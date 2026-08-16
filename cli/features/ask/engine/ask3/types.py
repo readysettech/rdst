@@ -24,22 +24,22 @@ class Interpretation:
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary."""
         return {
-            'id': self.id,
-            'description': self.description,
-            'assumptions': self.assumptions,
-            'sql_approach': self.sql_approach,
-            'likelihood': self.likelihood
+            "id": self.id,
+            "description": self.description,
+            "assumptions": self.assumptions,
+            "sql_approach": self.sql_approach,
+            "likelihood": self.likelihood,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> Interpretation:
         """Deserialize from dictionary."""
         return cls(
-            id=data.get('id', 0),
-            description=data.get('description', ''),
-            assumptions=data.get('assumptions', []),
-            sql_approach=data.get('sql_approach', ''),
-            likelihood=data.get('likelihood', 0.5)
+            id=data.get("id", 0),
+            description=data.get("description", ""),
+            assumptions=data.get("assumptions", []),
+            sql_approach=data.get("sql_approach", ""),
+            likelihood=data.get("likelihood", 0.5),
         )
 
 
@@ -55,20 +55,20 @@ class ValidationError:
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary."""
         return {
-            'column': self.column,
-            'table_alias': self.table_alias,
-            'message': self.message,
-            'suggestions': self.suggestions
+            "column": self.column,
+            "table_alias": self.table_alias,
+            "message": self.message,
+            "suggestions": self.suggestions,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> ValidationError:
         """Deserialize from dictionary."""
         return cls(
-            column=data.get('column', ''),
-            table_alias=data.get('table_alias'),
-            message=data.get('message', ''),
-            suggestions=data.get('suggestions', [])
+            column=data.get("column", ""),
+            table_alias=data.get("table_alias"),
+            message=data.get("message", ""),
+            suggestions=data.get("suggestions", []),
         )
 
 
@@ -83,18 +83,18 @@ class SchemaExpansionRequest:
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary."""
         return {
-            'missing_concepts': self.missing_concepts,
-            'requested_tables': self.requested_tables,
-            'reason': self.reason
+            "missing_concepts": self.missing_concepts,
+            "requested_tables": self.requested_tables,
+            "reason": self.reason,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'SchemaExpansionRequest':
+    def from_dict(cls, data: Dict[str, Any]) -> "SchemaExpansionRequest":
         """Deserialize from dictionary."""
         return cls(
-            missing_concepts=data.get('missing_concepts', []),
-            requested_tables=data.get('requested_tables', []),
-            reason=data.get('reason', '')
+            missing_concepts=data.get("missing_concepts", []),
+            requested_tables=data.get("requested_tables", []),
+            reason=data.get("reason", ""),
         )
 
 
@@ -105,19 +105,19 @@ class SchemaInfo:
     target: str
     db_type: str  # 'postgresql' | 'mysql'
     tables: Dict[str, TableInfo] = field(default_factory=dict)
-    formatted_schema: str = ''
-    source: str = 'semantic'  # 'semantic' | 'database'
+    formatted_schema: str = ""
+    source: str = "semantic"  # 'semantic' | 'database'
     terminology: Dict[str, Any] = field(default_factory=dict)  # Business terminology
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary."""
         return {
-            'target': self.target,
-            'db_type': self.db_type,
-            'tables': {k: v.to_dict() for k, v in self.tables.items()},
-            'formatted_schema': self.formatted_schema,
-            'source': self.source,
-            'terminology': self.terminology
+            "target": self.target,
+            "db_type": self.db_type,
+            "tables": {k: v.to_dict() for k, v in self.tables.items()},
+            "formatted_schema": self.formatted_schema,
+            "source": self.source,
+            "terminology": self.terminology,
         }
 
 
@@ -128,13 +128,22 @@ class TableInfo:
     name: str
     columns: Dict[str, ColumnInfo] = field(default_factory=dict)
     description: Optional[str] = None
+    business_context: Optional[str] = None
+    relationships: List[Any] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary."""
         return {
-            'name': self.name,
-            'columns': {k: v.to_dict() for k, v in self.columns.items()},
-            'description': self.description
+            "name": self.name,
+            "columns": {k: v.to_dict() for k, v in self.columns.items()},
+            "description": self.description,
+            "business_context": self.business_context,
+            "relationships": [
+                relationship.to_dict()
+                if hasattr(relationship, "to_dict")
+                else relationship
+                for relationship in self.relationships
+            ],
         }
 
 
@@ -151,11 +160,11 @@ class ColumnInfo:
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary."""
         return {
-            'name': self.name,
-            'data_type': self.data_type,
-            'description': self.description,
-            'is_primary_key': self.is_primary_key,
-            'is_foreign_key': self.is_foreign_key
+            "name": self.name,
+            "data_type": self.data_type,
+            "description": self.description,
+            "is_primary_key": self.is_primary_key,
+            "is_foreign_key": self.is_foreign_key,
         }
 
 
@@ -168,38 +177,43 @@ class ExecutionResult:
     row_count: int = 0
     execution_time_ms: float = 0.0
     error: Optional[str] = None
+    error_kind: Optional[str] = None
     truncated: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary."""
         return {
-            'columns': self.columns,
-            'rows': self.rows,
-            'row_count': self.row_count,
-            'execution_time_ms': self.execution_time_ms,
-            'error': self.error,
-            'truncated': self.truncated
+            "columns": self.columns,
+            "rows": self.rows,
+            "row_count": self.row_count,
+            "execution_time_ms": self.execution_time_ms,
+            "error": self.error,
+            "error_kind": self.error_kind,
+            "truncated": self.truncated,
         }
 
 
 # Status constants
 class Status:
     """Context status values."""
-    PENDING = 'pending'
-    SUCCESS = 'success'
-    ERROR = 'error'
-    CANCELLED = 'cancelled'
+
+    PENDING = "pending"
+    SUCCESS = "success"
+    ERROR = "error"
+    CANCELLED = "cancelled"
 
 
 # Database type constants
 class DbType:
     """Database type values."""
-    POSTGRESQL = 'postgresql'
-    MYSQL = 'mysql'
+
+    POSTGRESQL = "postgresql"
+    MYSQL = "mysql"
 
 
 # Schema source constants
 class SchemaSource:
     """Schema source values."""
-    SEMANTIC = 'semantic'
-    DATABASE = 'database'
+
+    SEMANTIC = "semantic"
+    DATABASE = "database"

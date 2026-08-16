@@ -7,39 +7,41 @@ disambiguation detection, and iterative refinement.
 
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+from shared.constants import rdst_data_dir
+from shared.error_parser import parse_syntax_error
 
 from .prompts.ask_prompts import (
     COMPREHENSIVE_ASK_PROMPT,
-    SQL_REFINEMENT_PROMPT,
     ERROR_RECOVERY_PROMPT,
     SCHEMA_FILTER_PROMPT,
+    SQL_GENERATION_RESPONSE_SCHEMA,
+    SQL_GENERATION_SYSTEM_PROMPT,
+    SQL_REFINEMENT_PROMPT,
+    VALIDATION_REPAIR_PROMPT,
+    VALIDATION_REPAIR_RESPONSE_SCHEMA,
+    format_provided_context_block,
 )
 from .sql_validation import check_read_only
-from shared.constants import rdst_data_dir
-from shared.error_parser import parse_syntax_error
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class SQLGenerationResult:
     """Result from SQL generation process."""
+
     success: bool
     sql: str = ""
     explanation: str = ""
     confidence: float = 0.0
-    needs_clarification: bool = False
-    clarifications: List[Dict[str, Any]] = field(default_factory=list)
-    ambiguities: List[str] = field(default_factory=list)
     assumptions: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
-    tables_used: List[str] = field(default_factory=list)
-    columns_used: List[str] = field(default_factory=list)
-    alternatives: List[Dict[str, Any]] = field(default_factory=list)
+    cannot_answer: bool = False
+    cannot_answer_reason: str = ""
+    missing_schema: List[str] = field(default_factory=list)
     error: str = ""
     raw_response: Dict[str, Any] = field(default_factory=dict)
 
@@ -51,7 +53,8 @@ def generate_sql_from_nl(
     target_database: str,
     llm_manager,
     callback=None,
-    **kwargs
+    provided_context: str = "",
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Generate SQL from natural language question using LLM.
@@ -74,41 +77,55 @@ def generate_sql_from_nl(
         - sql: Generated SQL query
         - explanation: Plain English explanation
         - confidence: 0.0-1.0 confidence score
-        - needs_clarification: Whether user input is needed
-        - clarifications: List of clarification questions
-        - ambiguities: List of identified ambiguities
         - assumptions: List of assumptions made
-        - warnings: List of warnings
+        - cannot_answer: Whether the request cannot be answered from this schema
+        - cannot_answer_reason: Machine-readable refusal reason
+        - missing_schema: Missing concepts when schema is insufficient
         - error: Error message if failed
     """
+    purpose = kwargs.pop("purpose", "sql_generation")
+    system_message = kwargs.pop("system_message", SQL_GENERATION_SYSTEM_PROMPT)
     try:
         # Format the comprehensive prompt
         prompt = COMPREHENSIVE_ASK_PROMPT.format(
             database_engine=database_engine,
             target_database=target_database,
             nl_question=nl_question,
-            filtered_schema=filtered_schema
+            provided_context_block=format_provided_context_block(provided_context),
+            filtered_schema=filtered_schema,
         )
 
         # Call LLM with JSON mode for structured output
         # LLMManager uses generate_response() method
         import time
+
         start_time = time.time()
 
         llm_result = llm_manager.generate_response(
             prompt=prompt,
-            temperature=0.0,  # Deterministic for consistent generation
-            max_tokens=4000,  # Ensure enough space for complete JSON response
-            extra={"response_format": {"type": "json_object"}}  # Request JSON mode
+            system_message=system_message,
+            temperature=0.0,
+            max_tokens=800,
+            purpose=purpose,
+            extra={
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "sql_generation",
+                        "strict": True,
+                        "schema": SQL_GENERATION_RESPONSE_SCHEMA,
+                    },
+                }
+            },
         )
 
         latency_ms = (time.time() - start_time) * 1000
 
         # Invoke callback for LLM call tracking
         if callback:
-            response_text = llm_result.get('response', '')
-            tokens = llm_result.get('tokens_used', 0)
-            model = llm_result.get('model', 'unknown')
+            response_text = llm_result.get("response", "")
+            tokens = llm_result.get("tokens_used", 0)
+            model = llm_result.get("model", "unknown")
 
             try:
                 callback(
@@ -117,131 +134,248 @@ def generate_sql_from_nl(
                     tokens=tokens,
                     latency_ms=latency_ms,
                     model=model,
-                    metadata={'state': 'generating_sql', 'question': nl_question}
+                    metadata={"state": "generating_sql", "question": nl_question},
                 )
             except Exception as e:
                 import logging
+
                 logging.getLogger(__name__).warning(f"Callback invocation failed: {e}")
 
         # Parse JSON response
-        response_text = llm_result.get('response', '')
+        response_text = llm_result.get("response", "")
 
         # Debug: print what we got from LLM
         if not response_text:
             return {
-                'success': False,
-                'sql': '',
-                'explanation': '',
-                'confidence': 0.0,
-                'error': f'LLM returned empty response. Full result: {llm_result}'
+                "success": False,
+                "sql": "",
+                "explanation": "",
+                "confidence": 0.0,
+                "error": f"LLM returned empty response. Full result: {llm_result}",
             }
 
         logger.debug(f"LLM response (first 500 chars): {response_text[:500]}")
 
         # Strip markdown code fences if present (Claude often wraps JSON in ```json...```)
         response_text = response_text.strip()
-        if response_text.startswith('```'):
+        if response_text.startswith("```"):
             # Find the first newline after opening fence
-            first_newline = response_text.find('\n')
+            first_newline = response_text.find("\n")
             if first_newline != -1:
-                response_text = response_text[first_newline + 1:]
+                response_text = response_text[first_newline + 1 :]
             # Remove closing fence
-            if response_text.endswith('```'):
+            if response_text.endswith("```"):
                 response_text = response_text[:-3]
             response_text = response_text.strip()
 
         result_data = json.loads(response_text, strict=False)
 
-        # Extract key fields with safe defaults
-        analysis = result_data.get('analysis', {})
-        clarifications_list = result_data.get('clarifications', [])
-        sql_gen = result_data.get('sql_generation', {})
-        safety = result_data.get('safety_assessment', {})
-        alternatives = result_data.get('alternatives', [])
+        required_fields = set(SQL_GENERATION_RESPONSE_SCHEMA["required"])
+        missing_fields = sorted(required_fields - result_data.keys())
+        if missing_fields:
+            return {
+                "success": False,
+                "sql": "",
+                "explanation": "",
+                "confidence": 0.0,
+                "error": (
+                    "SQL generation response is missing required fields: "
+                    + ", ".join(missing_fields)
+                ),
+                "raw_response": result_data,
+            }
+        unexpected_fields = sorted(
+            result_data.keys() - SQL_GENERATION_RESPONSE_SCHEMA["properties"].keys()
+        )
+        if unexpected_fields:
+            raise ValueError(
+                "SQL generation response has unexpected fields: "
+                + ", ".join(unexpected_fields)
+            )
 
-        # Build result object
         result = SQLGenerationResult(
             success=True,
-            sql=sql_gen.get('sql', ''),
-            explanation=sql_gen.get('explanation', ''),
-            confidence=sql_gen.get('confidence', 0.0),
-            needs_clarification=analysis.get('needs_clarification', False),
-            clarifications=clarifications_list,
-            ambiguities=analysis.get('ambiguities', []),
-            assumptions=sql_gen.get('assumptions', []),
-            warnings=safety.get('warnings', []),
-            tables_used=sql_gen.get('tables_used', []),
-            columns_used=sql_gen.get('columns_used', []),
-            alternatives=alternatives,
-            raw_response=result_data
+            sql=result_data.get("sql", ""),
+            explanation=result_data.get("explanation", ""),
+            confidence=result_data.get("confidence", 0.0),
+            assumptions=result_data.get("assumptions", []),
+            cannot_answer=result_data.get("cannot_answer", False),
+            cannot_answer_reason=result_data.get("cannot_answer_reason", ""),
+            missing_schema=result_data.get("missing_schema", []),
+            raw_response=result_data,
         )
+
+        if not isinstance(result.sql, str) or not isinstance(result.explanation, str):
+            raise ValueError("sql and explanation must be strings")
+        if (
+            isinstance(result.confidence, bool)
+            or not isinstance(result.confidence, (int, float))
+            or not 0.0 <= float(result.confidence) <= 1.0
+        ):
+            raise ValueError("confidence must be a number between 0 and 1")
+        if not isinstance(result.assumptions, list) or not all(
+            isinstance(item, str) for item in result.assumptions
+        ):
+            raise ValueError("assumptions must be an array of strings")
+        if not isinstance(result.cannot_answer, bool):
+            raise ValueError("cannot_answer must be a boolean")
+        if result.cannot_answer_reason not in {
+            "",
+            "missing_schema",
+            "unsupported_request",
+            "ambiguous",
+        }:
+            raise ValueError("invalid cannot_answer_reason")
+        if not isinstance(result.missing_schema, list) or not all(
+            isinstance(item, str) for item in result.missing_schema
+        ):
+            raise ValueError("missing_schema must be an array of strings")
+
+        if result.cannot_answer:
+            if result.sql.strip():
+                result.success = False
+                result.error = "cannot_answer responses must leave sql empty"
+            elif not result.cannot_answer_reason:
+                result.success = False
+                result.error = "cannot_answer responses must provide a reason"
+        elif not result.sql.strip():
+            result.success = False
+            result.error = "answerable SQL generation response returned empty sql"
+        elif result.cannot_answer_reason or result.missing_schema:
+            result.success = False
+            result.error = (
+                "answerable responses cannot include refusal reasons or missing schema"
+            )
 
         # Validate safety. The model's own safety_assessment is not evidence --
         # the same model wrote the SQL -- so check the generated statement.
         if result.sql:
             read_only_check = check_read_only(result.sql)
-            if not read_only_check['is_read_only']:
+            if not read_only_check["is_read_only"]:
                 result.success = False
                 result.error = "Generated query is not read-only (safety violation)"
-                result.warnings.extend(read_only_check['issues'])
 
         # Convert to dict for workflow compatibility
         return {
-            'success': result.success,
-            'sql': result.sql,
-            'explanation': result.explanation,
-            'confidence': result.confidence,
-            'needs_clarification': result.needs_clarification,
-            'clarifications': result.clarifications,
-            'ambiguities': result.ambiguities,
-            'assumptions': result.assumptions,
-            'warnings': result.warnings,
-            'tables_used': result.tables_used,
-            'columns_used': result.columns_used,
-            'alternatives': result.alternatives,
-            'error': result.error,
-            'raw_response': result_data
+            "success": result.success,
+            "sql": result.sql,
+            "explanation": result.explanation,
+            "confidence": result.confidence,
+            "assumptions": result.assumptions,
+            "cannot_answer": result.cannot_answer,
+            "cannot_answer_reason": result.cannot_answer_reason,
+            "missing_schema": result.missing_schema,
+            "error": result.error,
+            "raw_response": result_data,
         }
 
     except json.JSONDecodeError as e:
         # Print more context around the error
-        if 'response_text' in locals():
-            error_pos = e.pos if hasattr(e, 'pos') else 0
+        if "response_text" in locals():
+            error_pos = e.pos if hasattr(e, "pos") else 0
             context_start = max(0, error_pos - 100)
             context_end = min(len(response_text), error_pos + 100)
             error_context = response_text[context_start:context_end]
-            logger.debug(f"JSON error context around position {error_pos}: ...{error_context}...")
+            logger.debug(
+                f"JSON error context around position {error_pos}: ...{error_context}..."
+            )
             logger.debug(f"Full response length: {len(response_text)} chars")
             # Save to file for inspection. The response can carry schema and
             # sampled values, so it stays in the user's own directory rather
             # than a world-readable temp path.
             try:
-                debug_dir = rdst_data_dir() / 'debug'
+                debug_dir = rdst_data_dir() / "debug"
                 debug_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-                debug_path = debug_dir / 'ask_llm_response.json'
-                with open(debug_path, 'w', encoding='utf-8', newline='\n') as f:
+                debug_path = debug_dir / "ask_llm_response.json"
+                with open(debug_path, "w", encoding="utf-8", newline="\n") as f:
                     f.write(response_text)
                 logger.debug(f"Full response saved to {debug_path}")
-            except:
+            except Exception:
                 pass
 
         return {
-            'success': False,
-            'sql': '',
-            'explanation': '',
-            'confidence': 0.0,
-            'error': f'Failed to parse LLM response as JSON: {str(e)}',
-            'raw_response': response_text if 'response_text' in locals() else ''
+            "success": False,
+            "sql": "",
+            "explanation": "",
+            "confidence": 0.0,
+            "error": f"Failed to parse LLM response as JSON: {str(e)}",
+            "raw_response": response_text if "response_text" in locals() else "",
         }
 
     except Exception as e:
+        if getattr(llm_manager, "propagate_query_errors", False):
+            raise
         return {
-            'success': False,
-            'sql': '',
-            'explanation': '',
-            'confidence': 0.0,
-            'error': str(e)
+            "success": False,
+            "sql": "",
+            "explanation": "",
+            "confidence": 0.0,
+            "error": str(e),
         }
+
+
+def repair_sql_after_validation(
+    *,
+    nl_question: str,
+    failed_sql: str,
+    error_message: str,
+    filtered_schema: str,
+    database_engine: str,
+    llm_manager,
+    callback=None,
+    provided_context: str = "",
+) -> Dict[str, Any]:
+    """Perform one narrowly scoped repair from deterministic validator feedback."""
+    import time
+
+    prompt = VALIDATION_REPAIR_PROMPT.format(
+        nl_question=nl_question,
+        provided_context_block=format_provided_context_block(provided_context),
+        failed_sql=failed_sql,
+        error_message=error_message,
+        filtered_schema=filtered_schema,
+        database_engine=database_engine,
+    )
+    try:
+        started = time.time()
+        result = llm_manager.generate_response(
+            prompt=prompt,
+            temperature=0.0,
+            max_tokens=800,
+            purpose="sql_validation_repair",
+            extra={
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "sql_validation_repair",
+                        "strict": True,
+                        "schema": VALIDATION_REPAIR_RESPONSE_SCHEMA,
+                    },
+                }
+            },
+        )
+        response_text = result.get("response", "")
+        if callback:
+            callback(
+                prompt=prompt,
+                response=response_text,
+                tokens=result.get("tokens_used", 0),
+                latency_ms=(time.time() - started) * 1000,
+                model=result.get("model", "unknown"),
+            )
+        parsed = json.loads(response_text)
+        if set(parsed) != {"sql", "explanation"}:
+            raise ValueError("validation repair response has unexpected fields")
+        if not all(isinstance(parsed[field], str) for field in parsed):
+            raise ValueError("validation repair fields must be strings")
+        safety = check_read_only(parsed["sql"])
+        if not safety["is_read_only"]:
+            raise ValueError("validation repair did not return one read-only statement")
+        return {"success": True, **parsed, "raw_response": parsed}
+    except Exception as exc:
+        if getattr(llm_manager, "propagate_query_errors", False):
+            raise
+        return {"success": False, "error": str(exc)}
 
 
 def refine_sql_with_feedback(
@@ -250,7 +384,7 @@ def refine_sql_with_feedback(
     user_feedback: str,
     filtered_schema: str,
     llm_manager,
-    **kwargs
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Refine a generated SQL query based on user feedback.
@@ -271,56 +405,54 @@ def refine_sql_with_feedback(
     """
     try:
         # Extract callback from kwargs if provided
-        callback = kwargs.get('callback')
+        callback = kwargs.get("callback")
 
         prompt = SQL_REFINEMENT_PROMPT.format(
             original_question=original_question,
             generated_sql=generated_sql,
             user_feedback=user_feedback,
-            filtered_schema=filtered_schema
+            filtered_schema=filtered_schema,
         )
 
         # Call with callback if provided
         llm_kwargs = {
-            'prompt': prompt,
-            'temperature': 0.0,
-            'max_tokens': 2000,  # Refinement responses are typically shorter
-            'extra': {"response_format": {"type": "json_object"}}
+            "prompt": prompt,
+            "temperature": 0.0,
+            "max_tokens": 2000,  # Refinement responses are typically shorter
+            "purpose": "sql_refinement",
+            "extra": {"response_format": {"type": "json_object"}},
         }
         if callback:
-            llm_kwargs['callback'] = callback
+            llm_kwargs["callback"] = callback
 
         llm_result = llm_manager.generate_response(**llm_kwargs)
 
-        response_text = llm_result.get('response', '')
+        response_text = llm_result.get("response", "")
 
         # Strip markdown code fences if present
         response_text = response_text.strip()
-        if response_text.startswith('```'):
-            first_newline = response_text.find('\n')
+        if response_text.startswith("```"):
+            first_newline = response_text.find("\n")
             if first_newline != -1:
-                response_text = response_text[first_newline + 1:]
-            if response_text.endswith('```'):
+                response_text = response_text[first_newline + 1 :]
+            if response_text.endswith("```"):
                 response_text = response_text[:-3]
             response_text = response_text.strip()
 
         result_data = json.loads(response_text, strict=False)
 
         return {
-            'success': True,
-            'refined_sql': result_data.get('refined_sql', ''),
-            'changes_made': result_data.get('changes_made', []),
-            'explanation': result_data.get('explanation', ''),
-            'confidence': result_data.get('confidence', 0.0),
-            'validation': result_data.get('validation', {}),
-            'raw_response': result_data
+            "success": True,
+            "refined_sql": result_data.get("refined_sql", ""),
+            "changes_made": result_data.get("changes_made", []),
+            "explanation": result_data.get("explanation", ""),
+            "confidence": result_data.get("confidence", 0.0),
+            "validation": result_data.get("validation", {}),
+            "raw_response": result_data,
         }
 
     except Exception as e:
-        return {
-            'success': False,
-            'error': f'SQL refinement failed: {str(e)}'
-        }
+        return {"success": False, "error": f"SQL refinement failed: {str(e)}"}
 
 
 def recover_from_error(
@@ -332,7 +464,7 @@ def recover_from_error(
     rows_returned: int = 0,
     execution_time_ms: float = 0.0,
     llm_manager=None,
-    **kwargs
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Attempt to recover from SQL execution error by generating corrected query.
@@ -358,45 +490,39 @@ def recover_from_error(
     """
     try:
         # Check for syntax errors first
-        syntax_error = parse_syntax_error(
-            error_message,
-            failed_sql,
-            database_engine
-        )
+        syntax_error = parse_syntax_error(error_message, failed_sql, database_engine)
 
-        if syntax_error and syntax_error.get('corrected_sql'):
+        if syntax_error and syntax_error.get("corrected_sql"):
             # We can auto-correct this syntax error
             return {
-                'success': True,
-                'diagnosis': {
-                    'root_cause': syntax_error['diagnosis'],
-                    'error_type': 'syntax_error'
+                "success": True,
+                "diagnosis": {
+                    "root_cause": syntax_error["diagnosis"],
+                    "error_type": "syntax_error",
                 },
-                'corrected_sql': syntax_error['corrected_sql'],
-                'explanation': f"Auto-corrected syntax error: {syntax_error['suggestion']}",
-                'confidence': syntax_error['confidence'],
-                'original_sql': syntax_error['original_sql']
+                "corrected_sql": syntax_error["corrected_sql"],
+                "explanation": f"Auto-corrected syntax error: {syntax_error['suggestion']}",
+                "confidence": syntax_error["confidence"],
+                "original_sql": syntax_error["original_sql"],
             }
 
         # Check for schema mismatch errors second
         schema_mismatch = _detect_schema_mismatch(
-            error_message,
-            failed_sql,
-            filtered_schema
+            error_message, failed_sql, filtered_schema
         )
 
-        if schema_mismatch and schema_mismatch['found_suggestions']:
+        if schema_mismatch and schema_mismatch["found_suggestions"]:
             # We found similar column/table names, use those
             return {
-                'success': True,
-                'diagnosis': {
-                    'root_cause': schema_mismatch['diagnosis'],
-                    'error_type': 'schema_mismatch'
+                "success": True,
+                "diagnosis": {
+                    "root_cause": schema_mismatch["diagnosis"],
+                    "error_type": "schema_mismatch",
                 },
-                'corrected_sql': schema_mismatch['corrected_sql'],
-                'explanation': schema_mismatch['explanation'],
-                'confidence': schema_mismatch['confidence'],
-                'suggestions': schema_mismatch['suggestions']
+                "corrected_sql": schema_mismatch["corrected_sql"],
+                "explanation": schema_mismatch["explanation"],
+                "confidence": schema_mismatch["confidence"],
+                "suggestions": schema_mismatch["suggestions"],
             }
 
         # Fall back to LLM-based recovery
@@ -407,53 +533,48 @@ def recover_from_error(
             filtered_schema=filtered_schema,
             database_engine=database_engine,
             rows_returned=rows_returned,
-            execution_time_ms=execution_time_ms
+            execution_time_ms=execution_time_ms,
         )
 
         llm_result = llm_manager.generate_response(
             prompt=prompt,
             temperature=0.0,
             max_tokens=2000,  # Error recovery responses are typically shorter
-            extra={"response_format": {"type": "json_object"}}
+            purpose="sql_recovery",
+            extra={"response_format": {"type": "json_object"}},
         )
 
-        response_text = llm_result.get('response', '')
+        response_text = llm_result.get("response", "")
 
         # Strip markdown code fences if present
         response_text = response_text.strip()
-        if response_text.startswith('```'):
-            first_newline = response_text.find('\n')
+        if response_text.startswith("```"):
+            first_newline = response_text.find("\n")
             if first_newline != -1:
-                response_text = response_text[first_newline + 1:]
-            if response_text.endswith('```'):
+                response_text = response_text[first_newline + 1 :]
+            if response_text.endswith("```"):
                 response_text = response_text[:-3]
             response_text = response_text.strip()
 
         result_data = json.loads(response_text, strict=False)
 
         return {
-            'success': True,
-            'diagnosis': result_data.get('diagnosis', {}),
-            'corrected_sql': result_data.get('corrected_sql', ''),
-            'explanation': result_data.get('explanation', ''),
-            'confidence': result_data.get('confidence', 0.0),
-            'testing_recommendations': result_data.get('testing_recommendations', []),
-            'prevention': result_data.get('prevention', ''),
-            'raw_response': result_data
+            "success": True,
+            "diagnosis": result_data.get("diagnosis", {}),
+            "corrected_sql": result_data.get("corrected_sql", ""),
+            "explanation": result_data.get("explanation", ""),
+            "confidence": result_data.get("confidence", 0.0),
+            "testing_recommendations": result_data.get("testing_recommendations", []),
+            "prevention": result_data.get("prevention", ""),
+            "raw_response": result_data,
         }
 
     except Exception as e:
-        return {
-            'success': False,
-            'error': f'Error recovery failed: {str(e)}'
-        }
+        return {"success": False, "error": f"Error recovery failed: {str(e)}"}
 
 
 def filter_relevant_schema(
-    nl_question: str,
-    full_schema: str,
-    llm_manager=None,
-    **kwargs
+    nl_question: str, full_schema: str, llm_manager=None, **kwargs
 ) -> Dict[str, Any]:
     """
     Filter schema to include only tables relevant to the natural language question.
@@ -483,59 +604,55 @@ def filter_relevant_schema(
             # Filter schema to include only relevant tables
             filtered = _filter_schema_by_tables(full_schema, relevant_tables)
             return {
-                'success': True,
-                'filtered_schema': filtered,
-                'tables_included': relevant_tables,
-                'method': 'heuristic'
+                "success": True,
+                "filtered_schema": filtered,
+                "tables_included": relevant_tables,
+                "method": "heuristic",
             }
 
         # Fallback to LLM if heuristic fails and LLM is available
         if llm_manager:
             table_list = "\n".join([f"- {name}" for name in table_names])
             prompt = SCHEMA_FILTER_PROMPT.format(
-                nl_question=nl_question,
-                table_list=table_list
+                nl_question=nl_question, table_list=table_list
             )
 
-            response = llm_manager.chat(
-                prompt=prompt,
-                temperature=0.0,
-                json_mode=True
-            )
+            response = llm_manager.chat(prompt=prompt, temperature=0.0, json_mode=True)
 
             result_data = json.loads(response, strict=False)
-            relevant_tables = result_data.get('relevant_tables', [])
+            relevant_tables = result_data.get("relevant_tables", [])
 
             if relevant_tables:
                 filtered = _filter_schema_by_tables(full_schema, relevant_tables)
                 return {
-                    'success': True,
-                    'filtered_schema': filtered,
-                    'tables_included': relevant_tables,
-                    'method': 'llm',
-                    'confidence': result_data.get('confidence', 0.0)
+                    "success": True,
+                    "filtered_schema": filtered,
+                    "tables_included": relevant_tables,
+                    "method": "llm",
+                    "confidence": result_data.get("confidence", 0.0),
                 }
 
         # If all else fails, return full schema
         return {
-            'success': True,
-            'filtered_schema': full_schema,
-            'tables_included': table_names,
-            'method': 'fallback_full'
+            "success": True,
+            "filtered_schema": full_schema,
+            "tables_included": table_names,
+            "method": "fallback_full",
         }
 
     except Exception as e:
         # On error, return full schema
         return {
-            'success': True,
-            'filtered_schema': full_schema,
-            'tables_included': [],
-            'method': 'error_fallback',
-            'error': str(e)
+            "success": True,
+            "filtered_schema": full_schema,
+            "tables_included": [],
+            "method": "error_fallback",
+            "error": str(e),
         }
 
 
 # Helper functions
+
 
 def _extract_table_names_from_schema(schema: str) -> List[str]:
     """Extract table names from schema information string."""
@@ -543,9 +660,9 @@ def _extract_table_names_from_schema(schema: str) -> List[str]:
 
     # Pattern for "Table: table_name" or "CREATE TABLE table_name"
     patterns = [
-        r'Table:\s+([a-zA-Z_][a-zA-Z0-9_]*)',
-        r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z_][a-zA-Z0-9_]*)',
-        r'## ([a-zA-Z_][a-zA-Z0-9_]*)\s+\('
+        r"Table:\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z_][a-zA-Z0-9_]*)",
+        r"## ([a-zA-Z_][a-zA-Z0-9_]*)\s+\(",
     ]
 
     for pattern in patterns:
@@ -574,11 +691,11 @@ def _match_tables_heuristic(question: str, table_names: List[str]) -> List[str]:
             continue
 
         # Try singular/plural variants
-        if table_lower.endswith('s') and table_lower[:-1] in question_lower:
+        if table_lower.endswith("s") and table_lower[:-1] in question_lower:
             relevant.append(table)
             continue
 
-        if table_lower + 's' in question_lower:
+        if table_lower + "s" in question_lower:
             relevant.append(table)
             continue
 
@@ -595,17 +712,19 @@ def _filter_schema_by_tables(full_schema: str, table_names: List[str]) -> str:
         return full_schema
 
     # Split schema into table sections
-    lines = full_schema.split('\n')
+    lines = full_schema.split("\n")
     filtered_lines = []
     include_section = False
-    current_table = None
 
     for line in lines:
         # Check if line is a table header
         for table in table_names:
-            if f'Table: {table}' in line or f'## {table}' in line or f'CREATE TABLE {table}' in line.upper():
+            if (
+                f"Table: {table}" in line
+                or f"## {table}" in line
+                or f"CREATE TABLE {table}" in line.upper()
+            ):
                 include_section = True
-                current_table = table
                 break
 
         # Include line if we're in a relevant section
@@ -613,12 +732,12 @@ def _filter_schema_by_tables(full_schema: str, table_names: List[str]) -> str:
             filtered_lines.append(line)
 
             # Check if section ends (next table or empty lines)
-            if line.strip() == '' and len(filtered_lines) > 10:
+            if line.strip() == "" and len(filtered_lines) > 10:
                 # Might be end of table section, prepare to check next table
                 include_section = False
 
     if filtered_lines:
-        return '\n'.join(filtered_lines)
+        return "\n".join(filtered_lines)
     else:
         # If filtering failed, return full schema
         return full_schema
@@ -668,7 +787,7 @@ def find_similar_names(
     wrong_name: str,
     available_names: List[str],
     threshold: float = 0.5,
-    max_results: int = 5
+    max_results: int = 5,
 ) -> List[Tuple[str, float]]:
     """
     Find similar names using fuzzy matching.
@@ -704,12 +823,12 @@ def _extract_column_names_from_schema(schema: str) -> List[str]:
     # Pattern for column definitions
     # Matches: "column_name TYPE" or "  column_name:"
     patterns = [
-        r'^\s+(\w+)\s+(?:INT|VARCHAR|TEXT|TIMESTAMP|DECIMAL|BIGINT|FLOAT|DOUBLE|DATE|DATETIME|BOOLEAN|BOOL)',
-        r'^\s+-\s+(\w+):',
-        r'`(\w+)`\s+(?:INT|VARCHAR|TEXT|TIMESTAMP|DECIMAL|BIGINT|FLOAT|DOUBLE|DATE|DATETIME|BOOLEAN|BOOL)'
+        r"^\s+(\w+)\s+(?:INT|VARCHAR|TEXT|TIMESTAMP|DECIMAL|BIGINT|FLOAT|DOUBLE|DATE|DATETIME|BOOLEAN|BOOL)",
+        r"^\s+-\s+(\w+):",
+        r"`(\w+)`\s+(?:INT|VARCHAR|TEXT|TIMESTAMP|DECIMAL|BIGINT|FLOAT|DOUBLE|DATE|DATETIME|BOOLEAN|BOOL)",
     ]
 
-    for line in schema.split('\n'):
+    for line in schema.split("\n"):
         for pattern in patterns:
             match = re.search(pattern, line, re.IGNORECASE)
             if match:
@@ -720,9 +839,7 @@ def _extract_column_names_from_schema(schema: str) -> List[str]:
 
 
 def _detect_schema_mismatch(
-    error_message: str,
-    failed_sql: str,
-    filtered_schema: str
+    error_message: str, failed_sql: str, filtered_schema: str
 ) -> Optional[Dict[str, Any]]:
     """
     Detect if error is due to schema mismatch (wrong column/table name).
@@ -734,6 +851,7 @@ def _detect_schema_mismatch(
 
     # Pattern 1: Unknown column 'column_name'
     import re
+
     unknown_col_pattern = r"unknown column ['\"]?(\w+)['\"]?"
     col_match = re.search(unknown_col_pattern, error_lower)
 
@@ -751,24 +869,23 @@ def _detect_schema_mismatch(
 
             # Generate corrected SQL
             corrected_sql = re.sub(
-                r'\b' + wrong_col + r'\b',
-                best_match,
-                failed_sql,
-                flags=re.IGNORECASE
+                r"\b" + wrong_col + r"\b", best_match, failed_sql, flags=re.IGNORECASE
             )
 
-            suggestions_text = "\n".join([
-                f"  - {name} (similarity: {score*100:.0f}%)"
-                for name, score in suggestions[:3]
-            ])
+            suggestions_text = "\n".join(
+                [
+                    f"  - {name} (similarity: {score * 100:.0f}%)"
+                    for name, score in suggestions[:3]
+                ]
+            )
 
             return {
-                'found_suggestions': True,
-                'diagnosis': f"Column '{wrong_col}' not found. Did you mean '{best_match}'?",
-                'corrected_sql': corrected_sql,
-                'explanation': f"Replaced '{wrong_col}' with '{best_match}'",
-                'confidence': suggestions[0][1],
-                'suggestions': suggestions_text
+                "found_suggestions": True,
+                "diagnosis": f"Column '{wrong_col}' not found. Did you mean '{best_match}'?",
+                "corrected_sql": corrected_sql,
+                "explanation": f"Replaced '{wrong_col}' with '{best_match}'",
+                "confidence": suggestions[0][1],
+                "suggestions": suggestions_text,
             }
 
     # Pattern 2: Table doesn't exist
@@ -789,24 +906,23 @@ def _detect_schema_mismatch(
 
             # Generate corrected SQL
             corrected_sql = re.sub(
-                r'\b' + wrong_table + r'\b',
-                best_match,
-                failed_sql,
-                flags=re.IGNORECASE
+                r"\b" + wrong_table + r"\b", best_match, failed_sql, flags=re.IGNORECASE
             )
 
-            suggestions_text = "\n".join([
-                f"  - {name} (similarity: {score*100:.0f}%)"
-                for name, score in suggestions[:3]
-            ])
+            suggestions_text = "\n".join(
+                [
+                    f"  - {name} (similarity: {score * 100:.0f}%)"
+                    for name, score in suggestions[:3]
+                ]
+            )
 
             return {
-                'found_suggestions': True,
-                'diagnosis': f"Table '{wrong_table}' not found. Did you mean '{best_match}'?",
-                'corrected_sql': corrected_sql,
-                'explanation': f"Replaced table '{wrong_table}' with '{best_match}'",
-                'confidence': suggestions[0][1],
-                'suggestions': suggestions_text
+                "found_suggestions": True,
+                "diagnosis": f"Table '{wrong_table}' not found. Did you mean '{best_match}'?",
+                "corrected_sql": corrected_sql,
+                "explanation": f"Replaced table '{wrong_table}' with '{best_match}'",
+                "confidence": suggestions[0][1],
+                "suggestions": suggestions_text,
             }
 
     return None

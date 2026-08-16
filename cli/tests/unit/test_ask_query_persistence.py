@@ -99,3 +99,20 @@ def test_validation_flags_reduced_limit_not_added():
     )
     assert result["limit_added"] is False
     assert result["limit_reduced"] is True
+
+
+def test_validation_can_preserve_result_limits_for_evaluation():
+    unbounded = validate_sql_for_ask(
+        "SELECT * FROM votes", enforce_result_limit=False
+    )
+    large_limit = validate_sql_for_ask(
+        "SELECT * FROM votes LIMIT 999999",
+        max_limit=1000,
+        enforce_result_limit=False,
+    )
+
+    assert unbounded["validated_sql"] == "SELECT * FROM votes"
+    assert unbounded["has_limit"] is False
+    assert unbounded["limit_added"] is False
+    assert large_limit["validated_sql"] == "SELECT * FROM votes LIMIT 999999"
+    assert large_limit["limit_reduced"] is False

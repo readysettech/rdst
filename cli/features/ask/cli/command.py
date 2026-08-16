@@ -41,7 +41,7 @@ class AskCommand:
         if no_interactive:
             return RdstResult(
                 False,
-                'ask requires a question in --no-interactive mode. '
+                "ask requires a question in --no-interactive mode. "
                 'Example: rdst ask "How many users are there?" --no-interactive',
             )
 
@@ -214,6 +214,7 @@ class AskCommand:
                                 elif isinstance(resume_event, AskErrorEvent):
                                     error_event = resume_event
                         except (EOFError, KeyboardInterrupt):
+                            service.abandon(event.session_id)
                             error_event = AskErrorEvent(
                                 type="error",
                                 message="Cancelled by user",
@@ -234,7 +235,9 @@ class AskCommand:
                 message = f"\nSQL: {result_event.sql}\n"
                 if not dry_run:
                     message += f"Rows: {result_event.row_count}\n"
-                    message += f"Execution time: {result_event.execution_time_ms:.1f}ms\n"
+                    message += (
+                        f"Execution time: {result_event.execution_time_ms:.1f}ms\n"
+                    )
                 message += f"LLM calls: {result_event.llm_calls}\n"
                 message += f"Total tokens: {result_event.total_tokens}\n"
 

@@ -12,6 +12,7 @@ class AskPhase(str, Enum):
     FILTER = "filter"
     CLARIFY = "clarify"
     GENERATE = "generate"
+    EXPAND = "expand"
     VALIDATE = "validate"
     EXECUTE = "execute"
     CONFIG = "config"
@@ -24,6 +25,7 @@ class AskInput:
     question: str
     target: Optional[str] = None
     source: str = "cli"
+    provided_context: str = ""
 
 
 @dataclass
@@ -32,9 +34,13 @@ class AskOptions:
 
     dry_run: bool = False
     timeout_seconds: int = 30
+    max_rows: int = 100
     verbose: bool = False
     agent_mode: bool = False
     no_interactive: bool = False
+    enforce_result_limit: bool = True
+    persist_query: bool = True
+    raise_unexpected_errors: bool = False
 
 
 @dataclass

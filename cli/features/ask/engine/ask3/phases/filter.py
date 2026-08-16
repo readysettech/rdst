@@ -17,10 +17,10 @@ semantically required but not literally mentioned (e.g., "posts" for
 
 from __future__ import annotations
 
-import json
 import logging
 import re
-from typing import TYPE_CHECKING, Dict, List, Set, Optional
+from time import perf_counter
+from typing import TYPE_CHECKING, Any, Dict, List, Set
 
 from features.analyze.functions.shallow_analysis import _extract_json_from_response
 
@@ -30,50 +30,53 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+FULL_SCHEMA_FILTER_MAX_TABLES = 8
+FULL_SCHEMA_FILTER_MAX_CHARS = 20_000
+
 
 # Tier 2.3: Patterns for detecting negative/exclusion clauses
 # NOTE: Order matters - more specific patterns should come first
 NEGATIVE_PATTERNS = [
     # "have not been answered", "has not been commented" - must come before simpler "not X"
-    re.compile(r'\bnot\s+been\s+(\w+)', re.IGNORECASE),
+    re.compile(r"\bnot\s+been\s+(\w+)", re.IGNORECASE),
     # "haven't been answered", "hasn't been posted"
-    re.compile(r'\b(haven\'t|hasn\'t|didn\'t|don\'t)\s+been\s+(\w+)', re.IGNORECASE),
+    re.compile(r"\b(haven\'t|hasn\'t|didn\'t|don\'t)\s+been\s+(\w+)", re.IGNORECASE),
     # "without any comments", "never made any posts"
-    re.compile(r'\b(never|not?|without)\s+any\s+(\w+)', re.IGNORECASE),
+    re.compile(r"\b(never|not?|without)\s+any\s+(\w+)", re.IGNORECASE),
     # "never asked", "not answered", "without comments"
-    re.compile(r'\b(never|not?|without)\s+(\w+)', re.IGNORECASE),
+    re.compile(r"\b(never|not?|without)\s+(\w+)", re.IGNORECASE),
     # "haven't posted", "hasn't answered"
-    re.compile(r'\b(haven\'t|hasn\'t|didn\'t|don\'t)\s+(\w+)', re.IGNORECASE),
+    re.compile(r"\b(haven\'t|hasn\'t|didn\'t|don\'t)\s+(\w+)", re.IGNORECASE),
     # "no comments", "no votes"
-    re.compile(r'\bno\s+(\w+)', re.IGNORECASE),
+    re.compile(r"\bno\s+(\w+)", re.IGNORECASE),
 ]
 
 # Action verb to table hints - maps verbs to potential table names
 ACTION_VERB_HINTS = {
     # Core actions
-    'asked': ['posts'],
-    'answered': ['posts'],
-    'commented': ['comments'],
-    'voted': ['votes'],
-    'tagged': ['tags', 'posttags'],
-    'posted': ['posts'],
+    "asked": ["posts"],
+    "answered": ["posts"],
+    "commented": ["comments"],
+    "voted": ["votes"],
+    "tagged": ["tags", "posttags"],
+    "posted": ["posts"],
     # Extended actions
-    'edited': ['posthistory', 'posts'],
-    'earned': ['badges'],
-    'received': ['badges', 'votes'],
-    'gave': ['votes'],
-    'linked': ['postlinks'],
-    'duplicated': ['postlinks'],
-    'viewed': ['posts'],
-    'accepted': ['posts'],
-    'closed': ['posts'],
-    'created': ['posts', 'comments'],
+    "edited": ["posthistory", "posts"],
+    "earned": ["badges"],
+    "received": ["badges", "votes"],
+    "gave": ["votes"],
+    "linked": ["postlinks"],
+    "duplicated": ["postlinks"],
+    "viewed": ["posts"],
+    "accepted": ["posts"],
+    "closed": ["posts"],
+    "created": ["posts", "comments"],
 }
 
 # Join tables - maps table pairs to their bridge table
 JOIN_TABLES = {
-    ('posts', 'tags'): 'posttags',
-    ('tags', 'posts'): 'posttags',
+    ("posts", "tags"): "posttags",
+    ("tags", "posts"): "posttags",
 }
 
 
@@ -81,7 +84,8 @@ def _extract_semantic_concepts(
     question: str,
     all_tables: List[str],
     llm_manager,
-    model: str = "claude-haiku-4-5-20251001"
+    model: str = "claude-haiku-4-5-20251001",
+    schema_info=None,
 ) -> Dict[str, Any]:
     """
     Use Haiku to identify semantic concepts and required tables.
@@ -105,13 +109,14 @@ def _extract_semantic_concepts(
         }
     """
     try:
-        table_list = ", ".join(all_tables)
+        table_list = _compact_schema_catalog(all_tables, schema_info)
 
         prompt = f"""Analyze this database question and identify which tables are needed.
 
 Question: "{question}"
 
-Available tables: {table_list}
+Available schema (every table is listed):
+{table_list}
 
 Think about:
 - What entities are mentioned or implied (e.g., "posted" implies a posts/content table)
@@ -126,45 +131,102 @@ Rules:
 - Be inclusive - suggest all tables that MIGHT be needed
 - Consider implied relationships (e.g., "posted about X" needs posts table)"""
 
+        started = perf_counter()
         response = llm_manager.query(
             system_message="You are a database expert. Return only valid JSON.",
             user_query=prompt,
             max_tokens=200,
             temperature=0.0,
             model=model,
-            extra={"response_format": {"type": "json_object"}}
+            purpose="schema_filter_concepts",
+            extra={"response_format": {"type": "json_object"}},
         )
+        response_data = response if isinstance(response, dict) else {}
+        call_details = {
+            "prompt": prompt,
+            "response": response_data.get("text", ""),
+            "tokens": int((response_data.get("usage") or {}).get("total_tokens", 0)),
+            "latency_ms": (perf_counter() - started) * 1000,
+            "model": str(response_data.get("model") or model),
+        }
 
-        if not response or 'text' not in response or not response['text'].strip():
+        if not response or "text" not in response or not response["text"].strip():
             logger.debug("Semantic extraction returned no response")
-            return {"suggested_tables": [], "reasoning": "LLM returned no response"}
+            return {
+                "suggested_tables": [],
+                "reasoning": "LLM returned no response",
+                "llm_call": call_details,
+            }
 
-        result = _extract_json_from_response(response['text'])
+        result = _extract_json_from_response(response["text"])
         if result is None:
             logger.debug("Semantic extraction returned unparseable JSON")
-            return {"suggested_tables": [], "reasoning": "Could not parse LLM response as JSON"}
+            return {
+                "suggested_tables": [],
+                "reasoning": "Could not parse LLM response as JSON",
+                "llm_call": call_details,
+            }
 
         # Validate suggested tables exist
-        suggested = result.get('suggested_tables', [])
-        valid_tables = [t for t in suggested if t in all_tables]
+        suggested = result.get("suggested_tables", [])
+        canonical_tables = {table.lower(): table for table in all_tables}
+        valid_tables = [
+            canonical_tables[table.lower()]
+            for table in suggested
+            if isinstance(table, str) and table.lower() in canonical_tables
+        ]
 
-        logger.info(f"Semantic extraction: {valid_tables} (reasoning: {result.get('reasoning', 'none')})")
+        logger.info(
+            f"Semantic extraction: {valid_tables} (reasoning: {result.get('reasoning', 'none')})"
+        )
 
         return {
             "suggested_tables": valid_tables,
-            "reasoning": result.get('reasoning', '')
+            "reasoning": result.get("reasoning", ""),
+            "llm_call": call_details,
         }
 
     except Exception as e:
+        if getattr(llm_manager, "propagate_query_errors", False):
+            raise
         logger.debug(f"Semantic extraction skipped, falling back to heuristics: {e}")
         return {"suggested_tables": [], "reasoning": f"Error: {e}"}
 
 
+def _compact_schema_catalog(all_tables: List[str], schema_info) -> str:
+    """Serialize retrieval context while preserving every table header."""
+    if schema_info is None:
+        return "\n".join(f"- {table}" for table in all_tables)
+
+    lines = []
+    for table_name in all_tables:
+        table = schema_info.tables.get(table_name)
+        if table is None:
+            lines.append(f"- {table_name}")
+            continue
+        description = " ".join((table.description or "").split())
+        business_context = " ".join((table.business_context or "").split())
+        header = f"- {table_name}"
+        if description:
+            header += f": {description}"
+        if business_context:
+            header += f" Usage: {business_context}"
+        lines.append(header)
+        columns = []
+        for column_name, column in table.columns.items():
+            column_description = " ".join((column.description or "").split())
+            rendered = f"{column_name} {column.data_type}"
+            if column_description:
+                rendered += f" ({column_description})"
+            columns.append(rendered)
+        if columns:
+            lines.append("  columns: " + "; ".join(columns))
+    return "\n".join(lines)
+
+
 def filter_schema(
-    ctx: 'Ask3Context',
-    presenter: 'Ask3Presenter',
-    llm_manager=None
-) -> 'Ask3Context':
+    ctx: "Ask3Context", presenter: "Ask3Presenter", llm_manager=None
+) -> "Ask3Context":
     """
     Filter schema to tables relevant to the question.
 
@@ -186,7 +248,7 @@ def filter_schema(
     Returns:
         Updated context with filtered schema_formatted and filtered_tables
     """
-    ctx.phase = 'filter'
+    ctx.phase = "filter"
 
     # Need schema_info for filtering
     if not ctx.schema_info or not ctx.schema_info.tables:
@@ -198,14 +260,34 @@ def filter_schema(
     if not all_tables:
         return ctx
 
+    if (
+        len(all_tables) <= FULL_SCHEMA_FILTER_MAX_TABLES
+        and len(ctx.schema_formatted) <= FULL_SCHEMA_FILTER_MAX_CHARS
+    ):
+        ctx.filtered_tables = all_tables
+        ctx.schema_filter_strategy = "full-schema-below-budget"
+        presenter.schema_filtered(
+            original=len(all_tables), filtered=len(all_tables), tables=all_tables
+        )
+        return ctx
+
     # Initialize LLM manager for semantic extraction
     if llm_manager is None:
         from shared.llm_manager import LLMManager
+
         llm_manager = LLMManager()
 
     # Step 1: Semantic concept extraction (Haiku) - runs FIRST
-    semantic_result = _extract_semantic_concepts(ctx.question, all_tables, llm_manager)
-    semantic_tables = set(semantic_result.get('suggested_tables', []))
+    semantic_result = _extract_semantic_concepts(
+        ctx.question,
+        all_tables,
+        llm_manager,
+        schema_info=ctx.schema_info,
+    )
+    if call := semantic_result.get("llm_call"):
+        ctx.add_llm_call(phase="filter", **call)
+    ctx.schema_filter_strategy = "semantic-llm"
+    semantic_tables = set(semantic_result.get("suggested_tables", []))
     logger.debug(f"Step 1 (semantic): {semantic_tables}")
 
     # Step 2: Terminology matching (augments semantic results)
@@ -221,7 +303,9 @@ def filter_schema(
     logger.debug(f"Step 3.3 (negative clauses): {negative_tables}")
 
     # Combine all sources
-    candidate_tables = semantic_tables | term_tables | heuristic_tables | negative_tables
+    candidate_tables = (
+        semantic_tables | term_tables | heuristic_tables | negative_tables
+    )
 
     # Step 3.5: FK expansion (bidirectional - always run if we have candidates)
     if candidate_tables:
@@ -234,16 +318,17 @@ def filter_schema(
         logger.debug("All methods failed, using full schema")
         candidate_tables = set(all_tables)
 
-    final_tables = list(candidate_tables)
+    candidate_names = {table.casefold() for table in candidate_tables}
+    final_tables = [
+        table for table in all_tables if table.casefold() in candidate_names
+    ]
 
     # Filter schema to selected tables
     ctx.schema_formatted = _filter_schema_text(ctx.schema_formatted, final_tables)
     ctx.filtered_tables = final_tables
 
     presenter.schema_filtered(
-        original=len(all_tables),
-        filtered=len(final_tables),
-        tables=final_tables
+        original=len(all_tables), filtered=len(final_tables), tables=final_tables
     )
 
     return ctx
@@ -259,7 +344,7 @@ def _match_via_terminology(question: str, schema_info) -> Set[str]:
     question_lower = question.lower()
 
     # Check if schema_info has terminology
-    if not hasattr(schema_info, 'terminology') or not schema_info.terminology:
+    if not hasattr(schema_info, "terminology") or not schema_info.terminology:
         return matched_tables
 
     for term_name, term in schema_info.terminology.items():
@@ -268,12 +353,12 @@ def _match_via_terminology(question: str, schema_info) -> Set[str]:
         # Check if term appears in question
         if term_lower in question_lower:
             # Extract tables from the term's SQL pattern
-            if hasattr(term, 'sql_pattern') and term.sql_pattern:
+            if hasattr(term, "sql_pattern") and term.sql_pattern:
                 tables = _extract_tables_from_sql(term.sql_pattern)
                 matched_tables.update(tables)
 
             # Also check tables_used if available
-            if hasattr(term, 'tables_used') and term.tables_used:
+            if hasattr(term, "tables_used") and term.tables_used:
                 matched_tables.update(term.tables_used)
 
     return matched_tables
@@ -291,7 +376,7 @@ def _match_tables_and_columns(question: str, schema_info) -> Set[str]:
     question_lower = question.lower()
 
     # Extract words from question (alphanumeric, min 3 chars)
-    words = set(re.findall(r'\b[a-z]{3,}\b', question_lower))
+    words = set(re.findall(r"\b[a-z]{3,}\b", question_lower))
 
     for table_name, table_info in schema_info.tables.items():
         table_lower = table_name.lower()
@@ -301,15 +386,63 @@ def _match_tables_and_columns(question: str, schema_info) -> Set[str]:
             matched_tables.add(table_name)
             continue
 
+        if _metadata_matches_question(table_info.description, words):
+            matched_tables.add(table_name)
+            continue
+
+        if _metadata_matches_question(table_info.business_context, words):
+            matched_tables.add(table_name)
+            continue
+
         # Match column names
-        if hasattr(table_info, 'columns') and table_info.columns:
-            for col_name in table_info.columns.keys():
+        if hasattr(table_info, "columns") and table_info.columns:
+            for col_name, column_info in table_info.columns.items():
                 col_lower = col_name.lower()
-                if _matches_with_variants(col_lower, question_lower, words):
+                if _matches_with_variants(
+                    col_lower, question_lower, words
+                ) or _metadata_matches_question(
+                    f"{col_name} {column_info.description or ''}", words
+                ):
                     matched_tables.add(table_name)
                     break  # Found a match, move to next table
 
     return matched_tables
+
+
+_METADATA_STOPWORDS = {
+    "about",
+    "above",
+    "below",
+    "column",
+    "contains",
+    "database",
+    "field",
+    "from",
+    "identifier",
+    "name",
+    "number",
+    "record",
+    "table",
+    "that",
+    "their",
+    "this",
+    "value",
+    "which",
+    "with",
+}
+
+
+def _metadata_matches_question(text: str | None, question_words: Set[str]) -> bool:
+    """Conservatively match human-readable names and AI descriptions."""
+    if not text:
+        return False
+    metadata_words = {
+        word
+        for word in re.findall(r"\b[a-z]{4,}\b", text.lower())
+        if word not in _METADATA_STOPWORDS
+    }
+    overlap = metadata_words & question_words
+    return len(overlap) >= 2 or any(len(word) >= 9 for word in overlap)
 
 
 def _matches_with_variants(name: str, question: str, words: Set[str]) -> bool:
@@ -330,33 +463,33 @@ def _matches_with_variants(name: str, question: str, words: Set[str]) -> bool:
         return True
 
     # Singular variant (remove trailing 's')
-    if name.endswith('s') and len(name) > 3:
+    if name.endswith("s") and len(name) > 3:
         singular = name[:-1]
         if singular in question or singular in words:
             return True
 
     # Plural variant (add 's')
-    plural = name + 's'
+    plural = name + "s"
     if plural in question or plural in words:
         return True
 
     # Handle 'ies' pluralization (e.g., query -> queries)
-    if name.endswith('y') and len(name) > 2:
-        ies_plural = name[:-1] + 'ies'
+    if name.endswith("y") and len(name) > 2:
+        ies_plural = name[:-1] + "ies"
         if ies_plural in question or ies_plural in words:
             return True
 
     # Handle reverse (queries -> query)
-    if name.endswith('ies') and len(name) > 3:
-        y_singular = name[:-3] + 'y'
+    if name.endswith("ies") and len(name) > 3:
+        y_singular = name[:-3] + "y"
         if y_singular in question or y_singular in words:
             return True
 
     # Handle underscore-separated names (e.g., title_ratings → check "ratings").
     # Trade-off: may over-include tables (e.g., "post" matches post_history),
     # but missing a needed table is worse than including an extra one.
-    if '_' in name:
-        parts = name.split('_')
+    if "_" in name:
+        parts = name.split("_")
         for part in parts:
             if len(part) >= 3 and _matches_with_variants(part, question, words):
                 return True
@@ -387,7 +520,7 @@ def _detect_negative_clause_tables(question: str, schema_info) -> Set[str]:
                     matched_tables.update(tables)
 
     # Also check for "without X" pattern separately (noun matching)
-    without_matches = re.findall(r'\bwithout\s+(\w+)', question_lower)
+    without_matches = re.findall(r"\bwithout\s+(\w+)", question_lower)
     for noun in without_matches:
         tables = _match_noun_to_table(noun, schema_info)
         matched_tables.update(tables)
@@ -397,21 +530,21 @@ def _detect_negative_clause_tables(question: str, schema_info) -> Set[str]:
 
 def _simple_stem(word: str) -> str:
     """Simple English verb stemmer (no dependencies)."""
-    if word.endswith('ied') and len(word) > 4:
-        return word[:-3] + 'y'
-    if word.endswith('ed') and len(word) > 3:
+    if word.endswith("ied") and len(word) > 4:
+        return word[:-3] + "y"
+    if word.endswith("ed") and len(word) > 3:
         if word[-3] == word[-4]:  # doubled consonant (e.g., stopped)
             return word[:-3]
-        return word[:-2] if word[-3] not in 'aeiou' else word[:-1]
-    if word.endswith('ing') and len(word) > 4:
+        return word[:-2] if word[-3] not in "aeiou" else word[:-1]
+    if word.endswith("ing") and len(word) > 4:
         if word[-4] == word[-5]:  # doubled consonant
             return word[:-4]
         return word[:-3]
-    if word.endswith('ies') and len(word) > 4:
-        return word[:-3] + 'y'
-    if word.endswith('es') and len(word) > 3:
+    if word.endswith("ies") and len(word) > 4:
+        return word[:-3] + "y"
+    if word.endswith("es") and len(word) > 3:
         return word[:-2]
-    if word.endswith('s') and not word.endswith('ss') and len(word) > 2:
+    if word.endswith("s") and not word.endswith("ss") and len(word) > 2:
         return word[:-1]
     return word
 
@@ -447,9 +580,9 @@ def _match_noun_to_table(noun: str, schema_info) -> Set[str]:
     for table_name in schema_info.tables.keys():
         table_lower = table_name.lower()
         # Direct match or singular/plural
-        if table_lower == noun_lower or table_lower == noun_lower + 's':
+        if table_lower == noun_lower or table_lower == noun_lower + "s":
             tables.add(table_name)
-        if noun_lower.endswith('s') and table_lower == noun_lower[:-1]:
+        if noun_lower.endswith("s") and table_lower == noun_lower[:-1]:
             tables.add(table_name)
 
     return tables
@@ -466,14 +599,14 @@ def _build_reverse_fk_index(schema_info) -> Dict[str, Set[str]]:
     index: Dict[str, Set[str]] = {}
 
     for table_name, table_info in schema_info.tables.items():
-        if not hasattr(table_info, 'columns') or not table_info.columns:
+        if not hasattr(table_info, "columns") or not table_info.columns:
             continue
 
         for col_name in table_info.columns.keys():
             col_lower = col_name.lower()
 
             # Detect FK pattern: xxxid -> table xxx
-            if col_lower.endswith('id') and len(col_lower) > 2:
+            if col_lower.endswith("id") and len(col_lower) > 2:
                 parent_hint = col_lower[:-2]  # e.g., "user" from "userid"
 
                 if parent_hint not in index:
@@ -481,7 +614,7 @@ def _build_reverse_fk_index(schema_info) -> Dict[str, Set[str]]:
                 index[parent_hint].add(table_name)
 
                 # Also index with 's' suffix for plural table names
-                parent_plural = parent_hint + 's'
+                parent_plural = parent_hint + "s"
                 if parent_plural not in index:
                     index[parent_plural] = set()
                 index[parent_plural].add(table_name)
@@ -510,31 +643,38 @@ def _expand_via_fk_relationships(tables: Set[str], schema_info) -> Set[str]:
             continue
 
         # Check explicit relationships
-        if hasattr(table_info, 'relationships') and table_info.relationships:
+        if hasattr(table_info, "relationships") and table_info.relationships:
             for rel in table_info.relationships:
-                if hasattr(rel, 'target_table'):
+                if hasattr(rel, "target_table"):
                     if rel.target_table in schema_info.tables:
                         expanded.add(rel.target_table)
 
         # FORWARD: Check FK columns (columns ending in 'id' like userid, postid)
-        if hasattr(table_info, 'columns') and table_info.columns:
+        if hasattr(table_info, "columns") and table_info.columns:
             for col_name in table_info.columns.keys():
                 col_lower = col_name.lower()
 
                 # Look for FK pattern: xxxid -> xxx table
-                if col_lower.endswith('id') and len(col_lower) > 2:
+                if col_lower.endswith("id") and len(col_lower) > 2:
                     potential_table = col_lower[:-2]  # Remove 'id'
 
                     # Try to find matching table (with 's' suffix too)
                     for other_table in schema_info.tables.keys():
                         other_lower = other_table.lower()
-                        if other_lower == potential_table or other_lower == potential_table + 's':
+                        if (
+                            other_lower == potential_table
+                            or other_lower == potential_table + "s"
+                        ):
                             expanded.add(other_table)
                             break
 
         # REVERSE: Find child tables that reference this table via FK columns
         table_lower = table_name.lower()
-        singular = table_lower.rstrip('s') if table_lower.endswith('s') and len(table_lower) > 1 else table_lower
+        singular = (
+            table_lower.rstrip("s")
+            if table_lower.endswith("s") and len(table_lower) > 1
+            else table_lower
+        )
 
         if table_lower in reverse_index:
             expanded.update(reverse_index[table_lower])
@@ -544,10 +684,12 @@ def _expand_via_fk_relationships(tables: Set[str], schema_info) -> Set[str]:
     # BRIDGE: Add join tables for table pairs
     table_list = list(expanded)
     for i, t1 in enumerate(table_list):
-        for t2 in table_list[i+1:]:
+        for t2 in table_list[i + 1 :]:
             t1_lower, t2_lower = t1.lower(), t2.lower()
             # Check both directions
-            bridge = JOIN_TABLES.get((t1_lower, t2_lower)) or JOIN_TABLES.get((t2_lower, t1_lower))
+            bridge = JOIN_TABLES.get((t1_lower, t2_lower)) or JOIN_TABLES.get(
+                (t2_lower, t1_lower)
+            )
             if bridge:
                 # Find actual table name (case-sensitive)
                 for actual_table in schema_info.tables.keys():
@@ -562,7 +704,7 @@ def _llm_select_tables(
     question: str,
     all_tables: List[str],
     llm_manager,
-    model: str = "claude-haiku-4-5-20251001"
+    model: str = "claude-haiku-4-5-20251001",
 ) -> Set[str]:
     """
     Tier 3: Use LLM to select relevant tables.
@@ -592,26 +734,31 @@ Rules:
             max_tokens=300,
             temperature=0.0,
             model=model,
-            extra={"response_format": {"type": "json_object"}}
+            purpose="schema_filter_tables",
+            extra={"response_format": {"type": "json_object"}},
         )
 
-        if not response or 'text' not in response:
+        if not response or "text" not in response:
             logger.warning("LLM table selection returned no response")
             return set()
 
-        result = _extract_json_from_response(response['text'])
+        result = _extract_json_from_response(response["text"])
         if result is None:
             logger.warning("LLM table selection returned unparseable JSON")
             return set()
-        tables = result.get('relevant_tables', [])
+        tables = result.get("relevant_tables", [])
 
         # Validate tables exist
         valid_tables = set(t for t in tables if t in all_tables)
 
-        logger.info(f"LLM selected tables: {valid_tables} (reasoning: {result.get('reasoning', 'none')})")
+        logger.info(
+            f"LLM selected tables: {valid_tables} (reasoning: {result.get('reasoning', 'none')})"
+        )
         return valid_tables
 
     except Exception as e:
+        if getattr(llm_manager, "propagate_query_errors", False):
+            raise
         logger.error(f"LLM table selection failed: {e}")
         return set()
 
@@ -628,7 +775,7 @@ def _filter_schema_text(full_schema: str, table_names: List[str]) -> str:
     # Normalize table names for case-insensitive matching
     table_names_lower = {t.lower() for t in table_names}
 
-    lines = full_schema.split('\n')
+    lines = full_schema.split("\n")
     filtered_lines = []
     include_section = False
 
@@ -636,10 +783,8 @@ def _filter_schema_text(full_schema: str, table_names: List[str]) -> str:
         # Check if line is a table header
         line_lower = line.lower()
 
-        # Match "Table: xxx" pattern
-        match = re.match(r'table:\s+(\w+)', line_lower)
-        if match:
-            table_found = match.group(1)
+        if line_lower.startswith("table:"):
+            table_found = line_lower.removeprefix("table:").split(" -- ", 1)[0].strip()
             include_section = table_found in table_names_lower
             if include_section:
                 filtered_lines.append(line)
@@ -647,20 +792,10 @@ def _filter_schema_text(full_schema: str, table_names: List[str]) -> str:
 
         # Include line if we're in a relevant section
         if include_section:
-            # Check if we hit the next table (marks end of current section)
-            if line_lower.startswith('table:'):
-                match = re.match(r'table:\s+(\w+)', line_lower)
-                if match:
-                    table_found = match.group(1)
-                    include_section = table_found in table_names_lower
-                    if include_section:
-                        filtered_lines.append(line)
-                continue
-
             filtered_lines.append(line)
 
     if filtered_lines:
-        return '\n'.join(filtered_lines)
+        return "\n".join(filtered_lines)
     else:
         # If filtering failed, return full schema
         logger.warning("Schema filtering produced no output, returning full schema")
@@ -677,8 +812,8 @@ def _extract_tables_from_sql(sql: str) -> Set[str]:
 
     # Pattern for FROM table or JOIN table
     patterns = [
-        r'\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)',
-        r'\bJOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)',
+        r"\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+        r"\bJOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)",
     ]
 
     for pattern in patterns:

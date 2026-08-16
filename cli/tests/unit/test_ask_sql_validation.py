@@ -15,9 +15,158 @@ import pytest
 
 from features.ask.engine.ask3.context import Ask3Context
 from features.ask.engine.ask3.phases.execute import execute_query
-from features.ask.engine.ask3.types import Status
+from features.ask.engine.ask3.phases.validate import validate_sql
+from features.ask.engine.ask3.types import ColumnInfo, SchemaInfo, Status, TableInfo
 from features.ask.sql_generation import generate_sql_from_nl
-from features.ask.sql_validation import check_read_only, validate_sql_for_ask
+from features.ask.sql_validation import (
+    check_read_only,
+    validate_filter_literal_provenance,
+    validate_sql_for_ask,
+    validate_tables_against_schema,
+)
+
+
+Q72_SCHEMA = """Table: frpm
+  School Name (text) -- The official name of the school.
+  County Name (text) -- The county containing the school.
+  School Type (enum) -- School classification. [enum: State Special Schools]
+  Educational Option Type (enum) -- Program model. [enum: State Special School]
+  Academic Year (enum) -- Reporting year. [enum: 2014-2015]
+  Enrollment (Ages 5-17) (double) -- Enrollment count.
+
+Table: schools
+  CDSCode (varchar)
+  City (text)
+  EdOpsName (enum) -- Program model. [enum: State Special School]
+"""
+
+
+class TestFilterLiteralProvenance:
+    def test_blocks_free_text_when_the_same_value_is_a_listed_enum(self):
+        result = validate_filter_literal_provenance(
+            "SELECT f.`Enrollment (Ages 5-17)` FROM frpm f "
+            "WHERE f.`School Name` = 'State Special School' "
+            "AND f.`Academic Year` = '2014-2015'",
+            question=(
+                "How many students are enrolled at the State Special School school "
+                "for the 2014-2015 academic year?"
+            ),
+            schema_formatted=Q72_SCHEMA,
+            dialect="mysql",
+        )
+
+        assert result["is_valid"] is False
+        assert [(issue["kind"], issue["literal"]) for issue in result["issues"]] == [
+            ("enum_shadowed_free_text", "State Special School")
+        ]
+        assert result["issues"][0]["suggestions"] == [
+            "frpm.educational option type",
+            "schools.edopsname",
+        ]
+
+    def test_accepts_the_value_on_an_enum_column(self):
+        result = validate_filter_literal_provenance(
+            "SELECT `Enrollment (Ages 5-17)` FROM frpm "
+            "WHERE `Educational Option Type` = 'State Special School'",
+            question="Show State Special School enrollment",
+            schema_formatted=Q72_SCHEMA,
+            dialect="mysql",
+        )
+
+        assert result == {"is_valid": True, "issues": [], "warnings": []}
+
+    @pytest.mark.parametrize("wording", ["named", "called", "titled", "known as"])
+    def test_explicit_name_wording_allows_a_free_text_name(self, wording):
+        result = validate_filter_literal_provenance(
+            "SELECT language FROM sets WHERE name = 'Archenemy'",
+            question=f"Show languages for the set {wording} Archenemy",
+            schema_formatted=(
+                "Table: sets\n  name (text)\n  type (enum) [enum: Archenemy]\n"
+            ),
+            dialect="mysql",
+        )
+
+        assert result["is_valid"] is True
+        assert result["issues"] == []
+
+    def test_unsupported_literal_is_advisory_without_a_blocking_issue(self):
+        result = validate_filter_literal_provenance(
+            "SELECT language FROM cards WHERE name = 'Fellwar Stone'",
+            question='Which foreign language is used by "A Pedra Fellwar"?',
+            schema_formatted="Table: cards\n  name (text)\n",
+            dialect="mysql",
+        )
+
+        assert result["is_valid"] is True
+        assert result["issues"] == []
+        assert [(item["kind"], item["literal"]) for item in result["warnings"]] == [
+            ("unsupported_literal", "Fellwar Stone")
+        ]
+
+    def test_phase_includes_advisory_literals_when_a_blocker_triggers_repair(self):
+        ctx = Ask3Context(
+            question=(
+                "How many students are enrolled at the State Special School school "
+                "in Fremont for the 2014-2015 academic year?"
+            ),
+            target="california_schools",
+            db_type="mysql",
+            enforce_result_limit=False,
+        )
+        ctx.schema_formatted = Q72_SCHEMA
+        ctx.schema_info = SchemaInfo(
+            target=ctx.target,
+            db_type=ctx.db_type,
+            tables={
+                "frpm": TableInfo(
+                    name="frpm",
+                    columns={
+                        name: ColumnInfo(name=name, data_type=data_type)
+                        for name, data_type in {
+                            "School Name": "text",
+                            "County Name": "text",
+                            "School Type": "enum",
+                            "Educational Option Type": "enum",
+                            "Academic Year": "enum",
+                            "Enrollment (Ages 5-17)": "double",
+                        }.items()
+                    },
+                )
+            },
+        )
+        ctx.sql = (
+            "SELECT `Enrollment (Ages 5-17)` FROM frpm "
+            "WHERE `School Name` = 'State Special School' "
+            "AND `County Name` = 'Alameda' "
+            "AND `Academic Year` = '2014-2015'"
+        )
+
+        validate_sql(ctx, MagicMock())
+
+        assert len(ctx.validation_errors) == 2
+        assert "free-text column" in ctx.validation_errors[0].message
+        assert "Alameda" in ctx.validation_errors[1].message
+
+
+def test_table_validation_rejects_unknown_physical_table() -> None:
+    result = validate_tables_against_schema(
+        "SELECT id FROM invented_users",
+        {"users": ["id"]},
+        "postgresql",
+    )
+
+    assert result["is_valid"] is False
+    assert result["invalid_tables"] == ["invented_users"]
+
+
+def test_table_validation_does_not_treat_cte_alias_as_physical_table() -> None:
+    result = validate_tables_against_schema(
+        "WITH selected AS (SELECT id FROM users) SELECT id FROM selected",
+        {"users": ["id"]},
+        "postgresql",
+    )
+
+    assert result["is_valid"] is True
 
 
 class TestSelectInto:
@@ -67,13 +216,27 @@ class TestKeywordsInsideLiterals:
     )
     def test_literal_keyword_does_not_read_as_a_write(self, sql):
         assert check_read_only(sql)["is_read_only"] is True
-        assert validate_sql_for_ask(sql, max_limit=1000, default_limit=100)["is_valid"] is True
+        assert (
+            validate_sql_for_ask(sql, max_limit=1000, default_limit=100)["is_valid"]
+            is True
+        )
 
     def test_real_write_is_still_rejected(self):
         result = check_read_only("DELETE FROM users WHERE id = 1")
 
         assert result["is_read_only"] is False
         assert "DELETE" in result["dangerous_keywords"]
+
+    def test_mysql_replace_function_is_read_only_but_replace_statement_is_not(self):
+        query = "SELECT REPLACE(name, 'old', 'new') FROM users"
+
+        assert check_read_only(query)["is_read_only"] is True
+        validated = validate_sql_for_ask(query, enforce_result_limit=False)
+        assert validated["is_valid"] is True
+
+        write = check_read_only("REPLACE INTO users (id) VALUES (1)")
+        assert write["is_read_only"] is False
+        assert "REPLACE" in write["dangerous_keywords"]
 
 
 class TestGenerationSafetyGate:
@@ -90,12 +253,13 @@ class TestGenerationSafetyGate:
 
     def _payload(self, sql: str) -> dict:
         return {
-            "analysis": {"needs_clarification": False, "ambiguities": []},
-            "clarifications": [],
-            "sql_generation": {"sql": sql, "explanation": "", "confidence": 0.9},
-            # The model grades itself as read-only regardless of what it wrote.
-            "safety_assessment": {"is_read_only": True, "warnings": []},
-            "alternatives": [],
+            "sql": sql,
+            "explanation": "",
+            "confidence": 0.9,
+            "assumptions": [],
+            "cannot_answer": False,
+            "cannot_answer_reason": "",
+            "missing_schema": [],
         }
 
     def _generate(self, sql: str) -> dict:
@@ -124,7 +288,9 @@ class TestExecutionGate:
     """Agent paths hand SQL straight to execute, so execute validates too."""
 
     def _ctx(self, sql: str) -> Ask3Context:
-        ctx = Ask3Context(question="q", target="testdb", target_config={"host": "localhost"})
+        ctx = Ask3Context(
+            question="q", target="testdb", target_config={"host": "localhost"}
+        )
         ctx.sql = sql
         return ctx
 
@@ -148,7 +314,9 @@ class TestExecutionGate:
             executed.append(sql)
             return {"success": True, "rows": [], "columns": []}
 
-        ctx = execute_query(self._ctx("SELECT * INTO exfil FROM users"), MagicMock(), executor)
+        ctx = execute_query(
+            self._ctx("SELECT * INTO exfil FROM users"), MagicMock(), executor
+        )
 
         assert executed == []
         assert ctx.status == Status.ERROR
@@ -164,6 +332,68 @@ class TestExecutionGate:
 
         assert executed == ["SELECT id FROM users LIMIT 100"]
         assert ctx.status == Status.SUCCESS
+
+    def test_evaluation_select_executes_without_limit_mutation(self):
+        executed = []
+        ctx = self._ctx("SELECT id FROM users")
+        ctx.enforce_result_limit = False
+
+        def executor(sql, config):
+            executed.append(sql)
+            return {"success": True, "rows": [[1]], "columns": ["id"]}
+
+        ctx = execute_query(ctx, MagicMock(), executor)
+
+        assert executed == ["SELECT id FROM users"]
+        assert ctx.status == Status.SUCCESS
+
+    def test_executor_preserves_structured_failure_kind(self):
+        def executor(sql, config):
+            return {
+                "success": False,
+                "rows": [],
+                "columns": [],
+                "error": "query timed out",
+                "error_kind": "timeout",
+            }
+
+        ctx = execute_query(self._ctx("SELECT id FROM users"), MagicMock(), executor)
+
+        assert ctx.execution_result.error == "query timed out"
+        assert ctx.execution_result.error_kind == "timeout"
+
+    def test_read_only_cte_allows_keyword_like_alias(self):
+        sql = """WITH summary AS (
+            SELECT COUNT(*) AS count FROM users
+        )
+        SELECT count FROM summary"""
+
+        result = validate_sql_for_ask(sql, enforce_result_limit=False)
+
+        assert result["is_valid"] is True
+        assert result["is_safe"] is True
+
+    def test_parenthesized_set_operation_is_read_only(self):
+        result = validate_sql_for_ask(
+            "(SELECT 1) UNION (SELECT 2)", enforce_result_limit=False
+        )
+
+        assert result["is_valid"] is True
+        assert result["is_safe"] is True
+
+    def test_evaluation_policy_still_blocks_writes(self):
+        executed = []
+        ctx = self._ctx("DELETE FROM users")
+        ctx.enforce_result_limit = False
+
+        def executor(sql, config):
+            executed.append(sql)
+            return {"success": True, "rows": [], "columns": []}
+
+        ctx = execute_query(ctx, MagicMock(), executor)
+
+        assert executed == []
+        assert ctx.status == Status.ERROR
 
 
 class TestAskExecutionEvidence:

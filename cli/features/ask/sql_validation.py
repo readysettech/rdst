@@ -9,36 +9,56 @@ Multi-layer validation to ensure queries are safe for execution:
 """
 
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
+import sqlglot
 import sqlparse
-from sqlparse.sql import Statement, Token, TokenList
+from sqlglot import exp
+from sqlparse.sql import Parenthesis, Statement, TokenList
 from sqlparse.tokens import DML, Keyword
+
+from shared.query_safety import _QUOTED_SPANS, SIDE_EFFECT_FUNCTIONS
 
 # Shared with the analyze validator so the two lists cannot drift apart.
 # _QUOTED_SPANS blanks out literals and quoted identifiers: a keyword inside one
 # is text, not an operation, and scanning the raw string reads it as an operation.
-from shared.query_safety import SIDE_EFFECT_FUNCTIONS, _QUOTED_SPANS
 
 
 # Dangerous keywords that indicate write operations
 WRITE_KEYWORDS = {
-    'INSERT', 'UPDATE', 'DELETE', 'DROP', 'CREATE', 'ALTER', 'TRUNCATE',
-    'REPLACE', 'MERGE', 'GRANT', 'REVOKE', 'SET', 'RESET', 'COPY', 'CALL',
-    'EXECUTE', 'DO', 'VACUUM', 'LOAD', 'IMPORT', 'ATTACH'
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "DROP",
+    "CREATE",
+    "ALTER",
+    "TRUNCATE",
+    "REPLACE",
+    "MERGE",
+    "GRANT",
+    "REVOKE",
+    "SET",
+    "RESET",
+    "COPY",
+    "CALL",
+    "EXECUTE",
+    "DO",
+    "VACUUM",
+    "LOAD",
+    "IMPORT",
+    "ATTACH",
 }
 
 # Safe read-only keywords
-READ_KEYWORDS = {
-    'SELECT', 'WITH', 'SHOW', 'DESCRIBE', 'DESC', 'EXPLAIN'
-}
+READ_KEYWORDS = {"SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN"}
 
 
 def validate_sql_for_ask(
     sql: str,
     max_limit: int = 1000,
     default_limit: int = 100,
-    **kwargs
+    enforce_result_limit: bool = True,
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Comprehensive SQL validation for ask command.
@@ -53,6 +73,7 @@ def validate_sql_for_ask(
         sql: SQL query to validate
         max_limit: Maximum allowed LIMIT value
         default_limit: Default LIMIT to inject if missing
+        enforce_result_limit: Add or reduce LIMIT clauses when true
         **kwargs: Additional parameters
 
     Returns:
@@ -71,85 +92,85 @@ def validate_sql_for_ask(
     # Step 1: Basic validation
     if not sql or not sql.strip():
         return {
-            'is_valid': False,
-            'is_safe': False,
-            'validated_sql': sql,
-            'issues': ['Empty or whitespace-only query'],
-            'warnings': [],
-            'has_limit': False,
-            'limit_value': None
+            "is_valid": False,
+            "is_safe": False,
+            "validated_sql": sql,
+            "issues": ["Empty or whitespace-only query"],
+            "warnings": [],
+            "has_limit": False,
+            "limit_value": None,
         }
 
     # Step 2: Check for dangerous keywords
     read_only_check = check_read_only(sql)
-    if not read_only_check['is_read_only']:
-        issues.extend(read_only_check['issues'])
+    if not read_only_check["is_read_only"]:
+        issues.extend(read_only_check["issues"])
         return {
-            'is_valid': False,
-            'is_safe': False,
-            'validated_sql': sql,
-            'issues': issues,
-            'warnings': warnings,
-            'has_limit': False,
-            'limit_value': None,
-            'dangerous_keywords': read_only_check.get('dangerous_keywords', [])
+            "is_valid": False,
+            "is_safe": False,
+            "validated_sql": sql,
+            "issues": issues,
+            "warnings": warnings,
+            "has_limit": False,
+            "limit_value": None,
+            "dangerous_keywords": read_only_check.get("dangerous_keywords", []),
         }
 
     # Step 3: Parse SQL and check structure
     try:
         parsed = sqlparse.parse(sql)
         if not parsed:
-            issues.append('Failed to parse SQL statement')
+            issues.append("Failed to parse SQL statement")
             return {
-                'is_valid': False,
-                'is_safe': False,
-                'validated_sql': sql,
-                'issues': issues,
-                'warnings': warnings,
-                'has_limit': False,
-                'limit_value': None
+                "is_valid": False,
+                "is_safe": False,
+                "validated_sql": sql,
+                "issues": issues,
+                "warnings": warnings,
+                "has_limit": False,
+                "limit_value": None,
             }
 
         # Only the leading statement is inspected below, so anything trailing a
         # semicolon would reach the driver unexamined.
-        meaningful = [s for s in parsed if str(s).strip().strip(';').strip()]
+        meaningful = [s for s in parsed if str(s).strip().strip(";").strip()]
         if len(meaningful) > 1:
-            issues.append('Only a single statement is allowed')
+            issues.append("Only a single statement is allowed")
             return {
-                'is_valid': False,
-                'is_safe': False,
-                'validated_sql': sql,
-                'issues': issues,
-                'warnings': warnings,
-                'has_limit': False,
-                'limit_value': None
+                "is_valid": False,
+                "is_safe": False,
+                "validated_sql": sql,
+                "issues": issues,
+                "warnings": warnings,
+                "has_limit": False,
+                "limit_value": None,
             }
 
         statement = parsed[0]
 
         # Check if it's a SELECT statement
         if not _is_select_statement(statement):
-            issues.append('Only SELECT statements are allowed')
+            issues.append("Only SELECT statements are allowed")
             return {
-                'is_valid': False,
-                'is_safe': False,
-                'validated_sql': sql,
-                'issues': issues,
-                'warnings': warnings,
-                'has_limit': False,
-                'limit_value': None
+                "is_valid": False,
+                "is_safe": False,
+                "validated_sql": sql,
+                "issues": issues,
+                "warnings": warnings,
+                "has_limit": False,
+                "limit_value": None,
             }
 
     except Exception as e:
-        issues.append(f'SQL parsing error: {str(e)}')
+        issues.append(f"SQL parsing error: {str(e)}")
         return {
-            'is_valid': False,
-            'is_safe': False,
-            'validated_sql': sql,
-            'issues': issues,
-            'warnings': warnings,
-            'has_limit': False,
-            'limit_value': None
+            "is_valid": False,
+            "is_safe": False,
+            "validated_sql": sql,
+            "issues": issues,
+            "warnings": warnings,
+            "has_limit": False,
+            "limit_value": None,
         }
 
     # Step 3b: Constructs that stay inside a SELECT but reach past the queried
@@ -159,52 +180,263 @@ def validate_sql_for_ask(
     if forbidden:
         issues.extend(forbidden)
         return {
-            'is_valid': False,
-            'is_safe': False,
-            'validated_sql': sql,
-            'issues': issues,
-            'warnings': warnings,
-            'has_limit': False,
-            'limit_value': None
+            "is_valid": False,
+            "is_safe": False,
+            "validated_sql": sql,
+            "issues": issues,
+            "warnings": warnings,
+            "has_limit": False,
+            "limit_value": None,
         }
 
     # Step 4: Check for existing LIMIT clause
     limit_info = _extract_limit_clause(sql)
-    has_limit = limit_info['has_limit']
-    limit_value = limit_info['limit_value']
+    has_limit = limit_info["has_limit"]
+    limit_value = limit_info["limit_value"]
 
     # Step 5: Inject or validate LIMIT
     validated_sql = sql
     limit_added = False
     limit_reduced = False
-    if not has_limit:
-        # Inject default LIMIT
-        validated_sql = _inject_limit(sql, default_limit)
-        warnings.append(f'Added LIMIT {default_limit} to prevent unbounded results')
-        limit_value = default_limit
-        limit_added = True
-    elif limit_value and limit_value > max_limit:
-        # Reduce excessive LIMIT
-        validated_sql = _replace_limit(sql, max_limit)
-        warnings.append(f'Reduced LIMIT from {limit_value} to maximum {max_limit}')
-        limit_value = max_limit
-        limit_reduced = True
+    if enforce_result_limit:
+        if not has_limit:
+            validated_sql = _inject_limit(sql, default_limit)
+            warnings.append(f"Added LIMIT {default_limit} to prevent unbounded results")
+            has_limit = True
+            limit_value = default_limit
+            limit_added = True
+        elif limit_value and limit_value > max_limit:
+            validated_sql = _replace_limit(sql, max_limit)
+            warnings.append(f"Reduced LIMIT from {limit_value} to maximum {max_limit}")
+            limit_value = max_limit
+            limit_reduced = True
 
     # Step 6: Additional safety checks
     safety_warnings = _check_dangerous_patterns(validated_sql)
     warnings.extend(safety_warnings)
 
     return {
-        'is_valid': True,
-        'is_safe': True,
-        'validated_sql': validated_sql,
-        'issues': issues,
-        'warnings': warnings,
-        'has_limit': True,  # After injection
-        'limit_value': limit_value,
-        'limit_added': limit_added,
-        'limit_reduced': limit_reduced,
+        "is_valid": True,
+        "is_safe": True,
+        "validated_sql": validated_sql,
+        "issues": issues,
+        "warnings": warnings,
+        "has_limit": has_limit,
+        "limit_value": limit_value,
+        "limit_added": limit_added,
+        "limit_reduced": limit_reduced,
     }
+
+
+def validate_filter_literal_provenance(
+    sql: str,
+    *,
+    question: str,
+    schema_formatted: str,
+    provided_context: str = "",
+    clarifications: Optional[Dict[str, str]] = None,
+    dialect: str = "",
+) -> Dict[str, Any]:
+    """Reject unsupported string filters and free-text filters shadowed by enums."""
+    try:
+        tree = sqlglot.parse_one(sql, dialect=dialect or None)
+    except Exception:
+        return {"is_valid": True, "issues": [], "warnings": []}
+
+    column_types, enum_columns = _parse_formatted_schema_metadata(schema_formatted)
+    aliases = {
+        table.alias_or_name.lower(): table.name.lower()
+        for table in tree.find_all(exp.Table)
+        if table.name
+    }
+    physical_tables = set(aliases.values())
+    source_text = "\n".join(
+        part
+        for part in (
+            question,
+            provided_context,
+            "\n".join(str(value) for value in (clarifications or {}).values()),
+        )
+        if part
+    )
+    issues = []
+    warnings = []
+    seen = set()
+    for column, literal in _filter_column_literal_pairs(tree):
+        value = literal.this
+        if not isinstance(value, str) or not value.strip():
+            continue
+        normalized_value = _normalize_filter_value(value)
+        if not normalized_value:
+            continue
+
+        table_name = aliases.get(column.table.lower(), column.table.lower())
+        if not table_name and len(physical_tables) == 1:
+            table_name = next(iter(physical_tables))
+        column_name = column.name.lower()
+        qualified_column = f"{table_name}.{column_name}" if table_name else column_name
+        enum_matches = sorted(
+            qualified
+            for qualified, payload in enum_columns.items()
+            if _normalized_text_contains(payload, normalized_value)
+        )
+        source_supports_value = _normalized_text_contains(
+            _normalize_text(source_text), normalized_value
+        )
+        schema_supports_value = bool(enum_matches)
+
+        issue_key = (qualified_column, value)
+        if not source_supports_value and not schema_supports_value:
+            if issue_key in seen:
+                continue
+            seen.add(issue_key)
+            warnings.append(
+                {
+                    "column": column.name,
+                    "table_alias": column.table or None,
+                    "literal": value,
+                    "kind": "unsupported_literal",
+                    "message": (
+                        f"Filter literal {value!r} has no source in the user question, "
+                        "caller context, clarification answers, or listed enum values. "
+                        "Remove it or replace it only with a supported value."
+                    ),
+                    "suggestions": [],
+                }
+            )
+            continue
+
+        target_type = column_types.get(qualified_column, "")
+        target_is_enum = "enum" in target_type
+        enum_matches_elsewhere = [
+            match for match in enum_matches if match != qualified_column
+        ]
+        if (
+            source_supports_value
+            and enum_matches_elsewhere
+            and target_type
+            and not target_is_enum
+            and not _explicit_free_text_reference(question, column.name, value)
+        ):
+            if issue_key in seen:
+                continue
+            seen.add(issue_key)
+            suggestions = enum_matches_elsewhere[:3]
+            issues.append(
+                {
+                    "column": column.name,
+                    "table_alias": column.table or None,
+                    "literal": value,
+                    "kind": "enum_shadowed_free_text",
+                    "message": (
+                        f"Filter literal {value!r} is applied to free-text column "
+                        f"{qualified_column!r}, but the schema lists the same value "
+                        "on an enum column. Use the best supported enum mapping unless "
+                        "the user explicitly requested a name or other free-text field."
+                    ),
+                    "suggestions": suggestions,
+                }
+            )
+
+    return {"is_valid": not issues, "issues": issues, "warnings": warnings}
+
+
+def _filter_column_literal_pairs(tree: exp.Expression):
+    comparison_types = (
+        exp.EQ,
+        exp.NEQ,
+        exp.GT,
+        exp.GTE,
+        exp.LT,
+        exp.LTE,
+        exp.Like,
+        exp.ILike,
+    )
+    for node in tree.walk():
+        if isinstance(node, comparison_types):
+            left = node.this
+            right = node.expression
+            if isinstance(left, exp.Column) and isinstance(right, exp.Literal):
+                if right.is_string:
+                    yield left, right
+            elif isinstance(right, exp.Column) and isinstance(left, exp.Literal):
+                if left.is_string:
+                    yield right, left
+        elif isinstance(node, exp.In) and isinstance(node.this, exp.Column):
+            for candidate in node.expressions:
+                if isinstance(candidate, exp.Literal) and candidate.is_string:
+                    yield node.this, candidate
+        elif isinstance(node, exp.Between) and isinstance(node.this, exp.Column):
+            for key in ("low", "high"):
+                candidate = node.args.get(key)
+                if isinstance(candidate, exp.Literal) and candidate.is_string:
+                    yield node.this, candidate
+
+
+def _parse_formatted_schema_metadata(
+    schema_formatted: str,
+) -> tuple[Dict[str, str], Dict[str, str]]:
+    column_types = {}
+    enum_columns = {}
+    current_table = ""
+    for raw_line in schema_formatted.splitlines():
+        table_match = re.match(r"^Table:\s+`?([^`\s]+)`?", raw_line.strip())
+        if table_match:
+            current_table = table_match.group(1).lower()
+            continue
+        if not current_table or not raw_line.startswith("  "):
+            continue
+        content = raw_line.strip()
+        if content.startswith(("Business context:", "Relationships:")):
+            continue
+        structural = content.split(" --", 1)[0].split(" [", 1)[0]
+        if " (" not in structural or not structural.endswith(")"):
+            continue
+        column_name, data_type = structural.rsplit(" (", 1)
+        qualified = f"{current_table}.{column_name.lower()}"
+        column_types[qualified] = data_type[:-1].lower()
+        enum_match = re.search(r"\[enum:\s*(.*?)\](?:\s|$)", content)
+        if enum_match:
+            enum_columns[qualified] = _normalize_text(enum_match.group(1))
+    return column_types, enum_columns
+
+
+def _normalize_text(value: str) -> str:
+    return " ".join(value.casefold().split())
+
+
+def _normalize_filter_value(value: str) -> str:
+    return _normalize_text(value.strip("%_^$"))
+
+
+def _normalized_text_contains(haystack: str, needle: str) -> bool:
+    if not needle:
+        return False
+    return re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack) is not None
+
+
+def _explicit_free_text_reference(
+    question: str, column_name: str, literal: str
+) -> bool:
+    question_normalized = _normalize_text(question)
+    literal_normalized = _normalize_filter_value(literal)
+    column_normalized = _normalize_text(column_name)
+    if not literal_normalized:
+        return False
+    if re.search(
+        rf"\b(?:named|called|titled|known\s+as)\s+"
+        rf"{re.escape(literal_normalized)}\b",
+        question_normalized,
+    ):
+        return True
+    return bool(
+        column_normalized
+        and re.search(
+            rf"\b{re.escape(column_normalized)}\s+(?:is|equals?|=)\s+"
+            rf"{re.escape(literal_normalized)}\b",
+            question_normalized,
+        )
+    )
 
 
 def check_read_only(sql: str) -> Dict[str, Any]:
@@ -215,46 +447,51 @@ def check_read_only(sql: str) -> Dict[str, Any]:
     1. Keyword pattern matching
     2. SQL parsing to check statement type
     """
-    sql_upper = _QUOTED_SPANS.sub(' ', sql).upper()
+    sql_upper = _QUOTED_SPANS.sub(" ", sql).upper()
+    # MySQL uses REPLACE both for a write statement (``REPLACE INTO ...``) and
+    # for a read-only scalar function (``REPLACE(value, from, to)``).  Remove
+    # only function-call spellings before the keyword scan; a statement-level
+    # REPLACE, including one following a CTE or another statement, remains.
+    keyword_scan_sql = re.sub(r"\bREPLACE\s*(?=\()", "", sql_upper)
     dangerous_found = []
 
     # Check for write keywords
     for keyword in WRITE_KEYWORDS:
-        # Use word boundary to avoid false positives (e.g., "DESCRIPTION" contains "DESC")
-        pattern = r'\b' + keyword + r'\b'
-        if re.search(pattern, sql_upper):
+        # Use word boundaries to avoid false positives such as DESCRIPTION/DESC.
+        pattern = r"\b" + keyword + r"\b"
+        if re.search(pattern, keyword_scan_sql):
             dangerous_found.append(keyword)
 
     if dangerous_found:
         return {
-            'is_read_only': False,
-            'issues': [f'Write operation detected: {", ".join(dangerous_found)}'],
-            'dangerous_keywords': dangerous_found
+            "is_read_only": False,
+            "issues": [f"Write operation detected: {', '.join(dangerous_found)}"],
+            "dangerous_keywords": dangerous_found,
         }
 
     # Additional check: ensure it starts with SELECT or WITH
     first_keyword = _get_first_keyword(sql)
     if first_keyword and first_keyword not in READ_KEYWORDS:
         return {
-            'is_read_only': False,
-            'issues': [f'Query must start with SELECT or WITH, found: {first_keyword}'],
-            'dangerous_keywords': [first_keyword]
+            "is_read_only": False,
+            "issues": [f"Query must start with SELECT or WITH, found: {first_keyword}"],
+            "dangerous_keywords": [first_keyword],
         }
 
-    return {
-        'is_read_only': True,
-        'issues': [],
-        'dangerous_keywords': []
-    }
+    return {"is_read_only": True, "issues": [], "dangerous_keywords": []}
 
 
 def _is_select_statement(statement: Statement) -> bool:
     """Check if parsed statement is a SELECT query."""
     for token in statement.tokens:
-        if token.ttype is DML and token.value.upper() == 'SELECT':
+        if isinstance(token, Parenthesis):
+            nested = sqlparse.parse(token.value[1:-1])
+            if nested and _is_select_statement(nested[0]):
+                return True
+        if token.ttype in DML and token.value.upper() == "SELECT":
             return True
         # Check for WITH clause (CTEs)
-        if token.ttype is Keyword and token.value.upper() == 'WITH':
+        if token.ttype in Keyword and token.value.upper() == "WITH":
             return True
     return False
 
@@ -272,13 +509,17 @@ def _get_first_keyword(sql: str) -> Optional[str]:
         if parsed:
             statement = parsed[0]
             for token in statement.tokens:
-                if token.ttype in (Keyword, DML):
+                if isinstance(token, Parenthesis):
+                    nested_keyword = _get_first_keyword(token.value[1:-1])
+                    if nested_keyword:
+                        return nested_keyword
+                if token.ttype in Keyword or token.ttype in DML:
                     return token.value.upper()
-    except:
+    except Exception:
         pass
 
     # Fallback: regex
-    match = re.match(r'\s*(\w+)', sql, re.IGNORECASE)
+    match = re.match(r"\s*\(*\s*(\w+)", sql, re.IGNORECASE)
     if match:
         return match.group(1).upper()
 
@@ -294,21 +535,15 @@ def _extract_limit_clause(sql: str) -> Dict[str, Any]:
     """
     # Pattern for LIMIT clause (PostgreSQL and MySQL)
     # Matches: LIMIT 100, LIMIT 100 OFFSET 10, LIMIT 10, 100 (MySQL)
-    pattern = r'\bLIMIT\s+(\d+)(?:\s*,\s*(\d+)|\s+OFFSET\s+\d+)?'
+    pattern = r"\bLIMIT\s+(\d+)(?:\s*,\s*(\d+)|\s+OFFSET\s+\d+)?"
     match = re.search(pattern, sql, re.IGNORECASE)
 
     if match:
         # For MySQL format "LIMIT offset, count", the count is in group 2
         limit_value = int(match.group(2) if match.group(2) else match.group(1))
-        return {
-            'has_limit': True,
-            'limit_value': limit_value
-        }
+        return {"has_limit": True, "limit_value": limit_value}
 
-    return {
-        'has_limit': False,
-        'limit_value': None
-    }
+    return {"has_limit": False, "limit_value": None}
 
 
 def _inject_limit(sql: str, limit: int) -> str:
@@ -324,7 +559,7 @@ def _inject_limit(sql: str, limit: int) -> str:
     sql = sql.rstrip()
 
     # Remove trailing semicolon if present
-    if sql.endswith(';'):
+    if sql.endswith(";"):
         sql = sql[:-1].rstrip()
 
     # Add LIMIT before any trailing semicolon
@@ -345,24 +580,26 @@ def _replace_limit(sql: str, new_limit: int) -> str:
         Modified SQL with updated LIMIT
     """
     # Pattern to match and replace LIMIT clause
-    pattern = r'\bLIMIT\s+\d+(?:\s*,\s*\d+|\s+OFFSET\s+\d+)?'
+    pattern = r"\bLIMIT\s+\d+(?:\s*,\s*\d+|\s+OFFSET\s+\d+)?"
 
     def replace_func(match):
         # Check if it's MySQL format with offset
-        if ',' in match.group(0):
+        if "," in match.group(0):
             # Extract offset from "LIMIT offset, count"
-            offset_match = re.match(r'LIMIT\s+(\d+)\s*,\s*\d+', match.group(0), re.IGNORECASE)
+            offset_match = re.match(
+                r"LIMIT\s+(\d+)\s*,\s*\d+", match.group(0), re.IGNORECASE
+            )
             if offset_match:
                 offset = offset_match.group(1)
-                return f'LIMIT {offset}, {new_limit}'
+                return f"LIMIT {offset}, {new_limit}"
         # Check for OFFSET syntax
-        elif 'OFFSET' in match.group(0).upper():
-            offset_match = re.search(r'OFFSET\s+(\d+)', match.group(0), re.IGNORECASE)
+        elif "OFFSET" in match.group(0).upper():
+            offset_match = re.search(r"OFFSET\s+(\d+)", match.group(0), re.IGNORECASE)
             if offset_match:
                 offset = offset_match.group(1)
-                return f'LIMIT {new_limit} OFFSET {offset}'
+                return f"LIMIT {new_limit} OFFSET {offset}"
         # Simple LIMIT
-        return f'LIMIT {new_limit}'
+        return f"LIMIT {new_limit}"
 
     return re.sub(pattern, replace_func, sql, flags=re.IGNORECASE)
 
@@ -371,7 +608,7 @@ def _replace_limit(sql: str, new_limit: int) -> str:
 # remaining INTO is a destination: a new table (PostgreSQL SELECT ... INTO, with
 # or without TEMP/UNLOGGED/TABLE), a variable, or the OUTFILE/DUMPFILE forms
 # reported separately.
-_SELECT_INTO = re.compile(r'\bINTO\s+(?!OUTFILE\b|DUMPFILE\b)', re.IGNORECASE)
+_SELECT_INTO = re.compile(r"\bINTO\s+(?!OUTFILE\b|DUMPFILE\b)", re.IGNORECASE)
 
 
 def _check_forbidden_constructs(sql: str) -> List[str]:
@@ -382,18 +619,20 @@ def _check_forbidden_constructs(sql: str) -> List[str]:
         List of issue messages; empty means nothing forbidden was found
     """
     issues = []
-    sql_upper = _QUOTED_SPANS.sub(' ', sql).upper()
+    sql_upper = _QUOTED_SPANS.sub(" ", sql).upper()
 
-    if 'INTO OUTFILE' in sql_upper or 'INTO DUMPFILE' in sql_upper:
-        issues.append('INTO OUTFILE/DUMPFILE writes to the database server filesystem')
+    if "INTO OUTFILE" in sql_upper or "INTO DUMPFILE" in sql_upper:
+        issues.append("INTO OUTFILE/DUMPFILE writes to the database server filesystem")
 
     if _SELECT_INTO.search(sql_upper):
-        issues.append('SELECT ... INTO writes the result set outside the queried tables')
+        issues.append(
+            "SELECT ... INTO writes the result set outside the queried tables"
+        )
 
     for func in sorted(SIDE_EFFECT_FUNCTIONS):
-        if re.search(r'\b' + func + r'\s*\(', sql_upper):
+        if re.search(r"\b" + func + r"\s*\(", sql_upper):
             issues.append(
-                f'{func}() reaches outside the queried tables and is not permitted'
+                f"{func}() reaches outside the queried tables and is not permitted"
             )
 
     return issues
@@ -410,12 +649,14 @@ def _check_dangerous_patterns(sql: str) -> List[str]:
     sql_upper = sql.upper()
 
     # Check for potentially expensive operations
-    if 'CROSS JOIN' in sql_upper:
-        warnings.append('Query contains CROSS JOIN - may produce very large result set')
+    if "CROSS JOIN" in sql_upper:
+        warnings.append("Query contains CROSS JOIN - may produce very large result set")
 
     # Check for user-defined functions that might have side effects
-    if 'PROCEDURE' in sql_upper or 'FUNCTION' in sql_upper:
-        warnings.append('Query calls stored procedures/functions - verify they are read-only')
+    if "PROCEDURE" in sql_upper or "FUNCTION" in sql_upper:
+        warnings.append(
+            "Query calls stored procedures/functions - verify they are read-only"
+        )
 
     return warnings
 
@@ -430,12 +671,14 @@ def estimate_query_complexity(sql: str) -> str:
     sql_upper = sql.upper()
 
     # Count indicators of complexity
-    join_count = sql_upper.count('JOIN')
-    subquery_count = sql_upper.count('SELECT') - 1  # Subtract main SELECT
-    aggregate_count = sum(sql_upper.count(agg) for agg in ['COUNT', 'SUM', 'AVG', 'MAX', 'MIN'])
-    has_group_by = 'GROUP BY' in sql_upper
-    has_having = 'HAVING' in sql_upper
-    has_window = 'OVER(' in sql_upper or 'OVER (' in sql_upper
+    join_count = sql_upper.count("JOIN")
+    subquery_count = sql_upper.count("SELECT") - 1  # Subtract main SELECT
+    aggregate_count = sum(
+        sql_upper.count(agg) for agg in ["COUNT", "SUM", "AVG", "MAX", "MIN"]
+    )
+    has_group_by = "GROUP BY" in sql_upper
+    has_having = "HAVING" in sql_upper
+    has_window = "OVER(" in sql_upper or "OVER (" in sql_upper
 
     complexity_score = 0
     if join_count > 0:
@@ -452,13 +695,13 @@ def estimate_query_complexity(sql: str) -> str:
         complexity_score += 5
 
     if complexity_score <= 5:
-        return 'simple'
+        return "simple"
     elif complexity_score <= 10:
-        return 'moderate'
+        return "moderate"
     elif complexity_score <= 20:
-        return 'complex'
+        return "complex"
     else:
-        return 'very_complex'
+        return "very_complex"
 
 
 def extract_table_names(sql: str) -> List[str]:
@@ -485,11 +728,17 @@ def extract_table_names(sql: str) -> List[str]:
             if isinstance(token, TokenList):
                 # Look for FROM or JOIN clauses
                 from_seen = False
-                join_seen = False
-
                 for item in token.tokens:
                     # Check if this is a FROM or JOIN keyword
-                    if item.ttype is Keyword and item.value.upper() in ('FROM', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'OUTER', 'CROSS'):
+                    if item.ttype is Keyword and item.value.upper() in (
+                        "FROM",
+                        "JOIN",
+                        "INNER",
+                        "LEFT",
+                        "RIGHT",
+                        "OUTER",
+                        "CROSS",
+                    ):
                         from_seen = True
                         continue
 
@@ -498,13 +747,22 @@ def extract_table_names(sql: str) -> List[str]:
                         # Clean up the identifier (remove schema prefix if present)
                         table_name = str(item).strip()
                         # Remove aliases (everything after AS or space)
-                        table_name = re.split(r'\s+(?:as\s+)?', table_name, flags=re.IGNORECASE)[0]
+                        table_name = re.split(
+                            r"\s+(?:as\s+)?", table_name, flags=re.IGNORECASE
+                        )[0]
                         # Remove schema prefix (schema.table -> table)
-                        if '.' in table_name:
-                            table_name = table_name.split('.')[-1]
+                        if "." in table_name:
+                            table_name = table_name.split(".")[-1]
                         # Remove quotes
-                        table_name = table_name.strip('"\'`')
-                        if table_name and not table_name.upper() in ('SELECT', 'WHERE', 'ORDER', 'GROUP', 'HAVING', 'LIMIT'):
+                        table_name = table_name.strip("\"'`")
+                        if table_name and table_name.upper() not in (
+                            "SELECT",
+                            "WHERE",
+                            "ORDER",
+                            "GROUP",
+                            "HAVING",
+                            "LIMIT",
+                        ):
                             tables.add(table_name)
                         from_seen = False
 
@@ -517,15 +775,15 @@ def extract_table_names(sql: str) -> List[str]:
         # Fallback: simple regex extraction if sqlparse fails
         if not tables:
             # Look for patterns like "FROM table" or "JOIN table"
-            from_pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)'
+            from_pattern = r"(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)"
             matches = re.findall(from_pattern, sql, re.IGNORECASE)
             tables.update(matches)
 
         return sorted(list(tables))
 
-    except Exception as e:
+    except Exception:
         # If parsing fails, try simple regex fallback
-        from_pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)'
+        from_pattern = r"(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)"
         matches = re.findall(from_pattern, sql, re.IGNORECASE)
         return sorted(list(set(matches)))
 
@@ -549,7 +807,7 @@ def extract_column_references(sql: str) -> List[Dict[str, Any]]:
 
     # Pattern to match table.column or alias.column references
     # Matches: c.userid, posts.id, p.ownerdisplayname, etc.
-    qualified_pattern = r'([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)'
+    qualified_pattern = r"([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)"
 
     for match in re.finditer(qualified_pattern, sql):
         table_alias = match.group(1).lower()
@@ -557,14 +815,20 @@ def extract_column_references(sql: str) -> List[Dict[str, Any]]:
         full_ref = match.group(0)
 
         # Skip common SQL keywords that might match
-        if table_alias in ('order', 'group', 'inner', 'left', 'right', 'outer', 'cross'):
+        if table_alias in (
+            "order",
+            "group",
+            "inner",
+            "left",
+            "right",
+            "outer",
+            "cross",
+        ):
             continue
 
-        columns.append({
-            'column': column,
-            'table_alias': table_alias,
-            'full_ref': full_ref
-        })
+        columns.append(
+            {"column": column, "table_alias": table_alias, "full_ref": full_ref}
+        )
 
     return columns
 
@@ -585,14 +849,27 @@ def extract_table_aliases(sql: str) -> Dict[str, str]:
 
     # Pattern for "table_name alias" or "table_name AS alias"
     # Matches: FROM comments c, FROM posts AS p, JOIN users u
-    pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+(?:AS\s+)?([a-zA-Z_][a-zA-Z0-9_]*)'
+    pattern = (
+        r"(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+(?:AS\s+)?([a-zA-Z_][a-zA-Z0-9_]*)"
+    )
 
     for match in re.finditer(pattern, sql, re.IGNORECASE):
         table_name = match.group(1).lower()
         alias = match.group(2).lower()
 
         # Skip if "alias" is actually a keyword
-        if alias in ('on', 'where', 'inner', 'left', 'right', 'outer', 'cross', 'join', 'and', 'or'):
+        if alias in (
+            "on",
+            "where",
+            "inner",
+            "left",
+            "right",
+            "outer",
+            "cross",
+            "join",
+            "and",
+            "or",
+        ):
             continue
 
         aliases[alias] = table_name
@@ -608,8 +885,7 @@ def extract_table_aliases(sql: str) -> Dict[str, str]:
 
 
 def validate_columns_against_schema(
-    sql: str,
-    schema: Dict[str, List[str]]
+    sql: str, schema: Dict[str, List[str]]
 ) -> Dict[str, Any]:
     """
     Validate that all column references in SQL exist in the schema.
@@ -628,8 +904,7 @@ def validate_columns_against_schema(
     """
     # Normalize schema to lowercase
     schema_lower = {
-        table.lower(): [col.lower() for col in cols]
-        for table, cols in schema.items()
+        table.lower(): [col.lower() for col in cols] for table, cols in schema.items()
     }
 
     # Extract column references and aliases
@@ -640,9 +915,9 @@ def validate_columns_against_schema(
     suggestions = {}
 
     for ref in column_refs:
-        alias = ref['table_alias']
-        column = ref['column']
-        full_ref = ref['full_ref']
+        alias = ref["table_alias"]
+        column = ref["column"]
+        full_ref = ref["full_ref"]
 
         # Resolve alias to table name
         table_name = aliases.get(alias, alias)
@@ -655,12 +930,14 @@ def validate_columns_against_schema(
         # Check if column exists in table
         valid_columns = schema_lower[table_name]
         if column not in valid_columns:
-            invalid_columns.append({
-                'reference': full_ref,
-                'table': table_name,
-                'column': column,
-                'alias': alias
-            })
+            invalid_columns.append(
+                {
+                    "reference": full_ref,
+                    "table": table_name,
+                    "column": column,
+                    "alias": alias,
+                }
+            )
 
             # Find similar column names for suggestions
             similar = _find_similar_columns(column, valid_columns)
@@ -671,27 +948,73 @@ def validate_columns_against_schema(
         # Build error message
         errors = []
         for inv in invalid_columns:
-            msg = f"Column '{inv['reference']}' does not exist in table '{inv['table']}'"
-            if inv['reference'] in suggestions:
+            msg = (
+                f"Column '{inv['reference']}' does not exist in table '{inv['table']}'"
+            )
+            if inv["reference"] in suggestions:
                 msg += f". Did you mean: {', '.join(suggestions[inv['reference']])}?"
             errors.append(msg)
 
         return {
-            'is_valid': False,
-            'invalid_columns': invalid_columns,
-            'suggestions': suggestions,
-            'error_message': '\n'.join(errors)
+            "is_valid": False,
+            "invalid_columns": invalid_columns,
+            "suggestions": suggestions,
+            "error_message": "\n".join(errors),
         }
 
     return {
-        'is_valid': True,
-        'invalid_columns': [],
-        'suggestions': {},
-        'error_message': None
+        "is_valid": True,
+        "invalid_columns": [],
+        "suggestions": {},
+        "error_message": None,
     }
 
 
-def _find_similar_columns(target: str, candidates: List[str], max_suggestions: int = 3) -> List[str]:
+def validate_tables_against_schema(
+    sql: str,
+    schema: Dict[str, List[str]],
+    dialect: str,
+) -> Dict[str, Any]:
+    """Validate physical table references while excluding scoped CTE aliases."""
+    schema_names = {name.casefold(): name for name in schema}
+    try:
+        tree = sqlglot.parse_one(
+            sql,
+            read="postgres" if dialect == "postgresql" else dialect,
+        )
+    except sqlglot.errors.ParseError as exc:
+        return {
+            "is_valid": False,
+            "invalid_tables": [],
+            "error_message": f"SQL parser rejected query: {exc}",
+        }
+    cte_names = {
+        cte.alias_or_name.casefold()
+        for cte in tree.find_all(exp.CTE)
+        if cte.alias_or_name
+    }
+    invalid_tables = sorted(
+        {
+            table.name
+            for table in tree.find_all(exp.Table)
+            if table.name.casefold() not in cte_names
+            and table.name.casefold() not in schema_names
+        },
+        key=str.casefold,
+    )
+    if not invalid_tables:
+        return {"is_valid": True, "invalid_tables": [], "error_message": None}
+    return {
+        "is_valid": False,
+        "invalid_tables": invalid_tables,
+        "error_message": "Tables do not exist in the loaded schema: "
+        + ", ".join(invalid_tables),
+    }
+
+
+def _find_similar_columns(
+    target: str, candidates: List[str], max_suggestions: int = 3
+) -> List[str]:
     """
     Find column names similar to target using edit distance.
 
@@ -703,6 +1026,7 @@ def _find_similar_columns(target: str, candidates: List[str], max_suggestions: i
     Returns:
         List of similar column names, sorted by similarity
     """
+
     def levenshtein_distance(s1: str, s2: str) -> int:
         """Simple Levenshtein distance implementation."""
         if len(s1) < len(s2):

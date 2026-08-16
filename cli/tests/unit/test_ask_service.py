@@ -6,11 +6,16 @@ clarification handling, and error scenarios.
 """
 
 import asyncio
-import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from typing import Any, Dict, List
+from unittest.mock import MagicMock, Mock, patch
 
-from features.ask.service import AskService
+import pytest
+
+from features.ask.ambiguity_detection import (
+    NON_INTERACTIVE_CLARIFICATION_POLICY,
+    RANKED_RESOLVER_POLICY,
+    Ambiguity,
+    AmbiguityOption,
+)
 from features.ask.events import (
     AskClarificationNeededEvent,
     AskErrorEvent,
@@ -24,7 +29,9 @@ from features.ask.models import (
     AskInput,
     AskInterpretation,
     AskOptions,
+    AskPhase,
 )
+from features.ask.service import AskService
 
 pytestmark = pytest.mark.usefixtures("run_blocking_inline")
 
@@ -70,7 +77,7 @@ class TestAskServiceAsk:
             timeout_seconds=30,
             verbose=False,
             agent_mode=False,
-            no_interactive=False,
+            no_interactive=True,
         )
 
     @pytest.mark.asyncio
@@ -323,6 +330,711 @@ class TestAskServiceSessionManagement:
 
         assert isinstance(_sessions, dict)
 
+    @pytest.mark.asyncio
+    async def test_ask_resume_runs_generation_with_refined_question(self):
+        from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
+
+        sessions = {}
+        service = AskService(session_store=sessions, persist_queries=False)
+        input_data = AskInput(question="Show active users", target="test")
+        options = AskOptions(dry_run=True, no_interactive=False, persist_query=False)
+        ambiguity = Ambiguity(
+            id="status",
+            category="status",
+            clarifying_question="What does active mean?",
+            possible_interpretations=[
+                AmbiguityOption("enabled", "enabled = 1", 0.9),
+                AmbiguityOption("recent", "last_seen is recent", 0.1),
+            ],
+            term="active",
+            reason="active is undefined",
+        )
+
+        async def mock_load_config(target):
+            return (target, {"engine": "postgresql"})
+
+        def fake_load(ctx, _presenter, _manager):
+            ctx.schema_info = SchemaInfo(
+                target="test",
+                db_type="postgresql",
+                source=SchemaSource.DATABASE,
+            )
+            ctx.schema_info.tables = {"users": Mock()}
+            ctx.schema_formatted = "users table"
+            return ctx
+
+        def fake_generate(ctx, _presenter, _manager):
+            assert "What does active mean?" in ctx.refined_question
+            assert "Answer: enabled = 1" in ctx.refined_question
+            ctx.sql = "SELECT * FROM users WHERE enabled = 1"
+            ctx.generated_sql = ctx.sql
+            return ctx
+
+        with (
+            patch.object(service, "_load_config", side_effect=mock_load_config),
+            patch("features.ask.service.load_schema", side_effect=fake_load),
+            patch(
+                "features.ask.service.filter_schema",
+                side_effect=lambda ctx, _presenter, _manager: ctx,
+            ),
+            patch.object(
+                service,
+                "_detect_ambiguities",
+                side_effect=lambda ctx: (ctx, [], [ambiguity]),
+            ),
+            patch("features.ask.service.generate_sql", side_effect=fake_generate),
+            patch(
+                "features.ask.service.validate_sql",
+                side_effect=lambda ctx, _presenter: ctx,
+            ),
+        ):
+            initial = [event async for event in service.ask(input_data, options)]
+            clarification = initial[-1]
+            assert isinstance(clarification, AskClarificationNeededEvent)
+            resumed = [
+                event
+                async for event in service.resume(
+                    clarification.session_id, {"status": "enabled = 1"}
+                )
+            ]
+
+        assert isinstance(resumed[-1], AskResultEvent)
+        assert resumed[-1].sql == "SELECT * FROM users WHERE enabled = 1"
+        assert sessions == {}
+
+    @pytest.mark.asyncio
+    async def test_validation_failure_gets_exactly_one_bounded_repair(self):
+        from features.ask.engine.ask3.context import Ask3Context
+        from features.ask.engine.ask3.types import ValidationError
+
+        service = AskService(persist_queries=False)
+        ctx = Ask3Context(
+            question="Show user ids",
+            target="test",
+            dry_run=True,
+        )
+
+        def fake_generate(context, _presenter, _manager):
+            context.sql = "SELECT id FROM users; SELECT name FROM users"
+            context.generated_sql = context.sql
+            return context
+
+        validations = 0
+
+        def fake_validate(context, _presenter):
+            nonlocal validations
+            validations += 1
+            context.clear_validation_errors()
+            if validations == 1:
+                context.validation_errors.append(
+                    ValidationError(
+                        column="",
+                        table_alias=None,
+                        message="Only a single statement is allowed",
+                    )
+                )
+            return context
+
+        def fake_repair(context, _presenter, error_message, _manager):
+            assert "Only a single statement is allowed" in error_message
+            context.sql = "SELECT id FROM users"
+            context.generated_sql = context.sql
+            return context
+
+        with (
+            patch("features.ask.service.generate_sql", side_effect=fake_generate),
+            patch("features.ask.service.validate_sql", side_effect=fake_validate),
+            patch(
+                "features.ask.service.repair_validation_error",
+                side_effect=fake_repair,
+            ) as repair,
+        ):
+            events = [
+                event
+                async for event in service._run_from_generate(ctx, persist_query=False)
+            ]
+
+        assert isinstance(events[-1], AskResultEvent)
+        assert events[-1].sql == "SELECT id FROM users"
+        assert validations == 2
+        assert repair.call_count == 1
+        assert ctx.retry_count == 1
+
+    @pytest.mark.asyncio
+    async def test_failed_validation_repair_does_not_execute_invalid_sql(self):
+        from features.ask.engine.ask3.context import Ask3Context
+        from features.ask.engine.ask3.types import ValidationError
+
+        service = AskService(persist_queries=False)
+        ctx = Ask3Context(question="Show users", target="test")
+
+        def fake_generate(context, _presenter, _manager):
+            context.sql = "SELECT 1; SELECT 2"
+            return context
+
+        validations = 0
+
+        def fake_validate(context, _presenter):
+            nonlocal validations
+            validations += 1
+            context.clear_validation_errors()
+            context.validation_errors.append(
+                ValidationError(
+                    column="",
+                    table_alias=None,
+                    message="Only a single statement is allowed",
+                )
+            )
+            return context
+
+        with (
+            patch("features.ask.service.generate_sql", side_effect=fake_generate),
+            patch("features.ask.service.validate_sql", side_effect=fake_validate),
+            patch(
+                "features.ask.service.repair_validation_error",
+                side_effect=lambda context, *_args: context,
+            ),
+            patch("features.ask.service.execute_query") as execute,
+        ):
+            events = [
+                event
+                async for event in service._run_from_generate(ctx, persist_query=False)
+            ]
+
+        assert validations == 2
+        assert isinstance(events[-1], AskErrorEvent)
+        assert events[-1].phase == AskPhase.VALIDATE
+        execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_literal_provenance_failure_gets_one_bounded_repair(self):
+        from features.ask.engine.ask3.context import Ask3Context
+        from features.ask.engine.ask3.types import ColumnInfo, SchemaInfo, TableInfo
+
+        service = AskService(persist_queries=False)
+        ctx = Ask3Context(
+            question=(
+                "How many students are enrolled at the State Special School school "
+                "for the 2014-2015 academic year?"
+            ),
+            target="california_schools",
+            db_type="mysql",
+            dry_run=True,
+            enforce_result_limit=False,
+        )
+        ctx.schema_formatted = """Table: frpm
+  School Name (text)
+  County Name (text)
+  Educational Option Type (enum) [enum: State Special School]
+  Academic Year (enum) [enum: 2014-2015]
+  Enrollment (Ages 5-17) (double)
+"""
+        ctx.schema_info = SchemaInfo(
+            target=ctx.target,
+            db_type=ctx.db_type,
+            tables={
+                "frpm": TableInfo(
+                    name="frpm",
+                    columns={
+                        name: ColumnInfo(name=name, data_type=data_type)
+                        for name, data_type in {
+                            "School Name": "text",
+                            "County Name": "text",
+                            "Educational Option Type": "enum",
+                            "Academic Year": "enum",
+                            "Enrollment (Ages 5-17)": "double",
+                        }.items()
+                    },
+                )
+            },
+        )
+
+        def fake_generate(context, _presenter, _manager):
+            context.sql = (
+                "SELECT `Enrollment (Ages 5-17)` FROM frpm "
+                "WHERE `School Name` = 'State Special School' "
+                "AND `County Name` = 'Alameda' "
+                "AND `Academic Year` = '2014-2015'"
+            )
+            context.generated_sql = context.sql
+            return context
+
+        def fake_repair(context, _presenter, error_message, _manager):
+            assert "free-text column" in error_message
+            assert "Alameda" in error_message
+            context.sql = (
+                "SELECT `Enrollment (Ages 5-17)` FROM frpm "
+                "WHERE `Educational Option Type` = 'State Special School' "
+                "AND `Academic Year` = '2014-2015'"
+            )
+            context.generated_sql = context.sql
+            return context
+
+        with (
+            patch("features.ask.service.generate_sql", side_effect=fake_generate),
+            patch(
+                "features.ask.service.repair_validation_error",
+                side_effect=fake_repair,
+            ) as repair,
+        ):
+            events = [
+                event
+                async for event in service._run_from_generate(ctx, persist_query=False)
+            ]
+
+        assert isinstance(events[-1], AskResultEvent)
+        assert "Educational Option Type" in events[-1].sql
+        assert repair.call_count == 1
+        assert ctx.retry_count == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("propagate", [False, True])
+    async def test_resume_preserves_unexpected_error_policy(self, propagate):
+        from features.ask.engine.ask3.context import Ask3Context
+        from features.ask.service import _PendingAskSession
+
+        sessions = {
+            "pending": _PendingAskSession(
+                context=Ask3Context(question="question", target="test"),
+                persist_query=False,
+                raise_unexpected_errors=propagate,
+            )
+        }
+        service = AskService(session_store=sessions)
+
+        async def broken_run(_ctx, *, persist_query=True):
+            raise RuntimeError("resume failed")
+            if False:
+                yield None
+
+        with patch.object(service, "_run_from_generate", side_effect=broken_run):
+            if propagate:
+                with pytest.raises(RuntimeError, match="resume failed"):
+                    _ = [event async for event in service.resume("pending")]
+            else:
+                events = [event async for event in service.resume("pending")]
+                assert isinstance(events[-1], AskErrorEvent)
+                assert events[-1].message == "resume failed"
+
+    def test_abandon_removes_injected_session(self):
+        sessions = {"pending": Mock()}
+        service = AskService(session_store=sessions)
+
+        assert service.abandon("pending") is True
+        assert sessions == {}
+        assert service.abandon("pending") is False
+
+    @pytest.mark.asyncio
+    async def test_resume_adds_answers_to_refined_question(self):
+        from features.ask.engine.ask3.context import Ask3Context
+        from features.ask.service import _PendingAskSession
+
+        ctx = Ask3Context(question="Show active users", target="test")
+        sessions = {"pending": _PendingAskSession(context=ctx, persist_query=False)}
+        service = AskService(session_store=sessions)
+
+        async def fake_run(resumed_ctx, *, persist_query=True):
+            assert persist_query is False
+            if False:
+                yield None
+
+        with patch.object(service, "_run_from_generate", side_effect=fake_run):
+            events = [
+                event
+                async for event in service.resume(
+                    "pending", {"status": "active means enabled = 1"}
+                )
+            ]
+
+        assert events == []
+        assert ctx.refined_question == (
+            "Show active users (status: active means enabled = 1)"
+        )
+        assert sessions == {}
+
+
+class TestAskServiceDependencyInjection:
+    @pytest.mark.asyncio
+    async def test_injected_dependencies_reach_every_phase(self):
+        from features.ask.engine.ask3.types import (
+            ExecutionResult,
+            SchemaInfo,
+            SchemaSource,
+        )
+
+        llm_manager = Mock()
+        semantic_manager = Mock()
+        db_executor = Mock()
+        service = AskService(
+            llm_manager=llm_manager,
+            semantic_manager=semantic_manager,
+            db_executor=db_executor,
+            persist_queries=False,
+        )
+        input_data = AskInput(question="Count users", target="test")
+        options = AskOptions(no_interactive=True, persist_query=False)
+
+        async def mock_load_config(target):
+            return (target, {"engine": "postgresql", "host": "localhost"})
+
+        def fake_load(ctx, presenter, dependency):
+            assert dependency is semantic_manager
+            ctx.schema_info = SchemaInfo(
+                target="test",
+                db_type="postgresql",
+                source=SchemaSource.DATABASE,
+            )
+            ctx.schema_info.tables = {"users": Mock()}
+            ctx.schema_formatted = "users table"
+            return ctx
+
+        def fake_filter(ctx, presenter, dependency):
+            assert dependency is llm_manager
+            return ctx
+
+        def fake_generate(ctx, presenter, dependency):
+            assert dependency is llm_manager
+            ctx.sql = "SELECT COUNT(*) FROM users"
+            return ctx
+
+        def fake_execute(ctx, presenter, dependency):
+            assert dependency is db_executor
+            ctx.execution_result = ExecutionResult(
+                columns=["count"], rows=[(1,)], row_count=1
+            )
+            return ctx
+
+        with (
+            patch.object(service, "_load_config", side_effect=mock_load_config),
+            patch.object(
+                service,
+                "_detect_ambiguities",
+                side_effect=lambda ctx: (ctx, [], []),
+            ),
+            patch("features.ask.service.load_schema", side_effect=fake_load),
+            patch("features.ask.service.filter_schema", side_effect=fake_filter),
+            patch("features.ask.service.generate_sql", side_effect=fake_generate),
+            patch("features.ask.service.validate_sql", side_effect=lambda ctx, _: ctx),
+            patch("features.ask.service.execute_query", side_effect=fake_execute),
+        ):
+            events = [event async for event in service.ask(input_data, options)]
+
+        assert isinstance(events[-1], AskResultEvent)
+        assert events[-1].query_hash == ""
+
+    def test_ambiguity_detection_uses_injected_manager(self):
+        llm_manager = Mock()
+        service = AskService(llm_manager=llm_manager)
+        ctx = Mock(
+            question="Which users?",
+            schema_formatted="users table",
+            db_type="postgresql",
+            provided_context="Active means enabled = true.",
+            no_interactive=False,
+        )
+
+        with patch(
+            "features.ask.service.detect_ambiguities",
+            return_value={"success": False, "error": "truncated response"},
+        ) as detect:
+            returned_ctx, interpretations, ambiguities = service._detect_ambiguities(
+                ctx
+            )
+
+        assert detect.call_args.kwargs["llm_manager"] is llm_manager
+        assert detect.call_args.kwargs["provided_context"] == ctx.provided_context
+        assert returned_ctx is ctx
+        assert interpretations == []
+        assert ambiguities == []
+        assert ctx.ambiguity_report == {
+            "error": "truncated response",
+            "fallback": "fail_closed",
+        }
+        assert ctx.clarification_policy == RANKED_RESOLVER_POLICY
+        ctx.mark_error.assert_called_once_with(
+            "Failed to analyze whether the question requires clarification"
+        )
+
+    @pytest.mark.asyncio
+    async def test_duplicate_clarification_categories_receive_unique_answer_keys(self):
+        sessions = {}
+        service = AskService(session_store=sessions)
+        input_data = AskInput(question="Show users", target="test")
+        options = AskOptions(no_interactive=False)
+        ambiguities = [
+            Ambiguity(
+                id="status-1",
+                category="status",
+                term="status",
+                reason="status is ambiguous",
+                clarifying_question="Which status?",
+                possible_interpretations=[
+                    AmbiguityOption("active", "active", 0.7),
+                    AmbiguityOption("disabled", "disabled", 0.3),
+                ],
+            ),
+            Ambiguity(
+                id="status-2",
+                category="status",
+                term="other status",
+                reason="status is ambiguous",
+                clarifying_question="Which other status?",
+                possible_interpretations=[
+                    AmbiguityOption("enabled", "enabled", 0.7),
+                    AmbiguityOption("disabled", "disabled", 0.3),
+                ],
+            ),
+        ]
+
+        async def mock_load_config(target):
+            return (target, {"engine": "postgresql"})
+
+        def fake_load(ctx, _presenter, _manager):
+            from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
+
+            ctx.schema_info = SchemaInfo(
+                target="test",
+                db_type="postgresql",
+                source=SchemaSource.DATABASE,
+            )
+            ctx.schema_info.tables = {"users": Mock()}
+            return ctx
+
+        with (
+            patch.object(service, "_load_config", side_effect=mock_load_config),
+            patch("features.ask.service.load_schema", side_effect=fake_load),
+            patch(
+                "features.ask.service.filter_schema",
+                side_effect=lambda ctx, _presenter, _manager: ctx,
+            ),
+            patch.object(
+                service,
+                "_detect_ambiguities",
+                side_effect=lambda ctx: (ctx, [], ambiguities),
+            ),
+        ):
+            events = [event async for event in service.ask(input_data, options)]
+
+        assert isinstance(events[-1], AskClarificationNeededEvent)
+        assert [question.id for question in events[-1].questions] == [
+            "status",
+            "status:2",
+        ]
+        assert list(sessions) == [events[-1].session_id]
+        assert service.abandon(events[-1].session_id)
+
+    @pytest.mark.asyncio
+    async def test_non_interactive_mode_skips_llm_detector_and_generates(self):
+        sessions = {}
+        observed_contexts = []
+        service = AskService(
+            session_store=sessions,
+            persist_queries=False,
+            phase_observer=lambda _phase, ctx: observed_contexts.append(ctx),
+        )
+        input_data = AskInput(question="Show users", target="test")
+        options = AskOptions(
+            no_interactive=True,
+            dry_run=True,
+            persist_query=False,
+        )
+
+        async def mock_load_config(target):
+            return (target, {"engine": "postgresql"})
+
+        def fake_load(ctx, _presenter, _manager):
+            from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
+
+            ctx.schema_info = SchemaInfo(
+                target="test",
+                db_type="postgresql",
+                source=SchemaSource.DATABASE,
+            )
+            ctx.schema_info.tables = {"users": Mock()}
+            return ctx
+
+        def fake_generate(ctx, _presenter, _manager):
+            assert ctx.question == "Show users"
+            assert ctx.refined_question is None
+            assert ctx.clarifications == {}
+            ctx.sql = "SELECT * FROM users"
+            ctx.generated_sql = ctx.sql
+            return ctx
+
+        with (
+            patch.object(service, "_load_config", side_effect=mock_load_config),
+            patch("features.ask.service.load_schema", side_effect=fake_load),
+            patch(
+                "features.ask.service.filter_schema",
+                side_effect=lambda ctx, _presenter, _manager: ctx,
+            ),
+            patch.object(
+                service,
+                "_detect_ambiguities",
+                side_effect=AssertionError(
+                    "Non-interactive mode must not invoke the LLM detector"
+                ),
+            ),
+            patch(
+                "features.ask.service.generate_sql",
+                side_effect=fake_generate,
+            ),
+            patch(
+                "features.ask.service.validate_sql",
+                side_effect=lambda ctx, _presenter: ctx,
+            ),
+        ):
+            events = [event async for event in service.ask(input_data, options)]
+
+        assert isinstance(events[-1], AskResultEvent)
+        assert not any(
+            isinstance(event, AskClarificationNeededEvent) for event in events
+        )
+        assert sessions == {}
+        ctx = observed_contexts[-1]
+        assert ctx.clarifications == {}
+        assert ctx.refined_question is None
+        assert ctx.clarification_resolutions == []
+        assert ctx.clarification_policy == NON_INTERACTIVE_CLARIFICATION_POLICY
+        assert ctx.ambiguity_report == {
+            "ambiguities": [],
+            "total_ambiguities": 0,
+            "requires_clarification": False,
+            "can_proceed_with_assumptions": True,
+            "overall_confidence": 1.0,
+            "decision": "deterministic_only_non_interactive",
+            "llm_detector_invoked": False,
+        }
+
+    @pytest.mark.asyncio
+    async def test_non_interactive_mode_stops_for_deterministic_missing_intent(self):
+        observed_contexts = []
+        service = AskService(
+            session_store={},
+            persist_queries=False,
+            phase_observer=lambda _phase, ctx: observed_contexts.append(ctx),
+        )
+
+        async def mock_load_config(target):
+            return (target, {"engine": "postgresql"})
+
+        def fake_load(ctx, _presenter, _manager):
+            from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
+
+            ctx.schema_info = SchemaInfo(
+                target="test",
+                db_type="postgresql",
+                source=SchemaSource.DATABASE,
+            )
+            ctx.schema_info.tables = {"users": Mock()}
+            return ctx
+
+        with (
+            patch.object(service, "_load_config", side_effect=mock_load_config),
+            patch("features.ask.service.load_schema", side_effect=fake_load),
+            patch(
+                "features.ask.service.filter_schema",
+                side_effect=lambda ctx, _presenter, _manager: ctx,
+            ),
+            patch.object(
+                service,
+                "_detect_ambiguities",
+                side_effect=AssertionError(
+                    "Non-interactive mode must not invoke the LLM detector"
+                ),
+            ),
+            patch(
+                "features.ask.service.generate_sql",
+                side_effect=AssertionError(
+                    "Missing sort direction must stop before generation"
+                ),
+            ),
+            patch(
+                "features.ask.service.validate_sql",
+                side_effect=lambda ctx, _presenter: ctx,
+            ),
+        ):
+            events = [
+                event
+                async for event in service.ask(
+                    AskInput(
+                        question="Show users sorted by score",
+                        target="test",
+                    ),
+                    AskOptions(
+                        no_interactive=True,
+                        dry_run=True,
+                        persist_query=False,
+                    ),
+                )
+            ]
+
+        assert isinstance(events[-1], AskErrorEvent)
+        assert events[-1].code == "clarification_required"
+        resolution = observed_contexts[-1].clarification_resolutions[0]
+        assert resolution["ambiguity_id"] == "intent-sort-direction"
+        assert resolution["action"] == "abstain"
+        assert resolution["source"] == "deterministic_intent"
+        assert resolution["applied"] is False
+
+    @pytest.mark.asyncio
+    async def test_benchmark_policy_propagates_unexpected_phase_errors(self):
+        service = AskService()
+        input_data = AskInput(question="Show users", target="test")
+        options = AskOptions(raise_unexpected_errors=True)
+
+        async def mock_load_config(target):
+            return (target, {"engine": "postgresql"})
+
+        with (
+            patch.object(service, "_load_config", side_effect=mock_load_config),
+            patch(
+                "features.ask.service.load_schema",
+                side_effect=RuntimeError("transport failed"),
+            ),
+            pytest.raises(RuntimeError, match="transport failed"),
+        ):
+            _ = [event async for event in service.ask(input_data, options)]
+
+    @pytest.mark.asyncio
+    async def test_options_reach_context(self):
+        service = AskService()
+        options = AskOptions(
+            max_rows=321,
+            no_interactive=True,
+            enforce_result_limit=False,
+        )
+        input_data = AskInput(
+            question="Count users",
+            target="test",
+            provided_context="Users means enabled accounts.",
+        )
+
+        async def mock_load_config(target):
+            return (target, {"engine": "postgresql"})
+
+        with (
+            patch.object(service, "_load_config", side_effect=mock_load_config),
+            patch("features.ask.service.create_context") as create,
+            patch("features.ask.service.load_schema") as load,
+        ):
+            ctx = Mock()
+            from features.ask.engine.ask3 import Status
+
+            ctx.status = Status.ERROR
+            ctx.error_message = "stop"
+            create.return_value = ctx
+            load.return_value = ctx
+            _ = [event async for event in service.ask(input_data, options)]
+
+        assert create.call_args.kwargs["max_rows"] == 321
+        assert create.call_args.kwargs["no_interactive"] is True
+        assert create.call_args.kwargs["enforce_result_limit"] is False
+        assert (
+            create.call_args.kwargs["provided_context"]
+            == "Users means enabled accounts."
+        )
+
 
 class TestAskServiceLoadConfig:
     """Tests for _load_config() method."""
@@ -421,11 +1133,14 @@ class TestAskServiceNullSchema:
 
         with patch.object(service, "_load_config", side_effect=mock_load_config):
             with patch("features.ask.service.load_schema") as mock_load:
+
                 def fake_load_schema(ctx, presenter, sem_mgr):
                     # Simulate _collect_from_database returning (None, error_string)
                     # without calling mark_error — the bug scenario.
                     ctx.schema_info = None
-                    ctx.schema_formatted = "Schema information: Not available (no target config)"
+                    ctx.schema_formatted = (
+                        "Schema information: Not available (no target config)"
+                    )
                     return ctx
 
                 mock_load.side_effect = fake_load_schema
@@ -438,7 +1153,9 @@ class TestAskServiceNullSchema:
             f"Expected error event for null schema, got events: "
             f"{[e.type for e in events]}"
         )
-        assert "schema" in error_events[0].message.lower() or "schema" in (error_events[0].phase or "")
+        assert "schema" in error_events[0].message.lower() or "schema" in (
+            error_events[0].phase or ""
+        )
 
     @pytest.mark.asyncio
     async def test_error_when_schema_has_no_tables(self, service, input_data, options):
@@ -450,8 +1167,10 @@ class TestAskServiceNullSchema:
 
         with patch.object(service, "_load_config", side_effect=mock_load_config):
             with patch("features.ask.service.load_schema") as mock_load:
+
                 def fake_load_schema(ctx, presenter, sem_mgr):
                     from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
+
                     ctx.schema_info = SchemaInfo(
                         target="test-target",
                         db_type="postgresql",
@@ -482,9 +1201,12 @@ class TestAskServiceNullSchema:
 
         with patch.object(service, "_load_config", side_effect=mock_load_config):
             with patch("features.ask.service.load_schema") as mock_load:
+
                 def fake_load_schema(ctx, presenter, sem_mgr):
                     ctx.schema_info = None
-                    ctx.schema_formatted = "Schema information: Collection failed (connection refused)"
+                    ctx.schema_formatted = (
+                        "Schema information: Collection failed (connection refused)"
+                    )
                     return ctx
 
                 mock_load.side_effect = fake_load_schema
@@ -652,6 +1374,7 @@ class TestAskServiceDryRun:
 
         def fake_load(ctx, p, s):
             from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
+
             ctx.schema_info = SchemaInfo(
                 target="test-target",
                 db_type="postgresql",
@@ -673,13 +1396,19 @@ class TestAskServiceDryRun:
             ctx.validation_errors = []
             return ctx
 
-        with patch.object(service, "_load_config", side_effect=mock_load_config), \
-             patch("features.ask.service.load_schema", side_effect=fake_load), \
-             patch("features.ask.service.filter_schema", side_effect=fake_filter), \
-             patch("features.ask.service.generate_sql", side_effect=fake_gen), \
-             patch("features.ask.service.validate_sql", side_effect=fake_val), \
-             patch("features.ask.service.execute_query") as mock_exec:
-
+        with (
+            patch.object(service, "_load_config", side_effect=mock_load_config),
+            patch("features.ask.service.load_schema", side_effect=fake_load),
+            patch("features.ask.service.filter_schema", side_effect=fake_filter),
+            patch.object(
+                service,
+                "_detect_ambiguities",
+                side_effect=lambda ctx: (ctx, [], []),
+            ),
+            patch("features.ask.service.generate_sql", side_effect=fake_gen),
+            patch("features.ask.service.validate_sql", side_effect=fake_val),
+            patch("features.ask.service.execute_query") as mock_exec,
+        ):
             async for event in service.ask(input_data, dry_run_options):
                 events.append(event)
 
@@ -693,6 +1422,80 @@ class TestAskServiceDryRun:
         assert result.sql == "SELECT COUNT(*) FROM users"
         assert result.rows == []
         assert result.row_count == 0
+
+    @pytest.mark.asyncio
+    async def test_missing_schema_expands_once_then_regenerates(
+        self, service, input_data, dry_run_options
+    ):
+        async def mock_load_config(target):
+            return ("test-target", {"engine": "postgresql", "host": "localhost"})
+
+        def fake_load(ctx, _presenter, _semantic_manager):
+            from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
+
+            ctx.schema_info = SchemaInfo(
+                target="test-target",
+                db_type="postgresql",
+                source=SchemaSource.DATABASE,
+            )
+            ctx.schema_info.tables = {"users": Mock(), "orders": Mock()}
+            ctx.schema_formatted = "users table"
+            return ctx
+
+        def fake_filter(ctx, _presenter, _llm_manager):
+            ctx.filtered_tables = ["users"]
+            return ctx
+
+        generation_calls = 0
+
+        def fake_generate(ctx, _presenter, _llm_manager):
+            nonlocal generation_calls
+            generation_calls += 1
+            if generation_calls == 1:
+                ctx.generation_response = {
+                    "cannot_answer": True,
+                    "cannot_answer_reason": "missing_schema",
+                    "missing_schema": ["orders"],
+                }
+                ctx.mark_error("Cannot answer this question (missing_schema). orders")
+            else:
+                ctx.generation_response = {"cannot_answer": False}
+                ctx.sql = "SELECT COUNT(*) FROM orders"
+                ctx.sql_explanation = "Counts orders."
+            return ctx
+
+        def fake_expand(ctx, _presenter, missing_concepts, requested_tables):
+            assert missing_concepts == requested_tables == ["orders"]
+            ctx.filtered_tables.append("orders")
+            ctx.schema_formatted = "users table\norders table"
+            ctx.increment_expansion()
+            return ctx
+
+        with (
+            patch.object(service, "_load_config", side_effect=mock_load_config),
+            patch("features.ask.service.load_schema", side_effect=fake_load),
+            patch("features.ask.service.filter_schema", side_effect=fake_filter),
+            patch.object(
+                service,
+                "_detect_ambiguities",
+                side_effect=lambda ctx: (ctx, [], []),
+            ),
+            patch("features.ask.service.generate_sql", side_effect=fake_generate),
+            patch(
+                "features.ask.service.expand_schema", side_effect=fake_expand
+            ) as expand,
+            patch("features.ask.service.validate_sql", side_effect=lambda ctx, _: ctx),
+        ):
+            events = [event async for event in service.ask(input_data, dry_run_options)]
+
+        assert generation_calls == 2
+        expand.assert_called_once()
+        assert any(
+            event.type == "status" and event.phase == AskPhase.EXPAND
+            for event in events
+        )
+        assert isinstance(events[-1], AskResultEvent)
+        assert events[-1].sql == "SELECT COUNT(*) FROM orders"
 
 
 class TestAskServiceTimeoutScenarios:
@@ -935,7 +1738,9 @@ class TestAskServiceDryRunNoSave:
         return AskOptions(dry_run=True, timeout_seconds=30, verbose=False)
 
     @pytest.mark.asyncio
-    async def test_dry_run_does_not_call_auto_save(self, service, input_data, dry_run_options):
+    async def test_dry_run_does_not_call_auto_save(
+        self, service, input_data, dry_run_options
+    ):
         """dry_run=True should NOT call _auto_save_query — query is never executed."""
         events = []
 
@@ -944,6 +1749,7 @@ class TestAskServiceDryRunNoSave:
 
         def fake_load(ctx, p, s):
             from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
+
             ctx.schema_info = SchemaInfo(
                 target="test-target",
                 db_type="postgresql",
@@ -965,13 +1771,19 @@ class TestAskServiceDryRunNoSave:
             ctx.validation_errors = []
             return ctx
 
-        with patch.object(service, "_load_config", side_effect=mock_load_config), \
-             patch("features.ask.service.load_schema", side_effect=fake_load), \
-             patch("features.ask.service.filter_schema", side_effect=fake_filter), \
-             patch("features.ask.service.generate_sql", side_effect=fake_gen), \
-             patch("features.ask.service.validate_sql", side_effect=fake_val), \
-             patch.object(service, "_auto_save_query") as mock_save:
-
+        with (
+            patch.object(service, "_load_config", side_effect=mock_load_config),
+            patch("features.ask.service.load_schema", side_effect=fake_load),
+            patch("features.ask.service.filter_schema", side_effect=fake_filter),
+            patch.object(
+                service,
+                "_detect_ambiguities",
+                side_effect=lambda ctx: (ctx, [], []),
+            ),
+            patch("features.ask.service.generate_sql", side_effect=fake_gen),
+            patch("features.ask.service.validate_sql", side_effect=fake_val),
+            patch.object(service, "_auto_save_query") as mock_save,
+        ):
             async for event in service.ask(input_data, dry_run_options):
                 events.append(event)
 
@@ -997,7 +1809,9 @@ class TestAskServiceTargetNotFoundHint:
         return AskOptions(dry_run=False, timeout_seconds=30, verbose=False)
 
     @pytest.mark.asyncio
-    async def test_target_not_found_includes_configure_list_hint(self, service, options):
+    async def test_target_not_found_includes_configure_list_hint(
+        self, service, options
+    ):
         """Error for nonexistent target should include 'rdst configure list' hint."""
         events = []
 
@@ -1026,7 +1840,6 @@ class TestAskRendererDryRunMessage:
     def test_dry_run_result_shows_dry_run_message(self):
         """When result has execution_time_ms=0.0 and empty columns, show 'Dry run' message."""
         from features.ask.engine.ask3.renderer import AskRenderer
-        from io import StringIO
 
         # Create a dry-run result event
         event = AskResultEvent(
@@ -1046,7 +1859,6 @@ class TestAskRendererDryRunMessage:
         renderer = AskRenderer(verbose=False)
 
         # Capture console output
-        output = StringIO()
         with patch.object(renderer, "_console") as mock_console:
             printed_texts = []
 
@@ -1058,9 +1870,7 @@ class TestAskRendererDryRunMessage:
             renderer.render(event)
 
         combined = " ".join(printed_texts)
-        assert "Dry run" in combined, (
-            f"Expected 'Dry run' in output, got: {combined!r}"
-        )
+        assert "Dry run" in combined, f"Expected 'Dry run' in output, got: {combined!r}"
         assert "No results returned" not in combined, (
             f"'No results returned' should NOT appear for dry-run, got: {combined!r}"
         )
@@ -1112,9 +1922,10 @@ class TestAskDryRunMetadataSuppressed:
         These metadata lines are only meaningful when the query is actually
         executed.
         """
-        from shared.cli.rdst_cli import RdstCLI
+        from unittest.mock import patch
+
         from features.ask.events import AskResultEvent
-        from unittest.mock import patch, MagicMock
+        from shared.cli.rdst_cli import RdstCLI
 
         result_event = AskResultEvent(
             type="result",
@@ -1136,8 +1947,10 @@ class TestAskDryRunMetadataSuppressed:
         async def fake_ask_gen(*args, **kwargs):
             yield result_event
 
-        with patch("features.ask.service.AskService") as MockAskService, \
-             patch("features.ask.engine.ask3.renderer.AskRenderer") as MockRenderer:
+        with (
+            patch("features.ask.service.AskService") as MockAskService,
+            patch("features.ask.engine.ask3.renderer.AskRenderer") as MockRenderer,
+        ):
             mock_service_instance = MockAskService.return_value
             mock_service_instance.ask = fake_ask_gen
             MockRenderer.return_value.render = MagicMock()

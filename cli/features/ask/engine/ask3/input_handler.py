@@ -144,17 +144,13 @@ class NonInteractiveInputHandler(AskInputHandler):
     def collect_clarifications(
         self, event: "AskClarificationNeededEvent"
     ) -> Dict[str, str]:
-        """Return first option for each question without prompting."""
-        answers = {}
-        for question in event.questions:
-            if question.options:
-                answers[question.id] = question.options[0]
-        return answers
+        """Abstain; ranked auto-resolution belongs in AskService."""
+        return {}
 
     def prompt_choice(self, prompt_text: str, choices: List[str]) -> str:
-        """Return first choice."""
-        return choices[0] if choices else ""
+        """Refuse to invent a choice in non-interactive mode."""
+        raise RuntimeError("Non-interactive mode cannot answer a choice prompt")
 
     def prompt_number(self, prompt_text: str, min_val: int, max_val: int) -> int:
-        """Return min value."""
-        return min_val
+        """Refuse to invent a number in non-interactive mode."""
+        raise RuntimeError("Non-interactive mode cannot answer a number prompt")

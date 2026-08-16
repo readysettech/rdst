@@ -11,13 +11,13 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .types import (
-    Interpretation,
-    ValidationError,
-    ExecutionResult,
-    SchemaInfo,
-    Status,
     DbType,
+    ExecutionResult,
+    Interpretation,
+    SchemaInfo,
     SchemaSource,
+    Status,
+    ValidationError,
 )
 
 
@@ -34,6 +34,7 @@ class Ask3Context:
     question: str
     target: str
     db_type: str = DbType.POSTGRESQL
+    provided_context: str = ""
 
     # === Configuration ===
     max_retries: int = 2
@@ -42,6 +43,8 @@ class Ask3Context:
     verbose: bool = False
     no_interactive: bool = False
     dry_run: bool = False
+    enforce_result_limit: bool = True
+    allow_agent_escalation: bool = True
 
     # === Conversation Context (for agent chat mode) ===
     conversation_context: str = ""
@@ -51,25 +54,39 @@ class Ask3Context:
 
     # === Schema (Phase 1) ===
     schema_info: Optional[SchemaInfo] = None
-    schema_formatted: str = ''
+    schema_full_formatted: str = ""
+    schema_formatted: str = ""
     schema_source: str = SchemaSource.SEMANTIC
 
     # === Schema Filtering (Phase 1.5) ===
     filtered_tables: List[str] = field(default_factory=list)
-    all_available_tables: List[str] = field(default_factory=list)  # Full table list before filtering
+    all_available_tables: List[str] = field(
+        default_factory=list
+    )  # Full table list before filtering
+    schema_filter_strategy: str = ""
 
     # === Schema Expansion (Phase 3.5) ===
     schema_expansion_count: int = 0
     max_schema_expansions: int = 2  # Hard limit to prevent infinite loops
-    generation_response: Dict[str, Any] = field(default_factory=dict)  # Raw LLM response for expansion detection
+    generation_response: Dict[str, Any] = field(
+        default_factory=dict
+    )  # Raw LLM response for expansion detection
 
     # === Clarification (Phase 2) ===
     interpretations: List[Interpretation] = field(default_factory=list)
     selected_interpretation: Optional[Interpretation] = None
     refined_question: Optional[str] = None
     clarifications: Dict[str, str] = field(default_factory=dict)
+    ambiguity_report: Dict[str, Any] = field(default_factory=dict)
+    clarification_resolutions: List[Dict[str, Any]] = field(default_factory=list)
+    clarification_policy: str = ""
+    ambiguity_schema_chars: int = 0
+    ambiguity_schema_sha256: str = ""
+    ambiguity_response_sha256: str = ""
 
     # === SQL Generation (Phase 3) ===
+    generated_sql: Optional[str] = None
+    generation_confidence: Optional[float] = None
     sql: Optional[str] = None
     sql_explanation: Optional[str] = None
 
@@ -77,6 +94,7 @@ class Ask3Context:
     validation_errors: List[ValidationError] = field(default_factory=list)
     retry_count: int = 0
     limit_added: bool = False  # True when validation injected a missing LIMIT
+    limit_reduced: bool = False
 
     # === Execution (Phase 5) ===
     execution_result: Optional[ExecutionResult] = None
@@ -84,7 +102,7 @@ class Ask3Context:
     # === Overall Status ===
     status: str = Status.PENDING
     error_message: Optional[str] = None
-    phase: str = 'init'  # Current phase for tracking
+    phase: str = "init"  # Current phase for tracking
 
     # === LLM Tracking ===
     llm_calls: List[Dict[str, Any]] = field(default_factory=list)
@@ -95,107 +113,134 @@ class Ask3Context:
         """Serialize context to dictionary for saving/logging."""
         return {
             # Input
-            'question': self.question,
-            'target': self.target,
-            'db_type': self.db_type,
-
+            "question": self.question,
+            "target": self.target,
+            "db_type": self.db_type,
+            "provided_context": self.provided_context,
             # Config
-            'max_retries': self.max_retries,
-            'timeout_seconds': self.timeout_seconds,
-            'max_rows': self.max_rows,
-            'verbose': self.verbose,
-            'no_interactive': self.no_interactive,
-
+            "max_retries": self.max_retries,
+            "timeout_seconds": self.timeout_seconds,
+            "max_rows": self.max_rows,
+            "verbose": self.verbose,
+            "no_interactive": self.no_interactive,
+            "enforce_result_limit": self.enforce_result_limit,
+            "allow_agent_escalation": self.allow_agent_escalation,
             # Schema
-            'schema_source': self.schema_source,
-            'schema_formatted_length': len(self.schema_formatted) if self.schema_formatted else 0,
-            'filtered_tables': self.filtered_tables,
-            'all_available_tables': self.all_available_tables,
-
+            "schema_source": self.schema_source,
+            "schema_formatted_length": len(self.schema_formatted)
+            if self.schema_formatted
+            else 0,
+            "filtered_tables": self.filtered_tables,
+            "all_available_tables": self.all_available_tables,
+            "schema_filter_strategy": self.schema_filter_strategy,
             # Schema Expansion
-            'schema_expansion_count': self.schema_expansion_count,
-            'max_schema_expansions': self.max_schema_expansions,
-
+            "schema_expansion_count": self.schema_expansion_count,
+            "max_schema_expansions": self.max_schema_expansions,
             # Clarification
-            'interpretations': [i.to_dict() for i in self.interpretations],
-            'selected_interpretation': self.selected_interpretation.to_dict() if self.selected_interpretation else None,
-            'refined_question': self.refined_question,
-            'clarifications': self.clarifications,
-
+            "interpretations": [i.to_dict() for i in self.interpretations],
+            "selected_interpretation": self.selected_interpretation.to_dict()
+            if self.selected_interpretation
+            else None,
+            "refined_question": self.refined_question,
+            "clarifications": self.clarifications,
+            "ambiguity_report": self.ambiguity_report,
+            "clarification_resolutions": self.clarification_resolutions,
+            "clarification_policy": self.clarification_policy,
+            "ambiguity_schema_chars": self.ambiguity_schema_chars,
+            "ambiguity_schema_sha256": self.ambiguity_schema_sha256,
+            "ambiguity_response_sha256": self.ambiguity_response_sha256,
             # SQL
-            'sql': self.sql,
-            'sql_explanation': self.sql_explanation,
-
+            "generated_sql": self.generated_sql,
+            "generation_confidence": self.generation_confidence,
+            "sql": self.sql,
+            "sql_explanation": self.sql_explanation,
             # Validation
-            'validation_errors': [e.to_dict() for e in self.validation_errors],
-            'retry_count': self.retry_count,
-
+            "validation_errors": [e.to_dict() for e in self.validation_errors],
+            "retry_count": self.retry_count,
+            "limit_added": self.limit_added,
+            "limit_reduced": self.limit_reduced,
             # Execution
-            'execution_result': self.execution_result.to_dict() if self.execution_result else None,
-
+            "execution_result": self.execution_result.to_dict()
+            if self.execution_result
+            else None,
             # Status
-            'status': self.status,
-            'error_message': self.error_message,
-            'phase': self.phase,
-
+            "status": self.status,
+            "error_message": self.error_message,
+            "phase": self.phase,
             # LLM tracking
-            'total_tokens': self.total_tokens,
-            'total_llm_time_ms': self.total_llm_time_ms,
-            'llm_call_count': len(self.llm_calls),
+            "total_tokens": self.total_tokens,
+            "total_llm_time_ms": self.total_llm_time_ms,
+            "llm_call_count": len(self.llm_calls),
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> Ask3Context:
         """Deserialize context from dictionary."""
         ctx = cls(
-            question=data.get('question', ''),
-            target=data.get('target', ''),
-            db_type=data.get('db_type', DbType.POSTGRESQL),
+            question=data.get("question", ""),
+            target=data.get("target", ""),
+            db_type=data.get("db_type", DbType.POSTGRESQL),
+            provided_context=data.get("provided_context", ""),
         )
 
         # Config
-        ctx.max_retries = data.get('max_retries', 2)
-        ctx.timeout_seconds = data.get('timeout_seconds', 30)
-        ctx.max_rows = data.get('max_rows', 100)
-        ctx.verbose = data.get('verbose', False)
-        ctx.no_interactive = data.get('no_interactive', False)
+        ctx.max_retries = data.get("max_retries", 2)
+        ctx.timeout_seconds = data.get("timeout_seconds", 30)
+        ctx.max_rows = data.get("max_rows", 100)
+        ctx.verbose = data.get("verbose", False)
+        ctx.no_interactive = data.get("no_interactive", False)
+        ctx.enforce_result_limit = data.get("enforce_result_limit", True)
+        ctx.allow_agent_escalation = data.get("allow_agent_escalation", True)
 
         # Schema
-        ctx.schema_source = data.get('schema_source', SchemaSource.SEMANTIC)
-        ctx.filtered_tables = data.get('filtered_tables', [])
-        ctx.all_available_tables = data.get('all_available_tables', [])
+        ctx.schema_source = data.get("schema_source", SchemaSource.SEMANTIC)
+        ctx.filtered_tables = data.get("filtered_tables", [])
+        ctx.all_available_tables = data.get("all_available_tables", [])
+        ctx.schema_filter_strategy = data.get("schema_filter_strategy", "")
 
         # Schema Expansion
-        ctx.schema_expansion_count = data.get('schema_expansion_count', 0)
-        ctx.max_schema_expansions = data.get('max_schema_expansions', 2)
+        ctx.schema_expansion_count = data.get("schema_expansion_count", 0)
+        ctx.max_schema_expansions = data.get("max_schema_expansions", 2)
 
         # Clarification
         ctx.interpretations = [
-            Interpretation.from_dict(i) for i in data.get('interpretations', [])
+            Interpretation.from_dict(i) for i in data.get("interpretations", [])
         ]
-        if data.get('selected_interpretation'):
-            ctx.selected_interpretation = Interpretation.from_dict(data['selected_interpretation'])
-        ctx.refined_question = data.get('refined_question')
-        ctx.clarifications = data.get('clarifications', {})
+        if data.get("selected_interpretation"):
+            ctx.selected_interpretation = Interpretation.from_dict(
+                data["selected_interpretation"]
+            )
+        ctx.refined_question = data.get("refined_question")
+        ctx.clarifications = data.get("clarifications", {})
+        ctx.ambiguity_report = data.get("ambiguity_report", {})
+        ctx.clarification_resolutions = data.get("clarification_resolutions", [])
+        ctx.clarification_policy = data.get("clarification_policy", "")
+        ctx.ambiguity_schema_chars = data.get("ambiguity_schema_chars", 0)
+        ctx.ambiguity_schema_sha256 = data.get("ambiguity_schema_sha256", "")
+        ctx.ambiguity_response_sha256 = data.get("ambiguity_response_sha256", "")
 
         # SQL
-        ctx.sql = data.get('sql')
-        ctx.sql_explanation = data.get('sql_explanation')
+        ctx.generated_sql = data.get("generated_sql")
+        ctx.generation_confidence = data.get("generation_confidence")
+        ctx.sql = data.get("sql")
+        ctx.sql_explanation = data.get("sql_explanation")
 
         # Validation
         ctx.validation_errors = [
-            ValidationError.from_dict(e) for e in data.get('validation_errors', [])
+            ValidationError.from_dict(e) for e in data.get("validation_errors", [])
         ]
-        ctx.retry_count = data.get('retry_count', 0)
+        ctx.retry_count = data.get("retry_count", 0)
+        ctx.limit_added = data.get("limit_added", False)
+        ctx.limit_reduced = data.get("limit_reduced", False)
 
         # Status
-        ctx.status = data.get('status', Status.PENDING)
-        ctx.error_message = data.get('error_message')
-        ctx.phase = data.get('phase', 'init')
+        ctx.status = data.get("status", Status.PENDING)
+        ctx.error_message = data.get("error_message")
+        ctx.phase = data.get("phase", "init")
 
         # LLM tracking
-        ctx.total_tokens = data.get('total_tokens', 0)
-        ctx.total_llm_time_ms = data.get('total_llm_time_ms', 0.0)
+        ctx.total_tokens = data.get("total_tokens", 0)
+        ctx.total_llm_time_ms = data.get("total_llm_time_ms", 0.0)
 
         return ctx
 
@@ -219,17 +264,21 @@ class Ask3Context:
         tokens: int,
         latency_ms: float,
         model: str,
-        phase: str
+        phase: str,
     ) -> None:
         """Track an LLM call for debugging and cost analysis."""
-        self.llm_calls.append({
-            'prompt_preview': prompt[:200] + '...' if len(prompt) > 200 else prompt,
-            'response_preview': response[:200] + '...' if len(response) > 200 else response,
-            'tokens': tokens,
-            'latency_ms': latency_ms,
-            'model': model,
-            'phase': phase,
-        })
+        self.llm_calls.append(
+            {
+                "prompt_preview": prompt[:200] + "..." if len(prompt) > 200 else prompt,
+                "response_preview": response[:200] + "..."
+                if len(response) > 200
+                else response,
+                "tokens": tokens,
+                "latency_ms": latency_ms,
+                "model": model,
+                "phase": phase,
+            }
+        )
         self.total_tokens += tokens
         self.total_llm_time_ms += latency_ms
 

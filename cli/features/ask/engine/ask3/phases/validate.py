@@ -21,10 +21,7 @@ from ..types import ValidationError
 logger = logging.getLogger(__name__)
 
 
-def validate_sql(
-    ctx: 'Ask3Context',
-    presenter: 'Ask3Presenter'
-) -> 'Ask3Context':
+def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context":
     """
     Validate SQL before execution.
 
@@ -40,51 +37,57 @@ def validate_sql(
     Returns:
         Updated context with validation_errors populated if issues found
     """
-    ctx.phase = 'validate'
+    ctx.phase = "validate"
     ctx.clear_validation_errors()
+    ctx.limit_added = False
+    ctx.limit_reduced = False
 
     if not ctx.sql:
-        ctx.validation_errors.append(ValidationError(
-            column='',
-            table_alias=None,
-            message='No SQL to validate',
-            suggestions=[]
-        ))
+        ctx.validation_errors.append(
+            ValidationError(
+                column="",
+                table_alias=None,
+                message="No SQL to validate",
+                suggestions=[],
+            )
+        )
         return ctx
 
     # Import validation functions
     # Path: lib/engines/ask3/phases/validate.py -> lib/functions/sql_validation.py
     from features.ask.sql_validation import (
+        validate_filter_literal_provenance,
         validate_sql_for_ask,
+        validate_tables_against_schema,
         validate_columns_against_schema,
-        extract_column_references,
     )
 
     # Step 1: Read-only and LIMIT validation
     validation_result = validate_sql_for_ask(
         sql=ctx.sql,
         max_limit=1000,
-        default_limit=ctx.max_rows
+        default_limit=ctx.max_rows,
+        enforce_result_limit=ctx.enforce_result_limit,
     )
 
-    if not validation_result.get('is_valid'):
-        issues = validation_result.get('issues', [])
+    if not validation_result.get("is_valid"):
+        issues = validation_result.get("issues", [])
         for issue in issues:
-            ctx.validation_errors.append(ValidationError(
-                column='',
-                table_alias=None,
-                message=issue,
-                suggestions=[]
-            ))
+            ctx.validation_errors.append(
+                ValidationError(
+                    column="", table_alias=None, message=issue, suggestions=[]
+                )
+            )
         presenter.validation_error(ctx.validation_errors)
         return ctx
 
     # Record whether validation injected a LIMIT the query lacked, so the
     # streaming layer can surface an explicit "LIMIT added" note (T15).
-    ctx.limit_added = bool(validation_result.get('limit_added'))
+    ctx.limit_added = bool(validation_result.get("limit_added"))
+    ctx.limit_reduced = bool(validation_result.get("limit_reduced"))
 
-    # Update SQL with LIMIT if it was added
-    validated_sql = validation_result.get('validated_sql')
+    # Update SQL with the validated form
+    validated_sql = validation_result.get("validated_sql")
     if validated_sql and validated_sql != ctx.sql:
         ctx.sql = validated_sql
 
@@ -92,23 +95,76 @@ def validate_sql(
     schema_dict = ctx.get_schema_as_dict()
 
     if schema_dict:
+        table_validation = validate_tables_against_schema(
+            ctx.sql, schema_dict, ctx.db_type
+        )
+        if not table_validation.get("is_valid", True):
+            invalid_tables = table_validation.get("invalid_tables", [])
+            if invalid_tables:
+                for table_name in invalid_tables:
+                    ctx.validation_errors.append(
+                        ValidationError(
+                            column=table_name,
+                            table_alias=None,
+                            message=f"Table '{table_name}' does not exist",
+                            suggestions=[],
+                        )
+                    )
+            else:
+                ctx.validation_errors.append(
+                    ValidationError(
+                        column="",
+                        table_alias=None,
+                        message=table_validation.get(
+                            "error_message", "Unable to parse SQL"
+                        ),
+                        suggestions=[],
+                    )
+                )
+
         column_validation = validate_columns_against_schema(ctx.sql, schema_dict)
 
-        if not column_validation.get('is_valid', True):
-            invalid_columns = column_validation.get('invalid_columns', [])
+        if not column_validation.get("is_valid", True):
+            invalid_columns = column_validation.get("invalid_columns", [])
 
             for col_info in invalid_columns:
-                ctx.validation_errors.append(ValidationError(
-                    column=col_info.get('column', ''),
-                    table_alias=col_info.get('table_alias'),
-                    message=col_info.get('error', 'Column not found'),
-                    suggestions=col_info.get('suggestions', [])
-                ))
+                ctx.validation_errors.append(
+                    ValidationError(
+                        column=col_info.get("column", ""),
+                        table_alias=col_info.get("table_alias"),
+                        message=col_info.get("error", "Column not found"),
+                        suggestions=col_info.get("suggestions", []),
+                    )
+                )
 
             presenter.validation_error(ctx.validation_errors)
 
+        if not ctx.validation_errors:
+            literal_validation = validate_filter_literal_provenance(
+                ctx.sql,
+                question=ctx.refined_question or ctx.question,
+                schema_formatted=ctx.schema_formatted,
+                provided_context=ctx.provided_context,
+                clarifications=ctx.clarifications,
+                dialect=ctx.db_type,
+            )
+            if not literal_validation["is_valid"]:
+                for issue in [
+                    *literal_validation["issues"],
+                    *literal_validation["warnings"],
+                ]:
+                    ctx.validation_errors.append(
+                        ValidationError(
+                            column=issue["column"],
+                            table_alias=issue["table_alias"],
+                            message=issue["message"],
+                            suggestions=issue["suggestions"],
+                        )
+                    )
+                presenter.validation_error(ctx.validation_errors)
+
     # Check for any warnings
-    warnings = validation_result.get('warnings', [])
+    warnings = validation_result.get("warnings", [])
     for warning in warnings:
         presenter.warning(warning)
 
@@ -146,23 +202,23 @@ def _build_schema_dict_from_formatted(schema_formatted: str) -> Dict[str, List[s
     schema_dict = {}
     current_table = None
 
-    for line in schema_formatted.split('\n'):
+    for line in schema_formatted.split("\n"):
         line = line.strip()
 
         # Table header: "Table: table_name" or "Table: table_name -- description"
-        table_match = re.match(r'Table:\s+(\w+)', line, re.IGNORECASE)
+        table_match = re.match(r"Table:\s+(\w+)", line, re.IGNORECASE)
         if table_match:
             current_table = table_match.group(1).lower()
             schema_dict[current_table] = []
             continue
 
         # Column line: "  column_name (type)" or "  column_name (type) -- description"
-        if current_table and line.startswith(' '):
-            col_match = re.match(r'\s*(\w+)', line)
+        if current_table and line.startswith(" "):
+            col_match = re.match(r"\s*(\w+)", line)
             if col_match:
                 col_name = col_match.group(1).lower()
                 # Skip if it looks like a keyword
-                if col_name not in ('table', 'column', 'index', 'primary', 'foreign'):
+                if col_name not in ("table", "column", "index", "primary", "foreign"):
                     schema_dict[current_table].append(col_name)
 
     return schema_dict

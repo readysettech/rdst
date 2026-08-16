@@ -14,16 +14,13 @@ if TYPE_CHECKING:
     from ..context import Ask3Context
     from ..presenter import Ask3Presenter
 
-from ..types import Status
 
 logger = logging.getLogger(__name__)
 
 
 def generate_sql(
-    ctx: 'Ask3Context',
-    presenter: 'Ask3Presenter',
-    llm_manager=None
-) -> 'Ask3Context':
+    ctx: "Ask3Context", presenter: "Ask3Presenter", llm_manager=None
+) -> "Ask3Context":
     """
     Generate SQL from natural language question.
 
@@ -39,7 +36,7 @@ def generate_sql(
     Returns:
         Updated context with sql and sql_explanation populated
     """
-    ctx.phase = 'generate'
+    ctx.phase = "generate"
     presenter.generating_sql()
 
     # Import here to avoid circular imports
@@ -64,32 +61,33 @@ def generate_sql(
         database_engine=ctx.db_type,
         target_database=ctx.target,
         llm_manager=llm_manager,
-        callback=lambda **kw: _track_llm_call(ctx, 'generate', **kw)
+        provided_context=ctx.provided_context,
+        callback=lambda **kw: _track_llm_call(ctx, "generate", **kw),
     )
 
-    if not result.get('success'):
-        error = result.get('error', 'Unknown error')
+    if not result.get("success"):
+        error = result.get("error", "Unknown error")
         logger.error(f"SQL generation failed: {error}")
         ctx.mark_error(error)
         presenter.error(error)
         return ctx
 
-    # Gate on very low confidence — schema can't answer the question
-    confidence = result.get('confidence', 1.0)
-    if confidence < 0.3:
-        assumptions = result.get('assumptions', [])
-        explanation = '; '.join(assumptions) if assumptions else 'Schema lacks the data needed to answer this question'
-        ctx.mark_error(
-            f"Cannot answer this question from the available schema "
-            f"(confidence: {confidence}). {explanation}"
-        )
+    ctx.generated_sql = result.get("sql", "")
+    ctx.generation_confidence = result.get("confidence", 1.0)
+    ctx.sql_explanation = result.get("explanation", "")
+    ctx.generation_response = result.get("raw_response", {})
+
+    if result.get("cannot_answer", False):
+        assumptions = result.get("assumptions", [])
+        reason = result.get("cannot_answer_reason") or "unspecified"
+        missing_schema = result.get("missing_schema", [])
+        details = [*assumptions, *missing_schema]
+        explanation = "; ".join(details) if details else reason
+        ctx.mark_error(f"Cannot answer this question ({reason}). {explanation}")
         presenter.error(ctx.error_message)
         return ctx
 
-    # Store results
-    ctx.sql = result.get('sql', '')
-    ctx.sql_explanation = result.get('explanation', '')
-    ctx.generation_response = result.get('raw_response', {})
+    ctx.sql = ctx.generated_sql
 
     if not ctx.sql:
         ctx.mark_error("LLM returned empty SQL")
@@ -103,11 +101,8 @@ def generate_sql(
 
 
 def regenerate_sql_with_error(
-    ctx: 'Ask3Context',
-    presenter: 'Ask3Presenter',
-    error_message: str,
-    llm_manager=None
-) -> 'Ask3Context':
+    ctx: "Ask3Context", presenter: "Ask3Presenter", error_message: str, llm_manager=None
+) -> "Ask3Context":
     """
     Regenerate SQL after validation or execution error.
 
@@ -140,33 +135,67 @@ def regenerate_sql_with_error(
         database_engine=ctx.db_type,
         rows_returned=0,
         execution_time_ms=0.0,
-        llm_manager=llm_manager
+        llm_manager=llm_manager,
     )
 
-    if not result.get('success'):
-        error = result.get('error', 'Recovery failed')
+    if not result.get("success"):
+        error = result.get("error", "Recovery failed")
         logger.error(f"SQL recovery failed: {error}")
         return ctx
 
-    corrected_sql = result.get('corrected_sql', '')
+    corrected_sql = result.get("corrected_sql", "")
     if corrected_sql:
+        ctx.generated_sql = corrected_sql
         ctx.sql = corrected_sql
-        explanation = result.get('explanation', '')
+        explanation = result.get("explanation", "")
         presenter.sql_generated(ctx.sql, explanation)
 
     return ctx
 
 
-def _track_llm_call(ctx: 'Ask3Context', phase: str, **kwargs) -> None:
+def repair_validation_error(
+    ctx: "Ask3Context",
+    presenter: "Ask3Presenter",
+    error_message: str,
+    llm_manager=None,
+) -> "Ask3Context":
+    """Apply one narrowly scoped LLM repair for deterministic validation errors."""
+    from features.ask.sql_generation import repair_sql_after_validation
+    from shared.llm_manager import LLMManager
+
+    if llm_manager is None:
+        llm_manager = LLMManager()
+    result = repair_sql_after_validation(
+        nl_question=ctx.refined_question or ctx.question,
+        failed_sql=ctx.sql or "",
+        error_message=error_message,
+        filtered_schema=ctx.schema_formatted,
+        database_engine=ctx.db_type,
+        llm_manager=llm_manager,
+        provided_context=ctx.provided_context,
+        callback=lambda **kw: _track_llm_call(ctx, "validation_repair", **kw),
+    )
+    if not result.get("success"):
+        logger.warning("SQL validation repair failed: %s", result.get("error"))
+        return ctx
+    ctx.generated_sql = result["sql"]
+    ctx.sql = result["sql"]
+    ctx.sql_explanation = result["explanation"]
+    ctx.generation_response = result.get("raw_response", {})
+    presenter.sql_generated(ctx.sql, ctx.sql_explanation)
+    return ctx
+
+
+def _track_llm_call(ctx: "Ask3Context", phase: str, **kwargs) -> None:
     """Track LLM call for debugging and cost analysis."""
     try:
         ctx.add_llm_call(
-            prompt=kwargs.get('prompt', ''),
-            response=kwargs.get('response', ''),
-            tokens=kwargs.get('tokens', 0),
-            latency_ms=kwargs.get('latency_ms', 0),
-            model=kwargs.get('model', 'unknown'),
-            phase=phase
+            prompt=kwargs.get("prompt", ""),
+            response=kwargs.get("response", ""),
+            tokens=kwargs.get("tokens", 0),
+            latency_ms=kwargs.get("latency_ms", 0),
+            model=kwargs.get("model", "unknown"),
+            phase=phase,
         )
     except Exception as e:
         logger.warning(f"Failed to track LLM call: {e}")

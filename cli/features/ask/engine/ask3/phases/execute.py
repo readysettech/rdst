@@ -58,7 +58,10 @@ def execute_query(
     from features.ask.sql_validation import validate_sql_for_ask
 
     validation = validate_sql_for_ask(
-        sql=ctx.sql, max_limit=1000, default_limit=ctx.max_rows
+        sql=ctx.sql,
+        max_limit=1000,
+        default_limit=ctx.max_rows,
+        enforce_result_limit=ctx.enforce_result_limit,
     )
     if not validation.get('is_valid'):
         message = "SQL validation failed: " + "; ".join(validation.get('issues', []))
@@ -98,6 +101,7 @@ def execute_query(
             error = result.get('error', 'Unknown execution error')
             ctx.execution_result = ExecutionResult(
                 error=error,
+                error_kind=result.get('error_kind'),
                 execution_time_ms=execution_time_ms
             )
             presenter.execution_error(error)

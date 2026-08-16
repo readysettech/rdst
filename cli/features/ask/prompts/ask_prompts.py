@@ -5,99 +5,139 @@ Contains structured prompts for text-to-SQL generation with schema awareness,
 disambiguation detection, and safety validation.
 """
 
-COMPREHENSIVE_ASK_PROMPT = """You are an expert SQL query generator. Your task is to convert natural language questions into accurate, executable SQL queries.
 
-TASK: Analyze the user's natural language question and generate a valid SQL query.
+def format_provided_context_block(provided_context: str | None) -> str:
+    """Render caller-provided facts separately from the user's question."""
+    value = (provided_context or "").strip()
+    if not value:
+        return ""
+    return f"\n\nAUTHORITATIVE CALLER-PROVIDED CONTEXT:\n{value}"
+
+
+SQL_GENERATION_SYSTEM_PROMPT = (
+    "You are an expert text-to-SQL system. Generate exactly one read-only SQL "
+    "query using the requested database dialect and only identifiers present in "
+    "the supplied schema. Follow the required structured response exactly."
+)
+
+COMPREHENSIVE_ASK_PROMPT = """You generate one accurate, read-only SQL query.
 
 DATABASE ENGINE: {database_engine}
 TARGET DATABASE: {target_database}
 
 USER QUESTION:
-{nl_question}
+{nl_question}{provided_context_block}
 
-RELEVANT SCHEMA INFORMATION:
+RELEVANT SCHEMA:
 {filtered_schema}
 
-INSTRUCTIONS:
-1. Analyze the question for ambiguities or missing information
-2. If ambiguous, identify what needs clarification
-3. Generate syntactically valid SQL for the specified database engine
-4. Explain the query in plain English
-5. Assess your confidence in the generated query
+Requirements:
+- Return exactly one SELECT or WITH statement in `sql`.
+- Return only the columns explicitly requested by the user. Do not add diagnostic,
+  descriptive, identifier, grouping, or ordering columns unless requested or required
+  to express the result.
+- Do not add filters, joins, limits, ordering, or assumptions that are not supported by
+  the question, supplied clarification, or schema.
+- Use only tables and columns present in the schema and the requested database dialect.
+- Keep `explanation` to one short sentence.
+- Put every unavoidable interpretation in `assumptions`; do not encode a hedge as an
+  invented SQL predicate.
+- If the filtered schema cannot answer the question, set `cannot_answer` to true,
+  leave `sql` empty, set `cannot_answer_reason` to `missing_schema`, and identify the
+  missing concepts in `missing_schema`.
+- If the request cannot safely be expressed as a read-only query, use
+  `cannot_answer_reason` = `unsupported_request`.
+- `confidence` is diagnostic only. It does not override `cannot_answer`.
 
-Return your response in the following JSON format:
+Return only the response object required by the supplied JSON schema."""
 
-{{
-  "analysis": {{
-    "question_interpretation": "Your understanding of what the user is asking",
-    "key_entities": ["tables", "columns", "concepts identified"],
-    "ambiguities": ["list of unclear aspects, if any"],
-    "needs_clarification": true/false
-  }},
-  "clarifications": [
-    {{
-      "question": "What clarification is needed?",
-      "type": "choice|freeform",
-      "options": ["option1", "option2", "option3"],
-      "reason": "Why this clarification is needed"
-    }}
-  ],
-  "sql_generation": {{
-    "sql": "SELECT ... FROM ... WHERE ...",
-    "explanation": "Plain English explanation of what the query does",
-    "tables_used": ["list", "of", "tables"],
-    "columns_used": ["list", "of", "columns"],
-    "confidence": 0.0-1.0,
-    "assumptions": ["any assumptions made in generating this query"]
-  }},
-  "safety_assessment": {{
-    "is_read_only": true/false,
-    "estimated_complexity": "simple|moderate|complex|very_complex",
-    "estimated_result_size": "small|medium|large|very_large",
-    "performance_concerns": ["any potential performance issues"],
-    "warnings": ["any warnings about query execution"]
-  }},
-  "alternatives": [
-    {{
-      "sql": "alternative query if applicable",
-      "description": "when to use this alternative",
-      "trade_offs": "pros and cons vs main query"
-    }}
-  ]
-}}
 
-CRITICAL GUIDELINES:
-1. ONLY generate SELECT statements - no INSERT, UPDATE, DELETE, DROP, etc.
-2. Be precise about table and column names - use ONLY what's in the schema
-3. Include LIMIT clause for queries that could return many rows
-4. Set needs_clarification=true if question is ambiguous
-5. For MySQL, use proper quote escaping; for PostgreSQL, use standard SQL syntax
-6. If the schema doesn't contain tables needed to answer the question, set confidence to 0.0 and explain in assumptions
-7. Always validate that columns exist in the referenced tables
-8. Consider JOIN requirements when multiple tables are involved
-9. Pay attention to data types for WHERE clause conditions
-10. Be conservative - if unsure, ask for clarification
+PLAIN_SQL_ASK_PROMPT = """You generate one accurate, read-only SQL query.
 
-COMMON PITFALLS TO AVOID:
-- Using columns that don't exist in the schema
-- Forgetting JOINs when querying multiple tables
-- Type mismatches in WHERE clauses
-- Missing aggregation functions (COUNT, SUM, AVG, etc.)
-- Incorrect GROUP BY clauses
-- Ambiguous column references in JOINs
+DATABASE ENGINE: {database_engine}
+TARGET DATABASE: {target_database}
 
-CONFIDENCE SCORING GUIDE:
-- 0.9-1.0: Question is clear, schema is sufficient, query is straightforward
-- 0.7-0.9: Minor assumptions made, but query should work
-- 0.5-0.7: Moderate ambiguity or schema gaps, clarification recommended
-- 0.0-0.5: Significant ambiguity or missing schema info, clarification required
+USER QUESTION:
+{nl_question}{provided_context_block}
 
-IMPORTANT RULES:
-1. If needs_clarification=true, you MUST provide at least one clarification question
-2. If the schema clearly CANNOT answer the question (missing tables/columns for the requested data), set confidence to 0.0, set sql to empty string "", and explain in assumptions what data is missing and what IS available
-3. Only generate best-guess SQL when the schema plausibly contains the needed data but has minor ambiguities
-4. Document your assumptions in the "assumptions" field
-5. If confidence < 0.7, you SHOULD consider requesting clarification"""
+RELEVANT SCHEMA:
+{filtered_schema}
+
+Requirements:
+- Return exactly one SELECT or WITH statement.
+- Return only the columns explicitly requested by the user. Do not add diagnostic,
+  descriptive, identifier, grouping, or ordering columns unless requested or required
+  to express the result.
+- Do not add filters, joins, limits, ordering, or assumptions that are not supported by
+  the question, supplied clarification, or schema.
+- Use only tables and columns present in the schema and the requested database dialect.
+- If the schema cannot answer the question, return `CANNOT_ANSWER:` followed by one
+  short reason instead of inventing a query.
+- Return only SQL with no explanation, JSON, markdown, or commentary when answerable."""
+
+ENUM_GROUNDING_RULES = """- Treat listed enum values as authoritative database values. If the user's
+  wording exactly or closely matches a listed enum value, filter that enum column
+  instead of treating the wording as a literal value in an unrelated free-text column.
+- Never invent a value for a listed enum column. Use only a listed value unless the
+  user explicitly supplied an exact database value."""
+
+
+SQL_GENERATION_RESPONSE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "sql": {"type": "string"},
+        "explanation": {"type": "string"},
+        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "cannot_answer": {"type": "boolean"},
+        "cannot_answer_reason": {
+            "type": "string",
+            "enum": ["", "missing_schema", "unsupported_request", "ambiguous"],
+        },
+        "missing_schema": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "sql",
+        "explanation",
+        "confidence",
+        "assumptions",
+        "cannot_answer",
+        "cannot_answer_reason",
+        "missing_schema",
+    ],
+}
+
+VALIDATION_REPAIR_PROMPT = """Repair one SQL query using deterministic validator feedback.
+
+DATABASE ENGINE: {database_engine}
+
+USER QUESTION:
+{nl_question}{provided_context_block}
+
+FAILED SQL:
+{failed_sql}
+
+VALIDATOR ERRORS:
+{error_message}
+
+RELEVANT SCHEMA:
+{filtered_schema}
+
+Return exactly one read-only SELECT or WITH statement. Change only what is necessary
+to fix the listed validation errors. Preserve the user's requested projection and do
+not introduce unsupported filters, joins, limits, or assumptions. Return only the
+object required by the supplied JSON schema."""
+
+VALIDATION_REPAIR_RESPONSE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "sql": {"type": "string"},
+        "explanation": {"type": "string"},
+    },
+    "required": ["sql", "explanation"],
+}
 
 SQL_REFINEMENT_PROMPT = """You are an expert SQL query refiner. A user has reviewed your generated SQL and requested changes.
 
@@ -211,19 +251,34 @@ GUIDELINES:
 
 # Template validation
 PROMPT_REQUIRED_FIELDS = {
-    'COMPREHENSIVE_ASK_PROMPT': [
-        'database_engine', 'target_database', 'nl_question', 'filtered_schema'
+    "COMPREHENSIVE_ASK_PROMPT": [
+        "database_engine",
+        "target_database",
+        "nl_question",
+        "filtered_schema",
     ],
-    'SQL_REFINEMENT_PROMPT': [
-        'original_question', 'generated_sql', 'user_feedback', 'filtered_schema'
+    "PLAIN_SQL_ASK_PROMPT": [
+        "database_engine",
+        "target_database",
+        "nl_question",
+        "filtered_schema",
     ],
-    'ERROR_RECOVERY_PROMPT': [
-        'nl_question', 'failed_sql', 'error_message', 'filtered_schema',
-        'database_engine', 'rows_returned', 'execution_time_ms'
+    "SQL_REFINEMENT_PROMPT": [
+        "original_question",
+        "generated_sql",
+        "user_feedback",
+        "filtered_schema",
     ],
-    'SCHEMA_FILTER_PROMPT': [
-        'nl_question', 'table_list'
-    ]
+    "ERROR_RECOVERY_PROMPT": [
+        "nl_question",
+        "failed_sql",
+        "error_message",
+        "filtered_schema",
+        "database_engine",
+        "rows_returned",
+        "execution_time_ms",
+    ],
+    "SCHEMA_FILTER_PROMPT": ["nl_question", "table_list"],
 }
 
 
@@ -239,6 +294,6 @@ def validate_prompt_template(template: str, required_fields: list) -> bool:
         True if all required fields are present
     """
     for field in required_fields:
-        if f'{{{field}}}' not in template:
+        if f"{{{field}}}" not in template:
             return False
     return True

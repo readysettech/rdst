@@ -14,16 +14,14 @@ if TYPE_CHECKING:
     from ..context import Ask3Context
     from ..presenter import Ask3Presenter
 
-from ..types import SchemaInfo, TableInfo, ColumnInfo, DbType, SchemaSource
+from ..types import ColumnInfo, DbType, SchemaInfo, SchemaSource, TableInfo
 
 logger = logging.getLogger(__name__)
 
 
 def load_schema(
-    ctx: 'Ask3Context',
-    presenter: 'Ask3Presenter',
-    semantic_manager=None
-) -> 'Ask3Context':
+    ctx: "Ask3Context", presenter: "Ask3Presenter", semantic_manager=None
+) -> "Ask3Context":
     """
     Load schema from semantic layer or database.
 
@@ -38,7 +36,7 @@ def load_schema(
     Returns:
         Updated context with schema_info and schema_formatted populated
     """
-    ctx.phase = 'schema'
+    ctx.phase = "schema"
     presenter.schema_loading(ctx.target)
 
     # Import here to avoid circular imports
@@ -55,18 +53,22 @@ def load_schema(
 
             if _is_complete(layer):
                 # Use semantic layer (fast path)
-                ctx.schema_info = _build_schema_info_from_semantic(layer, ctx.target, ctx.db_type)
+                ctx.schema_info = _build_schema_info_from_semantic(
+                    layer, ctx.target, ctx.db_type
+                )
                 ctx.schema_formatted = _format_semantic_schema(layer)
+                ctx.schema_full_formatted = ctx.schema_formatted
                 ctx.schema_source = SchemaSource.SEMANTIC
 
                 presenter.schema_loaded(
-                    source='semantic layer',
-                    table_count=len(layer.tables)
+                    source="semantic layer", table_count=len(layer.tables)
                 )
                 return ctx
 
             else:
-                logger.info(f"Semantic layer for {ctx.target} is incomplete, falling back to database")
+                logger.info(
+                    f"Semantic layer for {ctx.target} is incomplete, falling back to database"
+                )
 
         except Exception as e:
             logger.warning(f"Failed to load semantic layer: {e}")
@@ -74,6 +76,7 @@ def load_schema(
     # Fall back to database collection (slow path)
     try:
         ctx.schema_info, ctx.schema_formatted = _collect_from_database(ctx)
+        ctx.schema_full_formatted = ctx.schema_formatted
         ctx.schema_source = SchemaSource.DATABASE
 
         if ctx.schema_info is None or not ctx.schema_info.tables:
@@ -83,8 +86,7 @@ def load_schema(
             return ctx
 
         presenter.schema_loaded(
-            source='database',
-            table_count=len(ctx.schema_info.tables)
+            source="database", table_count=len(ctx.schema_info.tables)
         )
 
     except Exception as e:
@@ -104,7 +106,8 @@ def _is_complete(layer) -> bool:
         return False
 
     tables_with_types = sum(
-        1 for table in layer.tables.values()
+        1
+        for table in layer.tables.values()
         if any(col.data_type for col in table.columns.values())
     )
 
@@ -114,29 +117,29 @@ def _is_complete(layer) -> bool:
 def _build_schema_info_from_semantic(layer, target: str, db_type: str) -> SchemaInfo:
     """Build SchemaInfo from semantic layer."""
     schema_info = SchemaInfo(
-        target=target,
-        db_type=db_type,
-        source=SchemaSource.SEMANTIC
+        target=target, db_type=db_type, source=SchemaSource.SEMANTIC
     )
 
     for table_name, table in layer.tables.items():
         table_info = TableInfo(
             name=table_name,
-            description=table.description
+            description=table.description,
+            business_context=table.business_context,
+            relationships=list(table.relationships),
         )
 
         for col_name, col in table.columns.items():
             table_info.columns[col_name] = ColumnInfo(
                 name=col_name,
-                data_type=col.data_type or 'unknown',
+                data_type=col.data_type or "unknown",
                 description=col.description,
-                is_primary_key=col_name.lower() == 'id',  # Simple heuristic
+                is_primary_key=col_name.lower() == "id",  # Simple heuristic
             )
 
         schema_info.tables[table_name] = table_info
 
     # Copy terminology from semantic layer for Tier 1 matching
-    if hasattr(layer, 'terminology') and layer.terminology:
+    if hasattr(layer, "terminology") and layer.terminology:
         schema_info.terminology = layer.terminology
 
     return schema_info
@@ -156,6 +159,8 @@ def _format_semantic_schema(layer) -> str:
             parts.append(f"Table: {table_name} -- {table.description}")
         else:
             parts.append(f"Table: {table_name}")
+        if table.business_context:
+            parts.append(f"  Business context: {table.business_context}")
 
         # Columns
         col_strs = []
@@ -166,7 +171,14 @@ def _format_semantic_schema(layer) -> str:
             if col.description:
                 col_str += f" -- {col.description}"
             if col.enum_values:
-                enum_preview = ", ".join(f"{k}={v}" for k, v in list(col.enum_values.items())[:3])
+                enum_preview = ", ".join(
+                    f"{value}={meaning}"
+                    if meaning
+                    and meaning != str(value)
+                    and not meaning.startswith("TODO:")
+                    else str(value)
+                    for value, meaning in col.enum_values.items()
+                )
                 col_str += f" [enum: {enum_preview}]"
             if col.value_pattern:
                 col_str += f" [pattern: {col.value_pattern}]"
@@ -177,6 +189,13 @@ def _format_semantic_schema(layer) -> str:
             col_strs.append(col_str)
 
         parts.append("\n".join(col_strs))
+        if table.relationships:
+            parts.append("  Relationships:")
+            for relationship in table.relationships:
+                parts.append(
+                    f"    {relationship.relationship_type} to "
+                    f"{relationship.target_table}: {relationship.join_pattern}"
+                )
         parts.append("")  # Blank line between tables
 
     # Add extensions and custom types context if available
@@ -187,7 +206,7 @@ def _format_semantic_schema(layer) -> str:
     return "\n".join(parts)
 
 
-def _collect_from_database(ctx: 'Ask3Context') -> tuple[Optional[SchemaInfo], str]:
+def _collect_from_database(ctx: "Ask3Context") -> tuple[Optional[SchemaInfo], str]:
     """
     Collect schema directly from database.
 
@@ -197,34 +216,41 @@ def _collect_from_database(ctx: 'Ask3Context') -> tuple[Optional[SchemaInfo], st
         logger.error("No target_config provided for database schema collection")
         return None, "Schema information: Not available (no target config)"
 
-    db_type = ctx.db_type or ctx.target_config.get('engine', 'postgresql').lower()
+    db_type = ctx.db_type or ctx.target_config.get("engine", "postgresql").lower()
 
-    if db_type == DbType.POSTGRESQL or 'postgres' in db_type:
+    if db_type == DbType.POSTGRESQL or "postgres" in db_type:
         return _collect_postgres_schema(ctx.target_config, ctx.target)
-    elif db_type == DbType.MYSQL or 'mysql' in db_type:
+    elif db_type == DbType.MYSQL or "mysql" in db_type:
         return _collect_mysql_schema(ctx.target_config, ctx.target)
     else:
         logger.error(f"Unsupported database type: {db_type}")
         return None, f"Schema information: Unsupported database type {db_type}"
 
 
-def _collect_postgres_schema(config: dict, target: str) -> tuple[Optional[SchemaInfo], str]:
+def _collect_postgres_schema(
+    config: dict, target: str
+) -> tuple[Optional[SchemaInfo], str]:
     """Collect schema from PostgreSQL database."""
     try:
         import psycopg2
+
         from shared.db_connection import (
             postgres_connection_kwargs,
             resolve_connection_params,
         )
 
-        params = resolve_connection_params(target=target, target_config=config, lane="rdst/ask")
+        params = resolve_connection_params(
+            target=target, target_config=config, lane="rdst/ask"
+        )
 
-        if not all([params['host'], params['user'], params['database']]):
+        if not all([params["host"], params["user"], params["database"]]):
             return None, "Schema information: Missing connection parameters"
 
         conn = psycopg2.connect(**postgres_connection_kwargs(params))
 
-        schema_info = SchemaInfo(target=target, db_type=DbType.POSTGRESQL, source=SchemaSource.DATABASE)
+        schema_info = SchemaInfo(
+            target=target, db_type=DbType.POSTGRESQL, source=SchemaSource.DATABASE
+        )
         parts = []
 
         with conn.cursor() as cur:
@@ -240,13 +266,16 @@ def _collect_postgres_schema(config: dict, target: str) -> tuple[Optional[Schema
 
             for table_name in tables:
                 # Get columns for this table
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT column_name, data_type, is_nullable
                     FROM information_schema.columns
                     WHERE table_schema = 'public'
                     AND table_name = %s
                     ORDER BY ordinal_position
-                """, (table_name,))
+                """,
+                    (table_name,),
+                )
 
                 table_info = TableInfo(name=table_name)
                 col_strs = []
@@ -256,7 +285,7 @@ def _collect_postgres_schema(config: dict, target: str) -> tuple[Optional[Schema
                         name=col_name,
                         data_type=data_type,
                     )
-                    null_marker = " NULL" if nullable == 'YES' else ""
+                    null_marker = " NULL" if nullable == "YES" else ""
                     col_strs.append(f"  {col_name} ({data_type}){null_marker}")
 
                 schema_info.tables[table_name] = table_info
@@ -275,24 +304,31 @@ def _collect_postgres_schema(config: dict, target: str) -> tuple[Optional[Schema
         return None, f"Schema information: Collection failed ({e})"
 
 
-def _collect_mysql_schema(config: dict, target: str) -> tuple[Optional[SchemaInfo], str]:
+def _collect_mysql_schema(
+    config: dict, target: str
+) -> tuple[Optional[SchemaInfo], str]:
     """Collect schema from MySQL database."""
     try:
-        import pymysql
+        import pymysql  # noqa: F401 -- fail early with the existing import error path
+
         from shared.db_connection import (
             create_mysql_connection_from_params,
             quote_identifier,
             resolve_connection_params,
         )
 
-        params = resolve_connection_params(target=target, target_config=config, lane="rdst/ask")
+        params = resolve_connection_params(
+            target=target, target_config=config, lane="rdst/ask"
+        )
 
-        if not all([params['host'], params['user'], params['database']]):
+        if not all([params["host"], params["user"], params["database"]]):
             return None, "Schema information: Missing connection parameters"
 
         conn = create_mysql_connection_from_params(params)
 
-        schema_info = SchemaInfo(target=target, db_type=DbType.MYSQL, source=SchemaSource.DATABASE)
+        schema_info = SchemaInfo(
+            target=target, db_type=DbType.MYSQL, source=SchemaSource.DATABASE
+        )
         parts = []
 
         with conn.cursor() as cur:
@@ -316,7 +352,7 @@ def _collect_mysql_schema(config: dict, target: str) -> tuple[Optional[SchemaInf
                         name=col_name,
                         data_type=data_type,
                     )
-                    null_marker = " NULL" if nullable == 'YES' else ""
+                    null_marker = " NULL" if nullable == "YES" else ""
                     col_strs.append(f"  {col_name} ({data_type}){null_marker}")
 
                 schema_info.tables[table_name] = table_info
