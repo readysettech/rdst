@@ -23,7 +23,7 @@ class _FakeConfig:
     def __init__(self, trial: dict | None = None) -> None:
         self._data = {"trial": trial} if trial is not None else {}
 
-    def load(self) -> None:  # noqa: D401 - no-op loader
+    def load(self) -> None:
         return None
 
 
@@ -49,9 +49,7 @@ def _patch_config(monkeypatch, trial: dict | None) -> None:
 
 
 def _patch_store(monkeypatch, secrets: dict[str, str]) -> None:
-    monkeypatch.setattr(
-        secret_mod, "SecretStoreService", lambda: _FakeStore(secrets)
-    )
+    monkeypatch.setattr(secret_mod, "SecretStoreService", lambda: _FakeStore(secrets))
 
 
 def test_exhausted_trial_yields_to_present_keyring_key(monkeypatch):
@@ -94,6 +92,7 @@ def test_env_key_wins_over_everything(monkeypatch):
 
 def test_active_trial_used_when_no_own_key(monkeypatch):
     """Order 3 unchanged: an active trial token routes through the proxy."""
+    monkeypatch.setenv("RDST_KEYSERVICE_URL", "https://trial.example")
     _patch_config(monkeypatch, {"token": "trial-active", "status": "active"})
     _patch_store(monkeypatch, {})
 
@@ -101,7 +100,8 @@ def test_active_trial_used_when_no_own_key(monkeypatch):
 
     assert resolution.api_key == "trial-active"
     assert resolution.is_trial is True
-    assert resolution.proxy_url is not None
+    assert resolution.proxy_url == "https://trial.example"
+    assert not resolution.proxy_url.endswith("/v1/messages")
 
 
 def test_active_trial_wins_over_keyring_own_key(monkeypatch):

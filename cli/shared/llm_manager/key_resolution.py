@@ -12,20 +12,19 @@ trial tokens from being used outside RDST.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import hashlib
 import hmac
 import os
 import time
+from dataclasses import dataclass, field
 
-from shared.keyservice import keyservice_base_url, keyservice_url
+from shared.keyservice import keyservice_base_url
 from shared.shell import environment_assignment
 
-
-# Backwards-compatible module-level constants — evaluated at import time,
-# so they reflect the env var at process start. Prefer keyservice_url() /
-# keyservice_base_url() directly when you need runtime-fresh values.
-TRIAL_PROXY_URL = keyservice_url("/v1/messages")
+# Backwards-compatible module-level constants - evaluated at import time,
+# so they reflect the env var at process start. Prefer keyservice_base_url()
+# directly when you need runtime-fresh values.
+TRIAL_PROXY_URL = keyservice_base_url()
 TRIAL_PROXY_BASE = keyservice_base_url()
 # Client attestation value for HMAC signing — the proxy checks that requests
 # come from the RDST CLI, not arbitrary HTTP clients reusing a trial token.
@@ -114,7 +113,7 @@ def resolve_api_key() -> KeyResolution:
             from shared.secret_store_service import SecretStoreService
 
             return SecretStoreService().get_secret(name)
-        except Exception:
+        except Exception:  # noqa: BLE001 - optional keyring backends may fail
             return None
 
     # 1. User's own Anthropic API key (env var) — fastest path
@@ -128,7 +127,7 @@ def resolve_api_key() -> KeyResolution:
         return KeyResolution(
             api_key=trial_env,
             is_trial=True,
-            proxy_url=keyservice_url("/v1/messages"),
+            proxy_url=keyservice_base_url(),
             extra_headers=_make_attestation_headers(trial_env),
         )
 
@@ -144,7 +143,7 @@ def resolve_api_key() -> KeyResolution:
         trial = config._data.get("trial", {})
         trial_config_token = trial.get("token")
         trial_status = trial.get("status")
-    except Exception:
+    except Exception:  # noqa: BLE001,S110 - config is optional during resolution
         pass
 
     if trial_status == "exhausted":
@@ -169,7 +168,7 @@ def resolve_api_key() -> KeyResolution:
         return KeyResolution(
             api_key=trial_config_token,
             is_trial=True,
-            proxy_url=keyservice_url("/v1/messages"),
+            proxy_url=keyservice_base_url(),
             extra_headers=_make_attestation_headers(trial_config_token),
         )
 
@@ -185,7 +184,7 @@ def resolve_api_key() -> KeyResolution:
         return KeyResolution(
             api_key=keyring_trial,
             is_trial=True,
-            proxy_url=keyservice_url("/v1/messages"),
+            proxy_url=keyservice_base_url(),
             extra_headers=_make_attestation_headers(keyring_trial),
         )
 

@@ -18,7 +18,11 @@ class TestSqlGenerationTokenTracking:
         # Mock LLM manager that returns a valid response with token count
         mock_llm = MagicMock()
         mock_llm.generate_response.return_value = {
-            "response": '{"sql": "SELECT 1", "explanation": "test", "confidence": 0.9}',
+            "response": (
+                '{"sql":"SELECT 1","explanation":"test","confidence":0.9,'
+                '"assumptions":[],"cannot_answer":false,'
+                '"cannot_answer_reason":"","missing_schema":[]}'
+            ),
             "tokens_used": 1234,
             "model": "test-model",
         }

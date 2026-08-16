@@ -100,9 +100,9 @@ class LLMManager:
         model: Optional[str] = None,
         debug: Optional[bool] = None,
         api_key: Optional[str] = None,
+        purpose: Optional[str] = None,
         extra: Optional[Dict[str, Any]] = None,
         history: Optional[Sequence[Dict[str, str]]] = None,
-        purpose: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Provider-agnostic query interface.
@@ -376,6 +376,7 @@ class LLMManager:
                 "provider",
                 "debug",
                 "api_key",
+                "purpose",
                 "extra",
                 "history",
                 "purpose",
