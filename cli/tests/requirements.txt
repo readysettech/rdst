@@ -26,3 +26,8 @@ dnspython>=2.4
 filelock>=3.32.2
 psycopg2-binary>=2.9.9
 pymysql>=1.1.0
+
+# Optional benchmark dependencies imported by tests/unit/ask_benchmark.
+# Keep these constraints aligned with the eval dependency group in pyproject.toml.
+plotly>=6.0,<7
+pydantic-ai-slim[anthropic,google,openai,openrouter]==2.31.0

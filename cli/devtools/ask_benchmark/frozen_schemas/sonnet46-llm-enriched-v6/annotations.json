@@ -1,0 +1,1298 @@
+{
+  "artifact_schema_version": 1,
+  "databases": {
+    "california_schools": {
+      "tables": {
+        "frpm": {
+          "business_context": "Rows are created annually by the California Department of Education (CDE) when schools submit their CALPADS Fall 1 enrollment and meal eligibility data; each row represents one school's FRPM snapshot for the reporting year.",
+          "columns": {
+            "2013-14 CALPADS Fall 1 Certification Status": "Indicates whether the school's prior-year (2013-14) CALPADS Fall 1 enrollment data has been certified by the district.",
+            "Academic Year": "The school year for which the FRPM data is reported.",
+            "CDSCode": "The unique 14-digit County-District-School (CDS) code that identifies each school in California's education system.",
+            "Charter Funding Type": "Indicates how a charter school receives its public funding.",
+            "Charter School (Y/N)": "Indicates whether the school is a charter school.",
+            "Charter School Number": "The unique number assigned by the state to identify a charter school; null for non-charter schools.",
+            "County Code": "The two-digit numeric code identifying the California county where the school is located.",
+            "County Name": "The name of the California county where the school is located.",
+            "District Code": "The numeric code identifying the school district within the county.",
+            "District Name": "The name of the school district to which the school belongs.",
+            "District Type": "The administrative classification of the school district.",
+            "Educational Option Type": "The specific instructional program model or setting offered by the school.",
+            "Enrollment (Ages 5-17)": "The total number of students aged 5 to 17 enrolled at the school, used for Title I funding calculations.",
+            "Enrollment (K-12)": "The total number of students enrolled in grades K-12 at the school.",
+            "FRPM Count (Ages 5-17)": "The number of students aged 5-17 eligible for either free or reduced-price meals.",
+            "FRPM Count (K-12)": "The number of K-12 students eligible for either free or reduced-price meals (FRPM).",
+            "Free Meal Count (Ages 5-17)": "The number of students aged 5-17 eligible to receive free meals under the NSLP.",
+            "Free Meal Count (K-12)": "The number of K-12 students eligible to receive free meals under the NSLP.",
+            "High Grade": "The highest grade level offered at the school.",
+            "IRC": "Indicates whether the school participates in the Innovative Research and Curriculum (IRC) program; typically a binary flag.",
+            "Low Grade": "The lowest grade level offered at the school.",
+            "NSLP Provision Status": "The National School Lunch Program (NSLP) provision type under which the school operates, which affects how meal eligibility is determined.",
+            "Percent (%) Eligible FRPM (Ages 5-17)": "The proportion of enrolled students aged 5-17 who are eligible for free or reduced-price meals, expressed as a decimal.",
+            "Percent (%) Eligible FRPM (K-12)": "The proportion of K-12 enrolled students who are eligible for free or reduced-price meals, expressed as a decimal.",
+            "Percent (%) Eligible Free (Ages 5-17)": "The proportion of enrolled students aged 5-17 who are eligible for free meals, expressed as a decimal.",
+            "Percent (%) Eligible Free (K-12)": "The proportion of K-12 enrolled students who are eligible for free meals, expressed as a decimal.",
+            "School Code": "The numeric code identifying the individual school within the district.",
+            "School Name": "The official name of the school.",
+            "School Type": "The instructional level and program type classification of the school."
+          },
+          "description": "This table contains Free or Reduced Price Meal (FRPM) eligibility data for California schools for the 2014-2015 academic year, including enrollment counts, meal program participation, and school classification details. It is used to track student food insecurity and economic disadvantage metrics across public and state-operated schools."
+        },
+        "satscores": {
+          "business_context": "Rows are created or updated annually when SAT results are reported to the California Department of Education; a row is generated for each school (rtype=S) or district (rtype=D) that has reportable SAT data for the given year.",
+          "columns": {
+            "AvgScrMath": "Average SAT Mathematics section score for test takers; null when the number of test takers is too small to report.",
+            "AvgScrRead": "Average SAT Critical Reading section score for test takers; null when the number of test takers is too small to report.",
+            "AvgScrWrite": "Average SAT Writing section score for test takers; null when the number of test takers is too small to report.",
+            "NumGE1500": "Number of test takers who achieved a combined SAT score of 1500 or higher (out of a maximum 2400 across all three sections); null when the number of test takers is too small to report.",
+            "NumTstTakr": "Number of 12th-grade students who took the SAT during the reporting period.",
+            "cds": "County-District-School (CDS) code uniquely identifying the school or district; district-level records use zeros in the school portion of the code.",
+            "cname": "Name of the California county in which the school or district is located.",
+            "dname": "Name of the school district to which the school or district record belongs.",
+            "enroll12": "Total number of students enrolled in 12th grade at the school or district.",
+            "rtype": "Indicates whether the row represents an aggregate at the school level or the district level.",
+            "sname": "Name of the school; null for district-level (rtype=D) records."
+          },
+          "description": "Contains SAT score statistics for California schools and school districts, including enrollment, test participation, and average section scores. Each row represents either a school-level or district-level aggregation of SAT performance data."
+        },
+        "schools": {
+          "business_context": "Rows are created when a new school or educational program is established and assigned a CDS code by the California Department of Education. Rows are updated when administrative details change (e.g., address, leadership, status) and when schools close, merge, or transition to pending status.",
+          "columns": {
+            "AdmEmail1": "Email address of the primary school administrator.",
+            "AdmEmail2": "Email address of the secondary school administrator, if applicable.",
+            "AdmEmail3": "Email address of the tertiary school administrator, if applicable.",
+            "AdmFName1": "The first name of the primary school administrator (e.g., principal or director).",
+            "AdmFName2": "First name of the secondary school administrator, if applicable.",
+            "AdmFName3": "First name of the tertiary school administrator, if applicable.",
+            "AdmLName1": "Last name of the primary school administrator (e.g., principal or director).",
+            "AdmLName2": "Last name of the secondary school administrator, if applicable.",
+            "AdmLName3": "Last name of the tertiary school administrator, if applicable.",
+            "CDSCode": "The 14-digit County-District-School (CDS) code that uniquely identifies each school or educational entity in California.",
+            "Charter": "A flag indicating whether the school operates as a charter school (1 = charter, 0 = non-charter).",
+            "CharterNum": "The charter number assigned to the school by the authorizing agency, applicable only to charter schools.",
+            "City": "The city in which the school is physically located.",
+            "ClosedDate": "The date on which the school officially closed; null if the school is still active.",
+            "County": "The name of the California county in which the school is physically located.",
+            "DOC": "A numeric code representing the type of district or administrative body that oversees the school.",
+            "DOCType": "The human-readable label for the district or administrative body type corresponding to the DOC code.",
+            "District": "The name of the school district or administrative body to which the school belongs.",
+            "EILCode": "A short code representing the educational instruction level offered by the school.",
+            "EILName": "The human-readable label for the educational instruction level corresponding to the EILCode.",
+            "EdOpsCode": "A short code representing the educational program or operational model of the school.",
+            "EdOpsName": "The human-readable name of the educational program or operational model corresponding to the EdOpsCode.",
+            "Ext": "The phone extension associated with the school's primary contact number.",
+            "FundingType": "The funding model under which a charter school operates.",
+            "GSoffered": "The range of grade levels offered by the school (e.g., 'K-6', '9-12').",
+            "GSserved": "The range of grade levels actively served or enrolled at the school, which may differ from grades offered.",
+            "LastUpdate": "Date when the school's record was most recently updated in the database.",
+            "Latitude": "The geographic latitude coordinate of the school's physical location.",
+            "Longitude": "The geographic longitude coordinate of the school's physical location.",
+            "Magnet": "A flag indicating whether the school operates as a magnet school with a specialized curriculum (1 = magnet, 0 = non-magnet).",
+            "MailCity": "The city associated with the school's mailing address.",
+            "MailState": "The U.S. state of the school's mailing address, always California for this dataset.",
+            "MailStrAbr": "An abbreviated version of the mailing street address using standard postal abbreviations.",
+            "MailStreet": "The full mailing street address for the school, which may differ from the physical address.",
+            "MailZip": "The ZIP+4 postal code for the school's mailing address.",
+            "NCESDist": "The National Center for Education Statistics (NCES) district identifier assigned by the federal government for cross-state reporting.",
+            "NCESSchool": "The National Center for Education Statistics (NCES) school identifier assigned by the federal government for cross-state reporting.",
+            "OpenDate": "The date on which the school officially opened or began operations.",
+            "Phone": "The primary contact phone number for the school.",
+            "SOC": "A numeric code representing the school's organizational category or type.",
+            "SOCType": "The human-readable label for the school's organizational category corresponding to the SOC code.",
+            "School": "The official name of the school or educational program.",
+            "State": "The U.S. state of the school's physical address, always California for this dataset.",
+            "StatusType": "The current operational status of the school.",
+            "Street": "The full physical street address of the school.",
+            "StreetAbr": "An abbreviated version of the physical street address, using standard postal abbreviations.",
+            "Virtual": "Indicates the extent to which the school operates as a virtual or online school.",
+            "Website": "The URL of the school's official website.",
+            "Zip": "The ZIP+4 postal code for the school's physical address."
+          },
+          "description": "A comprehensive registry of all California schools, including public K-12 schools, community colleges, adult education centers, and special programs. Each row represents a single educational institution or program location, including both active and historically closed entities."
+        }
+      }
+    },
+    "card_games": {
+      "tables": {
+        "cards": {
+          "business_context": "Rows are created when new card printings are added to the MTGJSON dataset, typically when new sets are released or when historical card data is catalogued. Rows may be updated when card attributes change (e.g., errata, new marketplace IDs, or availability changes).",
+          "columns": {
+            "artist": "The name of the artist who illustrated the card.",
+            "asciiName": "ASCII-safe version of the card name, used for cards whose names contain non-ASCII characters (e.g., accented or special characters).",
+            "availability": "Comma-separated list of platforms or formats where this card printing is available.",
+            "borderColor": "The color of the card's border, which often indicates the era or special treatment of the printing.",
+            "cardKingdomFoilId": "The product identifier for the foil version of this card on the Card Kingdom marketplace.",
+            "cardKingdomId": "The product identifier for the non-foil version of this card on the Card Kingdom marketplace.",
+            "colorIdentity": "Comma-separated color identity of the card using single-letter color codes (W=White, U=Blue, B=Black, R=Red, G=Green), used for Commander deck-building rules.",
+            "colorIndicator": "The color indicator dot shown on cards that have a color not derived from their mana cost (e.g., transformed or devoid cards).",
+            "colors": "Comma-separated list of colors of the card using single-letter codes, representing the card's actual colors as defined by its mana cost or color indicator.",
+            "convertedManaCost": "The total converted mana cost (also called mana value) of the card, representing the sum of all mana symbols in its casting cost.",
+            "duelDeck": "Indicates which deck of a Duel Decks product this card belongs to.",
+            "edhrecRank": "The card's popularity ranking on EDHREC, a Commander/EDH deck-building resource, where lower numbers indicate higher usage.",
+            "faceConvertedManaCost": "The converted mana cost of only the front face of a multi-faced card (e.g., transform or split cards).",
+            "faceName": "The name of a specific face of a multi-faced card, used when a card has more than one face (e.g., double-faced or adventure cards).",
+            "flavorName": "An alternate display name for the card used for flavor or thematic purposes, such as on Planeswalker-themed showcase cards.",
+            "flavorText": "The italicized in-universe flavor text printed on the card, providing lore or thematic context.",
+            "frameEffects": "Special visual frame treatments applied to the card beyond the standard frame.",
+            "frameVersion": "The design era of the card frame, corresponding to major frame redesigns in Magic's history.",
+            "hand": "Hand size modifier for Vanguard cards, indicating the adjustment to the player's maximum hand size.",
+            "hasAlternativeDeckLimit": "Boolean flag (1=yes, 0=no) indicating whether the card has a special deck-building rule allowing more than the standard four copies.",
+            "hasContentWarning": "Boolean flag (1=yes, 0=no) indicating whether the card has been flagged by Wizards of the Coast for containing potentially offensive content.",
+            "hasFoil": "Boolean flag (1=yes, 0=no) indicating whether a foil version of this card printing exists.",
+            "hasNonFoil": "Boolean flag (1=yes, 0=no) indicating whether a non-foil version of this card printing exists.",
+            "id": "Internal surrogate primary key uniquely identifying each card printing record.",
+            "isAlternative": "Boolean flag (1=yes, 0=no) indicating whether this card is an alternative version of another card in the same set (e.g., alternate art or alternate frame).",
+            "isFullArt": "Boolean flag (1=yes, 0=no) indicating whether the card uses a full-art treatment where the illustration extends across the entire card face.",
+            "isOnlineOnly": "Boolean flag (1=yes, 0=no) indicating whether this card exists only in digital form and has never been printed physically.",
+            "isOversized": "Boolean flag (1=yes, 0=no) indicating whether this is an oversized card (larger than standard card dimensions), such as those in Commander precon decks.",
+            "isPromo": "Boolean flag (1=yes, 0=no) indicating whether this card is a promotional printing distributed outside of standard booster packs.",
+            "isReprint": "Boolean flag (1=yes, 0=no) indicating whether this card has been previously printed in an earlier set.",
+            "isReserved": "Boolean flag (1=yes, 0=no) indicating whether this card is on the Reserved List, meaning Wizards of the Coast has committed to never reprinting it.",
+            "isStarter": "Boolean flag (1=yes, 0=no) indicating whether this card was included in a starter or introductory product rather than a standard booster pack.",
+            "isStorySpotlight": "Boolean flag (1=yes, 0=no) indicating whether this card depicts a key moment in the Magic storyline for its set.",
+            "isTextless": "Boolean flag (1=yes, 0=no) indicating whether this is a special textless promotional version of the card with no rules text printed on it.",
+            "isTimeshifted": "Boolean flag (1=yes, 0=no) indicating whether this card is a timeshifted reprint, originally used in Time Spiral block with a purple rarity symbol.",
+            "keywords": "Comma-separated list of official Magic keyword abilities present on the card (e.g., Flying, Haste, Hexproof).",
+            "layout": "The physical or structural layout type of the card, determining how its faces and text are arranged.",
+            "leadershipSkills": "A serialized object indicating which Commander/EDH formats this card is legal to use as a commander or oathbreaker.",
+            "life": "Starting life total modifier for Vanguard cards, indicating the adjustment to the player's starting life total.",
+            "loyalty": "The starting loyalty counter value printed on Planeswalker cards.",
+            "manaCost": "The mana cost of the card as printed, using symbolic notation (e.g., {2}{R}{W}{B}) representing the colors and amounts of mana required to cast the card.",
+            "mcmId": "The unique product identifier for this card on the Magic Card Market (Cardmarket) platform, used for linking to marketplace listings.",
+            "mcmMetaId": "The meta-product identifier on Magic Card Market (Cardmarket), grouping all printings of the same card across sets under a single reference.",
+            "mtgArenaId": "The unique identifier for this card in the MTG Arena digital game client.",
+            "mtgjsonV4Id": "The legacy card identifier from MTGJSON version 4, retained for backward compatibility with older integrations.",
+            "mtgoFoilId": "The unique identifier for the foil version of this card in the Magic: The Gathering Online (MTGO) digital platform.",
+            "mtgoId": "The unique identifier for the non-foil version of this card in the Magic: The Gathering Online (MTGO) digital platform.",
+            "multiverseId": "The unique identifier for this card in Wizards of the Coast's official Gatherer card database.",
+            "name": "The official English name of the card as printed.",
+            "number": "The collector number of the card within its set, which may include suffixes (e.g., 's' for starter, 'a'/'b' for double-faced cards) to distinguish variants.",
+            "originalReleaseDate": "The original release date of the card, used primarily for cards with unique release dates that differ from their set's release date.",
+            "originalText": "The rules text of the card exactly as it was originally printed, before any errata or oracle text updates were applied.",
+            "originalType": "The type line of the card exactly as it was originally printed, before any errata or oracle text updates were applied.",
+            "otherFaceIds": "A comma-separated list of UUIDs referencing the other face(s) of a multi-faced card (e.g., transform, split, or adventure cards).",
+            "power": "The power value of a creature card as printed, which may be a number or a variable symbol such as '*' for cards with dynamic power.",
+            "printings": "A comma-separated list of set codes representing every set in which this card has been printed.",
+            "promoTypes": "A comma-separated list of promotional distribution methods associated with this card printing.",
+            "purchaseUrls": "A serialized dictionary of affiliate purchase links for this card across marketplaces such as Card Kingdom, Cardmarket, and TCGplayer.",
+            "rarity": "The rarity tier of the card within its set, which affects how frequently it appears in booster packs.",
+            "scryfallId": "The unique identifier for this specific card printing in the Scryfall card database.",
+            "scryfallIllustrationId": "The unique identifier for the card's artwork in the Scryfall database, grouping cards that share the same illustration.",
+            "scryfallOracleId": "The unique identifier for the card's oracle (canonical rules) definition in Scryfall, shared across all printings of the same card.",
+            "setCode": "The short alphanumeric code identifying the Magic: The Gathering set in which this printing appears (e.g., 'M21' for Core Set 2021).",
+            "side": "Indicates which face of a multi-faced card this row represents.",
+            "subtypes": "A comma-separated list of subtypes appearing after the em dash on the card's type line (e.g., creature subtypes like 'Elf,Scout' or land subtypes like 'Forest').",
+            "supertypes": "A comma-separated list of supertypes appearing before the main type on the card's type line, indicating special status.",
+            "tcgplayerProductId": "The unique product identifier for this card on the TCGplayer marketplace, used for linking to purchase listings.",
+            "text": "The current oracle (canonical) rules text of the card, reflecting any errata issued after the original printing.",
+            "toughness": "The toughness value of a creature card as printed, which may be a number or a variable symbol such as '*' for cards with dynamic toughness.",
+            "type": "The full type line of the card as currently defined by oracle rules, including supertypes, types, and subtypes (e.g., 'Basic Land \u2014 Forest').",
+            "types": "A comma-separated list of the card's primary card types (e.g., 'Creature', 'Land', 'Instant'), excluding supertypes and subtypes.",
+            "uuid": "The globally unique identifier assigned by MTGJSON to this specific card printing, used as the primary key for cross-referencing.",
+            "variations": "A comma-separated list of UUIDs referencing other printings of the same card within the same set that have different artwork or treatments.",
+            "watermark": "The name of the watermark symbol printed in the text box of the card, typically representing a faction, guild, or clan affiliation (e.g., 'mardu')."
+          },
+          "description": "The cards table stores detailed information about individual Magic: The Gathering card printings, including physical and digital availability, gameplay attributes, and marketplace identifiers. Each row represents a unique printing of a card within a specific set."
+        },
+        "foreign_data": {
+          "business_context": "Rows are created when a card is printed in a non-English language edition, providing translated card text, flavor text, name, and type for players who use non-English versions of the game. Updates may occur when errata or corrections are applied to translated card text.",
+          "columns": {
+            "flavorText": "The translated flavor text (thematic, non-mechanical narrative text) printed on the card in the given language, which may be empty if none exists.",
+            "id": "Unique surrogate primary key identifying each foreign language card record.",
+            "language": "The language in which this card's data is translated, representing one of the supported non-English print languages.",
+            "multiverseid": "The Gatherer (Wizards of the Coast's official card database) identifier for this card in the given language, which may be null if the card was not indexed in Gatherer for that language.",
+            "name": "The translated name of the card as it appears on the printed card in the given language.",
+            "text": "The translated rules or ability text of the card as printed in the given language, which may be empty for cards with no rules text.",
+            "type": "The translated type line of the card (e.g., creature type, spell type) as it appears in the given language, which may be empty if unavailable.",
+            "uuid": "A universally unique identifier linking this foreign language record back to the canonical card record in the main cards table."
+          },
+          "description": "Stores localized (translated) card data for Magic: The Gathering cards in supported non-English languages. Each row represents a single card's translated attributes for a specific language."
+        },
+        "legalities": {
+          "business_context": "Rows are created or updated when a card's legality changes in a given format, typically following official rulings or ban list announcements from the game's publisher. This table is used to enforce deck-building rules and filter card searches by format legality.",
+          "columns": {
+            "format": "The Magic: The Gathering play format to which this legality entry applies.",
+            "id": "Unique surrogate key identifying each card-format legality record.",
+            "status": "The legality status of the card in the given format, indicating whether it can be freely played, is prohibited, or is limited to one copy per deck.",
+            "uuid": "Foreign key referencing the unique identifier of the card in the cards table to which this legality entry belongs."
+          },
+          "description": "Stores the legality status of individual Magic: The Gathering cards across various competitive and casual play formats. Each row represents a single card-format pairing indicating whether that card is permitted, banned, or restricted in that format."
+        },
+        "rulings": {
+          "business_context": "Rows are created when Wizards of the Coast issues a new official ruling to clarify card interactions, resolve ambiguities, or address rules questions; rulings may be updated when game rules change or errata is issued, and are tied to specific card printings via UUID.",
+          "columns": {
+            "date": "The official date on which the ruling was issued or last updated by the rules committee.",
+            "id": "Unique numeric identifier for each individual ruling record.",
+            "text": "The full text of the official ruling, explaining how the card works in a specific situation or clarifying an interaction with game rules.",
+            "uuid": "Foreign key referencing the unique identifier of the card in the cards table to which this ruling applies."
+          },
+          "description": "Stores official rulings issued by the game's rules committee that clarify how specific Magic: The Gathering cards work in edge cases or complex interactions. Each ruling is linked to a specific card and provides authoritative guidance on card behavior."
+        },
+        "set_translations": {
+          "business_context": "Rows are created when a card set is released or localized for a new market, linking a set's code to its official translated name in each supported language. A translation may be null if the set was not officially released or named in that language.",
+          "columns": {
+            "id": "Unique identifier for each set translation record.",
+            "language": "The language into which the set name has been translated, representing one of the officially supported localization markets.",
+            "setCode": "The short alphanumeric code identifying the Magic: The Gathering card set being translated, corresponding to the set's code in the sets table.",
+            "translation": "The official translated name of the card set in the specified language; null if no official translation exists for that language."
+          },
+          "description": "Stores localized translations of Magic: The Gathering set names across multiple supported languages. Each row represents a single language translation for a specific card set."
+        },
+        "sets": {
+          "business_context": "Rows are created when a new Magic: The Gathering set is catalogued in the MTGJSON data pipeline, typically when a set is announced or released; rows may be updated as set details are finalized (e.g., when isPartialPreview transitions to a complete set).",
+          "columns": {
+            "baseSetSize": "The number of cards in the official, numbered base set, excluding variants, promos, and bonus cards.",
+            "block": "The named block or series grouping that this set belongs to (e.g., 'Return to Ravnica'), null if the set is not part of a block.",
+            "booster": "A JSON-encoded definition of the booster pack configuration, including card slot contents, sheet compositions, and pack weight probabilities used for pack simulation.",
+            "code": "The official short alphanumeric code uniquely identifying the set (e.g., 'RTR' for Return to Ravnica), used as the primary external reference across MTG platforms.",
+            "id": "Internal surrogate primary key uniquely identifying each set record in this database.",
+            "isFoilOnly": "Flag indicating whether all cards in this set are only available in foil treatment.",
+            "isForeignOnly": "Flag indicating whether this set was released exclusively in non-English languages.",
+            "isNonFoilOnly": "Flag indicating whether all cards in this set are only available in non-foil treatment.",
+            "isOnlineOnly": "Flag indicating whether this set exists exclusively on Magic: The Gathering Online (MTGO) or Arena and has no physical print run.",
+            "isPartialPreview": "Flag indicating whether the set data is incomplete because the full card list has not yet been officially previewed or released.",
+            "keyruneCode": "The code used to reference this set's symbol icon in the Keyrune font library, which renders MTG set symbols in web and app interfaces.",
+            "mcmId": "The Magic Card Market (Cardmarket) marketplace numeric identifier for this set, used to link to the set's listing on the European trading platform.",
+            "mcmIdExtras": "A secondary Magic Card Market (Cardmarket) identifier for supplemental or variant listings of the set (e.g., extras or special editions).",
+            "mcmName": "The set's display name as it appears on the Magic Card Market (Cardmarket) marketplace, which may differ slightly from the canonical name.",
+            "mtgoCode": "The set code used on Magic: The Gathering Online (MTGO), which may differ from the standard set code; null if the set is not available on MTGO.",
+            "name": "The full official display name of the set (e.g., 'Return to Ravnica', 'Magic 2015').",
+            "parentCode": "The set code of the parent set this set belongs to (e.g., a promo set referencing its main set), null if this is a standalone set.",
+            "releaseDate": "The official date on which the set was released to the public.",
+            "tcgplayerGroupId": "The numeric group identifier for this set on the TCGplayer marketplace, used to link to the set's product listings for North American retail pricing.",
+            "totalSetSize": "The total number of cards in the set including all variants, alternate art, and bonus cards beyond the base numbered set.",
+            "type": "The product category classifying the nature and purpose of the set."
+          },
+          "description": "Contains metadata for every Magic: The Gathering card set ever released, including physical, digital, and promotional sets. Each row represents a distinct set with its release details, market identifiers, and product configuration."
+        }
+      }
+    },
+    "codebase_community": {
+      "tables": {
+        "badges": {
+          "business_context": "A new row is created whenever a user earns a badge by meeting the criteria for a specific achievement (e.g., receiving a certain number of votes on a question, editing a post, or answering a question that gets upvoted). Badges are not updated once awarded; additional earnings of the same badge type result in new rows.",
+          "columns": {
+            "Date": "The timestamp when the badge was awarded to the user.",
+            "Id": "Unique identifier for each badge award record.",
+            "Name": "The name of the badge awarded, representing the specific achievement category (e.g., 'Teacher' for posting a well-received answer, 'Editor' for making a first edit, 'Popular Question' for a question reaching a view threshold).",
+            "UserId": "Foreign key referencing the user who earned the badge, linking to the users table."
+          },
+          "description": "Records badges awarded to users on the community platform as recognition for specific achievements or contributions. Each row represents a single badge award event for a particular user."
+        },
+        "comments": {
+          "business_context": "Rows are created when a community member submits a comment on a question or answer post, typically to ask for clarification, provide brief feedback, or add supplementary information. Comments are generally not edited after creation, though they may be deleted.",
+          "columns": {
+            "CreationDate": "The timestamp when the comment was posted to the platform.",
+            "Id": "Unique identifier for each comment record.",
+            "PostId": "Foreign key referencing the post (question or answer) that this comment is attached to.",
+            "Score": "Net upvote count for the comment, reflecting how helpful or relevant other community members found it.",
+            "Text": "The full textual content of the comment as submitted by the user, which may include markdown or @mentions.",
+            "UserDisplayName": "Display name of the commenter at the time of posting, populated for anonymous or deleted users where UserId may not resolve to an active account.",
+            "UserId": "Foreign key referencing the registered user account that authored the comment."
+          },
+          "description": "Stores user-submitted comments on posts within the codebase community Q&A platform. Each row represents a single comment attached to a specific post, written by a registered or anonymous user."
+        },
+        "postHistory": {
+          "business_context": "A new row is created whenever a post is edited, tagged, closed, reopened, locked, or otherwise modified. This provides a complete audit trail of all changes to posts over time, enabling revision diffs and rollback capabilities.",
+          "columns": {
+            "Comment": "An optional note describing the reason for the edit or a summary of what changed, sometimes auto-generated (e.g., character count changes) or a social media URL for tweet events.",
+            "CreationDate": "The timestamp when this history event was recorded, i.e., when the edit or action took place.",
+            "Id": "Unique identifier for each post history event record.",
+            "PostHistoryTypeId": "Numeric code indicating the type of action or change that occurred on the post.",
+            "PostId": "Foreign key referencing the post (question or answer) that this history event belongs to.",
+            "RevisionGUID": "A globally unique identifier grouping all changes made in the same edit revision (e.g., simultaneous title, body, and tag edits share the same GUID).",
+            "Text": "The content snapshot associated with this history event, such as the post body text, tag list, or title at the time of the change.",
+            "UserDisplayName": "The display name of the user who performed the action, used primarily when the user is anonymous or the account has since been deleted.",
+            "UserId": "Foreign key referencing the user who performed the action; null if the action was performed by an anonymous user or automated system."
+          },
+          "description": "Tracks the full revision history of posts (questions and answers) in the community, recording every change made to a post's content, tags, title, or status. Each row represents a single historical event or edit action applied to a specific post."
+        },
+        "postLinks": {
+          "business_context": "Rows are created when a moderator or the system establishes a relationship between two posts, such as marking a question as a duplicate of another or flagging a related question. These links help users navigate between related content and consolidate answers to similar questions.",
+          "columns": {
+            "CreationDate": "The date and time when the link between the two posts was established.",
+            "Id": "Unique identifier for each post link record.",
+            "LinkTypeId": "Indicates the nature of the relationship between the two posts.",
+            "PostId": "The ID of the source post that contains or originates the link (e.g., the duplicate question).",
+            "RelatedPostId": "The ID of the target post being linked to (e.g., the original canonical question)."
+          },
+          "description": "Stores directional relationships between posts, capturing when one post is linked to or marked as a duplicate of another. Each row represents a single directed link from a source post to a related post."
+        },
+        "posts": {
+          "business_context": "Rows are created when a user submits a question, answer, or other post type. Rows are updated when posts are edited, receive new comments or answers, are closed, become community-owned, or have their scores changed through voting.",
+          "columns": {
+            "AcceptedAnswerId": "The Id of the answer post that the question owner has marked as the accepted/best answer (only applicable to questions).",
+            "AnswerCount": "The total number of answers that have been posted in response to a question; null for non-question post types.",
+            "Body": "The full HTML-formatted content/body text of the post.",
+            "ClosedDate": "The timestamp when the post (question) was closed by moderators or community vote; null if the post is still open.",
+            "CommentCount": "The total number of comments that have been posted on this post.",
+            "CommunityOwnedDate": "The timestamp when the post was converted to community wiki ownership, allowing broader editing rights; null if not community-owned.",
+            "CreaionDate": "The timestamp when the post was originally created (note: column name is a typo for 'CreationDate').",
+            "FavoriteCount": "The number of users who have marked this post as a favorite/bookmark.",
+            "Id": "Unique identifier for each post.",
+            "LasActivityDate": "The timestamp of the most recent activity on the post, such as an edit, new answer, or comment (note: column name is a typo for 'LastActivityDate').",
+            "LastEditDate": "The timestamp of the most recent edit made to the post.",
+            "LastEditorDisplayName": "The display name of the last editor, used when the editor is an anonymous or deleted user.",
+            "LastEditorUserId": "The Id of the registered user who most recently edited the post, referencing the users table.",
+            "OwnerDisplayName": "The display name of the post owner at the time of posting, used when the owner is an anonymous or deleted user.",
+            "OwnerUserId": "The Id of the registered user who created the post, referencing the users table.",
+            "ParentId": "For answer posts, the Id of the parent question post this answer belongs to; null for questions.",
+            "PostTypeId": "Indicates the type/role of the post within the platform.",
+            "Score": "The net vote score of the post, calculated as upvotes minus downvotes.",
+            "Tags": "Angle-bracket-delimited list of topic tags associated with a question (e.g., '<regression><probability>'); only applicable to questions.",
+            "Title": "The title/subject of the post; only populated for questions (PostTypeId = 1), null for answers and other types.",
+            "ViewCount": "The total number of times the post (question) has been viewed; null for non-question post types."
+          },
+          "description": "Stores all posts in the community Q&A platform, including questions, answers, and other post types. Each row represents a single post with its content, metadata, and engagement metrics."
+        },
+        "tags": {
+          "business_context": "A new row is created when a tag is introduced to the platform (typically when a user first applies a new tag to a post). The Count is updated as posts are tagged or untagged, and ExcerptPostId/WikiPostId are populated when community members create tag wiki documentation.",
+          "columns": {
+            "Count": "The total number of posts currently tagged with this tag, reflecting its popularity and usage frequency.",
+            "ExcerptPostId": "Foreign key referencing the post that contains the short excerpt (summary) of the tag wiki, providing a brief description of the tag's meaning.",
+            "Id": "Unique identifier for the tag record.",
+            "TagName": "The human-readable label for the tag as it appears on posts (e.g., 'regression', 'kernel-density-estimate').",
+            "WikiPostId": "Foreign key referencing the post that contains the full tag wiki body, providing detailed documentation and guidance on when to use this tag."
+          },
+          "description": "Stores all tags used to categorize posts in the community platform, along with usage statistics and links to their documentation posts. Each tag represents a topic or concept that users can apply to questions to aid discoverability and organization."
+        },
+        "users": {
+          "business_context": "A row is created when a user registers on the platform. It is updated whenever the user logs in (LastAccessDate), gains or loses reputation through community interactions, casts votes, or updates their profile information such as display name, location, or bio.",
+          "columns": {
+            "AboutMe": "A free-text biographical section where the user can describe themselves, their interests, or their expertise.",
+            "AccountId": "The identifier linking this community user account to a global or network-wide account, enabling single sign-on across multiple Stack Exchange-style sites.",
+            "Age": "The self-reported age of the user in years, as optionally provided in their profile.",
+            "CreationDate": "The timestamp when the user account was first created on the platform.",
+            "DisplayName": "The publicly visible username or handle chosen by the user, sometimes auto-generated (e.g., 'user8434') for users who did not set a custom name.",
+            "DownVotes": "The total number of downvotes this user has cast on posts, questions, or answers across the platform.",
+            "Id": "The unique internal identifier for the user within this community platform.",
+            "LastAccessDate": "The timestamp of the user's most recent login or activity on the platform.",
+            "Location": "The self-reported geographic location of the user, such as a city or country, as entered in their profile.",
+            "ProfileImageUrl": "The URL of the user's profile avatar image, which may be hosted externally (e.g., via Facebook Graph API) or on the platform itself.",
+            "Reputation": "The user's reputation score, earned through positive community contributions such as receiving upvotes on posts and answers; new users start at 1.",
+            "UpVotes": "The total number of upvotes this user has cast on posts, questions, or answers across the platform.",
+            "Views": "The total number of times this user's profile page has been viewed by other community members.",
+            "WebsiteUrl": "An optional personal or professional website URL provided by the user in their profile."
+          },
+          "description": "Stores registered user accounts for the codebase community platform, capturing profile information, activity metrics, and reputation scores. Each row represents a unique user who has signed up for the community."
+        },
+        "votes": {
+          "business_context": "Rows are created whenever a community member (or the system) performs a voting action on a post, such as upvoting, downvoting, marking as favorite, or offering/awarding a bounty. UserId is null for anonymous or system-generated votes (e.g., community wiki votes), and BountyAmount is only populated for bounty-related vote types.",
+          "columns": {
+            "BountyAmount": "The reputation amount associated with a bounty vote; only populated for BountyStart and BountyClose vote types, null otherwise.",
+            "CreationDate": "The date on which the vote was cast.",
+            "Id": "Unique identifier for each vote record.",
+            "PostId": "Foreign key referencing the post that received the vote.",
+            "UserId": "Foreign key referencing the user who cast the vote; null for anonymous or system-generated votes.",
+            "VoteTypeId": "Categorizes the type of voting action performed on the post."
+          },
+          "description": "Records all votes cast on posts within the community platform, capturing upvotes, downvotes, favorites, bounties, and other community-driven voting actions. Each row represents a single vote event tied to a specific post."
+        }
+      }
+    },
+    "debit_card_specializing": {
+      "tables": {
+        "customers": {
+          "business_context": "Rows are created when a new customer is onboarded to the debit card program and may be updated if a customer's segment classification or preferred currency changes.",
+          "columns": {
+            "Currency": "The primary currency used for the customer's transactions and billing.",
+            "CustomerID": "Unique numeric identifier assigned to each customer account.",
+            "Segment": "The commercial market segment the customer belongs to, used to tailor products, pricing, and account management."
+          },
+          "description": "Stores core profile information for customers enrolled in the debit card specializing program, including their market segment and billing currency. Each row represents a unique customer account."
+        },
+        "gasstations": {
+          "business_context": "Rows are created when a new gas station is onboarded into the system and updated if the station changes its chain affiliation or market segment. This table serves as a dimension/lookup table referenced by transaction data to enrich purchases made at fuel retailers.",
+          "columns": {
+            "ChainID": "Foreign key referencing the gas station chain or brand that operates this location (e.g., Shell, OMV, MOL).",
+            "Country": "The country where the gas station is located.",
+            "GasStationID": "Unique identifier for each individual gas station location.",
+            "Segment": "The market positioning segment of the gas station, reflecting its pricing strategy and brand tier."
+          },
+          "description": "Contains reference data for individual gas stations, including their chain affiliation, geographic location, and market positioning segment. Each row represents a unique gas station location within the debit card specializing system."
+        },
+        "products": {
+          "business_context": "Rows are created when a new product or service category is introduced into the system, and updated when the description of an existing category changes. These records serve as a lookup/reference for categorizing line items on transactions.",
+          "columns": {
+            "Description": "A human-readable label describing the product or service category, which may include fuel types, additives, services, or VAT-exempt items such as tyres or breakdown assistance.",
+            "ProductID": "A unique numeric identifier assigned to each product or service category, used as a foreign key in transaction and sales tables."
+          },
+          "description": "A reference table listing the types of products and services that can be purchased using debit cards at fuel stations or related outlets. Each row represents a distinct product or service category available for transaction."
+        },
+        "transactions_1k": {
+          "business_context": "A new row is created each time a customer uses their debit card at a gas station to purchase a product (e.g., fuel or convenience items); rows are typically not updated after creation as they represent immutable point-of-sale events.",
+          "columns": {
+            "Amount": "The quantity of the product purchased (e.g., number of liters of fuel or units of an item); a value of 0 may indicate a non-quantity-based or voided transaction.",
+            "CardID": "Foreign key referencing the specific debit card used to complete the transaction.",
+            "CustomerID": "Foreign key referencing the customer who made the purchase.",
+            "Date": "The calendar date on which the transaction took place.",
+            "GasStationID": "Foreign key referencing the gas station where the transaction occurred.",
+            "Price": "The total monetary value charged for the transaction in the local currency.",
+            "ProductID": "Foreign key referencing the product purchased (e.g., a specific fuel grade or convenience store item).",
+            "Time": "The time of day at which the transaction was processed, stored as a string in HH:MM:SS format.",
+            "TransactionID": "Unique identifier for each individual purchase transaction."
+          },
+          "description": "Records individual purchase transactions made by customers using debit cards at gas stations, capturing details of each fuel or product purchase. The table holds up to approximately 1,000 transaction records."
+        },
+        "yearmonth": {
+          "business_context": "Rows are created or updated when monthly transaction data is aggregated for debit card holders, typically at the end of each billing or reporting month, to track consumption trends and support loyalty or spending analysis.",
+          "columns": {
+            "Consumption": "The total amount of goods or fuel consumed (likely in currency units or volume units) by the customer during the given month.",
+            "CustomerID": "Unique identifier for the customer, linking to the customers table.",
+            "Date": "The year and month of the consumption record, stored as a 6-character string in YYYYMM format (e.g., '201311' represents November 2013)."
+          },
+          "description": "Records monthly fuel or goods consumption amounts for each customer who holds a debit card, aggregated at the year-month level. Each row represents a single customer's total spending/consumption for one calendar month."
+        }
+      }
+    },
+    "european_football_2": {
+      "tables": {
+        "Country": {
+          "business_context": "Rows are created once during initial database setup to represent the fixed set of 10 European football nations covered by the dataset; they are rarely if ever updated, as the country list is static for the scope of this database.",
+          "columns": {
+            "id": "Unique numeric identifier for the country, used as a foreign key in related tables such as League and Team.",
+            "name": "The official name of the European country whose football competitions are included in the database."
+          },
+          "description": "Reference table listing the European countries whose football leagues and teams are tracked in this database. Each row represents one country and serves as a lookup for associating leagues, teams, and matches with their respective nation."
+        },
+        "League": {
+          "business_context": "Rows are created when a new league is added to the dataset; they serve as the top-level organizational unit linking countries to their respective league competitions, matches, and team standings.",
+          "columns": {
+            "country_id": "Foreign key referencing the Country table, identifying which country this league belongs to.",
+            "id": "Unique identifier for the league, which also appears to align with the country_id, suggesting a one-to-one mapping between country and league in this dataset.",
+            "name": "The official name of the league, combining the country name with the league's branded or common name (e.g., sponsor or historical name)."
+          },
+          "description": "Contains the professional football leagues covered in the database, each associated with a specific country. Each row represents one top-division league from a European nation."
+        },
+        "Match": {
+          "business_context": "Rows are created when a match is scheduled or completed; event XML fields (goal, shoton, shotoff, foulcommit, card, cross, corner, possession) are populated after the match concludes, while betting odds may be recorded before the match. Player lineup and position fields are filled once the starting XI is confirmed.",
+          "columns": {
+            "B365A": "Bet365 bookmaker pre-match decimal odds for an away team win.",
+            "B365D": "Bet365 bookmaker pre-match decimal odds for a draw.",
+            "B365H": "Bet365 bookmaker pre-match decimal odds for a home team win.",
+            "BSA": "Blue Square (BS) bookmaker pre-match decimal odds for an away team win.",
+            "BSD": "Blue Square (BS) bookmaker pre-match decimal odds for a draw.",
+            "BSH": "Blue Square (BS) bookmaker pre-match decimal odds for a home team win.",
+            "BWA": "Betway (BW) bookmaker pre-match decimal odds for an away team win.",
+            "BWD": "Betway (BW) bookmaker pre-match decimal odds for a draw.",
+            "BWH": "Betway (BW) bookmaker pre-match decimal odds for a home team win.",
+            "GBA": "Gamebookers (GB) bookmaker pre-match decimal odds for an away team win.",
+            "GBD": "Gamebookers (GB) bookmaker pre-match decimal odds for a draw.",
+            "GBH": "Gamebookers (GB) bookmaker pre-match decimal odds for a home team win.",
+            "IWA": "Interwetten (IW) bookmaker pre-match decimal odds for an away team win.",
+            "IWD": "Interwetten (IW) bookmaker pre-match decimal odds for a draw.",
+            "IWH": "Interwetten (IW) bookmaker pre-match decimal odds for a home team win.",
+            "LBA": "Ladbrokes (LB) bookmaker pre-match decimal odds for an away team win.",
+            "LBD": "Ladbrokes (LB) bookmaker pre-match decimal odds for a draw.",
+            "LBH": "Ladbrokes (LB) bookmaker pre-match decimal odds for a home team win.",
+            "PSA": "Pinnacle Sports (PS) bookmaker pre-match decimal odds for an away team win; null when odds were not available for this fixture.",
+            "PSD": "Pinnacle Sports (PS) bookmaker pre-match decimal odds for a draw; null when odds were not available for this fixture.",
+            "PSH": "Pinnacle Sports (PS) bookmaker pre-match decimal odds for a home team win; null when odds were not available for this fixture.",
+            "SJA": "Stan James (SJ) bookmaker pre-match decimal odds for an away team win.",
+            "SJD": "Stan James (SJ) bookmaker pre-match decimal odds for a draw.",
+            "SJH": "Stan James (SJ) bookmaker pre-match decimal odds for a home team win.",
+            "VCA": "VC Bet / Victor Chandler (VC) bookmaker pre-match decimal odds for an away team win.",
+            "VCD": "VC Bet / Victor Chandler (VC) bookmaker pre-match decimal odds for a draw.",
+            "VCH": "VC Bet / Victor Chandler (VC) bookmaker pre-match decimal odds for a home team win.",
+            "WHA": "William Hill (WH) bookmaker pre-match decimal odds for an away team win.",
+            "WHD": "William Hill (WH) bookmaker pre-match decimal odds for a draw.",
+            "WHH": "William Hill (WH) bookmaker pre-match decimal odds for a home team win.",
+            "away_player_1": "Foreign key referencing the Player table for the away team's 1st starting player (typically the goalkeeper).",
+            "away_player_10": "Foreign key referencing the Player table for the away team's 10th starting player.",
+            "away_player_11": "Foreign key referencing the Player table for the away team's 11th starting player.",
+            "away_player_2": "Foreign key referencing the Player table for the away team's 2nd starting player.",
+            "away_player_3": "Foreign key referencing the Player table for the away team's 3rd starting player.",
+            "away_player_4": "Foreign key referencing the Player table for the away team's 4th starting player.",
+            "away_player_5": "Foreign key referencing the Player table for the away team's 5th starting player.",
+            "away_player_6": "Foreign key referencing the Player table for the away team's 6th starting player.",
+            "away_player_7": "Foreign key referencing the Player table for the away team's 7th starting player.",
+            "away_player_8": "Foreign key referencing the Player table for the away team's 8th starting player.",
+            "away_player_9": "Foreign key referencing the Player table for the away team's 9th starting player.",
+            "away_player_X1": "Horizontal grid coordinate of away team player 1's starting position.",
+            "away_player_X10": "Horizontal grid coordinate of away team player 10's starting position.",
+            "away_player_X11": "Horizontal grid coordinate of away team player 11's starting position.",
+            "away_player_X2": "Horizontal grid coordinate of away team player 2's starting position.",
+            "away_player_X3": "Horizontal grid coordinate of away team player 3's starting position.",
+            "away_player_X4": "Horizontal grid coordinate of away team player 4's starting position.",
+            "away_player_X5": "Horizontal grid coordinate of away team player 5's starting position.",
+            "away_player_X6": "Horizontal grid coordinate of away team player 6's starting position.",
+            "away_player_X7": "Horizontal grid coordinate of away team player 7's starting position.",
+            "away_player_X8": "Horizontal grid coordinate of away team player 8's starting position.",
+            "away_player_X9": "Horizontal grid coordinate of away team player 9's starting position.",
+            "away_player_Y1": "Vertical (Y-axis) grid position on the pitch for the away team's 1st player (typically the goalkeeper), used to reconstruct the team's tactical formation.",
+            "away_player_Y10": "Vertical (Y-axis) grid position on the pitch for the away team's 10th player, used to reconstruct the team's tactical formation.",
+            "away_player_Y11": "Vertical (Y-axis) grid position on the pitch for the away team's 11th player, used to reconstruct the team's tactical formation.",
+            "away_player_Y2": "Vertical (Y-axis) grid position on the pitch for the away team's 2nd player, used to reconstruct the team's tactical formation.",
+            "away_player_Y3": "Vertical (Y-axis) grid position on the pitch for the away team's 3rd player, used to reconstruct the team's tactical formation.",
+            "away_player_Y4": "Vertical (Y-axis) grid position on the pitch for the away team's 4th player, used to reconstruct the team's tactical formation.",
+            "away_player_Y5": "Vertical (Y-axis) grid position on the pitch for the away team's 5th player, used to reconstruct the team's tactical formation.",
+            "away_player_Y6": "Vertical (Y-axis) grid position on the pitch for the away team's 6th player, used to reconstruct the team's tactical formation.",
+            "away_player_Y7": "Vertical (Y-axis) grid position on the pitch for the away team's 7th player, used to reconstruct the team's tactical formation.",
+            "away_player_Y8": "Vertical (Y-axis) grid position on the pitch for the away team's 8th player, used to reconstruct the team's tactical formation.",
+            "away_player_Y9": "Vertical (Y-axis) grid position on the pitch for the away team's 9th player, used to reconstruct the team's tactical formation.",
+            "away_team_api_id": "Foreign key referencing the Team table for the team playing away.",
+            "away_team_goal": "Total number of goals scored by the away team in the match.",
+            "card": "XML stream of all disciplinary card events during the match, each entry recording the elapsed minute, the player, the team, and the card type (y = yellow, y2 = second yellow / red, r = straight red).",
+            "corner": "XML stream of all corner kick events during the match, each entry recording the elapsed minute, the player taking the corner, the team, and the corner subtype (e.g., cross, short).",
+            "country_id": "Foreign key referencing the Country table, indicating the country in which the match was played.",
+            "cross": "XML stream of all crossing attempts during the match, each entry recording the elapsed minute, the crossing player, the team, and the subtype (cross or corner-cross); note that corner events are also embedded here when the cross originates from a corner situation.",
+            "date": "The date and time when the match was played, stored as a text timestamp.",
+            "foulcommit": "XML stream of all foul-commit incidents during the match, each entry recording the elapsed minute, the fouling player (player1), the fouled player (player2), the team, and the foul subtype (e.g., serious_foul, from_behind, hands, obstruction, penalty).",
+            "goal": "XML-encoded event stream listing every goal scored in the match, including elapsed time, scoring player, assisting player, team, goal type (normal, penalty, own goal, direct free kick), and associated shot statistics.",
+            "home_player_1": "Foreign key referencing the Player table for the home team's 1st starting player (typically the goalkeeper).",
+            "home_player_10": "Foreign key referencing the Player table for the home team's 10th starting player.",
+            "home_player_11": "Foreign key referencing the Player table for the home team's 11th starting player.",
+            "home_player_2": "Foreign key referencing the Player table for the home team's 2nd starting player.",
+            "home_player_3": "Foreign key referencing the Player table for the home team's 3rd starting player.",
+            "home_player_4": "Foreign key referencing the Player table for the home team's 4th starting player.",
+            "home_player_5": "Foreign key referencing the Player table for the home team's 5th starting player.",
+            "home_player_6": "Foreign key referencing the Player table for the home team's 6th starting player.",
+            "home_player_7": "Foreign key referencing the Player table for the home team's 7th starting player.",
+            "home_player_8": "Foreign key referencing the Player table for the home team's 8th starting player.",
+            "home_player_9": "Foreign key referencing the Player table for the home team's 9th starting player.",
+            "home_player_X1": "Horizontal grid coordinate (1\u201310 scale across the pitch width) of home team player 1's starting position.",
+            "home_player_X10": "Horizontal grid coordinate of home team player 10's starting position.",
+            "home_player_X11": "Horizontal grid coordinate of home team player 11's starting position.",
+            "home_player_X2": "Horizontal grid coordinate of home team player 2's starting position.",
+            "home_player_X3": "Horizontal grid coordinate of home team player 3's starting position.",
+            "home_player_X4": "Horizontal grid coordinate of home team player 4's starting position.",
+            "home_player_X5": "Horizontal grid coordinate of home team player 5's starting position.",
+            "home_player_X6": "Horizontal grid coordinate of home team player 6's starting position.",
+            "home_player_X7": "Horizontal grid coordinate of home team player 7's starting position.",
+            "home_player_X8": "Horizontal grid coordinate of home team player 8's starting position.",
+            "home_player_X9": "Horizontal grid coordinate of home team player 9's starting position.",
+            "home_player_Y1": "Vertical grid coordinate (1\u201311 scale along the pitch length) of home team player 1's starting position, where 1 is the goalkeeper end.",
+            "home_player_Y10": "Vertical (Y-axis) grid position on the pitch for the home team's 10th player, used to reconstruct the team's tactical formation.",
+            "home_player_Y11": "Vertical (Y-axis) grid position on the pitch for the home team's 11th player, used to reconstruct the team's tactical formation.",
+            "home_player_Y2": "Vertical grid coordinate of home team player 2's starting position.",
+            "home_player_Y3": "Vertical grid coordinate of home team player 3's starting position.",
+            "home_player_Y4": "Vertical grid coordinate of home team player 4's starting position.",
+            "home_player_Y5": "Vertical grid coordinate of home team player 5's starting position.",
+            "home_player_Y6": "Vertical grid coordinate of home team player 6's starting position.",
+            "home_player_Y7": "Vertical grid coordinate of home team player 7's starting position.",
+            "home_player_Y8": "Vertical (Y-axis) grid position on the pitch for the home team's 8th player, used to reconstruct the team's tactical formation.",
+            "home_player_Y9": "Vertical (Y-axis) grid position on the pitch for the home team's 9th player, used to reconstruct the team's tactical formation.",
+            "home_team_api_id": "Foreign key referencing the Team table for the team playing at home.",
+            "home_team_goal": "Total number of goals scored by the home team in the match.",
+            "id": "Internal primary key uniquely identifying each match record in this database.",
+            "league_id": "Foreign key referencing the League table, indicating the specific league competition the match belongs to.",
+            "match_api_id": "External API identifier for the match, used to cross-reference with the source data provider.",
+            "possession": "XML stream of ball possession snapshots recorded at intervals during the match, each entry containing the elapsed minute, the home team possession percentage (homepos), and the away team possession percentage (awaypos).",
+            "season": "The football season during which the match was played, expressed as a start/end year pair.",
+            "shotoff": "XML-encoded event stream of all shots off target during the match, with elapsed time, player, team, and shot subtype (e.g., header, volley, distance).",
+            "shoton": "XML-encoded event stream of all shots on target (including blocked shots) during the match, with elapsed time, player, team, and shot subtype (e.g., header, distance, deflected).",
+            "stage": "The matchday or round number within the season at which this match was played."
+          },
+          "description": "Records individual football matches played across European leagues, including match metadata, lineups with player positions, in-game event logs (goals, shots, fouls, cards, etc.), and pre-match betting odds from multiple bookmakers. Each row represents one match played in a specific league, season, and stage."
+        },
+        "Player": {
+          "business_context": "Rows are created when a new player is registered in the system, typically sourced from football data providers. Records may be updated if physical attributes (height/weight) are corrected or player details change. This table serves as the master player registry, linked to match events and player performance attributes via player_api_id.",
+          "columns": {
+            "birthday": "The player's date of birth, stored as a datetime string with a zeroed time component.",
+            "height": "The player's height measured in centimeters.",
+            "id": "Internal surrogate primary key uniquely identifying each player record within this database.",
+            "player_api_id": "External identifier for the player from the football data API provider, used to join with match and player attribute tables.",
+            "player_fifa_api_id": "The player's unique identifier in the EA Sports FIFA video game database, enabling cross-referencing with FIFA game ratings and attributes.",
+            "player_name": "Full display name of the football player as provided by the data source.",
+            "weight": "The player's weight measured in pounds."
+          },
+          "description": "Contains biographical and physical profile information for professional football (soccer) players participating in European leagues. Each row represents a unique player identity record."
+        },
+        "Player_Attributes": {
+          "business_context": "Rows are created each time FIFA releases updated player ratings (typically seasonally or after major transfer windows), resulting in multiple records per player over time. The data is sourced from the FIFA video game series and used to assess player quality, compare players, and analyze rating progression.",
+          "columns": {
+            "acceleration": "Player's rate of increase in speed from a standing or slow-moving start (0\u2013100).",
+            "aggression": "Player's intensity and willingness to engage in physical challenges and duels (0\u2013100).",
+            "agility": "Player's ability to change direction quickly and move fluidly on the pitch (0\u2013100).",
+            "attacking_work_rate": "How actively the player participates in offensive play and pressing forward, as rated by FIFA.",
+            "balance": "Player's ability to maintain stability and resist being knocked off the ball (0\u2013100).",
+            "ball_control": "Player's ability to receive, trap, and retain possession of the ball under pressure (0\u2013100).",
+            "crossing": "Player's ability to deliver accurate crosses into the penalty area from wide positions (0\u2013100).",
+            "curve": "Player's ability to bend or curl the ball when shooting or passing (0\u2013100).",
+            "date": "The date on which this set of FIFA attribute ratings was recorded or published.",
+            "defensive_work_rate": "How actively the player tracks back and contributes to defensive duties, as rated by FIFA.",
+            "dribbling": "Player's ability to maintain control of the ball while moving past opponents (0\u2013100).",
+            "finishing": "Player's ability to score goals when in shooting positions, reflecting composure and accuracy (0\u2013100).",
+            "free_kick_accuracy": "Player's accuracy and technique when taking direct free kicks (0\u2013100).",
+            "gk_diving": "Goalkeeper's ability to dive and make saves to the side (0\u2013100); very low for outfield players.",
+            "gk_handling": "Goalkeeper's ability to cleanly catch or hold shots and crosses (0\u2013100); very low for outfield players.",
+            "gk_kicking": "Goalkeeper's ability to distribute the ball accurately with their feet (0\u2013100); very low for outfield players.",
+            "gk_positioning": "FIFA rating (0-100) for the player's ability to position themselves effectively as a goalkeeper; typically very low for outfield players and meaningful only for goalkeepers.",
+            "gk_reflexes": "FIFA rating (0-100) for the player's reflex speed and reaction ability when making saves as a goalkeeper; typically very low for outfield players.",
+            "heading_accuracy": "Player's ability to direct headers accurately toward goal or to teammates (0\u2013100).",
+            "id": "Unique surrogate primary key identifying each player attribute snapshot record.",
+            "interceptions": "Player's ability to read the game and intercept passes intended for opponents (0\u2013100).",
+            "jumping": "Player's ability to leap high for aerial duels and headers (0\u2013100).",
+            "long_passing": "Player's accuracy and quality when playing long-range passes over distance (0\u2013100).",
+            "long_shots": "Player's accuracy and effectiveness when shooting from outside the penalty area (0\u2013100).",
+            "marking": "Player's ability to track and closely defend opposing players to limit their influence (0\u2013100).",
+            "overall_rating": "FIFA's composite overall skill rating for the player on a scale of 0\u2013100, summarizing general quality.",
+            "penalties": "Player's composure and accuracy when taking penalty kicks (0\u2013100).",
+            "player_api_id": "The player's identifier in the broader football database, used to join with the Player table.",
+            "player_fifa_api_id": "The player's identifier within the FIFA game API, used to link to FIFA-specific data sources.",
+            "positioning": "Player's ability to find and occupy effective positions during attacking play (0\u2013100).",
+            "potential": "FIFA's projected maximum overall rating the player could reach in their career, on a scale of 0\u2013100.",
+            "preferred_foot": "The player's dominant foot used for kicking and ball control.",
+            "reactions": "Player's speed of response to in-game events such as loose balls or opponent actions (0\u2013100).",
+            "short_passing": "Player's accuracy and quality when playing short-range passes (0\u2013100).",
+            "shot_power": "The raw power and velocity behind the player's shots on goal (0\u2013100).",
+            "sliding_tackle": "Player's ability to win the ball from an opponent using a sliding challenge (0\u2013100).",
+            "sprint_speed": "Player's maximum running speed at full sprint (0\u2013100).",
+            "stamina": "Player's ability to maintain performance levels throughout the full duration of a match (0\u2013100).",
+            "standing_tackle": "Player's ability to win the ball from an opponent using a standing challenge (0\u2013100).",
+            "strength": "Player's physical power used to hold off opponents and win physical duels (0\u2013100).",
+            "vision": "Player's ability to anticipate play and identify creative passing opportunities (0\u2013100).",
+            "volleys": "Player's ability to strike the ball cleanly and accurately while it is in the air (0\u2013100)."
+          },
+          "description": "Stores FIFA video game attribute ratings for individual football players at specific points in time, capturing both their current ability and future potential across dozens of skill dimensions. Each row represents a snapshot of a player's ratings as of a particular date, allowing historical tracking of player development."
+        },
+        "Team": {
+          "business_context": "Rows are created when a new team is introduced into the dataset, typically sourced from football data providers. Teams are referenced by matches, player contracts, and team attributes throughout the database.",
+          "columns": {
+            "id": "Internal primary key uniquely identifying each team record within this database.",
+            "team_api_id": "External identifier for the team as used by the football data API that sourced this dataset, used to join with match and team attribute tables.",
+            "team_fifa_api_id": "External identifier for the team in the FIFA video game database, enabling cross-referencing with FIFA game data; may be null if the team does not appear in FIFA.",
+            "team_long_name": "The full official name of the football club (e.g., 'Tottenham Hotspur').",
+            "team_short_name": "A standard three-letter abbreviation of the team name used for compact display (e.g., 'TOT' for Tottenham Hotspur)."
+          },
+          "description": "Contains reference data for football clubs participating in European leagues, storing both internal and external system identifiers alongside team names. Each row represents a unique football team."
+        },
+        "Team_Attributes": {
+          "business_context": "Rows are created periodically (roughly annually) to capture how a team's tactical profile evolves over time, enabling historical analysis of team strategies across seasons from 2010 to 2015.",
+          "columns": {
+            "buildUpPlayDribbling": "Numeric score (0\u2013100) indicating the team's tendency to use dribbling during build-up play; may be null for older records.",
+            "buildUpPlayDribblingClass": "Categorical classification of how much dribbling the team employs during build-up play.",
+            "buildUpPlayPassing": "Numeric score (0\u2013100) indicating the team's preference for short versus long passing during build-up.",
+            "buildUpPlayPassingClass": "Categorical classification of the team's passing style during build-up play.",
+            "buildUpPlayPositioningClass": "Describes whether players follow structured positional roles or move freely during build-up.",
+            "buildUpPlaySpeed": "Numeric score (0\u2013100) indicating how quickly the team moves the ball forward during build-up play.",
+            "buildUpPlaySpeedClass": "Categorical classification of the team's build-up play speed.",
+            "chanceCreationCrossing": "Numeric score (0\u2013100) indicating how frequently the team uses crossing to create scoring opportunities.",
+            "chanceCreationCrossingClass": "Categorical classification of the team's crossing frequency when creating chances.",
+            "chanceCreationPassing": "Numeric score (0\u2013100) indicating the team's risk level when passing to create scoring chances.",
+            "chanceCreationPassingClass": "Categorical classification of the team's passing risk when creating chances.",
+            "chanceCreationPositioningClass": "Describes whether attacking players follow set positions or move freely when creating chances.",
+            "chanceCreationShooting": "Numeric score (0\u2013100) indicating how aggressively the team shoots when opportunities arise.",
+            "chanceCreationShootingClass": "Categorical classification of the team's shooting frequency and aggression.",
+            "date": "The date on which this set of team attributes was recorded, representing a seasonal snapshot.",
+            "defenceAggression": "Numeric score (0\u2013100) indicating the intensity and aggression of the team's defensive approach.",
+            "defenceAggressionClass": "Categorical classification of the team's defensive aggression style.",
+            "defenceDefenderLineClass": "Describes the defensive line strategy used by the team's backline.",
+            "defencePressure": "Numeric score (0\u2013100) indicating how high up the pitch the team applies defensive pressure.",
+            "defencePressureClass": "Categorical classification of where the team applies defensive pressure on the pitch.",
+            "defenceTeamWidth": "Numeric score (0\u2013100) indicating how wide or narrow the team's defensive shape is.",
+            "defenceTeamWidthClass": "Categorical classification of the team's defensive width.",
+            "id": "Unique surrogate primary key identifying each team attribute record.",
+            "team_api_id": "The team's identifier in the broader football database, used to join with the Team table.",
+            "team_fifa_api_id": "The team's identifier in the FIFA video game API, used to link to FIFA game data."
+          },
+          "description": "Stores tactical and strategic attributes for football teams at specific points in time, sourced from FIFA video game ratings. Each row represents a snapshot of a team's playing style configuration for a given season or date."
+        }
+      }
+    },
+    "financial": {
+      "tables": {
+        "account": {
+          "business_context": "A row is created when a customer opens a new bank account at a district branch. The frequency setting determines how often account statements or fee charges are issued to the account holder.",
+          "columns": {
+            "account_id": "Unique identifier for each bank account.",
+            "date": "The date on which the bank account was opened.",
+            "district_id": "Foreign key referencing the district (branch region) where the account was opened.",
+            "frequency": "The frequency at which account statements or transaction-based fees are issued to the account holder."
+          },
+          "description": "Stores bank account records, each representing a unique customer account opened at a specific branch district. Each account has a defined statement issuance frequency and an opening date."
+        },
+        "card": {
+          "business_context": "A new row is created when a card is issued to a client associated with an account disposition. Rows are generally not updated; a new card issuance (e.g., renewal or upgrade) would result in a new row.",
+          "columns": {
+            "card_id": "Unique identifier for each issued card.",
+            "disp_id": "Foreign key referencing the disposition record, linking the card to a specific client-account relationship and determining who holds the card.",
+            "issued": "The date on which the card was officially issued to the client.",
+            "type": "The tier or category of the card, reflecting the level of service and benefits associated with it."
+          },
+          "description": "Stores credit/debit cards issued to account holders, linking each card to a specific account disposition. Each row represents a single physical card issued to a client."
+        },
+        "client": {
+          "business_context": "A new row is created when a client registers with the bank, typically at the time of opening their first account. Rows may be updated if personal details such as district of residence change.",
+          "columns": {
+            "birth_date": "The client's date of birth, used for age verification, eligibility checks, and demographic analysis.",
+            "client_id": "Unique identifier assigned to each client upon registration with the bank.",
+            "district_id": "Foreign key referencing the district table, indicating the geographic district where the client resides.",
+            "gender": "The biological sex of the client, recorded at the time of registration."
+          },
+          "description": "Stores core demographic information about bank clients. Each row represents a unique individual who holds one or more accounts or financial products with the institution."
+        },
+        "disp": {
+          "business_context": "Rows are created when a client is granted access to an account, either at account opening (for the primary owner) or when an account holder authorizes an additional person to operate the account. Rows may be updated or removed if access rights change or are revoked.",
+          "columns": {
+            "account_id": "Reference to the bank account to which the client has been granted access.",
+            "client_id": "Reference to the client who holds the specified access rights to the account.",
+            "disp_id": "Unique identifier for each client-account disposition record.",
+            "type": "The role or level of access the client has over the account."
+          },
+          "description": "The disp table records the disposition (access rights) relationships between clients and bank accounts, defining which clients have access to which accounts and in what capacity. Each row represents a single client-account authorization link."
+        },
+        "district": {
+          "business_context": "Rows are created once per district during initial data load and updated when official census or statistical data is refreshed; they serve as a reference/lookup table joined to client and account records.",
+          "columns": {
+            "A10": "Average salary in the district (in thousands of CZK).",
+            "A11": "Average monthly wage or income level in the district (in CZK).",
+            "A12": "Unemployment rate in the district for a base reference year (percentage).",
+            "A13": "Unemployment rate in the district for a more recent year (percentage).",
+            "A14": "Number of committed crimes per 1,000 inhabitants in the district.",
+            "A15": "Number of crimes committed in the district in a base reference year.",
+            "A16": "Number of crimes committed in the district in a more recent year.",
+            "A2": "Name of the district (e.g., city or county name).",
+            "A3": "Geographic region of the Czech Republic in which the district is located.",
+            "A4": "Total population of the district.",
+            "A5": "Number of municipalities within the district.",
+            "A6": "Number of cities (urban settlements) within the district.",
+            "A7": "Ratio of urban population to total population, expressed as a percentage.",
+            "A8": "Number of natural persons (individual entrepreneurs) per 1,000 inhabitants.",
+            "A9": "Number of entrepreneurs (businesses) per 1,000 inhabitants.",
+            "district_id": "Unique identifier for each district, used as a foreign key in related financial tables."
+          },
+          "description": "Contains demographic and socioeconomic statistics for each administrative district in the Czech Republic. Each row represents one district and is used to enrich financial records (accounts, clients, loans) with regional context."
+        },
+        "loan": {
+          "business_context": "A row is created when a loan is approved and disbursed to an account holder. The status field is updated over time as the loan progresses through repayment or enters default.",
+          "columns": {
+            "account_id": "Foreign key referencing the bank account associated with this loan.",
+            "amount": "The total principal amount of the loan in the local currency (likely Czech koruna).",
+            "date": "The date on which the loan was issued or approved.",
+            "duration": "The agreed repayment term of the loan expressed in months.",
+            "loan_id": "Unique identifier for each loan contract.",
+            "payments": "The fixed monthly installment amount the borrower is required to pay.",
+            "status": "The current repayment status of the loan, indicating whether it is ongoing, completed, or in default."
+          },
+          "description": "Records loans issued to bank account holders, capturing the loan terms, repayment schedule, and current repayment status. Each row represents a single loan contract tied to a specific account."
+        },
+        "order": {
+          "business_context": "Rows are created when a customer sets up a standing order or payment instruction on their account, directing the bank to regularly transfer a specified amount to a designated external account; rows may be updated if the order details change or deleted when the order is cancelled.",
+          "columns": {
+            "account_id": "Foreign key referencing the source bank account that initiates the payment order.",
+            "account_to": "Account number at the destination bank that will receive the payment.",
+            "amount": "The fixed monetary amount to be transferred with each execution of this payment order.",
+            "bank_to": "Code identifying the destination bank where the payment is sent.",
+            "k_symbol": "Characterization code indicating the purpose or category of the payment.",
+            "order_id": "Unique identifier for each payment order."
+          },
+          "description": "This table stores standing payment orders (permanent orders) associated with bank accounts, representing recurring or one-time outgoing transfers to external accounts. Each row defines a fixed-amount payment instruction from a source account to a destination account at another bank."
+        },
+        "trans": {
+          "business_context": "A new row is created each time a financial transaction occurs on an account \u2014 such as a cash deposit, card withdrawal, or inter-bank transfer. Rows are not typically updated after creation.",
+          "columns": {
+            "account": "The account number at the counterpart bank involved in a transfer; null when no external account is referenced (e.g., cash transactions).",
+            "account_id": "Foreign key referencing the bank account on which the transaction was performed.",
+            "amount": "The monetary value of the transaction in the local currency.",
+            "balance": "The account balance immediately after this transaction was applied.",
+            "bank": "A code identifying the counterpart bank involved in a transfer transaction; null for cash transactions with no external bank.",
+            "date": "The calendar date on which the transaction was executed.",
+            "k_symbol": "A code indicating the purpose or category of the transaction, particularly for recurring or characterised payments.",
+            "operation": "The specific method or channel through which the transaction was carried out.",
+            "trans_id": "Unique identifier for each transaction record.",
+            "type": "High-level classification of the transaction as a credit (money in), debit (money out), or withdrawal."
+          },
+          "description": "Records every financial transaction made on a bank account, including deposits, withdrawals, and transfers. Each row represents a single transaction event with the resulting account balance after the transaction."
+        }
+      }
+    },
+    "formula_1": {
+      "tables": {
+        "circuits": {
+          "business_context": "Rows are created when a new circuit is added to the Formula 1 calendar or historical records are backfilled; updates occur if a circuit is renamed, relocated, or its geographic coordinates are corrected.",
+          "columns": {
+            "alt": "The altitude of the circuit above sea level in meters, which can affect car performance and engine tuning; may be null if not recorded.",
+            "circuitId": "Unique numeric identifier for each circuit, used as a primary key and foreign key reference in race and qualifying result tables.",
+            "circuitRef": "A short, URL-friendly slug uniquely identifying the circuit, typically derived from the circuit's common name (e.g., 'silverstone', 'suzuka').",
+            "country": "The country in which the circuit is located.",
+            "lat": "The geographic latitude coordinate of the circuit's location in decimal degrees.",
+            "lng": "The geographic longitude coordinate of the circuit's location in decimal degrees.",
+            "location": "The city or locality where the circuit is physically situated.",
+            "name": "The full official name of the racing circuit as it appears in Formula 1 records.",
+            "url": "A link to the circuit's Wikipedia page, serving as a reference for additional historical and descriptive information."
+          },
+          "description": "Contains reference data for all Formula 1 racing circuits that have hosted or currently host Grand Prix events. Each row represents a unique physical circuit with its geographic and identifying information."
+        },
+        "constructorResults": {
+          "business_context": "Rows are created after each race is completed and official results are confirmed, capturing the constructor championship points awarded to each team. Rows may be updated if results are revised due to disqualifications or appeals.",
+          "columns": {
+            "constructorId": "Foreign key referencing the constructor (team) whose points are recorded for this race.",
+            "constructorResultsId": "Unique surrogate key identifying each constructor result record.",
+            "points": "Total championship points awarded to the constructor for this race, aggregated across all their drivers' finishes.",
+            "raceId": "Foreign key referencing the specific race in which the constructor participated and earned points.",
+            "status": "Flag indicating a special administrative status applied to this result record."
+          },
+          "description": "Records the championship points earned by each constructor (team) in each Formula 1 race. Each row represents a single constructor's points tally for a specific race event."
+        },
+        "constructorStandings": {
+          "business_context": "A new row is created for each constructor that is eligible in the championship after each race is completed, reflecting their updated cumulative points total, championship position, and win count for the season to date.",
+          "columns": {
+            "constructorId": "Foreign key referencing the constructor (team) whose championship standing is recorded.",
+            "constructorStandingsId": "Unique surrogate key identifying each constructor standing record.",
+            "points": "Cumulative championship points earned by the constructor up to and including the referenced race.",
+            "position": "Numeric championship position of the constructor in the standings after the referenced race.",
+            "positionText": "Text representation of the championship position, which may include non-numeric indicators (e.g., 'E' for equal position) in addition to the standard numeric rank.",
+            "raceId": "Foreign key referencing the race after which this standing snapshot was recorded.",
+            "wins": "Cumulative number of race wins recorded by the constructor up to and including the referenced race in the current season."
+          },
+          "description": "Records the Constructors' Championship standings for each team after every race in a season, capturing cumulative points, position, and wins up to that point in the season. Each row represents a snapshot of a single constructor's standing as of a specific race."
+        },
+        "constructors": {
+          "business_context": "Rows are created when a new constructor enters the Formula 1 World Championship for the first time. Updates may occur to correct names, nationality, or Wikipedia URL references. This table serves as the master lookup for constructor identity across race results, standings, and pit stop data.",
+          "columns": {
+            "constructorId": "Unique surrogate key identifying each constructor within the database.",
+            "constructorRef": "URL-safe, lowercase slug used as a stable programmatic identifier for the constructor (e.g., used in API paths or joins).",
+            "name": "Official display name of the constructor as recognised by Formula 1 records.",
+            "nationality": "The country of origin or registration associated with the constructor, reflecting the nation under which they competed.",
+            "url": "Link to the constructor's Wikipedia article, serving as a reference for additional historical and biographical information."
+          },
+          "description": "Contains reference data for all Formula 1 constructors (teams) that have participated in the championship. Each row represents a unique constructor entity, spanning the full history of the sport."
+        },
+        "driverStandings": {
+          "business_context": "A new row is created (or updated) after each race event to reflect the updated championship standings for every driver who has participated in the season up to that point. This allows tracking of how the championship evolved race by race.",
+          "columns": {
+            "driverId": "Foreign key referencing the driver whose championship standing is recorded in this row.",
+            "driverStandingsId": "Unique surrogate key identifying each driver standings record.",
+            "points": "The driver's cumulative championship points total as of the referenced race, using a double to accommodate historical half-point scoring systems.",
+            "position": "The driver's numeric championship standing position (rank) in the Drivers' Championship as of the referenced race.",
+            "positionText": "The driver's championship position displayed as text, which may include non-numeric indicators (e.g., 'E' for equal position) in addition to the standard numeric rank.",
+            "raceId": "Foreign key referencing the race after which these standings were recorded, establishing the point in the season the snapshot represents.",
+            "wins": "The cumulative number of race victories the driver has achieved in the season up to and including the referenced race."
+          },
+          "description": "Records the Formula 1 Drivers' Championship standings for each driver after every race in a season. Each row captures a snapshot of a driver's cumulative points, position, and win count in the championship at a specific point in the season."
+        },
+        "drivers": {
+          "business_context": "A new row is created when a driver makes their first appearance in the Formula 1 world championship records. Rows may be updated to reflect corrections to biographical data or to add/update a driver's permanent race number or three-letter code when assigned by the FIA.",
+          "columns": {
+            "code": "The driver's official three-letter FIA abbreviation displayed on timing screens and broadcasts (e.g., 'HAM', 'VET'); null for drivers who competed before this system was introduced.",
+            "dob": "The driver's date of birth, used for age calculations and historical records.",
+            "driverId": "Surrogate primary key uniquely identifying each driver within the database.",
+            "driverRef": "A URL-safe, human-readable slug (typically lastname or firstname_lastname) used to uniquely reference a driver in external systems and APIs.",
+            "forename": "The driver's given name(s) as officially recorded.",
+            "nationality": "The driver's nationality as recognised by the FIA, typically corresponding to the country they represent in competition.",
+            "number": "The driver's permanent race number as assigned by the FIA (introduced in 2014); null for historical drivers or those who never held a permanent number.",
+            "surname": "The driver's family name as officially recorded.",
+            "url": "A link to the driver's Wikipedia page, serving as a reference source for biographical information."
+          },
+          "description": "Contains biographical and identification information for every Formula 1 driver who has participated in at least one race weekend tracked by the database. Each row represents a unique driver across all eras of the sport."
+        },
+        "lapTimes": {
+          "business_context": "Rows are created after each race event is processed, with one row inserted per driver per completed lap. Data is sourced from official race timing systems and is typically loaded in bulk after a race concludes; rows are not updated once inserted.",
+          "columns": {
+            "driverId": "Foreign key referencing the drivers table, identifying which driver completed this lap.",
+            "lap": "The sequential lap number within the race on which this time was recorded, starting at 1.",
+            "milliseconds": "The lap time expressed as a total number of milliseconds, providing a numeric representation suitable for calculations and comparisons.",
+            "position": "The driver's on-track race position at the completion of this lap (1 = race leader).",
+            "raceId": "Foreign key referencing the races table, identifying which Formula 1 race this lap time belongs to.",
+            "time": "The human-readable lap time in minutes:seconds.milliseconds format (e.g., '1:34.732' means 1 minute, 34.732 seconds)."
+          },
+          "description": "Records the lap time and track position for every driver on every lap of each Formula 1 race. This table provides granular, lap-by-lap performance data enabling analysis of race pace, position changes, and stint strategies."
+        },
+        "pitStops": {
+          "business_context": "Rows are created after each race event is processed, typically sourced from official FIA/Formula 1 timing data. Each pit stop a driver makes during a race generates one row, enabling analysis of pit stop strategies, durations, and their impact on race outcomes.",
+          "columns": {
+            "driverId": "Foreign key referencing the drivers table, identifying which driver made this pit stop.",
+            "duration": "The total elapsed time spent in the pit lane during this stop, formatted as seconds and milliseconds (e.g., '23.822') or minutes:seconds.milliseconds for unusually long stops (e.g., '1:44.980').",
+            "lap": "The lap number on which the driver entered the pit lane to make this stop.",
+            "milliseconds": "The total duration of the pit stop expressed in milliseconds, providing a numeric representation of the duration column for easier calculation and comparison.",
+            "raceId": "Foreign key referencing the races table, identifying which Formula 1 race this pit stop occurred in.",
+            "stop": "Sequential pit stop number for this driver within the race (e.g., 1 = first pit stop, 2 = second pit stop).",
+            "time": "The local clock time of day (HH:MM:SS) at which the driver entered the pit lane, as recorded by race timing systems."
+          },
+          "description": "Records every pit stop made by each driver during a Formula 1 race, capturing when the stop occurred and how long it lasted. Each row represents a single pit stop event for a specific driver in a specific race."
+        },
+        "qualifying": {
+          "business_context": "Rows are created after each race's qualifying session concludes, capturing the lap times set by each driver across the knockout qualifying segments and their final grid position. Null values in q2 or q3 indicate the driver was eliminated before reaching that segment.",
+          "columns": {
+            "constructorId": "Foreign key referencing the constructors table, identifying the team (constructor) the driver was representing during qualifying.",
+            "driverId": "Foreign key referencing the drivers table, identifying which driver this qualifying result belongs to.",
+            "number": "The car number assigned to the driver for that race weekend.",
+            "position": "The final grid position the driver achieved as a result of qualifying, where 1 is pole position.",
+            "q1": "The driver's best lap time recorded during the first qualifying segment (Q1), formatted as m:ss.mmm; all drivers participate in Q1.",
+            "q2": "The driver's best lap time recorded during the second qualifying segment (Q2), formatted as m:ss.mmm; null if the driver was eliminated in Q1.",
+            "q3": "The driver's best lap time recorded during the third and final qualifying segment (Q3), formatted as m:ss.mmm; null if the driver was eliminated before Q3, only the top 10 drivers participate.",
+            "qualifyId": "Unique surrogate key identifying each qualifying result record.",
+            "raceId": "Foreign key referencing the races table, identifying which Grand Prix this qualifying session belongs to."
+          },
+          "description": "Records qualifying session results for each driver in every Formula 1 race, capturing lap times across the three qualifying segments (Q1, Q2, Q3). Each row represents a single driver's qualifying performance at a specific race."
+        },
+        "races": {
+          "business_context": "Rows are created when a race is officially scheduled on the F1 calendar, and may be updated to reflect changes in race time, venue, or Wikipedia reference. Historical races (pre-modern era) often lack a scheduled start time.",
+          "columns": {
+            "circuitId": "Foreign key referencing the circuits table, identifying the track/venue where the race was held.",
+            "date": "The calendar date on which the race took place.",
+            "name": "The official name of the Grand Prix event (e.g., 'Monaco Grand Prix', 'Italian Grand Prix').",
+            "raceId": "Unique surrogate identifier for each race, used as a primary key and foreign key reference throughout the database.",
+            "round": "The sequential round number of the race within its season (e.g., round 3 means the third race of the year).",
+            "time": "The scheduled local start time of the race; null for historical races where the start time was not recorded.",
+            "url": "The Wikipedia URL for the race's dedicated article, providing a reference to detailed historical and contextual information.",
+            "year": "The Formula 1 season year in which the race took place."
+          },
+          "description": "Contains one record per Formula 1 race event, capturing the scheduling and identification details of every Grand Prix held across all seasons. Each row represents a distinct race in the F1 calendar."
+        },
+        "results": {
+          "business_context": "A row is created for each driver entered in a race once the race weekend concludes; it may be updated if results are revised by stewards (e.g., disqualifications, time penalties). Historical records exist for races where detailed timing data was not captured, resulting in many null timing fields.",
+          "columns": {
+            "constructorId": "Foreign key referencing the constructors table, identifying the team the driver represented in this race.",
+            "driverId": "Foreign key referencing the drivers table, identifying the driver who achieved this result.",
+            "fastestLap": "The lap number on which the driver recorded their personal fastest lap during the race.",
+            "fastestLapSpeed": "The average speed in km/h corresponding to the driver's fastest lap, stored as a string.",
+            "fastestLapTime": "The driver's fastest single lap time during the race, stored as a formatted string (e.g., '1:23.456').",
+            "grid": "The starting grid position of the driver at the beginning of the race (1 = pole position).",
+            "laps": "Total number of laps completed by the driver before finishing or retiring from the race.",
+            "milliseconds": "The driver's total race time in milliseconds, used for precise timing comparisons; null if not recorded or driver did not finish.",
+            "number": "The car number assigned to the driver for this race.",
+            "points": "Championship points awarded to the driver for this race result under the points system in effect at the time.",
+            "position": "The official numeric finishing position of the driver; null if the driver did not finish (retired, disqualified, etc.).",
+            "positionOrder": "Numeric ordering value used to sort all drivers consistently, including non-finishers, for standings and display purposes.",
+            "positionText": "Human-readable representation of the finishing position, using a number for classified finishers or a code for non-finishers.",
+            "raceId": "Foreign key referencing the races table, identifying which race this result belongs to.",
+            "rank": "The driver's rank among all drivers in the race based on fastest lap time (1 = fastest lap of the race).",
+            "resultId": "Unique surrogate primary key identifying each individual race result record.",
+            "statusId": "Foreign key referencing the status table, describing the reason the driver finished or retired (e.g., finished, engine failure, accident).",
+            "time": "The driver's total race time as a formatted string for classified finishers, or the gap to the race winner; null if not applicable or data unavailable."
+          },
+          "description": "Stores the race result for every driver in every Formula 1 race, capturing finishing position, points scored, lap counts, timing data, and race status. Each row represents a single driver's outcome in a single race."
+        },
+        "seasons": {
+          "business_context": "A new row is added when a Formula One season is introduced into the database, typically when race, driver, constructor, or results data for that year is first loaded. Rows are rarely updated unless the Wikipedia URL changes.",
+          "columns": {
+            "url": "The Wikipedia URL for the corresponding Formula One season article, providing a human-readable reference and additional context about that year's championship.",
+            "year": "The calendar year of the Formula One World Championship season, used as the primary identifier and foreign key reference throughout the database."
+          },
+          "description": "Contains one record per Formula One racing season, serving as the master reference for all seasons tracked in the database. Each row represents a distinct championship year with a link to its Wikipedia overview page."
+        },
+        "status": {
+          "business_context": "Rows are created when a new status type is needed to describe a race result outcome, either a classified finish (e.g., '+N Laps' behind the leader) or a reason for retirement (e.g., 'Brakes', 'Hydraulics'). This table is referenced by race results records to explain why a driver did not finish or how far behind the leader they were classified.",
+          "columns": {
+            "status": "Human-readable label describing the race outcome, either a laps-behind classification (e.g., '+29 Laps') for drivers who finished but were lapped, or a retirement cause (e.g., 'Brakes', 'Hydraulics', 'Supercharger') for drivers who did not complete the race.",
+            "statusId": "Unique numeric identifier for each status, used as a foreign key in race results tables."
+          },
+          "description": "A lookup table containing all possible finishing or retirement statuses for Formula 1 race entries. Each row represents a distinct outcome that a driver/car can have at the end of a race, ranging from laps-down finishes to specific mechanical failure reasons."
+        }
+      }
+    },
+    "student_club": {
+      "tables": {
+        "attendance": {
+          "business_context": "A row is created when a member is recorded as having attended a club event, either at check-in time or when attendance is logged after the event concludes.",
+          "columns": {
+            "link_to_event": "Foreign key referencing the specific club event that was attended.",
+            "link_to_member": "Foreign key referencing the club member who attended the event."
+          },
+          "description": "Records which club members attended which events, serving as a many-to-many join table between members and events. Each row represents a single member's attendance at a specific club event."
+        },
+        "budget": {
+          "business_context": "Rows are created when an event is being planned and a budget is allocated for a specific expense category. They are updated as money is spent during event execution and when the event lifecycle status changes from Planning through Open to Closed.",
+          "columns": {
+            "amount": "The total dollar amount originally allocated for this budget category and event.",
+            "budget_id": "Unique identifier for each budget line item record.",
+            "category": "The type of expense this budget line item covers for the associated event.",
+            "event_status": "The current lifecycle stage of the event associated with this budget line item.",
+            "link_to_event": "Foreign key reference to the event record that this budget line item belongs to.",
+            "remaining": "The dollar amount still available in this budget line item, calculated as amount minus spent; a negative value indicates overspending.",
+            "spent": "The actual dollar amount spent so far against this budget line item."
+          },
+          "description": "Tracks budget allocations for each spending category associated with student club events. Each row represents a single budget line item tied to a specific event, recording how much was allocated, spent, and remaining."
+        },
+        "event": {
+          "business_context": "Rows are created when a new club event is planned and updated as the event progresses through planning to open (active/upcoming) to closed (completed or cancelled). Events span a range of types from internal governance meetings to external community service activities.",
+          "columns": {
+            "event_date": "The scheduled date and time when the event is set to take place.",
+            "event_id": "Unique identifier for each event record, used as the primary key.",
+            "event_name": "Human-readable name or title of the event as it would appear on a club calendar or announcement.",
+            "location": "The physical venue or address where the event is held.",
+            "notes": "Additional descriptive details or instructions about the event, such as attendance rules, volunteer context, or activity specifics.",
+            "status": "Current lifecycle stage of the event indicating whether it is being planned, actively open, or has concluded.",
+            "type": "Categorical classification of the event that describes its primary purpose or format."
+          },
+          "description": "Stores records of all events organized or attended by the student club, including meetings, social activities, community service, and administrative events. Each row represents a single scheduled or completed event with its logistics and current status."
+        },
+        "expense": {
+          "business_context": "Rows are created when a club member submits an expense for reimbursement or when a purchase is recorded against the club's budget. The approved flag indicates the expense has been reviewed and authorized by club leadership.",
+          "columns": {
+            "approved": "Indicates whether the expense has been approved by club leadership; currently all recorded expenses are approved.",
+            "cost": "The monetary amount of the expense in US dollars.",
+            "expense_date": "The date on which the expense was incurred or the purchase was made.",
+            "expense_description": "A short description of what was purchased or the nature of the expense (e.g., food, supplies, merchandise, travel costs).",
+            "expense_id": "Unique identifier for each expense record, using an external system's record ID format (e.g., Airtable).",
+            "link_to_budget": "Foreign key reference to the budget line item or category that this expense is charged against, stored as an external record ID.",
+            "link_to_member": "Foreign key reference to the club member who submitted or incurred the expense, stored as an external record ID."
+          },
+          "description": "Records individual expense claims submitted by student club members, capturing what was purchased, when, how much it cost, and which budget category it draws from. Each row represents a single expense item submitted for reimbursement or payment tracking."
+        },
+        "income": {
+          "business_context": "Rows are created whenever the club receives money from any source \u2014 most commonly when a member pays their dues, but also when school appropriations are disbursed, fundraising events conclude, or sponsorship deals are finalized. Rows may be updated if payment details need correction.",
+          "columns": {
+            "amount": "The monetary amount received, in US dollars, for this income transaction.",
+            "date_received": "The calendar date on which the income was received by the club.",
+            "income_id": "Unique identifier for each income transaction record.",
+            "link_to_member": "Foreign key reference to the member record associated with this income, typically identifying the member who paid dues.",
+            "notes": "Optional contextual note providing additional detail about the specific income transaction, particularly for non-dues sources.",
+            "source": "The category or origin of the income, indicating how the money was obtained."
+          },
+          "description": "Records all income transactions received by the student club, capturing the amount, source, and date of each payment. Each row represents a single income event, such as a member dues payment, school funding allocation, fundraising proceeds, or sponsorship."
+        },
+        "major": {
+          "business_context": "Rows are created when new academic programs are established at the university and updated when programs are renamed, reorganized into different departments, or moved between colleges. This reference data is used to classify student members within the club database by their field of study.",
+          "columns": {
+            "college": "The top-level college or school within the university under which the major's department falls.",
+            "department": "The specific academic department or school within the college that administers and offers the major.",
+            "major_id": "A unique identifier for each academic major, used to link students to their declared field of study.",
+            "major_name": "The official name of the academic degree program as recognized by the university."
+          },
+          "description": "This table catalogs the academic majors available at the university, organized by department and college. Each row represents a distinct degree program that students can enroll in."
+        },
+        "member": {
+          "business_context": "Rows are created when a new student joins the club and updated when a member's role changes (e.g., elected to an officer position), becomes inactive, or updates personal details such as contact information or t-shirt size.",
+          "columns": {
+            "email": "The member's institutional email address, typically in the format firstname.lastname@lpu.edu.",
+            "first_name": "The member's given (first) name.",
+            "last_name": "The member's family (last) name.",
+            "link_to_major": "Foreign key reference to the member's declared academic major in a related majors table.",
+            "member_id": "Unique identifier for each club member, used as the primary key to reference members across related tables.",
+            "phone": "The member's contact phone number.",
+            "position": "The member's current role or standing within the student club.",
+            "t_shirt_size": "The member's preferred t-shirt size, used for ordering club merchandise or event apparel.",
+            "zip": "The member's residential ZIP code, used for location or mailing purposes."
+          },
+          "description": "Stores profile and contact information for all members of the student club, including their role within the organization and academic major affiliation. Each row represents one individual who has joined or previously participated in the club."
+        },
+        "zip_code": {
+          "business_context": "Rows represent static US Postal Service ZIP code records used to validate and enrich address information for members or events. Rows are typically loaded once from a postal reference dataset and updated only when postal boundaries change.",
+          "columns": {
+            "city": "The name of the city or locality associated with the ZIP code.",
+            "county": "The full name of the county (including the word 'County') in which the ZIP code is located.",
+            "short_state": "The standard two-letter USPS abbreviation for the state in which the ZIP code is located.",
+            "state": "The full name of the US state in which the ZIP code is located.",
+            "type": "The classification of the ZIP code as defined by the US Postal Service, indicating how mail is delivered or processed in that area.",
+            "zip_code": "The five-digit US ZIP code that uniquely identifies a postal delivery area."
+          },
+          "description": "A reference table of US ZIP codes with their associated geographic and classification information. It serves as a lookup for location data used elsewhere in the student club database."
+        }
+      }
+    },
+    "superhero": {
+      "tables": {
+        "alignment": {
+          "business_context": "Rows are created once during initial database setup to populate the fixed set of alignment options; they are rarely if ever updated. Other tables (e.g., a superhero table) reference these IDs to categorize each character's moral standing.",
+          "columns": {
+            "alignment": "The moral alignment label describing whether a character acts for good, evil, neutral, or undefined purposes.",
+            "id": "Unique numeric identifier for each alignment category, used as a foreign key in related tables."
+          },
+          "description": "A lookup/reference table that defines the possible moral alignment categories for superheroes and villains. It serves as a controlled vocabulary for classifying characters by their ethical disposition."
+        },
+        "attribute": {
+          "business_context": "Rows are created when a new attribute category is introduced into the rating system; this is a relatively static reference table that rarely changes and is used to standardize how superhero abilities are classified and scored across the database.",
+          "columns": {
+            "attribute_name": "The name of the superhero attribute category representing a specific dimension of ability that can be measured and compared across superheroes.",
+            "id": "Unique numeric identifier for each attribute category, used as a foreign key in related tables that store per-superhero attribute scores."
+          },
+          "description": "A reference lookup table defining the distinct categories of superhero attributes used to evaluate and compare superheroes. Each row represents one measurable dimension of a superhero's capabilities."
+        },
+        "colour": {
+          "business_context": "Rows are created when a new colour value is needed to describe a superhero's physical attributes. This table is referenced by other tables (e.g., superhero hair colour, eye colour, skin colour) to ensure consistent colour naming across the database.",
+          "columns": {
+            "colour": "The human-readable name of the colour, including special values like 'No Colour' to represent the absence of a colour attribute (e.g., a bald superhero or colourless eyes).",
+            "id": "A unique numeric identifier for each colour entry, used as a foreign key reference in related superhero attribute tables."
+          },
+          "description": "A reference lookup table containing all possible colour values used throughout the superhero database. It standardises colour descriptions for attributes such as hair colour, eye colour, and skin colour across superhero records."
+        },
+        "gender": {
+          "business_context": "Rows in this table are created during initial database setup and are rarely modified. They are referenced by the superhero table (or equivalent) to assign a standardized gender value to each character. New rows would only be added if additional gender categories needed to be supported.",
+          "columns": {
+            "gender": "The gender classification label assigned to a superhero, drawn from a fixed set of allowed values.",
+            "id": "A unique numeric identifier for each gender classification, used as a foreign key reference in related tables."
+          },
+          "description": "A lookup/reference table that defines the possible gender classifications used to categorize superheroes in the database. It serves as a controlled vocabulary to ensure consistent gender labeling across the system."
+        },
+        "hero_attribute": {
+          "business_context": "Rows are created when a superhero's profile is established or updated with measurable characteristics such as strength, speed, or intelligence; values may be updated as a hero's abilities change in the source material.",
+          "columns": {
+            "attribute_id": "Foreign key referencing the type of attribute being measured (e.g., strength, speed, intelligence, durability), defined in a separate attribute lookup table.",
+            "attribute_value": "Numeric score representing the hero's level or rating for the given attribute, typically on a defined scale (e.g., 0\u2013100).",
+            "hero_id": "Foreign key referencing the superhero whose attribute is being recorded."
+          },
+          "description": "Junction table that stores the numeric attribute values assigned to each superhero, linking heroes to their specific attributes with a measured score. Each row represents a single attribute rating for one hero."
+        },
+        "hero_power": {
+          "business_context": "Rows are created when a superhero is assigned one or more powers in the database, and removed if a power is revoked or corrected. A single hero can have multiple rows (one per power), and a single power can appear across many heroes.",
+          "columns": {
+            "hero_id": "Foreign key referencing the unique identifier of the superhero in the superhero table.",
+            "power_id": "Foreign key referencing the unique identifier of the superpower in the superpower table."
+          },
+          "description": "Junction table that maps superheroes to their superpowers, representing a many-to-many relationship between heroes and powers. Each row indicates that a specific hero possesses a specific power."
+        },
+        "publisher": {
+          "business_context": "Rows are created when a new publisher or media entity is added to the database to associate superheroes with their originating or licensing organization. Updates occur if a publisher is renamed or rebranded.",
+          "columns": {
+            "id": "Unique numeric identifier for each publisher record, used as a foreign key in related tables such as the superhero table.",
+            "publisher_name": "The full name of the publishing company, media network, or creative entity responsible for producing or owning the superhero property (e.g., comic publishers like IDW Publishing, TV networks like NBC - Heroes, or individual creators like George Lucas)."
+          },
+          "description": "Stores the publishers, studios, and media companies that own or produce superhero intellectual properties. This includes traditional comic book publishers as well as television networks and film studios associated with superhero characters."
+        },
+        "race": {
+          "business_context": "Rows are created when a new race or species is introduced into the superhero universe and needs to be associated with one or more characters. This table serves as a controlled vocabulary to ensure consistent race labeling across the superhero roster.",
+          "columns": {
+            "id": "A unique numeric identifier for each race record, used as a foreign key reference from the superhero table.",
+            "race": "The name of the race or species (e.g., human, alien, mythological, or fictional species) to which a superhero or villain belongs."
+          },
+          "description": "A reference lookup table containing the distinct racial or species classifications used to categorize superheroes and villains in the database. Each row represents a unique race or species that can be assigned to a character."
+        },
+        "superhero": {
+          "business_context": "Rows are created when a new superhero or supervillain character is added to the database, typically sourced from comic book publisher rosters. Rows may be updated when a character's canonical attributes change (e.g., alignment shifts, physical appearance retcons) or when lookup reference IDs are revised.",
+          "columns": {
+            "alignment_id": "Foreign key referencing an alignment lookup table indicating the character's moral orientation (e.g., Good, Neutral, Bad).",
+            "eye_colour_id": "Foreign key referencing a colour lookup table representing the character's eye colour.",
+            "full_name": "The character's real civilian birth name; may be null or '-' if the identity is unknown or unrevealed.",
+            "gender_id": "Foreign key referencing the gender lookup table to classify the character's gender identity.",
+            "hair_colour_id": "Foreign key referencing a colour lookup table representing the character's hair colour.",
+            "height_cm": "The character's height in centimetres; a value of 0 or null indicates the height is unknown or not applicable.",
+            "id": "Unique numeric identifier for each superhero record, used as the primary key for joins with related tables.",
+            "publisher_id": "Foreign key referencing the publisher lookup table identifying the comic book company that owns the character (e.g., Marvel, DC Comics).",
+            "race_id": "Foreign key referencing a race/species lookup table indicating the character's species or ethnic origin (e.g., Human, Mutant, Alien).",
+            "skin_colour_id": "Foreign key referencing a colour lookup table representing the character's skin colour or complexion.",
+            "superhero_name": "The character's superhero alias or codename as publicly known (e.g., 'Firestar', 'Professor X').",
+            "weight_kg": "The character's weight in kilograms; a value of 0 or null indicates the weight is unknown or not applicable."
+          },
+          "description": "Central catalog of superheroes and supervillains drawn from various comic book publishers, storing each character's identity, physical attributes, and classification metadata. Each row represents a unique character with references to lookup tables for categorical attributes."
+        },
+        "superpower": {
+          "business_context": "Rows are created when a new type of superpower needs to be tracked in the system, typically when onboarding a new superhero whose abilities are not yet represented. This table serves as the authoritative list of valid powers and is referenced by junction tables linking heroes to their powers.",
+          "columns": {
+            "id": "A unique numeric identifier for each superpower, used as a primary key and foreign key reference in related tables.",
+            "power_name": "The human-readable name of the superpower (e.g., 'Phasing', 'Plant Control', 'Omniscient'), describing the specific ability a superhero may possess."
+          },
+          "description": "A reference/lookup table that catalogs all distinct superpowers that can be assigned to superheroes in the database. Each row represents a unique, named ability or power type."
+        }
+      }
+    },
+    "thrombosis_prediction": {
+      "tables": {
+        "Examination": {
+          "business_context": "Rows are created when a patient undergoes a specialist immunological/rheumatological examination, typically to assess risk of thrombosis or to monitor known autoimmune diseases such as SLE (Systemic Lupus Erythematosus). Results inform diagnosis and thrombosis risk stratification.",
+          "columns": {
+            "ANA": "Antinuclear antibody titer expressed as a dilution factor (e.g., 64, 256); higher values indicate stronger autoimmune activity.",
+            "ANA Pattern": "The immunofluorescence staining pattern(s) observed in the ANA test, indicating the type of nuclear antigen targeted.",
+            "Diagnosis": "Free-text clinical diagnosis or diagnoses assigned to the patient at the time of examination, often abbreviations of autoimmune or connective tissue diseases.",
+            "Examination Date": "The date on which the examination and associated laboratory tests were performed.",
+            "ID": "Foreign key referencing the patient record in the Patient table.",
+            "KCT": "Kaolin Clotting Time test result, a lupus anticoagulant screening test indicating abnormal coagulation when positive.",
+            "LAC": "Overall Lupus Anticoagulant (LAC) determination, summarizing whether the patient tests positive for this antiphospholipid antibody.",
+            "RVVT": "Russell's Viper Venom Time test result, a confirmatory lupus anticoagulant test indicating coagulation pathway interference when positive.",
+            "Symptoms": "Clinical symptom or thrombotic event observed in the patient, used to characterize the clinical presentation associated with the examination.",
+            "Thrombosis": "Indicates the degree of thrombosis detected, where 0 means no thrombosis and higher integer values represent increasing severity or confirmed thrombotic events.",
+            "aCL IgA": "Anticardiolipin antibody level of the IgA isotype; less commonly measured but relevant in seronegative antiphospholipid syndrome cases.",
+            "aCL IgG": "Anticardiolipin antibody level of the IgG isotype, measured in GPL units; elevated values indicate antiphospholipid syndrome risk.",
+            "aCL IgM": "Anticardiolipin antibody level of the IgM isotype, measured in MPL units; elevated values are associated with antiphospholipid syndrome."
+          },
+          "description": "Records immunological examination results for patients being evaluated for thrombosis and related autoimmune conditions, capturing antiphospholipid antibody levels, coagulation test results, and clinical findings. Each row represents a single examination event for a patient, linking laboratory markers to thrombosis outcomes."
+        },
+        "Laboratory": {
+          "business_context": "Rows are created each time a patient undergoes a laboratory workup, capturing liver function, kidney function, lipid profile, hematology, coagulation, urinalysis, immunoglobulin levels, complement levels, and autoantibody titers to support thrombosis risk assessment and autoimmune disease management.",
+          "columns": {
+            "ALB": "Serum albumin concentration in g/dL, a marker of nutritional status and liver synthetic function.",
+            "ALP": "Alkaline phosphatase level in IU/L, a marker of liver and bone disease.",
+            "APTT": "Activated partial thromboplastin time in seconds, measuring the intrinsic coagulation pathway function.",
+            "C3": "Complement component C3 level in mg/dL, reduced in active lupus and immune complex disease.",
+            "C4": "Complement component C4 level in mg/dL, reduced in lupus and hereditary complement deficiencies.",
+            "CENTROMEA": "Anti-centromere antibody test result, a marker associated with limited systemic sclerosis (CREST syndrome).",
+            "CPK": "Creatine phosphokinase level in IU/L, elevated in muscle damage, myositis, or cardiac injury.",
+            "CRE": "Serum creatinine level in mg/dL, a primary indicator of kidney filtration function.",
+            "CRP": "C-reactive protein level, an acute-phase inflammatory marker; recorded as a qualitative or semi-quantitative text value.",
+            "DNA": "Anti-double-stranded DNA (anti-dsDNA) antibody result, a key diagnostic marker for systemic lupus erythematosus (SLE), stored as a text value to accommodate both numeric titers and qualitative results.",
+            "DNA-II": "Secondary or confirmatory anti-dsDNA antibody measurement (e.g., from a different assay method such as Farr assay or ELISA), reported as a numeric titer.",
+            "Date": "The date on which the laboratory specimen was collected.",
+            "FG": "Fibrinogen level in mg/dL, a coagulation factor and acute-phase reactant relevant to thrombosis risk.",
+            "GLU": "Blood glucose level in mg/dL, used to assess metabolic status and diabetes.",
+            "GOT": "Glutamic-oxaloacetic transaminase (AST) level in IU/L, a liver and cardiac enzyme marker.",
+            "GPT": "Glutamic-pyruvic transaminase (ALT) level in IU/L, a liver-specific enzyme marker.",
+            "HCT": "Hematocrit percentage, representing the proportion of blood volume occupied by red blood cells.",
+            "HGB": "Hemoglobin concentration in g/dL, reflecting anemia or polycythemia.",
+            "ID": "Unique patient identifier linking this lab record to the patient's demographic and clinical records.",
+            "IGA": "Immunoglobulin A level in mg/dL, associated with mucosal immunity and certain autoimmune conditions.",
+            "IGG": "Immunoglobulin G level in mg/dL, the most abundant antibody class, elevated in chronic infections and autoimmune disease.",
+            "IGM": "Immunoglobulin M level in mg/dL, the first antibody produced in an immune response, elevated in early infection or Waldenstr\u00f6m's macroglobulinemia.",
+            "LDH": "Lactate dehydrogenase level in IU/L, indicating tissue damage, hemolysis, or malignancy.",
+            "PIC": "Plasmin-alpha2-plasmin inhibitor complex level, a marker of fibrinolytic activity and thrombus formation.",
+            "PLT": "Platelet count in 10\u00b3/\u00b5L, critical for assessing thrombotic and bleeding risk.",
+            "PT": "Prothrombin time in seconds, measuring the extrinsic coagulation pathway function.",
+            "RA": "Rheumatoid arthritis latex agglutination test result, indicating the presence of rheumatoid factor by a qualitative method.",
+            "RBC": "Red blood cell count in 10\u2076/\u00b5L, a measure of oxygen-carrying capacity.",
+            "RF": "Rheumatoid factor titer or qualitative result, a marker for rheumatoid arthritis and other autoimmune diseases.",
+            "RNP": "Anti-ribonucleoprotein (anti-RNP) antibody titer, associated with mixed connective tissue disease and lupus.",
+            "SC170": "Anti-Scl-70 (anti-topoisomerase I) antibody titer, a marker for diffuse systemic sclerosis.",
+            "SM": "Anti-Smith (anti-Sm) antibody titer, a highly specific marker for systemic lupus erythematosus.",
+            "SSA": "Anti-SSA/Ro antibody titer, associated with Sj\u00f6gren's syndrome and neonatal lupus.",
+            "SSB": "Anti-SSB (anti-La) antibody test result, an autoantibody marker associated with Sj\u00f6gren's syndrome and other autoimmune diseases.",
+            "T-BIL": "Total bilirubin level in mg/dL, reflecting liver function and red blood cell breakdown.",
+            "T-CHO": "Total cholesterol level in mg/dL, a cardiovascular and metabolic risk marker.",
+            "TAT": "Thrombin-antithrombin complex level, a direct marker of thrombin generation and coagulation activation.",
+            "TAT2": "Secondary or repeat thrombin-antithrombin complex measurement, potentially from a different assay or time point.",
+            "TG": "Triglyceride level in mg/dL, a lipid marker associated with cardiovascular and metabolic risk.",
+            "TP": "Total protein concentration in g/dL, reflecting overall nutritional and hepatic synthetic status.",
+            "U-PRO": "Urine protein level measured by dipstick, indicating renal involvement or proteinuria severity.",
+            "UA": "Uric acid level in mg/dL, elevated in gout and renal impairment.",
+            "UN": "Blood urea nitrogen (BUN) level in mg/dL, a marker of renal function and protein catabolism.",
+            "WBC": "White blood cell count in 10\u00b3/\u00b5L, indicating immune response or infection."
+          },
+          "description": "Stores longitudinal laboratory test results for patients being monitored for thrombosis and related autoimmune conditions such as lupus. Each row represents a single lab panel drawn on a specific date for a given patient."
+        },
+        "Patient": {
+          "business_context": "Rows are created when a patient is first registered in the system, typically upon initial clinical encounter or hospital admission; the Description and First Date fields are updated as the patient's care history is recorded.",
+          "columns": {
+            "Admission": "Indicates whether the patient was admitted to the hospital (inpatient) or seen on an outpatient basis.",
+            "Birthday": "Date of birth of the patient, used to calculate age at diagnosis or treatment.",
+            "Description": "Date associated with a key clinical event or case description entry, likely the date the patient's case was formally documented or last updated.",
+            "Diagnosis": "Primary clinical diagnosis assigned to the patient, typically an autoimmune or connective tissue disease abbreviation (e.g., SLE = Systemic Lupus Erythematosus, PSS = Progressive Systemic Sclerosis, DM = Dermatomyositis).",
+            "First Date": "Date of the patient's first clinical visit or first recorded encounter related to their condition.",
+            "ID": "Unique numeric identifier assigned to each patient in the system.",
+            "SEX": "Biological sex of the patient."
+          },
+          "description": "This table stores demographic and clinical intake information for patients enrolled in a thrombosis prediction study, primarily those with autoimmune or connective tissue disorders. Each row represents a unique patient with their basic profile and initial diagnosis."
+        }
+      }
+    },
+    "toxicology": {
+      "tables": {
+        "atom": {
+          "business_context": "Rows are created when a molecule is registered in the database and its chemical structure is decomposed into constituent atoms. This data supports toxicological analysis by enabling structure-based queries, such as identifying molecules containing specific elements associated with toxic properties.",
+          "columns": {
+            "atom_id": "Unique identifier for an individual atom, typically composed of the parent molecule ID and a sequential atom index (e.g., TR173_21 is the 21st atom in molecule TR173).",
+            "element": "The chemical element symbol representing the type of atom.",
+            "molecule_id": "Foreign key referencing the molecule to which this atom belongs, linking the atom back to its parent chemical compound."
+          },
+          "description": "Stores individual atoms that make up chemical molecules in the toxicology dataset. Each row represents a single atom within a specific molecule, identified by its chemical element."
+        },
+        "bond": {
+          "business_context": "Rows are created when a molecule's chemical structure is registered or imported into the toxicology database. The bond_id encodes the molecule identifier and the two atom indices it connects (e.g., TR204_15_27 links atoms 15 and 27 in molecule TR204), enabling structural analysis and toxicity modeling.",
+          "columns": {
+            "bond_id": "Unique identifier for a bond, composed of the molecule ID and the indices of the two connected atoms (e.g., TR204_15_27 represents the bond between atoms 15 and 27 in molecule TR204).",
+            "bond_type": "The type of covalent bond between the two atoms, represented as a chemical notation symbol.",
+            "molecule_id": "Foreign key referencing the parent molecule to which this bond belongs."
+          },
+          "description": "Stores individual chemical bonds within molecules used in toxicology studies, capturing the type of covalent bond connecting two atoms. Each row represents a single bond between a specific pair of atoms within a molecule."
+        },
+        "connected": {
+          "business_context": "Rows are created when a molecule's structural data is loaded or parsed, reflecting the bonded atom pairs derived from chemical structure files (e.g., SDF/MOL format). This table is used to traverse molecular graphs for toxicity analysis, substructure searching, and feature engineering.",
+          "columns": {
+            "atom_id": "The identifier of the first atom in the bond, composed of the compound identifier and an atom index (e.g., 'TR313_21' = compound TR313, atom 21).",
+            "atom_id2": "The identifier of the second atom in the bond, following the same compound-plus-index format as atom_id, representing the other endpoint of the chemical bond.",
+            "bond_id": "A unique identifier for the bond, typically constructed by combining the compound identifier with the two atom indices in sorted order (e.g., 'TR313_5_21' = bond between atoms 5 and 21 in compound TR313)."
+          },
+          "description": "This table represents chemical bonds between pairs of atoms within molecular compounds, capturing the connectivity graph of each molecule in the toxicology database. Each row encodes a single bond linking two atoms that belong to the same compound."
+        },
+        "molecule": {
+          "business_context": "Rows are created when a molecule is introduced into the toxicology study dataset, typically sourced from chemical screening programs such as the Mutagenicity/Carcinogenicity dataset (e.g., Bursi or similar benchmarks). The label is assigned based on experimental test results (e.g., Ames mutagenicity test).",
+          "columns": {
+            "label": "The toxicological classification of the molecule indicating whether it is mutagenic or carcinogenic based on experimental testing.",
+            "molecule_id": "A unique identifier for each molecule in the study, formatted as a 'TR'-prefixed alphanumeric code corresponding to a specific chemical compound."
+          },
+          "description": "This table stores individual chemical molecules that have been evaluated for toxicological properties. Each row represents a unique molecule identified by a study reference code and classified by its mutagenicity or carcinogenicity outcome."
+        }
+      }
+    }
+  },
+  "snapshot_id": "sonnet46-llm-enriched-v6"
+}

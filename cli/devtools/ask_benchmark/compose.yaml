@@ -1,0 +1,25 @@
+services:
+  mysql:
+    image: ${BIRD_MYSQL_IMAGE:-mysql:8.4.0}
+    environment:
+      MYSQL_ROOT_PASSWORD: ${BIRD_MYSQL_ROOT_PASSWORD:-rdst-bird-root}
+      MYSQL_ROOT_HOST: "%"
+    ports:
+      - "127.0.0.1:${BIRD_MYSQL_PORT:-13316}:3306"
+    volumes:
+      - bird-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --local-infile=0
+      - --skip-log-bin
+      - --sql-mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+
+volumes:
+  bird-mysql-data:
