@@ -278,7 +278,11 @@ def format_analyze_output(workflow_result: Dict[str, Any]) -> str:
         if recommendations.get("available") and recommendations.get(
             "index_suggestions"
         ):
-            lines.extend(_format_index_recommendations(recommendations))
+            lines.extend(
+                _format_index_recommendations(
+                    recommendations, formatted_output.get("index_testing") or {}
+                )
+            )
             lines.append(_divider())
 
         # Query rewrite suggestions (AI recommended, not yet tested)
@@ -949,12 +953,16 @@ def _format_index_recommendations_from_llm(
     ]
 
 
-def _format_index_recommendations(recommendations: Dict[str, Any]) -> List[str]:
+def _format_index_recommendations(
+    recommendations: Dict[str, Any], index_testing: Optional[Dict[str, Any]] = None
+) -> List[str]:
     """Format index recommendations with emphasis on actionable steps."""
     index_suggestions = recommendations.get("index_suggestions", [])
     if not index_suggestions:
         return []
 
+    index_testing = index_testing or {}
+    planner_results = index_testing.get("results") or [] if index_testing.get("tested") else []
     content_parts: List[Any] = []
 
     for i, idx in enumerate(index_suggestions[:5], 1):
@@ -995,6 +1003,23 @@ def _format_index_recommendations(recommendations: Dict[str, Any]) -> List[str]:
                 f"   [{StyleTokens.MUTED}]Storage:[/{StyleTokens.MUTED}] {storage_impact}"
             )
 
+        planner_line = _format_planner_verdict(_planner_result_for(planner_results, i - 1, sql))
+        if planner_line:
+            content_parts.append(planner_line)
+
+        content_parts.append(Text(""))
+
+    if not index_testing.get("tested") and index_testing.get("skipped_reason") in (
+        "hypopg_not_installed",
+        "hypopg_not_available",
+    ):
+        content_parts.append(
+            f"[{StyleTokens.MUTED}]hypopg check unavailable: {index_testing.get('message', '')}"
+            f"[/{StyleTokens.MUTED}]"
+        )
+        install_sql = index_testing.get("install_sql")
+        if install_sql:
+            content_parts.append(f"   [{StyleTokens.SQL}]{install_sql}[/{StyleTokens.SQL}]")
         content_parts.append(Text(""))
 
     return [
@@ -1004,6 +1029,41 @@ def _format_index_recommendations(recommendations: Dict[str, Any]) -> List[str]:
             )
         )
     ]
+
+
+def _planner_result_for(results: List[Dict[str, Any]], position: int, sql: str) -> Optional[Dict[str, Any]]:
+    """Match a planner verdict to a suggestion by position, falling back to SQL text."""
+    if not results:
+        return None
+    if position < len(results):
+        return results[position]
+    normalized = " ".join((sql or "").lower().rstrip(";").split())
+    for result in results:
+        if " ".join((result.get("index_sql") or "").lower().split()) == normalized:
+            return result
+    return None
+
+
+def _format_planner_verdict(result: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not result:
+        return None
+    if result.get("error"):
+        return (
+            f"   [{StyleTokens.WARNING}]hypopg check:[/{StyleTokens.WARNING}] "
+            f"could not test ({result['error']})"
+        )
+    before, after = result.get("cost_before"), result.get("cost_after")
+    pct = result.get("cost_reduction_pct")
+    if result.get("planner_used_index"):
+        cost = f", est. cost {before:,.0f} -> {after:,.0f} ({pct}% lower)" if before and after is not None else ""
+        return (
+            f"   [{StyleTokens.SUCCESS}]hypopg check:[/{StyleTokens.SUCCESS}] "
+            f"planner uses this index ({result.get('scan_type')}{cost}); no index was created"
+        )
+    return (
+        f"   [{StyleTokens.WARNING}]hypopg check:[/{StyleTokens.WARNING}] "
+        "planner would not use this index for this query"
+    )
 
 
 def _format_query_rewrite_suggestions(

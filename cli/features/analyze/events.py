@@ -6,6 +6,7 @@ from shared.service_events import ErrorEvent, ProgressEvent
 from .event_payloads import (
     ExplainResults,
     FormattedAnalysis,
+    IndexTesting,
     LLMAnalysis,
     ReadysetCacheability,
     RewritePerformance,
@@ -63,6 +64,7 @@ class CompleteEvent:
     explain_results: Optional[ExplainResults] = None
     llm_analysis: Optional[LLMAnalysis] = None
     rewrite_testing: Optional[RewriteTesting] = None
+    index_testing: Optional[IndexTesting] = None
     readyset_cacheability: Optional[ReadysetCacheability] = None
     formatted: Optional[FormattedAnalysis] = None
 

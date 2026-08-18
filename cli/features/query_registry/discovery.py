@@ -243,6 +243,15 @@ def _default_connection_factory(target: str) -> tuple[Any, str]:
             connection.autocommit = False
         except Exception:
             logger.debug("Could not disable autocommit for target %s", target, exc_info=True)
+    elif engine == "mysql":
+        # The statement-stats source reads rows positionally; direct MySQL
+        # connections default to dict rows.
+        try:
+            import pymysql.cursors
+
+            connection.cursorclass = pymysql.cursors.Cursor
+        except Exception:
+            logger.debug("Could not set tuple cursor for target %s", target, exc_info=True)
     return connection, engine
 
 

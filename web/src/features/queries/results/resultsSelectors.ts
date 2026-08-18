@@ -1,11 +1,14 @@
 import { resolveRewriteTesting } from '../../../components/analysis/AnalysisSections'
 import type {
   CompleteEvent,
+  IndexPlannerResult,
   IndexRecommendation,
+  IndexTesting,
   ReadysetCacheability,
   RewriteTesting,
   TestedRewrite,
 } from '../../../lib/api'
+import { findPlannerResult } from '../../../lib/indexTesting'
 
 export type ResultTone = 'positive' | 'informative' | 'warning' | 'negative'
 
@@ -41,13 +44,14 @@ export type ResultNextStep =
     }
   | {
       kind: 'index'
-      evidence: 'Suggested'
+      evidence: 'Suggested' | 'Planner-verified'
       tone: 'informative'
       title: string
       body: string
       supportingText: string
       sql: string
       caveats: string[]
+      plannerVerdict?: IndexPlannerResult
     }
   | {
       kind: 'readyset'
@@ -73,6 +77,7 @@ export interface ResultsViewModel {
   cacheability?: ReadysetCacheability
   readysetVerdict?: ReadysetVerdict
   indexRecommendations: IndexRecommendation[]
+  indexTesting?: IndexTesting
   additionalRecommendations: NonNullable<
     CompleteEvent['llm_analysis']
   >['optimization_opportunities']
@@ -292,10 +297,12 @@ export function getReadysetVerdict(
 function getNextStep({
   testing,
   indexes,
+  indexTesting,
   readyset,
 }: {
   testing?: RewriteTesting
   indexes: IndexRecommendation[]
+  indexTesting?: IndexTesting
   readyset?: ReadysetVerdict
 }): ResultNextStep {
   const rewrite = findTestedImprovement(testing)
@@ -321,19 +328,29 @@ function getNextStep({
     }
   }
 
+  // An index the planner actually picks up (hypopg) beats a guessed impact.
+  const verified = indexes
+    .map((candidate) => ({ candidate, verdict: findPlannerResult(indexTesting, candidate) }))
+    .filter((entry) => entry.verdict?.planner_used_index)
+    .sort(
+      (a, b) => (b.verdict?.cost_reduction_pct ?? 0) - (a.verdict?.cost_reduction_pct ?? 0)
+    )[0]
   const index =
+    verified?.candidate ??
     indexes.find((candidate) => candidate.estimated_impact === 'high') ??
     indexes[0]
   if (index) {
+    const plannerVerdict = verified?.verdict ?? findPlannerResult(indexTesting, index)
     return {
       kind: 'index',
-      evidence: 'Suggested',
+      evidence: plannerVerdict?.planner_used_index ? 'Planner-verified' : 'Suggested',
       tone: 'informative',
       title: `Add an index on ${index.table}`,
       body: index.rationale,
       supportingText: `${index.estimated_impact.charAt(0).toUpperCase()}${index.estimated_impact.slice(1)} expected impact`,
       sql: index.sql,
       caveats: index.caveats ?? [],
+      plannerVerdict,
     }
   }
 
@@ -402,6 +419,7 @@ export function selectResultsViewModel(
     ? getReadysetVerdict(cacheability)
     : undefined
   const indexRecommendations = modelAnalysis?.index_recommendations ?? []
+  const indexTesting = results.index_testing ?? formatted?.index_testing ?? undefined
   const hasModelAnalysis =
     modelAnalysis?.success !== false &&
     Boolean(
@@ -417,11 +435,13 @@ export function selectResultsViewModel(
     cacheability,
     readysetVerdict,
     indexRecommendations,
+    indexTesting,
     additionalRecommendations: modelAnalysis?.optimization_opportunities ?? [],
     hasModelAnalysis,
     nextStep: getNextStep({
       testing,
       indexes: indexRecommendations,
+      indexTesting,
       readyset: readysetVerdict,
     }),
   }

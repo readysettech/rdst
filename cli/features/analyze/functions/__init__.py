@@ -6,6 +6,7 @@ from .parallel_merge import merge_parallel_analysis_results
 from .query_metrics import collect_query_metrics
 from .shallow_analysis import analyze_shallow_with_llm
 from .rewrite_testing import test_query_rewrites
+from .index_testing import test_index_recommendations
 from features.cache.readyset_cacheability import check_readyset_cacheability
 from features.cache.readyset_workflow_functions import (
     DATABASE_SETUP_FUNCTIONS,
@@ -30,6 +31,7 @@ ANALYZE_WORKFLOW_FUNCTIONS = {
     "analyze_with_llm": analyze_with_llm,
     "extract_rewrites": extract_rewrites,
     "test_query_rewrites": test_query_rewrites,
+    "test_index_recommendations": test_index_recommendations,
     "check_readyset_cacheability": check_readyset_cacheability,
     "store_analysis_results": store_analysis_results,
     "format_analysis_output": format_analysis_output,

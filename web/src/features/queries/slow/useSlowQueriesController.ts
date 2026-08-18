@@ -59,6 +59,7 @@ export function useSlowQueriesController({
   )
 
   const [parameterQuery, setParameterQuery] = useState<string | null>(null)
+  const [parameterQueryHash, setParameterQueryHash] = useState<string | null>(null)
   const [parameterValues, setParameterValues] = useState<
     Record<string, unknown> | undefined
   >(undefined)
@@ -187,6 +188,7 @@ export function useSlowQueriesController({
       const storedParams = registryParamsByHash.get(query.query_hash)
       if (hasParameters(query.query_text)) {
         setParameterQuery(query.query_text)
+        setParameterQueryHash(query.query_hash ?? null)
         setParameterValues(storedParams)
         return
       }
@@ -205,6 +207,7 @@ export function useSlowQueriesController({
 
   const closeParameterDialog = useCallback(() => {
     setParameterQuery(null)
+    setParameterQueryHash(null)
     setParameterValues(undefined)
   }, [])
 
@@ -312,6 +315,7 @@ export function useSlowQueriesController({
     },
     parameterDialog: {
       query: parameterQuery,
+      queryHash: parameterQueryHash,
       initialValues: parameterValues,
       close: closeParameterDialog,
       submit: handleParameterSubmit,

@@ -17,6 +17,8 @@ export type OptimizationOpportunity =
 export type LLMAnalysis = apiComponents['schemas']['LLMAnalysis']
 export type TestedRewrite = apiComponents['schemas']['TestedRewrite']
 export type RewriteTesting = apiComponents['schemas']['RewriteTesting']
+export type IndexTesting = apiComponents['schemas']['IndexTesting']
+export type IndexPlannerResult = apiComponents['schemas']['IndexPlannerResult']
 export type ReadysetCacheability =
   apiComponents['schemas']['ReadysetCacheability']
 
@@ -127,6 +129,30 @@ export async function fetchSchema(target?: string): Promise<SchemaResponse> {
     params: { query: { target: target ?? null } },
   })
   throwIfApiError(response, error, 'Failed to fetch schema')
+  if (!data) throw new Error('Missing response body')
+  return data
+}
+
+export type ParameterSuggestionsResponse =
+  apiComponents['schemas']['ParameterSuggestionsResponse']
+export type ParameterSuggestion = apiComponents['schemas']['ParameterSuggestion']
+export type ParameterValueSuggestion =
+  apiComponents['schemas']['ParameterValueSuggestion']
+
+/**
+ * Real values for a templated query's placeholders (captured statement
+ * instance, sampled column values), each with a provenance label.
+ */
+export async function fetchParameterSuggestions(
+  query: string,
+  target: string,
+  queryHash?: string | null
+): Promise<ParameterSuggestionsResponse> {
+  const { data, error, response } = await typedClient.POST(
+    '/api/analyze/parameter-suggestions',
+    { body: { query, target, query_hash: queryHash ?? null } }
+  )
+  throwIfApiError(response, error, 'Failed to fetch parameter suggestions')
   if (!data) throw new Error('Missing response body')
   return data
 }

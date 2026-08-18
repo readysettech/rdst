@@ -1,5 +1,5 @@
 import json
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
@@ -113,6 +113,7 @@ def _event_to_sse(event: AnalyzeEvent) -> dict:
                         "explain_results": event.explain_results,
                         "llm_analysis": event.llm_analysis,
                         "rewrite_testing": event.rewrite_testing,
+                        "index_testing": event.index_testing,
                         "readyset_cacheability": event.readyset_cacheability,
                         "formatted": event.formatted,
                     }
@@ -222,3 +223,51 @@ async def analyze_quick(
         model=request.model,
     )
     return EventSourceResponse(_quick_analyze_generator(input_data, options, guard.target_engine))
+
+
+class ParameterSuggestionsRequest(BaseModel):
+    query: str
+    target: Optional[str] = None
+    query_hash: Optional[str] = None
+
+
+class ParameterValueSuggestion(BaseModel):
+    value: str
+    provenance: str
+
+
+class ParameterSuggestion(BaseModel):
+    placeholder: str
+    index: int
+    column: Optional[str] = None
+    suggestions: list[ParameterValueSuggestion]
+
+
+class CapturedStatement(BaseModel):
+    sql: str
+    source: str
+    seen_at: Optional[str] = None
+    aligned: bool = False
+
+
+class ParameterSuggestionsResponse(BaseModel):
+    placeholders: list[ParameterSuggestion]
+    sample: Optional[CapturedStatement] = None
+
+
+@router.post("/analyze/parameter-suggestions", response_model=ParameterSuggestionsResponse)
+async def parameter_suggestions(
+    http_request: Request,
+    request: ParameterSuggestionsRequest,
+    guard: TargetGuard = Depends(require_target_body),
+):
+    """Real values for a templated query's placeholders, with provenance.
+
+    Sources: a captured statement instance (MySQL digest sample, or a
+    PostgreSQL 14+ query matched by query_id in pg_stat_activity) and values
+    sampled from the compared columns. Never invents values.
+    """
+    require_local_request(http_request)
+    return await AnalyzeService().suggest_parameter_values(
+        request.query, guard.target_name, guard.target_config, request.query_hash
+    )

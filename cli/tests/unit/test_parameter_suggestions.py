@@ -1,0 +1,68 @@
+"""Unit tests for sampled parameter value suggestions (pure parts)."""
+
+from features.analyze.parameter_suggestions import (
+    align_sample_values,
+    bind_placeholders_to_columns,
+    enumerate_placeholders,
+    suggest_parameter_values,
+)
+
+
+def test_enumerate_placeholders_uses_desktop_keys():
+    keys = [p["key"] for p in enumerate_placeholders("SELECT * FROM t WHERE a = $1 AND b = ? AND c = :p1 AND d = $1")]
+    assert keys == ["$1", "?1", ":p1"]
+
+
+def test_question_marks_inside_strings_are_not_placeholders():
+    keys = [p["key"] for p in enumerate_placeholders("SELECT * FROM t WHERE a = 'why?' AND b = ?")]
+    assert keys == ["?1"]
+
+
+def test_bind_placeholders_to_columns_resolves_aliases_and_shape():
+    sql = (
+        "SELECT o.* FROM orders o JOIN customers c ON c.id = o.customer_id "
+        "WHERE c.email = $1 AND o.total_cents BETWEEN $2 AND $3 AND o.id IN ($4) LIMIT $5 OFFSET $6"
+    )
+    bindings = bind_placeholders_to_columns(sql, "postgresql", enumerate_placeholders(sql))
+    assert bindings["$1"]["column"] == "customers.email"
+    assert bindings["$2"]["column"] == "orders.total_cents"
+    assert bindings["$3"]["column"] == "orders.total_cents"
+    assert bindings["$4"]["column"] == "orders.id"
+    assert bindings["$5"]["kind"] == "limit"
+    assert bindings["$6"]["kind"] == "offset"
+
+
+def test_mysql_question_marks_bind_in_textual_order():
+    sql = "SELECT * FROM `place` WHERE NAME ->> ? = ? LIMIT ?"
+    bindings = bind_placeholders_to_columns(sql, "mysql", enumerate_placeholders(sql))
+    # The first `?` is the JSON path operand, never a column value to sample.
+    assert bindings["?1"]["kind"] == "json_path"
+    assert bindings["?3"]["kind"] == "limit"
+
+
+def test_align_sample_values_by_literal_position():
+    template = enumerate_placeholders("SELECT * FROM `place` WHERE NAME ->> ? = ? LIMIT ?")
+    values = align_sample_values("SELECT * FROM place WHERE name->>'$.address.city' = 'Boston' LIMIT 5", template)
+    assert values == {"?1": "$.address.city", "?2": "Boston", "?3": "5"}
+
+
+def test_align_sample_values_rejects_mismatched_counts_and_bind_params():
+    template = enumerate_placeholders("SELECT * FROM t WHERE a = $1 AND b IN ($2, $3)")
+    assert align_sample_values("SELECT * FROM t WHERE a = 1 AND b IN (2, 3, 4)", template) is None
+    assert align_sample_values("SELECT * FROM t WHERE a = $1 AND b IN ($2, $3)", template) is None
+
+
+def test_suggest_parameter_values_without_connection_still_gives_shape_hints(monkeypatch):
+    import features.analyze.parameter_suggestions as mod
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("no db")
+
+    monkeypatch.setattr(mod, "_connect", boom)
+    result = suggest_parameter_values(
+        "SELECT * FROM orders WHERE status = $1 LIMIT $2", "t", {"engine": "postgresql"}
+    )
+    by_key = {p["placeholder"]: p for p in result["placeholders"]}
+    assert by_key["$1"]["column"] == "orders.status" and by_key["$1"]["suggestions"] == []
+    assert by_key["$2"]["suggestions"] == [{"value": "10", "provenance": "Query shape (LIMIT)"}]
+    assert result["sample"] is None

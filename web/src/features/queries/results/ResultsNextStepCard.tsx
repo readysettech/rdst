@@ -6,6 +6,7 @@ import { IconTile } from '@rs/ui-new/icon-tile'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
+import { PlannerVerdict } from '../../../components/analysis/AnalysisSections'
 import { SqlTokens } from '../../../components/SqlTokens'
 import { ResultSectionIndex } from './ResultSectionIndex'
 import { resultToneStyles } from './resultStyles'
@@ -137,6 +138,11 @@ export function ResultsNextStepCard({
         ) : (
           <NextStepEvidencePanel step={step} />
         )}
+        {step.kind === 'index' && step.plannerVerdict ? (
+          <div className="overflow-hidden rounded-xl border border-border-layout-1">
+            <PlannerVerdict result={step.plannerVerdict} />
+          </div>
+        ) : null}
       </Card.Content>
 
       <Card.Footer

@@ -8,6 +8,7 @@ import { Modal, ModalContentContainer } from '@rs/ui-new/modal'
 import * as ScrollArea from '@rs/ui-new/scroll'
 import { Text } from '@rs/ui-new/text'
 import { useEffect, useMemo, useState } from 'react'
+import type { ParameterSuggestion } from '../../lib/api'
 import {
   buildParameterSuggestions,
   fetchParameterSchema,
@@ -21,6 +22,7 @@ import {
   substituteParameters,
 } from '../../lib/sqlParameters'
 import { useFormatSql } from '../../lib/useFormatSql'
+import { useParameterSuggestions } from '../../lib/useParameterSuggestions'
 import { TaskDialogContent } from '../dialog/TaskDialogContent'
 import { ParameterSuggestionSummary } from '../ParameterSuggestionSummary'
 import {
@@ -38,8 +40,16 @@ interface ParameterDialogProps {
   query: string
   initialValues?: Record<string, unknown>
   target?: string | null
+  /** pg_stat_statements queryid or performance_schema digest, when known. */
+  queryHash?: string | null
   submitLabel?: string
   submitIcon?: 'speedometer' | 'play' | 'tick'
+}
+
+function sampledSuggestionKey(suggestion: ParameterSuggestion): string {
+  return suggestion.placeholder === '?'
+    ? `?${suggestion.index}`
+    : suggestion.placeholder
 }
 
 export function ParameterDialog({
@@ -49,10 +59,26 @@ export function ParameterDialog({
   query,
   initialValues,
   target,
+  queryHash,
   submitLabel = 'Analyze query',
   submitIcon = 'speedometer',
 }: ParameterDialogProps) {
   const parameters = useMemo(() => detectParameters(query), [query])
+  // Real values from the database (captured statement, sampled columns).
+  const { suggestions: sampled } = useParameterSuggestions(
+    isOpen ? query : null,
+    target,
+    queryHash,
+    isOpen
+  )
+  const sampledByKey = useMemo(
+    () =>
+      new Map(
+        (sampled?.placeholders ?? []).map((s) => [sampledSuggestionKey(s), s])
+      ),
+    [sampled]
+  )
+  const capturedSample = sampled?.sample ?? null
   const formattedQuery = useFormatSql(query)
   const displayQuery = formattedQuery ?? query
   const parameterHighlights = useMemo(
@@ -117,6 +143,14 @@ export function ParameterDialog({
     try {
       const schema = await fetchParameterSchema(target)
       const suggestions = buildParameterSuggestions(query, parameters, schema)
+      // Values the database already knows (captured statement, sampled
+      // column values) take precedence over schema-shape guesses.
+      sampledByKey.forEach((suggestion, key) => {
+        const best = suggestion.suggestions[0]
+        if (best) {
+          suggestions[key] = { value: best.value, provenance: best.provenance }
+        }
+      })
       const applicable = Object.entries(suggestions).filter(
         ([key]) => !values[key]?.trim()
       )
@@ -271,14 +305,80 @@ export function ParameterDialog({
                                 {provenance[key]}
                               </Text>
                             ) : null}
+                            {(() => {
+                              const suggestion = sampledByKey.get(key)
+                              if (!suggestion || suggestion.suggestions.length === 0)
+                                return null
+                              return (
+                                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                  {suggestion.suggestions.map((s) => (
+                                    <button
+                                      key={`${s.provenance}:${s.value}`}
+                                      type="button"
+                                      title={s.provenance}
+                                      onClick={() => {
+                                        handleValueChange(key, s.value)
+                                        setProvenance((current) => ({
+                                          ...current,
+                                          [key]: s.provenance,
+                                        }))
+                                      }}
+                                      className="max-w-full truncate rounded-md border border-border-layout-2 bg-surface-layout-1 px-2 py-0.5 font-mono text-xs text-content-layout-1 hover:border-border-primary-soft hover:bg-surface-primary-soft/40"
+                                    >
+                                      {s.value}
+                                    </button>
+                                  ))}
+                                  {suggestion.column ? (
+                                    <Text
+                                      as="span"
+                                      level="caption"
+                                      className="text-content-layout-3 truncate"
+                                    >
+                                      from {suggestion.column}
+                                    </Text>
+                                  ) : null}
+                                </div>
+                              )
+                            })()}
                           </div>
                         </div>
                       )
                     })}
+                    {capturedSample ? (
+                      <div className="space-y-2 rounded-lg border border-border-layout-1 bg-surface-layout-1 p-3">
+                        <Text level="body-small" className="text-content-layout-2">
+                          A real run of this query was captured (
+                          {capturedSample.source}
+                          {capturedSample.seen_at ? `, ${capturedSample.seen_at}` : ''}
+                          ).
+                        </Text>
+                        <SQLDisplay
+                          sql={capturedSample.sql}
+                          wrap
+                          className="max-h-32 overflow-auto rounded-md bg-surface-layout-2 p-2"
+                        />
+                        <Button
+                          variant="primary"
+                          modifier="ghost"
+                          size="small"
+                          label="Analyze captured statement"
+                          onClick={() => onSubmit(capturedSample.sql)}
+                        />
+                      </div>
+                    ) : null}
                     <Text level="body-small" className="text-content-layout-3">
                       Text values are quoted automatically. Numbers, NULL, TRUE,
                       and FALSE are used as entered.
                     </Text>
+                    {sampledByKey.size > 0 || capturedSample ? (
+                      <Text level="body-small" className="text-content-layout-3">
+                        EXPLAIN ANALYZE runs with the values you pick, and the plan
+                        can change a lot with them. Values seen in real traffic
+                        (observed values, a captured run) represent production
+                        best; the other suggestions are real rows from the table
+                        and may produce a very different plan.
+                      </Text>
+                    ) : null}
                     <ParameterSuggestionSummary
                       message={suggestionMessage}
                       schemaUnavailable={schemaUnavailable}

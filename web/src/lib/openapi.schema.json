@@ -1066,7 +1066,6 @@
         "type": "object"
       },
       "AnnotateCompleteEvent": {
-        "description": "Annotation process completed, possibly with individual table failures.",
         "properties": {
           "columns_annotated": {
             "title": "Columns Annotated",
@@ -1106,7 +1105,6 @@
         "type": "object"
       },
       "AnnotateErrorEvent": {
-        "description": "Annotation process encountered an error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -1126,7 +1124,6 @@
         "type": "object"
       },
       "AnnotateProgressEvent": {
-        "description": "Progress update during annotation.",
         "properties": {
           "message": {
             "title": "Message",
@@ -1190,7 +1187,6 @@
         "type": "object"
       },
       "AnnotateStartedEvent": {
-        "description": "Annotation process started.",
         "properties": {
           "completed_tables": {
             "default": 0,
@@ -1220,7 +1216,6 @@
         "type": "object"
       },
       "AnnotateTableCompleteEvent": {
-        "description": "A table has been annotated.",
         "properties": {
           "columns_annotated": {
             "title": "Columns Annotated",
@@ -1320,7 +1315,6 @@
         "type": "object"
       },
       "AskClarificationNeededEvent": {
-        "description": "Clarification needed from the user.",
         "properties": {
           "interpretations": {
             "items": {
@@ -1356,7 +1350,6 @@
         "type": "object"
       },
       "AskClarificationQuestion": {
-        "description": "A clarification question for the user.",
         "properties": {
           "id": {
             "title": "Id",
@@ -1383,7 +1376,6 @@
         "type": "object"
       },
       "AskErrorEvent": {
-        "description": "Ask encountered an error.",
         "properties": {
           "category": {
             "anyOf": [
@@ -1551,7 +1543,6 @@
         "type": "object"
       },
       "AskInterpretation": {
-        "description": "A possible interpretation of the user's question.",
         "properties": {
           "assumptions": {
             "items": {
@@ -1672,7 +1663,6 @@
         "type": "object"
       },
       "AskResultEvent": {
-        "description": "Ask completed with results.",
         "properties": {
           "columns": {
             "items": {
@@ -1746,7 +1736,6 @@
         "type": "object"
       },
       "AskSchemaLoadedEvent": {
-        "description": "Schema has been loaded.",
         "properties": {
           "source": {
             "title": "Source",
@@ -1784,7 +1773,6 @@
         "type": "object"
       },
       "AskSqlGeneratedEvent": {
-        "description": "SQL has been generated.",
         "properties": {
           "explanation": {
             "anyOf": [
@@ -1816,7 +1804,6 @@
         "type": "object"
       },
       "AskStatusEvent": {
-        "description": "Status update during ask execution.",
         "properties": {
           "message": {
             "title": "Message",
@@ -2844,7 +2831,6 @@
         ]
       },
       "BootstrapNeedsKeyEvent": {
-        "description": "The run reached the annotate gate without a usable Anthropic key.\n\nThe event name doubles as the run registry's gating signal: the run's\nstatus parks on needs_key until the next event arrives.",
         "properties": {
           "message": {
             "title": "Message",
@@ -2882,7 +2868,6 @@
         "type": "object"
       },
       "BootstrapStageEvent": {
-        "description": "Progress of one bootstrap stage.\n\nstatus is started | progress | done | failed | skipped. Child-service\nevents surface as status=\"progress\" with the child's payload in detail,\nso the stream stays one flat, typed union.",
         "properties": {
           "detail": {
             "anyOf": [
@@ -3094,7 +3079,6 @@
         "type": "object"
       },
       "CacheRunCompleteEvent": {
-        "description": "Performance comparison result (origin vs cache).",
         "properties": {
           "cache_iterations": {
             "anyOf": [
@@ -3268,6 +3252,40 @@
           "run_id"
         ],
         "title": "CacheTestRunStartResponse",
+        "type": "object"
+      },
+      "CapturedStatement": {
+        "properties": {
+          "aligned": {
+            "default": false,
+            "title": "Aligned",
+            "type": "boolean"
+          },
+          "seen_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seen At"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "sql": {
+            "title": "Sql",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sql",
+          "source"
+        ],
+        "title": "CapturedStatement",
         "type": "object"
       },
       "ChatCompleteEvent": {
@@ -3517,7 +3535,6 @@
         "type": "object"
       },
       "ChatToolResultEvent": {
-        "description": "Result of one tool execution.\n\nFor query_database, `data` carries sql/columns/rows/row_count/\nexecution_time_ms/truncated/query_hash/query_tag; for get_schema it\ncarries tables/source.",
         "properties": {
           "content": {
             "title": "Content",
@@ -3672,6 +3689,17 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/FormattedAnalysis"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "index_testing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IndexTesting"
               },
               {
                 "type": "null"
@@ -4129,7 +4157,6 @@
         "type": "object"
       },
       "ErrorEvent": {
-        "description": "Error event for service workflows.\n\n``code`` and ``detail`` mirror the shared HTTP error envelope\n(``shared.api.app._error_envelope``) so an SSE failure carries the same\n{code, message, detail} shape the client normalizes in ``lib/sse.ts``.\nBoth stay optional so existing producers that only set ``message`` keep\nworking; the client derives a code when one is absent.",
         "properties": {
           "code": {
             "anyOf": [
@@ -5454,6 +5481,17 @@
           "analysis_summary": {
             "$ref": "#/components/schemas/AnalysisSummary"
           },
+          "index_testing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IndexTesting"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "message": {
             "anyOf": [
               {
@@ -6176,6 +6214,124 @@
         "title": "ImportSshKeyResponse",
         "type": "object"
       },
+      "IndexPlannerResult": {
+        "additionalProperties": true,
+        "properties": {
+          "columns": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Columns"
+          },
+          "cost_after": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cost After"
+          },
+          "cost_before": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cost Before"
+          },
+          "cost_reduction_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cost Reduction Pct"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          },
+          "hypothetical_index": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hypothetical Index"
+          },
+          "index_sql": {
+            "title": "Index Sql",
+            "type": "string"
+          },
+          "planner_used_index": {
+            "title": "Planner Used Index",
+            "type": "boolean"
+          },
+          "scan_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scan Type"
+          },
+          "table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Table"
+          }
+        },
+        "required": [
+          "index_sql",
+          "planner_used_index"
+        ],
+        "title": "IndexPlannerResult",
+        "type": "object"
+      },
       "IndexRecommendation": {
         "additionalProperties": true,
         "properties": {
@@ -6236,6 +6392,107 @@
           "estimated_impact"
         ],
         "title": "IndexRecommendation",
+        "type": "object"
+      },
+      "IndexTesting": {
+        "additionalProperties": true,
+        "properties": {
+          "baseline_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Baseline Cost"
+          },
+          "install_sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Install Sql"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Message"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Method"
+          },
+          "results": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/IndexPlannerResult"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Results"
+          },
+          "skipped_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Skipped Reason"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Summary"
+          },
+          "tested": {
+            "title": "Tested",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tested"
+        ],
+        "title": "IndexTesting",
         "type": "object"
       },
       "InitCompleteResponse": {
@@ -6496,6 +6753,39 @@
         "title": "LLMAnalysis",
         "type": "object"
       },
+      "LatestAnalysisResponse": {
+        "description": "Latest stored analysis summary for one query hash, when any exists.",
+        "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueryAnalysisSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "found": {
+            "default": false,
+            "title": "Found",
+            "type": "boolean"
+          }
+        },
+        "title": "LatestAnalysisResponse",
+        "type": "object"
+      },
       "LlmInfo": {
         "additionalProperties": true,
         "properties": {
@@ -6711,6 +7001,122 @@
         "title": "OptimizationOpportunity",
         "type": "object"
       },
+      "ParameterSuggestion": {
+        "properties": {
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "placeholder": {
+            "title": "Placeholder",
+            "type": "string"
+          },
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/ParameterValueSuggestion"
+            },
+            "title": "Suggestions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "placeholder",
+          "index",
+          "suggestions"
+        ],
+        "title": "ParameterSuggestion",
+        "type": "object"
+      },
+      "ParameterSuggestionsRequest": {
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "query_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Hash"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "ParameterSuggestionsRequest",
+        "type": "object"
+      },
+      "ParameterSuggestionsResponse": {
+        "properties": {
+          "placeholders": {
+            "items": {
+              "$ref": "#/components/schemas/ParameterSuggestion"
+            },
+            "title": "Placeholders",
+            "type": "array"
+          },
+          "sample": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CapturedStatement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "placeholders"
+        ],
+        "title": "ParameterSuggestionsResponse",
+        "type": "object"
+      },
+      "ParameterValueSuggestion": {
+        "properties": {
+          "provenance": {
+            "title": "Provenance",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "provenance"
+        ],
+        "title": "ParameterValueSuggestion",
+        "type": "object"
+      },
       "PerformanceAssessment": {
         "additionalProperties": true,
         "properties": {
@@ -6780,7 +7186,6 @@
         "type": "object"
       },
       "ProgressEvent": {
-        "description": "Progress update during a multi-step operation.",
         "properties": {
           "message": {
             "title": "Message",
@@ -6822,8 +7227,47 @@
         "title": "ProviderTokenRequest",
         "type": "object"
       },
+      "QueryAnalysisSummary": {
+        "description": "Compact record of one stored analysis run for a query.",
+        "properties": {
+          "analysis_id": {
+            "title": "Analysis Id",
+            "type": "string"
+          },
+          "analyzed_at": {
+            "title": "Analyzed At",
+            "type": "string"
+          },
+          "efficiency_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Efficiency Score"
+          },
+          "overall_rating": {
+            "default": "",
+            "title": "Overall Rating",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "analysis_id",
+          "analyzed_at",
+          "target"
+        ],
+        "title": "QueryAnalysisSummary",
+        "type": "object"
+      },
       "QueryBenchmarkCompleteEvent": {
-        "description": "Benchmark finished; carries the final tally.",
         "properties": {
           "elapsed_seconds": {
             "title": "Elapsed Seconds",
@@ -6871,7 +7315,6 @@
         "type": "object"
       },
       "QueryBenchmarkErrorEvent": {
-        "description": "Benchmark failed (or was rejected by a safety rail) before completion.\n\nCarries the shared error envelope ({code, message, detail}, B7/T24) so the\nclient normalizes a benchmark failure exactly like every other SSE error.\n``message`` stays humane and safe to show; ``detail`` holds only the\nexception class name for correlation \u2014 never the raw ``str(e)``, which can\nembed host / DSN / SQL material.",
         "properties": {
           "code": {
             "anyOf": [
@@ -6928,7 +7371,6 @@
         ]
       },
       "QueryBenchmarkProgressEvent": {
-        "description": "Benchmark progress tick.",
         "properties": {
           "elapsed_seconds": {
             "title": "Elapsed Seconds",
@@ -6976,7 +7418,6 @@
         "type": "object"
       },
       "QueryBenchmarkStats": {
-        "description": "Statistics for a single benchmarked query.",
         "properties": {
           "avg_ms": {
             "title": "Avg Ms",
@@ -8141,7 +8582,6 @@
         "type": "object"
       },
       "RunEndEvent": {
-        "description": "Terminal event appended by the registry after every run.",
         "properties": {
           "status": {
             "title": "Status",
@@ -8322,7 +8762,6 @@
         "type": "object"
       },
       "ScanCompleteEvent": {
-        "description": "Scan completed.",
         "properties": {
           "success": {
             "title": "Success",
@@ -8348,7 +8787,6 @@
         "type": "object"
       },
       "ScanErrorEvent": {
-        "description": "Scan error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -8408,7 +8846,6 @@
         ]
       },
       "ScanFilesFoundEvent": {
-        "description": "Files with ORM patterns discovered.",
         "properties": {
           "files": {
             "items": {
@@ -8504,7 +8941,6 @@
         "type": "string"
       },
       "ScanProgressEvent": {
-        "description": "Progress update within a scan phase.",
         "properties": {
           "current": {
             "title": "Current",
@@ -8546,7 +8982,6 @@
         "type": "object"
       },
       "ScanQueryResultEvent": {
-        "description": "Individual query result from scan.",
         "properties": {
           "query": {
             "additionalProperties": true,
@@ -8567,7 +9002,6 @@
         "type": "object"
       },
       "ScanRegistryEvent": {
-        "description": "Registry save results.",
         "properties": {
           "new_queries": {
             "title": "New Queries",
@@ -8683,7 +9117,6 @@
         "type": "object"
       },
       "ScanStatusEvent": {
-        "description": "Status update during scan.",
         "properties": {
           "message": {
             "title": "Message",
@@ -10475,7 +10908,6 @@
         "type": "object"
       },
       "TopCompleteEvent": {
-        "description": "Operation completed.",
         "properties": {
           "newly_saved": {
             "title": "Newly Saved",
@@ -10513,7 +10945,6 @@
         "type": "object"
       },
       "TopConnectedEvent": {
-        "description": "Database connection established.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -10571,7 +11002,6 @@
         "type": "object"
       },
       "TopDbLimitWarningEvent": {
-        "description": "Database query size limit is below recommended threshold.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -10606,7 +11036,6 @@
         "type": "object"
       },
       "TopErrorEvent": {
-        "description": "Error occurred.\n\n``code`` and ``detail`` mirror the shared error envelope (B7/T24):\n``message`` stays humane, ``detail`` carries the exception class name for\ncorrelation \u2014 never the raw ``str(e)``, which can embed host/DSN material.",
         "properties": {
           "code": {
             "anyOf": [
@@ -10792,7 +11221,6 @@
         "type": "object"
       },
       "TopQueriesEvent": {
-        "description": "Batch of top queries.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -10854,7 +11282,6 @@
         "type": "object"
       },
       "TopQueryData": {
-        "description": "Individual query data.",
         "properties": {
           "avg_time": {
             "title": "Avg Time",
@@ -11033,7 +11460,6 @@
         "type": "object"
       },
       "TopQuerySavedEvent": {
-        "description": "Query saved to registry.",
         "properties": {
           "is_new": {
             "title": "Is New",
@@ -11058,7 +11484,6 @@
         "type": "object"
       },
       "TopSourceFallbackEvent": {
-        "description": "Source fallback occurred.",
         "properties": {
           "from_source": {
             "title": "From Source",
@@ -11088,7 +11513,6 @@
         "type": "object"
       },
       "TopStatusEvent": {
-        "description": "Progress status update.",
         "properties": {
           "message": {
             "title": "Message",
@@ -12548,6 +12972,45 @@
           }
         },
         "summary": "Analyze"
+      }
+    },
+    "/api/analyze/parameter-suggestions": {
+      "post": {
+        "description": "Real values for a templated query's placeholders, with provenance.\n\nSources: a captured statement instance (MySQL digest sample, or a\nPostgreSQL 14+ query matched by query_id in pg_stat_activity) and values\nsampled from the compared columns. Never invents values.",
+        "operationId": "parameter_suggestions_api_analyze_parameter_suggestions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParameterSuggestionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParameterSuggestionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Parameter Suggestions"
       }
     },
     "/api/analyze/quick": {
@@ -16962,6 +17425,46 @@
           }
         },
         "summary": "Remove Query From Registry"
+      }
+    },
+    "/api/query-registry/{query_hash}/analysis/latest": {
+      "get": {
+        "description": "Get the most recent stored analysis summary for a query.\n\nDetail-level companion to the library listing: the list rides only the\nlifecycle timestamps, and the expanded query detail fetches this compact\noutcome on demand.",
+        "operationId": "get_latest_query_analysis_api_query_registry__query_hash__analysis_latest_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "query_hash",
+            "required": true,
+            "schema": {
+              "title": "Query Hash",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LatestAnalysisResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Latest Query Analysis"
       }
     },
     "/api/query-registry/{query_hash}/reviewed": {

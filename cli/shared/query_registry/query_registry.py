@@ -188,6 +188,31 @@ def verify_query_completeness(
         return False, f"Failed to parse SQL: {e}"
 
 
+def dialect_for_target(target: Optional[str]) -> Optional[str]:
+    """Map a configured target's engine to a sqlglot dialect name.
+
+    Registry callers rarely know the dialect, but almost always know the
+    target. Parsing MySQL text with the generic dialect mangles engine
+    syntax such as `col->>'$.path'`, so resolve it from the target.
+    """
+    if not target:
+        return None
+    try:
+        from shared.config.targets import TargetsConfig
+
+        cfg = TargetsConfig()
+        cfg.load()
+        engine = (cfg.get(target) or {}).get("engine", "")
+    except Exception:
+        return None
+    engine = (engine or "").lower()
+    if engine in ("postgresql", "postgres"):
+        return "postgres"
+    if engine in ("mysql", "mariadb"):
+        return "mysql"
+    return None
+
+
 def normalize_sql(query: str, dialect: str = None) -> str:
     """
     Normalize SQL query for consistent hashing and parameterization.
@@ -1258,6 +1283,9 @@ class QueryRegistry:
                 f"({MAX_QUERY_LENGTH // 1024}KB)."
             )
 
+        if not dialect:
+            dialect = dialect_for_target(target)
+
         if not skip_param_extraction:
             # Only validate syntax for user-provided queries. Audit-captured
             # queries come directly from the database and are known-complete;
@@ -1638,7 +1666,7 @@ class QueryRegistry:
             # Interactive mode - prompt for missing values
             params = self._prompt_for_missing_params(params, sorted(missing))
 
-        return reconstruct_sql(entry.sql, params)
+        return reconstruct_sql(entry.sql, params, dialect_for_target(entry.last_target))
 
     def _prompt_for_missing_params(
         self, existing: Dict[str, dict], missing: list

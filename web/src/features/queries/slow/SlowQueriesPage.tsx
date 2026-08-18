@@ -47,6 +47,7 @@ export function SlowQueriesPage({
         onSubmit={parameterDialog.submit}
         query={parameterDialog.query ?? ''}
         target={target.name}
+        queryHash={parameterDialog.queryHash}
         initialValues={parameterDialog.initialValues}
       />
     </div>

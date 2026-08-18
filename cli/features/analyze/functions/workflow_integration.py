@@ -196,6 +196,7 @@ def format_analysis_output(**kwargs) -> Dict[str, Any]:
         rewrite_test_results = kwargs.get("rewrite_test_results")
         if isinstance(rewrite_test_results, str):
             rewrite_test_results = _ensure_dict(rewrite_test_results) or None
+        index_test_results = _ensure_dict(kwargs.get("index_test_results", {}))
         readyset_cacheability = _ensure_dict(kwargs.get("readyset_cacheability", {}))
         readyset_explain_cache = _ensure_dict(kwargs.get("readyset_explain_cache", {}))
         query_metrics = _ensure_dict(kwargs.get("query_metrics", {}))
@@ -255,6 +256,11 @@ def format_analysis_output(**kwargs) -> Dict[str, Any]:
         # Add rewrite test results if available
         if rewrite_test_results and rewrite_test_results.get("success"):
             output["rewrite_testing"] = _format_rewrite_testing(rewrite_test_results)
+
+        # Planner verification of index recommendations (hypopg). The result is
+        # already display-ready; only shape it to the payload contract.
+        if index_test_results:
+            output["index_testing"] = _format_index_testing(index_test_results)
 
         # Add success indicators
         output["success"] = True
@@ -488,6 +494,17 @@ def _format_readyset_cacheability(
         result["recommended_options"] = static_analysis.get("recommended_options", {})
 
     return result
+
+
+def _format_index_testing(index_test_results: Dict[str, Any]) -> Dict[str, Any]:
+    """Format hypopg index verification results for user display."""
+    keys = (
+        "tested", "skipped_reason", "message", "method", "install_sql",
+        "baseline_cost", "results", "summary",
+    )
+    formatted = {k: index_test_results.get(k) for k in keys if index_test_results.get(k) is not None}
+    formatted["tested"] = bool(index_test_results.get("tested"))
+    return formatted
 
 
 def _format_rewrite_testing(rewrite_test_results: Dict[str, Any]) -> Dict[str, Any]:

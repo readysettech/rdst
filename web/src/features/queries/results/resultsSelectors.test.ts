@@ -256,4 +256,58 @@ describe('getReadysetVerdict', () => {
       body: 'The query needs a compatibility change before Readyset can cache it.',
     })
   })
+
+  it('promotes the index the planner verified over a guessed high-impact one', () => {
+    const view = selectResultsViewModel(
+      completeEvent({
+        llm_analysis: {
+          success: true,
+          index_recommendations: [
+            {
+              sql: 'CREATE INDEX ON orders (channel)',
+              table: 'orders',
+              columns: ['channel'],
+              index_type: 'btree',
+              rationale: 'guess',
+              estimated_impact: 'high',
+            },
+            {
+              sql: 'CREATE INDEX ON orders (customer_id, status)',
+              table: 'orders',
+              columns: ['customer_id', 'status'],
+              index_type: 'btree',
+              rationale: 'filters',
+              estimated_impact: 'medium',
+            },
+          ],
+        },
+        index_testing: {
+          tested: true,
+          method: 'hypopg',
+          results: [
+            {
+              index_sql: 'CREATE INDEX ON orders (channel)',
+              planner_used_index: false,
+              cost_before: 49586,
+              cost_after: 49586,
+              cost_reduction_pct: 0,
+            },
+            {
+              index_sql: 'CREATE INDEX ON orders (customer_id, status)',
+              planner_used_index: true,
+              scan_type: 'Bitmap Index Scan',
+              cost_before: 49586,
+              cost_after: 35.8,
+              cost_reduction_pct: 99.9,
+            },
+          ],
+        },
+      })
+    )
+    expect(view.nextStep.kind).toBe('index')
+    if (view.nextStep.kind !== 'index') return
+    expect(view.nextStep.sql).toBe('CREATE INDEX ON orders (customer_id, status)')
+    expect(view.nextStep.evidence).toBe('Planner-verified')
+    expect(view.nextStep.plannerVerdict?.cost_reduction_pct).toBe(99.9)
+  })
 })

@@ -4,6 +4,7 @@ This service provides the core analysis logic extracted from the API and CLI,
 exposing an async generator interface that yields events during execution.
 """
 
+import json
 import asyncio
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, Optional, Tuple
@@ -35,6 +36,7 @@ STEP_PROGRESS: Dict[str, tuple[str, int, str]] = {
     "CollectDatabaseSchema": ("collecting_schema", 35, "Collecting schema context..."),
     "PerformLLMAnalysis": ("analyzing_llm", 50, "Analyzing with AI..."),
     "TestQueryRewrites": ("testing_rewrites", 70, "Testing query rewrites..."),
+    "TestIndexRecommendations": ("testing_indexes", 78, "Checking indexes with the planner..."),
     "CheckReadysetCacheability": (
         "checking_readyset",
         85,
@@ -54,6 +56,19 @@ def _serialize_for_json(obj: Any) -> Any:
     elif hasattr(obj, "__dict__") and not isinstance(obj, type):
         return str(obj)
     return obj
+
+
+def _coerce_dict(value: Any) -> Dict[str, Any]:
+    """Return workflow step output as a dict; the template engine may hand back JSON text."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip().startswith("{"):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except ValueError:
+            return {}
+    return {}
 
 
 def _normalize_rewrite_testing_results(rewrite_results: Any) -> Dict[str, Any]:
@@ -100,6 +115,20 @@ class AnalyzeService:
     def __init__(self) -> None:
         """Initialize the analyze service."""
         pass
+
+    async def suggest_parameter_values(
+        self,
+        sql: str,
+        target: str,
+        target_config: Optional[Dict[str, Any]] = None,
+        query_hash: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Real values for a templated query's placeholders, with provenance."""
+        from .parameter_suggestions import suggest_parameter_values
+
+        return await asyncio.to_thread(
+            suggest_parameter_values, sql, target, target_config, query_hash
+        )
 
     async def analyze(
         self,
@@ -651,6 +680,7 @@ class AnalyzeService:
             explain_results=_serialize_for_json(explain_results),
             llm_analysis=_serialize_for_json(context.get("llm_analysis", {})),
             rewrite_testing=_serialize_for_json(rewrite_results),
+            index_testing=_serialize_for_json(_coerce_dict(context.get("index_test_results"))),
             readyset_cacheability=_serialize_for_json(cacheability_payload),
             formatted=_serialize_for_json(formatted),
         )

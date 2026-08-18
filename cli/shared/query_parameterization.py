@@ -14,6 +14,8 @@ import hashlib
 from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
 
+from shared.sql_json_paths import mask_json_paths
+
 
 def normalize_for_registry(sql: str, **kwargs) -> Dict[str, Any]:
     """
@@ -115,6 +117,9 @@ def _normalize_sql_for_registry(sql: str) -> str:
     normalized = re.sub(r'--.*$', '', normalized, flags=re.MULTILINE)
     normalized = re.sub(r'/\*.*?\*/', '', normalized, flags=re.DOTALL)
 
+    # JSON paths (`col->>'$.a'`) are structure, not values; keep them verbatim.
+    normalized, restore_json_paths = mask_json_paths(normalized)
+
     # Normalize whitespace
     normalized = re.sub(r'\s+', ' ', normalized)
 
@@ -150,7 +155,7 @@ def _normalize_sql_for_registry(sql: str) -> str:
     for pattern, replacement, flags in keyword_patterns:
         normalized = re.sub(pattern, replacement, normalized, flags=flags)
 
-    return normalized.strip()
+    return restore_json_paths(normalized).strip()
 
 
 def _parameterize_for_llm_safety(sql: str) -> Tuple[str, List[Dict[str, str]]]:
@@ -168,6 +173,9 @@ def _parameterize_for_llm_safety(sql: str) -> Tuple[str, List[Dict[str, str]]]:
     parameterized = re.sub(r'/\*.*?\*/', '', parameterized, flags=re.DOTALL)
     if original_parameterized != parameterized:
         replacements.append({"type": "comments", "action": "removed", "reason": "potential_pii"})
+
+    # JSON paths (`col->>'$.a'`) are structure, not values; keep them verbatim.
+    parameterized, restore_json_paths = mask_json_paths(parameterized)
 
     # Replace string literals (most likely to contain PII)
     string_count = len(re.findall(r"'[^']*'", parameterized))
@@ -221,7 +229,7 @@ def _parameterize_for_llm_safety(sql: str) -> Tuple[str, List[Dict[str, str]]]:
 
     # Normalize whitespace
     parameterized = re.sub(r'\s+', ' ', parameterized)
-    parameterized = parameterized.strip()
+    parameterized = restore_json_paths(parameterized).strip()
 
     return parameterized, replacements
 

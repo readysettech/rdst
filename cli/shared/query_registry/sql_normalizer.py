@@ -8,11 +8,12 @@ correctly handling comments, nested queries, and edge cases.
 
 import re
 import logging
+from functools import lru_cache
 from itertools import count
 from typing import Tuple, Dict, Any, Optional, Set
 
 from sqlglot import parse_one, exp
-from sqlglot.generator import Generator as _BaseGenerator
+from sqlglot.dialects.dialect import Dialect
 
 logger = logging.getLogger(__name__)
 
@@ -22,17 +23,52 @@ logger = logging.getLogger(__name__)
 logging.getLogger("sqlglot").setLevel(logging.ERROR)
 
 
-class _ReadysetCompatGenerator(_BaseGenerator):
-    """Custom SQL generator that omits AS for table aliases.
+@lru_cache(maxsize=None)
+def _compat_generator_class(dialect: str):
+    """Build (once per dialect) a generator class that omits AS for table aliases.
 
-    sqlglot's default generator produces 'FROM table AS alias' but
-    Readyset's query ID hashing treats 'FROM table alias' (no AS) as
-    a different query. Since the wire protocol sends queries without AS,
-    we must generate SQL without AS to ensure cache ID consistency.
+    sqlglot's generators produce 'FROM table AS alias' but Readyset's query ID
+    hashing treats 'FROM table alias' (no AS) as a different query. Since the
+    wire protocol sends queries without AS, we generate without AS to keep cache
+    IDs consistent. Generating with the parse dialect keeps engine-specific
+    syntax such as MySQL's `->>` JSON operator intact.
     """
+    dialect_obj = Dialect.get_or_raise(dialect) if dialect else Dialect()
+    base_cls = type(dialect_obj.generator())
 
-    def table_sql(self, expression: exp.Table, sep: str = " ") -> str:
-        return super().table_sql(expression, sep=sep)
+    class _ReadysetCompatGenerator(base_cls):
+        def table_sql(self, expression: exp.Table, sep: str = " ") -> str:
+            return super().table_sql(expression, sep=sep)
+
+        def placeholder_sql(self, expression: exp.Placeholder) -> str:
+            # Registry placeholders are always :pN, whatever the dialect's native style.
+            return f":{expression.name}" if expression.this else "?"
+
+    return _ReadysetCompatGenerator, dialect_obj
+
+
+def _compat_generator(dialect: str = None):
+    generator_cls, dialect_obj = _compat_generator_class(dialect or "")
+    return generator_cls(dialect=dialect_obj)
+
+
+_JSON_PATH_PARENTS = tuple(
+    getattr(exp, name)
+    for name in ("JSONExtract", "JSONExtractScalar", "JSONBExtract", "JSONBExtractScalar")
+    if hasattr(exp, name)
+)
+
+
+def _is_json_path_literal(literal: exp.Literal) -> bool:
+    """JSON paths (`col->>'$.a'`, `col #>> '{a,b}'`, `JSON_VALUE(col, '$.a')`) name a
+    key inside the document. They are structure, not data, so they stay in the
+    normalized text instead of becoming parameters."""
+    if not literal.is_string:
+        return False
+    parent = literal.parent
+    if isinstance(parent, _JSON_PATH_PARENTS) and parent.expression is literal:
+        return True
+    return literal.this.startswith("$")
 
 
 _SYSTEM_SCHEMAS = {
@@ -162,7 +198,8 @@ def normalize_and_extract(sql: str, dialect: str = None) -> Tuple[str, Dict[str,
         return _fallback_normalize(sql)
 
     params = {}
-    for i, literal in enumerate(tree.find_all(exp.Literal), 1):
+    literals = [lit for lit in tree.find_all(exp.Literal) if not _is_json_path_literal(lit)]
+    for i, literal in enumerate(literals, 1):
         param_name = f"p{i}"
         # Store value with type info
         if literal.is_string:
@@ -172,7 +209,7 @@ def normalize_and_extract(sql: str, dialect: str = None) -> Tuple[str, Dict[str,
         # Replace with named :p1, :p2 placeholder
         literal.replace(exp.Placeholder(this=param_name))
 
-    return _ReadysetCompatGenerator().generate(tree), params
+    return _compat_generator(dialect).generate(tree), params
 
 
 def reconstruct_sql(normalized_sql: str, params: Dict[str, dict], dialect: str = None) -> str:
@@ -209,7 +246,7 @@ def reconstruct_sql(normalized_sql: str, params: Dict[str, dict], dialect: str =
                 replacement = exp.Literal.number(param_info['value'])
             placeholder.replace(replacement)
 
-    return _ReadysetCompatGenerator().generate(tree)
+    return _compat_generator(dialect).generate(tree)
 
 
 # Placeholder spellings that must hash alike: RDST's own `:pN`, positional

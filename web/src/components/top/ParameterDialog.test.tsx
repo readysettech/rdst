@@ -265,4 +265,57 @@ describe('ParameterDialog', () => {
     })
     expect(initLink.getAttribute('href')).toBe('/schema')
   })
+
+  it('offers sampled values from the database and a captured statement', async () => {
+    const suggestions = {
+      placeholders: [
+        {
+          placeholder: '$1',
+          index: 1,
+          column: 'orders.status',
+          suggestions: [
+            { value: 'shipped', provenance: 'Common value in orders.status (pg_stats)' },
+            { value: 'paid', provenance: 'Common value in orders.status (pg_stats)' },
+          ],
+        },
+      ],
+      sample: {
+        sql: "SELECT * FROM orders WHERE status = 'shipped'",
+        source: 'pg_stat_activity (running now)',
+        seen_at: null,
+        aligned: true,
+      },
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input)
+        if (url.includes('/api/analyze/parameter-suggestions')) {
+          return new Response(JSON.stringify(suggestions), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        return new Response('{}', { status: 404 })
+      })
+    )
+    render(
+      <ParameterDialog
+        isOpen
+        onClose={onClose}
+        onSubmit={onSubmit}
+        query="SELECT * FROM orders WHERE status = $1"
+        target="prod"
+        queryHash="123"
+      />
+    )
+    const chip = await screen.findByRole('button', { name: 'shipped' })
+    fireEvent.click(chip)
+    const input = screen.getByPlaceholderText('Enter value') as HTMLInputElement
+    expect(input.value).toBe('shipped')
+    expect(screen.getByText('Common value in orders.status (pg_stats)')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze captured statement' }))
+    expect(onSubmit).toHaveBeenCalledWith("SELECT * FROM orders WHERE status = 'shipped'")
+  })
 })

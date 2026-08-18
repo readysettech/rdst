@@ -106,7 +106,10 @@ export function ResultsSuccess({
       ) : null}
 
       {remainingIndexes.length > 0 ? (
-        <IndexRecommendationsSection recommendations={remainingIndexes} />
+        <IndexRecommendationsSection
+          recommendations={remainingIndexes}
+          indexTesting={view.indexTesting}
+        />
       ) : null}
 
       {view.additionalRecommendations &&

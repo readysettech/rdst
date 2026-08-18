@@ -1139,6 +1139,7 @@ class AnalyzeCommand:
                 "explain_results": last_event.explain_results or {},
                 "llm_analysis": last_event.llm_analysis or {},
                 "rewrite_test_results": last_event.rewrite_testing or {},
+                "index_test_results": last_event.index_testing or {},
                 "readyset_analysis": readyset_analysis,
                 "readyset_cacheability": last_event.readyset_cacheability or {},
                 "FormatFinalResults": formatted,

@@ -64,6 +64,14 @@ class FakeAnalyzeService(AnalyzeService):
         async for event in fixtures.events("analyze", ANALYZE_EVENT):
             yield event
 
+    async def suggest_parameter_values(
+        self, sql, target, target_config=None, query_hash=None
+    ):
+        del sql, target, target_config, query_hash
+        return fixtures.value(
+            "parameter_suggestions", default={"placeholders": [], "sample": None}
+        )
+
 
 class FakeAskService(AskService):
     async def ask(self, input, options):

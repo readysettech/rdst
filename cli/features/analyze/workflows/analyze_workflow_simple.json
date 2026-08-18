@@ -105,8 +105,21 @@
                 "baseline_result": "{{explain_results}}"
             },
             "ResultPath": "$.rewrite_test_results",
-            "Next": "CheckReadysetCacheability",
+            "Next": "TestIndexRecommendations",
             "TimeoutSeconds": 300
+        },
+        "TestIndexRecommendations": {
+            "Type": "Task",
+            "Resource": "test_index_recommendations",
+            "Parameters": {
+                "original_sql": "{{query}}",
+                "index_recommendations": "{{llm_analysis.index_recommendations}}",
+                "target": "{{target}}",
+                "target_config": "{{target_config}}"
+            },
+            "ResultPath": "$.index_test_results",
+            "Next": "CheckReadysetCacheability",
+            "TimeoutSeconds": 120
         },
         "CheckReadysetCacheability": {
             "Type": "Task",
@@ -130,7 +143,8 @@
                 "llm_analysis": "{{llm_analysis}}",
                 "rewrite_test_results": "{{rewrite_test_results}}",
                 "registry_normalization": "{{registry_normalization}}",
-                "llm_parameterization": "{{llm_parameterization}}"
+                "llm_parameterization": "{{llm_parameterization}}",
+                "index_test_results": "{{index_test_results}}"
             },
             "ResultPath": "$.storage_result",
             "Next": "FormatFinalResults"
@@ -148,7 +162,8 @@
                 "normalized_query": "{{registry_normalization.normalized_sql}}",
                 "target": "{{target}}",
                 "analysis_id": "{{storage_result.analysis_id}}",
-                "readyset_cacheability": "{{readyset_cacheability}}"
+                "readyset_cacheability": "{{readyset_cacheability}}",
+                "index_test_results": "{{index_test_results}}"
             },
             "End": true
         }

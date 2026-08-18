@@ -110,6 +110,30 @@ class RewriteTesting(_Base):
     best_rewrite: Optional[TestedRewrite] = None
 
 
+class IndexPlannerResult(_Base):
+    index_sql: str
+    table: Optional[str] = None
+    columns: Optional[list[str]] = None
+    planner_used_index: bool
+    hypothetical_index: Optional[str] = None
+    scan_type: Optional[str] = None
+    cost_before: Optional[float] = None
+    cost_after: Optional[float] = None
+    cost_reduction_pct: Optional[float] = None
+    error: Optional[str] = None
+
+
+class IndexTesting(_Base):
+    tested: bool
+    skipped_reason: Optional[str] = None
+    message: Optional[str] = None
+    method: Optional[str] = None
+    install_sql: Optional[str] = None
+    baseline_cost: Optional[float] = None
+    results: Optional[list[IndexPlannerResult]] = None
+    summary: Optional[str] = None
+
+
 class ReadysetCacheability(_Base):
     checked: bool
     cacheable: Optional[bool] = None
@@ -213,5 +237,6 @@ class FormattedAnalysis(_Base):
     optimization_insights: OptimizationInsights
     recommendations: Recommendations
     rewrite_testing: Optional[RewriteTesting] = None
+    index_testing: Optional[IndexTesting] = None
     readyset_cacheability: Optional[ReadysetCacheability] = None
     metadata: AnalysisMetadata

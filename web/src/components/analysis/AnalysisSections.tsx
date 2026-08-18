@@ -19,10 +19,13 @@ import { useId } from 'react'
 import type {
   CompleteEvent,
   ExplainResults,
+  IndexPlannerResult,
+  IndexTesting,
   ReadysetCacheability,
   RewriteTesting,
   TestedRewrite,
 } from '../../lib/api'
+import { findPlannerResult, plannerVerificationOff } from '../../lib/indexTesting'
 import { SQLDisplay } from '../SQLDisplay'
 
 // ---------------------------------------------------------------------------
@@ -732,14 +735,59 @@ export function TestedOptimizationsSection({
 // IndexRecommendationsSection — index SQL + rationale
 // ---------------------------------------------------------------------------
 
+function formatCost(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '?'
+  return Math.round(value).toLocaleString()
+}
+
+export function PlannerVerdict({ result }: { result: IndexPlannerResult }) {
+  if (result.error) {
+    return (
+      <HStack className="gap-2 items-center px-4 py-2.5 bg-surface-warning-soft/30 border-t border-border-warning-soft">
+        <Icon name="alert" label="Planner check" className="w-3.5 h-3.5 text-content-warning-soft" />
+        <Text level="body-small" className="text-content-layout-2">
+          hypopg check could not test this index: {result.error}
+        </Text>
+      </HStack>
+    )
+  }
+  if (result.planner_used_index) {
+    const pct = result.cost_reduction_pct
+    return (
+      <HStack className="gap-2 items-center px-4 py-2.5 bg-surface-positive-soft/30 border-t border-border-positive-soft">
+        <Icon name="tick" label="Planner check" className="w-3.5 h-3.5 text-content-positive-soft" />
+        <Text level="body-small" className="text-content-layout-2">
+          hypopg check: the planner uses this index ({result.scan_type}).
+          Estimated cost {formatCost(result.cost_before)} to{' '}
+          {formatCost(result.cost_after)}
+          {pct !== null && pct !== undefined ? ` (${pct}% lower)` : ''}. No index
+          was created.
+        </Text>
+      </HStack>
+    )
+  }
+  return (
+    <HStack className="gap-2 items-center px-4 py-2.5 bg-surface-warning-soft/30 border-t border-border-warning-soft">
+      <Icon name="alert" label="Planner check" className="w-3.5 h-3.5 text-content-warning-soft" />
+      <Text level="body-small" className="text-content-layout-2">
+        hypopg check: the planner would not use this index for this query. No
+        index was created.
+      </Text>
+    </HStack>
+  )
+}
+
 export function IndexRecommendationsSection({
   recommendations,
+  indexTesting,
 }: {
   recommendations: NonNullable<
     CompleteEvent['llm_analysis']
   >['index_recommendations']
+  indexTesting?: IndexTesting | null
 }) {
   if (!recommendations || recommendations.length === 0) return null
+  const hypopgMissing = plannerVerificationOff(indexTesting)
 
   return (
     <m.div
@@ -810,6 +858,10 @@ export function IndexRecommendationsSection({
                 showCopy
               />
             </div>
+            {(() => {
+              const verdict = findPlannerResult(indexTesting, index)
+              return verdict ? <PlannerVerdict result={verdict} /> : null
+            })()}
             {index.caveats && index.caveats.length > 0 && (
               <div className="p-4 bg-surface-warning-soft/30 border-t border-border-warning-soft">
                 <HStack className="gap-2 items-center mb-2">
@@ -839,6 +891,21 @@ export function IndexRecommendationsSection({
           </m.div>
         ))}
       </div>
+      {hypopgMissing && (
+        <div className="rounded-xl border border-border-layout-1 bg-surface-layout-1 p-4">
+          <HStack className="gap-2 items-start">
+            <Icon name="info" label="Planner check" className="w-4 h-4 text-content-info-soft mt-0.5" />
+            <VStack className="gap-2 items-start">
+              <Text level="body-small" className="text-content-layout-2">
+                hypopg check unavailable: {indexTesting?.message}
+              </Text>
+              {indexTesting?.install_sql && (
+                <SQLDisplay sql={indexTesting.install_sql} className="p-2 bg-surface-layout-2 rounded-lg" showCopy />
+              )}
+            </VStack>
+          </HStack>
+        </div>
+      )}
     </m.div>
   )
 }
