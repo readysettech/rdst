@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { collapseWhitespace } from '../../lib/collapseWhitespace'
 import { useFormatSql } from '../../lib/useFormatSql'
 import { SqlTokens } from '../SqlTokens'
 import type { QueryCardDialect } from './types'
@@ -18,6 +19,8 @@ interface QueryCardSqlProps {
   expandable: boolean
   /** Selectable cards expose one interaction only, so they omit Copy. */
   copyable: boolean
+  /** Compact one-line preview that truncates toward the card edge. */
+  truncateOneLine?: boolean
 }
 
 const QUERY_CARD_LINE_WIDTH = 80
@@ -28,6 +31,7 @@ export function QueryCardSql({
   initiallyExpanded = false,
   expandable,
   copyable,
+  truncateOneLine = false,
 }: QueryCardSqlProps) {
   // Formatting is presentation and applies to every query surface. Expansion
   // remains a separate interaction concern, disabled when the whole card is
@@ -64,7 +68,8 @@ export function QueryCardSql({
     }
   }, [displaySql, expandable, expanded])
 
-  const canToggle = expandable && (overflows || expanded)
+  const oneLineCollapsed = truncateOneLine && !expanded
+  const canToggle = expandable && (truncateOneLine || overflows || expanded)
 
   const toggle = () => {
     if (!canToggle || window.getSelection()?.toString()) return
@@ -100,27 +105,37 @@ export function QueryCardSql({
         ref={sqlRef}
         {...interactiveProps}
         className={cn(
-          'px-4 py-4 overflow-hidden focus-visible:outline-none focus-visible:shadow-focus',
+          'min-w-0 overflow-hidden px-4 py-4 focus-visible:outline-none focus-visible:shadow-focus',
           copyable && 'pr-14',
-          expandable && !expanded ? 'max-h-50' : 'max-h-none',
+          expandable && !expanded && !truncateOneLine
+            ? 'max-h-50'
+            : 'max-h-none',
           canToggle && 'cursor-pointer'
         )}
       >
-        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3">
-          <div
-            aria-hidden="true"
-            className="select-none border-r-(length:--border-base) border-r-border-layout-1 pr-3 text-right font-mono text-mono-large text-content-layout-3/50"
-          >
-            {Array.from({ length: lineCount }, (_, index) => (
-              <span className="block" key={index}>
-                {index + 1}
-              </span>
-            ))}
+        {oneLineCollapsed ? (
+          <SqlTokens
+            sql={collapseWhitespace(sql)}
+            title={sql}
+            className="truncate whitespace-nowrap text-mono-small"
+          />
+        ) : (
+          <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3">
+            <div
+              aria-hidden="true"
+              className="select-none border-r-(length:--border-base) border-r-border-layout-1 pr-3 text-right font-mono text-mono-large text-content-layout-3/50"
+            >
+              {Array.from({ length: lineCount }, (_, index) => (
+                <span className="block" key={index}>
+                  {index + 1}
+                </span>
+              ))}
+            </div>
+            <SqlTokens sql={displaySql} title={sql} />
           </div>
-          <SqlTokens sql={displaySql} title={sql} />
-        </div>
+        )}
       </div>
-      {expandable && overflows && !expanded ? (
+      {expandable && overflows && !expanded && !truncateOneLine ? (
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-surface-layout-2/50 to-transparent"

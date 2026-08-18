@@ -13,6 +13,10 @@ vi.mock('./useCompareController', () => ({
   useCompareController: vi.fn(),
 }))
 
+vi.mock('@tanstack/react-router', async () => ({
+  Link: (await import('@/test-utils')).LinkStub,
+}))
+
 const RESULT: CacheCompareRunResult = {
   success: true,
   query: 'SELECT 1',
@@ -90,6 +94,7 @@ function controller(overrides: Record<string, unknown> = {}) {
     updateParameter: vi.fn(),
     suggestingParameters: false,
     suggestionMessage: null,
+    suggestionSchemaUnavailable: false,
     suggestParameterValues: vi.fn(),
     parameterCount: 0,
     missingParameterCount: 0,
@@ -215,6 +220,133 @@ describe('ComparePage state matrix', () => {
 
     expect(screen.getByText('Compare cache performance')).toBeTruthy()
     expect(screen.getByTitle(query.sql)).toBeTruthy()
+  })
+
+  it('annotates prior not-cacheable evidence without gating selection', () => {
+    const queries = [
+      {
+        hash: 'blocked',
+        tag: 'Complex report',
+        sql: 'SELECT DISTINCT ON (id) * FROM reports',
+        readyset_supported: 'unsupported: unsupported query',
+        readyset_last_observed_at: new Date(
+          Date.now() - 5 * 60_000
+        ).toISOString(),
+      },
+      {
+        hash: 'unknown',
+        tag: 'Top posts',
+        sql: 'SELECT * FROM posts',
+        readyset_supported: '',
+      },
+    ]
+    vi.mocked(useCompareController).mockReturnValue(controller({ queries }))
+    renderPage()
+
+    expect(screen.getByText('Last check: not cacheable (5m ago)')).toBeTruthy()
+    expect(screen.getAllByText(/Last check/)).toHaveLength(1)
+    const selectionControls = screen
+      .getAllByRole('button')
+      .filter((button) => button.hasAttribute('aria-pressed'))
+    expect(selectionControls).toHaveLength(2)
+    expect(
+      selectionControls.every(
+        (control) => control.getAttribute('aria-disabled') !== 'true'
+      )
+    ).toBe(true)
+  })
+
+  it('reveals the full SQL beside the parameter inputs of a selected query', () => {
+    const query = {
+      hash: 'one',
+      tag: 'Users by status',
+      sql: 'SELECT id, email\nFROM users\nWHERE status = :status',
+    }
+    vi.mocked(useCompareController).mockReturnValue(
+      controller({
+        queries: [query],
+        selectedIds: ['one'],
+        selectedWithParams: [
+          {
+            entry: query,
+            parameters: [{ placeholder: ':status', index: 1, type: 'named' }],
+          },
+        ],
+        parameterCount: 1,
+        missingParameterCount: 1,
+      })
+    )
+    renderPage()
+
+    // getByTitle collapses attribute whitespace before matching.
+    const code = screen.getByTitle(
+      'SELECT id, email FROM users WHERE status = :status'
+    )
+    expect(code.textContent).toContain('\nFROM users')
+    expect(code.textContent).toContain('WHERE status = :status')
+    expect(code.className).not.toContain('truncate')
+    expect(
+      screen.getByPlaceholderText('Enter a representative value')
+    ).toBeTruthy()
+  })
+
+  it('counts parameters from normalized SQL when original SQL contains literals', () => {
+    const query = {
+      hash: 'normalized-parameter',
+      tag: 'User by id',
+      sql: 'SELECT * FROM users WHERE id = :p1',
+      original_sql: 'SELECT * FROM users WHERE id = 42',
+    }
+    vi.mocked(useCompareController).mockReturnValue(
+      controller({ queries: [query] })
+    )
+    renderPage()
+
+    expect(screen.getByText('1 parameter')).toBeTruthy()
+  })
+
+  it('places Suggest values under the Parameter readiness summary row', () => {
+    const query = {
+      hash: 'one',
+      tag: 'Users by status',
+      sql: 'SELECT id FROM users WHERE status = :status',
+    }
+    vi.mocked(useCompareController).mockReturnValue(
+      controller({
+        queries: [query],
+        selectedIds: ['one'],
+        parameterCount: 1,
+        missingParameterCount: 1,
+      })
+    )
+    renderPage()
+
+    const readiness = screen.getByText('Parameter readiness')
+    const suggest = screen.getByRole('button', { name: 'Suggest values' })
+    expect(
+      readiness.compareDocumentPosition(suggest) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it('points a schema-unavailable suggestion pass at the Schema page', () => {
+    vi.mocked(useCompareController).mockReturnValue(
+      controller({
+        queries: [
+          { hash: 'one', tag: 'Top posts', sql: 'SELECT * FROM posts' },
+        ],
+        parameterCount: 1,
+        suggestionMessage:
+          'No schema evidence is available for this database. 1 parameter needs a value you provide.',
+        suggestionSchemaUnavailable: true,
+      })
+    )
+    renderPage()
+
+    const initLink = screen.getByRole('link', {
+      name: 'Initialize the semantic layer',
+    })
+    expect(initLink.getAttribute('href')).toBe('/schema')
   })
 
   it('renders the single-card setup when queries are available', () => {

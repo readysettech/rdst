@@ -8,7 +8,10 @@ import {
   useBackgroundRuns,
 } from '../../../lib/backgroundRuns'
 import { formatDbTime, queryImpactMs } from '../../../lib/queryImpact'
-import { useQueryRegistry } from '../../../lib/useQueryRegistry'
+import {
+  type QueryRegistryEntry,
+  useQueryRegistry,
+} from '../../../lib/useQueryRegistry'
 import type { AddQueryMode } from './AddQueryDialog'
 import {
   concreteSqlForTest,
@@ -16,20 +19,36 @@ import {
   selectSavedQueries,
 } from './savedQuerySelectors'
 
+/**
+ * Externally fetched registry rows (the Query Library read model). List state
+ * replaces the controller's own fetch; mutations still come from the registry.
+ */
+export type QueryRegistryListSource = {
+  queries: QueryRegistryEntry[]
+  total: number
+  isLoading: boolean
+  isFetching: boolean
+  listError: string | null
+  refetch: () => Promise<unknown>
+}
+
 export function useSavedQueriesController({
   deepLinkHash,
   deepLinkRunId,
   onQueryAdded,
   onDeepLinkConsumed,
+  list,
 }: {
   deepLinkHash?: string
   deepLinkRunId?: string
   onQueryAdded?: (hash?: string | null) => void
   onDeepLinkConsumed?: (hash: string) => void
+  list?: QueryRegistryListSource
 }) {
   const navigate = useNavigate()
   const { target } = useTarget()
-  const registry = useQueryRegistry(150, target)
+  const ownRegistry = useQueryRegistry(150, target, { enabled: !list })
+  const registry = list ? { ...ownRegistry, ...list } : ownRegistry
   const {
     queries,
     total,
@@ -132,21 +151,32 @@ export function useSavedQueriesController({
     setHighlightedHash(deepLinkHash ?? null)
     if (!deepLinkHash) return
     setExpandedHash(deepLinkHash)
+  }, [deepLinkHash])
+
+  const deepLinkAvailable = Boolean(
+    deepLinkHash && queries.some((query) => query.hash === deepLinkHash)
+  )
+
+  useEffect(() => {
+    if (!deepLinkHash || !deepLinkAvailable) return
+
+    // The exact-hash read model may resolve after the first page rendered.
+    // Review and consume the link only once that query is actually present;
+    // a slow request must never lose its reveal to a wall-clock timeout.
     markReviewedRef.current(deepLinkHash)
 
     let scrollTimer: ReturnType<typeof setTimeout> | null = null
     let clearTimer: ReturnType<typeof setTimeout> | null = null
-    const startedAt = Date.now()
     const reveal = () => {
       const linkedCard = Array.from(
         document.querySelectorAll<HTMLElement>('[data-query-hash]')
       ).find((element) => element.dataset.queryHash === deepLinkHash)
-      if (!linkedCard && Date.now() - startedAt < 2_000) {
+      if (!linkedCard) {
         scrollTimer = setTimeout(reveal, 100)
         return
       }
 
-      linkedCard?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      linkedCard.scrollIntoView({ behavior: 'smooth', block: 'center' })
       clearTimer = setTimeout(() => {
         setHighlightedHash(null)
         onDeepLinkConsumedRef.current?.(deepLinkHash)
@@ -158,7 +188,7 @@ export function useSavedQueriesController({
       if (scrollTimer) clearTimeout(scrollTimer)
       if (clearTimer) clearTimeout(clearTimer)
     }
-  }, [deepLinkHash])
+  }, [deepLinkAvailable, deepLinkHash])
 
   const cacheTestRuns = useMemo(
     () =>
@@ -206,6 +236,10 @@ export function useSavedQueriesController({
     [cacheTestRuns, deepLinkRunId, target]
   )
 
+  // The comparison attaches inline on the expanded card via background runs.
+  // Starting one must leave the library's URL-owned state (view, search,
+  // deep-link params) untouched so the visible list never changes underneath
+  // the user.
   const runConcreteTest = useCallback(
     (hash: string, sql: string) => {
       if (!target) return
@@ -235,14 +269,9 @@ export function useSavedQueriesController({
             'Readyset will use a temporary cache and remove it after the test.',
           variant: 'positive',
         })
-        void navigate({
-          to: '/queries',
-          search: { view: 'saved', hash, run: runId },
-          replace: true,
-        })
       })
     },
-    [navigate, queries, target]
+    [queries, target]
   )
 
   const runTest = useCallback(
@@ -339,6 +368,10 @@ export function useSavedQueriesController({
             setHighlightedHash((current) =>
               current === hash ? (result.hash as string) : current
             )
+            // A pending add-query deep link narrows the read model to this
+            // exact hash. The rewrite retires that hash, so release the link
+            // or the list narrows to a query that no longer exists.
+            onDeepLinkConsumedRef.current?.(hash)
           }
           setEditingSqlHash(null)
           setSqlDraft('')

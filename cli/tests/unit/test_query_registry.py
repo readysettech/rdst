@@ -6,13 +6,17 @@ Tests the query registry functionality including normalization, hashing, and TOM
 
 import pytest
 import tempfile
+import toml
+from datetime import datetime, timezone
 from pathlib import Path
 
 from shared.query_registry.query_registry import (
     normalize_sql,
     hash_sql,
+    extract_observed_params,
     extract_parameters_from_sql,
     reconstruct_query_with_params,
+    registry_sqlite_enabled,
     verify_query_completeness,
     QueryEntry,
     QueryRegistry,
@@ -146,6 +150,36 @@ class TestHashSql:
         sql_without_comments = "SELECT * FROM users WHERE id = 123"
 
         assert hash_sql(sql_with_comments) == hash_sql(sql_without_comments)
+
+    def test_placeholder_styles_share_one_hash(self):
+        """$N, anonymous ?, :pN, and literal-bearing texts hash alike."""
+        variants = [
+            "SELECT a FROM t WHERE b = $1 LIMIT $2",
+            "SELECT a FROM t WHERE b = ? LIMIT ?",
+            "SELECT a FROM t WHERE b = :p1 LIMIT :p2",
+            "SELECT a FROM t WHERE b = 1 LIMIT 5",
+        ]
+        hashes = {hash_sql(sql) for sql in variants}
+        assert len(hashes) == 1
+
+    def test_placeholder_position_still_distinguishes_structure(self):
+        assert hash_sql("SELECT a FROM t WHERE b = $1") != hash_sql(
+            "SELECT a FROM t WHERE c = $1"
+        )
+
+    def test_string_literal_question_mark_does_not_add_a_slot(self):
+        assert hash_sql("SELECT * FROM t WHERE name = 'who?'") == hash_sql(
+            "SELECT * FROM t WHERE name = 'other'"
+        )
+
+    def test_postgres_json_operator_does_not_become_a_slot(self):
+        with_operator = "SELECT * FROM t WHERE tags ?| ARRAY['a'] LIMIT 5"
+        without_operator = "SELECT * FROM t WHERE tags = ARRAY['a'] LIMIT 5"
+        assert hash_sql(with_operator) != hash_sql(without_operator)
+        # Stable across literal values, so the ?| text keeps one identity.
+        assert hash_sql(with_operator) == hash_sql(
+            "SELECT * FROM t WHERE tags ?| ARRAY['b'] LIMIT 9"
+        )
 
 
 class TestExtractParametersFromSql:
@@ -506,6 +540,232 @@ class TestQueryRegistryLifecycle:
         assert registry.get_query(query_hash).lifecycle_for("analytics") is None
 
 
+class TestBatchPersistence:
+    def _make_registry(self, tmp_path: Path) -> QueryRegistry:
+        registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+        registry.load()
+        return registry
+
+    def _count_saves(self, monkeypatch) -> list:
+        saves: list[int] = []
+        original_save = QueryRegistry.save
+
+        def counting_save(registry):
+            saves.append(1)
+            original_save(registry)
+
+        monkeypatch.setattr(QueryRegistry, "save", counting_save)
+        return saves
+
+    def test_defer_save_persists_once_for_many_adds(self, tmp_path, monkeypatch):
+        registry = self._make_registry(tmp_path)
+        saves = self._count_saves(monkeypatch)
+
+        with registry.defer_save():
+            for table in ("users", "orders", "items"):
+                registry.add_query(
+                    f"SELECT * FROM {table}",
+                    source="top-historical",
+                    target="demo",
+                    observed=True,
+                    save_intent=False,
+                )
+
+        assert saves == [1]
+        reloaded = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+        reloaded.load()
+        assert len(reloaded.list_queries()) == 3
+
+    def test_defer_save_without_mutations_writes_nothing(self, tmp_path, monkeypatch):
+        registry = self._make_registry(tmp_path)
+        saves = self._count_saves(monkeypatch)
+
+        with registry.defer_save():
+            pass
+
+        assert saves == []
+        assert not (tmp_path / "queries.toml").exists()
+        assert not (tmp_path / "library.db").exists()
+
+    def test_add_query_alone_still_saves_immediately(self, tmp_path, monkeypatch):
+        registry = self._make_registry(tmp_path)
+        saves = self._count_saves(monkeypatch)
+
+        registry.add_query("SELECT * FROM users", source="manual", target="demo")
+
+        assert saves == [1]
+        assert (tmp_path / "library.db").exists()
+
+    def test_batch_matches_sequential_adds(self, tmp_path, monkeypatch):
+        class FrozenDatetime:
+            @staticmethod
+            def now(tz=None):
+                return datetime(2026, 8, 10, 10, 0, 0, tzinfo=timezone.utc)
+
+        monkeypatch.setattr(
+            "shared.query_registry.query_registry.datetime", FrozenDatetime
+        )
+        items = [
+            {
+                "sql": f"SELECT * FROM t{i} WHERE id = {i}",
+                "source": "top-historical",
+                "target": "demo",
+                "observed": True,
+                "save_intent": False,
+            }
+            for i in range(3)
+        ]
+
+        sequential = QueryRegistry(registry_path=str(tmp_path / "sequential.toml"))
+        for item in items:
+            sequential.add_query(**item)
+
+        batched = QueryRegistry(registry_path=str(tmp_path / "batched.toml"))
+        results = batched.add_queries_batch(items)
+
+        assert [is_new for _, is_new in results] == [True, True, True]
+        sequential.export_toml_projection()
+        batched.export_toml_projection()
+        assert toml.load(tmp_path / "batched.toml") == toml.load(
+            tmp_path / "sequential.toml"
+        )
+
+
+class TestRegistrySqliteFlag:
+    """RDST_REGISTRY_SQLITE gates the SQLite backend at construction time."""
+
+    def test_unset_env_defaults_to_enabled(self, monkeypatch):
+        monkeypatch.delenv("RDST_REGISTRY_SQLITE", raising=False)
+        assert registry_sqlite_enabled() is True
+
+    def test_disabling_values_are_trimmed_and_case_insensitive(self):
+        for value in ("0", "false", "FALSE", " False ", "\t0\n"):
+            assert registry_sqlite_enabled(value) is False, value
+
+    def test_other_values_keep_sqlite_enabled(self):
+        for value in ("", "1", "true", "yes", "no", "off"):
+            assert registry_sqlite_enabled(value) is True, value
+
+    def test_env_flag_selects_toml_backend(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("RDST_REGISTRY_SQLITE", "false")
+        registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+
+        registry.add_query("SELECT * FROM users", source="manual", target="demo")
+
+        assert (tmp_path / "queries.toml").exists()
+        assert not (tmp_path / "library.db").exists()
+
+    def test_constructor_override_beats_env(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("RDST_REGISTRY_SQLITE", "0")
+        registry = QueryRegistry(
+            registry_path=str(tmp_path / "queries.toml"), use_sqlite=True
+        )
+
+        registry.add_query("SELECT * FROM users", source="manual", target="demo")
+
+        assert (tmp_path / "library.db").exists()
+
+
+class TestTomlBackendMode:
+    """With SQLite disabled, queries.toml stays the authoritative store."""
+
+    def _registry(self, tmp_path: Path) -> QueryRegistry:
+        return QueryRegistry(
+            registry_path=str(tmp_path / "queries.toml"), use_sqlite=False
+        )
+
+    def _count_toml_writes(self, monkeypatch) -> list:
+        import shared.persistence as persistence
+
+        writes: list[str] = []
+        original_write = persistence._write_toml
+
+        def counting_write(path, data):
+            writes.append(path.name)
+            original_write(path, data)
+
+        monkeypatch.setattr(persistence, "_write_toml", counting_write)
+        return writes
+
+    def test_round_trip_without_sqlite_side_effects(self, tmp_path):
+        registry = self._registry(tmp_path)
+        query_hash, is_new = registry.add_query(
+            "SELECT * FROM users WHERE id = 42", tag="user_lookup"
+        )
+        assert is_new is True
+        assert query_hash in toml.load(tmp_path / "queries.toml")["queries"]
+
+        reloaded = self._registry(tmp_path)
+        entry = reloaded.get_query(query_hash)
+        assert entry is not None
+        assert entry.tag == "user_lookup"
+        assert len(reloaded.list_queries()) == 1
+
+        assert reloaded.remove_query(query_hash) is True
+        assert toml.load(tmp_path / "queries.toml")["queries"] == {}
+
+        file_names = {path.name for path in tmp_path.iterdir()}
+        assert "library.db" not in file_names
+        assert "queries.toml" in file_names
+
+    def test_save_goes_through_the_file_lock(self, tmp_path):
+        registry = self._registry(tmp_path)
+
+        registry.add_query("SELECT * FROM users", source="manual", target="demo")
+
+        assert (tmp_path / "queries.toml.lock").exists()
+
+    def test_existing_toml_loads_without_migration(self, tmp_path):
+        path = tmp_path / "queries.toml"
+        with open(path, "w", encoding="utf-8") as handle:
+            toml.dump(
+                {"queries": {"cccccccccccc": {"sql": "SELECT 1", "hash": "cccccccccccc"}}},
+                handle,
+            )
+
+        registry = self._registry(tmp_path)
+        registry.load()
+
+        assert registry.get_query("cccccccccccc") is not None
+        assert not (tmp_path / "library.db").exists()
+        assert not list(tmp_path.glob("*.bak"))
+
+    def test_defer_save_writes_toml_once_per_batch(self, tmp_path, monkeypatch):
+        registry = self._registry(tmp_path)
+        writes = self._count_toml_writes(monkeypatch)
+
+        with registry.defer_save():
+            for table in ("users", "orders", "items"):
+                registry.add_query(
+                    f"SELECT * FROM {table}", source="manual", target="demo"
+                )
+
+        assert writes == ["queries.toml"]
+        reloaded = self._registry(tmp_path)
+        assert len(reloaded.list_queries()) == 3
+
+    def test_add_queries_batch_writes_toml_once(self, tmp_path, monkeypatch):
+        registry = self._registry(tmp_path)
+        writes = self._count_toml_writes(monkeypatch)
+
+        results = registry.add_queries_batch(
+            [
+                {"sql": f"SELECT * FROM t{i} WHERE id = {i}", "target": "demo"}
+                for i in range(3)
+            ]
+        )
+
+        assert [is_new for _, is_new in results] == [True, True, True]
+        assert writes == ["queries.toml"]
+
+    def test_export_fails_with_clear_message(self, tmp_path):
+        registry = self._registry(tmp_path)
+        registry.add_query("SELECT * FROM users", source="manual", target="demo")
+
+        with pytest.raises(RuntimeError, match="SQLite registry is disabled"):
+            registry.export_toml_projection()
+
+
 class TestProceduralStatementRejection:
     """Procedural statements get a clear error, not a parse failure."""
 
@@ -587,6 +847,7 @@ class TestQueryRegistry:
 
         assert registry._queries == {}
         assert registry._loaded is True
+        assert list(temp_dir.iterdir()) == []
 
     def test_add_and_get_query(self, temp_dir):
         """Test adding and retrieving a query."""
@@ -1153,3 +1414,261 @@ class TestQueryRegistryUpdateReadysetIdentity:
     def test_find_by_readyset_query_id_empty_registry(self, tmp_path):
         reg = self._make_registry(tmp_path)
         assert reg.find_by_readyset_query_id("q_anything") is None
+
+
+DIGEST_TEXT = "SELECT * FROM `orders` WHERE `user_id` = ? AND `status` = ? LIMIT ?"
+SAMPLE_TEXT = "SELECT * FROM `orders` WHERE `user_id` = 42 AND `status` = 'open' LIMIT 10"
+
+
+class TestExtractObservedParams:
+    """Observed-value extraction from a literal-bearing sample of a statement
+    whose identity text carries engine-normalized '?' slots."""
+
+    def test_values_follow_textual_slot_order(self):
+        # normalize_and_extract names params in AST order (the LIMIT literal
+        # is visited before the WHERE literals); consumers resolve the k-th
+        # '?' as key 'pk', so the mapping must be re-ordered textually.
+        identity = normalize_sql(DIGEST_TEXT, "mysql")
+        params = extract_observed_params(SAMPLE_TEXT, identity, "mysql")
+        assert params == {
+            "p1": {"value": "42", "type": "number"},
+            "p2": {"value": "open", "type": "string"},
+            "p3": {"value": "10", "type": "number"},
+        }
+
+    def test_slot_count_mismatch_yields_no_values(self):
+        # A folded IN list or truncated sample must never misalign values.
+        assert (
+            extract_observed_params(
+                "SELECT * FROM t WHERE a = 1",
+                "SELECT * FROM t WHERE a = ? AND b = ?",
+            )
+            == {}
+        )
+
+    def test_sample_without_literals_yields_no_values(self):
+        assert (
+            extract_observed_params(
+                "SELECT * FROM t", "SELECT * FROM t WHERE a = ?"
+            )
+            == {}
+        )
+
+    def test_pg_dollar_slots_map_positionally(self):
+        # pg_stat_statements numbers $N by text position, so slot k is $k
+        # and values re-order textually exactly like '?' slots do.
+        assert extract_observed_params(
+            "SELECT id, name FROM users WHERE email = 'a@b.c' LIMIT 10",
+            "SELECT id, name FROM users WHERE email = $1 LIMIT $2",
+        ) == {
+            "p1": {"value": "a@b.c", "type": "string"},
+            "p2": {"value": "10", "type": "number"},
+        }
+
+    def test_repeated_dollar_slot_yields_no_values(self):
+        # A $N sequence that is not exactly 1..n cannot be mapped safely.
+        assert (
+            extract_observed_params(
+                "SELECT * FROM t WHERE a = 1 AND b = 1",
+                "SELECT * FROM t WHERE a = $1 AND b = $1",
+            )
+            == {}
+        )
+
+    def test_mixed_slot_styles_yield_no_values(self):
+        assert (
+            extract_observed_params(
+                "SELECT * FROM t WHERE a = 1 AND b = 2",
+                "SELECT * FROM t WHERE a = ? AND b = $1",
+            )
+            == {}
+        )
+
+
+class TestObservedParamsInAddQuery:
+    def _make_registry(self, tmp_path: Path) -> QueryRegistry:
+        return QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+
+    def test_sample_populates_observed_values(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        query_hash, is_new = registry.add_query(
+            sql=DIGEST_TEXT,
+            source="top-historical",
+            target="demo",
+            dialect="mysql",
+            observed=True,
+            save_intent=False,
+            observed_params_sql=SAMPLE_TEXT,
+        )
+        assert is_new
+        entry = registry.get_query(query_hash)
+        assert entry.most_recent_params == {"p1": "42", "p2": "open", "p3": "10"}
+        assert entry.parameters["p1"] == {"value": "42", "type": "number"}
+
+    def test_identity_ignores_the_sample(self, tmp_path):
+        # The hash must derive from the identity text alone. The sample of
+        # the same statement shares the identity by design (placeholder
+        # canonicalization), so a structurally different sample proves the
+        # identity does not follow observed_params_sql.
+        registry = self._make_registry(tmp_path)
+        other_sample = (
+            "SELECT * FROM `orders` WHERE `user_id` = 42 AND `status` = 'open'"
+            " AND `region` = 'eu' LIMIT 10"
+        )
+        with_sample, _ = registry.add_query(
+            sql=DIGEST_TEXT,
+            source="top-historical",
+            target="demo",
+            dialect="mysql",
+            observed_params_sql=other_sample,
+            save_intent=False,
+        )
+        assert with_sample == hash_sql(DIGEST_TEXT)
+        assert with_sample == hash_sql(SAMPLE_TEXT)
+        assert with_sample != hash_sql(other_sample)
+
+    def test_sql_literals_win_over_the_sample(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        query_hash, _ = registry.add_query(
+            sql="SELECT * FROM orders WHERE user_id = 7",
+            source="web",
+            target="demo",
+            observed_params_sql="SELECT * FROM orders WHERE user_id = 42",
+        )
+        entry = registry.get_query(query_hash)
+        assert entry.most_recent_params == {"p1": "7"}
+
+    def test_refresh_without_sample_keeps_observed_values(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        query_hash, _ = registry.add_query(
+            sql=DIGEST_TEXT,
+            source="top-historical",
+            target="demo",
+            dialect="mysql",
+            observed_params_sql=SAMPLE_TEXT,
+            save_intent=False,
+        )
+        registry.add_query(
+            sql=DIGEST_TEXT,
+            source="top-historical",
+            target="demo",
+            dialect="mysql",
+            save_intent=False,
+        )
+        entry = registry.get_query(query_hash)
+        assert entry.most_recent_params == {"p1": "42", "p2": "open", "p3": "10"}
+        assert entry.parameters["p2"] == {"value": "open", "type": "string"}
+
+    def test_newer_sample_refreshes_observed_values(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        query_hash, _ = registry.add_query(
+            sql=DIGEST_TEXT,
+            source="top-historical",
+            target="demo",
+            dialect="mysql",
+            observed_params_sql=SAMPLE_TEXT,
+            save_intent=False,
+        )
+        registry.add_query(
+            sql=DIGEST_TEXT,
+            source="top-historical",
+            target="demo",
+            dialect="mysql",
+            observed_params_sql=(
+                "SELECT * FROM `orders` WHERE `user_id` = 7"
+                " AND `status` = 'closed' LIMIT 5"
+            ),
+            save_intent=False,
+        )
+        entry = registry.get_query(query_hash)
+        assert entry.most_recent_params == {"p1": "7", "p2": "closed", "p3": "5"}
+
+
+class TestLiveCaptureObservedValues:
+    """Raw activity-lane statements carry literals; saving them must store
+    the values as observed parameters (the Parameter Assistant's first rung)."""
+
+    def test_explicit_save_of_raw_activity_text_stores_values(self, tmp_path):
+        registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+        query_hash, _ = registry.add_query(
+            sql="SELECT * FROM orders WHERE user_id = 42 AND status = 'open'",
+            source="top",
+            target="demo",
+            observed=True,
+        )
+        entry = registry.get_query(query_hash)
+        assert entry.most_recent_params == {"p1": "42", "p2": "open"}
+        assert entry.parameters == {
+            "p1": {"value": "42", "type": "number"},
+            "p2": {"value": "open", "type": "string"},
+        }
+
+    def test_resave_updates_observed_values(self, tmp_path):
+        registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+        query_hash, _ = registry.add_query(
+            sql="SELECT * FROM orders WHERE user_id = 42",
+            source="top",
+            target="demo",
+        )
+        resaved, _ = registry.add_query(
+            sql="SELECT * FROM orders WHERE user_id = 7",
+            source="top",
+            target="demo",
+        )
+        assert resaved == query_hash
+        assert registry.get_query(query_hash).most_recent_params == {"p1": "7"}
+
+
+class TestPlaceholderStyleIdentity:
+    """One logical query keeps one identity across placeholder styles.
+
+    Reproduces the T7B reviewer finding: an entry minted from
+    pg_stat_statements text (LIMIT $1) and a web test run of the same query
+    with a value (LIMIT 123, stored as LIMIT :p1) must land on one registry
+    entry with its lifecycle intact and the observed value captured.
+    """
+
+    OBSERVED_TEXT = (
+        "SELECT c.country, SUM(o.total) AS revenue FROM orders o "
+        "JOIN customers c ON c.id = o.customer_id "
+        "GROUP BY c.country ORDER BY revenue DESC LIMIT $1"
+    )
+    WEB_TEXT = (
+        "SELECT c.country, SUM(o.total) AS revenue FROM orders o "
+        "JOIN customers c ON c.id = o.customer_id "
+        "GROUP BY c.country ORDER BY revenue DESC LIMIT 123"
+    )
+
+    def test_engine_and_web_texts_share_one_hash(self):
+        assert hash_sql(self.OBSERVED_TEXT) == hash_sql(self.WEB_TEXT)
+        assert hash_sql(self.OBSERVED_TEXT) == hash_sql(
+            self.WEB_TEXT.replace("LIMIT 123", "LIMIT :p1")
+        )
+
+    def test_web_test_run_lands_on_the_observed_entry(self, tmp_path):
+        registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+        observed_hash, is_new = registry.add_query(
+            sql=self.OBSERVED_TEXT,
+            source="top-historical",
+            target="demo",
+            observed=True,
+            save_intent=False,
+        )
+        assert is_new is True
+
+        web_hash, web_is_new = registry.add_query(
+            sql=self.WEB_TEXT, source="web", target="demo"
+        )
+        assert web_hash == observed_hash
+        assert web_is_new is False
+        assert len(registry.list_queries()) == 1
+
+        entry = registry.get_query(observed_hash)
+        assert entry.most_recent_params == {"p1": "123"}
+        assert entry.parameters == {"p1": {"value": "123", "type": "number"}}
+        lifecycle = entry.lifecycle_for("demo")
+        assert lifecycle.first_observed_at
+        assert lifecycle.last_observed_at
+        assert lifecycle.saved_at
+        assert sorted(lifecycle.sources) == ["top-historical", "web"]
+        assert entry.is_new_for("demo") is True

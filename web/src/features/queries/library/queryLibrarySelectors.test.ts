@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { QueryRegistryEntry } from '../../../lib/useQueryRegistry'
 import {
   matchesActivityWindow,
+  normalizeQueryLibraryFacetCounts,
   selectQueryLibrary,
 } from './queryLibrarySelectors'
 
@@ -283,5 +284,35 @@ describe('selectQueryLibrary', () => {
     expect(deadEndSelection.queries).toHaveLength(0)
     expect(deadEndSelection.facetCounts.params.all).toBe(1)
     expect(deadEndSelection.facetCounts.source.manual).toBe(1)
+  })
+})
+
+describe('normalizeQueryLibraryFacetCounts', () => {
+  it('keeps server counts and fills missing values with zero', () => {
+    const counts = normalizeQueryLibraryFacetCounts({
+      view: { all: 240, new: 12 },
+      source: { observed: 200 },
+      params: {},
+      activity: { '24h': 31 },
+      impact: {},
+    })
+
+    expect(counts.view.all).toBe(240)
+    expect(counts.view.new).toBe(12)
+    expect(counts.view.cached).toBe(0)
+    expect(counts.source.observed).toBe(200)
+    expect(counts.source.scan).toBe(0)
+    expect(counts.activity['24h']).toBe(31)
+    expect(counts.impact['1h']).toBe(0)
+  })
+
+  it('returns a complete zeroed set before the first page arrives', () => {
+    const counts = normalizeQueryLibraryFacetCounts(null)
+
+    expect(counts.view.all).toBe(0)
+    expect(counts.source.all).toBe(0)
+    expect(counts.params.all).toBe(0)
+    expect(counts.activity.all).toBe(0)
+    expect(counts.impact.all).toBe(0)
   })
 })

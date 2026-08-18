@@ -1,6 +1,11 @@
 """Shared query registry package."""
 
-from .analysis_results import AnalysisResult, AnalysisResultsRegistry, create_analysis_result
+from .analysis_results import (
+    AnalysisResult,
+    AnalysisResultsRegistry,
+    create_analysis_result,
+    extract_performance_assessment,
+)
 from .conversation_registry import ConversationRegistry, InteractiveConversation
 from .query_registry import (
     QueryEntry,
@@ -28,6 +33,7 @@ __all__ = [
     "QueryRegistry",
     "create_analysis_result",
     "extract_parameters_from_sql",
+    "extract_performance_assessment",
     "generate_query_name",
     "get_placeholder_names",
     "hash_sql",

@@ -8,17 +8,22 @@ import {
   useState,
   useTransition,
 } from 'react'
+import { useTarget } from '../../../hooks/useTarget'
 import { useQueryDiscoverySnapshot } from '../../../lib/useQueryDiscovery'
+import { useQueryRegistryReadModel } from '../../../lib/useQueryRegistry'
 import { useSavedQueriesController } from '../saved/useSavedQueriesController'
 import {
   QUERY_LIBRARY_DEFAULT_DISPLAY_PROPERTIES,
   type QueryLibraryDisplayMode,
   type QueryLibraryDisplayProperty,
 } from './queryLibraryDisplay'
-import { selectQueryLibrary } from './queryLibrarySelectors'
+import {
+  isQueryLibraryFiltered,
+  normalizeQueryLibraryFacetCounts,
+  type QueryLibrarySelection,
+} from './queryLibrarySelectors'
 import {
   addedQuerySearchPatch,
-  newQueriesSearchPatch,
   type QueryLibrarySearch,
   resolvedQueryLibraryState,
 } from './queryLibraryState'
@@ -69,12 +74,6 @@ export function useQueryLibraryController({
     [updateSearch]
   )
 
-  const base = useSavedQueriesController({
-    deepLinkHash: search.hash,
-    deepLinkRunId: search.run,
-    onQueryAdded: (hash) => updateSearch(addedQuerySearchPatch(hash)),
-    onDeepLinkConsumed: search.run ? undefined : consumeTransientDeepLink,
-  })
   const state = useMemo(
     () => resolvedQueryLibraryState(optimisticSearch),
     [
@@ -88,7 +87,39 @@ export function useQueryLibraryController({
     ]
   )
   const deferredState = useDeferredValue(state)
-  const discovery = useQueryDiscoverySnapshot(base.target).data
+  const { target } = useTarget()
+  // Deep links must be able to reveal a query that is not in the currently
+  // loaded page. Temporarily narrow the server-side read model to the exact
+  // hash; once the link is consumed the user's normal text search resumes.
+  const readModelSearch =
+    optimisticSearch.hash?.trim() || deferredState.searchTerm
+  const readModel = useQueryRegistryReadModel(
+    {
+      search: readModelSearch,
+      view: deferredState.view,
+      source: deferredState.source,
+      params: deferredState.params,
+      activity: deferredState.activity,
+      impact: deferredState.impact,
+      sort: deferredState.sort,
+    },
+    target
+  )
+  const base = useSavedQueriesController({
+    deepLinkHash: search.hash,
+    deepLinkRunId: search.run,
+    onQueryAdded: (hash) => updateSearch(addedQuerySearchPatch(hash)),
+    onDeepLinkConsumed: search.run ? undefined : consumeTransientDeepLink,
+    list: {
+      queries: readModel.queries,
+      total: readModel.total,
+      isLoading: readModel.isLoading,
+      isFetching: readModel.isFetching,
+      listError: readModel.listError,
+      refetch: readModel.refetch,
+    },
+  })
+  const discovery = useQueryDiscoverySnapshot(target).data
   const [properties, setProperties] = useState<QueryLibraryDisplayProperty[]>(
     QUERY_LIBRARY_DEFAULT_DISPLAY_PROPERTIES
   )
@@ -97,29 +128,36 @@ export function useQueryLibraryController({
   const deferredDisplayMode = useDeferredValue(displayMode)
   const deferredProperties = useDeferredValue(properties)
 
-  const selection = useMemo(
-    () =>
-      selectQueryLibrary({
-        queries: base.registry.queries,
-        ...deferredState,
-        isCached: base.rowActions.isCached,
-      }),
-    [base.registry.queries, base.rowActions.isCached, deferredState]
-  )
+  // Filtering, sorting, and facet counts come from the read model; the client
+  // only presents the loaded rows.
+  const selection = useMemo<QueryLibrarySelection>(() => {
+    const facetCounts = normalizeQueryLibraryFacetCounts(readModel.facetCounts)
+    return {
+      queries: readModel.queries,
+      counts: facetCounts.view,
+      sourceCounts: facetCounts.source,
+      facetCounts,
+      isFiltered: isQueryLibraryFiltered(deferredState),
+    }
+  }, [deferredState, readModel.facetCounts, readModel.queries])
+  // Loading another page is an explicit list extension: the page count is part
+  // of the stable-list signature so appended rows render immediately.
   const signature = [
-    base.target ?? '',
+    target ?? '',
     deferredState.view,
-    deferredState.searchTerm,
+    readModelSearch,
     deferredState.source,
     deferredState.params,
     deferredState.activity,
     deferredState.impact,
     deferredState.sort,
+    String(readModel.pageCount),
   ].join('\u0000')
   const stableList = useStableQueryList({
     queries: selection.queries,
     signature,
     isLoading: base.registry.isLoading,
+    isPlaceholder: readModel.isPlaceholder,
     hashAliases: base.rowState.hashAliases,
     revealHash: search.hash,
   })
@@ -202,7 +240,12 @@ export function useQueryLibraryController({
       selection,
       ...stableList,
       newVisibleCount: newVisibleHashes.length,
+      total: readModel.total,
+      hasNextPage: readModel.hasNextPage,
+      isLoadingMore: readModel.isFetchingNextPage,
+      loadMore: () => void readModel.fetchNextPage(),
       discovery,
+      freshness: readModel.freshness,
       displayMode,
       renderDisplayMode: deferredDisplayMode,
       isPending:
@@ -253,10 +296,10 @@ export function useQueryLibraryController({
           sort: undefined,
         }),
       markAllReviewed: () => base.rowActions.markAllReviewed(newVisibleHashes),
-      revealPending: () => {
-        stableList.revealPending()
-        updateSearch(newQueriesSearchPatch())
-      },
+      // Pending rows were served by the active filter's read model, so
+      // adopting them in place always shows them; the user's filters,
+      // search, and sort stay untouched.
+      revealPending: stableList.revealPending,
     },
     addDialog: {
       ...base.addDialog,

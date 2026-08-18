@@ -55,6 +55,11 @@ const routeConfig: Record<string, RouteConfig> = {
   '/onboarding': { label: 'Get started', icon: 'querypilot' },
   '/dev-settings': { label: 'Dev settings', icon: 'adjustment-horizontal' },
   '/test': { label: 'Test', icon: 'adjustment-horizontal' },
+  '/lab/performance-cards': {
+    label: 'Performance cards lab',
+    icon: 'test-tube',
+    parent: '/cache',
+  },
 }
 
 interface HeaderProps {

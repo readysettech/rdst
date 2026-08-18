@@ -4,6 +4,7 @@ import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404 - subprocess re
 import time
 import statistics
 import threading
+from itertools import count
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, cast
 
@@ -111,13 +112,14 @@ def _open_persistent_connection(db_config: Dict[str, Any]):
         conn = pymysql.connect(
             host=normalized_host, port=port, user=user,
             password=password, database=database, connect_timeout=30,
-            autocommit=True,
+            autocommit=True, program_name="rdst/compare",
         )
     else:
         import psycopg2
         conn = psycopg2.connect(
             host=host, port=port, user=user,
             password=password, database=database, connect_timeout=30,
+            application_name="rdst/compare",
         )
         conn.autocommit = True
     return conn, engine
@@ -128,6 +130,8 @@ def _execute_on_connection(
     query: str,
     engine: str,
     controller: Optional[ComparisonController] = None,
+    on_execute: Optional[Any] = None,
+    on_complete: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Execute a query on an existing connection and measure query time only."""
     try:
@@ -135,8 +139,11 @@ def _execute_on_connection(
             controller.raise_if_cancelled()
         start = time.perf_counter()
         with conn.cursor() as cursor:
+            execution_token = on_execute() if on_execute else None
             cursor.execute(query)
             cursor.fetchall()
+            if on_complete and execution_token is not None:
+                on_complete(execution_token)
         end = time.perf_counter()
         if controller:
             controller.raise_if_cancelled()
@@ -158,10 +165,13 @@ def _run_concurrent_measurements(
     concurrency: int,
     duration_seconds: int | None,
     progress,
+    origin_progress,
+    origin_start,
     controller: ComparisonController | None,
 ) -> Dict[str, Any]:
     connections: list[Any] = []
     samples: list[tuple[int, float]] = []
+    warmups_executed = 0
     state_lock = threading.Lock()
     stop = threading.Event()
     deadline_expired = threading.Event()
@@ -198,18 +208,25 @@ def _run_concurrent_measurements(
             if deadline_expired.is_set():
                 break
             result = _execute_on_connection(
-                connections[0], query, engine, controller
+                connections[0],
+                query,
+                engine,
+                controller,
+                on_execute=origin_start if stage == "origin" else None,
+                on_complete=origin_progress if stage == "origin" else None,
             )
             if not result["success"]:
                 if deadline_expired.is_set():
                     break
                 return {
                     "success": False,
+                    "executions": warmups_executed,
                     "error": (
                         f"{label} warmup iteration {index + 1} failed: "
                         f"{result.get('error') or 'unknown error'}"
                     ),
                 }
+            warmups_executed += 1
             progress(f"{stage}_warmup", index + 1, warmup_iterations)
 
         def worker(connection: Any) -> None:
@@ -226,7 +243,12 @@ def _run_concurrent_measurements(
                     next_index += 1
 
                 result = _execute_on_connection(
-                    connection, query, engine, controller
+                    connection,
+                    query,
+                    engine,
+                    controller,
+                    on_execute=origin_start if stage == "origin" else None,
+                    on_complete=origin_progress if stage == "origin" else None,
                 )
                 if not result["success"]:
                     if deadline_expired.is_set():
@@ -262,15 +284,21 @@ def _run_concurrent_measurements(
             index, error = failure
             return {
                 "success": False,
+                "executions": warmups_executed + len(samples),
                 "error": f"{label} iteration {index + 1} failed: {error}",
             }
         if not samples:
             return {
                 "success": False,
+                "executions": warmups_executed,
                 "error": f"{label} completed no measured iterations",
             }
         samples.sort(key=lambda item: item[0])
-        return {"success": True, "times": [value for _, value in samples]}
+        return {
+            "success": True,
+            "times": [value for _, value in samples],
+            "executions": warmups_executed + len(samples),
+        }
     finally:
         if deadline_timer is not None:
             deadline_timer.cancel()
@@ -295,6 +323,8 @@ def run_comparison(
     duration_seconds: int | None = None,
     on_progress: Optional[Any] = None,
     controller: Optional[ComparisonController] = None,
+    on_origin_progress: Optional[Any] = None,
+    on_origin_start: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Run a headless performance comparison — no console output.
 
@@ -306,6 +336,10 @@ def run_comparison(
         concurrency: Number of concurrent persistent connections per side.
         duration_seconds: Per-side measurement deadline; count remains the cap.
         on_progress: Optional callable(stage, current, total) for progress updates.
+        on_origin_progress: Optional callable(token, completed_at, count) used for
+            incremental origin-execution attribution.
+        on_origin_start: Optional callable(token, started_at) invoked immediately
+            before an origin cursor.execute call.
 
     Suitable for service-layer / API use.
     """
@@ -371,10 +405,29 @@ def run_comparison(
             except Exception:
                 pass
 
+    origin_tokens = count(1)
+
+    def _origin_progress(token: int) -> None:
+        if on_origin_progress:
+            try:
+                on_origin_progress(token, time.time(), 1)
+            except Exception:
+                pass
+
+    def _origin_start() -> int:
+        token = next(origin_tokens)
+        if on_origin_start:
+            try:
+                on_origin_start(token, time.time())
+            except Exception:
+                pass
+        return token
+
     def _run_sequential_measurements(
         connection: Any, engine: str, label: str, stage: str
     ) -> Dict[str, Any]:
         times: List[float] = []
+        executed = 0
         interval_seconds = (interval_ms or 0) / 1000
         deadline = (
             time.perf_counter() + duration_seconds
@@ -398,18 +451,25 @@ def run_comparison(
                 if deadline_expired.is_set():
                     break
                 result = _execute_on_connection(
-                    connection, query, engine, controller
+                    connection,
+                    query,
+                    engine,
+                    controller,
+                    on_execute=_origin_start if stage == "origin" else None,
+                    on_complete=_origin_progress if stage == "origin" else None,
                 )
                 if not result["success"]:
                     if deadline_expired.is_set():
                         break
                     return {
                         "success": False,
+                        "executions": executed,
                         "error": (
                             f"{label} warmup iteration {index + 1} failed: "
                             f"{result.get('error') or 'unknown error'}"
                         ),
                     }
+                executed += 1
                 _progress(f"{stage}_warmup", index + 1, warmup_iterations)
 
             for index in range(iterations):
@@ -428,19 +488,26 @@ def run_comparison(
 
                 started = time.perf_counter()
                 result = _execute_on_connection(
-                    connection, query, engine, controller
+                    connection,
+                    query,
+                    engine,
+                    controller,
+                    on_execute=_origin_start if stage == "origin" else None,
+                    on_complete=_origin_progress if stage == "origin" else None,
                 )
                 if not result["success"]:
                     if deadline_expired.is_set():
                         break
                     return {
                         "success": False,
+                        "executions": executed,
                         "error": (
                             f"{label} iteration {index + 1} failed: "
                             f"{result.get('error') or 'unknown error'}"
                         ),
                     }
                 times.append(result["execution_time_ms"])
+                executed += 1
                 _progress(stage, len(times), iterations)
                 next_start = started + interval_seconds
         finally:
@@ -451,12 +518,14 @@ def run_comparison(
         if not times:
             return {
                 "success": False,
+                "executions": executed,
                 "error": f"{label} completed no measured iterations",
             }
-        return {"success": True, "times": times}
+        return {"success": True, "times": times, "executions": executed}
 
     origin_conn = None
     cache_conn = None
+    original_result: Dict[str, Any] | None = None
     try:
         if concurrency is not None:
             original_result = _run_concurrent_measurements(
@@ -469,6 +538,8 @@ def run_comparison(
                 concurrency=concurrency,
                 duration_seconds=duration_seconds,
                 progress=_progress,
+                origin_progress=_origin_progress,
+                origin_start=_origin_start,
                 controller=controller,
             )
             if not original_result["success"]:
@@ -483,10 +554,17 @@ def run_comparison(
                 concurrency=concurrency,
                 duration_seconds=duration_seconds,
                 progress=_progress,
+                origin_progress=_origin_progress,
+                origin_start=_origin_start,
                 controller=controller,
             )
             if not readyset_result["success"]:
-                return readyset_result
+                return {
+                    **readyset_result,
+                    "original": {
+                        "executions": original_result.get("executions")
+                    },
+                }
             original_times = original_result["times"]
             readyset_times = readyset_result["times"]
         else:
@@ -510,7 +588,12 @@ def run_comparison(
                 cache_conn, cache_engine, "Readyset", "cache"
             )
             if not readyset_result["success"]:
-                return readyset_result
+                return {
+                    **readyset_result,
+                    "original": {
+                        "executions": original_result.get("executions")
+                    },
+                }
             original_times = original_result["times"]
             readyset_times = readyset_result["times"]
 
@@ -539,6 +622,7 @@ def run_comparison(
                 "stats": original_stats,
                 "times": original_times,
                 "iterations": len(original_times),
+                "executions": original_result.get("executions"),
             },
             "readyset": {
                 "host": readyset_db_config.get("host"),
@@ -546,6 +630,7 @@ def run_comparison(
                 "stats": readyset_stats,
                 "times": readyset_times,
                 "iterations": len(readyset_times),
+                "executions": readyset_result.get("executions"),
             },
             "speedup": {
                 "mean": speedup,
@@ -557,9 +642,26 @@ def run_comparison(
             "winner": "readyset" if speedup > 1 else "original",
         }
     except ComparisonCancelled:
-        return {"success": False, "cancelled": True, "error": "Comparison cancelled"}
+        result: Dict[str, Any] = {
+            "success": False,
+            "cancelled": True,
+            "error": "Comparison cancelled",
+        }
+        if original_result and original_result.get("success"):
+            result["original"] = {
+                "executions": original_result.get("executions")
+            }
+        return result
     except Exception as e:
-        return {"success": False, "error": f"Performance comparison failed: {str(e)}"}
+        result = {
+            "success": False,
+            "error": f"Performance comparison failed: {str(e)}",
+        }
+        if original_result and original_result.get("success"):
+            result["original"] = {
+                "executions": original_result.get("executions")
+            }
+        return result
     finally:
         if origin_conn:
             if controller:
@@ -893,6 +995,7 @@ def _execute_postgres_query_psycopg2(
             password=password,
             database=database,
             connect_timeout=30,
+            application_name="rdst/compare",
         )
 
         try:
@@ -989,6 +1092,7 @@ def _execute_mysql_query_pymysql(
             password=password,
             database=database,
             connect_timeout=30,
+            program_name="rdst/compare",
         )
 
         try:

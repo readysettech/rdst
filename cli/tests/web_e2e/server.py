@@ -11,6 +11,14 @@ from __future__ import annotations
 
 import importlib
 import os
+import sqlite3
+
+# Run browser tests as if the packaged SQLite floor were satisfied, exactly
+# like tests/conftest.py does for unit tests: the development ``uv`` runtime
+# links an affected SQLite build and product code intentionally has no
+# unsafe-runtime bypass. Applied before any store module reads the version.
+sqlite3.sqlite_version_info = (3, 51, 3)
+sqlite3.sqlite_version = "3.51.3-test"
 
 from tests.web_e2e.fakes import (
     FakeAnalyzeService,

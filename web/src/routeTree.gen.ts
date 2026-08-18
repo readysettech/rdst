@@ -29,6 +29,7 @@ import { Route as AskRouteImport } from './routes/ask'
 import { Route as AnalyzeRouteImport } from './routes/analyze'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LabPerformanceCardsRouteImport } from './routes/lab.performance-cards'
 import { Route as LabQueriesVariantRouteImport } from './routes/lab.queries.$variant'
 import { Route as AuditRunsRunIdRouteImport } from './routes/audit_.runs.$runId'
 
@@ -132,6 +133,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LabPerformanceCardsRoute = LabPerformanceCardsRouteImport.update({
+  id: '/lab/performance-cards',
+  path: '/lab/performance-cards',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LabQueriesVariantRoute = LabQueriesVariantRouteImport.update({
   id: '/lab/queries/$variant',
   path: '/lab/queries/$variant',
@@ -164,6 +170,7 @@ export interface FileRoutesByFullPath {
   '/schema': typeof SchemaRoute
   '/test': typeof TestRoute
   '/top': typeof TopRoute
+  '/lab/performance-cards': typeof LabPerformanceCardsRoute
   '/audit/runs/$runId': typeof AuditRunsRunIdRoute
   '/lab/queries/$variant': typeof LabQueriesVariantRoute
 }
@@ -188,6 +195,7 @@ export interface FileRoutesByTo {
   '/schema': typeof SchemaRoute
   '/test': typeof TestRoute
   '/top': typeof TopRoute
+  '/lab/performance-cards': typeof LabPerformanceCardsRoute
   '/audit/runs/$runId': typeof AuditRunsRunIdRoute
   '/lab/queries/$variant': typeof LabQueriesVariantRoute
 }
@@ -213,6 +221,7 @@ export interface FileRoutesById {
   '/schema': typeof SchemaRoute
   '/test': typeof TestRoute
   '/top': typeof TopRoute
+  '/lab/performance-cards': typeof LabPerformanceCardsRoute
   '/audit_/runs/$runId': typeof AuditRunsRunIdRoute
   '/lab/queries/$variant': typeof LabQueriesVariantRoute
 }
@@ -239,6 +248,7 @@ export interface FileRouteTypes {
     | '/schema'
     | '/test'
     | '/top'
+    | '/lab/performance-cards'
     | '/audit/runs/$runId'
     | '/lab/queries/$variant'
   fileRoutesByTo: FileRoutesByTo
@@ -263,6 +273,7 @@ export interface FileRouteTypes {
     | '/schema'
     | '/test'
     | '/top'
+    | '/lab/performance-cards'
     | '/audit/runs/$runId'
     | '/lab/queries/$variant'
   id:
@@ -287,6 +298,7 @@ export interface FileRouteTypes {
     | '/schema'
     | '/test'
     | '/top'
+    | '/lab/performance-cards'
     | '/audit_/runs/$runId'
     | '/lab/queries/$variant'
   fileRoutesById: FileRoutesById
@@ -312,6 +324,7 @@ export interface RootRouteChildren {
   SchemaRoute: typeof SchemaRoute
   TestRoute: typeof TestRoute
   TopRoute: typeof TopRoute
+  LabPerformanceCardsRoute: typeof LabPerformanceCardsRoute
   AuditRunsRunIdRoute: typeof AuditRunsRunIdRoute
   LabQueriesVariantRoute: typeof LabQueriesVariantRoute
 }
@@ -458,6 +471,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/lab/performance-cards': {
+      id: '/lab/performance-cards'
+      path: '/lab/performance-cards'
+      fullPath: '/lab/performance-cards'
+      preLoaderRoute: typeof LabPerformanceCardsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/lab/queries/$variant': {
       id: '/lab/queries/$variant'
       path: '/lab/queries/$variant'
@@ -496,6 +516,7 @@ const rootRouteChildren: RootRouteChildren = {
   SchemaRoute: SchemaRoute,
   TestRoute: TestRoute,
   TopRoute: TopRoute,
+  LabPerformanceCardsRoute: LabPerformanceCardsRoute,
   AuditRunsRunIdRoute: AuditRunsRunIdRoute,
   LabQueriesVariantRoute: LabQueriesVariantRoute,
 }

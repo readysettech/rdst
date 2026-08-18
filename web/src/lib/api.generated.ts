@@ -2024,6 +2024,12 @@ export interface paths {
         /**
          * Get Query Registry
          * @description Get queries from the shared query registry, optionally scoped to a target.
+         *
+         *     Passing any Query Library read-model parameter (search, view, source,
+         *     params, activity, impact, sort, cursor) switches the response to
+         *     {queries, facet_counts, next_cursor, total, freshness}, computed over the
+         *     full target-scoped set with keyset pagination. Without them the legacy
+         *     limit/offset contract is unchanged.
          */
         get: operations["get_query_registry_api_query_registry_get"];
         put?: never;
@@ -5973,6 +5979,63 @@ export interface components {
             query_name: string;
             /** Successes */
             successes: number;
+        };
+        /**
+         * QueryLibraryFacetCounts
+         * @description Per-facet counts over the full filtered set, never a single page.
+         */
+        QueryLibraryFacetCounts: {
+            /** Activity */
+            activity: {
+                [key: string]: number;
+            };
+            /** Impact */
+            impact: {
+                [key: string]: number;
+            };
+            /** Params */
+            params: {
+                [key: string]: number;
+            };
+            /** Source */
+            source: {
+                [key: string]: number;
+            };
+            /** View */
+            view: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * QueryLibraryFreshness
+         * @description Collector state for the target, when the observation store has one.
+         */
+        QueryLibraryFreshness: {
+            /** Epoch Id */
+            epoch_id?: string | null;
+            /** Last Success At */
+            last_success_at?: string | null;
+            /**
+             * State
+             * @default
+             */
+            state?: string;
+        };
+        /**
+         * QueryLibraryResponse
+         * @description Read-model response for GET /api/query-registry library params.
+         */
+        QueryLibraryResponse: {
+            /** Error */
+            error?: string | null;
+            facet_counts: components["schemas"]["QueryLibraryFacetCounts"];
+            freshness?: components["schemas"]["QueryLibraryFreshness"] | null;
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /** Queries */
+            queries: components["schemas"]["QueryRegistryEntry"][];
+            /** Total */
+            total: number;
         };
         /** QueryPilotBody */
         QueryPilotBody: {
@@ -11101,6 +11164,14 @@ export interface operations {
                 limit?: number | null;
                 offset?: number;
                 target?: string | null;
+                search?: string | null;
+                view?: ("all" | "new" | "saved" | "high-impact" | "needs-analysis" | "ready-to-cache" | "cached") | null;
+                source?: ("all" | "observed" | "ask" | "manual" | "file" | "scan") | null;
+                params?: ("all" | "without-parameters" | "values-ready" | "values-needed") | null;
+                activity?: ("all" | "1m" | "1h" | "8h" | "24h" | "7d" | "30d") | null;
+                impact?: ("all" | "1m" | "10m" | "1h") | null;
+                sort?: ("highest-impact" | "recently-observed" | "newest" | "most-frequent" | "slowest-average" | "recently-analyzed") | null;
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -11114,7 +11185,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["QueryRegistryResponse"];
+                    "application/json": components["schemas"]["QueryLibraryResponse"] | components["schemas"]["QueryRegistryResponse"];
                 };
             };
             /** @description Validation Error */

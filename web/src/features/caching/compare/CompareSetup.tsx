@@ -4,12 +4,16 @@ import { ConfirmDialog } from '@rs/ui-new/confirm-dialog'
 import { IconTile } from '@rs/ui-new/icon-tile'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
+import { formatMeta, shortHash } from '../../../lib/formatters'
 import { queryDisplayName } from '../../../lib/queryIdentity'
+import { detectParameters } from '../../../lib/sqlParameters'
 import {
+  PerformanceCacheabilityNote,
+  PerformanceQueryCard,
   PerformanceQueryList,
   PerformanceQueryParameters,
-  PerformanceQueryRow,
 } from '../shared/PerformanceQueryList'
+import { SuggestValuesPanel } from '../shared/SuggestValuesPanel'
 import { CompareSummaryRow } from './compareUi'
 import {
   type CompareController,
@@ -59,34 +63,52 @@ function QuerySelector({ controller }: { controller: CompareController }) {
           const selection = controller.selectedWithParams.find(
             (item) => item.entry.hash === entry.hash
           )
+          const parameters =
+            selection?.parameters ?? detectParameters(entry.sql)
           return (
-            <PerformanceQueryRow
+            <PerformanceQueryCard
               key={entry.hash}
-              id={`compare-${entry.hash}`}
-              checked={selected}
+              queryHash={entry.hash}
+              selected={selected}
               disabled={disabled}
-              onCheckedChange={() => controller.toggleQuery(entry.hash)}
+              onSelect={() => controller.toggleQuery(entry.hash)}
               title={queryDisplayName(entry)}
               sql={entry.sql}
-            >
-              {selected && selection && selection.parameters.length > 0 && (
-                <PerformanceQueryParameters
-                  ownerId={entry.hash}
-                  inputPrefix="compare"
-                  parameters={selection.parameters}
-                  values={controller.paramValues}
-                  sources={controller.parameterSources}
-                  onValueChange={(parameter, value) =>
-                    controller.updateParameter(
-                      entry.hash,
-                      parameter.placeholder,
-                      parameter.index,
-                      value
-                    )
-                  }
-                />
-              )}
-            </PerformanceQueryRow>
+              parameterCount={parameters.length}
+              meta={
+                <>
+                  <Text level="caption" className="text-content-layout-3">
+                    {formatMeta([
+                      `hash ${shortHash(entry.hash)}`,
+                      entry.target || controller.target,
+                    ])}
+                  </Text>
+                  <PerformanceCacheabilityNote
+                    readysetSupported={entry.readyset_supported}
+                    checkedAt={entry.readyset_last_observed_at}
+                  />
+                </>
+              }
+              parameterContent={
+                selection && selection.parameters.length > 0 ? (
+                  <PerformanceQueryParameters
+                    ownerId={entry.hash}
+                    inputPrefix="compare"
+                    parameters={selection.parameters}
+                    values={controller.paramValues}
+                    sources={controller.parameterSources}
+                    onValueChange={(parameter, value) =>
+                      controller.updateParameter(
+                        entry.hash,
+                        parameter.placeholder,
+                        parameter.index,
+                        value
+                      )
+                    }
+                  />
+                ) : undefined
+              }
+            />
           )
         })}
       </PerformanceQueryList>
@@ -174,26 +196,14 @@ export function CompareSetup({
                   }
                 />
               </div>
-              {controller.parameterCount > 0 ? (
-                <VStack className="items-stretch gap-1">
-                  <Button
-                    size="small"
-                    variant="primary"
-                    modifier="outline"
-                    icon="sparkles"
-                    iconPosition="left"
-                    label="Suggest values"
-                    loading={controller.suggestingParameters}
-                    disabled={controller.missingParameterCount === 0}
-                    onClick={() => void controller.suggestParameterValues()}
-                  />
-                  {controller.suggestionMessage ? (
-                    <Text level="caption" className="text-content-layout-2">
-                      {controller.suggestionMessage}
-                    </Text>
-                  ) : null}
-                </VStack>
-              ) : null}
+              <SuggestValuesPanel
+                hasParameters={controller.parameterCount > 0}
+                suggesting={controller.suggestingParameters}
+                missingParameterCount={controller.missingParameterCount}
+                message={controller.suggestionMessage}
+                schemaUnavailable={controller.suggestionSchemaUnavailable}
+                onSuggest={() => void controller.suggestParameterValues()}
+              />
             </VStack>
           </div>
         </Card.Content>

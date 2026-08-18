@@ -103,12 +103,16 @@ class _LaneRunner:
         db_config: Dict[str, Any],
         controller: LiveComparisonController,
         measurements: queue.Queue,
+        on_execute: Optional[Callable[[], Any]] = None,
+        on_complete: Optional[Callable[[Any], None]] = None,
     ):
         self.name = name
         self.query = query
         self.db_config = db_config
         self.controller = controller
         self.measurements = measurements
+        self.on_execute = on_execute
+        self.on_complete = on_complete
         self.executor = ThreadPoolExecutor(
             max_workers=MAX_COMPARE_IN_FLIGHT_PER_LANE,
             thread_name_prefix=f"compare-{name}",
@@ -134,6 +138,8 @@ class _LaneRunner:
             self.query,
             engine,
             self.controller,
+            on_execute=self.on_execute,
+            on_complete=self.on_complete,
         )
 
     def submit(self) -> bool:
@@ -204,11 +210,42 @@ def run_live_comparison(
     duration_seconds: int,
     controller: LiveComparisonController,
     on_sample: Optional[Callable[[dict[str, Any]], None]] = None,
+    on_origin_progress: Optional[Callable[[int, float, int], None]] = None,
+    on_origin_start: Optional[Callable[[int, float], None]] = None,
 ) -> dict[str, Any]:
     """Execute an equal-concurrency comparison and return observed capacity."""
     measurements: queue.Queue = queue.Queue()
+
+    origin_token = 0
+    token_lock = threading.Lock()
+
+    def emit_origin_start() -> int:
+        nonlocal origin_token
+        with token_lock:
+            origin_token += 1
+            token = origin_token
+        if on_origin_start is not None:
+            try:
+                on_origin_start(token, time.time())
+            except Exception:
+                pass
+        return token
+
+    def emit_origin_complete(token: int) -> None:
+        if on_origin_progress is not None:
+            try:
+                on_origin_progress(token, time.time(), 1)
+            except Exception:
+                pass
+
     origin = _LaneRunner(
-        "origin", query, original_db_config, controller, measurements
+        "origin",
+        query,
+        original_db_config,
+        controller,
+        measurements,
+        on_execute=emit_origin_start,
+        on_complete=emit_origin_complete,
     )
     readyset = _LaneRunner(
         "readyset", query, readyset_db_config, controller, measurements

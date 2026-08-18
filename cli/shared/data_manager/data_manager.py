@@ -108,7 +108,8 @@ class ConnectionConfig:
                  tls: bool = False,
                  tls_verify: bool = False,
                  tls_ca: Optional[str] = None,
-                 hostaddr: Optional[str] = None):
+                 hostaddr: Optional[str] = None,
+                 application_name: Optional[str] = None):
         self.host = host
         self.port = port
         self.database = database
@@ -122,6 +123,7 @@ class ConnectionConfig:
         self.hostaddr = hostaddr
         self.connect_timeout = connect_timeout
         self.query_type = query_type
+        self.application_name = application_name
 
 class CommandSetData:
     def __init__(self, name: str, data_folder:str, schema: List[str] = None, global_logger=None):
@@ -613,6 +615,11 @@ class DataManager:
             # Mark that a connection attempt is being made
             self._connection_attempted[query_type] = True
             self.logger.debug(f"CONNECTION CONFIG: {connection_config}")
+            from shared.db_connection import resolve_application_name
+
+            application_name = resolve_application_name(
+                getattr(connection_config, "application_name", None)
+            )
             if connection_config.db_type == DMSDbType.MySql:
                 if query_type == DataManagerQueryType.READYSET:
                     self.logger.debug("READYSET: Initiating MySQL connection")
@@ -632,6 +639,7 @@ class DataManager:
                         "tls": connection_config.tls,
                         "tls_verify": connection_config.tls_verify,
                         "tls_ca": connection_config.tls_ca,
+                        "application_name": application_name,
                     },
                     connect_timeout=connection_config.connect_timeout,
                     autocommit=False,
@@ -664,6 +672,7 @@ class DataManager:
                             "sslmode": connection_config.ssl_mode,
                             "tls_verify": connection_config.tls_verify,
                             "tls_ca": connection_config.tls_ca,
+                            "application_name": application_name,
                         },
                         connect_timeout=connection_config.connect_timeout,
                     )

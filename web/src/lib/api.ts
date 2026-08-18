@@ -1,6 +1,6 @@
 import type { components as apiComponents } from './api.generated'
 import { api as typedClient } from './client'
-import { throwIfApiError, throwIfNotOk } from './httpError'
+import { extractDetail, throwIfApiError, throwIfNotOk } from './httpError'
 
 export type AnalyzeRequest = apiComponents['schemas']['AnalyzeRequest']
 
@@ -148,6 +148,125 @@ export async function fetchQueryRegistry(
   await throwIfNotOk(response, 'Failed to fetch registry')
   if (!data) throw new Error('Missing response body')
   return data
+}
+
+/**
+ * Facet counts computed server-side over the full target-scoped set. Each
+ * dimension applies every other dimension's filter but not its own. Keys are
+ * the Query Library filter values; the feature layer narrows them.
+ */
+export type QueryRegistryFacetCounts = {
+  view: Record<string, number>
+  source: Record<string, number>
+  params: Record<string, number>
+  activity: Record<string, number>
+  impact: Record<string, number>
+}
+
+export type QueryRegistryFreshness = {
+  state: string
+  last_success_at: string | null
+  epoch_id: string | null
+}
+
+export type QueryRegistryReadModelPage = {
+  queries: QueryRegistryEntry[]
+  facet_counts: QueryRegistryFacetCounts
+  next_cursor: string | null
+  total: number
+  freshness: QueryRegistryFreshness | null
+  error: string | null
+}
+
+export type QueryRegistryReadModelRequest = {
+  target?: string | null
+  search?: string
+  view: string
+  source: string
+  params: string
+  activity: string
+  impact: string
+  sort: string
+  limit: number
+  cursor?: string
+}
+
+/** The server no longer recognizes the page cursor; restart from page one. */
+export class QueryRegistryCursorError extends Error {
+  constructor() {
+    super('Query registry page cursor is no longer valid')
+    this.name = 'QueryRegistryCursorError'
+  }
+}
+
+/**
+ * Read-model mode of GET /api/query-registry: the server filters, sorts,
+ * counts facets over the full set, and pages by opaque cursor. Sending the
+ * filter params (even at their defaults) is what selects this mode over the
+ * legacy limit/offset mode. Untyped by the generated client until gen:api
+ * runs.
+ */
+export async function fetchQueryRegistryReadModel(
+  request: QueryRegistryReadModelRequest
+): Promise<QueryRegistryReadModelPage> {
+  const params = new URLSearchParams({
+    view: request.view,
+    source: request.source,
+    params: request.params,
+    activity: request.activity,
+    impact: request.impact,
+    sort: request.sort,
+    limit: String(request.limit),
+  })
+  if (request.target) params.set('target', request.target)
+  const search = request.search?.trim()
+  if (search) params.set('search', search)
+  if (request.cursor) params.set('cursor', request.cursor)
+
+  const response = await fetch(`/api/query-registry?${params}`)
+  if (response.status === 400) {
+    const body: unknown = await response.json().catch(() => null)
+    const detail = (body as { detail?: { code?: string } } | null)?.detail
+    if (
+      detail &&
+      typeof detail === 'object' &&
+      detail.code === 'cursor_invalid'
+    ) {
+      throw new QueryRegistryCursorError()
+    }
+    throw new Error(extractDetail(body) || 'Failed to fetch registry: 400')
+  }
+  await throwIfNotOk(response, 'Failed to fetch registry')
+  return response.json()
+}
+
+/** Compact record of one stored analysis run for a query. */
+export type QueryAnalysisSummary = {
+  analysis_id: string
+  analyzed_at: string
+  target: string
+  overall_rating: string
+  efficiency_score: number | null
+}
+
+export type LatestAnalysisResponse = {
+  found: boolean
+  analysis: QueryAnalysisSummary | null
+  error?: string | null
+}
+
+/**
+ * Latest stored analysis summary for one query hash. Untyped by the
+ * generated client until gen:api runs.
+ */
+export async function fetchLatestAnalysis(
+  hash: string
+): Promise<LatestAnalysisResponse> {
+  const response = await fetch(
+    `/api/query-registry/${encodeURIComponent(hash)}/analysis/latest`
+  )
+  await throwIfNotOk(response, 'Failed to fetch the latest analysis')
+  return response.json()
 }
 
 export async function addQueryToRegistry(

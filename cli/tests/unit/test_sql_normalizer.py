@@ -7,6 +7,7 @@ SQL parameterization using SQLGlot.
 
 import pytest
 from shared.query_registry.sql_normalizer import (
+    canonicalize_placeholder_style,
     normalize_and_extract,
     reconstruct_sql,
     get_placeholder_names,
@@ -353,6 +354,70 @@ class TestFallbackBehavior:
 # denormalize_for_readyset — engine-aware conversion of :pN placeholders
 # =============================================================================
 
+class TestCanonicalizePlaceholderStyle:
+    """Placeholder-style canonicalization used for hash derivation."""
+
+    def test_empty_input_passes_through(self):
+        assert canonicalize_placeholder_style("") == ""
+
+    def test_dollar_placeholders_map_to_pn(self):
+        # pg_stat_statements numbers $N textually, so indices are preserved.
+        assert (
+            canonicalize_placeholder_style(
+                "SELECT * FROM t WHERE a = $1 AND b = $2"
+            )
+            == "SELECT * FROM t WHERE a = :p1 AND b = :p2"
+        )
+
+    def test_dollar_index_preserved_through_cast(self):
+        assert (
+            canonicalize_placeholder_style(
+                "SELECT * FROM orders WHERE ids = ANY($1::bigint[]) LIMIT $2"
+            )
+            == "SELECT * FROM orders WHERE ids = ANY(:p1::bigint[]) LIMIT :p2"
+        )
+
+    def test_anonymous_qmarks_number_by_position(self):
+        assert (
+            canonicalize_placeholder_style("SELECT a FROM t WHERE b = ? LIMIT ?")
+            == "SELECT a FROM t WHERE b = :p1 LIMIT :p2"
+        )
+
+    def test_traversal_numbered_pn_renumbers_textually(self):
+        # RDST's literal extraction names :pN in AST-traversal order; the
+        # canonical form uses textual order so every style converges.
+        assert (
+            canonicalize_placeholder_style(
+                "SELECT a FROM t WHERE b = :p2 LIMIT :p1"
+            )
+            == "SELECT a FROM t WHERE b = :p1 LIMIT :p2"
+        )
+
+    def test_textually_ordered_pn_is_a_fixed_point(self):
+        sql = "SELECT a FROM t WHERE b = :p1 AND c IN (:p2, :p3)"
+        assert canonicalize_placeholder_style(sql) == sql
+
+    def test_postgres_json_operators_untouched(self):
+        for sql in (
+            "SELECT * FROM t WHERE tags ?| ARRAY[:p1, :p2]",
+            "SELECT * FROM t WHERE tags ?& ARRAY[:p1]",
+            "SELECT * FROM t WHERE data ?? :p1",
+            "SELECT * FROM t WHERE data @? :p1",
+        ):
+            assert canonicalize_placeholder_style(sql) == sql
+
+    def test_question_mark_inside_string_never_matches(self):
+        # Hash derivation runs this on normalize()d SQL, where string
+        # literals are already :pN placeholders; a literal containing '?'
+        # therefore contributes exactly one canonical slot.
+        normalized, _ = normalize_and_extract(
+            "SELECT * FROM t WHERE name = 'who?'"
+        )
+        assert canonicalize_placeholder_style(normalized) == (
+            "SELECT * FROM t WHERE name = :p1"
+        )
+
+
 class TestDenormalizeForReadyset:
     """ReadySet uses engine-specific placeholders ($N for Postgres, ? for MySQL).
 
@@ -495,3 +560,151 @@ class TestParseSupportedFromExplain:
 
     def test_no_supported_line(self):
         assert parse_supported_from_explain("just q_abc123") == ""
+
+
+class TestReferencesUserRelations:
+    """Tests for the system-vs-user relation classifier."""
+
+    def test_bare_pg_prefixed_names_are_system(self):
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        assert references_user_relations("SELECT * FROM pg_stat_user_indexes") is False
+        assert references_user_relations("SELECT * FROM pg_tables") is False
+
+    def test_qualified_system_schemas_are_system(self):
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        assert (
+            references_user_relations("SELECT * FROM pg_catalog.pg_class") is False
+        )
+        assert (
+            references_user_relations("SELECT * FROM information_schema.tables")
+            is False
+        )
+        assert (
+            references_user_relations(
+                "SELECT * FROM performance_schema.events_statements_summary_by_digest",
+                dialect="mysql",
+            )
+            is False
+        )
+        assert (
+            references_user_relations("SELECT * FROM mysql.user", dialect="mysql")
+            is False
+        )
+
+    def test_user_tables_are_user(self):
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        assert references_user_relations("SELECT * FROM users WHERE id = 1") is True
+        assert (
+            references_user_relations("SELECT * FROM public.orders o JOIN items i ON i.order_id = o.id")
+            is True
+        )
+
+    def test_mixed_user_and_system_is_user(self):
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        assert (
+            references_user_relations(
+                "SELECT u.* FROM users u JOIN pg_catalog.pg_class c ON true"
+            )
+            is True
+        )
+
+    def test_relation_free_statements_are_not_user(self):
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        assert references_user_relations("SELECT 1") is False
+        assert references_user_relations("SELECT now()") is False
+
+    def test_cte_alias_is_not_a_relation(self):
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        assert (
+            references_user_relations(
+                "WITH recent AS (SELECT * FROM orders) SELECT * FROM recent"
+            )
+            is True
+        )
+        assert (
+            references_user_relations(
+                "WITH recent AS (SELECT * FROM pg_stat_activity) SELECT * FROM recent"
+            )
+            is False
+        )
+
+    def test_unparseable_sql_is_kept_as_user(self):
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        assert references_user_relations("THIS IS NOT (((SQL") is True
+
+    def test_rdst_self_marker_is_never_user(self):
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        assert (
+            references_user_relations(
+                "/*rdst:observe*/ SELECT userid, dbid, queryid, toplevel, query "
+                "FROM pg_stat_statements WHERE queryid = ANY($1::bigint[]) AND dbid = $2"
+            )
+            is False
+        )
+        assert (
+            references_user_relations("/*rdst:analyze*/ SELECT * FROM users")
+            is False
+        )
+
+    def test_utility_statements_are_not_user(self):
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        assert (
+            references_user_relations("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            is False
+        )
+        assert references_user_relations("SET work_mem = '64MB'") is False
+        assert references_user_relations("COMMIT") is False
+        assert references_user_relations("SHOW server_version") is False
+
+    def test_parse_failure_falls_back_to_relation_tokens(self):
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        # Unmarked variant of RDST's own text fetch: the array cast defeats
+        # the AST parser, the token fallback still sees only a system table.
+        assert (
+            references_user_relations(
+                "SELECT userid, dbid, queryid, toplevel, query "
+                "FROM pg_stat_statements WHERE queryid = ANY($1::bigint[]) AND dbid = $2"
+            )
+            is False
+        )
+        # pg_dump-style catalog SQL: all captured tokens are system relations.
+        assert (
+            references_user_relations(
+                "SELECT t.tableoid, t.oid FROM pg_catalog.pg_index i "
+                "JOIN pg_catalog.pg_class t ON (t.oid = i.indexrelid) "
+                "WHERE i.indrelid = $1::pg_catalog.oid[]"
+            )
+            is False
+        )
+
+    def test_parse_failure_with_user_relation_token_is_user(self):
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        assert (
+            references_user_relations(
+                "SELECT * FROM orders WHERE ids = ANY($1::bigint[])"
+            )
+            is True
+        )
+
+    def test_leading_comment_is_looked_through(self):
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        assert (
+            references_user_relations("/* app comment */ SELECT * FROM users")
+            is True
+        )
+        assert (
+            references_user_relations("/* app comment */ SELECT * FROM pg_tables")
+            is False
+        )

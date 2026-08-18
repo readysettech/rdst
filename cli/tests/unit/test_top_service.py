@@ -47,6 +47,150 @@ class TestTopServiceInit:
         assert hasattr(service, "stream_realtime")
 
 
+class TestTopServiceResourceReuse:
+    """Tests for the opt-in execution-resource reuse mode."""
+
+    TARGET_CONFIG = {
+        "engine": "mysql",
+        "host": "database.internal",
+        "port": 3306,
+        "database": "app",
+        "user": "app",
+        "password": "password",
+    }
+
+    def _execute(self, service, resolved_params):
+        with (
+            patch(
+                "shared.db_connection.resolve_connection_params",
+                return_value=resolved_params,
+            ),
+            patch("shared.data_manager.DataManager") as data_manager,
+        ):
+            data_manager.return_value._available_commands = TOP_COMMAND_SETS
+            data_manager.return_value.execute_command.return_value = {
+                "success": True,
+                "data": [],
+            }
+            service._execute_top_query_sync(
+                "prod", self.TARGET_CONFIG, "mysql", "digest"
+            )
+            return data_manager
+
+    def _resolved(self, password="pw"):
+        return {
+            "host": "127.0.0.1",
+            "port": 3306,
+            "database": "app",
+            "user": "app",
+            "password": password,
+        }
+
+    def test_reuse_mode_shares_manager_and_temp_dir_until_close(self):
+        import os
+
+        service = TopService(reuse_execution_resources=True)
+
+        first = self._execute(service, self._resolved())
+        output_dir = service._reused_output_dir
+        assert output_dir is not None
+        assert os.path.isdir(output_dir)
+        assert first.call_count == 1
+
+        second = self._execute(service, self._resolved())
+        assert second.call_count == 0
+        assert service._reused_output_dir == output_dir
+
+        service.close()
+        assert not os.path.exists(output_dir)
+        assert service._reused_output_dir is None
+        assert service._reused_managers == {}
+
+    def test_reuse_mode_rebuilds_manager_when_connection_params_change(self):
+        service = TopService(reuse_execution_resources=True)
+        try:
+            first = self._execute(service, self._resolved(password="old"))
+            assert first.call_count == 1
+
+            second = self._execute(service, self._resolved(password="rotated"))
+            assert second.call_count == 1
+        finally:
+            service.close()
+
+    def test_fingerprint_change_disconnects_evicted_manager(self):
+        from shared.data_manager_service import DataManagerQueryType
+
+        service = TopService(reuse_execution_resources=True)
+        first = self._execute(service, self._resolved(password="old"))
+        old_manager = first.return_value
+
+        second = self._execute(service, self._resolved(password="rotated"))
+        assert second.call_count == 1
+        old_manager.disconnect.assert_called_once_with(
+            DataManagerQueryType.UPSTREAM
+        )
+
+        ((_fingerprint, current),) = service._reused_managers.values()
+        assert current is second.return_value
+
+        service.close()
+        second.return_value.disconnect.assert_called_once_with(
+            DataManagerQueryType.UPSTREAM
+        )
+
+    def test_top_path_tags_data_manager_with_observe_lane(self):
+        from shared.data_manager_service import DataManagerQueryType
+
+        service = TopService()
+        resolved = dict(self._resolved(), application_name="rdst/observe")
+        with (
+            patch(
+                "shared.db_connection.resolve_connection_params",
+                return_value=resolved,
+            ) as resolve_params,
+            patch("shared.data_manager.DataManager") as data_manager,
+        ):
+            data_manager.return_value._available_commands = TOP_COMMAND_SETS
+            data_manager.return_value.execute_command.return_value = {
+                "success": True,
+                "data": [],
+            }
+            service._execute_top_query_sync(
+                "prod", self.TARGET_CONFIG, "mysql", "digest"
+            )
+
+        assert resolve_params.call_args.kwargs["lane"] == "rdst/observe"
+        connection_config = data_manager.call_args.kwargs["connection_config"][
+            DataManagerQueryType.UPSTREAM
+        ]
+        assert connection_config.application_name == "rdst/observe"
+
+    def test_default_mode_keeps_per_call_teardown(self, monkeypatch):
+        import os
+        import tempfile
+
+        created: list[str] = []
+        real_mkdtemp = tempfile.mkdtemp
+
+        def recording_mkdtemp(*args, **kwargs):
+            path = real_mkdtemp(*args, **kwargs)
+            created.append(path)
+            return path
+
+        monkeypatch.setattr("tempfile.mkdtemp", recording_mkdtemp)
+
+        service = TopService()
+        first = self._execute(service, self._resolved())
+        second = self._execute(service, self._resolved())
+
+        assert first.call_count == 1
+        assert second.call_count == 1
+        assert len(created) == 2
+        assert not any(os.path.exists(path) for path in created)
+        assert service._reused_output_dir is None
+        assert service._reused_managers == {}
+
+
 class TestTopServiceGetTopQueries:
     """Tests for get_top_queries() method."""
 
@@ -121,6 +265,7 @@ class TestTopServiceGetTopQueries:
         resolve.assert_called_once_with(
             target="prod",
             target_config=target_config,
+            lane="rdst/observe",
         )
         assert connection_config.call_args.kwargs["host"] == "127.0.0.1"
         assert connection_config.call_args.kwargs["port"] == 49152

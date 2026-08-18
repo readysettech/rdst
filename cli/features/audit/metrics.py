@@ -32,7 +32,7 @@ def _collect_postgresql_metrics(
     )
 
     try:
-        conn = create_direct_connection(target_config, target=target)
+        conn = create_direct_connection(target_config, target=target, lane="rdst/audit")
     except Exception as e:
         raise RuntimeError(f"Failed to connect: {e}") from e
 
@@ -213,7 +213,7 @@ def _collect_mysql_metrics(
     )
 
     try:
-        conn = create_direct_connection(target_config, target=target)
+        conn = create_direct_connection(target_config, target=target, lane="rdst/audit")
     except Exception as e:
         raise RuntimeError(f"Failed to connect: {e}") from e
 

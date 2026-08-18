@@ -22,6 +22,7 @@ export function QueryCard({
   sql,
   dialect,
   sqlInitiallyExpanded,
+  truncateOneLine = false,
   leading,
   title,
   badges,
@@ -33,6 +34,7 @@ export function QueryCard({
   onToggleDetails,
   selectable = false,
   selected = false,
+  selectionDisabled = false,
   onSelect,
   selectionLabel,
   editor,
@@ -44,6 +46,7 @@ export function QueryCard({
   'data-cache-id': dataCacheId,
 }: QueryCardProps) {
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (selectionDisabled) return
     if (event.target !== event.currentTarget) return
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault()
@@ -54,10 +57,11 @@ export function QueryCard({
   const selectableProps = selectable
     ? {
         role: 'button',
-        tabIndex: 0,
+        tabIndex: selectionDisabled ? -1 : 0,
         'aria-label': selectionLabel,
         'aria-pressed': selected,
-        onClick: onSelect,
+        'aria-disabled': selectionDisabled || undefined,
+        onClick: selectionDisabled ? undefined : onSelect,
         onKeyDown: handleKeyDown,
       }
     : {}
@@ -76,8 +80,11 @@ export function QueryCard({
       className={cn(
         'transition-[box-shadow] duration-500',
         selectable &&
+          !selectionDisabled &&
           'cursor-pointer transition-[box-shadow,transform] focus-visible:outline-none focus-visible:shadow-focus hover:shadow-elevation-2',
+        selectable && selectionDisabled && 'cursor-not-allowed opacity-50',
         selectable &&
+          !selectionDisabled &&
           (selected
             ? 'ring-2 ring-border-primary-soft shadow-elevation-2'
             : 'hover:bg-surface-raised'),
@@ -109,6 +116,7 @@ export function QueryCard({
             sql={sql}
             dialect={dialect}
             initiallyExpanded={sqlInitiallyExpanded}
+            truncateOneLine={truncateOneLine}
             expandable={!selectable}
             copyable={!selectable}
           />

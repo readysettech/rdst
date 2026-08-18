@@ -7051,6 +7051,147 @@
         "title": "QueryBenchmarkStats",
         "type": "object"
       },
+      "QueryLibraryFacetCounts": {
+        "description": "Per-facet counts over the full filtered set, never a single page.",
+        "properties": {
+          "activity": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Activity",
+            "type": "object"
+          },
+          "impact": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Impact",
+            "type": "object"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Params",
+            "type": "object"
+          },
+          "source": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Source",
+            "type": "object"
+          },
+          "view": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "View",
+            "type": "object"
+          }
+        },
+        "required": [
+          "view",
+          "source",
+          "params",
+          "activity",
+          "impact"
+        ],
+        "title": "QueryLibraryFacetCounts",
+        "type": "object"
+      },
+      "QueryLibraryFreshness": {
+        "description": "Collector state for the target, when the observation store has one.",
+        "properties": {
+          "epoch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch Id"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "state": {
+            "default": "",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "title": "QueryLibraryFreshness",
+        "type": "object"
+      },
+      "QueryLibraryResponse": {
+        "description": "Read-model response for GET /api/query-registry library params.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "facet_counts": {
+            "$ref": "#/components/schemas/QueryLibraryFacetCounts"
+          },
+          "freshness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueryLibraryFreshness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "queries": {
+            "items": {
+              "$ref": "#/components/schemas/QueryRegistryEntry"
+            },
+            "title": "Queries",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queries",
+          "facet_counts",
+          "total"
+        ],
+        "title": "QueryLibraryResponse",
+        "type": "object"
+      },
       "QueryPilotBody": {
         "properties": {
           "enabled": {
@@ -16313,7 +16454,7 @@
     },
     "/api/query-registry": {
       "get": {
-        "description": "Get queries from the shared query registry, optionally scoped to a target.",
+        "description": "Get queries from the shared query registry, optionally scoped to a target.\n\nPassing any Query Library read-model parameter (search, view, source,\nparams, activity, impact, sort, cursor) switches the response to\n{queries, facet_counts, next_cursor, total, freshness}, computed over the\nfull target-scoped set with keyset pagination. Without them the legacy\nlimit/offset contract is unchanged.",
         "operationId": "get_query_registry_api_query_registry_get",
         "parameters": [
           {
@@ -16358,6 +16499,180 @@
               ],
               "title": "Target"
             }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "all",
+                    "new",
+                    "saved",
+                    "high-impact",
+                    "needs-analysis",
+                    "ready-to-cache",
+                    "cached"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "View"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "all",
+                    "observed",
+                    "ask",
+                    "manual",
+                    "file",
+                    "scan"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "params",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "all",
+                    "without-parameters",
+                    "values-ready",
+                    "values-needed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Params"
+            }
+          },
+          {
+            "in": "query",
+            "name": "activity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "all",
+                    "1m",
+                    "1h",
+                    "8h",
+                    "24h",
+                    "7d",
+                    "30d"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Activity"
+            }
+          },
+          {
+            "in": "query",
+            "name": "impact",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "all",
+                    "1m",
+                    "10m",
+                    "1h"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Impact"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "highest-impact",
+                    "recently-observed",
+                    "newest",
+                    "most-frequent",
+                    "slowest-average",
+                    "recently-analyzed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -16365,7 +16680,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/QueryRegistryResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/QueryLibraryResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QueryRegistryResponse"
+                    }
+                  ],
+                  "title": "Response Get Query Registry Api Query Registry Get"
                 }
               }
             },

@@ -26,6 +26,7 @@ import {
   formatTimestamp,
   shortHash,
 } from '../../../lib/formatters'
+import { OBSERVED_EVIDENCE_PROVENANCE } from '../../../lib/queryEvidence'
 import { queryDisplayName } from '../../../lib/queryIdentity'
 import {
   formatDbTime,
@@ -92,7 +93,10 @@ function QueryImpactRail({ entry }: { entry: QueryRegistryEntry }) {
   const runs = entry.observation_count ?? entry.frequency ?? 0
 
   return (
-    <VStack className="h-full min-h-44 items-stretch justify-between gap-6">
+    <VStack
+      title={OBSERVED_EVIDENCE_PROVENANCE}
+      className="h-full min-h-44 items-stretch justify-between gap-6"
+    >
       <VStack className="items-start gap-1">
         <Text level="caption" className="text-content-layout-3">
           Database time
@@ -175,7 +179,7 @@ export function SavedQueryRow({
   const showProperty = (property: QueryLibraryDisplayProperty) =>
     visible === null || visible.has(property)
   const activity = latestActivity(entry)
-  const meta = formatMeta([
+  const evidenceMeta = formatMeta([
     showProperty('impact') ? impactCaption : null,
     showProperty('frequency') ? runCount : null,
     showProperty('frequency') && !impactCaption
@@ -186,6 +190,8 @@ export function SavedQueryRow({
     showProperty('impact') && (entry.avg_duration_ms ?? 0) > 0
       ? `avg ${formatMs(entry.avg_duration_ms)}`
       : null,
+  ])
+  const detailMeta = formatMeta([
     showProperty('parameters') ? parameterSummary(entry) : null,
     showProperty('activity') && activity
       ? `active ${formatTimestamp(activity).toLowerCase()}`
@@ -193,6 +199,17 @@ export function SavedQueryRow({
     `hash ${shortHash(entry.hash)}`,
     entry.target || null,
   ])
+  const meta = formatMeta([evidenceMeta || null, detailMeta || null])
+  // Same text as `meta`, with the observed-evidence half carrying its
+  // provenance note on hover.
+  const metaContent = evidenceMeta ? (
+    <>
+      <span title={OBSERVED_EVIDENCE_PROVENANCE}>{evidenceMeta}</span>
+      {detailMeta ? ` · ${detailMeta}` : null}
+    </>
+  ) : (
+    meta
+  )
   const impactMeta = formatMeta([
     showProperty('parameters') ? parameterSummary(entry) : null,
     showProperty('activity') && activity
@@ -430,7 +447,7 @@ export function SavedQueryRow({
                 level="mono-small"
                 className="truncate text-content-layout-3"
               >
-                {meta}
+                {metaContent}
               </Text>
             </div>
 
@@ -467,6 +484,13 @@ export function SavedQueryRow({
                 cacheTestRun={cacheTestRun}
                 onDismissRun={actions.dismissRun}
                 onClose={() => actions.toggleExpanded(entry.hash)}
+                onViewAnalysis={() =>
+                  actions.analyze(
+                    entry.sql,
+                    entry.target,
+                    entry.most_recent_params
+                  )
+                }
               />
             </Card.Content>
           ) : null}
@@ -489,7 +513,7 @@ export function SavedQueryRow({
           sql: entry.sql,
           title,
           badges,
-          meta: displayMode === 'card-2' ? impactMeta : meta,
+          meta: displayMode === 'card-2' ? impactMeta : metaContent,
           highlighted: isHighlighted,
           className: cn(
             isConfirmingDelete && 'ring-1 ring-border-negative-soft'
@@ -529,6 +553,13 @@ export function SavedQueryRow({
                 cacheTestRun={cacheTestRun}
                 onDismissRun={actions.dismissRun}
                 onClose={() => actions.toggleExpanded(entry.hash)}
+                onViewAnalysis={() =>
+                  actions.analyze(
+                    entry.sql,
+                    entry.target,
+                    entry.most_recent_params
+                  )
+                }
               />
             ) : undefined,
         }

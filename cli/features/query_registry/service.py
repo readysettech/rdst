@@ -7,10 +7,13 @@ import re
 import statistics
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from queue import Empty, Queue
 from threading import Lock
-from typing import Any, AsyncGenerator, List, Literal, Optional
+from typing import Any, AsyncGenerator, Callable, List, Literal, Optional
+
+from shared.query_registry.observation_store import ExecutionEvidenceWriter
 
 from .events import (
     QueryBenchmarkCompleteEvent,
@@ -39,6 +42,10 @@ from .models import (
 MAX_BENCHMARK_DURATION_SECONDS = 300
 MAX_BENCHMARK_MAX_COUNT = 100_000
 MAX_BENCHMARK_CONCURRENCY = 32
+
+# After a cancel, how long to wait for workers blocked in driver calls before
+# force-closing their connections and returning the cancelled result.
+BENCHMARK_CANCEL_GRACE_SECONDS = 10
 
 # DML/DDL keywords that must never appear anywhere in a benchmarked statement —
 # scanned even mid-statement to defeat data-modifying CTEs, e.g.
@@ -105,6 +112,115 @@ class _BenchmarkController:
                     connection.close()
             except Exception:
                 pass
+
+
+class _LoadTestEvidenceRecorder:
+    """Thread-safe, run-scoped attribution buckets for a load test."""
+
+    def __init__(self, target: str) -> None:
+        self.run_id = uuid.uuid4().hex
+        self._writer = ExecutionEvidenceWriter(target, lane="rdst/loadtest")
+        self._lock = Lock()
+        self._next_token = 0
+        self._outstanding: dict[int, tuple[str, float]] = {}
+        self._exact: dict[tuple[str, int], tuple[int, float, float]] = {}
+        self._unknown: dict[tuple[str, int], tuple[float, float]] = {}
+        self._dirty_seconds: set[int] = set()
+
+    def note_started(self, sql: str, occurred_at: float | None = None) -> int:
+        with self._lock:
+            at = time.time() if occurred_at is None else float(occurred_at)
+            self._next_token += 1
+            token = self._next_token
+            self._outstanding[token] = (sql, at)
+            return token
+
+    def note_completed(self, token: int, occurred_at: float | None = None) -> None:
+        with self._lock:
+            # Capture the timestamp under the lock so the bucket second is
+            # assigned atomically with respect to a concurrent flush cutoff.
+            at = time.time() if occurred_at is None else float(occurred_at)
+            started = self._outstanding.pop(token, None)
+            if started is None:
+                return
+            sql, _ = started
+            second = int(at)
+            key = (sql, second)
+            previous = self._exact.get(key)
+            if previous is None:
+                self._exact[key] = (1, at, at)
+            else:
+                count, first, last = previous
+                self._exact[key] = (count + 1, min(first, at), max(last, at))
+            self._dirty_seconds.add(second)
+
+    def note_failed(self, token: int, occurred_at: float | None = None) -> None:
+        with self._lock:
+            at = time.time() if occurred_at is None else float(occurred_at)
+            started = self._outstanding.pop(token, None)
+            if started is None:
+                return
+            sql, began_at = started
+            second = int(at)
+            key = (sql, second)
+            previous = self._unknown.get(key)
+            if previous is None:
+                self._unknown[key] = (began_at, at)
+            else:
+                first, last = previous
+                self._unknown[key] = (min(first, began_at), max(last, at))
+            self._dirty_seconds.add(second)
+
+    def flush_closed(self, now: float | None = None) -> None:
+        current = int(time.time() if now is None else now)
+        self._flush(lambda second: second < current)
+
+    def flush_all(self) -> None:
+        # Anything left in flight after worker settlement is conservatively
+        # unknown through the final flush boundary.
+        ended_at = time.time()
+        with self._lock:
+            tokens = tuple(self._outstanding)
+        for token in tokens:
+            self.note_failed(token, ended_at)
+        self._flush(lambda _second: True)
+
+    def _flush(self, selected: Callable[[int], bool]) -> None:
+        with self._lock:
+            seconds = {second for second in self._dirty_seconds if selected(second)}
+            exact: dict[int, list[tuple[str, int, float, float]]] = {}
+            for (sql, second), (count, first, last) in self._exact.items():
+                if second in seconds:
+                    exact.setdefault(second, []).append((sql, count, first, last))
+            unknown: dict[int, list[tuple[str, float, float]]] = {}
+            for (sql, second), (first, last) in self._unknown.items():
+                if second in seconds:
+                    unknown.setdefault(second, []).append((sql, first, last))
+            self._dirty_seconds.difference_update(seconds)
+        # One write per (kind, second) under a stable run_id: the store's
+        # (target_id, run_id, normalized_hash) upsert makes re-flushing a
+        # still-hot cumulative bucket an in-place update of the count instead
+        # of a second row, and the writer merges same-hash SQL within a call.
+        for second in sorted(seconds):
+            buckets = exact.get(second)
+            if buckets:
+                self._writer.record(
+                    [{"sql": sql, "exec_count": count} for sql, count, _, _ in buckets],
+                    run_id=f"{self.run_id}:exact:{second}",
+                    started_at=min(first for _, _, first, _ in buckets),
+                    ended_at=max(last for _, _, _, last in buckets),
+                )
+            failures = unknown.get(second)
+            if failures:
+                self._writer.record(
+                    [{"sql": sql, "exec_count": None} for sql, _, _ in failures],
+                    run_id=f"{self.run_id}:unknown:{second}",
+                    started_at=min(first for _, first, _ in failures),
+                    ended_at=max(last for _, _, last in failures),
+                )
+
+    def close(self) -> None:
+        self._writer.close()
 
 
 def set_session_read_only(conn: Any, engine: str) -> None:
@@ -265,13 +381,18 @@ class QueryService:
         except asyncio.CancelledError as cancellation:
             stop_event.set()
             controller.cancel()
-            while not future.done():
+            deadline = time.monotonic() + BENCHMARK_CANCEL_GRACE_SECONDS
+            while not future.done() and time.monotonic() < deadline:
                 try:
-                    await asyncio.shield(future)
-                except asyncio.CancelledError:
+                    await asyncio.wait_for(asyncio.shield(future), timeout=0.1)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
                     continue
                 except Exception:
                     break
+            if not future.done():
+                # Grace expired: force-close registered connections and stop
+                # waiting on the daemon worker threads.
+                controller.cancel()
             raise cancellation
         finally:
             stop_event.set()
@@ -292,6 +413,8 @@ class QueryService:
         controller: _BenchmarkController,
     ) -> None:
         """Synchronous benchmark worker that reports progress events."""
+        evidence_recorder: _LoadTestEvidenceRecorder | None = None
+
         @dataclass
         class _QueryStats:
             query_name: str
@@ -490,6 +613,7 @@ class QueryService:
             query_stats: dict[str, _QueryStats] = {}
             stats_lock = Lock()
             start_time = time.perf_counter()
+            evidence_recorder = _LoadTestEvidenceRecorder(target)
 
             def _record_execution(
                 query_hash: str,
@@ -579,7 +703,10 @@ class QueryService:
                     # Each concurrent worker owns its connection. Sharing a DB
                     # connection would serialize driver calls and make the
                     # advertised concurrency fictional.
-                    conn = create_direct_connection(target_config)
+                    conn = create_direct_connection(target_config, lane="rdst/loadtest")
+                    # Register with the controller so a cancel can abort a
+                    # statement this worker is blocked in server-side.
+                    controller.register(conn)
                     try:
                         set_session_read_only(
                             conn, str(target_config.get("engine", ""))
@@ -598,10 +725,15 @@ class QueryService:
 
                         exec_start = time.perf_counter()
                         cursor = None
+                        evidence_token: int | None = None
                         try:
                             cursor = conn.cursor()
+                            # This is the attribution boundary: connection and
+                            # cursor failures before it record no traffic.
+                            evidence_token = evidence_recorder.note_started(rq.sql)
                             cursor.execute(rq.sql)
                             cursor.fetchall()
+                            evidence_recorder.note_completed(evidence_token)
                             _record_execution(
                                 rq.identifier,
                                 rq.name,
@@ -609,6 +741,8 @@ class QueryService:
                                 success=True,
                             )
                         except Exception as exc:
+                            if evidence_token is not None:
+                                evidence_recorder.note_failed(evidence_token)
                             _record_execution(
                                 rq.identifier,
                                 rq.name,
@@ -643,6 +777,7 @@ class QueryService:
                     stop_event.set()
                 finally:
                     if conn is not None:
+                        controller.unregister(conn)
                         close_connection(conn)
 
             worker_count = concurrency if mode == "concurrency" else 1
@@ -659,8 +794,18 @@ class QueryService:
 
             last_progress_time = 0.0
             progress_interval = 0.25
+            stop_deadline: float | None = None
             while any(worker.is_alive() for worker in workers):
                 now = time.perf_counter()
+                if stop_event.is_set():
+                    if stop_deadline is None:
+                        stop_deadline = now + BENCHMARK_CANCEL_GRACE_SECONDS
+                    elif now >= stop_deadline:
+                        # A worker blocked in a driver call cannot observe
+                        # stop_event; force-close its connection and stop
+                        # waiting on the daemon threads.
+                        controller.cancel()
+                        break
                 if (
                     now - last_progress_time >= progress_interval
                     and _has_measurements()
@@ -672,6 +817,7 @@ class QueryService:
                     last_progress_time = now
                 for worker in workers:
                     worker.join(timeout=0.02)
+                evidence_recorder.flush_closed()
 
             if worker_errors:
                 raise worker_errors[0]
@@ -707,3 +853,7 @@ class QueryService:
                 progress_queue.put_nowait(error_progress)
             except Exception:
                 pass
+        finally:
+            if evidence_recorder is not None:
+                evidence_recorder.flush_all()
+                evidence_recorder.close()

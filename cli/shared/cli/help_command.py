@@ -1251,7 +1251,7 @@ If digest source fails:
 
 ## Config File Location
 - Main config: ~/.rdst/config.toml
-- Query registry: ~/.rdst/queries.toml
+- Query registry: ~/.rdst/library.db (export TOML with `rdst query export`)
 - Conversation history: ~/.rdst/conversations/
 """
 

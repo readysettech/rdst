@@ -112,12 +112,42 @@ def register_error_handlers(app: FastAPI) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # The observation scheduler starts here and only here (research Q5):
+    # the module is reachable from no CLI entry point's import graph, and
+    # the flag defaults off until the Fleet validation matrix passes.
+    from features.query_registry.scheduler import (
+        ObservationScheduler,
+        observation_scheduler_enabled,
+    )
     from shared.deploy.sandbox_manager import sandbox_manager
 
     await sandbox_manager.start()
+    scheduler: ObservationScheduler | None = None
+    discovery_coordinator = None
+    # The app configures no handlers of its own, so module-level INFO logs
+    # are invisible under the default WARNING threshold; lifecycle notices
+    # go through uvicorn's console logger to stay operator-visible.
+    console = logging.getLogger("uvicorn.error")
     try:
+        if observation_scheduler_enabled():
+            from features.query_registry.discovery import query_discovery
+
+            discovery_coordinator = query_discovery
+            scheduler = ObservationScheduler(discovery_coordinator)
+            await scheduler.start()
+            console.info("Observation scheduler enabled (RDST_OBSERVATION_SCHEDULER)")
         yield
     finally:
+        # Shutdown order (research Q5): the scheduler stops admitting,
+        # cancels in-flight collections, and releases its leases before
+        # anything else is torn down.
+        if scheduler is not None:
+            await scheduler.stop()
+            # Last-subscriber disconnects deliberately preserve scheduler
+            # resources. Lifespan shutdown is therefore the owner that closes
+            # collector connections and the process-wide observation store.
+            await discovery_coordinator.close()
+            console.info("Observation scheduler stopped")
         await sandbox_manager.stop()
 
 

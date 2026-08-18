@@ -250,7 +250,7 @@ def benchmark_queries(
         time.sleep(1)
         try:
             from shared.db_connection import create_direct_connection
-            test_conn = create_direct_connection(cache_cfg)
+            test_conn = create_direct_connection(cache_cfg, lane="rdst/audit")
             test_conn.close()
             ready = True
             break
@@ -393,7 +393,7 @@ def benchmark_queries(
         try:
             from shared.db_connection import close_connection, create_direct_connection
 
-            conn = create_direct_connection(cache_cfg)
+            conn = create_direct_connection(cache_cfg, lane="rdst/audit")
             for i in range(3):
                 cursor = None
                 start = time.perf_counter()

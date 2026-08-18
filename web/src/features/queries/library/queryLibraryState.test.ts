@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   addedQuerySearchPatch,
-  newQueriesSearchPatch,
   parseQueryLibrarySearch,
   resolvedQueryLibraryState,
 } from './queryLibraryState'
@@ -88,21 +87,6 @@ describe('query library URL state', () => {
       sort: 'newest',
       action: undefined,
       hash: 'new-hash',
-      run: undefined,
-    })
-  })
-
-  it('reveals discovered queries in an unblocked New view', () => {
-    expect(newQueriesSearchPatch()).toEqual({
-      view: 'new',
-      q: undefined,
-      source: undefined,
-      params: undefined,
-      activity: undefined,
-      impact: undefined,
-      sort: 'newest',
-      action: undefined,
-      hash: undefined,
       run: undefined,
     })
   })

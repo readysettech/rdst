@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { findSafePython } from '../../../../rdst/scripts/sqlite-runtime.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -8,9 +9,17 @@ const __dirname = dirname(__filename)
 const appDir = resolve(__dirname, '..')
 const repoRoot = resolve(appDir, '..', '..', '..')
 const rdstDir = resolve(repoRoot, 'rdst')
+const pnpmCommand =
+  process.platform === 'win32' ? process.env.ComSpec ?? 'cmd.exe' : 'pnpm'
+const pnpmPrefixArgs =
+  process.platform === 'win32' ? ['/d', '/s', '/c', 'pnpm'] : []
 
+const safePython = findSafePython()
 const backendArgs = [
   'run',
+  '--isolated',
+  '--python',
+  safePython.executable,
   '--directory',
   rdstDir,
   'rdst',
@@ -20,12 +29,17 @@ const backendArgs = [
   '--reload',
 ]
 
+console.log(
+  `[rdst-web] Using ${safePython.executable} ` +
+    `(Python ${safePython.python}, SQLite ${safePython.sqlite})`,
+)
+
 const backend = spawn('uv', backendArgs, {
   cwd: appDir,
   stdio: 'inherit',
 })
 
-const frontend = spawn('pnpm', ['run', 'dev:vite'], {
+const frontend = spawn(pnpmCommand, [...pnpmPrefixArgs, 'exec', 'vite', 'dev'], {
   cwd: appDir,
   stdio: 'inherit',
 })

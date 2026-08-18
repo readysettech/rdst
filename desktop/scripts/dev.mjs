@@ -1,25 +1,41 @@
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import electronBinary from "electron";
+import { findSafePython } from "../../../../rdst/scripts/sqlite-runtime.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const appDir = resolve(__dirname, "..");
 const webAppsDir = resolve(appDir, "../..");
+const rendererDir = resolve(webAppsDir, "apps/rdst");
 const rdstDir = resolve(webAppsDir, "../rdst");
-const pnpmCommand = process.platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : "pnpm";
-const pnpmPrefixArgs = process.platform === "win32" ? ["/d", "/s", "/c", "pnpm"] : [];
-const backendCommand =
-  process.platform === "win32" ? resolve(rdstDir, ".venv/Scripts/rdst.exe") : "uv";
-const backendArgs =
-  process.platform === "win32"
-    ? ["web", "--ui", "none", "--reload"]
-    : ["run", "--directory", rdstDir, "rdst", "web", "--ui", "none", "--reload"];
 const READY_TIMEOUT_MS = 30_000;
 const SHUTDOWN_TIMEOUT_MS = 3_000;
 
+// On POSIX, long-running children run detached in their own process groups
+// so shutdown() can signal each whole tree; SIGKILL to a lone wrapper PID
+// cannot be forwarded and orphans the real Electron/vite/tsup processes.
+const detachChildren = process.platform !== "win32";
+
 const children = new Map();
 let shuttingDown = false;
+
+// Resolve a dependency's executable JS entrypoint from the package that
+// declares it, so children are spawned as direct node processes whose PIDs
+// the launcher owns.
+function resolveBin(fromDir, packageName, binName) {
+  const require = createRequire(resolve(fromDir, "package.json"));
+  const packageJsonPath = require.resolve(`${packageName}/package.json`);
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+  const bin =
+    typeof packageJson.bin === "string"
+      ? packageJson.bin
+      : packageJson.bin[binName];
+  return resolve(dirname(packageJsonPath), bin);
+}
 
 function run(command, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
@@ -43,8 +59,13 @@ function run(command, args, options = {}) {
 }
 
 function start(label, command, args, options = {}) {
+  // Detached children live in background process groups, where reading the
+  // terminal would stop them with SIGTTIN, so they get no stdin. They also
+  // stop receiving terminal-generated SIGINT; the launcher's own signal
+  // handlers forward shutdown to them instead.
   const child = spawn(command, args, {
-    stdio: "inherit",
+    stdio: detachChildren ? ["ignore", "inherit", "inherit"] : "inherit",
+    detached: detachChildren,
     ...options,
     env: {
       ...process.env,
@@ -108,49 +129,79 @@ function waitForExit(child) {
   return new Promise((resolvePromise) => child.once("exit", resolvePromise));
 }
 
+function killTree(child, signal) {
+  if (!child.pid) return;
+  if (process.platform === "win32") {
+    spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+    }).once("error", () => {});
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch (error) {
+    if (error.code !== "ESRCH") throw error;
+  }
+}
+
 async function shutdown(code) {
   if (shuttingDown) return;
   shuttingDown = true;
 
   const running = [...children.values()];
   for (const child of running) {
-    child.kill("SIGTERM");
+    killTree(child, "SIGTERM");
   }
 
   const forceKill = setTimeout(() => {
     for (const child of running) {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill("SIGKILL");
-      }
+      killTree(child, "SIGKILL");
     }
   }, SHUTDOWN_TIMEOUT_MS);
 
   await Promise.all(running.map(waitForExit));
   clearTimeout(forceKill);
+  if (detachChildren) {
+    // The tracked children are gone; sweep each process group once more so
+    // grandchildren that ignored SIGTERM cannot outlive the launcher.
+    for (const child of running) {
+      killTree(child, "SIGKILL");
+    }
+  }
   process.exit(code);
 }
 
 async function main() {
+  const safePython = findSafePython();
+  const backendArgs = [
+    "run",
+    "--isolated",
+    "--python",
+    safePython.executable,
+    "--directory",
+    rdstDir,
+    "rdst",
+    "web",
+    "--ui",
+    "none",
+    "--reload",
+  ];
+  console.log(
+    `[rdst-desktop] Using ${safePython.executable} ` +
+      `(Python ${safePython.python}, SQLite ${safePython.sqlite})`,
+  );
+  const tsupBinary = resolveBin(appDir, "tsup", "tsup");
+  const viteBinary = resolveBin(rendererDir, "vite", "vite");
   console.log("[rdst-desktop] Building Electron main and preload processes...");
-  await run(pnpmCommand, [...pnpmPrefixArgs, "exec", "tsup"], { cwd: appDir });
+  await run(process.execPath, [tsupBinary], { cwd: appDir });
 
-  if (process.platform === "win32") {
-    await run("uv", ["run", "--directory", rdstDir, "rdst", "version"], { cwd: appDir });
-  }
-
-  const backend = start("backend", backendCommand, backendArgs, { cwd: rdstDir });
-  const renderer = start(
-    "renderer",
-    pnpmCommand,
-    [...pnpmPrefixArgs, "--filter", "rdst-web", "dev:vite"],
-    { cwd: webAppsDir },
-  );
-  start(
-    "electron build watcher",
-    pnpmCommand,
-    [...pnpmPrefixArgs, "exec", "tsup", "--watch"],
-    { cwd: appDir },
-  );
+  const backend = start("backend", "uv", backendArgs, { cwd: rdstDir });
+  const renderer = start("renderer", process.execPath, [viteBinary, "dev"], {
+    cwd: rendererDir,
+  });
+  start("electron build watcher", process.execPath, [tsupBinary, "--watch"], {
+    cwd: appDir,
+  });
 
   const rendererUrl = "http://localhost:3001";
   await Promise.all([
@@ -158,7 +209,7 @@ async function main() {
     waitForUrl("Vite renderer", rendererUrl, renderer),
   ]);
 
-  start("electron", pnpmCommand, [...pnpmPrefixArgs, "exec", "electron", "."], {
+  start("electron", electronBinary, ["."], {
     cwd: appDir,
     env: { ELECTRON_RENDERER_URL: rendererUrl },
   });

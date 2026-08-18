@@ -339,7 +339,7 @@ def test_collect_top_queries_passes_target_name_to_connection():
         connect.return_value = connection
         service._collect_top_queries("prod", target_config, "postgresql")
 
-    connect.assert_called_once_with(target_config, target="prod")
+    connect.assert_called_once_with(target_config, target="prod", lane="rdst/audit")
 
 
 class TestAuditRunHistory:

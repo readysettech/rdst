@@ -1,11 +1,47 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BackgroundRunState } from '../../../lib/backgroundRuns'
 import type { QueryRegistryEntry } from '../../../lib/useQueryRegistry'
 import type { CacheRunResult } from '../../../types/cache'
 import { SavedQueryDetails } from './SavedQueryDetails'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+
+function stubLatestAnalysis(
+  analysis: {
+    overall_rating?: string
+    efficiency_score?: number | null
+  } | null
+) {
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    json: async () =>
+      analysis
+        ? {
+            found: true,
+            analysis: {
+              analysis_id: 'a-1',
+              analyzed_at: '2026-08-18T08:00:00Z',
+              target: 'imdb',
+              overall_rating: analysis.overall_rating ?? '',
+              efficiency_score: analysis.efficiency_score ?? null,
+            },
+          }
+        : { found: false, analysis: null },
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
 
 const entry: QueryRegistryEntry = {
   hash: 'abc123456789',
@@ -112,6 +148,74 @@ describe('SavedQueryDetails', () => {
       )
     ).not.toHaveLength(0)
     expect(screen.getByText('abc12345')).toBeTruthy()
+  })
+
+  it('shows the last analysis with its outcome and a view action for analyzed entries', async () => {
+    const fetchMock = stubLatestAnalysis({
+      overall_rating: 'good',
+      efficiency_score: 82,
+    })
+    const onViewAnalysis = vi.fn()
+
+    render(
+      <SavedQueryDetails
+        entry={{
+          ...entry,
+          last_analyzed_at: '2026-08-18T08:00:00Z',
+          analysis_count: 3,
+        }}
+        cacheTestRun={undefined}
+        onDismissRun={vi.fn()}
+        onClose={vi.fn()}
+        onViewAnalysis={onViewAnalysis}
+      />
+    )
+
+    expect(screen.getByText('Last analysis')).toBeTruthy()
+    expect(screen.getByText(/3 analyses/)).toBeTruthy()
+    expect(await screen.findByText('Good · 82/100')).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/query-registry/abc123456789/analysis/latest'
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'View analysis' }))
+    expect(onViewAnalysis).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the last-analysis row without an outcome when no summary is stored', async () => {
+    const fetchMock = stubLatestAnalysis(null)
+
+    render(
+      <SavedQueryDetails
+        entry={{ ...entry, last_analyzed_at: '2026-08-18T08:00:00Z' }}
+        cacheTestRun={undefined}
+        onDismissRun={vi.fn()}
+        onClose={vi.fn()}
+        onViewAnalysis={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('Last analysis')).toBeTruthy()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(screen.queryByText(/\/100/)).toBeNull()
+  })
+
+  it('hides the last-analysis row for entries that were never analyzed', () => {
+    const fetchMock = stubLatestAnalysis(null)
+
+    render(
+      <SavedQueryDetails
+        entry={entry}
+        cacheTestRun={undefined}
+        onDismissRun={vi.fn()}
+        onClose={vi.fn()}
+        onViewAnalysis={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByText('Last analysis')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'View analysis' })).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('separates deleting a test result from closing details', () => {

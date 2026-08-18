@@ -5,21 +5,42 @@ import { Text } from '@rs/ui-new/text'
 import { AnimatedSurfaceBackdrop } from '../../../components/AnimatedSurfaceBackdrop'
 import type { QueryLibraryController } from './useQueryLibraryController'
 
+function queryNoun(count: number) {
+  return count === 1 ? 'query' : 'queries'
+}
+
+/**
+ * Name the pending rows by lifecycle: rows first observed now are "new",
+ * rows whose existing entry gained fresh evidence are "updated".
+ */
+function pendingPhrase(newCount: number, updatedCount: number) {
+  if (newCount > 0 && updatedCount > 0) {
+    return `${newCount} new, ${updatedCount} updated`
+  }
+  if (newCount > 0) return `${newCount} new ${queryNoun(newCount)}`
+  return `${updatedCount} updated ${queryNoun(updatedCount)}`
+}
+
+function pendingHeadline(newCount: number, updatedCount: number) {
+  if (newCount > 0 && updatedCount > 0) {
+    return `${newCount} new, ${updatedCount} updated queries`
+  }
+  if (newCount > 0) return `${newCount} new ${queryNoun(newCount)} discovered`
+  return `${updatedCount} ${queryNoun(updatedCount)} updated`
+}
+
 export function QueryLibraryNewQueriesCard({
   controller,
 }: {
   controller: QueryLibraryController
 }) {
   const { library, registry } = controller
-  const pendingCount = library.pendingCount
+  const { pendingNewCount, pendingUpdatedCount } = library
   const reviewCount = library.newVisibleCount
-  const hasPending = pendingCount > 0
+  const hasPending = pendingNewCount + pendingUpdatedCount > 0
   const hasReviewable = reviewCount > 0
 
   if (!hasPending && !hasReviewable) return null
-
-  const headlineCount = hasPending ? pendingCount : reviewCount
-  const noun = headlineCount === 1 ? 'query' : 'queries'
 
   return (
     <div className="relative overflow-hidden rounded-2xl bg-surface-rising-solid px-6 py-5 shadow-elevation-2">
@@ -38,8 +59,9 @@ export function QueryLibraryNewQueriesCard({
             level="headline-4"
             className="text-content-rising-solid"
           >
-            {headlineCount} new {noun}{' '}
-            {hasPending ? 'discovered' : 'ready to review'}
+            {hasPending
+              ? pendingHeadline(pendingNewCount, pendingUpdatedCount)
+              : `${reviewCount} new ${queryNoun(reviewCount)} ready to review`}
           </Text>
           <Text level="body-small" className="text-content-rising-solid/80">
             {hasPending
@@ -67,7 +89,7 @@ export function QueryLibraryNewQueriesCard({
               modifier="solid"
               icon="add"
               iconPosition="left"
-              label={`Show ${pendingCount} new ${pendingCount === 1 ? 'query' : 'queries'}`}
+              label={`Show ${pendingPhrase(pendingNewCount, pendingUpdatedCount)}`}
               onClick={library.revealPending}
               className="bg-surface-layout-1 text-content-layout-1 hover:bg-surface-layout-2 active:bg-surface-layout-2"
             />

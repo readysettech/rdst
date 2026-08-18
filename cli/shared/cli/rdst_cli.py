@@ -382,7 +382,7 @@ class RdstCLI:
         This is separate from analysis - purely for query management.
 
         Args:
-            subcommand: One of: add, edit, list, show, delete, rm
+            subcommand: One of: add, edit, list, show, delete, rm, export
             **kwargs: Subcommand-specific arguments
 
         Returns:

@@ -312,6 +312,60 @@ function emptyCounts<Value extends string>(values: readonly Value[]) {
   >
 }
 
+export type QueryLibraryFacetCounts = QueryLibrarySelection['facetCounts']
+
+/**
+ * Narrow server facet counts (keyed by filter value) to the typed filter
+ * unions, filling any missing value with zero so menus always render a
+ * complete set.
+ */
+export function normalizeQueryLibraryFacetCounts(
+  counts?: Partial<
+    Record<keyof QueryLibraryFacetCounts, Record<string, number>>
+  > | null
+): QueryLibraryFacetCounts {
+  const pick = <Value extends string>(
+    values: readonly Value[],
+    dimension?: Record<string, number>
+  ) =>
+    Object.fromEntries(
+      values.map((value) => [value, dimension?.[value] ?? 0])
+    ) as Record<Value, number>
+  return {
+    view: pick(QUERY_LIBRARY_VIEWS, counts?.view),
+    source: pick(QUERY_LIBRARY_SOURCES, counts?.source),
+    params: pick(QUERY_LIBRARY_PARAMETER_FILTERS, counts?.params),
+    activity: pick(QUERY_LIBRARY_ACTIVITY_WINDOWS, counts?.activity),
+    impact: pick(QUERY_LIBRARY_IMPACT_FILTERS, counts?.impact),
+  }
+}
+
+/** True when any search or facet narrows the library below the full set. */
+export function isQueryLibraryFiltered({
+  searchTerm,
+  view,
+  source,
+  params,
+  activity,
+  impact,
+}: {
+  searchTerm: string
+  view: QueryLibraryView
+  source: QueryLibrarySource
+  params: QueryLibraryParameterFilter
+  activity: QueryLibraryActivityWindow
+  impact: QueryLibraryImpactFilter
+}) {
+  return (
+    Boolean(searchTerm.trim()) ||
+    view !== 'all' ||
+    source !== 'all' ||
+    params !== 'all' ||
+    activity !== 'all' ||
+    impact !== 'all'
+  )
+}
+
 export function selectQueryLibrary({
   queries,
   view,
@@ -422,12 +476,13 @@ export function selectQueryLibrary({
     counts: facetCounts.view,
     sourceCounts: facetCounts.source,
     facetCounts,
-    isFiltered:
-      Boolean(searchTerm.trim()) ||
-      view !== 'all' ||
-      source !== 'all' ||
-      params !== 'all' ||
-      activity !== 'all' ||
-      impact !== 'all',
+    isFiltered: isQueryLibraryFiltered({
+      searchTerm,
+      view,
+      source,
+      params,
+      activity,
+      impact,
+    }),
   }
 }

@@ -82,6 +82,7 @@ export function QueryLibraryToolbar({
         onToggleProperty={library.toggleProperty}
         selection={selection}
         resultCount={visibleCount}
+        totalCount={library.total}
       />
     </div>
   )

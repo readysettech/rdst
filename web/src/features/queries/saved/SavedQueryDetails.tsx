@@ -1,4 +1,5 @@
 import { Alert } from '@rs/ui-new/alert'
+import { Button } from '@rs/ui-new/button'
 import { CopyButton } from '@rs/ui-new/copy-button'
 import { Show } from '@rs/ui-new/show'
 import { Spinner } from '@rs/ui-new/spinner'
@@ -6,17 +7,45 @@ import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { ComparisonCard } from '../../../components/CacheComparison'
+import type { QueryAnalysisSummary } from '../../../lib/api'
 import type { BackgroundRunState } from '../../../lib/backgroundRuns'
 import { formatDuration, formatTimestamp } from '../../../lib/formatters'
+import { OBSERVED_EVIDENCE_PROVENANCE } from '../../../lib/queryEvidence'
 import type { QueryRegistryEntry } from '../../../lib/useQueryRegistry'
 import { isCacheRunResult } from '../../../types/cache'
+import { getResultTone, getScoreTone } from '../results/resultsSelectors'
+import { useLatestAnalysis } from './useLatestAnalysis'
 
 interface SavedQueryDetailsProps {
   entry: QueryRegistryEntry
   cacheTestRun?: BackgroundRunState
   onDismissRun: (runId: string) => void
   onClose: () => void
+  /** Opens Analyze for this query; the analysis re-runs on that action. */
+  onViewAnalysis?: () => void
   showMetadata?: boolean
+}
+
+/** Compact "Good / 82 of 100" style outcome for the last-analysis row. */
+function analysisOutcome(summary: QueryAnalysisSummary | null) {
+  if (!summary) return null
+  const rating = summary.overall_rating.trim()
+  const ratingLabel = rating
+    ? rating[0].toUpperCase() + rating.slice(1).toLowerCase()
+    : ''
+  const score =
+    typeof summary.efficiency_score === 'number' && summary.efficiency_score > 0
+      ? Math.round(summary.efficiency_score)
+      : null
+  const label =
+    ratingLabel && score !== null
+      ? `${ratingLabel} · ${score}/100`
+      : ratingLabel || (score !== null ? `${score}/100` : '')
+  if (!label) return null
+  return {
+    label,
+    tone: score !== null ? getScoreTone(score) : getResultTone(rating),
+  }
 }
 
 export function SavedQueryDetails({
@@ -24,6 +53,7 @@ export function SavedQueryDetails({
   cacheTestRun,
   onDismissRun,
   onClose,
+  onViewAnalysis,
   showMetadata = true,
 }: SavedQueryDetailsProps) {
   const isTesting =
@@ -37,6 +67,10 @@ export function SavedQueryDetails({
     (cacheTestRun?.status === 'done' || cacheTestRun?.status === 'partial') &&
     !comparisonResult
   const parameterKeys = Object.keys(entry.most_recent_params ?? {})
+  const lastAnalyzedAt = entry.last_analyzed_at || ''
+  const analysisCount = entry.analysis_count ?? 0
+  const latestAnalysis = useLatestAnalysis(entry.hash, Boolean(lastAnalyzedAt))
+  const outcome = analysisOutcome(latestAnalysis)
 
   return (
     <VStack className="gap-3 items-stretch">
@@ -86,6 +120,44 @@ export function SavedQueryDetails({
         )}
       </Show>
 
+      <Show when={Boolean(lastAnalyzedAt)}>
+        <HStack className="justify-between gap-3 flex-wrap items-center rounded-lg border border-border-layout-1 px-4 py-3">
+          <VStack className="gap-0.5 items-start">
+            <HStack className="gap-2 items-center">
+              <Text level="label-small" className="text-content-layout-1">
+                Last analysis
+              </Text>
+              <Show when={outcome}>
+                {(value) => (
+                  <Tag
+                    size="small"
+                    variant={value.tone}
+                    modifier="ghost"
+                    label={value.label}
+                  />
+                )}
+              </Show>
+            </HStack>
+            <Text level="caption" className="text-content-layout-3">
+              {formatTimestamp(lastAnalyzedAt)}
+              {analysisCount > 1 ? ` · ${analysisCount} analyses` : ''}
+            </Text>
+          </VStack>
+          <Show when={Boolean(onViewAnalysis)}>
+            <Button
+              variant="primary"
+              modifier="ghost"
+              size="small"
+              icon="speedometer"
+              iconPosition="left"
+              label="View analysis"
+              title="Opens Analyze and re-runs this query"
+              onClick={onViewAnalysis}
+            />
+          </Show>
+        </HStack>
+      </Show>
+
       <Show when={showMetadata}>
         <HStack className="justify-between gap-x-4 gap-y-1.5 flex-wrap items-center">
           <HStack className="gap-x-4 gap-y-1.5 flex-wrap items-center">
@@ -100,15 +172,19 @@ export function SavedQueryDetails({
             </HStack>
 
             <Show when={(entry.max_duration_ms ?? 0) > 0}>
-              <Text level="caption" className="text-content-layout-3">
-                max {formatDuration(entry.max_duration_ms)}
-              </Text>
+              <span title={OBSERVED_EVIDENCE_PROVENANCE}>
+                <Text level="caption" className="text-content-layout-3">
+                  max {formatDuration(entry.max_duration_ms)}
+                </Text>
+              </span>
             </Show>
 
             <Show when={(entry.observation_count ?? 0) > 0}>
-              <Text level="caption" className="text-content-layout-3">
-                {entry.observation_count} obs
-              </Text>
+              <span title={OBSERVED_EVIDENCE_PROVENANCE}>
+                <Text level="caption" className="text-content-layout-3">
+                  {entry.observation_count} obs
+                </Text>
+              </span>
             </Show>
 
             <Show when={parameterKeys.length > 0}>

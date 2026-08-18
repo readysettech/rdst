@@ -4,8 +4,9 @@ test_registry_and_files() {
   log_section "5. Registry & File Verification (${DB_ENGINE})"
 
   local registry_dir="$HOME/.rdst"
-  local queries_file="$registry_dir/queries.toml"
+  local library_file="$registry_dir/library.db"
   local analysis_file="$registry_dir/analysis_results.toml"
+  local queries_file="$TMP_RUN/queries_projection.toml"
 
   # PRIMARY_HASH and PRIMARY_TAG are set by fixture_seed_registry_query
   # (or by test_analyze_inputs when the analyze area runs).
@@ -13,8 +14,14 @@ test_registry_and_files() {
   # Verify registry directory exists
   [[ -d "$registry_dir" ]] || fail "Registry directory missing at ${registry_dir}"
 
-  # Verify queries.toml exists and has content
-  [[ -s "$queries_file" ]] || fail "queries.toml missing or empty at ${queries_file}"
+  # The SQLite library is the authoritative store; queries.toml is a
+  # projection regenerated on demand via `rdst query export`.
+  [[ -s "$library_file" ]] || fail "library.db missing or empty at ${library_file}"
+
+  run_cmd "Export registry TOML projection" \
+    "${RDST_CMD[@]}" query export --format toml --output "$queries_file"
+  assert_contains "Exported" "export should report the entry count"
+  [[ -s "$queries_file" ]] || fail "Exported projection missing or empty at ${queries_file}"
 
   # analysis_results.toml is an artifact of the analyze area, which may not
   # run in a diff-selected subset. Its absence here is expected, not a problem.
@@ -24,12 +31,12 @@ test_registry_and_files() {
     echo "  (analysis_results.toml absent — analyze area not run in this selection)"
   fi
 
-  # Verify the query was saved to queries.toml
+  # Verify the query was saved to the registry via the exported projection
   if [[ -n "$PRIMARY_HASH" ]]; then
     if grep -Fq "$PRIMARY_HASH" "$queries_file"; then
       echo "✓ Query hash ${PRIMARY_HASH} found in registry"
     else
-      fail "Primary hash ${PRIMARY_HASH} not found in queries.toml"
+      fail "Primary hash ${PRIMARY_HASH} not found in exported projection"
     fi
   fi
 
@@ -37,7 +44,7 @@ test_registry_and_files() {
     if grep -Fq "$PRIMARY_TAG" "$queries_file"; then
       echo "✓ Query tag '${PRIMARY_TAG}' found in registry"
     else
-      fail "Primary tag ${PRIMARY_TAG} not recorded in queries.toml"
+      fail "Primary tag ${PRIMARY_TAG} not recorded in exported projection"
     fi
   fi
 

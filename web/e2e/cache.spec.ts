@@ -103,15 +103,28 @@ async function prepareQueries(page: Page, queries: string[]) {
   return hashes
 }
 
+/** The query list region, distinct from the "Select all" toolbar button. */
+function compareQueryList(page: Page) {
+  return page.getByRole('region', { name: 'Queries available for comparison' })
+}
+
+/** Whole-card selection control (T3): role=button toggling aria-pressed. */
 async function selectFirstQuery(page: Page) {
-  await page.getByRole('checkbox').first().check()
+  const list = compareQueryList(page)
+  await list
+    .getByRole('button', { name: /^Select / })
+    .first()
+    .click()
+  await expect(
+    list.getByRole('button', { name: /^Deselect / }).first()
+  ).toHaveAttribute('aria-pressed', 'true')
 }
 
 test('offers unverified registry queries for comparison', async ({ page }) => {
   setBackendFixtures({
     sandbox_diagnostics: [{ value: readySandbox, repeat: true }],
   })
-  await prepareQueries(page, [directQuery])
+  const [queryHash] = await prepareQueries(page, [directQuery])
 
   await page.goto('/cache')
 
@@ -120,8 +133,12 @@ test('offers unverified registry queries for comparison', async ({ page }) => {
   await expect(
     page.getByText('RDST checks cacheability for each query', { exact: false })
   ).toBeVisible()
-  await expect(page.getByRole('checkbox')).toHaveCount(1)
-  await expect(page.getByRole('checkbox')).not.toBeChecked()
+  const card = compareQueryList(page).getByRole('button', {
+    name: /^Select /,
+  })
+  await expect(card).toHaveCount(1)
+  await expect(card).toHaveAttribute('data-query-hash', queryHash)
+  await expect(card).toHaveAttribute('aria-pressed', 'false')
   await expect(
     page.getByRole('button', { name: 'Run comparison' })
   ).toBeDisabled()

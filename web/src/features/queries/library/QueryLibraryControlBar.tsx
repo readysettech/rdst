@@ -108,6 +108,7 @@ type QueryLibraryControlBarProps = {
   onToggleProperty: (property: QueryLibraryDisplayProperty) => void
   selection: Pick<QueryLibrarySelection, 'facetCounts'>
   resultCount?: number
+  totalCount?: number
 }
 
 function filterValueLabel<Key extends QueryLibraryFilterKey>(
@@ -410,6 +411,7 @@ export function QueryLibraryControlBar({
   onToggleProperty,
   selection,
   resultCount,
+  totalCount,
 }: QueryLibraryControlBarProps) {
   const activeFilterCount = Object.entries(filters).filter(
     ([key, value]) => value !== FILTER_DEFAULTS[key as QueryLibraryFilterKey]
@@ -450,7 +452,9 @@ export function QueryLibraryControlBar({
           </div>
           <Show when={typeof resultCount === 'number'}>
             <Text level="body-small" className="px-1 text-content-layout-3">
-              {resultCount} {resultCount === 1 ? 'query' : 'queries'}
+              {typeof totalCount === 'number' && totalCount > (resultCount ?? 0)
+                ? `${resultCount} of ${totalCount} queries`
+                : `${resultCount} ${resultCount === 1 ? 'query' : 'queries'}`}
             </Text>
           </Show>
         </HStack>

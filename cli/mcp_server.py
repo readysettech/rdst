@@ -22,7 +22,7 @@ WHAT THIS PROVIDES:
 
 CONFIG LOCATION:
     ~/.rdst/config.toml - Contains database targets and settings
-    ~/.rdst/queries.toml - Query registry storage
+    ~/.rdst/library.db - Query registry storage (export TOML with 'rdst query export')
 
 PASSWORD HANDLING:
     Passwords are NEVER stored in config files. Instead, each target specifies a
@@ -131,7 +131,7 @@ caching suggestions.
 
 ### Configuration
 - Config: `~/.rdst/config.toml`
-- Query registry: `~/.rdst/queries.toml`
+- Query registry: `~/.rdst/library.db`
 - Conversation history: `~/.rdst/conversations/`
 
 ### Password Handling (CRITICAL)

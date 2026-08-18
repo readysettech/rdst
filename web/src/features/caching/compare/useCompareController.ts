@@ -6,6 +6,7 @@ import {
   buildParameterSuggestions,
   fetchParameterSchema,
   parameterValueKey,
+  suggestionSummaryMessage,
 } from '../../../lib/parameterSuggestions'
 import {
   detectParameters,
@@ -64,6 +65,8 @@ export function useCompareController(initialQueryHash?: string) {
   const [suggestionMessage, setSuggestionMessage] = useState<string | null>(
     null
   )
+  const [suggestionSchemaUnavailable, setSuggestionSchemaUnavailable] =
+    useState(false)
   const [concurrency, setConcurrency] = useState(DEFAULT_COMPARE_CONCURRENCY)
   const [durationSeconds, setDurationSeconds] = useState(
     DEFAULT_COMPARE_DURATION
@@ -89,6 +92,7 @@ export function useCompareController(initialQueryHash?: string) {
     setParamValues({})
     setParameterSources({})
     setSuggestionMessage(null)
+    setSuggestionSchemaUnavailable(false)
     initializedSelectionKey.current = null
     steppedBatchId.current = null
   }, [target])
@@ -294,6 +298,7 @@ export function useCompareController(initialQueryHash?: string) {
     if (!target || missingParameterCount === 0) return
     setSuggestingParameters(true)
     setSuggestionMessage(null)
+    setSuggestionSchemaUnavailable(false)
     try {
       const schema = await fetchParameterSchema(target)
       const applicable: Array<[string, string, string]> = []
@@ -332,10 +337,16 @@ export function useCompareController(initialQueryHash?: string) {
         ),
       }))
       setSuggestionMessage(
-        applicable.length > 0
-          ? `Filled ${applicable.length} unresolved ${applicable.length === 1 ? 'parameter' : 'parameters'} from safe schema evidence. Review before running.`
-          : 'No safe schema-grounded suggestions were found.'
+        suggestionSummaryMessage({
+          filled: applicable.length,
+          missingBefore: missingParameterCount,
+          queryCount: selectedWithParams.filter(
+            (item) => item.parameters.length > 0
+          ).length,
+          schemaAvailable: schema !== null,
+        })
       )
+      setSuggestionSchemaUnavailable(schema === null)
     } catch {
       setSuggestionMessage('Schema suggestions are unavailable.')
     } finally {
@@ -437,6 +448,7 @@ export function useCompareController(initialQueryHash?: string) {
     updateParameter,
     suggestingParameters,
     suggestionMessage,
+    suggestionSchemaUnavailable,
     suggestParameterValues,
     parameterCount,
     missingParameterCount,

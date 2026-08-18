@@ -6,6 +6,9 @@ import asyncio
 import hashlib
 import json
 import re
+import threading
+import time
+import uuid
 from queue import Empty, Queue
 from typing import Any, AsyncGenerator, Callable
 
@@ -21,6 +24,7 @@ from shared.deploy.sandbox_manager import (
     sandbox_manager,
 )
 from shared.password_resolver import resolve_password_value
+from shared.query_registry.observation_store import ExecutionEvidenceWriter
 from shared.service_events import ErrorEvent, ProgressEvent
 
 from .events import (
@@ -38,6 +42,126 @@ from .service import CacheService
 
 _DONE = object()
 _CACHE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+
+# Bound on post-cancel settling so a hung driver connect or execute cannot stall cancellation.
+COMPARE_CANCEL_GRACE_SECONDS = 10
+
+
+class _CompareEvidenceRecorder:
+    """Persist origin completions and tokenized in-flight uncertainty."""
+
+    def __init__(self, target: str, query: str) -> None:
+        self.target = target
+        self.query = query
+        self.run_id = uuid.uuid4().hex
+        self._buckets: dict[int, tuple[int, float, float]] = {}
+        self._dirty: set[int] = set()
+        self._outstanding: dict[Any, float] = {}
+        self._missing_since: float | None = None
+        self._lock = threading.Lock()
+        self._writer = ExecutionEvidenceWriter(target, lane="rdst/compare")
+        self.total = 0
+        self.last_event_at: float | None = None
+
+    def note_started(self, token: Any, occurred_at: float | None = None) -> None:
+        at = time.time() if occurred_at is None else float(occurred_at)
+        with self._lock:
+            self._outstanding[token] = at
+
+    def note_completed(
+        self, token: Any, occurred_at: float | None = None, count: int = 1
+    ) -> None:
+        if isinstance(count, bool) or count <= 0:
+            return
+        at = time.time() if occurred_at is None else float(occurred_at)
+        second = int(at)
+        with self._lock:
+            # A completion without a matching start cannot prove which
+            # outstanding execution finished, so keep the older uncertainty.
+            if token not in self._outstanding:
+                self._missing_since = (
+                    at
+                    if self._missing_since is None
+                    else min(self._missing_since, at)
+                )
+                return
+            self._outstanding.pop(token)
+            previous = self._buckets.get(second)
+            if previous is None:
+                self._buckets[second] = (count, at, at)
+            else:
+                old_count, first, last = previous
+                self._buckets[second] = (
+                    old_count + count,
+                    min(first, at),
+                    max(last, at),
+                )
+            self._dirty.add(second)
+            self.total += count
+            self.last_event_at = (
+                at if self.last_event_at is None else max(self.last_event_at, at)
+            )
+
+    def reconcile(self, expected_total: int, uncertain_from: float) -> bool:
+        """Verify callbacks without inventing a time for missing completions."""
+        with self._lock:
+            exact = (
+                expected_total == self.total
+                and not self._outstanding
+                and self._missing_since is None
+            )
+            if not exact:
+                candidates = [float(uncertain_from), *self._outstanding.values()]
+                if self._missing_since is not None:
+                    candidates.append(self._missing_since)
+                self._missing_since = min(candidates)
+            return exact
+
+    def uncertain_started_at(self) -> float | None:
+        with self._lock:
+            candidates = list(self._outstanding.values())
+            if self._missing_since is not None:
+                candidates.append(self._missing_since)
+            return min(candidates) if candidates else None
+
+    async def flush_closed(self, now: float | None = None) -> None:
+        current = int(time.time() if now is None else now)
+        with self._lock:
+            seconds = tuple(second for second in self._dirty if second < current)
+        await self._flush(seconds)
+
+    async def flush_all(self) -> None:
+        with self._lock:
+            seconds = tuple(self._dirty)
+        await self._flush(seconds)
+
+    async def _flush(self, seconds) -> None:
+        for second in sorted(tuple(seconds)):
+            with self._lock:
+                bucket = self._buckets.get(second)
+                if bucket is None or second not in self._dirty:
+                    continue
+                count, first, last = bucket
+                self._dirty.discard(second)
+            await asyncio.to_thread(
+                self._writer.record,
+                [{"sql": self.query, "exec_count": count}],
+                run_id=f"{self.run_id}:exact:{second}",
+                started_at=first,
+                ended_at=last,
+            )
+
+    async def record_unknown(self, started_at: float, ended_at: float) -> None:
+        await asyncio.to_thread(
+            self._writer.record,
+            [{"sql": self.query, "exec_count": None}],
+            run_id=f"{self.run_id}:unknown",
+            started_at=started_at,
+            ended_at=ended_at,
+        )
+
+    async def close(self) -> None:
+        await asyncio.to_thread(self._writer.close)
 
 
 def parameter_fingerprint(query: str) -> str:
@@ -180,6 +304,8 @@ class ReadysetExperimentService:
         created = False
         result_event: CacheRunCompleteEvent | CacheCompareCompleteEvent | None = None
         error_event: ErrorEvent | None = None
+        benchmark_started_at: float | None = None
+        evidence = _CompareEvidenceRecorder(target, query)
 
         async def progress(stage: str, message: str, percent: int = 0) -> None:
             await queue.put(
@@ -265,9 +391,28 @@ class ReadysetExperimentService:
                         "Validating origin and Readyset results",
                         58,
                     )
+
+                    def mark_origin_execute_started() -> str:
+                        token = "validation"
+                        evidence.note_started(token, time.time())
+                        return token
+
+                    def mark_origin_execute_completed(
+                        token: str, completed_at: float
+                    ) -> None:
+                        evidence.note_completed(token, completed_at)
+
                     origin_rows, readyset_rows = await _execute_validation_pair(
-                        origin, readyset, query
+                        origin,
+                        readyset,
+                        query,
+                        on_origin_execute=mark_origin_execute_started,
+                        on_origin_complete=mark_origin_execute_completed,
+                        on_wait=evidence.flush_closed,
                     )
+                    # A completed validation pair contains exactly one origin
+                    # execution, even when the result comparison below fails.
+                    await evidence.flush_closed()
                     results_match = _canonical_rows(
                         origin_rows, order_sensitive=False
                     ) == _canonical_rows(readyset_rows, order_sensitive=False)
@@ -277,6 +422,15 @@ class ReadysetExperimentService:
                             origin_rows, order_indexes
                         ) == _canonical_order_keys(readyset_rows, order_indexes)
                     if not results_match:
+                        if _has_top_level_limit_without_order(query):
+                            raise RuntimeError(
+                                "Origin and Readyset returned different rows. "
+                                "This query uses LIMIT without ORDER BY, so "
+                                "the database may return any matching rows "
+                                "and the two results are not comparable. Add "
+                                "an ORDER BY to the query for a meaningful "
+                                "comparison."
+                            )
                         raise RuntimeError(
                             "Readyset returned a different result from the origin; "
                             "the speed test was stopped."
@@ -287,6 +441,9 @@ class ReadysetExperimentService:
                         "Benchmarking origin and Readyset",
                         65,
                     )
+                    # Execution-boundary tokens preserve exact completions and
+                    # keep any in-flight tail unknown through cancellation.
+                    benchmark_started_at = time.time()
                     if live_controller is not None:
                         result = await _run_live_comparison_cancellable(
                             query=query,
@@ -295,6 +452,7 @@ class ReadysetExperimentService:
                             duration_seconds=duration_seconds or 30,
                             controller=live_controller,
                             event_queue=queue,
+                            evidence=evidence,
                         )
                     else:
                         result = await _run_comparison_cancellable(
@@ -307,6 +465,15 @@ class ReadysetExperimentService:
                             concurrency=concurrency,
                             duration_seconds=duration_seconds,
                             progress=progress,
+                            evidence=evidence,
+                        )
+                    benchmark_executions = _origin_benchmark_executions(
+                        result, live=live_controller is not None
+                    )
+                    if benchmark_executions is not None:
+                        evidence.reconcile(
+                            benchmark_executions + 1,
+                            benchmark_started_at,
                         )
                     if not result.get("success"):
                         if result.get("cancelled"):
@@ -412,11 +579,36 @@ class ReadysetExperimentService:
                 stage="speed_test",
             )
         finally:
+            # Closed one-second buckets are written while the compare runs;
+            # flush the final partial second before publishing completion.
+            await evidence.flush_all()
+            uncertain_from = evidence.uncertain_started_at()
+            if uncertain_from is not None:
+                # Exact progress before a cancellation remains attributable
+                # to its own windows. Only the unresolved tail is marked
+                # unknown, preserving earlier windows' exact subtraction.
+                await evidence.record_unknown(uncertain_from, time.time())
+            await evidence.close()
             if result_event is not None:
                 await queue.put(result_event)
             if error_event is not None:
                 await queue.put(error_event)
             await queue.put(_DONE)
+
+
+def _origin_benchmark_executions(
+    result: dict[str, Any], *, live: bool
+) -> int | None:
+    """Return an exact completed origin count when the runner provides one."""
+    section_name = "origin" if live else "original"
+    count_name = "completed" if live else "executions"
+    section = result.get(section_name)
+    if not isinstance(section, dict):
+        return None
+    count = section.get(count_name)
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        return None
+    return count
 
 
 def _origin_connection_config(target: str) -> dict[str, Any]:
@@ -452,6 +644,30 @@ async def _blocking_call(
     return future.result()
 
 
+def _mark_outcome_retrieved(future: asyncio.Future) -> None:
+    if not future.cancelled():
+        future.exception()
+
+
+async def _settle_after_cancel(future: asyncio.Future) -> bool:
+    """Bounded wait for a cancelled worker; False when it must be abandoned.
+
+    The worker's outcome is marked retrieved either way so an abandoned
+    thread's late failure is not reported as an unhandled exception.
+    """
+    future.add_done_callback(_mark_outcome_retrieved)
+    deadline = time.monotonic() + COMPARE_CANCEL_GRACE_SECONDS
+    while not future.done():
+        if time.monotonic() >= deadline:
+            return False
+        try:
+            await asyncio.sleep(0.01)
+        except asyncio.CancelledError:
+            # Repeated cancels must not extend or restart the bounded wait.
+            continue
+    return True
+
+
 def _readyset_query(query: str, engine: str) -> str:
     from shared.query_registry.sql_normalizer import denormalize_for_readyset
 
@@ -472,17 +688,21 @@ def _execute_rows(
     config: dict[str, Any],
     query: str,
     controller: ComparisonController | None = None,
+    on_execute: Callable[[], Any] | None = None,
 ) -> list[Any]:
     from shared.db_connection import close_connection, create_direct_connection
 
-    conn = create_direct_connection(config)
+    conn = create_direct_connection(config, lane="rdst/compare")
     if controller is not None:
         controller.register(conn)
     try:
         cursor = conn.cursor()
         try:
+            if on_execute is not None:
+                on_execute()
             cursor.execute(query)
-            return list(cursor.fetchall())
+            rows = list(cursor.fetchall())
+            return rows
         finally:
             cursor.close()
     finally:
@@ -492,18 +712,60 @@ def _execute_rows(
 
 
 async def _execute_rows_cancellable(
-    config: dict[str, Any], query: str
+    config: dict[str, Any],
+    query: str,
+    *,
+    on_execute: Callable[[], Any] | None = None,
+    on_complete: Callable[[Any, float], None] | None = None,
 ) -> list[Any]:
     controller = ComparisonController()
-    future = start_blocking(_execute_rows, config, query, controller)
+    started_tokens: list[Any] = []
+
+    def mark_started() -> Any:
+        # A cancelled run's worker must not record evidence for an execution
+        # nobody will observe complete.
+        controller.raise_if_cancelled()
+        token = on_execute() if on_execute is not None else None
+        started_tokens.append(token)
+        return token
+
+    def execute_rows() -> tuple[list[Any], float]:
+        if on_execute is None:
+            rows = _execute_rows(config, query, controller)
+        else:
+            rows = _execute_rows(
+                config,
+                query,
+                controller,
+                on_execute=mark_started,
+            )
+        # Capture completion inside the blocking worker, immediately after
+        # fetchall returns, rather than after the event loop's polling delay.
+        return rows, time.time()
+
+    future = start_blocking(execute_rows)
     try:
         while not future.done():
             await asyncio.sleep(0.01)
-        return future.result()
+        rows, completed_at = future.result()
+        if on_complete is not None and started_tokens:
+            on_complete(started_tokens[-1], completed_at)
+        return rows
     except asyncio.CancelledError as cancellation:
         controller.cancel()
-        while not future.done():
-            await asyncio.sleep(0.01)
+        if not await _settle_after_cancel(future):
+            # A stalled connect or execute must not hold the cancel. Any late
+            # registration is closed by the cancelled controller, and the
+            # abandoned worker's outcome is discarded.
+            controller.close_connections()
+            raise cancellation
+        try:
+            _rows, completed_at = future.result()
+        except Exception:
+            pass
+        else:
+            if on_complete is not None and started_tokens:
+                on_complete(started_tokens[-1], completed_at)
         raise cancellation
 
 
@@ -511,15 +773,35 @@ async def _execute_validation_pair(
     origin: dict[str, Any],
     readyset: dict[str, Any],
     query: str,
+    *,
+    on_origin_execute: Callable[[], Any] | None = None,
+    on_origin_complete: Callable[[Any, float], None] | None = None,
+    on_wait: Callable[[], Any] | None = None,
 ) -> tuple[list[Any], list[Any]]:
     """Settle both validation queries before their shared lease can be released."""
     tasks = (
-        asyncio.create_task(_execute_rows_cancellable(origin, query)),
+        asyncio.create_task(
+            _execute_rows_cancellable(
+                origin,
+                query,
+                on_execute=on_origin_execute,
+                on_complete=on_origin_complete,
+            )
+        ),
         asyncio.create_task(_execute_rows_cancellable(readyset, query)),
     )
     try:
-        origin_rows, readyset_rows = await asyncio.gather(*tasks)
-        return origin_rows, readyset_rows
+        while any(not task.done() for task in tasks):
+            await asyncio.sleep(0.05)
+            for task in tasks:
+                if task.done():
+                    # Surface one side's failure immediately so the sibling
+                    # is cancelled and settled below instead of waiting for
+                    # an unrelated slow validation query.
+                    task.result()
+            if on_wait is not None:
+                await on_wait()
+        return tasks[0].result(), tasks[1].result()
     except BaseException:
         for task in tasks:
             if not task.done():
@@ -539,15 +821,38 @@ async def _run_readyset_sql_settled(
         statement,
         **_connection_kwargs(lease),
     )
-    cancelled = False
-    while not future.done():
-        try:
+    try:
+        while not future.done():
             await asyncio.sleep(0.01)
-        except asyncio.CancelledError:
-            # _run_readyset_sql has 30-second driver timeouts. Waiting here
-            # avoids abandoned DDL racing the next lease or target transition.
-            cancelled = True
-    return future.result(), cancelled
+    except asyncio.CancelledError:
+        # _run_readyset_sql has 30-second driver timeouts, so settled DDL
+        # cannot race the next lease. A stall past the cancel grace abandons
+        # the statement and quarantines the sandbox instead of hanging.
+        if not await _settle_after_cancel(future):
+            await asyncio.shield(
+                lease.mark_dirty("Readyset DDL was abandoned during cancel")
+            )
+            raise
+        return future.result(), True
+    return future.result(), False
+
+
+def _has_top_level_limit_without_order(query: str) -> bool:
+    """True when the statement has a top-level LIMIT but no top-level ORDER BY.
+
+    Such queries may legitimately return different row sets from different
+    databases, so a result mismatch is expected rather than a correctness
+    signal. Subquery LIMIT/ORDER clauses do not count; unparseable queries
+    return False.
+    """
+    try:
+        expression = sqlglot.parse_one(query)
+    except Exception:
+        return False
+    return (
+        expression.args.get("limit") is not None
+        and expression.args.get("order") is None
+    )
 
 
 def _top_level_order_key_indexes(query: str) -> tuple[int, ...] | None:
@@ -628,12 +933,34 @@ async def _run_comparison_cancellable(
     concurrency: int | None,
     duration_seconds: int | None,
     progress,
+    evidence: _CompareEvidenceRecorder | None = None,
 ) -> dict[str, Any]:
     progress_queue: Queue = Queue()
+    evidence_queue: Queue = Queue()
     controller = ComparisonController()
 
     def on_progress(stage: str, current: int, total: int) -> None:
         progress_queue.put((stage, current, total))
+
+    def on_origin_progress(token: Any, occurred_at: float, count: int) -> None:
+        evidence_queue.put(("complete", token, occurred_at, count))
+
+    def on_origin_start(token: Any, occurred_at: float) -> None:
+        evidence_queue.put(("start", token, occurred_at, 0))
+
+    async def collect_evidence() -> None:
+        while True:
+            try:
+                kind, token, occurred_at, count = evidence_queue.get_nowait()
+            except Empty:
+                break
+            if evidence is not None:
+                if kind == "start":
+                    evidence.note_started(token, occurred_at)
+                else:
+                    evidence.note_completed(token, occurred_at, count)
+        if evidence is not None:
+            await evidence.flush_closed()
 
     last_percent = 65
     future = start_blocking(
@@ -647,10 +974,13 @@ async def _run_comparison_cancellable(
         concurrency=concurrency,
         duration_seconds=duration_seconds,
         on_progress=on_progress,
+        on_origin_progress=on_origin_progress,
+        on_origin_start=on_origin_start,
         controller=controller,
     )
     try:
         while True:
+            await collect_evidence()
             try:
                 stage, current, total = progress_queue.get_nowait()
             except Empty:
@@ -683,16 +1013,13 @@ async def _run_comparison_cancellable(
                 ),
                 last_percent,
             )
+        await collect_evidence()
         return future.result()
     except asyncio.CancelledError as cancellation:
         controller.cancel()
-        while not future.done():
-            try:
-                await asyncio.shield(future)
-            except asyncio.CancelledError:
-                continue
-            except Exception:
-                break
+        if not await _settle_after_cancel(future):
+            controller.close_connections()
+        await collect_evidence()
         raise cancellation
 
 
@@ -704,9 +1031,11 @@ async def _run_live_comparison_cancellable(
     duration_seconds: int,
     controller: LiveComparisonController,
     event_queue: asyncio.Queue[Any],
+    evidence: _CompareEvidenceRecorder | None = None,
 ) -> dict[str, Any]:
     """Bridge the blocking live runner into replayable background events."""
     sample_queue: Queue = Queue()
+    evidence_queue: Queue = Queue()
     future = start_blocking(
         run_live_comparison,
         query=query,
@@ -715,7 +1044,27 @@ async def _run_live_comparison_cancellable(
         duration_seconds=duration_seconds,
         controller=controller,
         on_sample=sample_queue.put,
+        on_origin_progress=lambda token, occurred_at, count: evidence_queue.put(
+            ("complete", token, occurred_at, count)
+        ),
+        on_origin_start=lambda token, occurred_at: evidence_queue.put(
+            ("start", token, occurred_at, 0)
+        ),
     )
+
+    async def collect_evidence() -> None:
+        while True:
+            try:
+                kind, token, occurred_at, count = evidence_queue.get_nowait()
+            except Empty:
+                break
+            if evidence is not None:
+                if kind == "start":
+                    evidence.note_started(token, occurred_at)
+                else:
+                    evidence.note_completed(token, occurred_at, count)
+        if evidence is not None:
+            await evidence.flush_closed()
 
     async def publish_samples() -> None:
         while True:
@@ -736,18 +1085,16 @@ async def _run_live_comparison_cancellable(
     try:
         while not future.done():
             await publish_samples()
+            await collect_evidence()
             await asyncio.sleep(0.05)
         await publish_samples()
+        await collect_evidence()
         return future.result()
     except asyncio.CancelledError as cancellation:
         controller.cancel()
-        while not future.done():
-            try:
-                await asyncio.shield(future)
-            except asyncio.CancelledError:
-                continue
-            except Exception:
-                break
+        if not await _settle_after_cancel(future):
+            controller.close_connections()
+        await collect_evidence()
         raise cancellation
 
 

@@ -6,12 +6,18 @@ These functions bridge between the workflow execution and the query registry sys
 """
 
 import json
+import logging
 import time
 from typing import Dict, Any, Optional
 from shared.query_registry import QueryRegistry, hash_sql
 from shared.query_safety import validate_query_safety
 from shared.workflow_manager_runtime import WorkflowError
 from .validation import validate_recommendations, reorder_index_columns
+
+logger = logging.getLogger(__name__)
+
+# Bound the per-query analysis history kept in the results store.
+KEPT_ANALYSES_PER_QUERY = 10
 
 
 def enforce_query_safety(sql: str, **kwargs) -> Dict[str, Any]:
@@ -63,7 +69,7 @@ def store_analysis_results(**kwargs) -> Dict[str, Any]:
         Dict containing:
         - success: boolean indicating storage success
         - query_hash: hash of the analyzed query
-        - analysis_id: ID of the stored analysis (using query hash)
+        - analysis_id: ID of the stored analysis (the registry query hash)
         - error: error message if failed
     """
     try:
@@ -94,10 +100,16 @@ def store_analysis_results(**kwargs) -> Dict[str, Any]:
             save_intent=False,
         )
 
+        _persist_analysis_summary(
+            stored_hash, target, _ensure_dict(kwargs.get("llm_analysis"))
+        )
+
         return {
             "success": True,
             "query_hash": stored_hash,
-            "analysis_id": stored_hash,  # Use hash as analysis ID for now
+            # CLI follow-up hints treat this as the registry hash; the summary
+            # store keeps its own per-run analysis ids.
+            "analysis_id": stored_hash,
             "is_new_query": is_new,
             "message": f"Query stored in registry with hash: {stored_hash}",
         }
@@ -109,6 +121,60 @@ def store_analysis_results(**kwargs) -> Dict[str, Any]:
             "query_hash": "",
             "analysis_id": None,
         }
+
+
+def _persist_analysis_summary(
+    query_hash: str, target: str, llm_analysis: Dict[str, Any]
+) -> Optional[str]:
+    """Persist a compact per-analysis summary and return its analysis id.
+
+    The Query Library reads this store to show each query's latest analysis
+    outcome. Only the compact assessment is kept, so the store stays small;
+    the history is bounded per query. Best effort: the analysis itself has
+    already succeeded, so a summary-store failure returns None instead of
+    failing the workflow step.
+    """
+    try:
+        from shared.query_registry import (
+            AnalysisResultsRegistry,
+            create_analysis_result,
+            extract_performance_assessment,
+        )
+
+        assessment = extract_performance_assessment(llm_analysis)
+        summary: Dict[str, Any] = {}
+        rating = assessment.get("overall_rating")
+        if isinstance(rating, str) and rating:
+            summary["overall_rating"] = rating
+        score = assessment.get("efficiency_score")
+        if isinstance(score, (int, float)) and not isinstance(score, bool):
+            summary["efficiency_score"] = float(score)
+
+        tokens_used = llm_analysis.get("tokens_used")
+        results_registry = AnalysisResultsRegistry()
+        record = create_analysis_result(
+            query_hash=query_hash,
+            target=target,
+            performance_metrics={},
+            llm_analysis={"performance_assessment": summary} if summary else {},
+            explain_plan={},
+            query_metrics={},
+            llm_model_used=str(llm_analysis.get("llm_model") or ""),
+            tokens_used=(
+                int(tokens_used)
+                if isinstance(tokens_used, (int, float))
+                and not isinstance(tokens_used, bool)
+                else 0
+            ),
+        )
+        analysis_id = results_registry.store_analysis_result(query_hash, record)
+        results_registry.cleanup_old_analyses(keep_per_query=KEPT_ANALYSES_PER_QUERY)
+        return analysis_id
+    except Exception:
+        logger.warning(
+            "Could not persist the analysis summary for %s", query_hash, exc_info=True
+        )
+        return None
 
 
 def format_analysis_output(**kwargs) -> Dict[str, Any]:

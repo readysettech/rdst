@@ -12,6 +12,7 @@ import {
   buildParameterSuggestions,
   fetchParameterSchema,
   parameterValueKey,
+  suggestionSummaryMessage,
 } from '../../lib/parameterSuggestions'
 import {
   detectParameters,
@@ -21,6 +22,7 @@ import {
 } from '../../lib/sqlParameters'
 import { useFormatSql } from '../../lib/useFormatSql'
 import { TaskDialogContent } from '../dialog/TaskDialogContent'
+import { ParameterSuggestionSummary } from '../ParameterSuggestionSummary'
 import {
   buildParameterHighlights,
   getParameterColor,
@@ -76,6 +78,7 @@ export function ParameterDialog({
   const [suggestionMessage, setSuggestionMessage] = useState<string | null>(
     null
   )
+  const [schemaUnavailable, setSchemaUnavailable] = useState(false)
 
   useEffect(() => {
     const init: Record<string, string> = {}
@@ -89,6 +92,7 @@ export function ParameterDialog({
     setValues(init)
     setProvenance(sources)
     setSuggestionMessage(null)
+    setSchemaUnavailable(false)
   }, [query, parameters, initialValues])
 
   const handleValueChange = (key: string, value: string) => {
@@ -109,6 +113,7 @@ export function ParameterDialog({
     if (!target || missingCount === 0) return
     setSuggesting(true)
     setSuggestionMessage(null)
+    setSchemaUnavailable(false)
     try {
       const schema = await fetchParameterSchema(target)
       const suggestions = buildParameterSuggestions(query, parameters, schema)
@@ -132,10 +137,13 @@ export function ParameterDialog({
         return next
       })
       setSuggestionMessage(
-        filled > 0
-          ? `Filled ${filled} unresolved ${filled === 1 ? 'parameter' : 'parameters'} from safe schema evidence. Review before running.`
-          : 'No safe schema-grounded suggestions were found. Existing values were preserved.'
+        suggestionSummaryMessage({
+          filled,
+          missingBefore: missingCount,
+          schemaAvailable: schema !== null,
+        })
       )
+      setSchemaUnavailable(schema === null)
     } catch {
       setSuggestionMessage(
         'Schema suggestions are unavailable. Existing values were preserved.'
@@ -271,11 +279,10 @@ export function ParameterDialog({
                       Text values are quoted automatically. Numbers, NULL, TRUE,
                       and FALSE are used as entered.
                     </Text>
-                    {suggestionMessage ? (
-                      <Text level="caption" className="text-content-layout-2">
-                        {suggestionMessage}
-                      </Text>
-                    ) : null}
+                    <ParameterSuggestionSummary
+                      message={suggestionMessage}
+                      schemaUnavailable={schemaUnavailable}
+                    />
                   </div>
                 </ScrollArea.Viewport>
                 <ScrollArea.Scrollbar

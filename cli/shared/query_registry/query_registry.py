@@ -2,20 +2,28 @@
 Query Registry Implementation
 
 Core functionality for storing, retrieving, and managing SQL queries with
-normalized hashing and TOML-based persistence.
+normalized hashing, persisted in SQLite (library.db). A pre-existing
+queries.toml is imported on first load and kept as a backup; the TOML
+projection can be regenerated with ``rdst query export --format=toml``.
+
+The SQLite flip is gated by the RDST_REGISTRY_SQLITE environment variable
+(see registry_sqlite_enabled): when disabled, queries.toml remains the
+authoritative store and no library.db is created or imported.
 """
 
 from __future__ import annotations
 
 import copy
 import hashlib
+import os
 import re
 import logging
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, asdict, field, fields as dataclass_fields
 from datetime import datetime, timezone
 from pathlib import Path
 import shared.constants as shared_constants
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Tuple
 import toml
 import sqlglot
 import sqlparse
@@ -23,6 +31,7 @@ from sqlglot.errors import ParseError
 
 from shared.persistence import update_toml
 from shared.query_capture_limits import MAX_QUERY_LENGTH
+from shared.query_registry.library_store import LibraryStore, library_db_path_for
 
 logger = logging.getLogger(__name__)
 
@@ -281,12 +290,26 @@ def hash_sql_deep(query: str) -> str:
     return hashlib.md5(normalized.encode('utf-8'), usedforsecurity=False).hexdigest()[:12]
 
 
+def _sql_digest(normalized_sql: str) -> str:
+    """Digest a normalized SQL text into the registry's 12-hex identity."""
+    # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
+    # MD5 is used for query fingerprinting/deduplication, not cryptographic purposes
+    return hashlib.md5(
+        normalized_sql.encode("utf-8"), usedforsecurity=False
+    ).hexdigest()[
+        :12
+    ]  # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
+
+
 def hash_sql(query: str) -> str:
     """
     Generate a consistent hash for a SQL query.
 
-    Uses normalized SQL to ensure the same logical query always
-    produces the same hash regardless of formatting differences.
+    Uses normalized SQL with every placeholder renumbered by textual
+    position in one canonical :pN form, so the same logical query always
+    produces the same hash regardless of formatting differences or the
+    placeholder style its source spells ($N, anonymous ?, or :pN; see
+    sql_normalizer.canonicalize_placeholder_style).
 
     Args:
         query: SQL query string (will be normalized)
@@ -294,12 +317,9 @@ def hash_sql(query: str) -> str:
     Returns:
         12-character hexadecimal hash string
     """
-    normalized = normalize_sql(query)
-    # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
-    # MD5 is used for query fingerprinting/deduplication, not cryptographic purposes
-    return hashlib.md5(normalized.encode("utf-8"), usedforsecurity=False).hexdigest()[
-        :12
-    ]  # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
+    from .sql_normalizer import canonicalize_placeholder_style
+
+    return _sql_digest(canonicalize_placeholder_style(normalize_sql(query)))
 
 
 # Stop words to filter out when generating query names
@@ -606,6 +626,61 @@ def extract_parameters_from_sql(original_sql: str, parameterized_sql: str) -> Di
     return params
 
 
+def _identity_slot_count(identity_sql: str) -> int:
+    """Count the parameter slots of an engine-normalized identity text.
+
+    MySQL digest texts carry anonymous '?' slots. pg_stat_statements texts
+    carry $N placeholders numbered by text position, so slot k is $k and the
+    positional 'pk' mapping holds for both styles. A text mixing the two, or
+    whose $N sequence is not exactly 1..n in text order, has no safely
+    mappable slots and counts as zero (yielding no values).
+    """
+    qmark_slots = identity_sql.count("?")
+    dollar_slots = [int(number) for number in re.findall(r"\$(\d+)", identity_sql)]
+    if not dollar_slots:
+        return qmark_slots
+    if qmark_slots or dollar_slots != list(range(1, len(dollar_slots) + 1)):
+        return 0
+    return len(dollar_slots)
+
+
+def extract_observed_params(
+    sample_sql: str, identity_sql: str, dialect: str = None
+) -> Dict[str, dict]:
+    """Extract observed parameter values from a literal-bearing sample of a
+    statement whose identity text is engine-normalized: anonymous '?' slots
+    (MySQL DIGEST_TEXT alongside QUERY_SAMPLE_TEXT) or positional $N slots
+    (pg_stat_statements text alongside a pg_stat_activity sample).
+
+    The sample's literals map positionally onto identity_sql's slots.
+    normalize_and_extract names parameters in AST-traversal order, so the
+    values are renamed p1..pN by their textual position first; consumers
+    resolve the k-th slot as key 'pk'. Values are returned only when the
+    literal count matches the slot count; any mismatch (folded IN lists,
+    truncated samples, non-literal slots) yields no values rather than
+    misaligned ones.
+    """
+    from .sql_normalizer import normalize_and_extract
+
+    try:
+        normalized_sample, params = normalize_and_extract(
+            canonicalize_sql(sample_sql), dialect
+        )
+    except Exception:
+        return {}
+    ordered = re.findall(r":p(\d+)\b", normalized_sample)
+    if len(ordered) != len(params) or len(ordered) != _identity_slot_count(
+        identity_sql
+    ):
+        return {}
+    remapped = {
+        f"p{position}": params[f"p{index}"]
+        for position, index in enumerate(ordered, 1)
+        if f"p{index}" in params
+    }
+    return remapped if len(remapped) == len(params) else {}
+
+
 def reconstruct_query_with_params(
     parameterized_sql: str, params: Dict[str, Any]
 ) -> str:
@@ -799,57 +874,159 @@ class QueryEntry:
         return cls(**data)
 
 
+REGISTRY_SQLITE_ENV_VAR = "RDST_REGISTRY_SQLITE"
+
+
+def registry_sqlite_enabled(value: Optional[str] = None) -> bool:
+    """Whether the SQLite library store backs QueryRegistry (default: yes).
+
+    The RDST_REGISTRY_SQLITE environment variable is the review gate for the
+    SQLite flip: a trimmed, case-insensitive "0" or "false" selects the
+    legacy TOML backend; any other value, or the variable being unset,
+    keeps SQLite authoritative.
+
+    Args:
+        value: Flag value to parse. Defaults to the current environment.
+    """
+    if value is None:
+        value = os.environ.get(REGISTRY_SQLITE_ENV_VAR)
+    return (value or "").strip().lower() not in {"0", "false"}
+
+
+class TomlLibraryStore:
+    """Legacy TOML persistence behind the same interface as LibraryStore.
+
+    Selected when registry_sqlite_enabled() is False: queries.toml is the
+    authoritative store, every save rewrites it atomically through
+    shared.persistence.update_toml under its file lock, and no library.db
+    is ever created or imported.
+    """
+
+    def __init__(self, registry_path: Path) -> None:
+        self._registry_path = registry_path
+
+    def load_all(self) -> Dict[str, Dict[str, Any]]:
+        """Return every entry as {hash: entry_dict}; a missing file is empty."""
+        if not self._registry_path.exists():
+            return {}
+        with open(self._registry_path, "r", encoding="utf-8") as handle:
+            data = toml.load(handle)
+        return data.get("queries", {})
+
+    def apply_changes(
+        self,
+        baseline: Dict[str, Dict[str, Any]],
+        current: Dict[str, Dict[str, Any]],
+        *,
+        validate: Optional[Callable[[Dict[str, Dict[str, Any]]], None]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Merge one writer's baseline->current delta onto the stored TOML.
+
+        Same contract as LibraryStore.apply_changes: the file is re-read
+        under the lock, ``validate`` sees the merged queries mapping before
+        anything is written, and the merged mapping is returned so the
+        caller can adopt it as its new baseline. One call is one file write.
+        """
+
+        def validate_document(merged: Dict[str, Any]) -> None:
+            if validate is not None:
+                validate(merged.get("queries", {}))
+
+        merged = update_toml(
+            self._registry_path,
+            {"queries": baseline},
+            {"queries": current},
+            validate=validate_document,
+        )
+        return merged.get("queries", {})
+
+
 class QueryRegistry:
     """
     Manages persistent storage and retrieval of SQL queries.
 
-    Stores queries in TOML format at ~/.rdst/queries.toml with structure:
-    [queries.{hash}]
-    sql = "SELECT * FROM users"
-    hash = "{hash}"
-    tag = "user_lookup"  # optional
-    first_analyzed = "2024-01-15T10:30:00Z"
-    last_analyzed = "2024-01-15T10:30:00Z"
-    frequency = 1000
-    source = "top"
+    Stores queries in SQLite at ~/.rdst/library.db (see library_store.py).
+    A legacy ~/.rdst/queries.toml is imported once on first load, backed up
+    beside itself, and ignored afterwards; the TOML projection is available
+    on demand via export_toml_projection / ``rdst query export``.
+
+    When RDST_REGISTRY_SQLITE disables the SQLite store, queries.toml is
+    authoritative instead and no library.db is touched. A process is
+    expected to run in one mode; flipping the flag between runs switches
+    the source of truth, so writes made in one mode are not visible in the
+    other (that is the point of the review gate).
     """
 
-    def __init__(self, registry_path: Optional[str] = None):
+    def __init__(
+        self, registry_path: Optional[str] = None, use_sqlite: Optional[bool] = None
+    ):
         """
         Initialize the query registry.
 
         Args:
-            registry_path: Custom path to registry file. Defaults to ~/.rdst/queries.toml
+            registry_path: Custom path to the legacy TOML registry file.
+                Defaults to ~/.rdst/queries.toml; the authoritative SQLite
+                store lives beside it (see library_db_path_for).
+            use_sqlite: Backend override, mainly for tests. Defaults to the
+                RDST_REGISTRY_SQLITE environment flag
+                (see registry_sqlite_enabled).
         """
         if registry_path:
             self.registry_path = Path(registry_path)
         else:
             self.registry_path = shared_constants.rdst_data_dir() / "queries.toml"
+        if use_sqlite is None:
+            use_sqlite = registry_sqlite_enabled()
+        self.sqlite_enabled = use_sqlite
+        if use_sqlite:
+            self._store = LibraryStore(
+                library_db_path_for(self.registry_path), self.registry_path
+            )
+        else:
+            self._store = TomlLibraryStore(self.registry_path)
 
         # In-memory cache of queries
         self._queries: Dict[str, QueryEntry] = {}
         self._loaded = False
         self._baseline_data: Dict[str, Any] = {"queries": {}}
+        self._defer_depth = 0
+        self._deferred_dirty = False
+        self._write_guard: Optional[Callable[[], AbstractContextManager[Any]]] = None
+
+    @property
+    def library_store(self) -> Optional[LibraryStore]:
+        """SQLite read-model store, or None while the TOML rollback gate is on."""
+        return self._store if isinstance(self._store, LibraryStore) else None
+
+    def set_write_guard(
+        self,
+        guard: Optional[Callable[[], AbstractContextManager[Any]]],
+    ) -> None:
+        """Install a context held across each backing-store commit.
+
+        Discovery uses this to keep its cache.db fencing transaction live
+        until the independent library.db transaction has committed. Ordinary
+        CLI/API registry writers leave the guard unset.
+        """
+        self._write_guard = guard
 
     def _ensure_directory(self) -> None:
         """Ensure the registry directory exists."""
         self.registry_path.parent.mkdir(parents=True, exist_ok=True)
 
     def load(self) -> None:
-        """Load queries from TOML file into memory."""
-        if not self.registry_path.exists():
-            self._queries = {}
-            self._loaded = True
-            self._baseline_data = {"queries": {}}
-            return
+        """Load queries from the backing store into memory.
 
+        With SQLite enabled, the first load of a data dir that still has a
+        legacy queries.toml imports it (see LibraryStore); a failed import
+        leaves the TOML untouched and authoritative for the next attempt.
+        A fresh data dir serves an empty registry without creating any
+        file; the store file is created by the first write.
+        """
         try:
-            with open(self.registry_path, "r", encoding="utf-8") as f:
-                data = toml.load(f)
-            queries_data = data.get("queries", {})
             self._queries = {
                 query_hash: QueryEntry.from_dict(query_data)
-                for query_hash, query_data in queries_data.items()
+                for query_hash, query_data in self._store.load_all().items()
             }
         except Exception as exc:
             raise RuntimeError(
@@ -867,32 +1044,99 @@ class QueryRegistry:
             }
         }
 
-    @staticmethod
-    def _validate_toml_data(data: Dict[str, Any]) -> None:
-        for query_data in data.get("queries", {}).values():
-            QueryEntry.from_dict(query_data)
-
     def save(self) -> None:
         """Merge this instance's changes and atomically persist the registry."""
         if not self._loaded:
             self.load()
 
         current = self._toml_data()
-        try:
-            merged = update_toml(
-                self.registry_path,
-                self._baseline_data,
-                current,
-                validate=self._validate_toml_data,
-            )
-        except Exception as exc:
-            raise RuntimeError(f"Failed to save query registry: {exc}") from exc
-
-        self._queries = {
-            query_hash: QueryEntry.from_dict(copy.deepcopy(query_data))
-            for query_hash, query_data in merged.get("queries", {}).items()
+        current_queries = current["queries"]
+        baseline_queries = self._baseline_data.get("queries", {})
+        dirty_hashes = {
+            query_hash
+            for query_hash in current_queries.keys() | baseline_queries.keys()
+            if current_queries.get(query_hash) != baseline_queries.get(query_hash)
         }
-        self._baseline_data = self._toml_data()
+
+        def validate(merged_queries: Dict[str, Any]) -> None:
+            # Entries this writer never touched were either parsed from the
+            # store or preserved verbatim by the merge; only the writer's own
+            # changes need a round-trip check before they hit the store.
+            for query_hash in dirty_hashes:
+                query_data = merged_queries.get(query_hash)
+                if query_data is not None:
+                    QueryEntry.from_dict(query_data)
+
+        guard = self._write_guard() if self._write_guard is not None else nullcontext()
+        with guard:
+            try:
+                merged_queries = self._store.apply_changes(
+                    baseline_queries,
+                    current_queries,
+                    validate=validate,
+                )
+            except Exception as exc:
+                raise RuntimeError(f"Failed to save query registry: {exc}") from exc
+
+        # Adopt the merged result as the new baseline. Entries whose merged
+        # form matches what this instance just serialized are already
+        # materialized in memory; only entries another writer changed need
+        # re-parsing.
+        queries: Dict[str, QueryEntry] = {}
+        baseline: Dict[str, Any] = {}
+        for query_hash, query_data in merged_queries.items():
+            existing = self._queries.get(query_hash)
+            if existing is not None and current_queries.get(query_hash) == query_data:
+                queries[query_hash] = existing
+                baseline[query_hash] = query_data
+            else:
+                entry = QueryEntry.from_dict(copy.deepcopy(query_data))
+                queries[query_hash] = entry
+                baseline[query_hash] = entry.to_dict()
+        self._queries = queries
+        self._baseline_data = {"queries": baseline}
+
+    @contextmanager
+    def defer_save(self) -> Iterator["QueryRegistry"]:
+        """Suppress per-mutation saves inside the block.
+
+        When the outermost block exits cleanly, all deferred mutations are
+        persisted with a single save(); a block that mutated nothing writes
+        nothing.
+        """
+        self._defer_depth += 1
+        try:
+            yield self
+        finally:
+            self._defer_depth -= 1
+        if self._defer_depth == 0 and self._deferred_dirty:
+            self._deferred_dirty = False
+            self.save()
+
+    def export_toml_projection(self, output_path: Optional[str] = None) -> Tuple[Path, int]:
+        """Regenerate the TOML projection of the registry from SQLite.
+
+        Produces the same format the TOML-era writer produced, so older
+        tooling can keep reading it. Defaults to the registry's own
+        queries.toml path. Returns the path written and the entry count.
+
+        Fails when the SQLite store is disabled: queries.toml is already
+        the authoritative registry then, and a "projection" that silently
+        rewrote it in place would suggest SQLite was involved.
+        """
+        from shared.persistence import write_text
+
+        if not self.sqlite_enabled:
+            raise RuntimeError(
+                "The SQLite registry is disabled (RDST_REGISTRY_SQLITE); "
+                f"{self.registry_path} is already the authoritative TOML "
+                "registry, so there is nothing to export."
+            )
+
+        queries = self._store.load_all()
+        path = Path(output_path) if output_path else self.registry_path
+        write_text(path, toml.dumps({"queries": queries}))
+        return path, len(queries)
 
     @staticmethod
     def _update_lifecycle(
@@ -940,6 +1184,7 @@ class QueryRegistry:
         avg_duration_ms: float = 0.0,
         observation_count: int = 0,
         skip_param_extraction: bool = False,
+        observed_params_sql: Optional[str] = None,
         observed: bool = False,
         analyzed: bool = False,
         compared: bool = False,
@@ -958,6 +1203,12 @@ class QueryRegistry:
             frequency: Query frequency from telemetry (if available)
             target: Target database name for this analysis
             skip_param_extraction: Skip parameter extraction (for pre-parameterized queries from scan)
+            observed_params_sql: Literal-bearing text of one observed execution
+                of the same statement (e.g. MySQL QUERY_SAMPLE_TEXT). When sql
+                itself yields no parameter values (engine-normalized text with
+                '?' slots), values extracted from this text populate
+                parameters/most_recent_params as observed values; the entry's
+                identity (hash) still derives from sql alone.
             dialect: Optional SQL dialect ('postgres', 'mysql', etc.)
             max_duration_ms: Maximum observed duration in ms (from rdst top)
             avg_duration_ms: Average observed duration in ms (from rdst top)
@@ -1027,6 +1278,10 @@ class QueryRegistry:
             params = {}
         else:
             normalized_sql, params = normalize_and_extract(canonical_sql, dialect)
+            if observed_params_sql and not params:
+                params = extract_observed_params(
+                    observed_params_sql, normalized_sql, dialect
+                )
         query_hash = hash_sql(canonical_sql)
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -1063,8 +1318,11 @@ class QueryRegistry:
             if ask_target and not entry.ask_target:
                 entry.ask_target = ask_target
 
-            # Update parameters with new SQLGlot format
-            entry.parameters = params
+            # Update parameters with new SQLGlot format. An extraction that
+            # found values never regresses to empty: observation cycles that
+            # lack a literal-bearing sample must not erase observed values.
+            if params:
+                entry.parameters = params
 
             # Update runtime stats if provided (keep max values)
             if max_duration_ms > entry.max_duration_ms:
@@ -1110,8 +1368,22 @@ class QueryRegistry:
             save_intent=save_intent,
         )
 
-        self.save()
+        if self._defer_depth:
+            self._deferred_dirty = True
+        else:
+            self.save()
         return query_hash, is_new_query
+
+    def add_queries_batch(
+        self, items: Iterable[Dict[str, Any]]
+    ) -> List[Tuple[str, bool]]:
+        """Add multiple queries with a single registry persistence.
+
+        Each item is a mapping of add_query keyword arguments. Returns the
+        add_query result for each item, in order.
+        """
+        with self.defer_save():
+            return [self.add_query(**item) for item in items]
 
     def get_query(self, query_hash: str) -> Optional[QueryEntry]:
         """
@@ -1452,6 +1724,11 @@ class QueryRegistry:
 
         if target:
             entry.last_target = target
+            # Changing last_target makes this identity belong to the target.
+            # Persist the matching lifecycle row at the same time so the
+            # target-indexed SQLite read model cannot disagree with
+            # QueryEntry.belongs_to_target().
+            entry.lifecycle_for(target, create=True)
 
         self.save()
         return True

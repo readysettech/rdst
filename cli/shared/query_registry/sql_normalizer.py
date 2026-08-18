@@ -8,6 +8,7 @@ correctly handling comments, nested queries, and edge cases.
 
 import re
 import logging
+from itertools import count
 from typing import Tuple, Dict, Any, Optional, Set
 
 from sqlglot import parse_one, exp
@@ -32,6 +33,112 @@ class _ReadysetCompatGenerator(_BaseGenerator):
 
     def table_sql(self, expression: exp.Table, sep: str = " ") -> str:
         return super().table_sql(expression, sep=sep)
+
+
+_SYSTEM_SCHEMAS = {
+    "pg_catalog",
+    "information_schema",
+    "performance_schema",
+    "mysql",
+    "sys",
+}
+
+
+# RDST prefixes its own observation statements with this marker; PostgreSQL
+# stores the first-seen text verbatim while the queryid jumble ignores
+# comments, so the marker identifies self-traffic without changing identity.
+RDST_SELF_MARKER = "/*rdst"
+
+# Session/transaction control and other utility statements are never user
+# workload candidates; they also commonly defeat the AST parser.
+_UTILITY_PREFIXES = (
+    "begin",
+    "commit",
+    "rollback",
+    "start transaction",
+    "set ",
+    "set\n",
+    "show ",
+    "reset ",
+    "deallocate",
+    "discard",
+    "fetch",
+    "close ",
+    "checkpoint",
+    "listen",
+    "notify",
+    "unlisten",
+)
+
+# Parse-failure fallback: capture relation tokens after FROM/JOIN/INTO/
+# UPDATE/DELETE FROM so catalog-only statements the parser cannot handle
+# (array casts, tooling SQL) are still classified instead of failing open.
+_RELATION_TOKEN = re.compile(
+    r"\b(?:from|join|into|update|delete\s+from)\s+"
+    r'("?[A-Za-z_][\w$]*"?(?:\."?[A-Za-z_][\w$]*"?)?)',
+    re.IGNORECASE,
+)
+
+
+def _is_system_relation(token: str) -> bool:
+    parts = [part.strip('"').lower() for part in token.split(".")]
+    schema = parts[0] if len(parts) == 2 else ""
+    name = parts[-1]
+    if schema in _SYSTEM_SCHEMAS:
+        return True
+    return not schema and name.startswith("pg_")
+
+
+def references_user_relations(sql: str, dialect: str = None) -> bool:
+    """Return True when the statement touches at least one user relation.
+
+    System relations are catalog/statistics tables: schema-qualified
+    pg_catalog/information_schema/performance_schema/mysql/sys names, and
+    unqualified pg_-prefixed names, which resolve to pg_catalog through the
+    default search_path. RDST-marked self-traffic, utility statements, and
+    statements with no relations at all report False. When the AST parser
+    fails, a regex fallback classifies by the captured relation tokens; only
+    a statement whose tokens include a non-system relation (or that yields
+    no signal at all while resembling a query) reports True, so a parser gap
+    cannot flood the library with catalog traffic yet never drops a user
+    query that names a user relation.
+    """
+    stripped = sql.lstrip()
+    if stripped.lower().startswith(RDST_SELF_MARKER):
+        return False
+    # Classification looks through a leading comment the way the engine's
+    # jumble does.
+    while stripped.startswith("/*"):
+        end = stripped.find("*/")
+        if end < 0:
+            break
+        stripped = stripped[end + 2 :].lstrip()
+    lowered = stripped.lower()
+    if any(lowered.startswith(prefix) for prefix in _UTILITY_PREFIXES):
+        return False
+    try:
+        parsed = parse_one(stripped, dialect=dialect)
+    except Exception:
+        tokens = _RELATION_TOKEN.findall(stripped)
+        if tokens:
+            return any(not _is_system_relation(token) for token in tokens)
+        return True
+    cte_names = {
+        cte.alias_or_name.lower()
+        for cte in parsed.find_all(exp.CTE)
+        if cte.alias_or_name
+    }
+    for table in parsed.find_all(exp.Table):
+        name = (table.name or "").lower()
+        schema = (table.db or "").lower()
+        if not name or (not schema and name in cte_names):
+            continue
+        if schema in _SYSTEM_SCHEMAS:
+            continue
+        if not schema and name.startswith("pg_"):
+            continue
+        return True
+    return False
 
 
 def normalize_and_extract(sql: str, dialect: str = None) -> Tuple[str, Dict[str, dict]]:
@@ -103,6 +210,46 @@ def reconstruct_sql(normalized_sql: str, params: Dict[str, dict], dialect: str =
             placeholder.replace(replacement)
 
     return _ReadysetCompatGenerator().generate(tree)
+
+
+# Placeholder spellings that must hash alike: RDST's own `:pN`, positional
+# `$N` (pg_stat_statements texts; the digits never touch other tokens, so
+# `$1::bigint` still maps), and a bare `?` (MySQL digest texts). Postgres
+# spells JSON/jsonpath operators with `?` too (`??`, `?|`, `?&`, `@?`); a
+# `?` adjacent to `?`, `|`, or `&`, or following `@`, is one of those
+# operators in every dialect that produces it, never a placeholder.
+_PLACEHOLDER_TOKEN = re.compile(r":p\d+\b|\$\d+\b|(?<![?@])\?(?![?|&])")
+
+
+def canonicalize_placeholder_style(normalized_sql: str) -> str:
+    """Renumber every placeholder by textual position, in one `:pN` style.
+
+    Engine-normalized statement texts keep their engine's placeholder style
+    through normalization: pg_stat_statements texts carry `$N` (the
+    dialect-less parser reads them as identifiers and regenerates them
+    verbatim) and MySQL digest texts carry anonymous `?`, while RDST's own
+    literal extraction emits `:pN` numbered in AST-traversal order, which
+    need not match textual order. Hashing the normalized text directly
+    therefore gives one logical query a different identity per source; hash
+    derivation routes through this function, which rewrites the k-th
+    placeholder in text order to `:pk` regardless of its spelling, so every
+    style converges on one canonical form. Distinct slots keep distinct
+    indices; pg_stat_statements numbers `$N` textually, so its indices are
+    preserved as `:pN`.
+
+    Expects normalize()d SQL: string literals are already extracted to
+    `:pN` and comments are stripped, so a remaining `$N` or bare `?` is a
+    real parameter slot rather than text inside a literal. Regex is the
+    right tool here because the engine styles survive the AST as plain
+    text; only the hash input goes through this mapping, displayed and
+    stored SQL keep their original style.
+    """
+    if not normalized_sql:
+        return normalized_sql
+    position = count(1)
+    return _PLACEHOLDER_TOKEN.sub(
+        lambda _: f":p{next(position)}", normalized_sql
+    )
 
 
 def denormalize_for_readyset(sql: str, engine: str = "postgresql") -> str:

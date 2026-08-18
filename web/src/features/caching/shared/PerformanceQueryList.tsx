@@ -1,12 +1,17 @@
-import { cn } from '@rs/tailwind-base'
-import { BaseInputCheckbox } from '@rs/ui-new/base-input-checkbox'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
+import { Card } from '@rs/ui-new/card-2'
 import { Scrollable } from '@rs/ui-new/scrollable'
 import { VStack } from '@rs/ui-new/stack'
+import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
-import type { ReactNode } from 'react'
-import { SqlTokens } from '../../../components/SqlTokens'
-import { collapseWhitespace } from '../../../lib/collapseWhitespace'
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
+import { QueryCard } from '../../../components/QueryCard'
+import { QueryCardFooter } from '../../../components/query-card/QueryCardFooter'
+import { QueryCardHeader } from '../../../components/query-card/QueryCardHeader'
+import { QueryCardSelectionIndicator } from '../../../components/query-card/QueryCardSelectionIndicator'
+import { QueryCardSql } from '../../../components/query-card/QueryCardSql'
+import { formatTimestamp } from '../../../lib/formatters'
+import { isNotCacheable } from '../../../lib/queryImpact'
 import type { Parameter } from '../../../lib/sqlParameters'
 
 export function performanceParameterKey(ownerId: string, parameter: Parameter) {
@@ -66,6 +71,27 @@ export function PerformanceQueryParameters({
   )
 }
 
+/**
+ * Timestamped cacheability evidence for a selectable row: shown at point of
+ * use, never a visibility gate (FB-13). Renders only for a confirmed
+ * not-cacheable verdict; unknown or positive evidence asserts nothing here.
+ */
+export function PerformanceCacheabilityNote({
+  readysetSupported,
+  checkedAt,
+}: {
+  readysetSupported?: string
+  checkedAt?: string
+}) {
+  if (!isNotCacheable(readysetSupported)) return null
+  const when = checkedAt ? ` (${formatTimestamp(checkedAt)})` : ''
+  return (
+    <Text level="caption" className="text-content-layout-3">
+      Last check: not cacheable{when}
+    </Text>
+  )
+}
+
 export function PerformanceQueryList({
   children,
   footer,
@@ -78,75 +104,118 @@ export function PerformanceQueryList({
   return (
     <section
       aria-label={ariaLabel}
-      className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border-layout-soft"
+      className="flex min-h-0 flex-1 flex-col overflow-hidden"
     >
       <Scrollable type="always" className="h-full">
-        {children}
+        <VStack className="items-stretch gap-3 p-1 pr-5">{children}</VStack>
       </Scrollable>
       {footer}
     </section>
   )
 }
 
-export function PerformanceQueryRow({
-  id,
-  checked,
+function performanceCardTitle(title: string) {
+  return (
+    <Text level="label-medium" className="font-semibold text-content-layout-1">
+      {title}
+    </Text>
+  )
+}
+
+function performanceCardBadges(parameterCount: number) {
+  return parameterCount > 0 ? (
+    <Tag
+      size="small"
+      variant="neutral"
+      modifier="ghost"
+      label={`${parameterCount} ${parameterCount === 1 ? 'parameter' : 'parameters'}`}
+    />
+  ) : undefined
+}
+
+export function PerformanceQueryCard({
+  queryHash,
+  selected,
   disabled = false,
-  onCheckedChange,
+  onSelect,
   title,
   sql,
   meta,
-  children,
+  parameterCount = 0,
+  parameterContent,
 }: {
-  id: string
-  checked: boolean
+  queryHash: string
+  selected: boolean
   disabled?: boolean
-  onCheckedChange: () => void
+  onSelect: () => void
   title: string
   sql: string
   meta?: ReactNode
-  children?: ReactNode
+  parameterCount?: number
+  parameterContent?: ReactNode
 }) {
+  const titleContent = performanceCardTitle(title)
+  const badges = performanceCardBadges(parameterCount)
+  const selectionLabel = `${selected ? 'Deselect' : 'Select'} ${title}`
+
+  if (!selected || !parameterContent) {
+    return (
+      <QueryCard
+        sql={sql}
+        truncateOneLine={!selected}
+        title={titleContent}
+        badges={badges}
+        meta={meta}
+        selectable
+        selected={selected}
+        selectionDisabled={disabled}
+        selectionLabel={selectionLabel}
+        onSelect={onSelect}
+        data-query-hash={queryHash}
+      />
+    )
+  }
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (disabled) return
+    if (event.target !== event.currentTarget) return
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      onSelect()
+    }
+  }
+
   return (
-    <div
-      className={cn(
-        'border-b border-border-layout-soft last:border-0',
-        checked && 'bg-surface-primary-soft/20',
-        disabled && 'opacity-50'
-      )}
+    <Card
+      data-query-hash={queryHash}
+      className="ring-2 ring-border-primary-soft shadow-elevation-2 transition-[box-shadow]"
     >
-      <label
-        htmlFor={id}
-        className={cn(
-          'flex items-start gap-3 px-4 py-4',
-          disabled ? 'cursor-not-allowed' : 'cursor-pointer'
-        )}
-      >
-        <BaseInputCheckbox
-          id={id}
-          checked={checked}
-          disabled={disabled}
-          onCheckedChange={onCheckedChange}
-          className="mt-0.5"
-        />
-        <VStack className="min-w-0 flex-1 items-start gap-1">
-          <Text
-            level="label-small"
-            className="w-full truncate text-content-layout-1"
-          >
-            {title}
-          </Text>
-          <div className="w-full min-w-0 overflow-hidden">
-            <SqlTokens
-              sql={collapseWhitespace(sql)}
-              title={sql}
-              className="truncate whitespace-nowrap text-mono-small"
-            />
-          </div>
-          {meta}
-        </VStack>
-      </label>
-      {checked ? children : null}
-    </div>
+      <Card.Content className="p-0 overflow-hidden">
+        {/* biome-ignore lint/a11y/useSemanticElements: a native button cannot contain the card's block-level header and SQL bands */}
+        <div
+          role="button"
+          tabIndex={disabled ? -1 : 0}
+          aria-pressed
+          aria-disabled={disabled || undefined}
+          aria-label={selectionLabel}
+          onClick={disabled ? undefined : onSelect}
+          onKeyDown={handleKeyDown}
+          className={
+            disabled
+              ? 'cursor-not-allowed opacity-50'
+              : 'cursor-pointer focus-visible:outline-none focus-visible:shadow-focus'
+          }
+        >
+          <QueryCardHeader
+            leading={<QueryCardSelectionIndicator selected />}
+            title={titleContent}
+            badges={badges}
+          />
+          <QueryCardSql sql={sql} expandable={false} copyable={false} />
+        </div>
+        {parameterContent}
+      </Card.Content>
+      <QueryCardFooter meta={meta} detailsOpen={false} />
+    </Card>
   )
 }

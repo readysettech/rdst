@@ -991,6 +991,7 @@ def test_resolve_connection_params_without_ssh_is_unchanged():
         "tls_verify": False,
         "tls_ca": None,
         "read_only": True,
+        "application_name": "rdst/unknown",
         "password_env": "APP_DB_PASSWORD",
     }
 

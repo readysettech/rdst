@@ -637,6 +637,24 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
                 ],
             ),
             SubcommandDef(
+                name="export",
+                help="Export the registry as a TOML projection",
+                args=[
+                    ArgDef(
+                        "--format",
+                        dest="format",
+                        default="toml",
+                        choices=["toml"],
+                        help="Export format (default: toml)",
+                    ),
+                    ArgDef(
+                        "--output",
+                        short="-o",
+                        help="Output path (default: queries.toml beside the registry)",
+                    ),
+                ],
+            ),
+            SubcommandDef(
                 name="rm",
                 help="Delete a query from registry (alias for delete)",
                 args=[

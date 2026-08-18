@@ -167,7 +167,7 @@ class QueryCommand:
         Route to appropriate subcommand handler.
 
         Args:
-            subcommand: One of: add, edit, list, show, delete, rm, import
+            subcommand: One of: add, edit, list, show, delete, rm, import, export
             **kwargs: Subcommand-specific arguments
 
         Returns:
@@ -188,6 +188,8 @@ class QueryCommand:
             return self.show(**kwargs)
         elif subcommand in ["delete", "rm"]:
             return self.delete(**kwargs)
+        elif subcommand == "export":
+            return self.export(**kwargs)
         elif subcommand == "run":
             return self.run(**kwargs)
         elif subcommand == "cache-compare":
@@ -744,6 +746,45 @@ class QueryCommand:
                 message=f"Error deleting query: {str(e)}",
                 data={"identifier": identifier, "error": str(e)},
             )
+
+    def export(
+        self,
+        format: str = "toml",
+        output: Optional[str] = None,
+        **kwargs,
+    ):
+        """
+        Export the registry as a TOML projection of the SQLite store.
+
+        Args:
+            format: Export format (only "toml" is supported)
+            output: Output path; defaults to queries.toml beside the registry
+
+        Returns:
+            RdstResult with the export path and entry count
+        """
+        from shared.cli.types import RdstResult
+
+        if format != "toml":
+            return RdstResult(
+                ok=False,
+                message=f"Unsupported export format: {format}",
+                data={"format": format},
+            )
+
+        try:
+            path, count = self.registry.export_toml_projection(output)
+        except Exception as e:
+            return RdstResult(
+                ok=False,
+                message=f"Error exporting registry: {str(e)}",
+                data={"error": str(e)},
+            )
+        return RdstResult(
+            ok=True,
+            message=f"✓ Exported {count} queries to {path}",
+            data={"path": str(path), "count": count, "format": format},
+        )
 
     def list(
         self,

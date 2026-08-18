@@ -6,7 +6,6 @@ sources like pg_stat_statements (PostgreSQL) and performance_schema (MySQL).
 Handles cases where these extensions/schemas are not available.
 """
 
-import time
 from typing import Dict, Any, Optional, List
 from contextlib import contextmanager
 
@@ -74,9 +73,9 @@ def collect_query_metrics(
         engine = target_config.get('engine', '').lower()
 
         if engine in ['postgresql', 'postgres']:
-            return _collect_postgres_metrics(sql, target_config, query_hash, target)
+            collector = _collect_postgres_metrics
         elif engine in ['mysql', 'mariadb']:
-            return _collect_mysql_metrics(sql, target_config, query_hash, target)
+            collector = _collect_mysql_metrics
         else:
             return {
                 "success": False,
@@ -84,6 +83,11 @@ def collect_query_metrics(
                 "metrics": {},
                 "available_sources": []
             }
+
+        # These collectors query statistics views; they never execute the
+        # analyzed SQL itself, so they must not create evidence for its
+        # identity.
+        return collector(sql, target_config, query_hash, target)
 
     except Exception as e:
         return {
@@ -113,6 +117,7 @@ def _collect_postgres_metrics(
         resolved_params = resolve_connection_params(
             target=target,
             target_config=target_config,
+            lane="rdst/analyze",
         )
         conn_params = postgres_connection_kwargs(resolved_params)
 
@@ -189,6 +194,7 @@ def _collect_mysql_metrics(
         resolved_params = resolve_connection_params(
             target=target,
             target_config=target_config,
+            lane="rdst/analyze",
         )
         conn_overrides = {
             'charset': 'utf8mb4',

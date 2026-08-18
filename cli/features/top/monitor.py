@@ -108,6 +108,7 @@ class ActivityQueryCollector:
           AND query NOT LIKE 'COMMIT%'
           AND query NOT LIKE 'ROLLBACK%'
           AND query NOT LIKE '%pg_catalog%'
+          AND COALESCE(application_name, '') NOT LIKE 'rdst/%'
           AND usename NOT IN ('rdsadmin', 'rdsrepladmin', 'readyset', 'replicator')
         ORDER BY duration_ms DESC
         LIMIT 250
@@ -132,6 +133,12 @@ class ActivityQueryCollector:
           AND INFO NOT LIKE 'SHOW %'
           AND INFO NOT LIKE 'SELECT 1%'
           AND DB = DATABASE()
+          AND ID NOT IN (
+              SELECT PROCESSLIST_ID
+              FROM performance_schema.session_account_connect_attrs
+              WHERE ATTR_NAME = 'program_name'
+                AND ATTR_VALUE LIKE 'rdst/%'
+          )
         ORDER BY duration_ms DESC
         LIMIT 250
     """

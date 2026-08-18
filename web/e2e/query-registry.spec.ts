@@ -3,8 +3,8 @@ import {
   clearQueryRegistry,
   configureTestTarget,
   expect,
-  mockConnectivityOk,
   fillCodeMirror,
+  mockConnectivityOk,
   setBackendFixtures,
   test,
 } from './fixtures'
@@ -89,7 +89,10 @@ test('creates, renames, edits, searches, analyzes, and deletes a saved query', a
   ).toBeVisible()
   // v3: the SQL renders as a highlighted <code title={sql}> (no expand button);
   // its title attribute carries the full query as a stable per-row hook.
-  await expect(queryRow.locator('[title]')).toHaveAttribute('title', updatedSql)
+  await expect(queryRow.locator('code[title]')).toHaveAttribute(
+    'title',
+    updatedSql
+  )
 
   const search = page.getByPlaceholder('Search name, hash, or SQL...')
   await search.fill('active-users')

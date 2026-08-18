@@ -6,6 +6,7 @@ Tests explain_analysis, parallel_merge, query_metrics and other function utiliti
 
 import importlib.util
 import sys
+import threading
 from pathlib import Path
 
 # Import module directly to avoid package __init__.py issues
@@ -143,6 +144,120 @@ class TestMergeParallelAnalysisResults:
         assert final_verdict["cacheable"] is True
         assert final_verdict["confidence"] == "medium"
         assert final_verdict["method"] == "static_analysis"
+
+
+class TestAnalyzeWorkerLifecycle:
+    """Cancellation cannot close evidence ahead of a background execution."""
+
+    def test_delayed_worker_cancelled_before_start_never_executes(self):
+        from features.analyze.functions import explain_analysis
+
+        state = explain_analysis._AnalyzeWorkerState("backend_pid")
+        identifier_ready = threading.Event()
+        allow_start = threading.Event()
+        executed = threading.Event()
+
+        def worker():
+            try:
+                state.set_identifier(42)
+                identifier_ready.set()
+                allow_start.wait()
+                if not state.begin_execution():
+                    return
+                executed.set()
+                state.mark_database_completion()
+            finally:
+                state.finish()
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        assert identifier_ready.wait(timeout=1.0)
+
+        state.request_cancel()
+        allow_start.set()
+        thread.join(timeout=1.0)
+
+        assert not thread.is_alive()
+        assert not executed.is_set()
+        assert state.snapshot()["started"] is False
+
+    def test_failed_cancel_has_bounded_settle_wait(self):
+        from features.analyze.functions import explain_analysis
+
+        release = threading.Event()
+        thread = threading.Thread(target=release.wait, daemon=True)
+        thread.start()
+
+        assert explain_analysis._settle_analyze_worker(thread, timeout=0.01) is False
+        assert thread.is_alive()
+
+        release.set()
+        thread.join(timeout=1.0)
+        assert not thread.is_alive()
+
+    def test_open_evidence_closes_only_after_worker_exit(self, monkeypatch):
+        from features.analyze.functions import explain_analysis
+
+        state = explain_analysis._AnalyzeWorkerState("backend_pid")
+        state.set_identifier(42)
+        assert state.begin_execution() is True
+
+        release = threading.Event()
+
+        def worker():
+            release.wait()
+            state.mark_database_completion()
+            state.finish()
+
+        worker_thread = threading.Thread(target=worker, daemon=True)
+        worker_thread.start()
+
+        recorded = []
+        recorded_lock = threading.Lock()
+        closed = threading.Event()
+
+        def capture(*args, **kwargs):
+            with recorded_lock:
+                recorded.append((args, kwargs))
+                if len(recorded) == 2:
+                    closed.set()
+
+        monkeypatch.setattr(explain_analysis, "record_execution_evidence", capture)
+        snapshot = state.snapshot()
+        monkeypatch.setattr(
+            explain_analysis,
+            "_execute_postgres_explain_analyze",
+            lambda sql, config, **kwargs: {
+                "success": True,
+                "plan_format": "json",
+                "explain_analyze_started": True,
+                "explain_analyze_started_at": snapshot["started_at"],
+                "explain_analyze_ended_at": None,
+                "_analyze_worker_thread": worker_thread,
+                "_analyze_worker_state": state,
+            },
+        )
+
+        result = explain_analysis.execute_explain_analyze(
+            "SELECT * FROM users",
+            target="t1",
+            target_config={"engine": "postgresql"},
+        )
+
+        assert len(recorded) == 1
+        assert recorded[0][1]["ended_at"] is None
+        assert "_analyze_worker_thread" not in result
+        assert "_analyze_worker_state" not in result
+
+        release.set()
+        assert closed.wait(timeout=1.0)
+        worker_thread.join(timeout=1.0)
+
+        first_kwargs = recorded[0][1]
+        second_kwargs = recorded[1][1]
+        assert first_kwargs["run_id"] == second_kwargs["run_id"]
+        assert first_kwargs["started_at"] == second_kwargs["started_at"]
+        assert second_kwargs["ended_at"] >= second_kwargs["started_at"]
 
 
 class TestExtractTableNamesFromSql:
@@ -477,3 +592,266 @@ class TestCollectQueryMetrics:
 
         assert result["success"] is False
         assert "Unsupported" in result["error"]
+
+
+class TestAnalyzeExecutionEvidence:
+    """Q11 attribution: the analyze lane records what it ran on the target."""
+
+    @staticmethod
+    def _capture(monkeypatch, module):
+        recorded = []
+        monkeypatch.setattr(
+            module,
+            "record_execution_evidence",
+            lambda *args, **kwargs: recorded.append((args, kwargs)),
+        )
+        return recorded
+
+    def test_full_explain_analyze_records_one_user_execution(self, monkeypatch):
+        from features.analyze.functions import explain_analysis
+
+        recorded = self._capture(monkeypatch, explain_analysis)
+        monkeypatch.setattr(
+            explain_analysis,
+            "_execute_postgres_explain_analyze",
+            lambda sql, config, **kwargs: {
+                "success": True,
+                "plan_format": "analyze",
+                "explain_analyze_ended_at": 123.456,
+            },
+        )
+
+        result = explain_analysis.execute_explain_analyze(
+            "SELECT * FROM users",
+            target="t1",
+            target_config={"engine": "postgresql"},
+        )
+
+        assert result["success"] is True
+        assert len(recorded) == 1
+        args, kwargs = recorded[0]
+        assert args == ("t1", [{"sql": "SELECT * FROM users", "exec_count": 1}])
+        assert kwargs["lane"] == "rdst/analyze"
+        assert kwargs["started_at"] == kwargs["ended_at"] == 123.456
+        assert isinstance(kwargs["started_at"], float)
+
+    def test_fast_mode_records_zero_user_executions(self, monkeypatch):
+        from features.analyze.functions import explain_analysis
+
+        recorded = self._capture(monkeypatch, explain_analysis)
+        monkeypatch.setattr(
+            explain_analysis,
+            "_execute_postgres_explain_analyze",
+            lambda sql, config, **kwargs: {
+                "success": True,
+                "plan_format": "json",
+                "explain_analyze_skipped": True,
+            },
+        )
+
+        explain_analysis.execute_explain_analyze(
+            "SELECT * FROM users",
+            target="t1",
+            target_config={"engine": "postgresql"},
+            fast_mode=True,
+        )
+
+        assert recorded == []
+
+    def test_fast_mode_that_completes_analyze_records_one(self, monkeypatch):
+        from features.analyze.functions import explain_analysis
+
+        recorded = self._capture(monkeypatch, explain_analysis)
+        monkeypatch.setattr(
+            explain_analysis,
+            "_execute_mysql_explain_analyze",
+            lambda sql, config, **kwargs: {
+                "success": True,
+                "plan_format": "analyze",
+                "explain_analyze_started": True,
+            },
+        )
+
+        explain_analysis.execute_explain_analyze(
+            "SELECT * FROM users",
+            target="t1",
+            target_config={"engine": "mysql"},
+            fast_mode=True,
+        )
+
+        args, _kwargs = recorded[0]
+        assert args == ("t1", [{"sql": "SELECT * FROM users", "exec_count": 1}])
+
+    def test_cancelled_analyze_records_unknown_count(self, monkeypatch):
+        from features.analyze.functions import explain_analysis
+
+        recorded = self._capture(monkeypatch, explain_analysis)
+        monkeypatch.setattr(
+            explain_analysis,
+            "_execute_postgres_explain_analyze",
+            lambda sql, config, **kwargs: {
+                "success": True,
+                "plan_format": "json",
+                "explain_analyze_started": True,
+                "explain_analyze_started_at": 200.125,
+                "explain_analyze_ended_at": 201.875,
+                "explain_analyze_timeout": True,
+            },
+        )
+
+        explain_analysis.execute_explain_analyze(
+            "SELECT * FROM users",
+            target="t1",
+            target_config={"engine": "postgresql"},
+        )
+
+        args, _kwargs = recorded[0]
+        assert args == ("t1", [{"sql": "SELECT * FROM users", "exec_count": None}])
+        assert _kwargs["started_at"] == 200.125
+        assert _kwargs["ended_at"] == 201.875
+
+    def test_cancelled_before_analyze_starts_records_zero(self, monkeypatch):
+        from features.analyze.functions import explain_analysis
+
+        recorded = self._capture(monkeypatch, explain_analysis)
+        monkeypatch.setattr(
+            explain_analysis,
+            "_execute_postgres_explain_analyze",
+            lambda sql, config, **kwargs: {
+                "success": True,
+                "plan_format": "json",
+                "explain_analyze_started": False,
+                "explain_analyze_skipped": True,
+            },
+        )
+
+        explain_analysis.execute_explain_analyze(
+            "SELECT * FROM users",
+            target="t1",
+            target_config={"engine": "postgresql"},
+        )
+
+        assert recorded == []
+
+    def test_failed_explain_records_nothing(self, monkeypatch):
+        from features.analyze.functions import explain_analysis
+
+        recorded = self._capture(monkeypatch, explain_analysis)
+        monkeypatch.setattr(
+            explain_analysis,
+            "_execute_postgres_explain_analyze",
+            lambda sql, config, **kwargs: {"success": False, "error": "boom"},
+        )
+
+        explain_analysis.execute_explain_analyze(
+            "SELECT * FROM users",
+            target="t1",
+            target_config={"engine": "postgresql"},
+        )
+
+        assert recorded == []
+
+    def test_failed_analyze_after_possible_start_records_unknown(self, monkeypatch):
+        from features.analyze.functions import explain_analysis
+
+        recorded = self._capture(monkeypatch, explain_analysis)
+        monkeypatch.setattr(
+            explain_analysis,
+            "_execute_postgres_explain_analyze",
+            lambda sql, config, **kwargs: {
+                "success": False,
+                "error": "no fallback plan",
+                "explain_analyze_started": True,
+            },
+        )
+
+        result = explain_analysis.execute_explain_analyze(
+            "SELECT * FROM users",
+            target="t1",
+            target_config={"engine": "postgresql"},
+        )
+
+        assert result["success"] is False
+        args, _kwargs = recorded[0]
+        assert args == (
+            "t1",
+            [{"sql": "SELECT * FROM users", "exec_count": None}],
+        )
+
+    def test_metrics_collection_does_not_record_user_execution(self, monkeypatch):
+        recorded = []
+        monkeypatch.setattr(
+            query_metrics,
+            "record_execution_evidence",
+            lambda *args, **kwargs: recorded.append((args, kwargs)),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            query_metrics,
+            "_collect_postgres_metrics",
+            lambda sql, config, query_hash, target: {"success": True, "metrics": {}},
+        )
+
+        result = query_metrics.collect_query_metrics(
+            sql="SELECT * FROM users",
+            target="t1",
+            target_config={"engine": "postgresql"},
+        )
+
+        assert result["success"] is True
+        assert recorded == []
+
+    def test_failed_metrics_collection_records_nothing(self, monkeypatch):
+        recorded = []
+        monkeypatch.setattr(
+            query_metrics,
+            "record_execution_evidence",
+            lambda *args, **kwargs: recorded.append((args, kwargs)),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            query_metrics,
+            "_collect_postgres_metrics",
+            lambda sql, config, query_hash, target: {"success": False},
+        )
+
+        query_metrics.collect_query_metrics(
+            sql="SELECT * FROM users",
+            target="t1",
+            target_config={"engine": "postgresql"},
+        )
+
+        assert recorded == []
+
+    def test_store_failure_does_not_fail_the_analysis(self, monkeypatch, tmp_path):
+        # Drive the real best-effort helper into a broken store: cache.db
+        # exists, but opening it raises. The analysis must still succeed.
+        from features.analyze.functions import explain_analysis
+        from shared.query_registry import observation_store
+
+        cache_db = tmp_path / "cache.db"
+        cache_db.touch()
+        monkeypatch.setattr(
+            observation_store, "default_cache_db_path", lambda: cache_db
+        )
+
+        def broken_store(*args, **kwargs):
+            raise RuntimeError("store exploded")
+
+        monkeypatch.setattr(observation_store, "ObservationStore", broken_store)
+        monkeypatch.setattr(
+            explain_analysis,
+            "_execute_postgres_explain_analyze",
+            lambda sql, config, **kwargs: {
+                "success": True,
+                "plan_format": "analyze",
+            },
+        )
+
+        result = explain_analysis.execute_explain_analyze(
+            "SELECT * FROM users",
+            target="t1",
+            target_config={"engine": "postgresql"},
+        )
+
+        assert result["success"] is True

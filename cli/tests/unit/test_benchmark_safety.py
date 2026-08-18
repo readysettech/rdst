@@ -9,6 +9,8 @@ leaking raw driver text.
 
 from __future__ import annotations
 
+import re
+import sqlite3
 from unittest.mock import patch
 
 import pytest
@@ -18,6 +20,7 @@ from features.query_registry.service import (
     MAX_BENCHMARK_DURATION_SECONDS,
     MAX_BENCHMARK_MAX_COUNT,
     QueryService,
+    _LoadTestEvidenceRecorder,
     benchmark_read_only_reason,
     set_session_read_only,
 )
@@ -361,7 +364,8 @@ class TestStreamBenchmarkRails:
     async def test_concurrency_mode_opens_one_read_only_connection_per_worker(self):
         connections: list[_FakeConnection] = []
 
-        def create_connection(_config):
+        def create_connection(_config, *, lane=None):
+            assert lane == "rdst/loadtest"
             connection = _FakeConnection()
             connections.append(connection)
             return connection
@@ -395,3 +399,243 @@ class TestStreamBenchmarkRails:
         )
         assert events[-1].type == "complete"
         assert events[-1].total_executions == 6
+
+
+class TestBenchmarkExecutionEvidence:
+    """Q11 attribution: a benchmark records its exact completed executions."""
+
+    @pytest.mark.asyncio
+    async def test_successful_benchmark_records_exact_counts(self, monkeypatch):
+        recorded = []
+
+        class Writer:
+            def __init__(self, target, *, lane):
+                self.target = target
+                self.lane = lane
+
+            def record(self, executions, *, run_id, started_at, ended_at):
+                recorded.append(
+                    (self.target, self.lane, run_id, list(executions), started_at, ended_at)
+                )
+
+            def close(self):
+                return None
+
+        monkeypatch.setattr(
+            "features.query_registry.service.ExecutionEvidenceWriter", Writer
+        )
+        conn = _FakeConnection()
+        with (
+            patch(
+                "shared.db_connection.create_direct_connection", return_value=conn
+            ),
+            patch(
+                "shared.config.targets.create_targets_config",
+                return_value=_FakeTargetsConfig(),
+            ),
+        ):
+            events = await _collect(
+                QueryService().stream_benchmark(
+                    queries=[{"identifier": "q", "sql": "SELECT 1"}],
+                    target="demo",
+                    mode="interval",
+                    interval_ms=0,
+                    concurrency=1,
+                    duration_seconds=1,
+                    max_count=2,
+                )
+            )
+
+        complete = events[-1]
+        assert complete.type == "complete"
+        assert recorded
+        assert {(target, lane) for target, lane, *_ in recorded} == {
+            ("demo", "rdst/loadtest")
+        }
+        assert (
+            sum(
+                execution["exec_count"]
+                for _, _, _, executions, _, _ in recorded
+                for execution in executions
+            )
+            == complete.total_successes
+        )
+        for _, _, run_id, _, started_at, ended_at in recorded:
+            # Stable per-second run_id: no flush batch index in the key.
+            assert re.fullmatch(r"[0-9a-f]{32}:exact:\d+", run_id)
+            assert started_at <= ended_at
+
+    def test_long_run_flushes_completion_buckets_in_their_own_windows(
+        self, monkeypatch
+    ):
+        flushed = []
+
+        class Writer:
+            def __init__(self, _target, *, lane):
+                assert lane == "rdst/loadtest"
+
+            def record(self, executions, *, run_id, started_at, ended_at):
+                flushed.append((run_id, list(executions), started_at, ended_at))
+
+            def close(self):
+                return None
+
+        monkeypatch.setattr(
+            "features.query_registry.service.ExecutionEvidenceWriter", Writer
+        )
+        recorder = _LoadTestEvidenceRecorder("demo")
+        first = recorder.note_started("SELECT 1", 1000.1)
+        recorder.note_completed(first, 1000.2)
+        recorder.flush_closed(1001.0)
+        second = recorder.note_started("SELECT 1", 1060.1)
+        recorder.note_completed(second, 1060.2)
+        recorder.flush_all()
+        recorder.close()
+
+        assert [run_id for run_id, _, _, _ in flushed] == [
+            f"{recorder.run_id}:exact:1000",
+            f"{recorder.run_id}:exact:1060",
+        ]
+        assert [rows for _, rows, _, _ in flushed] == [
+            [{"sql": "SELECT 1", "exec_count": 1}],
+            [{"sql": "SELECT 1", "exec_count": 1}],
+        ]
+        assert [(started, ended) for _, _, started, ended in flushed] == [
+            (1000.2, 1000.2),
+            (1060.2, 1060.2),
+        ]
+
+    def test_no_completed_or_started_execution_writes_no_evidence(
+        self, monkeypatch
+    ):
+        flushed = []
+
+        class Writer:
+            def __init__(self, _target, *, lane):
+                assert lane == "rdst/loadtest"
+
+            def record(self, executions, *, run_id, started_at, ended_at):
+                flushed.append((run_id, list(executions)))
+
+            def close(self):
+                return None
+
+        monkeypatch.setattr(
+            "features.query_registry.service.ExecutionEvidenceWriter", Writer
+        )
+        recorder = _LoadTestEvidenceRecorder("demo")
+        recorder.flush_all()
+        recorder.close()
+        assert flushed == []
+
+    @staticmethod
+    def _recorder_with_store(monkeypatch, tmp_path):
+        from shared.query_registry import observation_store
+
+        cache_db = tmp_path / "cache.db"
+        observation_store.ObservationStore(cache_db).close()
+        monkeypatch.setattr(
+            observation_store, "default_cache_db_path", lambda: cache_db
+        )
+        return _LoadTestEvidenceRecorder("demo"), cache_db
+
+    @staticmethod
+    def _evidence_rows(cache_db):
+        with sqlite3.connect(cache_db) as db:
+            return db.execute(
+                "SELECT run_id, normalized_hash, exec_count FROM rdst_execution"
+                " ORDER BY run_id"
+            ).fetchall()
+
+    def test_reflushed_bucket_updates_cumulative_row_in_place(
+        self, monkeypatch, tmp_path
+    ):
+        """Flushing a bucket, completing more work in the same second, and
+        flushing again must upsert ONE evidence row carrying the cumulative
+        count, never a second row the overlap reader would sum twice."""
+        recorder, cache_db = self._recorder_with_store(monkeypatch, tmp_path)
+        sql = "SELECT * FROM orders WHERE id = 1"
+        for index in range(5):
+            token = recorder.note_started(sql, 1000.1 + index * 0.01)
+            recorder.note_completed(token, 1000.2 + index * 0.01)
+        recorder.flush_all()
+        token = recorder.note_started(sql, 1000.8)
+        recorder.note_completed(token, 1000.9)
+        recorder.flush_all()
+        recorder.close()
+
+        rows = self._evidence_rows(cache_db)
+        assert len(rows) == 1
+        run_id, _, exec_count = rows[0]
+        assert run_id == f"{recorder.run_id}:exact:1000"
+        assert exec_count == 6
+
+    def test_same_hash_sql_merges_into_one_row_per_second(
+        self, monkeypatch, tmp_path
+    ):
+        """Two literals of the same normalized query completed in one second
+        share a normalized_hash, so a flush must merge them into one row."""
+        from shared.query_registry.query_registry import hash_sql
+
+        first_sql = "SELECT * FROM orders WHERE id = 1"
+        second_sql = "SELECT * FROM orders WHERE id = 2"
+        assert hash_sql(first_sql) == hash_sql(second_sql)
+
+        recorder, cache_db = self._recorder_with_store(monkeypatch, tmp_path)
+        token = recorder.note_started(first_sql, 1000.1)
+        recorder.note_completed(token, 1000.2)
+        token = recorder.note_started(second_sql, 1000.3)
+        recorder.note_completed(token, 1000.4)
+        recorder.flush_all()
+        recorder.close()
+
+        rows = self._evidence_rows(cache_db)
+        assert len(rows) == 1
+        run_id, normalized_hash, exec_count = rows[0]
+        assert run_id == f"{recorder.run_id}:exact:1000"
+        assert normalized_hash == hash_sql(first_sql)
+        assert exec_count == 2
+
+    @pytest.mark.asyncio
+    async def test_store_failure_does_not_fail_the_benchmark(
+        self, monkeypatch, tmp_path
+    ):
+        # Drive the real best-effort helper into a broken store: cache.db
+        # exists, but opening it raises. The benchmark must still complete.
+        from shared.query_registry import observation_store
+
+        cache_db = tmp_path / "cache.db"
+        cache_db.touch()
+        monkeypatch.setattr(
+            observation_store, "default_cache_db_path", lambda: cache_db
+        )
+
+        def broken_store(*args, **kwargs):
+            raise RuntimeError("store exploded")
+
+        monkeypatch.setattr(observation_store, "ObservationStore", broken_store)
+
+        conn = _FakeConnection()
+        with (
+            patch(
+                "shared.db_connection.create_direct_connection", return_value=conn
+            ),
+            patch(
+                "shared.config.targets.create_targets_config",
+                return_value=_FakeTargetsConfig(),
+            ),
+        ):
+            events = await _collect(
+                QueryService().stream_benchmark(
+                    queries=[{"identifier": "q", "sql": "SELECT 1"}],
+                    target="demo",
+                    mode="interval",
+                    interval_ms=0,
+                    concurrency=1,
+                    duration_seconds=1,
+                    max_count=2,
+                )
+            )
+
+        assert events[-1].type == "complete"
+        assert events[-1].total_successes >= 1

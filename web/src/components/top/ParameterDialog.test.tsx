@@ -15,6 +15,10 @@ vi.mock('../SQLDisplay', () => ({
   ),
 }))
 
+vi.mock('@tanstack/react-router', async () => ({
+  Link: (await import('@/test-utils')).LinkStub,
+}))
+
 describe('ParameterDialog', () => {
   const onClose = vi.fn()
   const onSubmit = vi.fn()
@@ -217,5 +221,48 @@ describe('ParameterDialog', () => {
     expect(inputs[2].value).toBe('1')
     expect(screen.getByText('Observed value')).toBeTruthy()
     expect(screen.getByText('Schema enum · users.name')).toBeTruthy()
+    expect(
+      screen.getByText(
+        'Filled 2 of 2 missing parameters. Review suggested values before running.'
+      )
+    ).toBeTruthy()
+    expect(
+      screen.queryByRole('link', { name: 'Initialize the semantic layer' })
+    ).toBeNull()
+  })
+
+  it('reports how many parameters still need a value after suggesting', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: false, status: 404 })
+    )
+    render(
+      <ParameterDialog
+        isOpen
+        onClose={onClose}
+        onSubmit={onSubmit}
+        query="SELECT * FROM users WHERE name = :p1 LIMIT :p2"
+        target="prod"
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest values' }))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          'Filled 1 of 2 missing parameters. 1 needs a value you provide. Schema evidence is unavailable, so only query-shape suggestions were applied. Review suggested values before running.'
+        )
+      ).toBeTruthy()
+    )
+    const inputs = screen.getAllByPlaceholderText(
+      'Enter value'
+    ) as HTMLInputElement[]
+    expect(inputs[0].value).toBe('')
+    expect(inputs[1].value).toBe('100')
+    const initLink = screen.getByRole('link', {
+      name: 'Initialize the semantic layer',
+    })
+    expect(initLink.getAttribute('href')).toBe('/schema')
   })
 })

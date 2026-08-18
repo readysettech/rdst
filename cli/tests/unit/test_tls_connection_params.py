@@ -1,41 +1,9 @@
 import ssl
-import sys
-import types
 from unittest.mock import MagicMock, patch
 
-try:
-    import pymysql
-except ModuleNotFoundError:  # driver-free CI environments
-    pymysql = types.ModuleType("pymysql")
-    pymysql.err = types.ModuleType("pymysql.err")
-
-    class _OperationalError(Exception):
-        def __init__(self, *args):
-            super().__init__(*args)
-            self.args = args
-
-    pymysql.err.OperationalError = _OperationalError
-    pymysql.connect = MagicMock(name="pymysql.connect")
-    pymysql.cursors = types.ModuleType("pymysql.cursors")
-    pymysql.cursors.DictCursor = type("DictCursor", (), {})
-    sys.modules["pymysql"] = pymysql
-    sys.modules["pymysql.err"] = pymysql.err
-    sys.modules["pymysql.cursors"] = pymysql.cursors
-
-try:
-    import psycopg2
-except ModuleNotFoundError:  # driver-free CI environments
-    psycopg2 = types.ModuleType("psycopg2")
-
-    class _PgOperationalError(Exception):
-        pass
-
-    psycopg2.OperationalError = _PgOperationalError
-    psycopg2.connect = MagicMock(name="psycopg2.connect")
-    psycopg2.extras = types.ModuleType("psycopg2.extras")
-    psycopg2.extras.RealDictCursor = type("RealDictCursor", (), {})
-    sys.modules["psycopg2"] = psycopg2
-    sys.modules["psycopg2.extras"] = psycopg2.extras
+# In driver-free environments these resolve to the stubs installed by
+# tests/conftest.py before any test module is imported.
+import pymysql
 
 from shared.api.ssh_errors import connectivity_error_payload
 from shared.db_connection import (
@@ -117,6 +85,7 @@ def test_postgres_ssh_verify_splits_tls_host_from_socket_endpoint():
         "password": "password",
         "database": "app",
         "connect_timeout": 10,
+        "application_name": "rdst/unknown",
         "sslmode": "verify-full",
         "sslrootcert": "/certs/root.pem",
     }

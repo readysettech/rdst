@@ -1,17 +1,22 @@
 import {
+  type InfiniteData,
   keepPreviousData,
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   addQueryToRegistry,
   fetchQueryRegistry,
+  fetchQueryRegistryReadModel,
   type ImportQueriesResponse,
   importQueries,
   markQueryReviewed,
+  QueryRegistryCursorError,
   type QueryRegistryEntry,
+  type QueryRegistryReadModelPage,
   removeQueryFromRegistry,
   updateQuerySql,
   updateQueryTag,
@@ -19,7 +24,18 @@ import {
 
 export type { QueryRegistryEntry }
 
-export function useQueryRegistry(initialLimit = 100, target?: string | null) {
+/**
+ * Target-scoped registry key prefix. Full list keys append limit and offset,
+ * so invalidating this prefix refetches only the given target's variants.
+ */
+export const queryRegistryQueryKey = (target?: string | null) =>
+  ['queryRegistry', target ?? null] as const
+
+export function useQueryRegistry(
+  initialLimit = 100,
+  target?: string | null,
+  options?: { enabled?: boolean }
+) {
   const queryClient = useQueryClient()
   const [limit, setLimit] = useState(initialLimit)
   const [offset, setOffset] = useState(0)
@@ -31,10 +47,11 @@ export function useQueryRegistry(initialLimit = 100, target?: string | null) {
   }, [target])
 
   const { data, isLoading, isFetching, error, refetch } = useQuery({
-    queryKey: ['queryRegistry', limit, offset, target ?? null],
+    queryKey: [...queryRegistryQueryKey(target), limit, offset],
     queryFn: () => fetchQueryRegistry(limit, offset, target),
     staleTime: 30 * 1000,
     placeholderData: keepPreviousData,
+    enabled: options?.enabled ?? true,
   })
   const queries = data?.queries ?? []
   const total = data?.total ?? 0
@@ -174,5 +191,130 @@ export function useQueryRegistry(initialLimit = 100, target?: string | null) {
     updateTag,
     updateSqlMutation,
     importMutation,
+  }
+}
+
+/** Filter and sort values as the read model understands them. */
+export type QueryRegistryReadModelSpec = {
+  search: string
+  view: string
+  source: string
+  params: string
+  activity: string
+  impact: string
+  sort: string
+}
+
+export const QUERY_REGISTRY_READ_MODEL_PAGE_SIZE = 100
+
+/**
+ * Read-model registry list: the server filters, sorts, and counts facets over
+ * the full target-scoped set and pages by opaque cursor. Keys extend the
+ * target-scoped prefix, so discovery invalidation refetches every loaded page
+ * sequentially (deep paging makes that proportionally expensive). A spec
+ * change is a new key that starts without a cursor, so stale cursors never
+ * outlive their filters.
+ */
+export function useQueryRegistryReadModel(
+  spec: QueryRegistryReadModelSpec,
+  target?: string | null,
+  pageSize = QUERY_REGISTRY_READ_MODEL_PAGE_SIZE
+) {
+  const queryClient = useQueryClient()
+  const { search, view, source, params, activity, impact, sort } = spec
+  const queryKey = useMemo(
+    () =>
+      [
+        ...queryRegistryQueryKey(target),
+        'read-model',
+        { search, view, source, params, activity, impact, sort },
+        pageSize,
+      ] as const,
+    [search, view, source, params, activity, impact, sort, pageSize, target]
+  )
+
+  const query = useInfiniteQuery({
+    queryKey,
+    queryFn: ({ pageParam }) =>
+      fetchQueryRegistryReadModel({
+        target,
+        search,
+        view,
+        source,
+        params,
+        activity,
+        impact,
+        sort,
+        limit: pageSize,
+        cursor: pageParam ?? undefined,
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor,
+    staleTime: 30 * 1000,
+    placeholderData: keepPreviousData,
+    retry: (failureCount, error) =>
+      !(error instanceof QueryRegistryCursorError) && failureCount < 3,
+  })
+
+  // A stale cursor is a restart signal, not an error state: keep page one,
+  // drop the tail, and refetch so the cursor chain starts fresh.
+  const { error, refetch } = query
+  useEffect(() => {
+    if (!(error instanceof QueryRegistryCursorError)) return
+    queryClient.setQueryData<
+      InfiniteData<QueryRegistryReadModelPage, string | null>
+    >(queryKey, (data) =>
+      data
+        ? {
+            pages: data.pages.slice(0, 1),
+            pageParams: data.pageParams.slice(0, 1),
+          }
+        : data
+    )
+    void refetch()
+  }, [error, queryClient, queryKey, refetch])
+
+  const pages = query.data?.pages
+  const queries = useMemo(() => {
+    if (!pages) return []
+    // Rows can shift across page boundaries while paging; keep the first
+    // occurrence so hashes (and React keys) stay unique.
+    const seen = new Set<string>()
+    const rows: QueryRegistryEntry[] = []
+    for (const page of pages) {
+      for (const entry of page.queries) {
+        if (seen.has(entry.hash)) continue
+        seen.add(entry.hash)
+        rows.push(entry)
+      }
+    }
+    return rows
+  }, [pages])
+
+  const lastPage = pages?.[pages.length - 1]
+  const restarting = error instanceof QueryRegistryCursorError
+  const listError = restarting
+    ? null
+    : (lastPage?.error ??
+      (error instanceof Error
+        ? error.message
+        : error
+          ? 'Failed to load the query registry'
+          : null))
+
+  return {
+    queries,
+    total: lastPage?.total ?? 0,
+    facetCounts: lastPage?.facet_counts ?? null,
+    freshness: lastPage?.freshness ?? null,
+    pageCount: pages?.length ?? 0,
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    isPlaceholder: query.isPlaceholderData,
+    listError,
+    refetch,
+    hasNextPage: query.hasNextPage && !query.isPlaceholderData,
+    fetchNextPage: query.fetchNextPage,
+    isFetchingNextPage: query.isFetchingNextPage,
   }
 }

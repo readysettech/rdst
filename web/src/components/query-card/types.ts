@@ -9,6 +9,15 @@ interface QueryCardBaseProps {
   dialect?: QueryCardDialect
   /** Opens the SQL band at full height on its first render. */
   sqlInitiallyExpanded?: boolean
+  /**
+   * Starts the SQL band as one line that truncates toward the card edge.
+   * Static cards can toggle between this preview and the full formatted SQL;
+   * selectable cards reveal the formatted SQL when their selected state is
+   * rendered by the caller.
+   */
+  truncateOneLine?: boolean
+  /** Prevents selection while preserving the card's disabled state semantics. */
+  selectionDisabled?: boolean
 
   /** Optional identity content shown in the header. */
   leading?: ReactNode

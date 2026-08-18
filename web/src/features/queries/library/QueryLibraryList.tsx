@@ -1,3 +1,5 @@
+import { Button } from '@rs/ui-new/button'
+import { Show } from '@rs/ui-new/show'
 import { DataResponse } from '../../../components/data-response/DataResponse'
 import {
   QueryListEmptyState,
@@ -148,6 +150,18 @@ export function QueryLibraryList({
                 visibleProperties={library.renderProperties}
               />
             ))}
+            <Show when={library.hasNextPage}>
+              <div className="flex justify-center pt-1">
+                <Button
+                  variant="primary"
+                  modifier="ghost"
+                  size="small"
+                  label="Load more"
+                  loading={library.isLoadingMore}
+                  onClick={library.loadMore}
+                />
+              </div>
+            </Show>
           </div>
         )}
       </DataResponse>

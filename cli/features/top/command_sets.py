@@ -111,6 +111,7 @@ TOP_COMMAND_SETS = {
                           (state IN ('idle in transaction (aborted)', 'fastpath function call') AND query_start > now() - interval '2 minutes')
                       )
                       AND pid != pg_backend_pid()
+                      AND COALESCE(application_name, '') NOT LIKE 'rdst/%'
                       AND usename NOT IN ('replicator')
                     ORDER BY
                         CASE
@@ -199,6 +200,12 @@ TOP_COMMAND_SETS = {
                       AND INFO NOT LIKE '%information_schema%'
                       AND INFO NOT LIKE 'EXPLAIN%'
                       AND ID != CONNECTION_ID()
+                      AND ID NOT IN (
+                          SELECT PROCESSLIST_ID
+                          FROM performance_schema.session_account_connect_attrs
+                          WHERE ATTR_NAME = 'program_name'
+                            AND ATTR_VALUE LIKE 'rdst/%'
+                      )
                     ORDER BY TIME DESC
                 """,
                 "default_interval_ms": 2000,

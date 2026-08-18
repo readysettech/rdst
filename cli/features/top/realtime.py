@@ -105,7 +105,7 @@ def run_realtime_monitor(
 
     try:
         # Connect to database (silently)
-        connection = create_direct_connection(target_config)
+        connection = create_direct_connection(target_config, lane="rdst/observe")
         db_engine = target_config.get("engine", "").lower()
 
         # Check database query size limit

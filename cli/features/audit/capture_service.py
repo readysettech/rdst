@@ -248,7 +248,7 @@ class CaptureService:
             type="status", phase="config", message=f"Connecting to {target_name}..."
         )
         try:
-            connection = create_direct_connection(target_config)
+            connection = create_direct_connection(target_config, lane="rdst/audit")
         except Exception as exc:
             yield WorkloadErrorEvent(type="error", message=str(exc), phase="connect")
             return
@@ -735,7 +735,7 @@ class CaptureService:
 
         def _worker(worker_id: int) -> None:
             try:
-                connection = create_direct_connection(target_config)
+                connection = create_direct_connection(target_config, lane="rdst/audit")
                 cursor = connection.cursor()
                 index = 0
                 while not self._stop_requested:

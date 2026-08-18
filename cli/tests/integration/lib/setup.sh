@@ -126,6 +126,10 @@ fi
 # Disable telemetry during tests
 export RDST_TESTING=true
 
+# CI's container Python bundles SQLite 3.40.0 (no WAL-reset fix); rdst
+# detects that and runs its stores in rollback-journal (DELETE) mode
+# automatically, so the suite needs no SQLite-related overrides.
+
 export RICH_NO_COLOR=1
 export TERM=dumb
 
@@ -197,7 +201,9 @@ cleanup() {
   echo "Cleaning up test environment..."
 
   # Clean up the singleton sandbox and containers from older RDST versions.
-  docker rm -f "rdst-readyset-sandbox" >/dev/null 2>&1 || true
+  if [[ "${RDST_IT_KEEP_SANDBOX:-}" != "1" ]]; then
+    docker rm -f "rdst-readyset-sandbox" >/dev/null 2>&1 || true
+  fi
   if [[ "$TEST_POSTGRESQL" == "true" ]]; then
     docker rm -f "rdst-readyset-${PG_TARGET_NAME}" >/dev/null 2>&1 || true
     docker rm -f "rdst-test-psql-${PG_TARGET_NAME}" >/dev/null 2>&1 || true

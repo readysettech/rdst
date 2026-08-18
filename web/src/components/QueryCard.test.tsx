@@ -81,6 +81,71 @@ describe('QueryCard', () => {
     expect(code.getAttribute('title')).toBe(sql)
   })
 
+  it('toggles truncateOneLine between a compact preview and formatted SQL', async () => {
+    const sql = 'select id, email\nfrom users\nwhere status = :status'
+    render(<QueryCard sql={sql} truncateOneLine />)
+
+    // getByTitle collapses attribute whitespace before matching.
+    const code = screen.getByTitle(
+      'select id, email from users where status = :status'
+    )
+    expect(code.textContent).toBe(
+      'select id, email from users where status = :status'
+    )
+    expect(code.className).toContain('truncate')
+    expect(code.className).toContain('whitespace-nowrap')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand SQL' }))
+    await waitFor(() => {
+      expect(
+        screen.getByTitle('select id, email from users where status = :status')
+          .textContent
+      ).toContain('\nFROM users')
+    })
+    expect(screen.getByRole('button', { name: 'Collapse SQL' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse SQL' }))
+    expect(
+      screen.getByTitle('select id, email from users where status = :status')
+        .textContent
+    ).toBe('select id, email from users where status = :status')
+    expect(screen.getByRole('button', { name: 'Expand SQL' })).toBeTruthy()
+  })
+
+  it('prevents selection when a selectable card is disabled', () => {
+    const onSelect = vi.fn()
+    render(
+      <QueryCard
+        selectable
+        selected={false}
+        selectionDisabled
+        onSelect={onSelect}
+        selectionLabel="Select disabled query"
+        sql="select 1"
+      />
+    )
+
+    const card = screen.getByRole('button', { name: 'Select disabled query' })
+    expect(card.getAttribute('aria-disabled')).toBe('true')
+    expect(card.getAttribute('tabindex')).toBe('-1')
+    fireEvent.click(card)
+    fireEvent.keyDown(card, { key: 'Enter' })
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('keeps the formatted multi-line block without truncateOneLine', async () => {
+    const sql = 'select id, email\nfrom users\nwhere status = :status'
+    render(<QueryCard sql={sql} />)
+
+    const code = screen.getByTitle(
+      'select id, email from users where status = :status'
+    )
+    await waitFor(() => {
+      expect(code.textContent).toContain('\nFROM users')
+    })
+    expect(code.className).not.toContain('truncate')
+  })
+
   it('keeps normal cards static and delegates interaction to explicit actions', () => {
     const onAction = vi.fn()
     render(

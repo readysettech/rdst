@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from typing import TYPE_CHECKING, Dict, Any, List
 
 if TYPE_CHECKING:
     from ..context import Ask3Context
     from ..presenter import Ask3Presenter
+
+from shared.query_registry.observation_store import record_execution_evidence
 
 from ..types import ExecutionResult, DbType
 
@@ -88,7 +91,8 @@ def execute_query(
                 presenter.error(f"Unsupported database type: {db_type}")
                 return ctx
 
-        execution_time_ms = (time.time() - start_time) * 1000
+        completed_at = float(time.time())
+        execution_time_ms = (completed_at - start_time) * 1000
 
         if not result.get('success'):
             error = result.get('error', 'Unknown execution error')
@@ -116,6 +120,18 @@ def execute_query(
         )
 
         ctx.mark_success()
+
+        # Attribution evidence (research Q11): a completed one-off execution
+        # belongs to exactly one adjacent observation window, so record it as
+        # a point at the actual executor completion time.
+        record_execution_evidence(
+            ctx.target,
+            [{"sql": ctx.sql, "exec_count": 1}],
+            lane="rdst/ask",
+            run_id=uuid.uuid4().hex,
+            started_at=completed_at,
+            ended_at=completed_at,
+        )
 
     except Exception as e:
         execution_time_ms = (time.time() - start_time) * 1000
@@ -145,7 +161,7 @@ def _execute_postgres(
             resolve_connection_params,
         )
 
-        params = resolve_connection_params(target=target, target_config=config)
+        params = resolve_connection_params(target=target, target_config=config, lane="rdst/ask")
 
         if not all([params['host'], params['user'], params['database']]):
             return {
@@ -212,7 +228,7 @@ def _execute_mysql(
             resolve_connection_params,
         )
 
-        params = resolve_connection_params(target=target, target_config=config)
+        params = resolve_connection_params(target=target, target_config=config, lane="rdst/ask")
 
         if not all([params['host'], params['user'], params['database']]):
             return {

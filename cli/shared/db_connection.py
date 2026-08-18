@@ -8,6 +8,26 @@ without using DataManager infrastructure.
 import socket
 from typing import Dict, Any, Literal, Optional, Tuple
 
+# Lane tag applied to every RDST-initiated connection so activity views can
+# recognize RDST's own sessions (PostgreSQL application_name, MySQL program_name
+# connection attribute). Features pass a specific lane such as "rdst/ask" or
+# "rdst/compare"; untagged callers fall back to this default.
+DEFAULT_LANE = "rdst/unknown"
+
+
+def resolve_application_name(
+    configured: Optional[str], lane: Optional[str] = None
+) -> str:
+    """Resolve the effective application name for an RDST-initiated connection.
+
+    Precedence: a user-configured target application_name always wins, then
+    the caller's lane tag, then DEFAULT_LANE. Accepted caveat of
+    custom-name-wins: sessions carrying a custom name do not match the
+    rdst/% exclusion in activity views, so RDST's own queries can surface in
+    activity output for such targets.
+    """
+    return configured or lane or DEFAULT_LANE
+
 
 def normalize_engine_name(engine: str) -> str:
     """Normalize engine aliases to the canonical names used by RDST."""
@@ -51,6 +71,7 @@ def resolve_connection_params(
     target_config: Optional[Dict[str, Any]] = None,
     *,
     force_fresh_tunnel: bool = False,
+    lane: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Resolve all connection parameters from target name or configuration.
@@ -60,6 +81,8 @@ def resolve_connection_params(
     Args:
         target: Target name (loads config from TargetsConfig)
         target_config: Target configuration dict (alternative to target name)
+        lane: RDST lane tag (e.g. "rdst/ask") used as the connection's
+            application name unless the target config sets its own
 
     Returns:
         Dict with resolved connection parameters:
@@ -73,6 +96,7 @@ def resolve_connection_params(
             - tls: Boolean TLS flag
             - sslmode: PostgreSQL SSL mode ('require' if tls, else 'prefer')
             - read_only: Boolean read-only flag
+            - application_name: Self-identification tag (lane or user override)
 
     Raises:
         ValueError: If neither target nor target_config provided, or target not found
@@ -130,6 +154,10 @@ def resolve_connection_params(
     # Determine SSL mode for PostgreSQL
     sslmode = 'verify-full' if tls_verify else ('require' if tls else 'prefer')
 
+    application_name = resolve_application_name(
+        target_config.get('application_name'), lane
+    )
+
     result = {
         'engine': engine,
         'host': host,
@@ -142,6 +170,7 @@ def resolve_connection_params(
         'tls_verify': tls_verify,
         'tls_ca': tls_ca,
         'read_only': read_only,
+        'application_name': application_name,
         'password_env': password_env,  # Keep for error messages
     }
     if "ssh" in target_config:
@@ -158,6 +187,7 @@ def create_direct_connection(
     *,
     target: Optional[str] = None,
     force_fresh_tunnel: bool = False,
+    lane: Optional[str] = None,
 ):
     """
     Create a direct database connection from target configuration.
@@ -183,6 +213,7 @@ def create_direct_connection(
         target=target,
         target_config=target_config,
         force_fresh_tunnel=force_fresh_tunnel,
+        lane=lane,
     )
     engine = params['engine']
     host = params['host']
@@ -210,12 +241,14 @@ def create_direct_connection(
             host, port, user, password, database, use_tls,
             tls_verify=tls_verify, tls_ca=tls_ca,
             hostaddr=params.get('hostaddr'), connect_timeout=connect_timeout,
+            application_name=params['application_name'],
         )
     elif engine == 'mysql':
         conn = _create_mysql_connection(
             host, port, user, password, database, use_tls,
             tls_verify=tls_verify, tls_ca=tls_ca,
             hostaddr=params.get('hostaddr'), connect_timeout=connect_timeout,
+            program_name=params['application_name'],
         )
     else:
         raise ValueError(f"Unsupported database engine: {engine}")
@@ -284,6 +317,7 @@ def postgres_connection_kwargs(
         'password': params['password'],
         'database': params['database'],
         'connect_timeout': connect_timeout,
+        'application_name': params.get('application_name') or DEFAULT_LANE,
         **postgres_ssl_kwargs(params),
     }
     result.update(overrides)
@@ -297,6 +331,9 @@ def create_mysql_connection_from_params(
     **overrides: Any,
 ):
     """Connect with PyMySQL, separating a tunnel socket from the TLS identity."""
+    overrides.setdefault(
+        'program_name', params.get('application_name') or DEFAULT_LANE
+    )
     return _create_mysql_connection(
         params['host'],
         params['port'],
@@ -324,6 +361,7 @@ def _create_postgres_connection(
     tls_ca: Optional[str] = None,
     hostaddr: Optional[str] = None,
     connect_timeout: int = 10,
+    application_name: Optional[str] = None,
 ):
     """Create PostgreSQL connection using psycopg2."""
     try:
@@ -340,6 +378,7 @@ def _create_postgres_connection(
             'password': password,
             'database': database,
             'connect_timeout': connect_timeout,
+            'application_name': application_name or DEFAULT_LANE,
         }
 
         conn_params.update(
@@ -399,6 +438,8 @@ def _create_mysql_connection(
                 }
             )
         conn_params.update(overrides)
+        # Sent to the server as the program_name connection attribute.
+        conn_params.setdefault('program_name', DEFAULT_LANE)
 
         if tls_verify:
             conn_params.update(

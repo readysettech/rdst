@@ -5,6 +5,7 @@ import {
   copyFileSync,
   cpSync,
   existsSync,
+  mkdtempSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -12,7 +13,9 @@ import {
   writeFileSync
 } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { findSafePython } from "../../../../rdst/scripts/sqlite-runtime.mjs";
 
 const appDir = path.resolve(import.meta.dirname, "..");
 const repoRoot = path.resolve(appDir, "../../..");
@@ -37,21 +40,6 @@ const venvRoot = path.resolve(buildRoot, "venv");
 const pyinstallerAppDir = path.resolve(distRoot, "rdst");
 const lockedRequirements = path.resolve(appDir, "scripts/requirements-sidecar.lock");
 const rendererDist = path.resolve(appDir, "out/renderer");
-const PINNED_PYTHON_VERSION = "3.12";
-
-const PYTHON_CANDIDATES =
-  process.platform === "win32"
-    ? [
-        { command: "py", args: ["-3.12"] },
-        { command: "python", args: [] },
-        { command: "python3", args: [] }
-      ]
-    : [
-        { command: "python3.12", args: [] },
-        { command: "python3", args: [] },
-        { command: "python", args: [] }
-      ];
-
 const PYINSTALLER_ARGS = [
   "--onedir",
   "--clean",
@@ -103,36 +91,6 @@ function run(command, args, options = {}) {
   }
 }
 
-function pythonVersion(candidate) {
-  const result = spawnSync(
-    candidate.command,
-    [
-      ...candidate.args,
-      "-c",
-      "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-    ],
-    { encoding: "utf8" }
-  );
-  return result.status === 0 ? result.stdout.trim() : null;
-}
-
-function detectPython() {
-  for (const candidate of PYTHON_CANDIDATES) {
-    if (pythonVersion(candidate) === PINNED_PYTHON_VERSION) {
-      return candidate;
-    }
-  }
-  throw new Error(
-    `Unable to find Python ${PINNED_PYTHON_VERSION}. Tried: ${PYTHON_CANDIDATES.map(
-      ({ command, args }) => [command, ...args].join(" ")
-    ).join(", ")}`
-  );
-}
-
-function runPython(candidate, args, options = {}) {
-  run(candidate.command, [...candidate.args, ...args], options);
-}
-
 function makeExecutable(filePath) {
   if (process.platform !== "win32") {
     chmodSync(filePath, 0o755);
@@ -170,6 +128,35 @@ function stageSidecarBinary(sourcePath) {
   makeExecutable(stagedExecutable);
   validateExecutable(stagedExecutable);
   console.log(`[rdst-desktop] Staged RDST backend sidecar at ${stagedExecutable}`);
+}
+
+function probeStagedSidecar() {
+  const probeHome = mkdtempSync(path.join(tmpdir(), "rdst-sidecar-sqlite-"));
+  try {
+    run(
+      stagedExecutable,
+      ["query", "add", "sqlite-runtime-probe", "-q", "SELECT 1"],
+      {
+        env: {
+          HOME: probeHome,
+          USERPROFILE: probeHome,
+          LOCALAPPDATA: probeHome,
+          APPDATA: probeHome,
+          RDST_REGISTRY_SQLITE: "1",
+          RDST_TESTING: "true"
+        }
+      }
+    );
+    const libraryDb = path.resolve(probeHome, ".rdst/library.db");
+    if (!existsSync(libraryDb)) {
+      throw new Error(
+        `Packaged RDST SQLite probe did not create its library at ${libraryDb}`
+      );
+    }
+    console.log("[rdst-desktop] Packaged SQLite WAL safety probe passed");
+  } finally {
+    rmSync(probeHome, { recursive: true, force: true });
+  }
 }
 
 function addDataArg(source, target) {
@@ -227,7 +214,11 @@ function prepareRdstPackageSources() {
 
 function buildWithPyInstaller() {
   prepareRdstPackageSources();
-  const hostPython = detectPython();
+  const hostPython = findSafePython({ requiredMinor: "3.12" });
+  console.log(
+    `[rdst-desktop] Building with ${hostPython.executable} ` +
+      `(Python ${hostPython.python}, SQLite ${hostPython.sqlite})`
+  );
   const rdstEntry = path.resolve(rdstDir, "rdst.py");
   if (!existsSync(rdstEntry)) {
     throw new Error(`RDST entrypoint not found: ${rdstEntry}`);
@@ -235,7 +226,7 @@ function buildWithPyInstaller() {
 
   rmSync(buildRoot, { recursive: true, force: true });
   mkdirSync(buildRoot, { recursive: true });
-  runPython(hostPython, ["-m", "venv", venvRoot]);
+  run(hostPython.executable, ["-m", "venv", venvRoot]);
 
   const python = venvPythonPath();
   if (!existsSync(lockedRequirements)) {
@@ -290,3 +281,5 @@ if (explicitDir) {
 } else {
   buildWithPyInstaller();
 }
+
+probeStagedSidecar();

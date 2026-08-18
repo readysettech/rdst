@@ -16,11 +16,14 @@ import { TargetConnectivityNotice, TargetLockNotice } from '../../../components'
 import { BenchmarkConfirmDialog } from '../../../components/BenchmarkConfirmDialog'
 import { formatMeta, shortHash } from '../../../lib/formatters'
 import { queryDisplayName } from '../../../lib/queryIdentity'
+import { detectParameters } from '../../../lib/sqlParameters'
 import {
+  PerformanceCacheabilityNote,
+  PerformanceQueryCard,
   PerformanceQueryList,
   PerformanceQueryParameters,
-  PerformanceQueryRow,
 } from '../shared/PerformanceQueryList'
+import { SuggestValuesPanel } from '../shared/SuggestValuesPanel'
 import {
   BENCHMARK_EXECUTION_CAP,
   type LoadTestController,
@@ -113,6 +116,7 @@ export function LoadTestSetup({
     updateParameter,
     suggestingParameters,
     suggestionMessage,
+    suggestionSchemaUnavailable,
     suggestParameterValues,
     confirmOpen,
     setConfirmOpen,
@@ -453,28 +457,36 @@ export function LoadTestSetup({
                       const identifier = query.tag || query.hash
                       const selected = selectedQueries.includes(identifier)
                       const selectedQuery = selectedQueryById.get(identifier)
+                      const parameterCount = detectParameters(query.sql).length
                       return (
-                        <PerformanceQueryRow
+                        <PerformanceQueryCard
                           key={query.hash}
-                          id={`load-query-${query.hash}`}
-                          checked={selected}
-                          onCheckedChange={() => toggleQuery(identifier)}
+                          queryHash={query.hash}
+                          selected={selected}
+                          onSelect={() => toggleQuery(identifier)}
                           title={queryDisplayName(query)}
                           sql={query.sql}
+                          parameterCount={parameterCount}
                           meta={
-                            <Text
-                              level="caption"
-                              className="text-content-layout-3"
-                            >
-                              {formatMeta([
-                                `hash ${shortHash(query.hash)}`,
-                                query.target ?? null,
-                              ])}
-                            </Text>
+                            <>
+                              <Text
+                                level="caption"
+                                className="text-content-layout-3"
+                              >
+                                {formatMeta([
+                                  `hash ${shortHash(query.hash)}`,
+                                  query.target ?? null,
+                                ])}
+                              </Text>
+                              <PerformanceCacheabilityNote
+                                readysetSupported={query.readyset_supported}
+                                checkedAt={query.readyset_last_observed_at}
+                              />
+                            </>
                           }
-                        >
-                          {selectedQuery &&
-                            selectedQuery.parameters.length > 0 && (
+                          parameterContent={
+                            selectedQuery &&
+                            selectedQuery.parameters.length > 0 ? (
                               <PerformanceQueryParameters
                                 ownerId={identifier}
                                 inputPrefix="load"
@@ -490,8 +502,9 @@ export function LoadTestSetup({
                                   updateParameter(key, value)
                                 }}
                               />
-                            )}
-                        </PerformanceQueryRow>
+                            ) : undefined
+                          }
+                        />
                       )
                     })}
                   </PerformanceQueryList>
@@ -592,6 +605,15 @@ export function LoadTestSetup({
                   tone={missingParameterCount > 0 ? 'warning' : 'positive'}
                 />
               </div>
+
+              <SuggestValuesPanel
+                hasParameters={queriesWithParameters.length > 0}
+                suggesting={suggestingParameters}
+                missingParameterCount={missingParameterCount}
+                message={suggestionMessage}
+                schemaUnavailable={suggestionSchemaUnavailable}
+                onSuggest={() => void suggestParameterValues()}
+              />
 
               <div className="overflow-hidden rounded-xl border border-border-layout-soft">
                 <Pressable
@@ -700,24 +722,6 @@ export function LoadTestSetup({
               </Text>
             )}
           </VStack>
-          {queriesWithParameters.length > 0 ? (
-            <Button
-              size="small"
-              variant="primary"
-              modifier="outline"
-              icon="sparkles"
-              iconPosition="left"
-              label="Suggest values"
-              loading={suggestingParameters}
-              disabled={missingParameterCount === 0}
-              onClick={() => void suggestParameterValues()}
-            />
-          ) : null}
-          {suggestionMessage ? (
-            <Text level="caption" className="text-content-layout-2">
-              {suggestionMessage}
-            </Text>
-          ) : null}
           <Button
             variant="rising"
             modifier="solid"

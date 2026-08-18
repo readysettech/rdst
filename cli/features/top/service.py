@@ -52,9 +52,39 @@ class TopService:
             handle_event(event)
     """
 
-    def __init__(self) -> None:
-        """Initialize the top service."""
-        pass
+    def __init__(self, *, reuse_execution_resources: bool = False) -> None:
+        """Initialize the top service.
+
+        With ``reuse_execution_resources`` enabled, the historical execution
+        path keeps its temp directory and DataManager alive across calls so a
+        scheduled caller (one caller at a time) avoids per-cycle setup;
+        ``close()`` releases them. The default keeps the one-shot
+        construct-use-teardown behavior.
+        """
+        self._reuse_execution_resources = reuse_execution_resources
+        self._reused_output_dir: Optional[str] = None
+        self._reused_managers: Dict[str, Tuple[Dict[str, Any], Any]] = {}
+
+    def close(self) -> None:
+        """Release execution resources cached by reuse mode; safe to repeat."""
+        managers = self._reused_managers
+        output_dir = self._reused_output_dir
+        self._reused_managers = {}
+        self._reused_output_dir = None
+        for _config, dm in managers.values():
+            try:
+                from shared.data_manager_service import DataManagerQueryType
+
+                dm.disconnect(DataManagerQueryType.UPSTREAM)
+            except Exception:
+                logger.debug("Failed to disconnect a reused DataManager", exc_info=True)
+        if output_dir is not None:
+            import shutil
+
+            try:
+                shutil.rmtree(output_dir)
+            except Exception:
+                pass
 
     async def get_top_queries(
         self,
@@ -593,8 +623,7 @@ class TopService:
         source: str,
     ) -> tuple[Dict[str, Any], str, Optional[TopSourceFallbackEvent]]:
         """Synchronous execution of top query (runs in thread)."""
-        from features.top.command_sets import TOP_COMMAND_SETS
-        from shared.data_manager import ConnectionConfig, DataManager
+        from shared.data_manager import ConnectionConfig
         from shared.data_manager_service import DMSDbType, DataManagerQueryType
 
         from shared.db_connection import resolve_connection_params
@@ -602,6 +631,7 @@ class TopService:
         params = resolve_connection_params(
             target=target_name,
             target_config=target_config,
+            lane="rdst/observe",
         )
         password = params["password"]
 
@@ -622,6 +652,7 @@ class TopService:
             tls_ca=params.get("tls_ca"),
             hostaddr=params.get("hostaddr"),
             query_type=DataManagerQueryType.UPSTREAM,
+            application_name=params.get("application_name"),
         )
 
         # Get command set name
@@ -645,8 +676,17 @@ class TopService:
             else:
                 raise
 
-        # Create temporary output directory
-        output_dir = tempfile.mkdtemp(prefix="rdst_")
+        # Reuse mode keeps one output directory alive across calls; rebuild it
+        # if something removed it out from under us.
+        if self._reused_output_dir is not None and not os.path.isdir(
+            self._reused_output_dir
+        ):
+            self.close()
+        output_dir = self._reused_output_dir
+        if output_dir is None:
+            output_dir = tempfile.mkdtemp(prefix="rdst_")
+            if self._reuse_execution_resources:
+                self._reused_output_dir = output_dir
 
         try:
             # Create a simple logger wrapper for DataManager
@@ -672,13 +712,8 @@ class TopService:
             dm_logger = SimpleLoggerWrapper()
 
             # Initialize DataManager
-            dm = DataManager(
-                connection_config={DataManagerQueryType.UPSTREAM: connection_config},
-                global_logger=dm_logger,
-                command_sets=[command_set_name],
-                available_commands=TOP_COMMAND_SETS,
-                data_directory=output_dir,
-                cli_mode=True,
+            dm = self._data_manager_for(
+                command_set_name, connection_config, dm_logger, output_dir
             )
 
             # Get the command name from the command set
@@ -723,15 +758,8 @@ class TopService:
                     )[0]
 
                     # Re-create DataManager with activity command set
-                    dm = DataManager(
-                        connection_config={
-                            DataManagerQueryType.UPSTREAM: connection_config
-                        },
-                        global_logger=dm_logger,
-                        command_sets=[command_set_name],
-                        available_commands=TOP_COMMAND_SETS,
-                        data_directory=output_dir,
-                        cli_mode=True,
+                    dm = self._data_manager_for(
+                        command_set_name, connection_config, dm_logger, output_dir
                     )
                     result = dm.execute_command(command_set_name, command_name)
                     actual_source = "activity"
@@ -741,13 +769,57 @@ class TopService:
             return result, actual_source, fallback_event
 
         finally:
-            # Clean up temporary directory
-            import shutil
+            # Reuse mode keeps the directory until close(); the one-shot path
+            # cleans up its temporary directory here.
+            if not self._reuse_execution_resources:
+                import shutil
 
-            try:
-                shutil.rmtree(output_dir)
-            except Exception:
-                pass
+                try:
+                    shutil.rmtree(output_dir)
+                except Exception:
+                    pass
+
+    def _data_manager_for(
+        self,
+        command_set_name: str,
+        connection_config: Any,
+        dm_logger: Any,
+        output_dir: str,
+    ) -> Any:
+        """Build a DataManager, or return the cached one in reuse mode.
+
+        The cache is keyed by command set and invalidated when the resolved
+        connection parameters change, so credential rotation or target edits
+        take effect on the next call.
+        """
+        from features.top.command_sets import TOP_COMMAND_SETS
+        from shared.data_manager import DataManager
+        from shared.data_manager_service import DataManagerQueryType
+
+        fingerprint = dict(vars(connection_config))
+        if self._reuse_execution_resources:
+            cached = self._reused_managers.get(command_set_name)
+            if cached is not None:
+                if cached[0] == fingerprint:
+                    return cached[1]
+                self._reused_managers.pop(command_set_name, None)
+                try:
+                    cached[1].disconnect(DataManagerQueryType.UPSTREAM)
+                except Exception:
+                    logger.debug(
+                        "Failed to disconnect an evicted DataManager", exc_info=True
+                    )
+        dm = DataManager(
+            connection_config={DataManagerQueryType.UPSTREAM: connection_config},
+            global_logger=dm_logger,
+            command_sets=[command_set_name],
+            available_commands=TOP_COMMAND_SETS,
+            data_directory=output_dir,
+            cli_mode=True,
+        )
+        if self._reuse_execution_resources:
+            self._reused_managers[command_set_name] = (fingerprint, dm)
+        return dm
 
     def _process_top_data(
         self,

@@ -107,19 +107,6 @@ export function addedQuerySearchPatch(
   }
 }
 
-/**
- * Revealing a workload update must not leave a hidden search or facet active.
- * The New view becomes the user's visible, shareable review context.
- */
-export function newQueriesSearchPatch(): Partial<QueryLibrarySearch> {
-  return {
-    ...CLEARED_QUERY_LIBRARY_FILTERS,
-    view: 'new',
-    sort: 'newest',
-    hash: undefined,
-  }
-}
-
 function includes<T extends string>(
   values: readonly T[],
   value: unknown

@@ -164,3 +164,88 @@ class TestExecutionGate:
 
         assert executed == ["SELECT id FROM users LIMIT 100"]
         assert ctx.status == Status.SUCCESS
+
+
+class TestAskExecutionEvidence:
+    """Q11 attribution: a successful ask execution records exactly one run."""
+
+    def _ctx(self, sql: str) -> Ask3Context:
+        ctx = Ask3Context(
+            question="q", target="testdb", target_config={"host": "localhost"}
+        )
+        ctx.sql = sql
+        return ctx
+
+    def _executor(self, executed):
+        def executor(sql, config):
+            executed.append(sql)
+            return {"success": True, "rows": [[1]], "columns": ["id"]}
+
+        return executor
+
+    def test_successful_execution_records_one_run(self, monkeypatch):
+        recorded = []
+        monkeypatch.setattr(
+            "features.ask.engine.ask3.phases.execute.record_execution_evidence",
+            lambda *args, **kwargs: recorded.append((args, kwargs)),
+        )
+        timestamps = iter((100.125, 100.875))
+        monkeypatch.setattr(
+            "features.ask.engine.ask3.phases.execute.time.time",
+            lambda: next(timestamps),
+        )
+        executed = []
+
+        ctx = execute_query(
+            self._ctx("SELECT id FROM users"), MagicMock(), self._executor(executed)
+        )
+
+        assert ctx.status == Status.SUCCESS
+        assert len(recorded) == 1
+        args, kwargs = recorded[0]
+        assert args == (
+            "testdb",
+            [{"sql": "SELECT id FROM users LIMIT 100", "exec_count": 1}],
+        )
+        assert kwargs["lane"] == "rdst/ask"
+        assert kwargs["started_at"] == kwargs["ended_at"] == 100.875
+        assert isinstance(kwargs["started_at"], float)
+
+    def test_failed_execution_records_nothing(self, monkeypatch):
+        recorded = []
+        monkeypatch.setattr(
+            "features.ask.engine.ask3.phases.execute.record_execution_evidence",
+            lambda *args, **kwargs: recorded.append((args, kwargs)),
+        )
+
+        def executor(sql, config):
+            return {"success": False, "error": "boom"}
+
+        ctx = execute_query(self._ctx("SELECT id FROM users"), MagicMock(), executor)
+
+        assert ctx.execution_result.error == "boom"
+        assert recorded == []
+
+    def test_store_failure_does_not_fail_the_execution(self, monkeypatch, tmp_path):
+        # Drive the real best-effort helper into a broken store: cache.db
+        # exists, but opening it raises. The ask answer must still succeed.
+        from shared.query_registry import observation_store
+
+        cache_db = tmp_path / "cache.db"
+        cache_db.touch()
+        monkeypatch.setattr(
+            observation_store, "default_cache_db_path", lambda: cache_db
+        )
+
+        def broken_store(*args, **kwargs):
+            raise RuntimeError("store exploded")
+
+        monkeypatch.setattr(observation_store, "ObservationStore", broken_store)
+        executed = []
+
+        ctx = execute_query(
+            self._ctx("SELECT id FROM users"), MagicMock(), self._executor(executed)
+        )
+
+        assert ctx.status == Status.SUCCESS
+        assert executed == ["SELECT id FROM users LIMIT 100"]

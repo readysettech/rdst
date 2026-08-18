@@ -11,6 +11,8 @@ import time
 import sys
 import signal
 import select
+import threading
+import uuid
 try:
     import termios
     import tty
@@ -41,6 +43,102 @@ from shared.db_connection import (
     postgres_connection_kwargs,
     resolve_connection_params,
 )
+from shared.query_registry.observation_store import record_execution_evidence
+
+
+_WORKER_SETTLE_TIMEOUT_SECONDS = 1.0
+
+
+class _AnalyzeWorkerState:
+    """Thread-safe lifecycle for one background EXPLAIN ANALYZE execution."""
+
+    def __init__(self, identifier_key: str):
+        self.identifier_key = identifier_key
+        self.lock = threading.Lock()
+        self.cancel_requested = threading.Event()
+        self.result = {
+            'completed': False,
+            'started': False,
+            'started_at': None,
+            'ended_at': None,
+            'data': None,
+            'error': None,
+            identifier_key: None,
+        }
+
+    def set_identifier(self, identifier: int) -> None:
+        with self.lock:
+            self.result[self.identifier_key] = identifier
+
+    def identifier(self) -> Optional[int]:
+        with self.lock:
+            return self.result[self.identifier_key]
+
+    def request_cancel(self) -> None:
+        self.cancel_requested.set()
+
+    def begin_execution(self) -> bool:
+        """Open the execution interval unless cancellation won the race."""
+        with self.lock:
+            if self.cancel_requested.is_set():
+                return False
+            self.result['started'] = True
+            self.result['started_at'] = float(time.time())
+            return True
+
+    def mark_database_completion(self) -> None:
+        """Capture the database statement's completion, before result decoding."""
+        with self.lock:
+            if self.result['started'] and self.result['ended_at'] is None:
+                self.result['ended_at'] = float(time.time())
+
+    def finish(self, *, data: Any = None, error: Optional[str] = None) -> None:
+        with self.lock:
+            if self.result['started'] and self.result['ended_at'] is None:
+                self.result['ended_at'] = float(time.time())
+            if data is not None:
+                self.result['data'] = data
+            if error is not None:
+                self.result['error'] = error
+            self.result['completed'] = True
+
+    def snapshot(self) -> Dict[str, Any]:
+        with self.lock:
+            return dict(self.result)
+
+
+def _settle_analyze_worker(
+    worker: threading.Thread,
+    timeout: float = _WORKER_SETTLE_TIMEOUT_SECONDS,
+) -> bool:
+    """Wait briefly for cancellation without allowing an unbounded response."""
+    worker.join(timeout=max(0.0, timeout))
+    return not worker.is_alive()
+
+
+def _close_open_analyze_evidence(
+    worker: threading.Thread,
+    state: _AnalyzeWorkerState,
+    *,
+    target: Optional[str],
+    sql: str,
+    run_id: str,
+    started_at: float,
+) -> None:
+    """Close an open evidence row only after its worker has definitely exited."""
+    worker.join()
+    snapshot = state.snapshot()
+    ended_at = snapshot.get('ended_at')
+    if ended_at is None:
+        ended_at = float(time.time())
+    record_execution_evidence(
+        target,
+        [{"sql": sql, "exec_count": None}],
+        lane="rdst/analyze",
+        run_id=run_id,
+        started_at=started_at,
+        ended_at=float(ended_at),
+    )
 
 
 def _normalize_plan_data(raw: Any) -> Dict[str, Any]:
@@ -143,21 +241,9 @@ def execute_explain_analyze(sql: str, target: str = None, **kwargs) -> Dict[str,
                 rewrite_max_time_ms = None
 
         if engine in ['postgresql', 'postgres']:
-            return _execute_postgres_explain_analyze(
-                sql,
-                target_config,
-                fast_mode=fast_mode,
-                rewrite_max_time_ms=rewrite_max_time_ms,
-                target=target,
-            )
+            runner = _execute_postgres_explain_analyze
         elif engine in ['mysql', 'mariadb']:
-            return _execute_mysql_explain_analyze(
-                sql,
-                target_config,
-                fast_mode=fast_mode,
-                rewrite_max_time_ms=rewrite_max_time_ms,
-                target=target,
-            )
+            runner = _execute_mysql_explain_analyze
         else:
             return {
                 "success": False,
@@ -165,6 +251,85 @@ def execute_explain_analyze(sql: str, target: str = None, **kwargs) -> Dict[str,
                 "explain_plan": None,
                 "execution_time_ms": 0
             }
+
+        result = runner(
+            sql,
+            target_config,
+            fast_mode=fast_mode,
+            rewrite_max_time_ms=rewrite_max_time_ms,
+            target=target,
+        )
+
+        # These private values exist only when a cancelled worker could not
+        # settle within the bounded response deadline. They must never leak
+        # into the workflow result (the thread/state objects are not serializable).
+        open_worker = result.pop('_analyze_worker_thread', None)
+        open_state = result.pop('_analyze_worker_state', None)
+
+        # Attribution evidence (research Q11) counts executions of the user's
+        # statement, not the surrounding EXPLAIN statements. Plain EXPLAIN
+        # therefore contributes zero; successful EXPLAIN ANALYZE contributes
+        # exactly one. A cancelled, timed-out, or failed ANALYZE is unknown
+        # only when its database execution may actually have started.
+        if result.get("success") and result.get("plan_format") == "analyze":
+            # A completed one-off execution belongs to exactly one adjacent
+            # observation window, so represent it as a point at completion.
+            completed_at = result.get("explain_analyze_ended_at")
+            if completed_at is None:
+                completed_at = float(time.time())
+            completed_at = float(completed_at)
+            record_execution_evidence(
+                target,
+                [{"sql": sql, "exec_count": 1}],
+                lane="rdst/analyze",
+                run_id=uuid.uuid4().hex,
+                started_at=completed_at,
+                ended_at=completed_at,
+            )
+        elif result.get("explain_analyze_started"):
+            # A cancelled/failed execution is not safe to subtract. Preserve
+            # its real execution span and keep it open if cancellation could
+            # not settle promptly; the finalizer closes it after worker exit.
+            started_at = result.get("explain_analyze_started_at")
+            if started_at is None:
+                started_at = float(time.time())
+            started_at = float(started_at)
+            ended_at = result.get("explain_analyze_ended_at")
+            if ended_at is not None:
+                ended_at = float(ended_at)
+            elif open_worker is None or open_state is None:
+                # Compatibility for injected/custom runners that do not
+                # expose worker state: there is no later worker to close it.
+                ended_at = float(time.time())
+            run_id = uuid.uuid4().hex
+            record_execution_evidence(
+                target,
+                [{"sql": sql, "exec_count": None}],
+                lane="rdst/analyze",
+                run_id=run_id,
+                started_at=started_at,
+                ended_at=ended_at,
+            )
+            if ended_at is None and open_worker is not None and open_state is not None:
+                try:
+                    threading.Thread(
+                        target=_close_open_analyze_evidence,
+                        kwargs={
+                            "worker": open_worker,
+                            "state": open_state,
+                            "target": target,
+                            "sql": sql,
+                            "run_id": run_id,
+                            "started_at": started_at,
+                        },
+                        name="rdst-analyze-evidence-finalizer",
+                        daemon=True,
+                    ).start()
+                except Exception:
+                    # Evidence is best-effort and remains safely open-ended;
+                    # bookkeeping must never turn a valid analysis into failure.
+                    pass
+        return result
 
     except Exception as e:
         return {
@@ -225,6 +390,7 @@ def _execute_postgres_explain_analyze(
         resolved_params = resolve_connection_params(
             target=target,
             target_config=target_config,
+            lane="rdst/analyze",
         )
         password = _resolve_explain_password(
             target_config, resolved_params['password']
@@ -305,34 +471,37 @@ def _execute_postgres_explain_analyze(
             }
 
         # Now run EXPLAIN ANALYZE in background thread with timeout handling
-        query_result = {'completed': False, 'data': None, 'error': None, 'backend_pid': None}
-        query_lock = threading.Lock()
+        worker_state = _AnalyzeWorkerState('backend_pid')
+        query_result = worker_state.result
+        query_lock = worker_state.lock
 
         def execute_explain_analyze():
             query_conn = None
+            data = None
+            error = None
             try:
                 query_conn = psycopg2.connect(**conn_params)
                 with query_conn.cursor() as query_cursor:
                     query_cursor.execute("SELECT pg_backend_pid()")
                     backend_pid = query_cursor.fetchone()[0]
-
-                    with query_lock:
-                        query_result['backend_pid'] = backend_pid
+                    worker_state.set_identifier(backend_pid)
 
                     explain_analyze_query = f"EXPLAIN (ANALYZE true, VERBOSE true, COSTS true, BUFFERS true, FORMAT JSON) {sql}"
+                    if not worker_state.begin_execution():
+                        return
                     query_cursor.execute(explain_analyze_query)  # nosem
+                    worker_state.mark_database_completion()
                     result = query_cursor.fetchone()
 
-                    with query_lock:
-                        query_result['completed'] = True
-                        if result and result[0]:
-                            raw = result[0][0] if isinstance(result[0], list) else result[0]
-                            query_result['data'] = _normalize_plan_data(raw)
+                    if result and result[0]:
+                        raw = result[0][0] if isinstance(result[0], list) else result[0]
+                        data = _normalize_plan_data(raw)
             except Exception as e:
-                with query_lock:
-                    query_result['completed'] = True
-                    query_result['error'] = str(e)
+                error = str(e)
             finally:
+                # Publish the terminal execution state before connection
+                # cleanup, which may itself block in a broken driver/socket.
+                worker_state.finish(data=data, error=error)
                 if query_conn:
                     try:
                         query_conn.close()
@@ -352,8 +521,8 @@ def _execute_postgres_explain_analyze(
 
         # Helper to cancel the backend query using shared utility
         def cancel_backend_query():
-            with query_lock:
-                backend_pid = query_result.get('backend_pid')
+            worker_state.request_cancel()
+            backend_pid = worker_state.identifier()
             if backend_pid:
                 return cancel_postgres_by_pid(conn_params, backend_pid, verbose=True)
             else:
@@ -440,12 +609,13 @@ def _execute_postgres_explain_analyze(
                 # Loop completed due to max_wait_time timeout (not break)
                 # Cancel the still-running backend query
                 with query_lock:
-                    if not query_result['completed']:
-                        max_wait_timeout = True
-                        user_skipped = True
-                        print(f"\n>> Max wait time ({max_wait_time}s) exceeded - cancelling query...\n")
-                        sys.stdout.flush()
-                        cancel_backend_query()
+                    should_cancel = not query_result['completed']
+                if should_cancel:
+                    max_wait_timeout = True
+                    user_skipped = True
+                    print(f"\n>> Max wait time ({max_wait_time}s) exceeded - cancelling query...\n")
+                    sys.stdout.flush()
+                    cancel_backend_query()
         finally:
             # Restore original SIGINT handler if we installed one
             if sigint_supported and original_sigint_handler is not None:
@@ -465,68 +635,97 @@ def _execute_postgres_explain_analyze(
                 except:
                     pass
 
+        # A cancel can race a worker that has connected but not entered the
+        # user's statement. The pre-start gate stops that case; a worker that
+        # already entered is given a bounded settle window. If cancellation
+        # fails, the caller records an open interval and closes it only after
+        # this worker eventually exits.
+        if user_skipped or rewrite_timeout_exceeded or max_wait_timeout or ctrl_c_pressed:
+            worker_state.request_cancel()
+        worker_settled = _settle_analyze_worker(analyze_thread)
+        query_snapshot = worker_state.snapshot()
+
         end_time = time.perf_counter()
         execution_time_ms = (end_time - start_time) * 1000
 
+        execution_evidence = {
+            "explain_analyze_started": bool(query_snapshot['started']),
+            "explain_analyze_started_at": query_snapshot['started_at'],
+            "explain_analyze_ended_at": query_snapshot['ended_at'],
+        }
+        if (
+            not worker_settled
+            and query_snapshot['started']
+            and query_snapshot['ended_at'] is None
+        ):
+            execution_evidence.update(
+                {
+                    "_analyze_worker_thread": analyze_thread,
+                    "_analyze_worker_state": worker_state,
+                }
+            )
+
         # Check results
-        with query_lock:
-            if query_result['data'] and not user_skipped:
-                plan_data = query_result['data']
-                return {
-                    "success": True,
-                    "explain_plan": plan_data,
-                    "execution_time_ms": execution_time_ms,
-                    "rows_examined": _extract_postgres_rows_examined(plan_data),
-                    "rows_returned": _extract_postgres_rows_returned(plan_data),
-                    "cost_estimate": _extract_postgres_cost(plan_data),
-                    "actual_time_ms": _extract_postgres_actual_time(plan_data),
-                    "planning_time_ms": plan_data.get('Planning Time', 0),
-                    "execution_time_ms": plan_data.get('Execution Time', execution_time_ms),
-                    "database_engine": "postgresql",
-                    "plan_format": "analyze",
-                    "explain_only_plan": explain_plan_data
-                }
-            elif explain_plan_data:
-                elapsed_seconds = execution_time_ms / 1000
-                if elapsed_seconds >= 60:
-                    elapsed_str = f"{int(elapsed_seconds // 60)} min {int(elapsed_seconds % 60)} sec"
-                else:
-                    elapsed_str = f"{elapsed_seconds:.1f} sec"
-
-                if rewrite_timeout_exceeded:
-                    skip_reason = f"Rewrite slower than baseline (cancelled after {elapsed_str})"
-                elif ctrl_c_pressed:
-                    skip_reason = f"Cancelled by user (Ctrl+C) after {elapsed_str}"
-                elif max_wait_timeout:
-                    skip_reason = f"Max wait time exceeded (cancelled after {elapsed_str})"
-                elif user_skipped:
-                    skip_reason = f"User skipped after {elapsed_str}"
-                else:
-                    skip_reason = f"EXPLAIN ANALYZE timed out after {elapsed_str}: {query_result.get('error', 'timeout')}"
-
-                return {
-                    "success": True,
-                    "explain_plan": explain_plan_data,
-                    "execution_time_ms": explain_plan_time_ms,
-                    "actual_elapsed_time_ms": execution_time_ms,
-                    "rows_examined": _extract_postgres_rows_examined(explain_plan_data),
-                    "rows_returned": _extract_postgres_rows_returned(explain_plan_data),
-                    "cost_estimate": _extract_postgres_cost(explain_plan_data),
-                    "database_engine": "postgresql",
-                    "plan_format": "json",
-                    "explain_analyze_timeout": not user_skipped,
-                    "explain_analyze_skipped": user_skipped,
-                    "rewrite_timeout_exceeded": rewrite_timeout_exceeded,
-                    "fallback_reason": f"Using EXPLAIN plan only - {skip_reason}",
-                    "skip_reason": skip_reason
-                }
+        if query_snapshot['data'] and not user_skipped:
+            plan_data = query_snapshot['data']
+            return {
+                "success": True,
+                "explain_plan": plan_data,
+                "execution_time_ms": execution_time_ms,
+                "rows_examined": _extract_postgres_rows_examined(plan_data),
+                "rows_returned": _extract_postgres_rows_returned(plan_data),
+                "cost_estimate": _extract_postgres_cost(plan_data),
+                "actual_time_ms": _extract_postgres_actual_time(plan_data),
+                "planning_time_ms": plan_data.get('Planning Time', 0),
+                "execution_time_ms": plan_data.get('Execution Time', execution_time_ms),
+                "database_engine": "postgresql",
+                "plan_format": "analyze",
+                "explain_only_plan": explain_plan_data,
+                **execution_evidence,
+            }
+        elif explain_plan_data:
+            elapsed_seconds = execution_time_ms / 1000
+            if elapsed_seconds >= 60:
+                elapsed_str = f"{int(elapsed_seconds // 60)} min {int(elapsed_seconds % 60)} sec"
             else:
-                return {
-                    "success": False,
-                    "error": f"No EXPLAIN plan available. ANALYZE error: {query_result.get('error', 'unknown')}",
-                    "explain_plan": None,
-                    "execution_time_ms": 0
-                }
+                elapsed_str = f"{elapsed_seconds:.1f} sec"
+
+            if rewrite_timeout_exceeded:
+                skip_reason = f"Rewrite slower than baseline (cancelled after {elapsed_str})"
+            elif ctrl_c_pressed:
+                skip_reason = f"Cancelled by user (Ctrl+C) after {elapsed_str}"
+            elif max_wait_timeout:
+                skip_reason = f"Max wait time exceeded (cancelled after {elapsed_str})"
+            elif user_skipped:
+                skip_reason = f"User skipped after {elapsed_str}"
+            else:
+                skip_reason = f"EXPLAIN ANALYZE timed out after {elapsed_str}: {query_result.get('error', 'timeout')}"
+
+            return {
+                "success": True,
+                "explain_plan": explain_plan_data,
+                "execution_time_ms": explain_plan_time_ms,
+                "actual_elapsed_time_ms": execution_time_ms,
+                "rows_examined": _extract_postgres_rows_examined(explain_plan_data),
+                "rows_returned": _extract_postgres_rows_returned(explain_plan_data),
+                "cost_estimate": _extract_postgres_cost(explain_plan_data),
+                "database_engine": "postgresql",
+                "plan_format": "json",
+                "explain_analyze_timeout": not user_skipped,
+                "explain_analyze_skipped": user_skipped,
+                "rewrite_timeout_exceeded": rewrite_timeout_exceeded,
+                "fallback_reason": f"Using EXPLAIN plan only - {skip_reason}",
+                "skip_reason": skip_reason,
+                **execution_evidence,
+            }
+        else:
+            return {
+                "success": False,
+                "error": f"No EXPLAIN plan available. ANALYZE error: {query_result.get('error', 'unknown')}",
+                "explain_plan": None,
+                "execution_time_ms": 0,
+                **execution_evidence,
+            }
 
     except Exception as e:
         import traceback
@@ -583,6 +782,7 @@ def _execute_mysql_explain_analyze(
         resolved_params = resolve_connection_params(
             target=target,
             target_config=target_config,
+            lane="rdst/analyze",
         )
         password = _resolve_explain_password(
             target_config, resolved_params['password']
@@ -637,12 +837,15 @@ def _execute_mysql_explain_analyze(
                 connection_id = cursor.fetchone()['CONNECTION_ID()']
 
                 # Shared state between threads
-                query_result = {'completed': False, 'data': None, 'error': None, 'connection_id': None}
-                query_lock = threading.Lock()
+                worker_state = _AnalyzeWorkerState('connection_id')
+                query_result = worker_state.result
+                query_lock = worker_state.lock
 
                 def execute_explain_analyze():
                     """Execute EXPLAIN ANALYZE in separate thread with its own connection."""
                     query_conn = None
+                    data = None
+                    error = None
                     try:
                         # Create new connection for this thread (cursors aren't thread-safe)
                         query_conn = create_mysql_connection_from_params(
@@ -653,25 +856,24 @@ def _execute_mysql_explain_analyze(
                             # Get this thread's connection ID
                             query_cursor.execute("SELECT CONNECTION_ID()")
                             thread_conn_id = query_cursor.fetchone()['CONNECTION_ID()']
-
-                            with query_lock:
-                                query_result['connection_id'] = thread_conn_id
+                            worker_state.set_identifier(thread_conn_id)
 
                             # Execute EXPLAIN ANALYZE
                             explain_query = f"EXPLAIN ANALYZE {sql}"
                             # Safe: sql parameter is user\'s query to analyze (intended functionality), validated by query_safety.py
 
+                            if not worker_state.begin_execution():
+                                return
                             query_cursor.execute(explain_query)  # nosem
+                            worker_state.mark_database_completion()
                             results = query_cursor.fetchall()
-
-                            with query_lock:
-                                query_result['completed'] = True
-                                query_result['data'] = results
+                            data = results
                     except Exception as e:
-                        with query_lock:
-                            query_result['completed'] = True
-                            query_result['error'] = str(e)
+                        error = str(e)
                     finally:
+                        # Publish completion before potentially blocking
+                        # connection cleanup; no SQL can run after this point.
+                        worker_state.finish(data=data, error=error)
                         if query_conn:
                             try:
                                 query_conn.close()
@@ -692,8 +894,8 @@ def _execute_mysql_explain_analyze(
 
                 # Helper to kill the MySQL query using shared utility
                 def kill_mysql_query():
-                    with query_lock:
-                        thread_conn_id = query_result.get('connection_id')
+                    worker_state.request_cancel()
+                    thread_conn_id = worker_state.identifier()
                     if thread_conn_id:
                         return cancel_mysql_by_thread_id(
                             target_config,
@@ -788,12 +990,13 @@ def _execute_mysql_explain_analyze(
                         # Loop completed due to max_wait_time timeout (not break)
                         # Kill the still-running query
                         with query_lock:
-                            if not query_result['completed']:
-                                max_wait_timeout = True
-                                user_skipped = True
-                                print(f"\n>> Max wait time ({max_wait_time}s) exceeded - cancelling query...\n")
-                                sys.stdout.flush()
-                                kill_mysql_query()
+                            should_cancel = not query_result['completed']
+                        if should_cancel:
+                            max_wait_timeout = True
+                            user_skipped = True
+                            print(f"\n>> Max wait time ({max_wait_time}s) exceeded - cancelling query...\n")
+                            sys.stdout.flush()
+                            kill_mysql_query()
                 finally:
                     # Restore original SIGINT handler if we installed one
                     if sigint_supported and original_sigint_handler is not None:
@@ -814,64 +1017,88 @@ def _execute_mysql_explain_analyze(
                         except:
                             pass
 
+                if user_skipped or max_wait_timeout or ctrl_c_pressed:
+                    worker_state.request_cancel()
+                worker_settled = _settle_analyze_worker(analyze_thread)
+                query_snapshot = worker_state.snapshot()
+
                 end_time = time.perf_counter()
                 execution_time_ms = (end_time - start_time) * 1000
 
+                execution_evidence = {
+                    "explain_analyze_started": bool(query_snapshot['started']),
+                    "explain_analyze_started_at": query_snapshot['started_at'],
+                    "explain_analyze_ended_at": query_snapshot['ended_at'],
+                }
+                if (
+                    not worker_settled
+                    and query_snapshot['started']
+                    and query_snapshot['ended_at'] is None
+                ):
+                    execution_evidence.update(
+                        {
+                            "_analyze_worker_thread": analyze_thread,
+                            "_analyze_worker_state": worker_state,
+                        }
+                    )
+
                 # Check results
-                with query_lock:
-                    if query_result['data'] and not user_skipped:
-                        # EXPLAIN ANALYZE completed successfully
-                        return {
-                            "success": True,
-                            "explain_plan": query_result['data'],
-                            "execution_time_ms": execution_time_ms,
-                            "rows_examined": _extract_mysql_rows_examined(query_result['data']),
-                            "rows_returned": _extract_mysql_rows_returned(query_result['data']),
-                            "cost_estimate": _extract_mysql_cost(query_result['data']),
-                            "database_engine": "mysql",
-                            "plan_format": "analyze",
-                            "explain_only_plan": explain_plan_data
-                        }
-                    elif explain_plan_data:
-                        # Use EXPLAIN data (user skipped or timeout/error)
-                        # Format the actual elapsed time nicely
-                        elapsed_seconds = execution_time_ms / 1000
-                        if elapsed_seconds >= 60:
-                            elapsed_str = f"{int(elapsed_seconds // 60)} min {int(elapsed_seconds % 60)} sec"
-                        else:
-                            elapsed_str = f"{int(elapsed_seconds)} sec"
-
-                        if ctrl_c_pressed:
-                            skip_reason = f"Cancelled by user (Ctrl+C) after {elapsed_str}"
-                        elif max_wait_timeout:
-                            skip_reason = f"Max wait time exceeded (cancelled after {elapsed_str})"
-                        elif user_skipped:
-                            skip_reason = f"User skipped after {elapsed_str}"
-                        else:
-                            skip_reason = f"EXPLAIN ANALYZE timed out after {elapsed_str}: {query_result.get('error', 'timeout')}"
-
-                        return {
-                            "success": True,
-                            "explain_plan": explain_plan_data,
-                            "execution_time_ms": plan_time_ms,  # This is the EXPLAIN time, not actual query time
-                            "actual_elapsed_time_ms": execution_time_ms,  # This is how long we actually waited
-                            "rows_examined": _extract_mysql_json_rows_examined(explain_plan_data),
-                            "rows_returned": _extract_mysql_json_rows_returned(explain_plan_data),
-                            "cost_estimate": _extract_mysql_json_cost(explain_plan_data),
-                            "database_engine": "mysql",
-                            "plan_format": "json",
-                            "explain_analyze_timeout": not user_skipped,
-                            "explain_analyze_skipped": user_skipped,
-                            "fallback_reason": f"Using EXPLAIN plan only - {skip_reason}",
-                            "skip_reason": skip_reason
-                        }
+                if query_snapshot['data'] and not user_skipped:
+                    # EXPLAIN ANALYZE completed successfully
+                    return {
+                        "success": True,
+                        "explain_plan": query_snapshot['data'],
+                        "execution_time_ms": execution_time_ms,
+                        "rows_examined": _extract_mysql_rows_examined(query_snapshot['data']),
+                        "rows_returned": _extract_mysql_rows_returned(query_snapshot['data']),
+                        "cost_estimate": _extract_mysql_cost(query_snapshot['data']),
+                        "database_engine": "mysql",
+                        "plan_format": "analyze",
+                        "explain_only_plan": explain_plan_data,
+                        **execution_evidence,
+                    }
+                elif explain_plan_data:
+                    # Use EXPLAIN data (user skipped or timeout/error)
+                    # Format the actual elapsed time nicely
+                    elapsed_seconds = execution_time_ms / 1000
+                    if elapsed_seconds >= 60:
+                        elapsed_str = f"{int(elapsed_seconds // 60)} min {int(elapsed_seconds % 60)} sec"
                     else:
-                        return {
-                            "success": False,
-                            "error": f"No EXPLAIN plan available. ANALYZE error: {query_result.get('error', 'unknown')}",
-                            "explain_plan": None,
-                            "execution_time_ms": 0
-                        }
+                        elapsed_str = f"{int(elapsed_seconds)} sec"
+
+                    if ctrl_c_pressed:
+                        skip_reason = f"Cancelled by user (Ctrl+C) after {elapsed_str}"
+                    elif max_wait_timeout:
+                        skip_reason = f"Max wait time exceeded (cancelled after {elapsed_str})"
+                    elif user_skipped:
+                        skip_reason = f"User skipped after {elapsed_str}"
+                    else:
+                        skip_reason = f"EXPLAIN ANALYZE timed out after {elapsed_str}: {query_result.get('error', 'timeout')}"
+
+                    return {
+                        "success": True,
+                        "explain_plan": explain_plan_data,
+                        "execution_time_ms": plan_time_ms,  # This is the EXPLAIN time, not actual query time
+                        "actual_elapsed_time_ms": execution_time_ms,  # This is how long we actually waited
+                        "rows_examined": _extract_mysql_json_rows_examined(explain_plan_data),
+                        "rows_returned": _extract_mysql_json_rows_returned(explain_plan_data),
+                        "cost_estimate": _extract_mysql_json_cost(explain_plan_data),
+                        "database_engine": "mysql",
+                        "plan_format": "json",
+                        "explain_analyze_timeout": not user_skipped,
+                        "explain_analyze_skipped": user_skipped,
+                        "fallback_reason": f"Using EXPLAIN plan only - {skip_reason}",
+                        "skip_reason": skip_reason,
+                        **execution_evidence,
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": f"No EXPLAIN plan available. ANALYZE error: {query_result.get('error', 'unknown')}",
+                        "explain_plan": None,
+                        "execution_time_ms": 0,
+                        **execution_evidence,
+                    }
 
     except Exception as e:
         return {

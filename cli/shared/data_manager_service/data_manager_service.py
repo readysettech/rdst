@@ -84,6 +84,7 @@ class ConnectionConfig:
     ssl_mode: str = "prefer"
     connect_timeout: int = DEFAULT_TIMEOUT
     query_type: DataManagerQueryType = DataManagerQueryType.UPSTREAM
+    application_name: Optional[str] = None
 
 @dataclass
 class CommandSetData:

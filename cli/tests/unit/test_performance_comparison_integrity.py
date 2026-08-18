@@ -13,6 +13,56 @@ class _Connection:
         pass
 
 
+def test_execute_start_callback_is_immediately_before_cursor_execute():
+    order = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def execute(self, _query):
+            order.append("execute")
+
+        def fetchall(self):
+            return []
+
+    class Connection:
+        def cursor(self):
+            order.append("cursor")
+            return Cursor()
+
+    result = performance_comparison._execute_on_connection(
+        Connection(),
+        "SELECT 1",
+        "postgresql",
+        on_execute=lambda: order.append("start"),
+    )
+
+    assert result["success"] is True
+    assert order == ["cursor", "start", "execute"]
+
+
+def test_cursor_creation_failure_does_not_emit_execute_start():
+    started = []
+
+    class Connection:
+        def cursor(self):
+            raise RuntimeError("cursor unavailable")
+
+    result = performance_comparison._execute_on_connection(
+        Connection(),
+        "SELECT 1",
+        "postgresql",
+        on_execute=lambda: started.append(True),
+    )
+
+    assert result["success"] is False
+    assert started == []
+
+
 def test_partial_measured_failure_rejects_the_comparison(monkeypatch):
     connections = iter([(_Connection(), "postgresql"), (_Connection(), "postgresql")])
     monkeypatch.setattr(
@@ -28,11 +78,14 @@ def test_partial_measured_failure_rejects_the_comparison(monkeypatch):
             {"success": True, "execution_time_ms": 2.0},
         ]
     )
-    monkeypatch.setattr(
-        performance_comparison,
-        "_execute_on_connection",
-        lambda *_args, **_kwargs: next(outcomes),
-    )
+    def execute(*_args, **kwargs):
+        token = kwargs["on_execute"]() if kwargs.get("on_execute") else None
+        result = next(outcomes)
+        if result["success"] and kwargs.get("on_complete") is not None:
+            kwargs["on_complete"](token)
+        return result
+
+    monkeypatch.setattr(performance_comparison, "_execute_on_connection", execute)
 
     result = performance_comparison.run_comparison(
         query="SELECT 1",
@@ -148,7 +201,7 @@ def test_concurrent_cancellation_settles_workers_and_connections(monkeypatch):
         connections.append(connection)
         return connection, "postgresql"
 
-    def execute(connection, _query, _engine, controller):
+    def execute(connection, _query, _engine, controller, **_kwargs):
         nonlocal active
         with active_lock:
             active += 1
@@ -409,3 +462,101 @@ def test_invalid_load_controls_are_rejected_before_connecting(
 
     assert result["success"] is False
     assert error in result["error"].lower()
+
+
+def test_result_reports_exact_execution_counts_per_side(monkeypatch):
+    """Q11 attribution: each side's completed executions (warmups included)
+    are reported exactly so the compare lane can record subtractable
+    evidence."""
+    connections = iter([(_Connection(), "postgresql"), (_Connection(), "postgresql")])
+    monkeypatch.setattr(
+        performance_comparison,
+        "_open_persistent_connection",
+        lambda _config: next(connections),
+    )
+    monkeypatch.setattr(
+        performance_comparison,
+        "_execute_on_connection",
+        lambda *_args, **_kwargs: {"success": True, "execution_time_ms": 1.0},
+    )
+
+    result = performance_comparison.run_comparison(
+        query="SELECT 1",
+        original_db_config={"engine": "postgresql"},
+        readyset_db_config={"engine": "postgresql"},
+        iterations=2,
+        warmup_iterations=1,
+    )
+
+    assert result["success"] is True
+    assert result["original"]["executions"] == 3
+    assert result["readyset"]["executions"] == 3
+
+
+def test_readyset_failure_preserves_completed_origin_execution_count(monkeypatch):
+    connections = iter([(_Connection(), "postgresql"), (_Connection(), "postgresql")])
+    monkeypatch.setattr(
+        performance_comparison,
+        "_open_persistent_connection",
+        lambda _config: next(connections),
+    )
+    outcomes = iter(
+        [
+            {"success": True, "execution_time_ms": 10.0},
+            {"success": True, "execution_time_ms": 9.0},
+            {"success": True, "execution_time_ms": 8.0},
+            {"success": False, "error": "Readyset unavailable"},
+        ]
+    )
+    progress: list[tuple[int, int]] = []
+    def execute(*_args, **kwargs):
+        token = kwargs["on_execute"]() if kwargs.get("on_execute") else None
+        result = next(outcomes)
+        if result["success"] and kwargs.get("on_complete") is not None:
+            kwargs["on_complete"](token)
+        return result
+
+    monkeypatch.setattr(performance_comparison, "_execute_on_connection", execute)
+
+    result = performance_comparison.run_comparison(
+        query="SELECT 1",
+        original_db_config={"engine": "postgresql"},
+        readyset_db_config={"engine": "postgresql"},
+        iterations=2,
+        warmup_iterations=1,
+        on_origin_progress=lambda token, occurred_at, count: progress.append(
+            (token, occurred_at, count)
+        ),
+    )
+
+    assert result["success"] is False
+    assert "Readyset unavailable" in result["error"]
+    assert result["original"]["executions"] == 3
+    assert len(progress) == 3
+    assert all(count == 1 for _token, _occurred_at, count in progress)
+
+
+def test_concurrent_result_reports_exact_execution_counts(monkeypatch):
+    monkeypatch.setattr(
+        performance_comparison,
+        "_open_persistent_connection",
+        lambda _config: (_Connection(), "postgresql"),
+    )
+    monkeypatch.setattr(
+        performance_comparison,
+        "_execute_on_connection",
+        lambda *_args, **_kwargs: {"success": True, "execution_time_ms": 1.0},
+    )
+
+    result = performance_comparison.run_comparison(
+        query="SELECT 1",
+        original_db_config={"engine": "postgresql"},
+        readyset_db_config={"engine": "postgresql"},
+        iterations=4,
+        warmup_iterations=2,
+        concurrency=2,
+    )
+
+    assert result["success"] is True
+    assert result["original"]["executions"] == 6
+    assert result["readyset"]["executions"] == 6

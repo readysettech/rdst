@@ -380,6 +380,20 @@ class AnalysisResultsRegistry:
         return removed_count
 
 
+def extract_performance_assessment(llm_analysis: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract the compact performance assessment from a stored llm_analysis dict.
+
+    Accepts both the top-level shape the analyze functions return and the
+    nested shape under "analysis_results". Returns {} when absent.
+    """
+    assessment = llm_analysis.get("performance_assessment")
+    if not isinstance(assessment, dict) or not assessment:
+        nested = llm_analysis.get("analysis_results")
+        assessment = nested.get("performance_assessment") if isinstance(nested, dict) else None
+    return assessment if isinstance(assessment, dict) else {}
+
+
 # Convenience functions for creating analysis results
 def create_analysis_result(query_hash: str, target: str,
                           performance_metrics: Dict[str, Any],

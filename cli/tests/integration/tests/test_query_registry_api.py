@@ -1,7 +1,8 @@
 """Integration tests for the query registry API — no service mocks.
 
-The real `QueryRegistry` reads/writes `~/.rdst/queries.toml`, relocated
-into a tmp dir per test by the `tmp_rdst_home` fixture in `conftest.py`.
+The real `QueryRegistry` persists to `~/.rdst/library.db`, importing a
+pre-seeded `~/.rdst/queries.toml` on first load; both are relocated into
+a tmp dir per test by the `tmp_rdst_home` fixture in `conftest.py`.
 """
 
 from __future__ import annotations

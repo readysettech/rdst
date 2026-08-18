@@ -391,6 +391,9 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             query_kwargs["interactive"] = getattr(args, "interactive", False)
         if query_subcommand in ["delete", "rm"]:
             query_kwargs["force"] = getattr(args, "force", False)
+        if query_subcommand == "export":
+            query_kwargs["format"] = getattr(args, "format", "toml")
+            query_kwargs["output"] = getattr(args, "output", None)
         if query_subcommand == "run":
             query_kwargs["queries"] = getattr(args, "queries", [])
             query_kwargs["target"] = getattr(args, "target", None)

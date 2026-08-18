@@ -217,7 +217,7 @@ def _collect_postgres_schema(config: dict, target: str) -> tuple[Optional[Schema
             resolve_connection_params,
         )
 
-        params = resolve_connection_params(target=target, target_config=config)
+        params = resolve_connection_params(target=target, target_config=config, lane="rdst/ask")
 
         if not all([params['host'], params['user'], params['database']]):
             return None, "Schema information: Missing connection parameters"
@@ -285,7 +285,7 @@ def _collect_mysql_schema(config: dict, target: str) -> tuple[Optional[SchemaInf
             resolve_connection_params,
         )
 
-        params = resolve_connection_params(target=target, target_config=config)
+        params = resolve_connection_params(target=target, target_config=config, lane="rdst/ask")
 
         if not all([params['host'], params['user'], params['database']]):
             return None, "Schema information: Missing connection parameters"

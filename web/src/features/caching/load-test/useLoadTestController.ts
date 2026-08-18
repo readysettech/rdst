@@ -8,6 +8,7 @@ import {
   buildParameterSuggestions,
   fetchParameterSchema,
   parameterValueKey,
+  suggestionSummaryMessage,
 } from '../../../lib/parameterSuggestions'
 import {
   filterQueriesBySearch,
@@ -112,6 +113,8 @@ export function useLoadTestController({
   const [suggestionMessage, setSuggestionMessage] = useState<string | null>(
     null
   )
+  const [suggestionSchemaUnavailable, setSuggestionSchemaUnavailable] =
+    useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [repeatPrevious, setRepeatPrevious] = useState(false)
   const [loadSettingsOpen, setLoadSettingsOpen] = useDisclosure({})
@@ -300,6 +303,7 @@ export function useLoadTestController({
     if (!suggestionTarget || missingParameterCount === 0) return
     setSuggestingParameters(true)
     setSuggestionMessage(null)
+    setSuggestionSchemaUnavailable(false)
     try {
       const schema = await fetchParameterSchema(suggestionTarget)
       const applicable: Array<[string, string, string]> = []
@@ -330,10 +334,16 @@ export function useLoadTestController({
         ),
       }))
       setSuggestionMessage(
-        applicable.length > 0
-          ? `Filled ${applicable.length} unresolved ${applicable.length === 1 ? 'parameter' : 'parameters'} from safe schema evidence. Review before running.`
-          : 'No safe schema-grounded suggestions were found.'
+        suggestionSummaryMessage({
+          filled: applicable.length,
+          missingBefore: missingParameterCount,
+          queryCount: runnableQueryObjects.filter(
+            (query) => query.parameters.length > 0
+          ).length,
+          schemaAvailable: schema !== null,
+        })
       )
+      setSuggestionSchemaUnavailable(schema === null)
     } catch {
       setSuggestionMessage('Schema suggestions are unavailable.')
     } finally {
@@ -520,6 +530,7 @@ export function useLoadTestController({
     updateParameter,
     suggestingParameters,
     suggestionMessage,
+    suggestionSchemaUnavailable,
     suggestParameterValues,
     confirmOpen,
     setConfirmOpen,

@@ -768,6 +768,7 @@ class AuditService:
             connection = create_direct_connection(
                 target_config,
                 target=target_name,
+                lane="rdst/audit",
             )
             try:
                 if engine == "postgresql":

@@ -3,8 +3,10 @@ Common pytest fixtures and configuration for RDST tests.
 """
 
 import os
+import sqlite3
 import sys
 import tempfile
+import types
 
 # Protect the developer profile before pytest imports test modules. Some
 # production modules derive paths from Path.home() at import time; the autouse
@@ -28,6 +30,48 @@ for variable in (
 # Disable telemetry for all tests before shared.telemetry_manager is imported.
 os.environ.setdefault("RDST_TESTING", "true")
 
+# Driver-free test environments (CI installs tests/requirements.txt, which has
+# no database drivers) need importable psycopg2/pymysql stand-ins registered
+# before any test module is imported: production modules such as
+# shared.data_manager.data_manager bind these modules at import time, and test
+# module imports happen in collection order, so a stub installed by one test
+# file arrives too late for modules imported earlier. Tests patch each stub's
+# connect at the same lookup site they would patch on the real driver; an
+# unpatched stub connect fails the way an unreachable database would.
+try:
+    import psycopg2  # noqa: F401
+except ModuleNotFoundError:
+    psycopg2 = types.ModuleType("psycopg2")
+    psycopg2.OperationalError = type("OperationalError", (Exception,), {})
+
+    def _psycopg2_stub_connect(*args, **kwargs):
+        raise psycopg2.OperationalError("psycopg2 stub: no database available")
+
+    psycopg2.connect = _psycopg2_stub_connect
+    psycopg2.extras = types.ModuleType("psycopg2.extras")
+    psycopg2.extras.RealDictCursor = type("RealDictCursor", (), {})
+    sys.modules["psycopg2"] = psycopg2
+    sys.modules["psycopg2.extras"] = psycopg2.extras
+
+try:
+    import pymysql  # noqa: F401
+except ModuleNotFoundError:
+    pymysql = types.ModuleType("pymysql")
+    pymysql.OperationalError = type("OperationalError", (Exception,), {})
+
+    def _pymysql_stub_connect(*args, **kwargs):
+        raise pymysql.OperationalError("pymysql stub: no database available")
+
+    pymysql.connect = _pymysql_stub_connect
+    pymysql.err = types.ModuleType("pymysql.err")
+    pymysql.err.OperationalError = pymysql.OperationalError
+    pymysql.cursors = types.ModuleType("pymysql.cursors")
+    pymysql.cursors.Cursor = type("Cursor", (), {})
+    pymysql.cursors.DictCursor = type("DictCursor", (), {})
+    sys.modules["pymysql"] = pymysql
+    sys.modules["pymysql.err"] = pymysql.err
+    sys.modules["pymysql.cursors"] = pymysql.cursors
+
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -39,6 +83,21 @@ if str(rdst_root) not in sys.path:
     sys.path.insert(0, str(rdst_root))
 if str(rdst_root / "lib") not in sys.path:
     sys.path.insert(0, str(rdst_root / "lib"))
+
+
+@pytest.fixture(autouse=True)
+def _fixed_sqlite_runtime_for_tests(monkeypatch):
+    """Run ordinary tests as if the packaged SQLite carried the WAL-reset fix.
+
+    The development ``uv`` runtime currently links an unfixed SQLite build,
+    which would put every store into the DELETE rollback fallback. Injecting
+    a fixed version at the Python boundary keeps ordinary tests on the WAL
+    configuration that packaged builds ship. Runtime-gate tests override
+    these attributes again to exercise each journal strategy and version
+    line.
+    """
+    monkeypatch.setattr(sqlite3, "sqlite_version_info", (3, 51, 3))
+    monkeypatch.setattr(sqlite3, "sqlite_version", "3.51.3-test")
 
 
 # Test suites excluded from default runs.  Each entry maps a path
