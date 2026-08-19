@@ -362,6 +362,41 @@ def managed_sandbox_running() -> bool:
     return bool(result and result.get("running"))
 
 
+def image_present(image: str) -> bool:
+    """True when the image already exists locally."""
+    try:
+        result = subprocess.run(
+            ["docker", "image", "inspect", image], capture_output=True, timeout=10
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def pull_image(image: str, timeout_seconds: int = 1800) -> Dict[str, Any]:
+    """Pull an image ahead of container start.
+
+    First-run pulls of the Readyset image are gigabyte-scale and must never
+    race a container readiness timeout; callers surface a downloading state
+    to the user while this runs.
+    """
+    try:
+        result = subprocess.run(
+            ["docker", "pull", image],
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "docker pull failed").strip()
+            return {"success": False, "error": detail[-400:]}
+        return {"success": True}
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": f"Downloading {image} timed out"}
+    except FileNotFoundError:
+        return {"success": False, "error": "Docker CLI was not found on RDST's PATH."}
+
+
 def remove_managed_sandbox() -> Dict[str, Any]:
     """Remove only the exact, labeled RDST sandbox."""
     existing, inspection_error = _inspect_exact_container_checked(

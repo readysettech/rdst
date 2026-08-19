@@ -7,6 +7,7 @@ declare global {
     rdstDesktop?: {
       isDesktop: true
       platform: NodeJS.Platform
+      telemetryDisabled: boolean
       oauth: {
         registerProtocol: () => Promise<boolean>
       }

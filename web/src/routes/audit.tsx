@@ -96,9 +96,10 @@ function CaptureElapsed({
     const timer = window.setInterval(() => setClock(Date.now()), 500)
     return () => window.clearInterval(timer)
   }, [session.id])
+  const wallclockSeconds = (clock - session.startedAt) / 1000
   const elapsedSeconds = Math.min(
     session.durationSeconds || Number.POSITIVE_INFINITY,
-    Math.max(progressElapsedSeconds ?? 0, (clock - session.startedAt) / 1000)
+    Math.max(progressElapsedSeconds ?? 0, wallclockSeconds)
   )
   return (
     <RunProgress
@@ -106,6 +107,7 @@ function CaptureElapsed({
       statusMessage={statusMessage}
       durationSeconds={session.durationSeconds}
       elapsedSeconds={elapsedSeconds}
+      totalElapsedSeconds={wallclockSeconds}
     />
   )
 }

@@ -306,6 +306,14 @@ class RunRegistry:
             )
             self._append(handle, name, data)
             status = "failed"
+            try:
+                from shared.telemetry import telemetry
+
+                telemetry.track_error(
+                    f"run:{handle.kind}", exc, context={"target": handle.target},
+                )
+            except Exception:
+                pass
         finally:
             # Always emit a terminal record so attached subscribers settle.
             try:

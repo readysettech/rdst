@@ -210,6 +210,30 @@ class LocalDockerSandboxAdapter:
             await discard_stale()
             return None
 
+    async def ensure_image_ready(self, on_download=None) -> None:
+        """Guarantee the Readyset image is local before any container start.
+
+        A first-run pull is gigabyte-scale and would otherwise be spent
+        inside the container readiness timeout, which then fails with
+        "container is not running" while the download is still going.
+        `on_download` is awaited once before a pull actually starts, so the
+        caller can surface a downloading state to the user.
+        """
+        from shared.deploy import READYSET_IMAGE
+        from shared.deploy.local_docker import image_present, pull_image
+
+        if await asyncio.to_thread(image_present, READYSET_IMAGE):
+            return
+        if on_download is not None:
+            result = on_download()
+            if inspect.isawaitable(result):
+                await result
+        pulled = await asyncio.to_thread(pull_image, READYSET_IMAGE)
+        if not pulled.get("success"):
+            raise RuntimeError(
+                f"Could not download the Readyset image: {pulled.get('error')}"
+            )
+
     async def provision(
         self, target: str, fingerprint: str, target_config: dict[str, Any]
     ) -> ProvisionedSandbox:
@@ -913,6 +937,15 @@ class ReadysetSandboxManager:
                 self._state.phase = "provisioning"
                 self._state.failed_target = None
                 self._state.last_error = None
+            ensure_image = getattr(self._adapter, "ensure_image_ready", None)
+            if ensure_image is not None:
+                async def _announce_download() -> None:
+                    await _emit(
+                        waiter.progress,
+                        "downloading_readyset",
+                        "Downloading the Readyset image (first run, one-time)",
+                    )
+                await _finish_before_cancelling(ensure_image(_announce_download))
             await _emit(waiter.progress, "starting_readyset", "Starting Readyset sandbox")
             provisioning_started = True
             sandbox = await _finish_before_cancelling(

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import threading
+import time
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Sequence
 
 from .base import LLMDefaults, LLMError, Provider, ProviderRequest, ProviderResponse
@@ -101,9 +102,13 @@ class LLMManager:
         api_key: Optional[str] = None,
         extra: Optional[Dict[str, Any]] = None,
         history: Optional[Sequence[Dict[str, str]]] = None,
+        purpose: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Provider-agnostic query interface.
+
+        `purpose` labels the call in telemetry (e.g. "audit_health"); it is
+        never forwarded to the provider.
 
         Returns a dict:
         {
@@ -167,6 +172,7 @@ class LLMManager:
             extra=extra or {},
         )
 
+        request_started = time.monotonic()
         try:
             resp: ProviderResponse = prov.complete(
                 req,
@@ -184,8 +190,10 @@ class LLMManager:
                     self._config.save()
                 except Exception:
                     pass
+            self._track_llm_error(e, purpose, code=e.code)
             raise
         except Exception as e:
+            self._track_llm_error(e, purpose)
             raise LLMError(
                 f"Provider '{name}' failed: {e}", code="PROVIDER_FAILURE", cause=e
             )
@@ -235,8 +243,9 @@ class LLMManager:
                 model=actual_model,
                 tokens_in=usage.get("prompt_tokens") or 0,
                 tokens_out=usage.get("completion_tokens") or 0,
-                duration_ms=0,  # TODO: Add timing if needed
-                purpose=extra.get("purpose", "general") if extra else "general",
+                duration_ms=int((time.monotonic() - request_started) * 1000),
+                purpose=purpose or "general",
+                max_tokens_requested=resolved["max_tokens"],
             )
         except Exception:
             pass  # Don't fail LLM call if telemetry fails
@@ -369,6 +378,7 @@ class LLMManager:
                 "api_key",
                 "extra",
                 "history",
+                "purpose",
             }
 
             filtered_kwargs = {
@@ -397,6 +407,18 @@ class LLMManager:
             }
         except Exception as e:
             raise e
+
+    @staticmethod
+    def _track_llm_error(error: BaseException, purpose: Optional[str], code: Optional[str] = None) -> None:
+        try:
+            from shared.telemetry import telemetry
+
+            context = {"purpose": purpose or "general"}
+            if code:
+                context["llm_error_code"] = code
+            telemetry.track_error("llm", error, context=context)
+        except Exception:
+            pass
 
     def _safe_load_key_for_query(self, provider: str) -> "KeyResolution":
         """Resolve API key and routing (direct vs trial proxy).

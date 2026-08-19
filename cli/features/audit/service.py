@@ -69,6 +69,9 @@ class AuditService:
         history) can find it.
         """
         import asyncio
+        import time
+
+        from shared.telemetry import telemetry
 
         config = self._get_config()
         target_config = config.get(target_name)
@@ -79,6 +82,34 @@ class AuditService:
                 phase="config",
             )
             return
+
+        engine = target_config.get("engine", "unknown")
+        run_started_monotonic = time.monotonic()
+        phase_started_monotonic = run_started_monotonic
+        phase_timings: dict[str, float] = {}
+
+        def _phase_done(phase: str, success: bool = True, error_type: str | None = None) -> None:
+            nonlocal phase_started_monotonic
+            now = time.monotonic()
+            duration_ms = round((now - phase_started_monotonic) * 1000.0, 1)
+            phase_started_monotonic = now
+            phase_timings[phase] = duration_ms
+            telemetry.track("audit_phase_complete", {
+                "endpoint": "audit",
+                "target": target_name,
+                "engine": engine,
+                "phase": phase,
+                "duration_ms": duration_ms,
+                "success": success,
+                "error_type": error_type,
+            })
+
+        telemetry.track("audit_started", {
+            "endpoint": "audit",
+            "target": target_name,
+            "engine": engine,
+            "analysis_requested": insights,
+        })
 
         yield AuditStatusEvent(type="status", phase="connect", message=f"Auditing {target_name}...")
         yield AuditTargetStartEvent(type="target_start", target_name=target_name, index=0, total=1)
@@ -106,6 +137,16 @@ class AuditService:
         result = await task
 
         if result.error:
+            _phase_done("collect", success=False, error_type="collection_error")
+            telemetry.track("audit_completed", {
+                "endpoint": "audit",
+                "target": target_name,
+                "engine": engine,
+                "duration_ms": round((time.monotonic() - run_started_monotonic) * 1000.0, 1),
+                "success": False,
+                "error_type": "collection_error",
+                "phase_timings_ms": dict(phase_timings),
+            })
             yield AuditTargetErrorEvent(
                 type="target_error",
                 target_name=target_name,
@@ -115,6 +156,7 @@ class AuditService:
             )
             yield AuditCompleteEvent(type="complete", success=False)
             return
+        _phase_done("collect")
 
         yield AuditMetricsCollectedEvent(
             type="metrics_collected",
@@ -123,11 +165,26 @@ class AuditService:
         )
 
         final_result = asdict(result)
+        analysis_error: str | None = None
         if insights:
             yield AuditStatusEvent(type="status", phase="insights", message="Analyzing health data...")
             health_analysis = await asyncio.to_thread(self.run_health_llm, final_result)
             if health_analysis:
                 final_result["health_analysis"] = health_analysis
+            # run_health_llm returns {"error": ...} on failure. That error
+            # channel is part of the report contract, but a failed analysis
+            # must not pass for a successful one here: surface it as a
+            # failing phase and in the completion summary.
+            if health_analysis and health_analysis.get("error"):
+                analysis_error = str(health_analysis["error"])
+                _phase_done("insights", success=False, error_type="llm_error")
+                yield AuditStatusEvent(
+                    type="status",
+                    phase="insights",
+                    message=f"Analysis failed: {analysis_error}",
+                )
+            else:
+                _phase_done("insights")
 
         snapshot_id: str | None = None
         if save:
@@ -138,10 +195,22 @@ class AuditService:
             # Persist the same HTML artifact the CLI emails, so "email me this
             # report" from the web ships identical output.
             await asyncio.to_thread(self._save_report_artifact, snapshot_id, final_result)
+            _phase_done("save")
             yield AuditSnapshotSavedEvent(
                 type="snapshot_saved", snapshot_id=snapshot_id, path=path,
             )
 
+        total_duration_ms = round((time.monotonic() - run_started_monotonic) * 1000.0, 1)
+        telemetry.track("audit_completed", {
+            "endpoint": "audit",
+            "target": target_name,
+            "engine": engine,
+            "duration_ms": total_duration_ms,
+            "success": True,
+            "had_analysis": "health_analysis" in final_result and analysis_error is None,
+            "analysis_error": analysis_error,
+            "phase_timings_ms": dict(phase_timings),
+        })
         yield AuditTargetCompleteEvent(
             type="target_complete",
             target_name=target_name,
@@ -149,7 +218,16 @@ class AuditService:
             index=0,
             total=1,
         )
-        yield AuditCompleteEvent(type="complete", success=True, snapshot_id=snapshot_id)
+        yield AuditCompleteEvent(
+            type="complete",
+            success=True,
+            snapshot_id=snapshot_id,
+            summary={
+                "analysis_error": analysis_error,
+                "phase_timings_ms": dict(phase_timings),
+                "total_duration_ms": total_duration_ms,
+            },
+        )
 
     async def audit_fleet(
         self,
@@ -741,7 +819,9 @@ class AuditService:
                 top_queries=audit_result_dict.get("top_queries") or [],
             )
             llm = LLMManager()
-            llm_result = llm.generate_response(prompt, max_tokens=4096, temperature=0.0)
+            llm_result = llm.generate_response(
+                prompt, max_tokens=4096, temperature=0.0, purpose="audit_health",
+            )
             raw_text = llm_result.get("response", "")
             ha = parse_llm_json(raw_text) or {}
             ha["model_used"] = llm_result.get("model", "unknown")

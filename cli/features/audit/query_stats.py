@@ -530,51 +530,62 @@ def collect_schema_for_tables(
         cur = connection.cursor()
         sections = []
 
+        # Postgres metadata is fetched in three set-based queries covering
+        # every table at once. information_schema views are expensive on
+        # managed instances, so per-table round trips multiply badly over
+        # WAN — one slow catalog makes N tables cost N times the pain.
+        pg_columns: Dict[str, List[str]] = {}
+        pg_indexes: Dict[str, List[str]] = {}
+        pg_fks: Dict[str, List[str]] = {}
+        if engine == "postgresql":
+            tables_param = (list(table_names),)
+            cur.execute(
+                "SELECT table_name, column_name, data_type, is_nullable "
+                "FROM information_schema.columns "
+                "WHERE table_name = ANY(%s) AND table_schema = 'public' "
+                "ORDER BY table_name, ordinal_position",
+                tables_param,
+            )
+            for row in cur.fetchall():
+                v = list(row.values()) if isinstance(row, dict) else row
+                col_name = str(v[1])
+                if referenced_cols and col_name.lower() not in referenced_cols:
+                    continue
+                dtype = str(v[2]).upper().replace("CHARACTER VARYING", "VARCHAR")
+                nullable = "" if str(v[3]) == "YES" else " NOT NULL"
+                pg_columns.setdefault(str(v[0]), []).append(f"{col_name} {dtype}{nullable}")
+
+            cur.execute(
+                "SELECT tablename, indexname, indexdef FROM pg_indexes "
+                "WHERE tablename = ANY(%s)",
+                tables_param,
+            )
+            for row in cur.fetchall():
+                v = list(row.values()) if isinstance(row, dict) else row
+                pg_indexes.setdefault(str(v[0]), []).append(f"{v[1]}: {v[2]}")
+
+            cur.execute(
+                "SELECT tc.table_name, kcu.column_name, "
+                "ccu.table_name AS foreign_table, ccu.column_name AS foreign_column "
+                "FROM information_schema.table_constraints tc "
+                "JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name "
+                "JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name "
+                "WHERE tc.table_name = ANY(%s) AND tc.constraint_type = 'FOREIGN KEY'",
+                tables_param,
+            )
+            for row in cur.fetchall():
+                v = list(row.values()) if isinstance(row, dict) else row
+                pg_fks.setdefault(str(v[0]), []).append(f"{v[1]} -> {v[2]}({v[3]})")
+
         for table in table_names:
             columns = []
             indexes = []
             fks = []
 
             if engine == "postgresql":
-                # Columns
-                cur.execute(
-                    "SELECT column_name, data_type, is_nullable "
-                    "FROM information_schema.columns "
-                    "WHERE table_name = %s AND table_schema = 'public' "
-                    "ORDER BY ordinal_position",
-                    (table,),
-                )
-                for row in cur.fetchall():
-                    v = list(row.values()) if isinstance(row, dict) else row
-                    col_name = str(v[0])
-                    if referenced_cols and col_name.lower() not in referenced_cols:
-                        continue
-                    dtype = str(v[1]).upper().replace("CHARACTER VARYING", "VARCHAR")
-                    nullable = "" if str(v[2]) == "YES" else " NOT NULL"
-                    columns.append(f"{col_name} {dtype}{nullable}")
-
-                # Indexes
-                cur.execute(
-                    "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = %s",
-                    (table,),
-                )
-                for row in cur.fetchall():
-                    v = list(row.values()) if isinstance(row, dict) else row
-                    indexes.append(f"{v[0]}: {v[1]}")
-
-                # Foreign keys
-                cur.execute(
-                    "SELECT tc.constraint_name, kcu.column_name, "
-                    "ccu.table_name AS foreign_table, ccu.column_name AS foreign_column "
-                    "FROM information_schema.table_constraints tc "
-                    "JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name "
-                    "JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name "
-                    "WHERE tc.table_name = %s AND tc.constraint_type = 'FOREIGN KEY'",
-                    (table,),
-                )
-                for row in cur.fetchall():
-                    v = list(row.values()) if isinstance(row, dict) else row
-                    fks.append(f"{v[1]} -> {v[2]}({v[3]})")
+                columns = pg_columns.get(table, [])
+                indexes = pg_indexes.get(table, [])
+                fks = pg_fks.get(table, [])
 
             else:
                 # MySQL - Columns via DESCRIBE

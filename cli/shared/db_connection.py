@@ -5,8 +5,11 @@ Handles creating direct psycopg2 or pymysql connections
 without using DataManager infrastructure.
 """
 
+import logging
 import socket
 from typing import Dict, Any, Literal, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # Lane tag applied to every RDST-initiated connection so activity views can
 # recognize RDST's own sessions (PostgreSQL application_name, MySQL program_name
@@ -255,7 +258,29 @@ def create_direct_connection(
 
     if params.get('read_only'):
         apply_read_only_session(conn, engine)
+    if lane == 'rdst/audit':
+        apply_diagnostic_statement_timeout(conn, engine)
     return conn
+
+
+def apply_diagnostic_statement_timeout(connection, engine: str, seconds: int = 30) -> None:
+    """Cap per-statement runtime on diagnostic (audit) sessions.
+
+    Audit collection issues many small catalog queries with no user watching
+    each one; a single stalled statement must fail the phase visibly instead
+    of hanging the run for minutes. Best-effort — a session that rejects the
+    setting still gets to run.
+    """
+    try:
+        cursor = connection.cursor()
+        if engine == 'postgresql':
+            cursor.execute(f"SET statement_timeout = '{int(seconds)}s'")
+        elif engine == 'mysql':
+            # Applies to SELECTs only, which is what diagnostics issue.
+            cursor.execute(f"SET SESSION max_execution_time = {int(seconds) * 1000}")
+        cursor.close()
+    except Exception as exc:
+        logger.debug("Could not set diagnostic statement timeout: %s", exc)
 
 
 def apply_read_only_session(connection, engine: str) -> None:

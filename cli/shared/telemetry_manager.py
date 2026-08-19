@@ -1150,6 +1150,7 @@ class TelemetryManager:
         tokens_out: int,
         duration_ms: int,
         purpose: str,  # analyze, rewrite, index_suggestion, etc.
+        max_tokens_requested: Optional[int] = None,
     ):
         """Track LLM API usage and persist cumulative token counts locally."""
         # Always persist token usage locally (even if telemetry is disabled)
@@ -1164,9 +1165,55 @@ class TelemetryManager:
             "total_tokens": tokens_in + tokens_out,
             "duration_ms": duration_ms,
             "purpose": purpose,
+            "max_tokens_requested": max_tokens_requested,
         }
 
         self.track("llm_usage", properties)
+
+    # Errors already reported this process, keyed by (area, error_type).
+    # One event per distinct failure per session keeps a crash loop from
+    # flooding ingestion while still recording that the failure happened.
+    _ERROR_SESSION_CAP = 20
+
+    def track_error(
+        self,
+        area: str,
+        error: BaseException,
+        context: Optional[Dict[str, Any]] = None,
+    ):
+        """Report an unexpected error for aggregate visibility.
+
+        Sends error type, a sanitized message (emails stripped, truncated),
+        and code locations only — never SQL text, hostnames, credentials,
+        or local variables. Callers own keeping `context` values PII-free.
+        """
+        import re as _re
+        import traceback as _tb
+
+        try:
+            if not hasattr(self, "_errors_sent"):
+                self._errors_sent: set = set()
+            key = (area, type(error).__name__)
+            if key in self._errors_sent or len(self._errors_sent) >= self._ERROR_SESSION_CAP:
+                return
+            self._errors_sent.add(key)
+
+            message = _re.sub(r"[\w.+-]+@[\w-]+\.[\w.-]+", "[email]", str(error))[:300]
+            frames = [
+                f"{os.path.basename(f.filename)}:{f.lineno} in {f.name}"
+                for f in _tb.extract_tb(error.__traceback__)[-4:]
+            ]
+            properties: Dict[str, Any] = {
+                "area": area,
+                "error_type": type(error).__name__,
+                "message": message,
+                "frames": frames,
+            }
+            if context:
+                properties.update(context)
+            self.track("rdst_error", properties)
+        except Exception:
+            pass
 
     def track_audit_report(
         self,

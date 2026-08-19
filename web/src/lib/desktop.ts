@@ -34,6 +34,9 @@ declare global {
     rdstDesktop?: {
       isDesktop: true
       platform: string
+      // Set by the preload when RDST_TELEMETRY disables telemetry, so the
+      // renderer's analytics stay silent in automated launches (CI smokes).
+      telemetryDisabled?: boolean
       oauth?: {
         registerProtocol: () => Promise<boolean>
       }

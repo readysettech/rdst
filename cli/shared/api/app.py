@@ -103,6 +103,14 @@ def register_error_handlers(app: FastAPI) -> None:
         logging.getLogger("rdst.api").exception(
             "Unhandled %s on %s %s", type(exc).__name__, request.method, request.url.path
         )
+        try:
+            from shared.telemetry import telemetry
+
+            telemetry.track_error(
+                "api", exc, context={"path": request.url.path, "method": request.method},
+            )
+        except Exception:
+            pass
         message = "An unexpected server error occurred."
         return JSONResponse(
             status_code=500,

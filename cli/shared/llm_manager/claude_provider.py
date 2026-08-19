@@ -273,10 +273,11 @@ class ClaudeProvider(Provider):
             payload.update(request.extra)
 
         target_url = base_url or self._BASE_URL
-        # Scale timeout with max_tokens — large analysis prompts need more time
-        timeout = 60
-        if request.max_tokens and request.max_tokens > 4096:
-            timeout = 120
+        # Non-streaming calls hold the socket until the full response is
+        # generated, so the read timeout must cover worst-case generation
+        # time for the requested response size, not just network stalls.
+        # ~16 tokens/second is a conservative generation floor.
+        timeout = min(600, max(60, int((request.max_tokens or 0) / 16)))
         try:
             resp = requests.post(
                 target_url, headers=headers, data=json.dumps(payload), timeout=timeout

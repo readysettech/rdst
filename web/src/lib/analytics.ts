@@ -23,6 +23,14 @@ const PRODUCTION_POSTHOG_KEY = 'phc_WPINnbS1CUiADz01QFeDZCr4Wn7jXfNPxe1EK0V2ZzP'
  * SQL literals) must never reach the recording.
  */
 export function initAnalytics(): void {
+  // Automated browsers (Playwright suites in CI and locally) run the
+  // production bundle; without this guard every e2e run ships synthetic
+  // pageviews and autocapture into the production project as fake users.
+  if (navigator.webdriver) return
+  // Desktop smoke tests launch the real packaged app without a webdriver;
+  // they disable telemetry via RDST_TELEMETRY, which the Electron preload
+  // surfaces here. Renderer-side analytics must honor it too.
+  if (window.rdstDesktop?.telemetryDisabled) return
   const key =
     import.meta.env.VITE_POSTHOG_KEY ||
     (import.meta.env.PROD ? PRODUCTION_POSTHOG_KEY : '')
@@ -33,6 +41,10 @@ export function initAnalytics(): void {
     // SPA-aware pageviews: capture on history navigation, not just boot.
     capture_pageview: 'history_change',
     autocapture: true,
+    // Error Tracking: uncaught exceptions and unhandled rejections become
+    // $exception events. Stack frames only; PostHog masks none of our data
+    // because none is attached.
+    capture_exceptions: true,
     person_profiles: 'identified_only',
     session_recording: {
       maskAllInputs: true,

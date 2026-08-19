@@ -222,6 +222,7 @@ class CaptureService:
         lands in the complete event's summary under "readyset_comparison".
         """
         from shared.db_connection import create_direct_connection
+        from shared.telemetry import telemetry
 
         config = self._get_config()
         target_config = config.get(target_name)
@@ -235,6 +236,42 @@ class CaptureService:
         storage = AuditStorage()
         run_id = storage.generate_run_id(target_name)
 
+        # Per-phase wall-clock accounting. Every phase boundary lands in
+        # phase_timings (surfaced in the complete event summary) and emits an
+        # audit_phase_complete telemetry event, so a slow or stalled run can
+        # be decomposed from PostHog alone.
+        run_started_monotonic = time.monotonic()
+        phase_started_monotonic = run_started_monotonic
+        phase_timings: dict[str, float] = {}
+
+        def _phase_done(phase: str, success: bool = True, error_type: str | None = None) -> None:
+            nonlocal phase_started_monotonic
+            now = time.monotonic()
+            duration_ms = round((now - phase_started_monotonic) * 1000.0, 1)
+            phase_started_monotonic = now
+            phase_timings[phase] = duration_ms
+            telemetry.track("audit_phase_complete", {
+                "endpoint": "capture",
+                "run_id": run_id,
+                "target": target_name,
+                "engine": db_engine,
+                "phase": phase,
+                "duration_ms": duration_ms,
+                "success": success,
+                "error_type": error_type,
+            })
+
+        telemetry.track("audit_started", {
+            "endpoint": "capture",
+            "run_id": run_id,
+            "target": target_name,
+            "engine": db_engine,
+            "duration_requested_seconds": duration_seconds,
+            "analysis_requested": run_analysis,
+            "collect_metrics_audit": collect_metrics_audit,
+            "snapshot_only": snapshot_only,
+        })
+
         if audit_result is None and collect_metrics_audit:
             yield WorkloadStatusEvent(
                 type="status",
@@ -242,6 +279,7 @@ class CaptureService:
                 message="Collecting health and sizing metrics...",
             )
             audit_result = await self._collect_metrics_audit(target_name, target_config)
+            _phase_done("metrics_audit", success=audit_result is not None)
         audit_payload = self._audit_capture_payload(audit_result)
 
         yield WorkloadStatusEvent(
@@ -250,14 +288,16 @@ class CaptureService:
         try:
             connection = create_direct_connection(target_config, lane="rdst/audit")
         except Exception as exc:
+            _phase_done("connect", success=False, error_type=type(exc).__name__)
             yield WorkloadErrorEvent(type="error", message=str(exc), phase="connect")
             return
+        _phase_done("connect")
 
         # Preflight: verify query tracking is enabled before spending time on
         # capture. "error" results (unrelated failures) let the capture proceed
         # and get handled downstream; only a definitive "missing" aborts.
         if duration_seconds and not snapshot_only:
-            preflight = self.check_query_stats(connection, db_engine)
+            preflight = await asyncio.to_thread(self.check_query_stats, connection, db_engine)
             if preflight["status"] == "missing":
                 yield WorkloadErrorEvent(
                     type="error",
@@ -276,21 +316,25 @@ class CaptureService:
 
         replay_threads: list[Any] = []
         try:
-            has_query_stats = False
-            try:
+            def _probe_query_stats() -> bool:
                 test_cursor = connection.cursor()
-                if db_engine == "postgresql":
-                    test_cursor.execute("SELECT count(*) FROM pg_stat_statements LIMIT 1")
-                    test_cursor.fetchone()
-                    has_query_stats = True
-                else:
+                try:
+                    if db_engine == "postgresql":
+                        test_cursor.execute("SELECT count(*) FROM pg_stat_statements LIMIT 1")
+                        test_cursor.fetchone()
+                        return True
                     test_cursor.execute(
                         "SELECT count(*) FROM performance_schema.events_statements_summary_by_digest LIMIT 1"
                     )
                     row = test_cursor.fetchone()
                     value = list(row.values())[0] if isinstance(row, dict) else row[0]
-                    has_query_stats = int(value) > 0
-                test_cursor.close()
+                    return int(value) > 0
+                finally:
+                    test_cursor.close()
+
+            has_query_stats = False
+            try:
+                has_query_stats = await asyncio.to_thread(_probe_query_stats)
             except Exception:
                 pass
 
@@ -308,8 +352,13 @@ class CaptureService:
             yield WorkloadStatusEvent(
                 type="status", phase="snapshot_start", message="Capturing start snapshot..."
             )
-            snapshot_start = query_stats_module.collect_database_snapshot(connection, db_engine)
-            table_stats_start = query_stats_module.collect_table_stats(connection, db_engine)
+            snapshot_start = await asyncio.to_thread(
+                query_stats_module.collect_database_snapshot, connection, db_engine
+            )
+            table_stats_start = await asyncio.to_thread(
+                query_stats_module.collect_table_stats, connection, db_engine
+            )
+            _phase_done("snapshot_start")
 
             yield WorkloadSnapshotEvent(
                 type="snapshot",
@@ -341,13 +390,15 @@ class CaptureService:
                 yield WorkloadStatusEvent(
                     type="status", phase="capture", message="Reading query statistics..."
                 )
-                raw_queries = (
-                    query_stats_module.collect_pg_stat_statements(connection)
+                raw_queries = await asyncio.to_thread(
+                    query_stats_module.collect_pg_stat_statements
                     if db_engine == "postgresql"
-                    else query_stats_module.collect_mysql_digest_stats(connection)
+                    else query_stats_module.collect_mysql_digest_stats,
+                    connection,
                 )
                 queries = self._convert_raw_queries(raw_queries, db_engine, limit)
                 actual_duration = 0
+                _phase_done("capture")
             else:
                 if duration_seconds:
                     yield WorkloadStatusEvent(
@@ -362,15 +413,28 @@ class CaptureService:
                         message="Capturing queries... (Ctrl+C to stop)",
                     )
 
-                baseline_queries = (
-                    query_stats_module.collect_pg_stat_statements(connection)
+                baseline_queries = await asyncio.to_thread(
+                    query_stats_module.collect_pg_stat_statements
                     if db_engine == "postgresql"
-                    else query_stats_module.collect_mysql_digest_stats(connection)
+                    else query_stats_module.collect_mysql_digest_stats,
+                    connection,
                 )
 
                 capture_start = time.monotonic()
                 last_intermediate = capture_start
                 self._stop_requested = False
+
+                # Intermediate snapshots run off the event loop and never
+                # extend the window: a snapshot that outlives its 30s slot
+                # skips the next one instead of stacking. The connection is
+                # only touched by one reader at a time; the end-of-window
+                # reads below drain any snapshot still in flight first.
+                intermediate_task: asyncio.Task | None = None
+
+                def _collect_intermediate(elapsed_at_start: float):
+                    return query_stats_module.collect_intermediate_snapshot(
+                        connection, db_engine, elapsed_at_start, snapshot_start
+                    )
 
                 while True:
                     elapsed = time.monotonic() - capture_start
@@ -378,31 +442,46 @@ class CaptureService:
                         break
                     if self._stop_requested:
                         break
-                    if time.monotonic() - last_intermediate >= 30:
-                        intermediate = query_stats_module.collect_intermediate_snapshot(
-                            connection, db_engine, elapsed, snapshot_start
+                    if intermediate_task is not None and intermediate_task.done():
+                        try:
+                            intermediate = intermediate_task.result()
+                            intermediate_snapshots.append(intermediate)
+                            yield WorkloadCaptureProgressEvent(
+                                type="capture_progress",
+                                elapsed_seconds=round(elapsed, 1),
+                                total_seconds=float(duration_seconds) if duration_seconds else None,
+                                cache_hit_ratio=intermediate.cache_hit_ratio,
+                                active_connections=intermediate.active_connections,
+                                tps=intermediate.transactions_per_sec,
+                            )
+                        except Exception as exc:
+                            logger.debug("Intermediate snapshot failed: %s", exc)
+                        intermediate_task = None
+                    if time.monotonic() - last_intermediate >= 30 and intermediate_task is None:
+                        intermediate_task = asyncio.ensure_future(
+                            asyncio.to_thread(_collect_intermediate, elapsed)
                         )
-                        intermediate_snapshots.append(intermediate)
                         last_intermediate = time.monotonic()
-                        yield WorkloadCaptureProgressEvent(
-                            type="capture_progress",
-                            elapsed_seconds=round(elapsed, 1),
-                            total_seconds=float(duration_seconds) if duration_seconds else None,
-                            cache_hit_ratio=intermediate.cache_hit_ratio,
-                            active_connections=intermediate.active_connections,
-                            tps=intermediate.transactions_per_sec,
-                        )
                     await asyncio.sleep(2)
 
                 actual_duration = int(time.monotonic() - capture_start)
-                end_queries = (
-                    query_stats_module.collect_pg_stat_statements(connection)
+                _phase_done("capture")
+                if intermediate_task is not None:
+                    try:
+                        intermediate_snapshots.append(await intermediate_task)
+                    except Exception as exc:
+                        logger.debug("Intermediate snapshot failed: %s", exc)
+                    intermediate_task = None
+                end_queries = await asyncio.to_thread(
+                    query_stats_module.collect_pg_stat_statements
                     if db_engine == "postgresql"
-                    else query_stats_module.collect_mysql_digest_stats(connection)
+                    else query_stats_module.collect_mysql_digest_stats,
+                    connection,
                 )
                 queries = self._compute_query_delta(
                     baseline_queries, end_queries, db_engine, limit
                 )
+                _phase_done("query_delta")
 
             ended_at = datetime.datetime.now(datetime.timezone.utc)
             total_query_time = sum(query.total_time_ms for query in queries)
@@ -423,8 +502,13 @@ class CaptureService:
             yield WorkloadStatusEvent(
                 type="status", phase="snapshot_end", message="Capturing end snapshot..."
             )
-            snapshot_end = query_stats_module.collect_database_snapshot(connection, db_engine)
-            table_stats_end = query_stats_module.collect_table_stats(connection, db_engine)
+            snapshot_end = await asyncio.to_thread(
+                query_stats_module.collect_database_snapshot, connection, db_engine
+            )
+            table_stats_end = await asyncio.to_thread(
+                query_stats_module.collect_table_stats, connection, db_engine
+            )
+            _phase_done("snapshot_end")
 
             yield WorkloadSnapshotEvent(
                 type="snapshot",
@@ -454,6 +538,7 @@ class CaptureService:
             )
 
             analysis_dict = None
+            analysis_error: str | None = None
             if run_analysis and queries:
                 schema_context = ""
                 try:
@@ -477,6 +562,7 @@ class CaptureService:
                             logger.debug("Collected schema for %d tables", len(table_names))
                 except Exception as exc:
                     logger.debug("Schema collection skipped: %s", exc)
+                _phase_done("schema")
 
                 yield WorkloadStatusEvent(type="status", phase="analysis", message="Running final analysis...")
                 try:
@@ -493,7 +579,8 @@ class CaptureService:
                     )
                     llm = LLMManager()
                     llm_result = await asyncio.to_thread(
-                        llm.generate_response, prompt, max_tokens=6144, temperature=0.0,
+                        llm.generate_response, prompt,
+                        max_tokens=6144, temperature=0.0, purpose="audit_capture_analysis",
                     )
                     raw_text = llm_result.get("response", "")
                     analysis_dict = parse_llm_json(raw_text)
@@ -525,8 +612,11 @@ class CaptureService:
                     yield WorkloadAnalysisProgressEvent(
                         type="analysis_progress", message="Analysis complete", percent=100
                     )
+                    _phase_done("analysis")
                 except Exception as exc:
                     logger.warning("Analysis failed: %s", exc)
+                    analysis_error = str(exc)
+                    _phase_done("analysis", success=False, error_type=type(exc).__name__)
                     yield WorkloadStatusEvent(
                         type="status",
                         phase="analysis",
@@ -609,7 +699,9 @@ class CaptureService:
             if save_capture:
                 yield WorkloadStatusEvent(type="status", phase="storage", message="Saving audit capture...")
                 path = storage.save_run(run, extra=audit_payload)
+                _phase_done("save")
 
+            total_duration_ms = round((time.monotonic() - run_started_monotonic) * 1000.0, 1)
             query_dicts = [asdict(query) for query in queries] if queries else []
             summary = {
                 "run_id": run_id,
@@ -620,11 +712,25 @@ class CaptureService:
                 "total_query_time_ms": round(total_query_time, 1),
                 "path": path,
                 "has_analysis": analysis_dict is not None,
+                "analysis_error": analysis_error,
+                "phase_timings_ms": dict(phase_timings),
+                "total_duration_ms": total_duration_ms,
                 "queries": query_dicts,
             }
             if readyset_comparison:
                 summary["readyset_comparison"] = readyset_comparison
             summary.update(audit_payload)
+            telemetry.track("audit_completed", {
+                "endpoint": "capture",
+                "run_id": run_id,
+                "target": target_name,
+                "engine": db_engine,
+                "duration_ms": total_duration_ms,
+                "success": True,
+                "had_analysis": analysis_dict is not None,
+                "analysis_error": analysis_error,
+                "phase_timings_ms": dict(phase_timings),
+            })
             yield WorkloadCompleteEvent(
                 type="complete",
                 success=True,
@@ -635,6 +741,16 @@ class CaptureService:
         except Exception as exc:
             if replay_threads:
                 self._stop_replay_workers(replay_threads)
+            telemetry.track("audit_completed", {
+                "endpoint": "capture",
+                "run_id": run_id,
+                "target": target_name,
+                "engine": db_engine,
+                "duration_ms": round((time.monotonic() - run_started_monotonic) * 1000.0, 1),
+                "success": False,
+                "error_type": type(exc).__name__,
+                "phase_timings_ms": dict(phase_timings),
+            })
             yield WorkloadErrorEvent(type="error", message=str(exc), phase="capture")
         finally:
             if replay_threads:

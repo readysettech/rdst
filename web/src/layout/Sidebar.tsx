@@ -131,9 +131,10 @@ const primaryItems: NavItem[] = [
   { label: 'Try the demo', icon: 'querypilot', to: '/demo' },
 ]
 
+// Code scan is deliberately absent: the /scan route still works by direct
+// URL, but the feature stays out of the nav until it is production-ready.
 const advancedItems: NavItem[] = [
   { label: 'Schema', icon: 'layers', to: '/schema' },
-  { label: 'Code scan', icon: 'search', to: '/scan' },
   { label: 'Agents', icon: 'message-multiple', to: '/agents' },
   { label: 'Guards', icon: 'user-shield', to: '/guards' },
 ]

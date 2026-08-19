@@ -30,17 +30,26 @@ export function RunProgress({
   statusMessage,
   durationSeconds,
   elapsedSeconds,
+  totalElapsedSeconds,
 }: {
   phase: string | undefined
   statusMessage: string | undefined
   durationSeconds: number
   elapsedSeconds: number
+  // Wall-clock seconds since the run started, unclamped. Keeps the clock
+  // moving through the collection and analysis phases so a long run never
+  // looks hung after the capture window ends.
+  totalElapsedSeconds?: number
 }) {
   const captureActive = phase === 'capture' || phase === 'snapshot_end'
   const hasCaptureDuration = captureActive && durationSeconds > 0
   const percent = hasCaptureDuration
     ? Math.min(100, (elapsedSeconds / durationSeconds) * 100)
     : undefined
+  const runningClock =
+    !hasCaptureDuration && totalElapsedSeconds !== undefined && totalElapsedSeconds >= 0
+      ? `${formatSecondsClock(totalElapsedSeconds)} elapsed`
+      : ''
   const label = activityForPhase(phase)
   const detail =
     phase === 'readyset'
@@ -64,7 +73,7 @@ export function RunProgress({
             >
               {hasCaptureDuration
                 ? `${formatSecondsClock(elapsedSeconds)} / ${formatSecondsClock(durationSeconds)}`
-                : ''}
+                : runningClock}
             </Text>
             <div
               className="col-start-1 min-w-0"
