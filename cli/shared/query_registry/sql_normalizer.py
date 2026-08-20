@@ -71,6 +71,42 @@ def _is_json_path_literal(literal: exp.Literal) -> bool:
     return literal.this.startswith("$")
 
 
+def _is_placeholder_index(literal: exp.Literal) -> bool:
+    """Dialects with positional placeholders parse `$1` as a Parameter node
+    wrapping the digit literal. The digit names the slot, not a value, so the
+    parameter survives normalization verbatim."""
+    return isinstance(literal.parent, exp.Parameter)
+
+
+def _is_ordinal_literal(literal: exp.Literal) -> bool:
+    """GROUP BY 1 / ORDER BY 2 ordinals reference select-list positions. They
+    are structure, not data, so they stay in the normalized text. An ORDER BY
+    inside a window (`OVER (ORDER BY 1)`) or an aggregate function
+    (`ARRAY_AGG(x ORDER BY 1)`) instead orders rows by a constant, so a bare
+    number there is a value, not a select-list ordinal."""
+    if literal.is_string:
+        return False
+    parent = literal.parent
+    if isinstance(parent, exp.Group):
+        return True
+    return (
+        isinstance(parent, exp.Ordered)
+        and parent.this is literal
+        and isinstance(parent.parent, exp.Order)
+        and isinstance(parent.parent.parent, (exp.Select, exp.Union))
+    )
+
+
+def _is_structural_literal(literal: exp.Literal) -> bool:
+    """Literals that describe query structure rather than data values; these
+    are never extracted as parameters."""
+    return (
+        _is_json_path_literal(literal)
+        or _is_placeholder_index(literal)
+        or _is_ordinal_literal(literal)
+    )
+
+
 _SYSTEM_SCHEMAS = {
     "pg_catalog",
     "information_schema",
@@ -198,7 +234,7 @@ def normalize_and_extract(sql: str, dialect: str = None) -> Tuple[str, Dict[str,
         return _fallback_normalize(sql)
 
     params = {}
-    literals = [lit for lit in tree.find_all(exp.Literal) if not _is_json_path_literal(lit)]
+    literals = [lit for lit in tree.find_all(exp.Literal) if not _is_structural_literal(lit)]
     for i, literal in enumerate(literals, 1):
         param_name = f"p{i}"
         # Store value with type info
@@ -255,7 +291,10 @@ def reconstruct_sql(normalized_sql: str, params: Dict[str, dict], dialect: str =
 # spells JSON/jsonpath operators with `?` too (`??`, `?|`, `?&`, `@?`); a
 # `?` adjacent to `?`, `|`, or `&`, or following `@`, is one of those
 # operators in every dialect that produces it, never a placeholder.
-_PLACEHOLDER_TOKEN = re.compile(r":p\d+\b|\$\d+\b|(?<![?@])\?(?![?|&])")
+# Stored texts from builds whose dialect-aware normalization lifted the
+# digit out of a `$N` parameter carry the fused artifact `$:pN`; the
+# optional `$` absorbs it so those texts converge with their clean forms.
+_PLACEHOLDER_TOKEN = re.compile(r"\$?:p\d+\b|\$\d+\b|(?<![?@])\?(?![?|&])")
 
 
 def canonicalize_placeholder_style(normalized_sql: str) -> str:
@@ -432,9 +471,13 @@ def _fallback_normalize(sql: str) -> Tuple[str, Dict[str, dict]]:
         normalized
     )
 
-    # Replace numeric literals with placeholders
+    # Replace numeric literals with placeholders. A digit run preceded by a
+    # single `$` is a positional placeholder's slot index (`$1`, `$12`), not
+    # a literal; it stays verbatim, matching the parse path's Parameter
+    # guard. A digit run preceded by `$$` is inside a dollar-quoted string
+    # (`$$100$$`), so it stays eligible for extraction.
     normalized = re.sub(
-        r'\b\d+(?:\.\d+)?\b',
+        r'(?:(?<!\$)|(?<=\$\$))\b\d+(?:\.\d+)?\b',
         lambda m: replace_with_placeholder(m, is_string=False),
         normalized
     )

@@ -15,6 +15,7 @@ from shared.db_connection import (
     create_mysql_connection_from_params,
     postgres_connection_kwargs,
     quote_identifier,
+    rdst_self_marker,
     resolve_connection_params,
 )
 
@@ -32,6 +33,11 @@ from .pattern_detector import (
     detect_delimiter_columns_sql_mysql,
     DELIMITER_FRACTION_THRESHOLD,
 )
+
+# Enum sampling and delimiter probes read user tables; the lane tags the
+# connection and the marker keeps the statements out of registry admission.
+PROFILE_LANE = "rdst/profile"
+_SELF_MARKER = rdst_self_marker(PROFILE_LANE)
 
 
 class SchemaIntrospector:
@@ -112,6 +118,7 @@ class SchemaIntrospector:
         params = resolve_connection_params(
             target=target_name,
             target_config=self.config,
+            lane=PROFILE_LANE,
         )
         params["password"] = params["password"] or None
         return params
@@ -347,7 +354,7 @@ class SchemaIntrospector:
             if sample_pct < 100:
                 # Use TABLESAMPLE for efficiency
                 # Remove ORDER BY to avoid temp file creation
-                cursor.execute(f"""
+                cursor.execute(f"""{_SELF_MARKER}
                     WITH sampled AS (
                         SELECT {col}
                         FROM {table} TABLESAMPLE SYSTEM({sample_pct})
@@ -361,7 +368,7 @@ class SchemaIntrospector:
             else:
                 # Final attempt: full table but still with LIMIT
                 # Remove ORDER BY to avoid temp file creation on large tables
-                cursor.execute(f"""
+                cursor.execute(f"""{_SELF_MARKER}
                     SELECT DISTINCT {col}
                     FROM {table}
                     WHERE {col} IS NOT NULL
@@ -616,7 +623,7 @@ class SchemaIntrospector:
         table = TableAnnotation(name=table_name, description="", row_estimate=row_str)
 
         # Get columns
-        cursor.execute(f"DESCRIBE {quote_identifier(table_name, 'mysql')}")
+        cursor.execute(f"{_SELF_MARKER}DESCRIBE {quote_identifier(table_name, 'mysql')}")
         columns = cursor.fetchall()
 
         for col in columns:
@@ -740,7 +747,7 @@ class SchemaIntrospector:
 
         for sample_limit in [10000, 50000, 100000]:
             # Remove ORDER BY to avoid temp file creation
-            cursor.execute(f"""
+            cursor.execute(f"""{_SELF_MARKER}
                 SELECT DISTINCT {col}
                 FROM (
                     SELECT {col}
@@ -765,7 +772,7 @@ class SchemaIntrospector:
 
         # Final attempt with no limit (but still bounded distinct)
         # Remove ORDER BY to avoid temp file creation
-        cursor.execute(f"""
+        cursor.execute(f"""{_SELF_MARKER}
             SELECT DISTINCT {col}
             FROM {table}
             WHERE {col} IS NOT NULL

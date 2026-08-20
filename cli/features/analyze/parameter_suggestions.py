@@ -27,6 +27,7 @@ from sqlglot import exp, parse_one
 from shared.db_connection import (
     create_mysql_connection_from_params,
     postgres_connection_kwargs,
+    rdst_self_marker,
     resolve_connection_params,
 )
 
@@ -34,6 +35,11 @@ logger = logging.getLogger(__name__)
 
 MAX_SUGGESTIONS = 3
 SAMPLE_TIMEOUT_MS = 2000
+
+# Column-value sampling reads user tables; the lane tags the connection and
+# the marker keeps the DISTINCT reads out of registry admission.
+ANALYZE_LANE = "rdst/analyze"
+_SELF_MARKER = rdst_self_marker(ANALYZE_LANE)
 
 _PG_PLACEHOLDER_RE = re.compile(r"\$(\d+)")
 _NAMED_PLACEHOLDER_RE = re.compile(r"(?<![:\w]):([A-Za-z_]\w*)")
@@ -322,12 +328,12 @@ def _sample_column_values(conn, engine: str, binding: Dict[str, Any]) -> List[Di
             qualified = ".".join(f'"{p}"' for p in (schema, table) if p)
             cur.execute(f"SET LOCAL statement_timeout = {SAMPLE_TIMEOUT_MS}")
             cur.execute(
-                f'SELECT DISTINCT "{column}" FROM {qualified} WHERE "{column}" IS NOT NULL LIMIT {MAX_SUGGESTIONS}'
+                f'{_SELF_MARKER}SELECT DISTINCT "{column}" FROM {qualified} WHERE "{column}" IS NOT NULL LIMIT {MAX_SUGGESTIONS}'
             )
         else:
             qualified = ".".join(f"`{p}`" for p in (schema, table) if p)
             cur.execute(
-                f"SELECT /*+ MAX_EXECUTION_TIME({SAMPLE_TIMEOUT_MS}) */ DISTINCT `{column}` "
+                f"{_SELF_MARKER}SELECT /*+ MAX_EXECUTION_TIME({SAMPLE_TIMEOUT_MS}) */ DISTINCT `{column}` "
                 f"FROM {qualified} WHERE `{column}` IS NOT NULL LIMIT {MAX_SUGGESTIONS}"
             )
         rows = cur.fetchall() or []
@@ -344,7 +350,9 @@ def _sample_column_values(conn, engine: str, binding: Dict[str, Any]) -> List[Di
 
 
 def _connect(engine: str, target: str, target_config: Dict[str, Any]):
-    resolved = resolve_connection_params(target=target, target_config=target_config)
+    resolved = resolve_connection_params(
+        target=target, target_config=target_config, lane=ANALYZE_LANE
+    )
     if engine == "mysql":
         return create_mysql_connection_from_params(resolved)
     import psycopg2

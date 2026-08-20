@@ -42,6 +42,7 @@ from shared.query_registry.query_registry import (
     canonicalize_sql,
     extract_observed_params,
 )
+from shared.query_registry.self_traffic import match_self_template
 from shared.query_registry.sql_normalizer import (
     normalize_and_extract,
     references_user_relations,
@@ -1425,6 +1426,14 @@ class QueryDiscoveryCollector:
                     # own observation traffic or probes, not user workload;
                     # they stay in the counter/delta lanes but never enter
                     # the Query Library or future candidate rankings.
+                    self._system_identities.add(normalized)
+                    system_skipped += 1
+                    continue
+                if match_self_template(text):
+                    # Statement stores replay RDST's own diagnostic
+                    # statements captured before self markers were emitted;
+                    # recognizing the shapes here keeps them out of the
+                    # library regardless of what the store remembers.
                     self._system_identities.add(normalized)
                     system_skipped += 1
                     continue

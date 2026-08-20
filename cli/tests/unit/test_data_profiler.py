@@ -180,6 +180,39 @@ class TestPostgresProfile:
         assert "users.id = orders.user_id" in profile.foreign_keys
 
 
+    @patch("features.schema.semantic_layer.data_profiler.DataProfiler._connect")
+    def test_all_profile_statements_carry_self_marker(
+        self, mock_connect, pg_config, columns, relationships
+    ):
+        """Every statement the profiler runs against user tables is tagged."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+
+        cm = MagicMock()
+        cm.__enter__ = Mock(return_value=mock_cursor)
+        cm.__exit__ = Mock(return_value=False)
+
+        mock_cursor.fetchone.return_value = None
+        mock_cursor.fetchall.return_value = []
+        mock_cursor.connection = mock_conn
+
+        mock_dict_cursor = MagicMock()
+        mock_dict_cursor.fetchall.return_value = []
+        mock_conn.cursor.side_effect = [cm, mock_dict_cursor]
+
+        profiler = DataProfiler(pg_config)
+        profiler._profile_postgres(
+            "users", columns, 1000, "1.0K", relationships, sample_rows=3,
+        )
+
+        executed = [
+            call.args[0] for call in mock_cursor.execute.call_args_list
+        ] + [call.args[0] for call in mock_dict_cursor.execute.call_args_list]
+        assert executed
+        assert all(sql.startswith("/*rdst:profile*/ ") for sql in executed)
+
+
 # ── ColumnProfile defaults ───────────────────────────────────────────
 
 

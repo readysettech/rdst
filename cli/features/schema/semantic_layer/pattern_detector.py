@@ -10,7 +10,10 @@ schema init/refresh. Detection uses SQL aggregation (not random
 sampling) for deterministic, reliable results.
 """
 
-from shared.db_connection import quote_identifier
+from shared.db_connection import quote_identifier, rdst_self_marker
+
+# These probes read user tables; the marker keeps them out of registry admission.
+_SELF_MARKER = rdst_self_marker("rdst/profile")
 
 
 def detect_delimiter_columns_sql_postgres(
@@ -50,7 +53,7 @@ def detect_delimiter_columns_sql_postgres(
         )
 
     return (
-        f'SELECT {", ".join(agg_parts)} '
+        f'{_SELF_MARKER}SELECT {", ".join(agg_parts)} '
         f'FROM {quote_identifier(table_name)}{sample_clause}'
     )
 
@@ -82,12 +85,12 @@ def detect_delimiter_columns_sql_mysql(
     if inner_limit:
         inner_cols = ", ".join(quote_identifier(c, "mysql") for c in text_columns)
         return (
-            f'SELECT {", ".join(agg_parts)} '
+            f'{_SELF_MARKER}SELECT {", ".join(agg_parts)} '
             f'FROM (SELECT {inner_cols} '
             f'FROM {table}{inner_limit}) sampled'
         )
     return (
-        f'SELECT {", ".join(agg_parts)} '
+        f'{_SELF_MARKER}SELECT {", ".join(agg_parts)} '
         f'FROM {table}'
     )
 

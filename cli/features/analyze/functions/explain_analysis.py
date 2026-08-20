@@ -41,12 +41,17 @@ from shared.db_connection import (
     cancel_mysql_by_thread_id,
     create_mysql_connection_from_params,
     postgres_connection_kwargs,
+    rdst_self_marker,
     resolve_connection_params,
 )
 from shared.query_registry.observation_store import record_execution_evidence
 
 
 _WORKER_SETTLE_TIMEOUT_SECONDS = 1.0
+
+# EXPLAIN wrappers reference the user's tables and land in statement stores
+# as their own texts; the marker keeps them out of registry admission.
+_SELF_MARKER = rdst_self_marker("rdst/analyze")
 
 
 class _AnalyzeWorkerState:
@@ -406,7 +411,7 @@ def _execute_postgres_explain_analyze(
             try:
                 with _postgres_connection(conn_params) as conn:
                     with conn.cursor() as cursor:
-                        explain_query = f"EXPLAIN (VERBOSE true, COSTS true, FORMAT JSON) {sql}"
+                        explain_query = f"{_SELF_MARKER}EXPLAIN (VERBOSE true, COSTS true, FORMAT JSON) {sql}"
                         start_time = time.perf_counter()
                         cursor.execute(explain_query)  # nosem
                         end_time = time.perf_counter()
@@ -451,7 +456,7 @@ def _execute_postgres_explain_analyze(
         try:
             with _postgres_connection(conn_params) as conn:
                 with conn.cursor() as cursor:
-                    explain_query = f"EXPLAIN (VERBOSE true, COSTS true, FORMAT JSON) {sql}"
+                    explain_query = f"{_SELF_MARKER}EXPLAIN (VERBOSE true, COSTS true, FORMAT JSON) {sql}"
                     start_time = time.perf_counter()
                     cursor.execute(explain_query)  # nosem
                     end_time = time.perf_counter()
@@ -486,7 +491,7 @@ def _execute_postgres_explain_analyze(
                     backend_pid = query_cursor.fetchone()[0]
                     worker_state.set_identifier(backend_pid)
 
-                    explain_analyze_query = f"EXPLAIN (ANALYZE true, VERBOSE true, COSTS true, BUFFERS true, FORMAT JSON) {sql}"
+                    explain_analyze_query = f"{_SELF_MARKER}EXPLAIN (ANALYZE true, VERBOSE true, COSTS true, BUFFERS true, FORMAT JSON) {sql}"
                     if not worker_state.begin_execution():
                         return
                     query_cursor.execute(explain_analyze_query)  # nosem
@@ -805,7 +810,7 @@ def _execute_mysql_explain_analyze(
                 # PHASE 1: Get instant query plan with EXPLAIN FORMAT=JSON
                 explain_plan_data = None
                 try:
-                    explain_query = f"EXPLAIN FORMAT=JSON {sql}"
+                    explain_query = f"{_SELF_MARKER}EXPLAIN FORMAT=JSON {sql}"
                     start_time = time.perf_counter()
                     # Safe: sql parameter is user\'s query to analyze (intended functionality), validated by query_safety.py
 
@@ -859,7 +864,7 @@ def _execute_mysql_explain_analyze(
                             worker_state.set_identifier(thread_conn_id)
 
                             # Execute EXPLAIN ANALYZE
-                            explain_query = f"EXPLAIN ANALYZE {sql}"
+                            explain_query = f"{_SELF_MARKER}EXPLAIN ANALYZE {sql}"
                             # Safe: sql parameter is user\'s query to analyze (intended functionality), validated by query_safety.py
 
                             if not worker_state.begin_execution():

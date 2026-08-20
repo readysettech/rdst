@@ -181,6 +181,47 @@ class TestHashSql:
             "SELECT * FROM t WHERE tags ?| ARRAY['b'] LIMIT 9"
         )
 
+    def test_dollar_placeholder_texts_converge_across_dialects(self):
+        """Raw $N text, its dialect-less and postgres normalizations, the :pN
+        spelling, and legacy fused $:pN stored texts all share one hash."""
+        from shared.query_registry.sql_normalizer import normalize_and_extract
+
+        raw = (
+            "SELECT id, name FROM users WHERE score > $1 "
+            "ORDER BY created_at DESC LIMIT $2"
+        )
+        forms = [
+            raw,
+            normalize_and_extract(raw, None)[0],
+            normalize_and_extract(raw, "postgres")[0],
+            "SELECT id, name FROM users WHERE score > :p1 "
+            "ORDER BY created_at DESC LIMIT :p2",
+            "SELECT id, name FROM users WHERE score > $:p2 "
+            "ORDER BY created_at DESC LIMIT $:p1",
+        ]
+        assert len({hash_sql(form) for form in forms}) == 1
+
+    def test_fallback_normalized_text_keeps_raw_identity(self):
+        """Dialect-less sqlglot cannot parse TABLESAMPLE, so hashing routes
+        through the regex fallback; its output must re-hash to the raw
+        text's identity with $N slots intact."""
+        from shared.query_registry.sql_normalizer import normalize_and_extract
+
+        raw = (
+            "SELECT id, name FROM users TABLESAMPLE SYSTEM($1) "
+            "WHERE score > 10 LIMIT $2"
+        )
+        assert hash_sql(raw) == hash_sql(normalize_and_extract(raw, None)[0])
+
+    def test_group_by_ordinal_keeps_one_identity_across_dialects(self):
+        sql = (
+            "SELECT DATE_TRUNC($1, created_at) AS day, COUNT(*) FROM events "
+            "GROUP BY 1 ORDER BY 1 DESC"
+        )
+        from shared.query_registry.sql_normalizer import normalize_and_extract
+
+        assert hash_sql(sql) == hash_sql(normalize_and_extract(sql, "postgres")[0])
+
 
 class TestExtractParametersFromSql:
     """Tests for the extract_parameters_from_sql function."""

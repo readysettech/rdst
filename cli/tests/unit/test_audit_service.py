@@ -407,3 +407,45 @@ class TestAuditRunHistory:
         assert find_audit_run("audit_mydb_2026")["target_name"] == "mydb"
         assert find_audit_run("capture_xyz")["run_id"] == "capture_xyz"
         assert find_audit_run("does-not-exist") is None
+
+
+class TestReplayWorkerSelfTraffic:
+    def test_replay_workers_tag_queries_and_lane(self):
+        from features.audit.capture_service import CaptureService
+
+        service = CaptureService(config=MagicMock())
+        executed = []
+
+        class _Cursor:
+            def execute(self, sql):
+                executed.append(sql)
+                service._stop_requested = True
+
+            def fetchall(self):
+                return []
+
+            def close(self):
+                pass
+
+        class _Conn:
+            def cursor(self):
+                return _Cursor()
+
+            def close(self):
+                pass
+
+        with patch(
+            "shared.db_connection.create_direct_connection", return_value=_Conn()
+        ) as connect:
+            threads = service._start_replay_workers(
+                {"engine": "postgresql"},
+                ["SELECT * FROM users WHERE id = 1"],
+                concurrency=1,
+                delay=0,
+            )
+            for thread in threads:
+                thread.join(timeout=5)
+
+        assert executed
+        assert executed[0] == "/*rdst:audit*/ SELECT * FROM users WHERE id = 1"
+        assert connect.call_args.kwargs["lane"] == "rdst/audit"

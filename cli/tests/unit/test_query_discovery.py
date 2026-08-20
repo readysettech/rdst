@@ -2603,3 +2603,53 @@ async def test_system_catalog_identities_never_enter_the_library(tmp_path):
         assert sqls == ["SELECT * FROM orders"]
     finally:
         store.close()
+
+
+@pytest.mark.asyncio
+async def test_self_template_identities_never_enter_the_library(tmp_path):
+    """Marker-less diagnostic statements replayed by the statement store are
+    recognized by shape and stay out of the Query Library."""
+    profiler_text = (
+        'SELECT "body"::text, COUNT(*) AS cnt FROM "posts" '
+        'TABLESAMPLE SYSTEM($1) WHERE "body" IS NOT NULL '
+        'GROUP BY "body" ORDER BY cnt DESC LIMIT $2'
+    )
+    store = ObservationStore(tmp_path / "cache.db")
+    try:
+        registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+        connection = FakeConnection(
+            pg_rules(
+                2000.0,
+                [
+                    pg_stat_row(111, calls=900, total=9000.0),
+                    pg_stat_row(222, calls=2, total=10.0, mean=5.0),
+                ],
+                text_rows=[
+                    pg_text_row(111, profiler_text),
+                    pg_text_row(222, "SELECT * FROM orders"),
+                ],
+            )
+        )
+        collector = two_phase_collector(
+            tmp_path,
+            lambda target: (connection, "postgresql"),
+            store=store,
+            limit=1,
+            registry=registry,
+        )
+
+        first = await collector.collect_now()
+        assert first.event == "discovery_update"
+        assert first.data["stats"]["system_skipped"] == 1
+        assert first.data["new_hashes"] == []
+
+        second = await collector.collect_now()
+        assert second.event == "discovery_update"
+        assert second.data["stats"]["system_skipped"] == 0
+        assert len(second.data["new_hashes"]) == 1
+
+        registry.load()
+        sqls = [entry.original_sql for entry in registry.list_queries(limit=None)]
+        assert sqls == ["SELECT * FROM orders"]
+    finally:
+        store.close()

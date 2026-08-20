@@ -32,11 +32,13 @@ import json
 import logging
 import math
 import os
+import re
 import shutil
 import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from itertools import count
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, Optional
 
@@ -61,7 +63,7 @@ __all__ = [
     "library_db_path_for",
 ]
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 11
 
 # QueryRegistry is constructed by nearly every CLI command; run the SQLite
 # runtime check once per process, at first actual store use rather than at
@@ -367,6 +369,19 @@ _MIGRATIONS: Dict[int, Any] = {
     # engine placeholder styles before hashing, so identities are re-keyed
     # and duplicates merged (see _canonicalize_placeholder_hashes).
     8: lambda strict: (),
+    # Version 9 is a data migration with no DDL: it repairs identities
+    # written by the digit-lifting normalizer (fused $:pN text, lifted
+    # placeholder digits stored as parameter values, hashes derived from
+    # the damaged text); see _repair_placeholder_artifacts.
+    9: lambda strict: (),
+    # Version 10 is a data migration with no DDL: it finishes the v9 repair
+    # on databases v9 already migrated, and re-points cache.db observation
+    # history at every re-keyed identity; see _repair_v9_residue.
+    10: lambda strict: (),
+    # Version 11 is a data migration with no DDL: it prunes the RDST
+    # diagnostic statements admitted before the self markers existed; see
+    # _prune_self_traffic.
+    11: lambda strict: (),
 }
 
 # Data-cleanup versions: each runs _prune_system_only_entries inside its
@@ -555,6 +570,279 @@ def _curation_rank(entry: Dict[str, Any]) -> tuple[int, int, int, int]:
         entry.get("tag") or entry.get("question") or entry.get("readyset_query_id")
     )
     return (int(saved), analyzed, int(has_params), int(curated_meta))
+
+
+# Fused placeholder artifact written by the digit-lifting normalizer: a
+# `$N` parameter whose digit was extracted as if it were a literal value,
+# leaving `$:pN` in stored text. Genuine `$N` placeholders never match.
+_FUSED_PLACEHOLDER = re.compile(r"\$(:p\d+\b)")
+
+# Digit-lifting damage always leaves a placeholder token in the stored
+# text (`:pN` from the lift itself, or `$N` alongside it); texts spelling
+# none are never re-derived, keeping the v9 scan cheap on large stores.
+_REPAIR_CANDIDATE = re.compile(r":p\d|\$\d")
+
+# A select-list ordinal in the one position the digit-lifting normalizer
+# also extracted; a text spelling one normalizes differently under it.
+_ORDINAL_HINT = re.compile(r"\b(?:GROUP|ORDER)\s+BY\s+\d", re.IGNORECASE)
+
+# A `$N` placeholder a dialect-less regeneration read as a string literal:
+# the stored text spells `'$N'` where the original text spells `$N`.
+_QUOTED_PLACEHOLDER = re.compile(r"'\$\d+'")
+
+# A GROUP BY / ORDER BY list built entirely from `:pN` terms, which is
+# what a lifted select-list ordinal leaves behind. Lists mixing ordinals
+# with expressions are left alone: their spelling is not provable.
+_ORDINAL_CLAUSE = re.compile(
+    r"(\b(?:GROUP|ORDER)\s+BY\s+)"
+    r"(:p\d+(?:\s+(?:ASC|DESC))?(?:\s*,\s*:p\d+(?:\s+(?:ASC|DESC))?)*)",
+    re.IGNORECASE,
+)
+_PLACEHOLDER_NAME = re.compile(r":p(\d+)\b")
+
+# Placeholder canonicalization as it stood before `$:pN` counted as one
+# token, kept verbatim because it is the frozen spelling that older
+# identity hashes digest.
+_LEGACY_PLACEHOLDER_TOKEN = re.compile(r":p\d+\b|\$\d+\b|(?<![?@])\?(?![?|&])")
+
+
+def _param_value(params: Dict[str, Any], name: str) -> str:
+    """Read one parameter value from either stored parameter shape."""
+    value = params.get(name)
+    if isinstance(value, dict):
+        value = value.get("value")
+    return "" if value is None else str(value)
+
+
+def _lifted_slot_indices(params: Dict[str, Any]) -> bool:
+    """True when parameter values are the slot indices a digit lift stored.
+
+    The digit-lifting normalizer numbered slots in AST-traversal order and
+    recorded each slot's own index as its "value", so the values of such
+    an entry are exactly 1..N in some order rather than observed data.
+    """
+    if not params:
+        return False
+    values = [_param_value(params, name) for name in params]
+    if not all(value.isdigit() for value in values):
+        return False
+    return sorted(int(value) for value in values) == list(
+        range(1, len(values) + 1)
+    )
+
+
+def _restore_ordinals(text: str, params: Dict[str, Any]) -> str:
+    """Put GROUP BY / ORDER BY select-list ordinals back into a stored text.
+
+    A prior normalizer extracted those ordinals as if they were values,
+    leaving `:pN` in the clause and the digit among the entry's
+    parameters. Substituting the digits back reproduces the text the
+    current pipeline normalizes, so the entry can be re-keyed onto the
+    identity that live observations of the same query mint. A clause whose
+    parameters carry a non-digit value keeps its stored spelling.
+    """
+
+    def restore_clause(clause: re.Match[str]) -> str:
+        def restore_name(name: re.Match[str]) -> str:
+            value = _param_value(params, f"p{name.group(1)}")
+            return value if value.isdigit() else name.group(0)
+
+        return clause.group(1) + _PLACEHOLDER_NAME.sub(
+            restore_name, clause.group(2)
+        )
+
+    return _ORDINAL_CLAUSE.sub(restore_clause, text)
+
+
+def _legacy_normalized(text: str) -> str:
+    """Reproduce the digit-lifting normalization a stale hash digests.
+
+    That normalizer extracted every non-JSON-path literal, including the
+    index digit naming a `$N` slot and GROUP BY/ORDER BY ordinals, and its
+    regex fallback lifted a digit behind a `$` the same way. Identity
+    hashes minted under it digest a spelling the current pipeline no
+    longer produces, so reproducing it is how a migration recognizes such
+    a hash as one of its own rows.
+    """
+    from sqlglot import exp, parse_one
+
+    from shared.query_registry.query_registry import canonicalize_sql
+    from shared.query_registry.sql_normalizer import (
+        _compat_generator,
+        _is_json_path_literal,
+    )
+
+    canonical = canonicalize_sql(text)
+    if not canonical:
+        return ""
+    try:
+        tree = parse_one(canonical, dialect=None)
+    except Exception:
+        tree = None
+    if tree is None:
+        position = count(1)
+        collapsed = re.sub(r"\s+", " ", canonical)
+        collapsed = re.sub(
+            r"'[^']*'", lambda _: f":p{next(position)}", collapsed
+        )
+        return re.sub(
+            r"\b\d+(?:\.\d+)?\b", lambda _: f":p{next(position)}", collapsed
+        ).strip()
+    literals = [
+        literal
+        for literal in tree.find_all(exp.Literal)
+        if not _is_json_path_literal(literal)
+    ]
+    for index, literal in enumerate(literals, 1):
+        literal.replace(exp.Placeholder(this=f"p{index}"))
+    return _compat_generator(None).generate(tree)
+
+
+def _legacy_canonicalized(normalized: str) -> str:
+    """Renumber placeholders the way the pre-`$:pN` canonicalization did."""
+    position = count(1)
+    return _LEGACY_PLACEHOLDER_TOKEN.sub(
+        lambda _: f":p{next(position)}", normalized
+    )
+
+
+def _drop_unnamed_parameters(entry: Dict[str, Any]) -> None:
+    """Drop parameter values naming a placeholder the text does not spell."""
+    named = {
+        f"p{number}"
+        for number in _PLACEHOLDER_NAME.findall(str(entry.get("sql") or ""))
+    }
+    for column in ("parameters", "most_recent_params"):
+        values = entry.get(column)
+        if isinstance(values, dict):
+            entry[column] = {
+                name: value for name, value in values.items() if name in named
+            }
+
+
+def _repaired_parameters(
+    sql: str,
+    original: str,
+    params: Dict[str, Any],
+    observed: Dict[str, Any],
+    dialect: Optional[str],
+    query_hash: str,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Return the parameter values an entry's own text supports.
+
+    An entry minted from literal-bearing SQL keeps its values in the
+    numbering its stored text spells, so re-extracting the original
+    through the current pipeline is authoritative whenever the extraction
+    regenerates exactly that text. Failing that, values that reproduce the
+    entry's own identity when substituted back are the ones it was minted
+    from. An entry minted from engine-normalized text instead holds values
+    the activity sampler keyed by slot position; those stand unless they
+    are the slot indices a digit lift stored (see _lifted_slot_indices),
+    which name no observation at all.
+    """
+    from shared.query_registry.query_registry import (
+        _identity_slot_count,
+        canonicalize_sql,
+        hash_sql,
+    )
+    from shared.query_registry.sql_normalizer import (
+        normalize_and_extract,
+        reconstruct_sql,
+    )
+
+    slots = _identity_slot_count(sql)
+    if original and not slots:
+        try:
+            regenerated, extracted = normalize_and_extract(
+                canonicalize_sql(original), dialect
+            )
+        except Exception:
+            regenerated, extracted = "", {}
+        if extracted and regenerated == sql:
+            return extracted, {
+                name: info["value"] for name, info in extracted.items()
+            }
+    if params and not slots:
+        try:
+            substituted = reconstruct_sql(sql, params, dialect)
+        except Exception:
+            substituted = sql
+        if substituted != sql and hash_sql(substituted) == query_hash:
+            return params, observed
+    if _lifted_slot_indices(params) or _lifted_slot_indices(observed):
+        return {}, {}
+    # A slot-bearing text resolves its k-th engine slot as `pk`; a text
+    # spelling `:pN` names its own.
+    named = (
+        {f"p{index}" for index in range(1, slots + 1)}
+        if slots
+        else {f"p{number}" for number in _PLACEHOLDER_NAME.findall(sql)}
+    )
+    return (
+        {name: value for name, value in params.items() if name in named},
+        {name: value for name, value in observed.items() if name in named},
+    )
+
+
+def _normalized_text(
+    original: str, dialect: Optional[str], query_hash: str
+) -> str:
+    """Normalize an entry's original text, diagnosing a text that cannot."""
+    from shared.query_registry.query_registry import normalize_sql
+
+    try:
+        return normalize_sql(original, dialect)
+    except Exception:
+        logger.warning(
+            "Query identity %s keeps its stored text: the original does not "
+            "normalize",
+            query_hash,
+            exc_info=True,
+        )
+        return ""
+
+
+def _dialect_resolver() -> Callable[[str], Optional[str]]:
+    """Memoize target-to-dialect resolution across one migration pass.
+
+    Stored normalized text is generated with the dialect of the target it
+    came from, so regenerating it identity-safely needs the same dialect;
+    resolution reads the targets config, so one lookup per target is
+    plenty.
+    """
+    from shared.query_registry.query_registry import dialect_for_target
+
+    resolved: Dict[str, Optional[str]] = {}
+
+    def resolve(target: str) -> Optional[str]:
+        if target not in resolved:
+            resolved[target] = dialect_for_target(target)
+        return resolved[target]
+
+    return resolve
+
+
+def _scrub_placeholder_artifacts(entry: Dict[str, Any]) -> bool:
+    """Fold the fused `$:pN` artifact to `:pN` in an entry's stored texts.
+
+    Entries carrying the artifact also carry parameter "observations" that
+    are really the lifted placeholder digits. Stored values have no
+    provenance that could separate those from real observations, so
+    affected entries drop all observed parameter values; the activity
+    sampler repopulates them from live traffic. Returns True when the
+    entry carried the artifact.
+    """
+    affected = False
+    for column in ("sql", "original_sql"):
+        text = str(entry.get(column) or "")
+        folded = _FUSED_PLACEHOLDER.sub(r"\1", text)
+        if folded != text:
+            entry[column] = folded
+            affected = True
+    if affected:
+        entry["parameters"] = {}
+        entry["most_recent_params"] = {}
+    return affected
 
 
 def _json_dumps(value: Any) -> str:
@@ -747,6 +1035,9 @@ class LibraryStore:
         self._lock = threading.Lock()
         self._opened = False
         self._read_only_reason: Optional[str] = None
+        # Identity re-keys this process's migrations performed, drained by
+        # _rekey_observation_history once the migration has committed.
+        self._identity_moves: Dict[str, str] = {}
 
     @property
     def path(self) -> Path:
@@ -809,6 +1100,7 @@ class LibraryStore:
                     self._migrate(conn, version)
             finally:
                 conn.close()
+            self._rekey_observation_history()
             self._opened = True
 
     def _migrate(self, conn: sqlite3.Connection, from_version: int) -> None:
@@ -833,6 +1125,12 @@ class LibraryStore:
                         conn.execute(statement)
                 if version == 8:
                     self._canonicalize_placeholder_hashes(conn)
+                if version == 9:
+                    self._repair_placeholder_artifacts(conn)
+                if version == 10:
+                    self._repair_v9_residue(conn)
+                if version == 11:
+                    self._prune_self_traffic(conn)
                 conn.execute(f"PRAGMA user_version = {version:d}")
                 conn.execute("COMMIT")
             except BaseException:
@@ -896,6 +1194,9 @@ class LibraryStore:
                 self._insert_entry(conn, query_hash, merged)
             _prune_system_only_entries(conn)
             self._canonicalize_placeholder_hashes(conn)
+            self._repair_placeholder_artifacts(conn)
+            self._repair_v9_residue(conn)
+            self._prune_self_traffic(conn)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION:d}")
             conn.execute("COMMIT")
         except BaseException:
@@ -986,6 +1287,104 @@ class LibraryStore:
             )
         return entry
 
+    def _record_identity_move(self, old_hash: str, new_hash: str) -> None:
+        """Note a re-key so observation history can follow it after commit."""
+        if not old_hash or old_hash == new_hash:
+            return
+        for source in [
+            source
+            for source, destination in self._identity_moves.items()
+            if destination == old_hash
+        ]:
+            self._identity_moves[source] = new_hash
+        self._identity_moves[old_hash] = new_hash
+
+    def _apply_identity_moves(
+        self,
+        conn: sqlite3.Connection,
+        entries: Dict[int, Dict[str, Any]],
+        targets: Dict[int, str],
+        old_hashes: Dict[int, str],
+    ) -> tuple[int, int]:
+        """Write repaired entries onto their target hashes, merging collisions.
+
+        Every prepared row is vacated before target-slot occupancy is
+        checked, so a slot freed by one move can be claimed by another and
+        occupancy checks only ever see identities staying put. A move onto
+        an occupied slot merges with the v8 lifecycle union: earliest
+        first_observed_at/reviewed_at/saved_at, latest last_*_at, max
+        counters, union of sources, richest curation surviving. The
+        occupant's parameters are filtered exactly as a mover's are, so
+        neither side can pass lifted digits off as curated values.
+        Returns (rows re-keyed, groups merged).
+        """
+        for identity_id in entries:
+            conn.execute(
+                "DELETE FROM target_query WHERE identity_id = ?", (identity_id,)
+            )
+            conn.execute("DELETE FROM query_identity WHERE id = ?", (identity_id,))
+
+        groups: Dict[str, list[int]] = {}
+        for identity_id, canonical in targets.items():
+            groups.setdefault(canonical, []).append(identity_id)
+
+        rekeyed = 0
+        merged_groups = 0
+        for canonical, member_ids in groups.items():
+            members = {mid: entries[mid] for mid in member_ids}
+            member_hashes = {mid: old_hashes[mid] for mid in member_ids}
+            occupant = conn.execute(
+                "SELECT id FROM query_identity WHERE hash = ?", (canonical,)
+            ).fetchone()
+            if occupant is not None:
+                occupant_entry = self._load_entry_by_id(conn, occupant["id"])
+                _drop_unnamed_parameters(occupant_entry)
+                members[occupant["id"]] = occupant_entry
+                member_hashes[occupant["id"]] = canonical
+                conn.execute(
+                    "DELETE FROM target_query WHERE identity_id = ?",
+                    (occupant["id"],),
+                )
+                conn.execute(
+                    "DELETE FROM query_identity WHERE id = ?", (occupant["id"],)
+                )
+            if len(members) == 1:
+                ((identity_id, entry),) = members.items()
+                entry["hash"] = canonical
+                self._insert_entry(conn, canonical, entry)
+                if member_hashes[identity_id] == canonical:
+                    logger.info(
+                        "Repaired stored state of query identity %s", canonical
+                    )
+                else:
+                    rekeyed += 1
+                    logger.info(
+                        "Re-keyed query identity %s to canonical hash %s",
+                        member_hashes[identity_id],
+                        canonical,
+                    )
+            else:
+                survivor_id = max(
+                    members, key=lambda mid: (_curation_rank(members[mid]), -mid)
+                )
+                merged = members[survivor_id]
+                for identity_id, entry in members.items():
+                    if identity_id != survivor_id:
+                        _merge_identity(merged, entry)
+                merged["hash"] = canonical
+                self._insert_entry(conn, canonical, merged)
+                merged_groups += 1
+                logger.info(
+                    "Merged query identities %s onto canonical hash %s "
+                    "(survivor carried %s)",
+                    ", ".join(sorted(member_hashes[mid] for mid in members)),
+                    canonical,
+                    member_hashes[survivor_id],
+                )
+            for identity_id in members:
+                self._record_identity_move(member_hashes[identity_id], canonical)
+        return rekeyed, merged_groups
+
     def _canonicalize_placeholder_hashes(self, conn: sqlite3.Connection) -> int:
         """Schema v8 data migration: one identity per logical query.
 
@@ -1051,6 +1450,7 @@ class LibraryStore:
                     old_hash,
                     canonical,
                 )
+                self._record_identity_move(old_hash, canonical)
                 continue
             entries = {
                 identity_id: self._load_entry_by_id(conn, identity_id)
@@ -1081,6 +1481,8 @@ class LibraryStore:
                 canonical,
                 survivor_hash,
             )
+            for _, old in members:
+                self._record_identity_move(old, canonical)
         if merged_groups:
             logger.info(
                 "Placeholder-style canonicalization merged %d duplicate "
@@ -1088,6 +1490,402 @@ class LibraryStore:
                 merged_groups,
             )
         return merged_groups
+
+    def _repair_placeholder_artifacts(self, conn: sqlite3.Connection) -> int:
+        """Schema v9 data migration: repair digit-lifting placeholder damage.
+
+        A prior normalizer extracted the digit of `$N` parameters (and of
+        GROUP BY/ORDER BY ordinals) as if it were a literal value, minting
+        identities whose stored text carries the fused `$:pN` artifact,
+        whose parameter "observations" are the lifted digits, and whose
+        hashes derive from the damaged text. The v8 canonicalization left
+        them alone because their stored hash matched neither derivation it
+        recognized. Re-derive each placeholder-bearing identity's hash
+        from its stored text through the current pipeline and re-key any
+        row whose hash differs, folding the fused artifact out of stored
+        text and dropping the lifted parameter values on the way (see
+        _scrub_placeholder_artifacts). Re-keyed rows with an original text
+        get their normalized text regenerated through the current
+        pipeline, and parameter observations naming a placeholder the
+        repaired text no longer spells are dropped: they are lifted
+        ordinal or placeholder digits, and real values are reconstructible
+        by the activity sampler. Rows without the artifact re-key only on
+        proven pipeline provenance: their stored hash must equal a digest
+        of their own stored text under some prior spelling (the raw
+        normalized text or its textual canonicalization), which covers
+        identities minted while ordinals and placeholder digits were still
+        lifted; hashes matching no derivation (hand-imported data) stay
+        untouched, exactly as in v8. A re-key that lands on an existing
+        identity merges with the v8 lifecycle union: earliest
+        first_observed_at/reviewed_at/saved_at, latest last_*_at, max
+        counters, union of sources, richest curation surviving; artifacts
+        are scrubbed before ranking so lifted digits cannot pass for
+        curated parameters. Idempotent: after one run every candidate's
+        hash equals the current derivation of its own stored text and no
+        stored text carries `$:pN`.
+        """
+        from shared.query_registry.query_registry import _sql_digest, normalize_sql
+        from shared.query_registry.sql_normalizer import (
+            canonicalize_placeholder_style,
+        )
+
+        movers: Dict[int, tuple[str, str]] = {}
+        rows = conn.execute(
+            "SELECT id, hash, sql, original_sql FROM query_identity"
+        ).fetchall()
+        for row in rows:
+            text = row["original_sql"] or row["sql"]
+            if not text or not (
+                _REPAIR_CANDIDATE.search(row["sql"])
+                or _REPAIR_CANDIDATE.search(row["original_sql"])
+            ):
+                continue
+            try:
+                normalized = normalize_sql(text)
+                if not normalized:
+                    continue
+                canonical = _sql_digest(canonicalize_placeholder_style(normalized))
+            except Exception:
+                logger.warning(
+                    "Query identity %s (row %d) stays as stored: its text "
+                    "does not normalize",
+                    row["hash"],
+                    row["id"],
+                    exc_info=True,
+                )
+                continue
+            damaged = bool(
+                _FUSED_PLACEHOLDER.search(row["sql"])
+                or _FUSED_PLACEHOLDER.search(row["original_sql"])
+            )
+            if canonical == row["hash"] and not damaged:
+                continue
+            if not damaged and row["hash"] not in {
+                _sql_digest(row["sql"]),
+                _sql_digest(canonicalize_placeholder_style(row["sql"])),
+                _sql_digest(normalized),
+            }:
+                continue
+            movers[row["id"]] = (row["hash"], canonical)
+
+        dialect_of = _dialect_resolver()
+        entries: Dict[int, Dict[str, Any]] = {}
+        targets: Dict[int, str] = {}
+        old_hashes: Dict[int, str] = {}
+        for identity_id, (old_hash, canonical) in movers.items():
+            entry = self._load_entry_by_id(conn, identity_id)
+            _scrub_placeholder_artifacts(entry)
+            original = str(entry.get("original_sql") or "")
+            if original:
+                # Stored text is generated with its target's dialect, which
+                # is what keeps `DATE_TRUNC($1, col)` a parameter rather
+                # than a string literal. Identity stays dialect-less: only
+                # the displayed and reconstructed text is regenerated here.
+                regenerated = _normalized_text(
+                    original,
+                    dialect_of(str(entry.get("last_target") or "")),
+                    old_hash,
+                )
+                if regenerated:
+                    entry["sql"] = regenerated
+            _drop_unnamed_parameters(entry)
+            entries[identity_id] = entry
+            targets[identity_id] = canonical
+            old_hashes[identity_id] = old_hash
+
+        rekeyed, merged_groups = self._apply_identity_moves(
+            conn, entries, targets, old_hashes
+        )
+        if movers:
+            logger.info(
+                "Placeholder-artifact repair touched %d identities "
+                "(%d re-keyed, %d merged groups)",
+                len(movers),
+                rekeyed,
+                merged_groups,
+            )
+        return len(movers)
+
+    def _repair_v9_residue(self, conn: sqlite3.Connection) -> int:
+        """Schema v10 data migration: finish the v9 placeholder repair.
+
+        v9 re-keyed the identities the digit-lifting normalizer minted, and
+        left three residues in the databases it migrated. An entry whose
+        hash was already canonical kept the lifted slot indices as its
+        parameter "observations". Regenerating stored text without the
+        entry's dialect turned a `DATE_TRUNC($1, col)` parameter into the
+        string literal `'$1'`. And an entry whose only text carries lifted
+        GROUP BY/ORDER BY ordinals still hashes apart from live
+        observations of the same query, because v9 re-derived from that
+        same lifted text.
+
+        Every repair here is gated on pipeline provenance: the entry's
+        stored hash must equal the current derivation of its own stored
+        text, which leaves hand-imported rows exactly as they are.
+        Parameters are re-extracted from a literal-bearing original where
+        the entry's text supports it, so real values are restored rather
+        than dropped; entries whose text carries engine slots keep their
+        sampled values unless those values are the slot indices themselves.
+        Ordinal reconstruction re-keys through the v9 occupancy and merge
+        machinery. Idempotent: a second run finds nothing to repair.
+        """
+        from shared.query_registry.query_registry import _sql_digest, normalize_sql
+        from shared.query_registry.sql_normalizer import (
+            canonicalize_placeholder_style,
+        )
+
+        dialect_of = _dialect_resolver()
+        entries: Dict[int, Dict[str, Any]] = {}
+        targets: Dict[int, str] = {}
+        old_hashes: Dict[int, str] = {}
+        for row in conn.execute(
+            "SELECT id, hash, sql, original_sql, parameters, most_recent_params,"
+            " last_target FROM query_identity"
+        ).fetchall():
+            sql = row["sql"] or ""
+            original = row["original_sql"] or ""
+            params = json.loads(row["parameters"])
+            observed = json.loads(row["most_recent_params"])
+            if not (params or observed or _QUOTED_PLACEHOLDER.search(sql)):
+                continue
+            text = original or sql
+            try:
+                derived = _sql_digest(
+                    canonicalize_placeholder_style(normalize_sql(text))
+                )
+            except Exception:
+                logger.warning(
+                    "Query identity %s (row %d) stays as stored: its text "
+                    "does not normalize",
+                    row["hash"],
+                    row["id"],
+                    exc_info=True,
+                )
+                continue
+            if derived != row["hash"]:
+                continue
+            dialect = dialect_of(row["last_target"])
+            canonical = row["hash"]
+            if original and _QUOTED_PLACEHOLDER.search(sql):
+                regenerated = _normalized_text(original, dialect, row["hash"])
+                if regenerated and not _QUOTED_PLACEHOLDER.search(regenerated):
+                    sql = regenerated
+            restored = _restore_ordinals(text, params or observed)
+            if restored != text:
+                try:
+                    moved = _sql_digest(
+                        canonicalize_placeholder_style(normalize_sql(restored))
+                    )
+                except Exception:
+                    moved = row["hash"]
+                if moved != row["hash"]:
+                    canonical = moved
+                    sql = _normalized_text(restored, dialect, row["hash"]) or sql
+                    if original:
+                        original = restored
+            params, observed = _repaired_parameters(
+                sql, original, params, observed, dialect, canonical
+            )
+            if (
+                canonical == row["hash"]
+                and sql == row["sql"]
+                and original == row["original_sql"]
+                and params == json.loads(row["parameters"])
+                and observed == json.loads(row["most_recent_params"])
+            ):
+                continue
+            entry = self._load_entry_by_id(conn, row["id"])
+            entry["sql"] = sql
+            entry["original_sql"] = original
+            entry["parameters"] = params
+            entry["most_recent_params"] = observed
+            entries[row["id"]] = entry
+            targets[row["id"]] = canonical
+            old_hashes[row["id"]] = row["hash"]
+
+        rekeyed, merged_groups = self._apply_identity_moves(
+            conn, entries, targets, old_hashes
+        )
+        self._identity_moves.update(self._stale_identity_hashes(conn))
+        if entries:
+            logger.info(
+                "Placeholder-residue repair touched %d identities "
+                "(%d re-keyed, %d merged groups)",
+                len(entries),
+                rekeyed,
+                merged_groups,
+            )
+        return len(entries)
+
+    def _prune_self_traffic(self, conn: sqlite3.Connection) -> int:
+        """Schema v11 data migration: drop RDST's own diagnostic statements.
+
+        Schema profiling reads user relations, so its statements look like
+        user workload to automatic discovery. They now carry an
+        ``/*rdst:...*/`` self marker that admission rejects, which no marker
+        can do for rows admitted before it existed. Those rows are matched
+        here by structure: the stored text has to be an exact instance of one
+        of the profiler, introspector, or pattern-detector templates
+        (see shared.query_registry.self_traffic).
+
+        Curation wins over the match, on the same terms
+        _prune_system_only_entries uses: a row someone saved, analyzed,
+        compared, asked about, or cached stays, and every such skip is
+        logged. reviewed_at is not curation here either -- a bulk review
+        sweep stamps it across whatever the list happened to show.
+
+        Observation history in cache.db is left alone, matching the earlier
+        prunes: cache.db is rebuildable, its recent_observation rows age out
+        on their own retention cutoff, and a pruned hash simply stops being
+        looked up. Re-keys recorded by earlier migrations that would land on
+        a pruned hash are dropped, so nothing re-points history at an
+        identity this migration removed.
+
+        Idempotent: a second run finds no template instance left to prune.
+        """
+        from shared.query_registry.self_traffic import match_self_template
+
+        pruned: set = set()
+        shapes: Dict[str, int] = {}
+        for row in conn.execute(
+            "SELECT id, hash, sql, original_sql, question, readyset_query_id"
+            " FROM query_identity"
+        ).fetchall():
+            sql_text = row["original_sql"] or row["sql"]
+            shape = match_self_template(sql_text)
+            if shape is None:
+                continue
+            reason = ""
+            if row["question"]:
+                reason = "it carries a question"
+            elif row["readyset_query_id"]:
+                reason = "it is cached in Readyset"
+            else:
+                lifecycles = conn.execute(
+                    """
+                    SELECT saved_at, last_analyzed_at, last_compared_at,
+                           analysis_count, comparison_count
+                    FROM target_query WHERE identity_id = ?
+                    """,
+                    (row["id"],),
+                ).fetchall()
+                if any(item["saved_at"] for item in lifecycles):
+                    reason = "it was saved"
+                elif any(
+                    item["last_analyzed_at"] or item["analysis_count"]
+                    for item in lifecycles
+                ):
+                    reason = "it was analyzed"
+                elif any(
+                    item["last_compared_at"] or item["comparison_count"]
+                    for item in lifecycles
+                ):
+                    reason = "it was compared"
+            if reason:
+                logger.warning(
+                    "Keeping RDST %s statement %s: %s",
+                    shape,
+                    row["hash"],
+                    reason,
+                )
+                continue
+            conn.execute("DELETE FROM target_query WHERE identity_id = ?", (row["id"],))
+            conn.execute("DELETE FROM query_identity WHERE id = ?", (row["id"],))
+            pruned.add(row["hash"])
+            shapes[shape] = shapes.get(shape, 0) + 1
+            logger.info(
+                "Pruned RDST %s statement %s: %.60s",
+                shape,
+                row["hash"],
+                " ".join(sql_text.split()),
+            )
+        if pruned:
+            self._identity_moves = {
+                old: new
+                for old, new in self._identity_moves.items()
+                if new not in pruned
+            }
+            logger.info(
+                "Library cleanup removed %d RDST self-traffic entries (%s)",
+                len(pruned),
+                ", ".join(f"{name} {count}" for name, count in sorted(shapes.items())),
+            )
+        return len(pruned)
+
+    def _stale_identity_hashes(self, conn: sqlite3.Connection) -> Dict[str, str]:
+        """Map hashes a row's own text minted under the prior normalizer.
+
+        Observation history in cache.db keyed by an identity the placeholder
+        migrations re-keyed can only be found again by recognizing the hash
+        the old spelling of a surviving row's text digests. Hashes that no
+        surviving text accounts for stay where they are, as do hashes two
+        rows both account for: nothing in either store proves what those
+        named.
+        """
+        from shared.query_registry.query_registry import _sql_digest
+        from shared.query_registry.sql_normalizer import (
+            canonicalize_placeholder_style,
+        )
+
+        live: set[str] = set()
+        stale: Dict[str, set[str]] = {}
+        for row in conn.execute(
+            "SELECT hash, sql, original_sql FROM query_identity"
+        ).fetchall():
+            live.add(row["hash"])
+            text = row["original_sql"] or row["sql"]
+            if not text or not (
+                _REPAIR_CANDIDATE.search(text) or _ORDINAL_HINT.search(text)
+            ):
+                continue
+            legacy = _legacy_normalized(text)
+            if not legacy:
+                continue
+            for candidate in (
+                _sql_digest(legacy),
+                _sql_digest(_legacy_canonicalized(legacy)),
+                _sql_digest(canonicalize_placeholder_style(legacy)),
+            ):
+                if candidate != row["hash"]:
+                    stale.setdefault(candidate, set()).add(row["hash"])
+        return {
+            old: next(iter(claimants))
+            for old, claimants in stale.items()
+            if old not in live and len(claimants) == 1
+        }
+
+    def _rekey_observation_history(self) -> None:
+        """Point cache.db's observation history at every re-keyed identity.
+
+        Runs after the migration transaction commits: discovery holds
+        cache.db's write lock across its library.db write, so a migration
+        must never take the two in the opposite order. cache.db is a
+        rebuildable cache, so a failure here is logged and the migrated
+        library still stands.
+        """
+        moves, self._identity_moves = self._identity_moves, {}
+        cache_path = self._db_path.parent / "cache.db"
+        if not moves or not cache_path.exists():
+            return
+        from shared.query_registry.observation_store import ObservationStore
+
+        try:
+            with ObservationStore(cache_path) as store:
+                moved = store.rekey_identities(moves)
+        except Exception:
+            logger.warning(
+                "Observation history at %s keeps its previous query hashes",
+                cache_path,
+                exc_info=True,
+            )
+            return
+        if moved:
+            logger.info(
+                "Re-keyed %d observation rows in %s onto migrated query "
+                "identities",
+                moved,
+                cache_path,
+            )
 
     @staticmethod
     def _dimension_predicates(

@@ -175,6 +175,7 @@ _UNSAFE_SQLITE_OK_ENV = "RDST_UNSAFE_SQLITE_OK"
 # Each journal-strategy warning fires once per process, not once per store.
 _unsafe_wal_warned = False
 _delete_fallback_warned = False
+_journal_adoption_warned = False
 
 
 def _unsafe_sqlite_override() -> bool:
@@ -245,8 +246,16 @@ def _apply_journal_mode(conn: sqlite3.Connection, path: Path) -> None:
     WAL is the only persistent journal mode, so the file needs a switch
     exactly when it is in WAL and the strategy is DELETE, or vice versa.
     Switching requires that no other connection has the file open; SQLite
-    reports contention as SQLITE_BUSY, which is retried briefly and then
-    surfaced with a clear message rather than opening in the wrong mode.
+    reports contention as SQLITE_BUSY, which is retried briefly. If another
+    live process keeps the file open in the other mode past the deadline,
+    this connection adopts the file's current mode instead of failing:
+    refusing would not change the mode the other process keeps using, it
+    would only make this process unable to read or record anything (for
+    example RDST self-execution evidence from CLI lanes while ``rdst web``
+    holds cache.db). Adoption is announced once per process; when a runtime
+    without the WAL-reset fix adopts WAL this accepts the multi-process WAL
+    corruption risk the DELETE fallback normally avoids, so the warning asks
+    for the processes' SQLite versions to be aligned.
     """
     desired = _journal_mode_for_runtime()
     current = conn.execute("PRAGMA journal_mode").fetchone()[0]
@@ -270,15 +279,41 @@ def _apply_journal_mode(conn: sqlite3.Connection, path: Path) -> None:
             if actual == desired:
                 return
             if time.monotonic() >= deadline:
-                raise RuntimeError(
-                    f"could not switch {path} to journal_mode={desired}: "
-                    "another process still has the database open in "
-                    f"{current} mode. Close other rdst processes (or align "
-                    "their SQLite versions) and retry"
-                )
+                _adopt_contended_journal_mode(conn, path, current, desired)
+                return
             time.sleep(0.05)
     finally:
         conn.execute("PRAGMA busy_timeout = 5000")
+
+
+def _adopt_contended_journal_mode(
+    conn: sqlite3.Connection, path: Path, current: str, desired: str
+) -> None:
+    """Keep the file's journal mode when another process blocks the switch."""
+    if current != "wal":
+        # This runtime assumed WAL and set synchronous=NORMAL, which is only
+        # corruption-safe under WAL; the rollback journal needs FULL.
+        conn.execute("PRAGMA synchronous = FULL")
+    global _journal_adoption_warned
+    if not _journal_adoption_warned:
+        _journal_adoption_warned = True
+        risk = (
+            " This runtime lacks the multi-process WAL-reset fix, so sharing"
+            " a WAL database across processes carries a corruption risk."
+            if current == "wal" and not _wal_reset_fixed(sqlite3.sqlite_version_info)
+            else ""
+        )
+        logger.warning(
+            "could not switch %s to journal_mode=%s: another process still "
+            "has the database open in %s mode; continuing in %s mode.%s "
+            "Align rdst processes' SQLite versions to avoid mixed journal "
+            "strategies",
+            path,
+            desired,
+            current,
+            current,
+            risk,
+        )
 
 
 def _refuse_network_path(path: str) -> None:
@@ -854,6 +889,79 @@ class ObservationStore:
                 (target_id, epoch_id),
             ).fetchall()
         return {row["engine_key"]: row["normalized_hash"] for row in rows}
+
+    def rekey_identities(self, mapping: Mapping[str, str]) -> int:
+        """Point observation history at identities library.db has re-keyed.
+
+        library.db owns query identity, and a migration there can re-key a
+        query onto a different hash while the aliases, windows, and
+        execution spans stored here still name the old one. Rewrites them
+        to the new hash. A window or span that already exists under the new
+        hash absorbs the old one -- counter deltas add, rates and spans
+        take the wider value -- so history survives two identities merging
+        into one. Returns the number of rows moved.
+        """
+        pairs = [
+            (old, new)
+            for old, new in mapping.items()
+            if old and new and old != new
+        ]
+        if not pairs:
+            return 0
+        moved = 0
+        with self._write() as conn:
+            for old, new in pairs:
+                moved += conn.execute(
+                    "UPDATE identity_alias SET normalized_hash = ?"
+                    " WHERE normalized_hash = ?",
+                    (new, old),
+                ).rowcount
+                conn.execute(
+                    """
+                    INSERT INTO recent_observation
+                      SELECT target_id, :new, window_start, window_end,
+                             calls_delta, exec_time_delta, approximate_qps,
+                             freshness, completeness, attribution
+                      FROM recent_observation WHERE normalized_hash = :old
+                    ON CONFLICT(target_id, normalized_hash, window_end)
+                    DO UPDATE SET
+                      window_start = MIN(window_start, excluded.window_start),
+                      calls_delta = COALESCE(calls_delta, 0)
+                        + COALESCE(excluded.calls_delta, 0),
+                      exec_time_delta = COALESCE(exec_time_delta, 0)
+                        + COALESCE(excluded.exec_time_delta, 0),
+                      approximate_qps = MAX(
+                        COALESCE(approximate_qps, 0),
+                        COALESCE(excluded.approximate_qps, 0)
+                      )
+                    """,
+                    {"old": old, "new": new},
+                )
+                moved += conn.execute(
+                    "DELETE FROM recent_observation WHERE normalized_hash = ?",
+                    (old,),
+                ).rowcount
+                conn.execute(
+                    """
+                    INSERT INTO rdst_execution
+                      SELECT target_id, :new, lane, run_id, started_at,
+                             ended_at, exec_count
+                      FROM rdst_execution WHERE normalized_hash = :old
+                    ON CONFLICT(target_id, run_id, normalized_hash) DO UPDATE SET
+                      started_at = MIN(started_at, excluded.started_at),
+                      ended_at = MAX(
+                        COALESCE(ended_at, 0), COALESCE(excluded.ended_at, 0)
+                      ),
+                      exec_count = COALESCE(exec_count, 0)
+                        + COALESCE(excluded.exec_count, 0)
+                    """,
+                    {"old": old, "new": new},
+                )
+                moved += conn.execute(
+                    "DELETE FROM rdst_execution WHERE normalized_hash = ?",
+                    (old,),
+                ).rowcount
+        return moved
 
     # -- recent observations --------------------------------------------------
 

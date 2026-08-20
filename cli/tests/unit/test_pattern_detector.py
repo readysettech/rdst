@@ -56,6 +56,20 @@ class TestDelimiterDetectionSqlMysql:
         assert 'LIMIT 10000' in sql
 
 
+class TestSelfMarker:
+    """Delimiter probes read user tables and must carry the RDST self marker."""
+
+    def test_postgres_sql_starts_with_marker(self):
+        sql = detect_delimiter_columns_sql_postgres(["tags"], "products", 1000)
+        assert sql.startswith("/*rdst:profile*/ ")
+
+    def test_mysql_sql_starts_with_marker(self):
+        small = detect_delimiter_columns_sql_mysql(["tags"], "products", 1000)
+        large = detect_delimiter_columns_sql_mysql(["tags"], "products", 100_000)
+        assert small.startswith("/*rdst:profile*/ ")
+        assert large.startswith("/*rdst:profile*/ ")
+
+
 class TestThreshold:
     """Test the delimiter fraction threshold value."""
 

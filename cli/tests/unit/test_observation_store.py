@@ -1315,9 +1315,51 @@ class TestSqliteRuntimeCheck:
             second.close()
         assert _journal_mode(path) == "wal"
 
-    def test_contended_journal_switch_fails_with_clear_message(
+    def test_contended_journal_switch_adopts_wal_with_warning(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        path = tmp_path / "cache.db"
+        ObservationStore(path).close()
+
+        holder = sqlite3.connect(path, isolation_level=None)
+        try:
+            holder.execute("BEGIN")
+            holder.execute("SELECT COUNT(*) FROM collector_state").fetchone()
+            self._fake_version(monkeypatch, (3, 40, 0), "3.40.0")
+            monkeypatch.setattr(
+                observation_store, "_journal_adoption_warned", False
+            )
+            monkeypatch.setattr(
+                observation_store, "_JOURNAL_SWITCH_TIMEOUT_SECONDS", 0.3
+            )
+            with caplog.at_level(
+                logging.WARNING, logger=observation_store.logger.name
+            ):
+                store = ObservationStore(path)
+            try:
+                store.append_event("t1", "collector", '{"a":1}', created_at=100)
+                assert store.latest_seq("t1") == 1
+            finally:
+                store.close()
+        finally:
+            holder.close()
+        assert _journal_mode(path) == "wal"
+        warnings = [
+            r.getMessage()
+            for r in caplog.records
+            if "could not switch" in r.getMessage()
+        ]
+        assert len(warnings) == 1
+        assert "continuing in wal mode" in warnings[0]
+        assert "corruption risk" in warnings[0]
+
+    def test_evidence_recorded_while_another_process_holds_wal(
         self, tmp_path, monkeypatch
     ):
+        """CLI-lane evidence lands even when a WAL holder blocks the journal
+        switch on a runtime that prefers the DELETE fallback (for example the
+        rdst web collector keeping cache.db open in WAL while an analyze run
+        records from a different SQLite build)."""
         path = tmp_path / "cache.db"
         ObservationStore(path).close()
 
@@ -1329,10 +1371,26 @@ class TestSqliteRuntimeCheck:
             monkeypatch.setattr(
                 observation_store, "_JOURNAL_SWITCH_TIMEOUT_SECONDS", 0.3
             )
-            with pytest.raises(RuntimeError, match="could not switch"):
-                ObservationStore(path)
+            record_execution_evidence(
+                "demo",
+                [{"sql": "SELECT * FROM users WHERE id = 1", "exec_count": 1}],
+                lane="rdst/analyze",
+                run_id="run-1",
+                started_at=100.0,
+                ended_at=100.0,
+                cache_db_path=path,
+            )
         finally:
             holder.close()
+
+        conn = sqlite3.connect(path)
+        try:
+            rows = conn.execute(
+                "SELECT target_id, lane, exec_count FROM rdst_execution"
+            ).fetchall()
+        finally:
+            conn.close()
+        assert rows == [("demo", "rdst/analyze", 1)]
 
     def test_two_instances_share_a_delete_mode_store(self, tmp_path, monkeypatch):
         self._fake_version(monkeypatch, (3, 40, 0), "3.40.0")

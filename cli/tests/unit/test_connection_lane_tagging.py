@@ -252,6 +252,32 @@ def test_resolve_application_name_precedence():
     assert resolve_application_name(None, None) == DEFAULT_LANE
 
 
+def test_rdst_self_marker_shape_and_admission_effect():
+    from shared.db_connection import rdst_self_marker
+    from shared.query_registry.sql_normalizer import references_user_relations
+
+    marker = rdst_self_marker("rdst/profile")
+    assert marker == "/*rdst:profile*/ "
+    tagged = marker + "SELECT * FROM users WHERE id = 1"
+    assert references_user_relations(tagged, "postgresql") is False
+    assert references_user_relations(tagged[len(marker):], "postgresql") is True
+
+
+def test_data_profiler_connects_with_profile_lane():
+    from features.schema.semantic_layer.data_profiler import DataProfiler
+
+    with patch("psycopg2.connect") as connect:
+        DataProfiler(dict(PG_CONFIG))._connect()
+    assert connect.call_args.kwargs["application_name"] == "rdst/profile"
+
+
+def test_schema_introspector_params_carry_profile_lane():
+    from features.schema.semantic_layer.introspector import SchemaIntrospector
+
+    params = SchemaIntrospector(dict(PG_CONFIG))._get_connection_params("t")
+    assert params["application_name"] == "rdst/profile"
+
+
 def _connect_data_manager(tmp_path, db_type, application_name):
     from shared.data_manager import ConnectionConfig, DataManager
     from shared.data_manager_service import DataManagerQueryType

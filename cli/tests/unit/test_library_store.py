@@ -93,6 +93,18 @@ def _user_version(db_path):
         conn.close()
 
 
+def _identity_rows(db_path):
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        return [
+            dict(row)
+            for row in conn.execute("SELECT * FROM query_identity ORDER BY hash")
+        ]
+    finally:
+        conn.close()
+
+
 class TestFirstLoadImport:
     def test_import_preserves_every_field(self, tmp_path):
         toml_path = _write_legacy_toml(tmp_path)
@@ -1055,3 +1067,1100 @@ class TestPlaceholderHashMigration:
         second = library_store.LibraryStore(db_path, toml_path).load_all()
         assert second == first
         assert _user_version(db_path) == SCHEMA_VERSION
+
+
+class TestPlaceholderArtifactRepair:
+    """Schema v9: repair identities written by the digit-lifting normalizer.
+
+    That normalizer extracted the digit of `$N` parameters as a literal
+    value, storing fused `$:pN` text, the lifted digits as parameter
+    "observations", and hashes derived from the damaged text (which the v8
+    guard could not recognize).
+    """
+
+    RAW_TEXT = "SELECT id, name FROM users WHERE org_id = $1 LIMIT $2"
+    CORRUPTED_SQL = "SELECT id, name FROM users WHERE org_id = $:p1 LIMIT $:p2"
+    ORPHAN_CORRUPTED_SQL = "SELECT sku FROM items WHERE vendor_id = $:p1"
+    ORPHAN_FOLDED_SQL = "SELECT sku FROM items WHERE vendor_id = :p1"
+    ZOMBIE_RAW = "SELECT status, total FROM orders WHERE customer_id = $1 LIMIT $2"
+    ZOMBIE_CORRUPTED_SQL = (
+        "SELECT status, total FROM orders WHERE customer_id = $:p1 LIMIT $:p2"
+    )
+    POISONED_PARAMS = {
+        "p1": {"value": "1", "type": "number"},
+        "p2": {"value": "2", "type": "number"},
+    }
+
+    def _seed_v8(self, tmp_path, entries):
+        """Write entries into a current-schema store, then stamp it v8."""
+        toml_path = tmp_path / "queries.toml"
+        db_path = library_db_path_for(toml_path)
+        store = library_store.LibraryStore(db_path, toml_path)
+        store.apply_changes({}, entries)
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("PRAGMA user_version = 8")
+            conn.commit()
+        finally:
+            conn.close()
+        return db_path, toml_path
+
+    @staticmethod
+    def _identity_row(db_path, query_hash):
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT * FROM query_identity WHERE hash = ?", (query_hash,)
+            ).fetchone()
+            return dict(row) if row is not None else None
+        finally:
+            conn.close()
+
+    def _damaged_fixture(self):
+        from shared.query_registry.query_registry import (
+            _sql_digest,
+            hash_sql,
+            normalize_sql,
+        )
+
+        corrupted_hash = _sql_digest(self.CORRUPTED_SQL)
+        canonical = hash_sql(self.RAW_TEXT)
+        assert canonical != corrupted_hash
+        clean_text = "SELECT email FROM customers WHERE id = 5"
+        clean_hash = hash_sql(clean_text)
+        legit_text = "SELECT a FROM accounts WHERE owner_id = $1"
+        legit_hash = hash_sql(legit_text)
+        entries = {
+            corrupted_hash: {
+                "hash": corrupted_hash,
+                "sql": self.CORRUPTED_SQL,
+                "original_sql": self.RAW_TEXT,
+                "source": "top-realtime",
+                "frequency": 9,
+                "observation_count": 9,
+                "parameters": dict(self.POISONED_PARAMS),
+                "most_recent_params": {"p1": "1", "p2": "2"},
+                "target_lifecycle": {
+                    "demo": {
+                        "first_observed_at": "2026-08-15T10:00:00Z",
+                        "last_observed_at": "2026-08-16T10:00:00Z",
+                        "sources": ["top-realtime"],
+                    },
+                },
+            },
+            # Artifact entry with no original text: the fused $ can only be
+            # folded out of the stored normalized text itself.
+            _sql_digest(self.ORPHAN_CORRUPTED_SQL): {
+                "hash": _sql_digest(self.ORPHAN_CORRUPTED_SQL),
+                "sql": self.ORPHAN_CORRUPTED_SQL,
+                "original_sql": "",
+                "source": "top-realtime",
+                "parameters": {"p1": {"value": "1", "type": "number"}},
+                "most_recent_params": {"p1": "1"},
+                "target_lifecycle": {
+                    "demo": {
+                        "first_observed_at": "2026-08-15T11:00:00Z",
+                        "sources": ["top-realtime"],
+                    },
+                },
+            },
+            # Clean entry minted by the current pipeline: a repair candidate
+            # (it spells :pN) whose hash already matches, kept byte-for-byte.
+            clean_hash: {
+                "hash": clean_hash,
+                "sql": normalize_sql(clean_text),
+                "original_sql": clean_text,
+                "source": "manual",
+                "parameters": {"p1": {"value": "5", "type": "number"}},
+                "most_recent_params": {"p1": "5"},
+                "target_lifecycle": {
+                    "demo": {
+                        "saved_at": "2026-08-01T10:00:00Z",
+                        "sources": ["manual"],
+                    },
+                },
+            },
+            # Genuinely-original $N spelling under its canonical hash: the
+            # fold targets only the fused $:pN artifact, never plain $N.
+            legit_hash: {
+                "hash": legit_hash,
+                "sql": normalize_sql(legit_text),
+                "original_sql": legit_text,
+                "source": "top-historical",
+                "target_lifecycle": {
+                    "demo": {
+                        "first_observed_at": "2026-08-10T10:00:00Z",
+                        "sources": ["top-historical"],
+                    },
+                },
+            },
+        }
+        return entries, corrupted_hash, canonical, clean_hash, legit_hash
+
+    def _zombie_fixture(self):
+        from shared.query_registry.query_registry import (
+            _sql_digest,
+            hash_sql,
+            normalize_sql,
+        )
+
+        canonical = hash_sql(self.ZOMBIE_RAW)
+        corrupted_hash = _sql_digest(self.ZOMBIE_CORRUPTED_SQL)
+        assert corrupted_hash != canonical
+        entries = {
+            # Reviewed identity already keyed under the canonical hash.
+            canonical: {
+                "hash": canonical,
+                "sql": normalize_sql(self.ZOMBIE_RAW),
+                "original_sql": self.ZOMBIE_RAW,
+                "source": "top-historical",
+                "tag": "order_totals",
+                "frequency": 12,
+                "observation_count": 12,
+                "avg_duration_ms": 8.0,
+                "target_lifecycle": {
+                    "demo": {
+                        "first_observed_at": "2026-08-01T10:00:00Z",
+                        "last_observed_at": "2026-08-05T10:00:00Z",
+                        "reviewed_at": "2026-08-02T09:00:00Z",
+                        "sources": ["top-historical"],
+                    },
+                },
+            },
+            # The same logical query re-admitted under a damaged hash after
+            # the digit-lifting build observed it again.
+            corrupted_hash: {
+                "hash": corrupted_hash,
+                "sql": self.ZOMBIE_CORRUPTED_SQL,
+                "original_sql": self.ZOMBIE_RAW,
+                "source": "top-realtime",
+                "frequency": 30,
+                "observation_count": 30,
+                "avg_duration_ms": 11.0,
+                "parameters": dict(self.POISONED_PARAMS),
+                "most_recent_params": {"p1": "1", "p2": "2"},
+                "target_lifecycle": {
+                    "demo": {
+                        "first_observed_at": "2026-08-10T10:00:00Z",
+                        "last_observed_at": "2026-08-16T10:00:00Z",
+                        "sources": ["top-realtime"],
+                    },
+                },
+            },
+        }
+        return entries, corrupted_hash, canonical
+
+    def test_damaged_entry_rekeys_folds_text_and_drops_params(
+        self, tmp_path, caplog
+    ):
+        from shared.query_registry.query_registry import hash_sql, normalize_sql
+
+        entries, corrupted_hash, canonical, clean_hash, legit_hash = (
+            self._damaged_fixture()
+        )
+        orphan_canonical = hash_sql(self.ORPHAN_CORRUPTED_SQL)
+        db_path, toml_path = self._seed_v8(tmp_path, entries)
+        clean_before = self._identity_row(db_path, clean_hash)
+        legit_before = self._identity_row(db_path, legit_hash)
+
+        with caplog.at_level(logging.INFO, logger=library_store.logger.name):
+            migrated = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert _user_version(db_path) == SCHEMA_VERSION
+        assert set(migrated) == {
+            canonical,
+            orphan_canonical,
+            clean_hash,
+            legit_hash,
+        }
+        repaired = migrated[canonical]
+        # The stored normalized text regenerates from the original through
+        # the current pipeline, shedding the fused artifact.
+        assert repaired["sql"] == normalize_sql(self.RAW_TEXT)
+        assert "$:p" not in repaired["sql"]
+        assert repaired["original_sql"] == self.RAW_TEXT
+        assert repaired["parameters"] == {}
+        assert repaired["most_recent_params"] == {}
+        assert repaired["frequency"] == 9
+        lifecycle = repaired["target_lifecycle"]["demo"]
+        assert lifecycle["first_observed_at"] == "2026-08-15T10:00:00Z"
+        assert lifecycle["last_observed_at"] == "2026-08-16T10:00:00Z"
+
+        # Without an original text the fused $ folds out of the stored
+        # normalized text itself.
+        orphan = migrated[orphan_canonical]
+        assert orphan["sql"] == self.ORPHAN_FOLDED_SQL
+        assert orphan["parameters"] == {}
+        assert orphan["most_recent_params"] == {}
+
+        # Untouched rows keep their bytes: the clean entry (its observed
+        # parameter values included) and the genuinely-$N entry.
+        assert self._identity_row(db_path, clean_hash) == clean_before
+        assert self._identity_row(db_path, legit_hash) == legit_before
+        assert "$1" in migrated[legit_hash]["sql"]
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT rm_hash FROM target_query WHERE rm_hash = ?",
+                (canonical,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None
+        assert any(
+            "Re-keyed query identity" in record.getMessage()
+            and corrupted_hash in record.getMessage()
+            for record in caplog.records
+        )
+
+    def test_zombie_pair_merges_with_lifecycle_union(self, tmp_path, caplog):
+        from shared.query_registry.query_registry import normalize_sql
+
+        entries, corrupted_hash, canonical = self._zombie_fixture()
+        db_path, toml_path = self._seed_v8(tmp_path, entries)
+
+        with caplog.at_level(logging.INFO, logger=library_store.logger.name):
+            migrated = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert set(migrated) == {canonical}
+        entry = migrated[canonical]
+        # The reviewed identity survives (tag curation outranks the damaged
+        # row once its lifted-digit parameters are scrubbed before ranking).
+        assert entry["tag"] == "order_totals"
+        assert entry["source"] == "top-historical"
+        assert entry["sql"] == normalize_sql(self.ZOMBIE_RAW)
+        assert entry["parameters"] == {}
+        assert entry["most_recent_params"] == {}
+        assert entry["frequency"] == 30
+        assert entry["observation_count"] == 30
+        assert entry["avg_duration_ms"] == 11.0
+        lifecycle = entry["target_lifecycle"]["demo"]
+        assert lifecycle["reviewed_at"] == "2026-08-02T09:00:00Z"
+        assert lifecycle["first_observed_at"] == "2026-08-01T10:00:00Z"
+        assert lifecycle["last_observed_at"] == "2026-08-16T10:00:00Z"
+        assert sorted(lifecycle["sources"]) == ["top-historical", "top-realtime"]
+        # The merge log names every folded-in hash, the canonical hash, and
+        # which member's hash the survivor carried.
+        assert any(
+            "Merged query identities" in record.getMessage()
+            and corrupted_hash in record.getMessage()
+            and canonical in record.getMessage()
+            for record in caplog.records
+        )
+
+    def test_foreign_hash_row_stays_untouched(self, tmp_path):
+        # Hand-imported data whose hash matches no pipeline derivation is
+        # precious and keeps its key, mirroring the v8 guard.
+        text = "SELECT a FROM foreign_rows WHERE b = $1"
+        entries = {
+            "abcdefabcdef": {
+                "hash": "abcdefabcdef",
+                "sql": text,
+                "original_sql": text,
+                "source": "manual",
+            },
+        }
+        db_path, toml_path = self._seed_v8(tmp_path, entries)
+
+        migrated = library_store.LibraryStore(db_path, toml_path).load_all()
+        assert set(migrated) == {"abcdefabcdef"}
+        assert migrated["abcdefabcdef"]["sql"] == text
+
+    def test_ordinal_lift_row_rekeys_on_proven_provenance(self, tmp_path):
+        from shared.query_registry.query_registry import _sql_digest, hash_sql
+        from shared.query_registry.sql_normalizer import (
+            canonicalize_placeholder_style,
+        )
+
+        # A build that lifted ORDER BY/GROUP BY ordinals stored this text
+        # for "... GROUP BY 1" and hashed its textual canonicalization.
+        lifted_sql = "SELECT region, COUNT(*) FROM shipments GROUP BY :p1"
+        raw_text = "SELECT region, COUNT(*) FROM shipments GROUP BY 1"
+        lifted_hash = _sql_digest(canonicalize_placeholder_style(lifted_sql))
+        canonical = hash_sql(raw_text)
+        assert canonical != lifted_hash
+        entries = {
+            lifted_hash: {
+                "hash": lifted_hash,
+                "sql": lifted_sql,
+                "original_sql": raw_text,
+                "source": "top-historical",
+                "parameters": {"p1": {"value": "1", "type": "number"}},
+                "most_recent_params": {"p1": "1"},
+            },
+        }
+        db_path, toml_path = self._seed_v8(tmp_path, entries)
+
+        migrated = library_store.LibraryStore(db_path, toml_path).load_all()
+        assert set(migrated) == {canonical}
+        entry = migrated[canonical]
+        assert entry["original_sql"] == raw_text
+        # The regenerated text keeps the ordinal, so the lifted digit's
+        # parameter observation names no placeholder and is dropped.
+        assert entry["sql"] == raw_text
+        assert entry["parameters"] == {}
+        assert entry["most_recent_params"] == {}
+
+    def test_repair_is_idempotent(self, tmp_path):
+        damaged, _, _, _, _ = self._damaged_fixture()
+        zombie, _, _ = self._zombie_fixture()
+        db_path, toml_path = self._seed_v8(tmp_path, {**damaged, **zombie})
+        first = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("PRAGMA user_version = 8")
+            conn.commit()
+        finally:
+            conn.close()
+        second = library_store.LibraryStore(db_path, toml_path).load_all()
+        assert second == first
+        assert _user_version(db_path) == SCHEMA_VERSION
+
+    def test_fresh_store_creates_at_current_version(self, tmp_path):
+        assert SCHEMA_VERSION == 11
+        toml_path = tmp_path / "queries.toml"
+        registry = QueryRegistry(registry_path=str(toml_path))
+        registry.add_query("SELECT 1", source="manual")
+        assert _user_version(library_db_path_for(toml_path)) == 11
+
+    def test_toml_import_repairs_damaged_entries(self, tmp_path):
+        from shared.query_registry.query_registry import hash_sql, normalize_sql
+
+        entries, corrupted_hash, canonical, clean_hash, legit_hash = (
+            self._damaged_fixture()
+        )
+        toml_path = _write_legacy_toml(tmp_path, {"queries": entries})
+        store = library_store.LibraryStore(
+            library_db_path_for(toml_path), toml_path
+        )
+
+        imported = store.load_all()
+        assert corrupted_hash not in imported
+        assert set(imported) == {
+            canonical,
+            hash_sql(self.ORPHAN_CORRUPTED_SQL),
+            clean_hash,
+            legit_hash,
+        }
+        assert imported[canonical]["sql"] == normalize_sql(self.RAW_TEXT)
+        assert imported[canonical]["parameters"] == {}
+        assert _user_version(store.path) == SCHEMA_VERSION
+
+
+class TestPlaceholderResidueRepair:
+    """Schema v10: finish the v9 repair on databases v9 already migrated.
+
+    v9 left three residues behind: lifted slot indices kept as parameter
+    "observations" on rows whose hash was already canonical, stored text
+    regenerated without the row's dialect (turning `$N` into `'$N'`), and
+    ordinal-lifted rows that still hash apart from live observations.
+    """
+
+    def _seed_v9(self, tmp_path, entries):
+        """Write entries into a current-schema store, then stamp it v9."""
+        toml_path = tmp_path / "queries.toml"
+        db_path = library_db_path_for(toml_path)
+        store = library_store.LibraryStore(db_path, toml_path)
+        store.apply_changes({}, entries)
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("PRAGMA user_version = 9")
+            conn.commit()
+        finally:
+            conn.close()
+        return db_path, toml_path
+
+    @staticmethod
+    def _entry(query_hash, **fields):
+        entry = {
+            "hash": query_hash,
+            "source": "top-historical",
+            "target_lifecycle": {
+                "demo": {
+                    "first_observed_at": "2026-08-15T10:00:00Z",
+                    "last_observed_at": "2026-08-16T10:00:00Z",
+                    "sources": ["top-historical"],
+                },
+            },
+        }
+        entry.update(fields)
+        return entry
+
+    ENGINE_SQL = "SELECT id FROM orders WHERE customer_id = $1 LIMIT $2"
+
+    def test_lifted_slot_indices_are_dropped(self, tmp_path):
+        from shared.query_registry.query_registry import hash_sql
+
+        engine_hash = hash_sql(self.ENGINE_SQL)
+        entries = {
+            engine_hash: self._entry(
+                engine_hash,
+                sql=self.ENGINE_SQL,
+                original_sql=self.ENGINE_SQL,
+                parameters={
+                    "p1": {"value": "2", "type": "number"},
+                    "p2": {"value": "1", "type": "number"},
+                },
+                most_recent_params={"p1": "2", "p2": "1"},
+            ),
+        }
+        db_path, toml_path = self._seed_v9(tmp_path, entries)
+
+        migrated = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert _user_version(db_path) == SCHEMA_VERSION
+        assert set(migrated) == {engine_hash}
+        assert migrated[engine_hash]["sql"] == self.ENGINE_SQL
+        assert migrated[engine_hash]["parameters"] == {}
+        assert migrated[engine_hash]["most_recent_params"] == {}
+
+    def test_sampled_slot_values_survive(self, tmp_path):
+        from shared.query_registry.query_registry import hash_sql
+
+        engine_hash = hash_sql(self.ENGINE_SQL)
+        sampled = {"p1": "4711", "p2": "25"}
+        entries = {
+            engine_hash: self._entry(
+                engine_hash,
+                sql=self.ENGINE_SQL,
+                original_sql=self.ENGINE_SQL,
+                most_recent_params=dict(sampled),
+            ),
+        }
+        db_path, toml_path = self._seed_v9(tmp_path, entries)
+
+        migrated = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert migrated[engine_hash]["most_recent_params"] == sampled
+
+    def test_literal_bearing_original_restores_real_values(self, tmp_path):
+        from shared.query_registry.query_registry import (
+            canonicalize_sql,
+            hash_sql,
+        )
+        from shared.query_registry.sql_normalizer import normalize_and_extract
+
+        raw = "SELECT name FROM users WHERE org_id = 7 LIMIT 10"
+        normalized, extracted = normalize_and_extract(canonicalize_sql(raw))
+        raw_hash = hash_sql(raw)
+        entries = {
+            raw_hash: self._entry(
+                raw_hash,
+                sql=normalized,
+                original_sql=raw,
+                parameters={
+                    name: {"value": str(index), "type": "number"}
+                    for index, name in enumerate(sorted(extracted), 1)
+                },
+                most_recent_params={
+                    name: str(index)
+                    for index, name in enumerate(sorted(extracted), 1)
+                },
+            ),
+        }
+        db_path, toml_path = self._seed_v9(tmp_path, entries)
+
+        migrated = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        entry = migrated[raw_hash]
+        assert entry["parameters"] == extracted
+        assert entry["most_recent_params"] == {
+            name: info["value"] for name, info in extracted.items()
+        }
+
+    def test_values_proving_their_own_identity_survive(self, tmp_path):
+        from shared.query_registry.query_registry import (
+            canonicalize_sql,
+            hash_sql,
+        )
+        from shared.query_registry.sql_normalizer import normalize_and_extract
+
+        # Values that happen to read as slot indices, on an entry whose
+        # only stored text is already normalized: substituting them back
+        # reproduces the entry's own hash, which proves they are real.
+        raw = "SELECT title FROM posts WHERE score > 1 LIMIT 2"
+        normalized, extracted = normalize_and_extract(canonicalize_sql(raw))
+        raw_hash = hash_sql(raw)
+        assert library_store._lifted_slot_indices(extracted)
+        entries = {
+            raw_hash: self._entry(
+                raw_hash,
+                sql=normalized,
+                original_sql=normalized,
+                parameters=dict(extracted),
+            ),
+        }
+        db_path, toml_path = self._seed_v9(tmp_path, entries)
+
+        migrated = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert migrated[raw_hash]["parameters"] == extracted
+
+    def test_quoted_placeholder_text_is_regenerated(self, tmp_path, monkeypatch):
+        from shared.query_registry import query_registry
+        from shared.query_registry.query_registry import hash_sql, normalize_sql
+
+        monkeypatch.setattr(
+            query_registry, "dialect_for_target", lambda target: "postgres"
+        )
+        raw = "SELECT DATE_TRUNC($1, created_at) AS bucket FROM events"
+        degraded = normalize_sql(raw)
+        assert "'$1'" in degraded
+        raw_hash = hash_sql(raw)
+        entries = {
+            raw_hash: self._entry(
+                raw_hash, sql=degraded, original_sql=raw, last_target="demo"
+            ),
+        }
+        db_path, toml_path = self._seed_v9(tmp_path, entries)
+
+        migrated = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        # The hash is derived dialect-lessly and stays put; only the text
+        # the user reads and RDST re-executes is regenerated.
+        assert set(migrated) == {raw_hash}
+        assert migrated[raw_hash]["sql"] == normalize_sql(raw, "postgres")
+        assert "'$1'" not in migrated[raw_hash]["sql"]
+
+    def test_ordinal_lift_without_original_rekeys(self, tmp_path):
+        from shared.query_registry.query_registry import _sql_digest, hash_sql
+        from shared.query_registry.sql_normalizer import (
+            canonicalize_placeholder_style,
+        )
+
+        lifted_sql = "SELECT region, COUNT(*) FROM shipments GROUP BY :p1 ORDER BY :p2"
+        raw = "SELECT region, COUNT(*) FROM shipments GROUP BY 1 ORDER BY 2"
+        lifted_hash = _sql_digest(canonicalize_placeholder_style(lifted_sql))
+        canonical = hash_sql(raw)
+        assert canonical != lifted_hash
+        entries = {
+            lifted_hash: self._entry(
+                lifted_hash,
+                sql=lifted_sql,
+                original_sql="",
+                parameters={
+                    "p1": {"value": "1", "type": "number"},
+                    "p2": {"value": "2", "type": "number"},
+                },
+                most_recent_params={"p1": "1", "p2": "2"},
+            ),
+        }
+        db_path, toml_path = self._seed_v9(tmp_path, entries)
+
+        migrated = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert set(migrated) == {canonical}
+        entry = migrated[canonical]
+        assert entry["sql"] == raw
+        assert entry["original_sql"] == ""
+        assert entry["parameters"] == {}
+        assert entry["most_recent_params"] == {}
+
+    def test_ordinal_rekey_merges_with_the_live_identity(self, tmp_path):
+        from shared.query_registry.query_registry import _sql_digest, hash_sql
+        from shared.query_registry.sql_normalizer import (
+            canonicalize_placeholder_style,
+        )
+
+        lifted_sql = "SELECT region, COUNT(*) FROM shipments GROUP BY :p1 ORDER BY :p2"
+        raw = "SELECT region, COUNT(*) FROM shipments GROUP BY 1 ORDER BY 2"
+        lifted_hash = _sql_digest(canonicalize_placeholder_style(lifted_sql))
+        canonical = hash_sql(raw)
+        entries = {
+            lifted_hash: self._entry(
+                lifted_hash,
+                sql=lifted_sql,
+                original_sql="",
+                frequency=40,
+                parameters={
+                    "p1": {"value": "1", "type": "number"},
+                    "p2": {"value": "2", "type": "number"},
+                },
+            ),
+            canonical: self._entry(
+                canonical,
+                sql=raw,
+                original_sql=raw,
+                tag="shipments_by_region",
+                frequency=3,
+                target_lifecycle={
+                    "demo": {
+                        "first_observed_at": "2026-08-10T10:00:00Z",
+                        "last_observed_at": "2026-08-14T10:00:00Z",
+                        "sources": ["top-realtime"],
+                    },
+                },
+            ),
+        }
+        db_path, toml_path = self._seed_v9(tmp_path, entries)
+
+        migrated = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert set(migrated) == {canonical}
+        entry = migrated[canonical]
+        # Curation survives; the lifecycle unions across both members.
+        assert entry["tag"] == "shipments_by_region"
+        assert entry["frequency"] == 40
+        lifecycle = entry["target_lifecycle"]["demo"]
+        assert lifecycle["first_observed_at"] == "2026-08-10T10:00:00Z"
+        assert lifecycle["last_observed_at"] == "2026-08-16T10:00:00Z"
+        assert sorted(lifecycle["sources"]) == ["top-historical", "top-realtime"]
+
+    def test_foreign_hash_row_stays_untouched(self, tmp_path):
+        entries = {
+            "abcdefabcdef": self._entry(
+                "abcdefabcdef",
+                sql=self.ENGINE_SQL,
+                original_sql=self.ENGINE_SQL,
+                parameters={
+                    "p1": {"value": "2", "type": "number"},
+                    "p2": {"value": "1", "type": "number"},
+                },
+            ),
+        }
+        db_path, toml_path = self._seed_v9(tmp_path, entries)
+
+        migrated = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert set(migrated) == {"abcdefabcdef"}
+        assert migrated["abcdefabcdef"]["parameters"] == {
+            "p1": {"value": "2", "type": "number"},
+            "p2": {"value": "1", "type": "number"},
+        }
+
+    def test_repair_is_idempotent(self, tmp_path):
+        from shared.query_registry.query_registry import _sql_digest, hash_sql
+        from shared.query_registry.sql_normalizer import (
+            canonicalize_placeholder_style,
+        )
+
+        engine_hash = hash_sql(self.ENGINE_SQL)
+        lifted_sql = "SELECT region, COUNT(*) FROM shipments GROUP BY :p1"
+        lifted_hash = _sql_digest(canonicalize_placeholder_style(lifted_sql))
+        entries = {
+            engine_hash: self._entry(
+                engine_hash,
+                sql=self.ENGINE_SQL,
+                original_sql=self.ENGINE_SQL,
+                parameters={
+                    "p1": {"value": "2", "type": "number"},
+                    "p2": {"value": "1", "type": "number"},
+                },
+            ),
+            lifted_hash: self._entry(
+                lifted_hash,
+                sql=lifted_sql,
+                original_sql="",
+                parameters={"p1": {"value": "1", "type": "number"}},
+            ),
+        }
+        db_path, toml_path = self._seed_v9(tmp_path, entries)
+        first = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        # Re-running the migration over its own output changes nothing.
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("PRAGMA user_version = 9")
+            conn.commit()
+        finally:
+            conn.close()
+        second = library_store.LibraryStore(db_path, toml_path).load_all()
+        assert second == first
+        assert library_store.LibraryStore(db_path, toml_path).load_all() == first
+        assert _user_version(db_path) == SCHEMA_VERSION
+
+    def test_clean_store_is_left_alone(self, tmp_path):
+        from shared.query_registry.query_registry import hash_sql
+
+        raw = "SELECT name FROM users WHERE org_id = 7"
+        raw_hash = hash_sql(raw)
+        entries = {
+            raw_hash: self._entry(
+                raw_hash,
+                sql="SELECT name FROM users WHERE org_id = :p1",
+                original_sql=raw,
+                parameters={"p1": {"value": "7", "type": "number"}},
+                most_recent_params={"p1": "7"},
+            ),
+        }
+        db_path, toml_path = self._seed_v9(tmp_path, entries)
+        before = _identity_rows(db_path)
+
+        library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert _identity_rows(db_path) == before
+
+
+class TestObservationHistoryRekey:
+    """Observation history follows the identities library.db re-keys."""
+
+    LIFTED_SQL = "SELECT region, COUNT(*) FROM shipments GROUP BY :p1"
+    RAW = "SELECT region, COUNT(*) FROM shipments GROUP BY 1"
+
+    def _window(self, query_hash, window_end, calls):
+        return {
+            "normalized_hash": query_hash,
+            "window_start": window_end - 60.0,
+            "window_end": window_end,
+            "calls_delta": calls,
+            "exec_time_delta": float(calls),
+            "approximate_qps": calls / 60.0,
+            "completeness": "complete",
+        }
+
+    def test_rekey_identities_moves_and_folds_rows(self, tmp_path):
+        store = observation_store.ObservationStore(tmp_path / "cache.db")
+        try:
+            store.record_identity_aliases("demo", "epoch-1", {"key-1": "aaaa"})
+            store.record_recent_observations(
+                "demo",
+                [self._window("aaaa", 100.0, 3), self._window("bbbb", 100.0, 4)],
+            )
+            moved = store.rekey_identities({"aaaa": "bbbb", "cccc": "cccc"})
+            assert moved
+            assert store.get_identity_aliases("demo", "epoch-1") == {
+                "key-1": "bbbb"
+            }
+            with store._read() as conn:
+                rows = conn.execute(
+                    "SELECT normalized_hash, calls_delta, exec_time_delta"
+                    " FROM recent_observation"
+                ).fetchall()
+        finally:
+            store.close()
+        assert [tuple(row) for row in rows] == [("bbbb", 7, 7.0)]
+
+    def test_migration_rekeys_observation_history(self, tmp_path):
+        from shared.query_registry.query_registry import _sql_digest, hash_sql
+        from shared.query_registry.sql_normalizer import (
+            canonicalize_placeholder_style,
+        )
+
+        lifted_hash = _sql_digest(canonicalize_placeholder_style(self.LIFTED_SQL))
+        canonical = hash_sql(self.RAW)
+        toml_path = tmp_path / "queries.toml"
+        db_path = library_db_path_for(toml_path)
+        seeder = TestPlaceholderResidueRepair()
+        entries = {
+            lifted_hash: seeder._entry(
+                lifted_hash,
+                sql=self.LIFTED_SQL,
+                original_sql="",
+                parameters={"p1": {"value": "1", "type": "number"}},
+            ),
+        }
+        db_path, toml_path = seeder._seed_v9(tmp_path, entries)
+        store = observation_store.ObservationStore(tmp_path / "cache.db")
+        try:
+            store.record_identity_aliases(
+                "demo", "epoch-1", {"key-1": lifted_hash}
+            )
+            store.record_recent_observations(
+                "demo", [self._window(lifted_hash, 100.0, 5)]
+            )
+        finally:
+            store.close()
+
+        migrated = library_store.LibraryStore(db_path, toml_path).load_all()
+        assert set(migrated) == {canonical}
+
+        store = observation_store.ObservationStore(tmp_path / "cache.db")
+        try:
+            assert store.get_identity_aliases("demo", "epoch-1") == {
+                "key-1": canonical
+            }
+            with store._read() as conn:
+                hashes = [
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT normalized_hash FROM recent_observation"
+                    )
+                ]
+        finally:
+            store.close()
+        assert hashes == [canonical]
+
+    def test_missing_cache_file_is_not_created(self, tmp_path):
+        from shared.query_registry.query_registry import _sql_digest
+
+        lifted_hash = _sql_digest(
+            "SELECT region, COUNT(*) FROM shipments GROUP BY :p1"
+        )
+        seeder = TestPlaceholderResidueRepair()
+        db_path, toml_path = seeder._seed_v9(
+            tmp_path,
+            {
+                lifted_hash: seeder._entry(
+                    lifted_hash,
+                    sql=self.LIFTED_SQL,
+                    original_sql="",
+                    parameters={"p1": {"value": "1", "type": "number"}},
+                ),
+            },
+        )
+
+        library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert not (tmp_path / "cache.db").exists()
+
+
+class TestSelfTrafficPrune:
+    """Schema v11: drop the RDST diagnostic statements markers cannot reach.
+
+    Schema profiling reads user relations, so its statements were admitted
+    as workload before the ``/*rdst:...*/`` self markers existed. They are
+    recognized by matching the stored text against the template that would
+    have emitted it, for the table and columns the text itself names.
+    """
+
+    PG_COLUMN_STATS = (
+        'SELECT COUNT(*) AS __total, COUNT("id") AS "id__cnt", '
+        'COUNT(DISTINCT "id") AS "id__dist", '
+        'SUM(CASE WHEN "id" IS NULL THEN $1 ELSE $2 END) AS "id__nulls", '
+        'COUNT("title") AS "title__cnt", COUNT(DISTINCT "title") AS "title__dist", '
+        'SUM(CASE WHEN "title" IS NULL THEN $3 ELSE $4 END) AS "title__nulls" '
+        'FROM "posts" TABLESAMPLE SYSTEM($5)'
+    )
+    PG_TOP_VALUES = (
+        'SELECT "body"::text, COUNT(*) AS cnt FROM "posts" TABLESAMPLE SYSTEM($1) '
+        'WHERE "body" IS NOT NULL GROUP BY "body" ORDER BY cnt DESC LIMIT $2'
+    )
+    PG_TOP_VALUES_SMALL = (
+        'SELECT "tagname"::text, COUNT(*) AS cnt FROM "tags" '
+        'WHERE "tagname" IS NOT NULL GROUP BY "tagname" ORDER BY cnt DESC LIMIT $1'
+    )
+    PG_SAMPLE_ROWS = 'SELECT * FROM "votes" TABLESAMPLE SYSTEM($1) LIMIT $2'
+    PG_ENUM_SAMPLE = (
+        'WITH sampled AS (\n'
+        '    SELECT "class"\n'
+        '    FROM "badges" TABLESAMPLE SYSTEM($1)\n'
+        '    LIMIT $2\n'
+        ')\n'
+        'SELECT DISTINCT "class"\n'
+        'FROM sampled\n'
+        'WHERE "class" IS NOT NULL\n'
+        'LIMIT $3'
+    )
+    MYSQL_COLUMN_STATS = (
+        "SELECT COUNT(*) AS __total, COUNT(`id`) AS `id__cnt`, "
+        "COUNT(DISTINCT `id`) AS `id__dist`, "
+        "SUM(CASE WHEN `id` IS NULL THEN ? ELSE ? END) AS `id__nulls` "
+        "FROM (SELECT `id` FROM `posts` LIMIT ?) sampled"
+    )
+    MYSQL_TOP_VALUES = (
+        "SELECT CAST(`name` AS CHAR) AS val, COUNT(*) AS cnt FROM `badges` "
+        "WHERE `name` IS NOT NULL GROUP BY val ORDER BY cnt DESC LIMIT ?"
+    )
+    MYSQL_ENUM_SAMPLE = (
+        "SELECT DISTINCT `class`\n"
+        "    FROM (\n"
+        "        SELECT `class`\n"
+        "        FROM `badges`\n"
+        "        LIMIT 10000\n"
+        "    ) subq\n"
+        "    WHERE `class` IS NOT NULL\n"
+        "    LIMIT 21"
+    )
+    # A user query that uses TABLESAMPLE without being a template instance.
+    USER_TABLESAMPLE = (
+        'SELECT id, title FROM "posts" TABLESAMPLE SYSTEM($1) WHERE score > $2'
+    )
+    # The small-table sample-rows form, indistinguishable from user SQL.
+    USER_STAR_LIMIT = 'SELECT * FROM "tags" LIMIT $1'
+
+    def _seed_v10(self, tmp_path, entries):
+        """Write entries into a current-schema store, then stamp it v10."""
+        toml_path = tmp_path / "queries.toml"
+        db_path = library_db_path_for(toml_path)
+        library_store.LibraryStore(db_path, toml_path).apply_changes({}, entries)
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("PRAGMA user_version = 10")
+            conn.commit()
+        finally:
+            conn.close()
+        return db_path, toml_path
+
+    @staticmethod
+    def _entry(sql, **lifecycle):
+        from shared.query_registry.query_registry import hash_sql
+
+        query_hash = hash_sql(sql)
+        target = {
+            "first_observed_at": "2026-08-19T10:00:00Z",
+            "last_observed_at": "2026-08-19T11:00:00Z",
+            "sources": ["top-historical"],
+        }
+        target.update(lifecycle)
+        return query_hash, {
+            "hash": query_hash,
+            "sql": sql,
+            "original_sql": sql,
+            "source": "top-historical",
+            "target_lifecycle": {"demo": target},
+        }
+
+    def _migrate(self, tmp_path, texts, lifecycles=None):
+        lifecycles = lifecycles or {}
+        entries = {}
+        hashes = {}
+        for text in texts:
+            query_hash, entry = self._entry(text, **lifecycles.get(text, {}))
+            entries[query_hash] = entry
+            hashes[text] = query_hash
+        db_path, toml_path = self._seed_v10(tmp_path, entries)
+        surviving = set(library_store.LibraryStore(db_path, toml_path).load_all())
+        return db_path, hashes, surviving
+
+    def test_postgres_template_rows_are_pruned(self, tmp_path):
+        from features.schema.semantic_layer.pattern_detector import (
+            detect_delimiter_columns_sql_postgres,
+        )
+
+        delimiter = detect_delimiter_columns_sql_postgres(
+            ["text"], "comments", 100_000
+        ).split("*/ ", 1)[1]
+        texts = [
+            self.PG_COLUMN_STATS,
+            self.PG_TOP_VALUES,
+            self.PG_TOP_VALUES_SMALL,
+            self.PG_SAMPLE_ROWS,
+            self.PG_ENUM_SAMPLE,
+            delimiter,
+        ]
+        db_path, _, surviving = self._migrate(tmp_path, texts)
+        assert surviving == set()
+        assert _user_version(db_path) == SCHEMA_VERSION
+
+    def test_mysql_template_rows_are_pruned(self, tmp_path):
+        from features.schema.semantic_layer.pattern_detector import (
+            detect_delimiter_columns_sql_mysql,
+        )
+
+        delimiter = detect_delimiter_columns_sql_mysql(
+            ["text"], "comments", 100_000
+        ).split("*/ ", 1)[1]
+        texts = [
+            self.MYSQL_COLUMN_STATS,
+            self.MYSQL_TOP_VALUES,
+            self.MYSQL_ENUM_SAMPLE,
+            delimiter,
+        ]
+        _, _, surviving = self._migrate(tmp_path, texts)
+        assert surviving == set()
+
+    def test_curated_template_rows_survive(self, tmp_path):
+        texts = [self.PG_TOP_VALUES, self.PG_SAMPLE_ROWS, self.PG_ENUM_SAMPLE]
+        lifecycles = {
+            self.PG_TOP_VALUES: {"saved_at": "2026-08-19T12:00:00Z"},
+            self.PG_SAMPLE_ROWS: {
+                "last_analyzed_at": "2026-08-19T12:00:00Z",
+                "analysis_count": 1,
+            },
+            self.PG_ENUM_SAMPLE: {
+                "last_compared_at": "2026-08-19T12:00:00Z",
+                "comparison_count": 2,
+            },
+        }
+        _, hashes, surviving = self._migrate(tmp_path, texts, lifecycles)
+        assert surviving == set(hashes.values())
+
+    def test_reviewed_only_template_row_is_pruned(self, tmp_path):
+        texts = [self.PG_TOP_VALUES]
+        lifecycles = {self.PG_TOP_VALUES: {"reviewed_at": "2026-08-19T12:00:00Z"}}
+        _, _, surviving = self._migrate(tmp_path, texts, lifecycles)
+        assert surviving == set()
+
+    def test_user_queries_survive(self, tmp_path):
+        texts = [self.USER_TABLESAMPLE, self.USER_STAR_LIMIT]
+        _, hashes, surviving = self._migrate(tmp_path, texts)
+        assert surviving == set(hashes.values())
+
+    def test_prune_is_idempotent(self, tmp_path):
+        texts = [self.PG_TOP_VALUES, self.USER_TABLESAMPLE]
+        db_path, hashes, surviving = self._migrate(tmp_path, texts)
+        assert surviving == {hashes[self.USER_TABLESAMPLE]}
+
+        toml_path = db_path.with_name("queries.toml")
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("PRAGMA user_version = 10")
+            conn.commit()
+        finally:
+            conn.close()
+        again = library_store.LibraryStore(db_path, toml_path).load_all()
+        assert set(again) == surviving
+        assert _user_version(db_path) == SCHEMA_VERSION
+
+    def test_clean_store_is_untouched(self, tmp_path, caplog):
+        texts = [self.USER_TABLESAMPLE, self.USER_STAR_LIMIT]
+        with caplog.at_level(logging.INFO, logger=library_store.__name__):
+            _, hashes, surviving = self._migrate(tmp_path, texts)
+        assert surviving == set(hashes.values())
+        assert "self-traffic" not in caplog.text
+
+    def test_ladder_from_v8_prunes_template_rows(self, tmp_path):
+        seeder = TestPlaceholderArtifactRepair()
+        template_hash, template = self._entry(self.PG_TOP_VALUES)
+        user_hash, user = self._entry(self.USER_TABLESAMPLE)
+        db_path, toml_path = seeder._seed_v8(
+            tmp_path, {template_hash: template, user_hash: user}
+        )
+
+        surviving = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert set(surviving) == {user_hash}
+        assert _user_version(db_path) == SCHEMA_VERSION
+
+    def test_prune_logs_shape_and_skip_reason(self, tmp_path, caplog):
+        texts = [self.PG_TOP_VALUES, self.PG_SAMPLE_ROWS]
+        lifecycles = {self.PG_SAMPLE_ROWS: {"saved_at": "2026-08-19T12:00:00Z"}}
+        with caplog.at_level(logging.INFO, logger=library_store.__name__):
+            self._migrate(tmp_path, texts, lifecycles)
+        assert "Pruned RDST top_values statement" in caplog.text
+        assert "Keeping RDST sample_rows statement" in caplog.text
+        assert "removed 1 RDST self-traffic entries (top_values 1)" in caplog.text
+
+
+class TestSelfTemplateRecognizer:
+    """The recognizer agrees with the builders it mirrors."""
+
+    def test_delimiter_probes_match_live_builders(self):
+        from features.schema.semantic_layer.pattern_detector import (
+            detect_delimiter_columns_sql_mysql,
+            detect_delimiter_columns_sql_postgres,
+        )
+        from shared.query_registry.self_traffic import match_self_template
+
+        for builder in (
+            detect_delimiter_columns_sql_postgres,
+            detect_delimiter_columns_sql_mysql,
+        ):
+            for row_estimate in (100, 100_000):
+                sql = builder(["text", "body"], "comments", row_estimate)
+                assert match_self_template(sql) == "delimiter_probe"
+                assert match_self_template(sql.split("*/ ", 1)[1]) == (
+                    "delimiter_probe"
+                )
+
+    def test_non_template_statements_are_not_matched(self):
+        from shared.query_registry.self_traffic import match_self_template
+
+        for sql in (
+            "",
+            "SELECT 1",
+            'SELECT * FROM "tags" LIMIT $1',
+            'SELECT DISTINCT "class" FROM "badges" WHERE "class" IS NOT NULL LIMIT $1',
+            'SELECT "name"::text, COUNT(*) AS cnt FROM "badges" '
+            'WHERE "name" IS NOT NULL GROUP BY "name" ORDER BY cnt DESC',
+            'SELECT COUNT(*) AS __total, COUNT("id") AS "id__cnt", '
+            'COUNT(DISTINCT "id") AS "id__dist", '
+            'SUM(CASE WHEN "id" IS NULL THEN $1 ELSE $2 END) AS "id__nulls" '
+            'FROM "tags" WHERE "id" > $3',
+            'SELECT * FROM "votes" TABLESAMPLE SYSTEM($1) WHERE id > $2 LIMIT $3',
+        ):
+            assert match_self_template(sql) is None

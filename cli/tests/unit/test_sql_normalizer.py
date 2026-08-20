@@ -144,6 +144,101 @@ AND status = 'active'"""
         assert "ORDER BY" in normalized.upper()
 
 
+class TestStructuralLiteralsSurvive:
+    """Positional placeholders and ordinals are structure, not data."""
+
+    def test_dollar_placeholders_survive_every_dialect(self):
+        sql = (
+            "SELECT id, name FROM users WHERE score > $1 "
+            "ORDER BY created_at DESC LIMIT $2"
+        )
+        for dialect in (None, "postgres", "mysql"):
+            normalized, params = normalize_and_extract(sql, dialect)
+            assert params == {}
+            assert "$1" in normalized
+            assert "$2" in normalized
+            assert "$:p" not in normalized
+
+    def test_dollar_placeholder_mixed_with_literals(self):
+        # Postgres parses $N as a Parameter wrapping the digit; only the
+        # real literals become params.
+        sql = "SELECT * FROM t WHERE a = $1 AND b = 'x' LIMIT 5"
+        normalized, params = normalize_and_extract(sql, "postgres")
+        assert "$1" in normalized
+        values = {p["value"] for p in params.values()}
+        assert values == {"x", "5"}
+
+    def test_group_by_ordinal_stays_literal(self):
+        sql = "SELECT a, COUNT(*) FROM t GROUP BY 1"
+        for dialect in (None, "postgres"):
+            normalized, params = normalize_and_extract(sql, dialect)
+            assert "GROUP BY 1" in normalized
+            assert params == {}
+
+    def test_order_by_ordinal_stays_literal(self):
+        sql = "SELECT a, b FROM t ORDER BY 2 DESC, 1"
+        for dialect in (None, "postgres"):
+            normalized, params = normalize_and_extract(sql, dialect)
+            assert "ORDER BY 2 DESC, 1" in normalized
+            assert params == {}
+
+    def test_order_by_expression_literal_still_extracted(self):
+        # A literal inside an ORDER BY expression is a value, not an ordinal.
+        normalized, params = normalize_and_extract("SELECT a FROM t ORDER BY a + 1")
+        assert "ORDER BY a + :p1" in normalized
+        assert params["p1"]["value"] == "1"
+
+    def test_window_order_by_constant_is_extracted(self):
+        # ORDER BY inside OVER (...) orders rows by a constant, not a
+        # select-list position; it is a value, not an ordinal.
+        sql = "SELECT ROW_NUMBER() OVER (ORDER BY 1) FROM t"
+        normalized, params = normalize_and_extract(sql)
+        assert "ORDER BY :p1" in normalized
+        assert params["p1"]["value"] == "1"
+
+    def test_aggregate_order_by_constant_is_extracted(self):
+        # ORDER BY inside an aggregate function argument list is likewise a
+        # constant, not a select-list ordinal.
+        sql = "SELECT ARRAY_AGG(x ORDER BY 1) FROM t"
+        normalized, params = normalize_and_extract(sql)
+        assert "ORDER BY :p1" in normalized
+        assert params["p1"]["value"] == "1"
+
+    def test_statement_level_group_by_ordinal_still_stays_literal(self):
+        # Regression: plain GROUP BY 1 at the statement level is still an
+        # ordinal and must not be affected by the window/aggregate fix.
+        sql = "SELECT a, COUNT(*) FROM t GROUP BY 1"
+        normalized, params = normalize_and_extract(sql)
+        assert "GROUP BY 1" in normalized
+        assert params == {}
+
+    def test_statement_level_order_by_ordinal_still_stays_literal(self):
+        # Regression: plain ORDER BY 2 at the statement level is still an
+        # ordinal and must not be affected by the window/aggregate fix.
+        sql = "SELECT a, b FROM t ORDER BY 2"
+        normalized, params = normalize_and_extract(sql)
+        assert "ORDER BY 2" in normalized
+        assert params == {}
+
+    def test_union_order_by_ordinal_still_stays_literal(self):
+        sql = "SELECT a FROM t1 UNION SELECT b FROM t2 ORDER BY 1"
+        normalized, params = normalize_and_extract(sql)
+        assert "ORDER BY 1" in normalized
+        assert params == {}
+
+    def test_ordinal_alongside_extracted_values(self):
+        sql = (
+            "SELECT DATE_TRUNC($1, created_at) AS day, COUNT(*) FROM events "
+            "WHERE type = 'click' GROUP BY 1 ORDER BY 1 DESC LIMIT 50"
+        )
+        normalized, params = normalize_and_extract(sql, "postgres")
+        assert "$1" in normalized
+        assert "GROUP BY 1" in normalized
+        assert "ORDER BY 1 DESC" in normalized
+        values = {p["value"] for p in params.values()}
+        assert values == {"click", "50"}
+
+
 class TestReconstructSql:
     """Tests for reconstruct_sql function."""
 
@@ -335,6 +430,55 @@ class TestFallbackBehavior:
         normalized, params = normalize_and_extract(sql, dialect='postgres')
         assert len(params) == 1
 
+    def test_fallback_preserves_dollar_placeholders(self):
+        """Dialect-less sqlglot cannot parse TABLESAMPLE, so this routes
+        through the regex fallback; $N slots must survive verbatim."""
+        sql = (
+            "SELECT id, name FROM users TABLESAMPLE SYSTEM($1) "
+            "WHERE score > 10 LIMIT $2"
+        )
+        normalized, params = normalize_and_extract(sql)
+        assert "SYSTEM($1)" in normalized
+        assert "LIMIT $2" in normalized
+        assert "$:p" not in normalized
+        assert [p["value"] for p in params.values()] == ["10"]
+
+    def test_fallback_multi_digit_slot_index_preserved(self):
+        from shared.query_registry.sql_normalizer import _fallback_normalize
+
+        normalized, params = _fallback_normalize(
+            "SELECT a FROM t WHERE b = $12 AND c = 34"
+        )
+        assert normalized == "SELECT a FROM t WHERE b = $12 AND c = :p1"
+        assert params == {"p1": {"value": "34", "type": "number"}}
+
+    def test_fallback_extracts_digits_inside_dollar_quoted_string(self):
+        from shared.query_registry.sql_normalizer import _fallback_normalize
+
+        normalized, params = _fallback_normalize(
+            "SELECT $$100$$ FROM t TABLESAMPLE SYSTEM($1)"
+        )
+        assert normalized == "SELECT $$:p1$$ FROM t TABLESAMPLE SYSTEM($1)"
+        assert params == {"p1": {"value": "100", "type": "number"}}
+
+    def test_fallback_positional_placeholders_still_preserved(self):
+        from shared.query_registry.sql_normalizer import _fallback_normalize
+
+        normalized, params = _fallback_normalize(
+            "SELECT id FROM users WHERE score > $1 LIMIT $2"
+        )
+        assert normalized == "SELECT id FROM users WHERE score > $1 LIMIT $2"
+        assert params == {}
+
+    def test_fallback_placeholder_and_literal_in_same_statement(self):
+        from shared.query_registry.sql_normalizer import _fallback_normalize
+
+        normalized, params = _fallback_normalize(
+            "SELECT a FROM t WHERE b = $1 AND c = 34"
+        )
+        assert normalized == "SELECT a FROM t WHERE b = $1 AND c = :p1"
+        assert params == {"p1": {"value": "34", "type": "number"}}
+
     def test_fallback_doubles_embedded_quotes(self):
         """The regex fallback must not let a value terminate its own literal."""
         from shared.query_registry.sql_normalizer import _fallback_reconstruct
@@ -396,6 +540,25 @@ class TestCanonicalizePlaceholderStyle:
     def test_textually_ordered_pn_is_a_fixed_point(self):
         sql = "SELECT a FROM t WHERE b = :p1 AND c IN (:p2, :p3)"
         assert canonicalize_placeholder_style(sql) == sql
+
+    def test_legacy_fused_dollar_pn_folds(self):
+        # Stored texts from builds that lifted the digit out of a $N
+        # parameter carry `$:pN`; they must converge with the clean form.
+        assert (
+            canonicalize_placeholder_style(
+                "SELECT * FROM t WHERE score > $:p2 LIMIT $:p1"
+            )
+            == "SELECT * FROM t WHERE score > :p1 LIMIT :p2"
+        )
+
+    def test_fused_and_clean_spellings_converge(self):
+        clean = canonicalize_placeholder_style(
+            "SELECT * FROM t WHERE score > $1 LIMIT $2"
+        )
+        fused = canonicalize_placeholder_style(
+            "SELECT * FROM t WHERE score > $:p2 LIMIT $:p1"
+        )
+        assert clean == fused == "SELECT * FROM t WHERE score > :p1 LIMIT :p2"
 
     def test_postgres_json_operators_untouched(self):
         for sql in (
@@ -706,5 +869,22 @@ class TestReferencesUserRelations:
         )
         assert (
             references_user_relations("/* app comment */ SELECT * FROM pg_tables")
+            is False
+        )
+
+    def test_mysql_describe_admits_as_user_but_marker_excludes_it(self):
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        # Unmarked, MySQL's admission classifier fails open on DESCRIBE (the
+        # introspector's own bug): it looks like it touches a user table.
+        assert (
+            references_user_relations("DESCRIBE `orders`", dialect="mysql") is True
+        )
+        # The introspector prefixes its self-marker on this statement, which
+        # keeps it out of registry admission like every other profiling probe.
+        assert (
+            references_user_relations(
+                "/*rdst:profile*/ DESCRIBE `orders`", dialect="mysql"
+            )
             is False
         )

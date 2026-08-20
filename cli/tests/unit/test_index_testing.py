@@ -55,7 +55,7 @@ class FakeCursor:
             col = stmt.split("(")[-1].rstrip(")").strip()
             self.hypo = f"<1>btree_orders_{col}"
             self._rows = [(self.hypo,)]
-        elif sql.startswith("EXPLAIN"):
+        elif sql.startswith(index_testing._SELF_MARKER + "EXPLAIN"):
             if self.hypo and self.hypo in self.used_by:
                 plan = {
                     "Node Type": "Bitmap Heap Scan",
@@ -92,10 +92,13 @@ def connect(monkeypatch):
     def _install(cursor):
         conn = FakeConn(cursor)
         holder["conn"] = conn
+
+        def _resolve(**kw):
+            conn.resolve_kwargs = kw
+            return {**PG_TARGET, "password": "pw"}
+
         monkeypatch.setattr(index_testing, "psycopg2", mock.Mock(connect=mock.Mock(return_value=conn)))
-        monkeypatch.setattr(
-            index_testing, "resolve_connection_params", lambda **kw: {**PG_TARGET, "password": "pw"}
-        )
+        monkeypatch.setattr(index_testing, "resolve_connection_params", _resolve)
         monkeypatch.setattr(index_testing, "postgres_connection_kwargs", lambda p, **kw: dict(p))
         return conn
 
@@ -155,6 +158,20 @@ def test_resets_hypothetical_indexes_after_each_recommendation(connect):
     verify_indexes("SELECT * FROM orders", RECS, "t", target_config=PG_TARGET)
     resets = [sql for sql, _ in conn.cursor().executed if "hypopg_reset" in sql]
     assert len(resets) == 1 + len(RECS)
+
+
+def test_explain_statements_carry_self_marker(connect):
+    conn = connect(FakeCursor())
+    verify_indexes("SELECT * FROM orders", RECS, "t", target_config=PG_TARGET)
+    explains = [sql for sql, _ in conn.cursor().executed if "EXPLAIN" in sql]
+    assert explains
+    assert all(sql.startswith("/*rdst:analyze*/ EXPLAIN") for sql in explains)
+
+
+def test_connection_carries_analyze_lane(connect):
+    conn = connect(FakeCursor())
+    verify_indexes("SELECT 1 FROM orders", RECS, "t", target_config=PG_TARGET)
+    assert conn.resolve_kwargs["lane"] == "rdst/analyze"
 
 
 def test_scan_using_index_walks_nested_plans():

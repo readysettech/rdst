@@ -14,13 +14,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from shared.db_connection import quote_identifier
+from shared.db_connection import quote_identifier, rdst_self_marker
 
 from .pattern_detector import (
     detect_delimiter_columns_sql_postgres,
     detect_delimiter_columns_sql_mysql,
     DELIMITER_FRACTION_THRESHOLD,
 )
+
+# Every profiling statement reads user tables; the lane tags the connection
+# and the marker keeps the statements out of registry admission.
+PROFILE_LANE = "rdst/profile"
+_SELF_MARKER = rdst_self_marker(PROFILE_LANE)
 
 
 @dataclass
@@ -159,7 +164,7 @@ class DataProfiler:
             )
 
         table = quote_identifier(table_name)
-        sql = f'SELECT COUNT(*) AS __total, {", ".join(parts)} FROM {table}{sample_clause}'
+        sql = f'{_SELF_MARKER}SELECT COUNT(*) AS __total, {", ".join(parts)} FROM {table}{sample_clause}'
         cur.execute(sql)
         row = cur.fetchone()
         if not row:
@@ -201,7 +206,7 @@ class DataProfiler:
             q = quote_identifier(col)
             try:
                 cur.execute(
-                    f'SELECT {q}::text, COUNT(*) AS cnt '
+                    f'{_SELF_MARKER}SELECT {q}::text, COUNT(*) AS cnt '
                     f'FROM {table}{sample_clause} '
                     f'WHERE {q} IS NOT NULL '
                     f'GROUP BY {q} ORDER BY cnt DESC LIMIT 10'
@@ -226,7 +231,7 @@ class DataProfiler:
         try:
             cur2 = cur.connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cur2.execute(
-                f'SELECT * FROM {quote_identifier(table_name)}{sample_clause} LIMIT {int(sample_rows)}'
+                f'{_SELF_MARKER}SELECT * FROM {quote_identifier(table_name)}{sample_clause} LIMIT {int(sample_rows)}'
             )
             profile.sample_rows = [
                 {k: _safe_str(v) for k, v in dict(row).items()}
@@ -316,11 +321,11 @@ class DataProfiler:
         if limit_clause:
             inner_cols = ", ".join(quote_identifier(c, "mysql") for c in col_names)
             sql = (
-                f'SELECT COUNT(*) AS __total, {", ".join(parts)} '
+                f'{_SELF_MARKER}SELECT COUNT(*) AS __total, {", ".join(parts)} '
                 f'FROM (SELECT {inner_cols} FROM {table}{limit_clause}) sampled'
             )
         else:
-            sql = f'SELECT COUNT(*) AS __total, {", ".join(parts)} FROM {table}'
+            sql = f'{_SELF_MARKER}SELECT COUNT(*) AS __total, {", ".join(parts)} FROM {table}'
 
         cur.execute(sql)
         row = cur.fetchone()
@@ -358,14 +363,14 @@ class DataProfiler:
             try:
                 if row_estimate > 50_000:
                     cur.execute(
-                        f'SELECT CAST({q} AS CHAR) AS val, COUNT(*) AS cnt '
+                        f'{_SELF_MARKER}SELECT CAST({q} AS CHAR) AS val, COUNT(*) AS cnt '
                         f'FROM (SELECT {q} FROM {table} LIMIT 20000) sampled '
                         f'WHERE {q} IS NOT NULL '
                         f'GROUP BY val ORDER BY cnt DESC LIMIT 10'
                     )
                 else:
                     cur.execute(
-                        f'SELECT CAST({q} AS CHAR) AS val, COUNT(*) AS cnt '
+                        f'{_SELF_MARKER}SELECT CAST({q} AS CHAR) AS val, COUNT(*) AS cnt '
                         f'FROM {table} '
                         f'WHERE {q} IS NOT NULL '
                         f'GROUP BY val ORDER BY cnt DESC LIMIT 10'
@@ -385,7 +390,7 @@ class DataProfiler:
         try:
             dict_cur = cur.connection.cursor(pymysql.cursors.DictCursor)
             dict_cur.execute(
-                f'SELECT * FROM {quote_identifier(table_name, "mysql")} LIMIT {int(sample_rows)}'
+                f'{_SELF_MARKER}SELECT * FROM {quote_identifier(table_name, "mysql")} LIMIT {int(sample_rows)}'
             )
             profile.sample_rows = [
                 {k: _safe_str(v) for k, v in row.items()}
@@ -432,7 +437,9 @@ class DataProfiler:
             resolve_connection_params,
         )
 
-        params = resolve_connection_params(target_config=self.config)
+        params = resolve_connection_params(
+            target_config=self.config, lane=PROFILE_LANE
+        )
         engine = params["engine"]
 
         if engine in ("postgresql", "postgres"):

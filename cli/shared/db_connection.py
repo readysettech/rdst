@@ -34,6 +34,18 @@ def resolve_application_name(
     return configured or lane or DEFAULT_LANE
 
 
+def rdst_self_marker(lane: str) -> str:
+    """Leading SQL comment identifying an RDST-issued statement.
+
+    Prepended to statements RDST runs against user relations so statement
+    stores keep the tag (pg_stat_statements records first-seen text, MySQL
+    keeps QUERY_SAMPLE_TEXT) and registry admission can exclude RDST's own
+    traffic by its "/*rdst" prefix. The lane's slash becomes a colon inside
+    the comment: "rdst/profile" tags statements as "/*rdst:profile*/ ".
+    """
+    return "/*" + lane.replace("/", ":", 1) + "*/ "
+
+
 def normalize_engine_name(engine: str) -> str:
     """Normalize engine aliases to the canonical names used by RDST."""
     value = (engine or "").lower()

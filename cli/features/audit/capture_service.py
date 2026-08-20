@@ -12,6 +12,7 @@ from dataclasses import asdict
 from typing import Any
 
 from shared.config.targets import TargetsConfig
+from shared.db_connection import rdst_self_marker
 
 from .events import (
     WorkloadAnalysisProgressEvent,
@@ -33,6 +34,10 @@ from . import query_stats as query_stats_module
 
 logger = logging.getLogger(__name__)
 _LITERAL_RE = re.compile(r"'[^']*'|\b\d+\.?\d*\b")
+
+# Replay workers execute user queries against user tables; the marker keeps a
+# replayed statement out of registry admission when RDST is its first issuer.
+_SELF_MARKER = rdst_self_marker("rdst/audit")
 
 # Keep capture reports aligned with the full metrics audit produced by the
 # CLI. These fields are added to both the persisted WorkloadRun JSON and the
@@ -857,7 +862,7 @@ class CaptureService:
                 while not self._stop_requested:
                     sql = queries[index % len(queries)]
                     try:
-                        cursor.execute(sql)
+                        cursor.execute(_SELF_MARKER + sql)
                         cursor.fetchall()
                     except Exception:
                         pass

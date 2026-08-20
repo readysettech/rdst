@@ -52,6 +52,46 @@ def test_align_sample_values_rejects_mismatched_counts_and_bind_params():
     assert align_sample_values("SELECT * FROM t WHERE a = $1 AND b IN ($2, $3)", template) is None
 
 
+def test_column_sample_reads_carry_self_marker():
+    from unittest.mock import MagicMock
+
+    from features.analyze.parameter_suggestions import _sample_column_values
+
+    binding = {"table": "orders", "column_name": "status"}
+
+    pg_cur = MagicMock()
+    pg_cur.fetchone.return_value = None  # no pg_stats row; fall to DISTINCT read
+    pg_cur.fetchall.return_value = [("shipped",)]
+    pg_conn = MagicMock()
+    pg_conn.cursor.return_value = pg_cur
+    _sample_column_values(pg_conn, "postgresql", binding)
+    distinct = [c.args[0] for c in pg_cur.execute.call_args_list if "DISTINCT" in c.args[0]]
+    assert distinct and distinct[0].startswith('/*rdst:analyze*/ SELECT DISTINCT "status"')
+
+    my_cur = MagicMock()
+    my_cur.fetchall.return_value = [("shipped",)]
+    my_conn = MagicMock()
+    my_conn.cursor.return_value = my_cur
+    _sample_column_values(my_conn, "mysql", binding)
+    sql = my_cur.execute.call_args.args[0]
+    assert sql.startswith("/*rdst:analyze*/ SELECT /*+ MAX_EXECUTION_TIME(")
+
+
+def test_connect_carries_analyze_lane(monkeypatch):
+    import features.analyze.parameter_suggestions as mod
+
+    captured = {}
+
+    def fake_resolve(**kwargs):
+        captured.update(kwargs)
+        return {"resolved": True}
+
+    monkeypatch.setattr(mod, "resolve_connection_params", fake_resolve)
+    monkeypatch.setattr(mod, "create_mysql_connection_from_params", lambda resolved: "conn")
+    assert mod._connect("mysql", "t", {"engine": "mysql"}) == "conn"
+    assert captured["lane"] == "rdst/analyze"
+
+
 def test_suggest_parameter_values_without_connection_still_gives_shape_hints(monkeypatch):
     import features.analyze.parameter_suggestions as mod
 

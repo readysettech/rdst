@@ -1283,6 +1283,12 @@ class QueryRegistry:
                 f"({MAX_QUERY_LENGTH // 1024}KB)."
             )
 
+        # Resolving a dialect here serves validation and extraction accuracy
+        # (postgres accepts TABLESAMPLE, mysql keeps `->>`). The fallback
+        # only needs to keep $N digits from being lifted into observed
+        # values as literals; dialect choice itself is not identity-neutral
+        # in general, so a stored hash can still shift with the resolved
+        # dialect.
         if not dialect:
             dialect = dialect_for_target(target)
 

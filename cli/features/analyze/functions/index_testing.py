@@ -14,7 +14,11 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from shared.db_connection import postgres_connection_kwargs, resolve_connection_params
+from shared.db_connection import (
+    postgres_connection_kwargs,
+    rdst_self_marker,
+    resolve_connection_params,
+)
 
 from .explain_analysis import _resolve_explain_password
 from .rewrite_testing import _has_unresolved_placeholders
@@ -28,6 +32,11 @@ except ImportError:  # pragma: no cover - psycopg2 is optional at import time
 logger = logging.getLogger(__name__)
 
 HYPOPG_INSTALL_SQL = "CREATE EXTENSION IF NOT EXISTS hypopg;"
+
+# The planner-check EXPLAINs reference user tables; the lane tags the
+# connection and the marker keeps the statements out of registry admission.
+ANALYZE_LANE = "rdst/analyze"
+_SELF_MARKER = rdst_self_marker(ANALYZE_LANE)
 
 # Skip reasons surfaced to CLI and desktop. Keep these stable: the UI keys off them.
 SKIP_NO_RECOMMENDATIONS = "no_recommendations"
@@ -80,7 +89,9 @@ def test_index_recommendations(
         return _skipped(SKIP_CONNECTION_FAILED, "psycopg2 is not available.")
 
     try:
-        resolved = resolve_connection_params(target=target, target_config=target_config)
+        resolved = resolve_connection_params(
+            target=target, target_config=target_config, lane=ANALYZE_LANE
+        )
         password = _resolve_explain_password(target_config, resolved["password"])
         conn_params = postgres_connection_kwargs(resolved, password=password)
         conn = psycopg2.connect(**conn_params)
@@ -206,7 +217,7 @@ def _hypopg_status(cur) -> str:
 
 
 def _explain(cur, sql: str) -> Dict[str, Any]:
-    cur.execute(f"EXPLAIN (FORMAT JSON) {sql}")
+    cur.execute(f"{_SELF_MARKER}EXPLAIN (FORMAT JSON) {sql}")
     raw = cur.fetchone()[0]
     if isinstance(raw, str):
         raw = json.loads(raw)

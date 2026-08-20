@@ -9,6 +9,7 @@ from shared.db_connection import (
     create_mysql_connection_from_params,
     postgres_connection_kwargs,
     quote_identifier,
+    rdst_self_marker,
     resolve_connection_params,
 )
 from shared.editor import resolve_editor_command
@@ -663,6 +664,7 @@ class SchemaCommand:
             params = resolve_connection_params(
                 target=target,
                 target_config=target_config,
+                lane="rdst/profile",
             )
             engine = params["engine"]
 
@@ -678,7 +680,7 @@ class SchemaCommand:
                         cursor_factory=psycopg2.extras.RealDictCursor
                     ) as cursor:
                         cursor.execute(
-                            f"""
+                            f"""{rdst_self_marker("rdst/profile")}
                             SELECT * FROM {quote_identifier(table_name)}
                             TABLESAMPLE SYSTEM(1)
                             LIMIT {int(sample_rows)}
@@ -700,6 +702,7 @@ class SchemaCommand:
                 try:
                     with conn.cursor() as cursor:
                         cursor.execute(
+                            f"{rdst_self_marker('rdst/profile')}"
                             f"SELECT * FROM {quote_identifier(table_name, 'mysql')} "
                             f"LIMIT {int(sample_rows)}"
                         )
