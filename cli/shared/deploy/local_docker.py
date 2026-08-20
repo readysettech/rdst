@@ -8,7 +8,11 @@ import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404
 from typing import Any, Dict, Optional
 from urllib.parse import quote as urlquote
 
-from shared.deploy.docker_topology import DockerTopology, DockerTopologyError
+from shared.deploy.docker_topology import (
+    ContainerNetworkPlan,
+    DockerTopology,
+    DockerTopologyError,
+)
 
 MANAGED_SANDBOX_NAME = "rdst-readyset-sandbox"
 MANAGED_SANDBOX_LABEL = "io.readyset.rdst.sandbox"
@@ -20,6 +24,22 @@ def publish_bind() -> str:
     this machine only. A remote daemon is reached by address, so its ports stay on
     the daemon's interfaces."""
     return "" if DockerTopology.from_environment().remote else "127.0.0.1:"
+
+
+def _container_network_args(
+    network: ContainerNetworkPlan,
+    readyset_port: str | int,
+    metrics_port: str | int,
+) -> list[str]:
+    if network.host_network:
+        return ["--network=host"]
+    return [
+        "-p",
+        f"{publish_bind()}{readyset_port}:{readyset_port}",
+        "-p",
+        f"{publish_bind()}{metrics_port}:{metrics_port}",
+        "--add-host=host.docker.internal:host-gateway",
+    ]
 
 
 def docker_runtime_status() -> Dict[str, bool]:
@@ -174,9 +194,10 @@ def _create_container(
     docker_memory = variables.get("docker_memory", "4g")
 
     try:
-        docker_db_host = DockerTopology.from_environment().container_host_for(db_host)
+        network = DockerTopology.from_environment().container_network_for(db_host)
     except DockerTopologyError as exc:
         return {"success": False, "error": str(exc)}
+    docker_db_host = network.upstream_host
 
     # Build DATABASE_URL (URL-encode user/password to handle special chars)
     safe_user = urlquote(db_user, safe="")
@@ -214,6 +235,7 @@ def _create_container(
     # ReadySet auto-caches; SHALLOW_MEMORY_PERCENT=100 + READYSET_MEMORY_LIMIT
     # together enable LRU eviction at the configured cap. Docker --memory and
     # --cpus enforce host-level resource limits (Tanmay/Gautam: 2c/4GB).
+    metrics_port = variables.get("metrics_port", "6034")
     docker_cmd = [
         "docker", "run",
         "-d",
@@ -221,9 +243,10 @@ def _create_container(
         "--name", container_name,
         f"--memory={docker_memory}",
         f"--cpus={cpus}",
+        *_container_network_args(network, readyset_port, metrics_port),
         "-e", f"UPSTREAM_DB_URL={db_url}",
         "-e", f"DATABASE_TYPE={db_type}",
-        "-e", f"LISTEN_ADDRESS=0.0.0.0:{readyset_port}",
+        "-e", f"LISTEN_ADDRESS={network.listen_host}:{readyset_port}",
         "-e", f"DEPLOYMENT_MODE=standalone",
         "-e", f"QUERY_CACHING={query_caching_mode}",
         "-e", "QUERY_LOG_MODE=enabled",
@@ -232,10 +255,7 @@ def _create_container(
         "-e", f"SHALLOW_MEMORY_PERCENT=100",
         "-e", f"READYSET_MEMORY_LIMIT={memory_bytes}",
         "-e", "DEFAULT_TTL_MS=600000",
-        "-e", f"METRICS_ADDRESS=0.0.0.0:{variables.get('metrics_port', '6034')}",
-        "-p", f"{publish_bind()}{readyset_port}:{readyset_port}",
-        "-p", f"{publish_bind()}{variables.get('metrics_port', '6034')}:{variables.get('metrics_port', '6034')}",
-        "--add-host=host.docker.internal:host-gateway",
+        "-e", f"METRICS_ADDRESS={network.listen_host}:{metrics_port}",
         image,
     ]
 
@@ -477,9 +497,10 @@ def _create_container_command(
     engine = variables["db_engine"]
     db_host = variables["db_host"]
     try:
-        docker_db_host = DockerTopology.from_environment().container_host_for(db_host)
+        network = DockerTopology.from_environment().container_network_for(db_host)
     except DockerTopologyError as exc:
         return {"success": False, "error": str(exc)}
+    docker_db_host = network.upstream_host
     safe_user = urlquote(variables["db_user"], safe="")
     safe_password = urlquote(password, safe="")
     db_type = "mysql" if engine == "mysql" else "postgresql"
@@ -501,6 +522,7 @@ def _create_container_command(
         ]
     )
     command.extend(extra_args or [])
+    command.extend(_container_network_args(network, readyset_port, metrics_port))
     command.extend(
         [
             "-e",
@@ -508,7 +530,7 @@ def _create_container_command(
             "-e",
             f"DATABASE_TYPE={db_type}",
             "-e",
-            f"LISTEN_ADDRESS=0.0.0.0:{readyset_port}",
+            f"LISTEN_ADDRESS={network.listen_host}:{readyset_port}",
             "-e",
             "DEPLOYMENT_MODE=standalone",
             "-e",
@@ -526,12 +548,7 @@ def _create_container_command(
             "-e",
             "DEFAULT_TTL_MS=600000",
             "-e",
-            f"METRICS_ADDRESS=0.0.0.0:{metrics_port}",
-            "-p",
-            f"{publish_bind()}{readyset_port}:{readyset_port}",
-            "-p",
-            f"{publish_bind()}{metrics_port}:{metrics_port}",
-            "--add-host=host.docker.internal:host-gateway",
+            f"METRICS_ADDRESS={network.listen_host}:{metrics_port}",
             variables["readyset_image"],
         ]
     )

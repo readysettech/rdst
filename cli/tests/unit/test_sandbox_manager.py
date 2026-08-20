@@ -15,9 +15,29 @@ from shared.deploy.sandbox_manager import (
     SandboxPriority,
     _finish_before_cancelling,
     _settle_transition,
+    target_fingerprint,
 )
 
 pytestmark = pytest.mark.usefixtures("run_blocking_inline")
+
+
+def test_target_fingerprint_changes_with_sandbox_deployment_version(monkeypatch):
+    config = {
+        "engine": "postgresql",
+        "host": "localhost",
+        "port": 5432,
+        "database": "app",
+        "user": "app",
+        "password": "secret",
+    }
+    current = target_fingerprint("app", config)
+
+    monkeypatch.setattr(
+        "shared.deploy.sandbox_manager.SANDBOX_DEPLOYMENT_VERSION",
+        3,
+    )
+
+    assert target_fingerprint("app", config) != current
 
 
 async def _wait_for_thread_event(event: threading.Event) -> None:

@@ -273,6 +273,66 @@ class TestManagedSandboxDocker:
         assert "io.readyset.rdst.target=origin" in command
         assert "io.readyset.rdst.fingerprint=fingerprint" in command
 
+    @patch("shared.deploy.docker_topology.sys.platform", "linux")
+    @patch("shared.deploy.local_docker.subprocess.run")
+    @patch(
+        "shared.deploy.local_docker._inspect_exact_container_checked",
+        return_value=(None, None),
+    )
+    def test_managed_localhost_uses_linux_host_network(self, _inspect, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0),
+            MagicMock(returncode=0, stdout="container-id", stderr=""),
+        ]
+
+        result = local_docker.deploy_managed_sandbox(
+            "origin", self.variables(), "secret", "fingerprint"
+        )
+
+        assert result["success"] is True
+        command = mock_run.call_args_list[1].args[0]
+        assert "--network=host" in command
+        assert "-p" not in command
+        assert "--add-host=host.docker.internal:host-gateway" not in command
+        assert "LISTEN_ADDRESS=127.0.0.1:5433" in command
+        assert "METRICS_ADDRESS=127.0.0.1:6034" in command
+        assert any(
+            value.startswith("UPSTREAM_DB_URL=postgresql://app:secret@localhost:5432/")
+            for value in command
+        )
+
+    @patch("shared.deploy.docker_topology.sys.platform", "linux")
+    @patch("shared.deploy.local_docker.subprocess.run")
+    @patch(
+        "shared.deploy.local_docker._inspect_exact_container_checked",
+        return_value=(None, None),
+    )
+    def test_managed_remote_daemon_keeps_bridge_network(
+        self, _inspect, mock_run, monkeypatch
+    ):
+        monkeypatch.setenv("RDST_DOCKER_REMOTE", "true")
+        monkeypatch.setenv("RDST_DOCKER_PUBLISHED_HOST", "10.0.0.5")
+        monkeypatch.setenv("RDST_DOCKER_UPSTREAM_HOST", "10.0.0.6")
+        mock_run.side_effect = [
+            MagicMock(returncode=0),
+            MagicMock(returncode=0, stdout="container-id", stderr=""),
+        ]
+
+        result = local_docker.deploy_managed_sandbox(
+            "origin", self.variables(), "secret", "fingerprint"
+        )
+
+        assert result["success"] is True
+        command = mock_run.call_args_list[1].args[0]
+        assert "--network=host" not in command
+        assert "5433:5433" in command
+        assert "--add-host=host.docker.internal:host-gateway" in command
+        assert "LISTEN_ADDRESS=0.0.0.0:5433" in command
+        assert any(
+            value.startswith("UPSTREAM_DB_URL=postgresql://app:secret@10.0.0.6:5432/")  # trufflehog:ignore
+            for value in command
+        )
+
     @patch("shared.deploy.local_docker.subprocess.run")
     @patch(
         "shared.deploy.local_docker._inspect_exact_container_checked",

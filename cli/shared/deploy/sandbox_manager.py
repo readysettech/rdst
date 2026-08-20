@@ -40,6 +40,7 @@ from shared.password_resolver import resolve_password_value
 logger = logging.getLogger(__name__)
 
 SANDBOX_CONTAINER_NAME = "rdst-readyset-sandbox"
+SANDBOX_DEPLOYMENT_VERSION = 2
 DEFAULT_IDLE_TTL = timedelta(days=1)
 
 ProgressCallback = Callable[[str, str], Awaitable[None] | None]
@@ -1035,6 +1036,7 @@ def target_fingerprint(target: str, config: dict[str, Any]) -> str:
         resolve_password_value(config).encode()
     ).hexdigest()
     payload = {
+        "deployment_version": SANDBOX_DEPLOYMENT_VERSION,
         "target": target,
         "engine": config.get("engine"),
         "host": config.get("host"),
