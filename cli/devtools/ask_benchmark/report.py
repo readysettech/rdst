@@ -514,7 +514,7 @@ def _summarize_model(
         attempt
         for attempt in scored_attempts
         if attempt.get("diagnostics", {}).get("schema_filter_strategy")
-        == "full-schema-below-budget"
+        in {"full-schema-below-budget", "full-schema-unfiltered"}
     ]
     latencies = [float(attempt.get("latency_ms", 0.0)) for attempt in scored_attempts]
     total_latency_ms = sum(latencies)

@@ -9,7 +9,10 @@ import httpx
 import pytest
 
 from shared.llm_manager.base import LLMError, ProviderRequest
-from shared.llm_manager.claude_provider import ClaudeProvider
+from shared.llm_manager.claude_provider import (
+    ANTHROPIC_MESSAGES_MAX_REQUEST_BYTES,
+    ClaudeProvider,
+)
 
 
 def _request(*, max_tokens=800, extra=None):
@@ -59,6 +62,42 @@ def _completion_client(*, message=None, headers=None):
 
 def test_supported_anthropic_sdk_version_is_installed():
     assert anthropic.__version__ == "0.122.0"
+
+
+def test_request_payload_size_matches_compact_utf8_json() -> None:
+    payload = {"model": "claude-sonnet-4-6", "messages": [{"content": "café"}]}
+
+    assert ClaudeProvider._request_payload_bytes(payload) == len(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    )
+
+
+def test_request_body_larger_than_anthropic_limit_fails_before_sdk_call() -> None:
+    with (
+        patch(
+            "shared.llm_manager.claude_provider.ANTHROPIC_MESSAGES_MAX_REQUEST_BYTES",
+            1,
+        ),
+        patch(
+            "shared.llm_manager.claude_provider.anthropic.Anthropic"
+        ) as anthropic_client,
+        pytest.raises(LLMError) as raised,
+    ):
+        ClaudeProvider().complete(_request(), api_key="sk-ant-test")
+
+    assert raised.value.code == "ANTHROPIC_REQUEST_TOO_LARGE"
+    assert raised.value.status == 413
+    assert "1-byte limit" in str(raised.value)
+    anthropic_client.assert_not_called()
+
+
+def test_anthropic_request_body_limit_is_32_mib() -> None:
+    assert ANTHROPIC_MESSAGES_MAX_REQUEST_BYTES == 32 * 1024 * 1024
 
 
 def test_real_sdk_posts_once_to_messages_endpoint():

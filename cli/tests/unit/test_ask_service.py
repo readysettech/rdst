@@ -76,7 +76,6 @@ class TestAskServiceAsk:
             dry_run=False,
             timeout_seconds=30,
             verbose=False,
-            agent_mode=False,
             no_interactive=True,
         )
 
@@ -373,10 +372,6 @@ class TestAskServiceSessionManagement:
         with (
             patch.object(service, "_load_config", side_effect=mock_load_config),
             patch("features.ask.service.load_schema", side_effect=fake_load),
-            patch(
-                "features.ask.service.filter_schema",
-                side_effect=lambda ctx, _presenter, _manager: ctx,
-            ),
             patch.object(
                 service,
                 "_detect_ambiguities",
@@ -505,6 +500,34 @@ class TestAskServiceSessionManagement:
         assert isinstance(events[-1], AskErrorEvent)
         assert events[-1].phase == AskPhase.VALIDATE
         execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_generation_error_preserves_model_limit_envelope(self):
+        from features.ask.engine.ask3.context import Ask3Context
+
+        service = AskService(persist_queries=False)
+        ctx = Ask3Context(question="Show users", target="warehouse")
+
+        def fake_generate(context, _presenter, _manager):
+            context.mark_error(
+                "The complete database schema could not fit within the model context.",
+                code="ANTHROPIC_CONTEXT_WINDOW_EXCEEDED",
+                category="model-limit",
+            )
+            return context
+
+        with patch("features.ask.service.generate_sql", side_effect=fake_generate):
+            events = [
+                event
+                async for event in service._run_from_generate(ctx, persist_query=False)
+            ]
+
+        error = events[-1]
+        assert isinstance(error, AskErrorEvent)
+        assert error.phase == AskPhase.GENERATE
+        assert error.code == "ANTHROPIC_CONTEXT_WINDOW_EXCEEDED"
+        assert error.category == "model-limit"
+        assert error.target == "warehouse"
 
     @pytest.mark.asyncio
     async def test_literal_provenance_failure_gets_one_bounded_repair(self):
@@ -665,6 +688,7 @@ class TestAskServiceDependencyInjection:
         llm_manager = Mock()
         semantic_manager = Mock()
         db_executor = Mock()
+
         service = AskService(
             llm_manager=llm_manager,
             semantic_manager=semantic_manager,
@@ -688,12 +712,9 @@ class TestAskServiceDependencyInjection:
             ctx.schema_formatted = "users table"
             return ctx
 
-        def fake_filter(ctx, presenter, dependency):
-            assert dependency is llm_manager
-            return ctx
-
         def fake_generate(ctx, presenter, dependency):
             assert dependency is llm_manager
+            assert list(ctx.schema_info.tables) == ["users"]
             ctx.sql = "SELECT COUNT(*) FROM users"
             return ctx
 
@@ -712,7 +733,6 @@ class TestAskServiceDependencyInjection:
                 side_effect=lambda ctx: (ctx, [], []),
             ),
             patch("features.ask.service.load_schema", side_effect=fake_load),
-            patch("features.ask.service.filter_schema", side_effect=fake_filter),
             patch("features.ask.service.generate_sql", side_effect=fake_generate),
             patch("features.ask.service.validate_sql", side_effect=lambda ctx, _: ctx),
             patch("features.ask.service.execute_query", side_effect=fake_execute),
@@ -803,10 +823,6 @@ class TestAskServiceDependencyInjection:
         with (
             patch.object(service, "_load_config", side_effect=mock_load_config),
             patch("features.ask.service.load_schema", side_effect=fake_load),
-            patch(
-                "features.ask.service.filter_schema",
-                side_effect=lambda ctx, _presenter, _manager: ctx,
-            ),
             patch.object(
                 service,
                 "_detect_ambiguities",
@@ -864,10 +880,6 @@ class TestAskServiceDependencyInjection:
         with (
             patch.object(service, "_load_config", side_effect=mock_load_config),
             patch("features.ask.service.load_schema", side_effect=fake_load),
-            patch(
-                "features.ask.service.filter_schema",
-                side_effect=lambda ctx, _presenter, _manager: ctx,
-            ),
             patch.object(
                 service,
                 "_detect_ambiguities",
@@ -932,10 +944,6 @@ class TestAskServiceDependencyInjection:
         with (
             patch.object(service, "_load_config", side_effect=mock_load_config),
             patch("features.ask.service.load_schema", side_effect=fake_load),
-            patch(
-                "features.ask.service.filter_schema",
-                side_effect=lambda ctx, _presenter, _manager: ctx,
-            ),
             patch.object(
                 service,
                 "_detect_ambiguities",
@@ -1192,8 +1200,9 @@ class TestAskServiceNullSchema:
         )
 
     @pytest.mark.asyncio
-    async def test_no_filter_phase_when_schema_none(self, service, input_data, options):
-        """Null schema should stop before filter phase — never send to LLM."""
+    async def test_null_schema_stops_before_generation(
+        self, service, input_data, options
+    ):
         events = []
 
         async def mock_load_config(target):
@@ -1211,12 +1220,10 @@ class TestAskServiceNullSchema:
 
                 mock_load.side_effect = fake_load_schema
 
-                with patch("features.ask.service.filter_schema") as mock_filter:
-                    async for event in service.ask(input_data, options):
-                        events.append(event)
+                async for event in service.ask(input_data, options):
+                    events.append(event)
 
-                    # filter_schema should never be called
-                    mock_filter.assert_not_called()
+        assert events[-1].type == "error"
 
 
 class TestAskServiceErrorHandling:
@@ -1384,9 +1391,6 @@ class TestAskServiceDryRun:
             ctx.schema_formatted = "users table"
             return ctx
 
-        def fake_filter(ctx, p, s):
-            return ctx
-
         def fake_gen(ctx, p, s):
             ctx.sql = "SELECT COUNT(*) FROM users"
             ctx.sql_explanation = "Counts users"
@@ -1399,7 +1403,6 @@ class TestAskServiceDryRun:
         with (
             patch.object(service, "_load_config", side_effect=mock_load_config),
             patch("features.ask.service.load_schema", side_effect=fake_load),
-            patch("features.ask.service.filter_schema", side_effect=fake_filter),
             patch.object(
                 service,
                 "_detect_ambiguities",
@@ -1424,79 +1427,48 @@ class TestAskServiceDryRun:
         assert result.row_count == 0
 
     @pytest.mark.asyncio
-    async def test_missing_schema_expands_once_then_regenerates(
-        self, service, input_data, dry_run_options
+    async def test_diagnostic_schema_formatter_is_forwarded_only_when_configured(
+        self, input_data, dry_run_options
     ):
+        formatter = Mock(name="compact-schema-formatter")
+        service = AskService(diagnostic_schema_formatter_fn=formatter)
+
         async def mock_load_config(target):
             return ("test-target", {"engine": "postgresql", "host": "localhost"})
 
-        def fake_load(ctx, _presenter, _semantic_manager):
+        def fake_load(ctx, _presenter, _semantic_manager, received_formatter):
             from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
 
+            assert received_formatter is formatter
             ctx.schema_info = SchemaInfo(
                 target="test-target",
                 db_type="postgresql",
-                source=SchemaSource.DATABASE,
+                source=SchemaSource.SEMANTIC,
             )
-            ctx.schema_info.tables = {"users": Mock(), "orders": Mock()}
-            ctx.schema_formatted = "users table"
+            ctx.schema_info.tables = {"users": Mock()}
+            ctx.schema_formatted = "compact users schema"
             return ctx
-
-        def fake_filter(ctx, _presenter, _llm_manager):
-            ctx.filtered_tables = ["users"]
-            return ctx
-
-        generation_calls = 0
 
         def fake_generate(ctx, _presenter, _llm_manager):
-            nonlocal generation_calls
-            generation_calls += 1
-            if generation_calls == 1:
-                ctx.generation_response = {
-                    "cannot_answer": True,
-                    "cannot_answer_reason": "missing_schema",
-                    "missing_schema": ["orders"],
-                }
-                ctx.mark_error("Cannot answer this question (missing_schema). orders")
-            else:
-                ctx.generation_response = {"cannot_answer": False}
-                ctx.sql = "SELECT COUNT(*) FROM orders"
-                ctx.sql_explanation = "Counts orders."
-            return ctx
-
-        def fake_expand(ctx, _presenter, missing_concepts, requested_tables):
-            assert missing_concepts == requested_tables == ["orders"]
-            ctx.filtered_tables.append("orders")
-            ctx.schema_formatted = "users table\norders table"
-            ctx.increment_expansion()
+            ctx.sql = "SELECT COUNT(*) FROM users"
+            ctx.sql_explanation = "Counts users"
             return ctx
 
         with (
             patch.object(service, "_load_config", side_effect=mock_load_config),
             patch("features.ask.service.load_schema", side_effect=fake_load),
-            patch("features.ask.service.filter_schema", side_effect=fake_filter),
             patch.object(
                 service,
                 "_detect_ambiguities",
                 side_effect=lambda ctx: (ctx, [], []),
             ),
             patch("features.ask.service.generate_sql", side_effect=fake_generate),
-            patch(
-                "features.ask.service.expand_schema", side_effect=fake_expand
-            ) as expand,
             patch("features.ask.service.validate_sql", side_effect=lambda ctx, _: ctx),
         ):
             events = [event async for event in service.ask(input_data, dry_run_options)]
 
-        assert generation_calls == 2
-        expand.assert_called_once()
-        assert any(
-            event.type == "status" and event.phase == AskPhase.EXPAND
-            for event in events
-        )
         assert isinstance(events[-1], AskResultEvent)
-        assert events[-1].sql == "SELECT COUNT(*) FROM orders"
-
+        assert events[-1].sql == "SELECT COUNT(*) FROM users"
 
 class TestAskServiceTimeoutScenarios:
     """Tests for timeout handling scenarios."""
@@ -1681,46 +1653,6 @@ class TestAskServiceNetworkFailures:
 
         assert events[-1].type == "error"
 
-    @pytest.mark.asyncio
-    async def test_partial_results_on_network_failure(
-        self, service, input_data, options
-    ):
-        """Test that partial results are preserved on late network failure."""
-        events = []
-
-        async def mock_load_config(target):
-            return ("test-target", {"engine": "postgresql", "host": "localhost"})
-
-        with patch.object(service, "_load_config", side_effect=mock_load_config):
-            with patch("features.ask.service.create_context") as mock_create_context:
-                mock_ctx = Mock()
-                from features.ask.engine.ask3 import Status
-
-                # Status.SUCCESS means schema loaded OK, but we'll fail on next step
-                mock_ctx.status = Status.SUCCESS
-                mock_ctx.schema_info = Mock()
-                mock_ctx.schema_info.tables = {"users": Mock()}
-                mock_ctx.schema_source = "test"
-                mock_ctx.all_available_tables = ["users"]
-                mock_ctx.error_message = None
-                mock_create_context.return_value = mock_ctx
-
-                with patch("features.ask.service.load_schema") as mock_load:
-                    mock_load.return_value = mock_ctx
-
-                    with patch("features.ask.service.filter_schema") as mock_filter:
-                        # Simulate network error during filter
-                        mock_filter.side_effect = ConnectionError("Network lost")
-
-                        async for event in service.ask(input_data, options):
-                            events.append(event)
-
-        # Should have yielded schema_loaded before error
-        schema_events = [e for e in events if e.type == "schema_loaded"]
-        assert len(schema_events) == 1
-        # Last event should be error
-        assert events[-1].type == "error"
-
 
 class TestAskServiceDryRunNoSave:
     """Tests that dry-run does NOT auto-save queries to the registry."""
@@ -1759,9 +1691,6 @@ class TestAskServiceDryRunNoSave:
             ctx.schema_formatted = "users table"
             return ctx
 
-        def fake_filter(ctx, p, s):
-            return ctx
-
         def fake_gen(ctx, p, s):
             ctx.sql = "SELECT COUNT(*) FROM users"
             ctx.sql_explanation = "Counts users"
@@ -1774,7 +1703,6 @@ class TestAskServiceDryRunNoSave:
         with (
             patch.object(service, "_load_config", side_effect=mock_load_config),
             patch("features.ask.service.load_schema", side_effect=fake_load),
-            patch("features.ask.service.filter_schema", side_effect=fake_filter),
             patch.object(
                 service,
                 "_detect_ambiguities",
@@ -1983,11 +1911,3 @@ class TestAskEngineImports:
         from features.ask.engine.ask3.engine import Ask3Engine
 
         assert Ask3Engine is not None
-
-    def test_filter_schema_imports_successfully(self):
-        """Bug fix: importing filter_schema from the filter phase module
-        should not raise ModuleNotFoundError.
-        """
-        from features.ask.engine.ask3.phases.filter import filter_schema
-
-        assert callable(filter_schema)

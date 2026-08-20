@@ -164,6 +164,17 @@ uv run --group eval python -m devtools.ask_benchmark run \
 ```
 
 `auto-init` identifies schema provenance; it does not control clarification behavior.
+Ask sends every loaded table. For semantic schemas it builds the complete verbose and
+compact-v2 serializations, then uses compact only when it is strictly more than 15%
+smaller by character count. Exactly 15% uses verbose. The run manifest binds the
+adaptive policy, and attempt diagnostics record the selected format and both measured
+sizes. Forced `verbose-v1` and `rdst-compact-schema-v2` are restricted to internal
+smoke diagnostics. Ask lets the provider make the authoritative context-window
+decision. If Anthropic rejects a verbose request for exceeding its context or 32 MB
+request-body limit, Ask retries once with the lossless compact form even below the 15%
+cost threshold. It does not retry unrelated invalid requests. If compact also fails,
+Ask returns the provider request ID and size diagnostics without truncating the schema.
+
 `--interaction-mode auto` never converts an LLM-generated option into user intent.
 The broad ambiguity model is not invoked in non-interactive mode. Only a deterministic
 missing-intent rule, currently an explicit sort request with no stated or implied

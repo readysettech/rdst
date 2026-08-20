@@ -8,7 +8,6 @@ export interface AskRequest {
   target?: string
   dry_run?: boolean
   timeout?: number
-  agent_mode?: boolean
   session_id?: string
   selected_interpretation_id?: number
   clarification_answers?: Record<string, string>

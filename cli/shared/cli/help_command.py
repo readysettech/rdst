@@ -313,8 +313,8 @@ rdst ask "Show me top 10 customers by order value" --target mydb
 # Dry run - generate SQL without executing
 rdst ask "Count orders by status" --target mydb --dry-run
 
-# Use agent mode for complex queries
-rdst ask "What's the relationship between customers and orders?" --target mydb --agent
+# Ask a relationship question
+rdst ask "What's the relationship between customers and orders?" --target mydb
 ```
 
 The ask command:

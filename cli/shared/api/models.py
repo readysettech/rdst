@@ -81,7 +81,6 @@ class AskRequest(BaseModel):
     target: Optional[str] = None
     dry_run: bool = False
     timeout: int = 30
-    agent_mode: bool = False
     session_id: Optional[str] = None
     selected_interpretation_id: Optional[int] = None
     clarification_answers: Optional[dict[str, str]] = None

@@ -8,7 +8,10 @@ import time
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Sequence
 
 from .base import LLMDefaults, LLMError, Provider, ProviderRequest, ProviderResponse
-from .claude_provider import ClaudeProvider, normalize_anthropic_model
+from .claude_provider import (
+    ClaudeProvider,
+    normalize_anthropic_model,
+)
 
 if TYPE_CHECKING:
     from .key_resolution import KeyResolution
@@ -410,7 +413,9 @@ class LLMManager:
             raise e
 
     @staticmethod
-    def _track_llm_error(error: BaseException, purpose: Optional[str], code: Optional[str] = None) -> None:
+    def _track_llm_error(
+        error: BaseException, purpose: Optional[str], code: Optional[str] = None
+    ) -> None:
         try:
             from shared.telemetry import telemetry
 

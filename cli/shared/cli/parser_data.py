@@ -459,12 +459,8 @@ and Readyset caching opportunities.""",
 Converts your question into SQL, executes it, and returns the results.
 Use this to explore data and answer questions - for query optimization, use 'rdst analyze' instead.
 
-The quality of results improves when you have a semantic layer configured (see 'rdst schema').
-The more details you provide with 'rdst schema annotate', the better the SQL generation.
-
-Modes:
-  Default     Linear flow: generate SQL, confirm, execute, show results
-  --agent     Agent mode: explores schema iteratively for complex questions""",
+Ask initializes a structural semantic layer automatically when one is missing.
+Use 'rdst schema annotate' to add reviewed business descriptions.""",
         args=[
             ArgDef(
                 "question", nargs="?", help="Natural language question about your data"
@@ -475,12 +471,6 @@ Modes:
             ),
             ArgDef("--timeout", type=int, default=600, help="Query timeout in seconds (default: 600)"),
             ArgDef("--verbose", action="store_true", help="Show detailed information"),
-            ArgDef(
-                "--agent",
-                dest="agent_mode",
-                action="store_true",
-                help="Agent mode: iteratively explores schema for complex questions",
-            ),
             ArgDef(
                 "--no-interactive", action="store_true", help="Non-interactive mode"
             ),
@@ -493,10 +483,6 @@ Modes:
             (
                 'rdst ask "Show top 10 orders by price" --target mydb',
                 "Data exploration",
-            ),
-            (
-                'rdst ask "Which products have the most sales?" --target mydb --agent',
-                "Complex question with agent mode",
             ),
             (
                 'rdst ask "Count users by country" --target mydb --dry-run',

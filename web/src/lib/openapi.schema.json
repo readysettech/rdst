@@ -1576,7 +1576,6 @@
       "AskPhase": {
         "enum": [
           "schema",
-          "filter",
           "clarify",
           "generate",
           "validate",
@@ -1589,11 +1588,6 @@
       "AskRequest": {
         "description": "Request for text-to-SQL conversion.",
         "properties": {
-          "agent_mode": {
-            "default": false,
-            "title": "Agent Mode",
-            "type": "boolean"
-          },
           "clarification_answers": {
             "anyOf": [
               {

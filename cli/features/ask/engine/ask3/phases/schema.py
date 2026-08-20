@@ -1,37 +1,48 @@
 """
 Phase 1: Schema Loading
 
-Loads database schema from semantic layer (fast) or database (slow).
+Loads the stored semantic layer or initializes one from the database.
 Populates context with schema information for SQL generation.
 """
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import TYPE_CHECKING, Optional
+import re
+from collections import Counter
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..context import Ask3Context
     from ..presenter import Ask3Presenter
 
-from ..types import ColumnInfo, DbType, SchemaInfo, SchemaSource, TableInfo
+from ..types import ColumnInfo, SchemaInfo, SchemaSource, TableInfo
 
 logger = logging.getLogger(__name__)
 
 
 def load_schema(
-    ctx: "Ask3Context", presenter: "Ask3Presenter", semantic_manager=None
+    ctx: "Ask3Context",
+    presenter: "Ask3Presenter",
+    semantic_manager=None,
+    semantic_schema_formatter: Callable[[Any], str] | None = None,
 ) -> "Ask3Context":
     """
-    Load schema from semantic layer or database.
+    Load a semantic layer, initializing it from the database when missing.
 
-    Tries semantic layer first (fast), falls back to database (slow).
+    Auto-init uses the same structural introspector as ``rdst schema init`` and
+    persists the result. An existing incomplete layer is never overwritten; Ask
+    uses a fresh in-memory introspection for that request instead.
     The semantic layer is complete if >50% of tables have column types.
 
     Args:
         ctx: Ask3Context with target set
         presenter: For progress output
         semantic_manager: SemanticLayerManager instance (optional, creates default)
+        semantic_schema_formatter: Optional diagnostic formatter for semantic layers.
 
     Returns:
         Updated context with schema_info and schema_formatted populated
@@ -46,53 +57,84 @@ def load_schema(
     if semantic_manager is None:
         semantic_manager = SemanticLayerManager()
 
-    # Try semantic layer first
-    if semantic_manager.exists(ctx.target):
+    layer_exists = semantic_manager.exists(ctx.target)
+    if layer_exists:
         try:
             layer = semantic_manager.load(ctx.target)
 
             if _is_complete(layer):
-                # Use semantic layer (fast path)
-                ctx.schema_info = _build_schema_info_from_semantic(
-                    layer, ctx.target, ctx.db_type
+                return _apply_semantic_layer(
+                    ctx,
+                    presenter,
+                    layer,
+                    source=SchemaSource.SEMANTIC,
+                    semantic_schema_formatter=semantic_schema_formatter,
                 )
-                ctx.schema_formatted = _format_semantic_schema(layer)
-                ctx.schema_full_formatted = ctx.schema_formatted
-                ctx.schema_source = SchemaSource.SEMANTIC
-
-                presenter.schema_loaded(
-                    source="semantic layer", table_count=len(layer.tables)
-                )
-                return ctx
-
-            else:
-                logger.info(
-                    f"Semantic layer for {ctx.target} is incomplete, falling back to database"
-                )
-
-        except Exception as e:
-            logger.warning(f"Failed to load semantic layer: {e}")
-
-    # Fall back to database collection (slow path)
-    try:
-        ctx.schema_info, ctx.schema_formatted = _collect_from_database(ctx)
-        ctx.schema_full_formatted = ctx.schema_formatted
-        ctx.schema_source = SchemaSource.DATABASE
-
-        if ctx.schema_info is None or not ctx.schema_info.tables:
-            error_msg = ctx.schema_formatted or "Failed to load schema"
-            logger.error(f"Schema collection produced no tables: {error_msg}")
-            ctx.mark_error(error_msg)
+            logger.warning(
+                "Semantic layer for %s is incomplete; using fresh introspection "
+                "without overwriting it",
+                ctx.target,
+            )
+        except Exception as exc:
+            ctx.mark_error(f"Failed to load semantic layer: {exc}")
             return ctx
 
-        presenter.schema_loaded(
-            source="database", table_count=len(ctx.schema_info.tables)
+    if not ctx.target_config:
+        ctx.mark_error("No target configuration available for schema initialization")
+        return ctx
+
+    try:
+        from features.schema.semantic_layer.introspector import SchemaIntrospector
+
+        layer = SchemaIntrospector(ctx.target_config).introspect(
+            target_name=ctx.target,
+            enum_threshold=20,
+            sample_enums=True,
         )
+        if not _is_complete(layer):
+            ctx.mark_error("Schema initialization produced no usable typed tables")
+            return ctx
+        if not layer_exists:
+            semantic_manager.save(layer)
+        return _apply_semantic_layer(
+            ctx,
+            presenter,
+            layer,
+            source=SchemaSource.SEMANTIC if not layer_exists else SchemaSource.DATABASE,
+            semantic_schema_formatter=semantic_schema_formatter,
+        )
+    except Exception as exc:
+        logger.error("Failed to initialize schema: %s", exc)
+        ctx.mark_error(f"Failed to initialize schema: {exc}")
 
-    except Exception as e:
-        logger.error(f"Failed to collect schema from database: {e}")
-        ctx.mark_error(f"Failed to load schema: {e}")
+    return ctx
 
+
+def _apply_semantic_layer(
+    ctx: "Ask3Context",
+    presenter: "Ask3Presenter",
+    layer: Any,
+    *,
+    source: str,
+    semantic_schema_formatter: Callable[[Any], str] | None,
+) -> "Ask3Context":
+    """Put one complete semantic representation on the Ask context."""
+    ctx.schema_info = _build_schema_info_from_semantic(layer, ctx.target, ctx.db_type)
+    serialization = select_semantic_schema_serialization(
+        layer, forced_formatter=semantic_schema_formatter
+    )
+    ctx.schema_formatted = serialization.formatted
+    ctx.schema_source = source
+    ctx.schema_format = serialization.format_version
+    ctx.schema_format_policy = serialization.policy
+    ctx.schema_verbose_chars = serialization.verbose_chars
+    ctx.schema_compact_chars = serialization.compact_chars
+    ctx.schema_compact_savings_ratio = serialization.compact_savings_ratio
+    ctx.schema_compact_fallback = serialization.compact_fallback
+    presenter.schema_loaded(
+        source="semantic layer" if source == SchemaSource.SEMANTIC else "database",
+        table_count=len(layer.tables),
+    )
     return ctx
 
 
@@ -206,166 +248,254 @@ def _format_semantic_schema(layer) -> str:
     return "\n".join(parts)
 
 
-def _collect_from_database(ctx: "Ask3Context") -> tuple[Optional[SchemaInfo], str]:
+VERBOSE_SCHEMA_FORMAT_VERSION = "rdst-verbose-schema-v1"
+COMPACT_SCHEMA_FORMAT_VERSION = "rdst-compact-schema-v2"
+ADAPTIVE_SCHEMA_FORMAT_VERSION = "rdst-adaptive-schema-v2"
+ADAPTIVE_SCHEMA_MIN_SAVINGS_PERCENT = 15
+ADAPTIVE_SCHEMA_MIN_SAVINGS_RATIO = ADAPTIVE_SCHEMA_MIN_SAVINGS_PERCENT / 100
+_COMPACT_SCHEMA_CODE_ALPHABET = (
+    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+)
+_SQL_IDENTIFIER = r'(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_$]*)'
+_CANONICAL_RELATIONSHIP = re.compile(
+    rf"^\s*(?P<source_table>{_SQL_IDENTIFIER})\."
+    rf"(?P<source_column>{_SQL_IDENTIFIER})\s*=\s*"
+    rf"(?P<target_table>{_SQL_IDENTIFIER})\."
+    rf"(?P<target_column>{_SQL_IDENTIFIER})\s*$"
+)
+
+
+def _compact_schema_escape(value: Any) -> str:
+    """Escape compact-schema delimiters without losing identifier or prose text."""
+    return (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace("\t", "\\t")
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
+        .replace(":", "\\:")
+    )
+
+
+def _compact_schema_code(index: int) -> str:
+    """Return a deterministic short code for a zero-based dictionary index."""
+    if index < 0:
+        raise ValueError("compact schema code index must be non-negative")
+    base = len(_COMPACT_SCHEMA_CODE_ALPHABET)
+    if index == 0:
+        return _COMPACT_SCHEMA_CODE_ALPHABET[0]
+    result = ""
+    while index:
+        index, remainder = divmod(index, base)
+        result = _COMPACT_SCHEMA_CODE_ALPHABET[remainder] + result
+    return result
+
+
+def _unquote_sql_identifier(identifier: str) -> str:
+    if identifier.startswith('"') and identifier.endswith('"'):
+        return identifier[1:-1].replace('""', '"')
+    return identifier
+
+
+def _compact_relationship_line(table_name: str, relationship: Any) -> str:
+    """Compact a canonical foreign key, falling back to its complete prompt form."""
+    match = _CANONICAL_RELATIONSHIP.fullmatch(relationship.join_pattern)
+    if match:
+        source_table = _unquote_sql_identifier(match.group("source_table"))
+        source_column = _unquote_sql_identifier(match.group("source_column"))
+        target_table = _unquote_sql_identifier(match.group("target_table"))
+        target_column = _unquote_sql_identifier(match.group("target_column"))
+        if source_table == table_name and target_table == relationship.target_table:
+            fields = [
+                f">{_compact_schema_escape(source_column)}",
+                _compact_schema_escape(target_table),
+            ]
+            if target_column != "id" or relationship.relationship_type != "many_to_one":
+                fields.append(_compact_schema_escape(target_column))
+            if relationship.relationship_type != "many_to_one":
+                fields.append(_compact_schema_escape(relationship.relationship_type))
+            return "\t".join(fields)
+
+    return "\t".join(
+        [
+            ">!",
+            _compact_schema_escape(relationship.relationship_type),
+            _compact_schema_escape(relationship.target_table),
+            _compact_schema_escape(relationship.join_pattern),
+        ]
+    )
+
+
+def format_semantic_schema_compact(layer) -> str:
+    """Serialize the complete effective Ask schema in a compact escaped grammar.
+
+    This retains every semantic field exposed by ``_format_semantic_schema`` while
+    removing repeated prose labels, common types, and redundant foreign-key syntax.
+    The most frequent type is implicit; the rest use deterministic short codes.
+    ``@`` starts a table and its tab-separated columns. ``>`` starts a canonical
+    relationship relative to that table. ``>!`` preserves a relationship that cannot
+    be normalized safely. Backslash escapes delimiters inside values.
     """
-    Collect schema directly from database.
+    type_counts = Counter(
+        col.data_type or ""
+        for table in layer.tables.values()
+        for col in table.columns.values()
+    )
+    ordered_types = sorted(
+        type_counts,
+        key=lambda data_type: (-type_counts[data_type], data_type),
+    )
+    default_type = ordered_types[0] if ordered_types else ""
+    type_codes = {
+        data_type: _compact_schema_code(index)
+        for index, data_type in enumerate(ordered_types[1:])
+    }
+    lines = [
+        (
+            f"{COMPACT_SCHEMA_FORMAT_VERSION}; @table<TAB>columns; "
+            "column or column:type-code, bare column uses !default_type and !type "
+            "defines codes; # table metadata; +column metadata; metadata tags "
+            "d=description,b=business context,e=enum,p=pattern,n=null %,k=distinct; "
+            ">source-column<TAB>target-table<TAB>optional-target-column"
+            "<TAB>optional-relationship-type; >!<TAB>type<TAB>target<TAB>join "
+            "preserves full relationship; "
+            "default target column=id and relationship=many_to_one"
+        ),
+        f"!default_type\t{_compact_schema_escape(default_type)}",
+    ]
+    lines.extend(
+        f"!type\t{code}\t{_compact_schema_escape(data_type)}"
+        for data_type, code in type_codes.items()
+    )
+    for table_name, table in layer.tables.items():
+        table_parts = [f"@{_compact_schema_escape(table_name)}"]
+        column_metadata: list[str] = []
+        for col_name, col in table.columns.items():
+            encoded_name = _compact_schema_escape(col_name)
+            data_type = col.data_type or ""
+            if data_type == default_type:
+                table_parts.append(encoded_name)
+            else:
+                table_parts.append(f"{encoded_name}:{type_codes[data_type]}")
 
-    This is the slow path - used when semantic layer doesn't exist or is incomplete.
-    """
-    if not ctx.target_config:
-        logger.error("No target_config provided for database schema collection")
-        return None, "Schema information: Not available (no target config)"
-
-    db_type = ctx.db_type or ctx.target_config.get("engine", "postgresql").lower()
-
-    if db_type == DbType.POSTGRESQL or "postgres" in db_type:
-        return _collect_postgres_schema(ctx.target_config, ctx.target)
-    elif db_type == DbType.MYSQL or "mysql" in db_type:
-        return _collect_mysql_schema(ctx.target_config, ctx.target)
-    else:
-        logger.error(f"Unsupported database type: {db_type}")
-        return None, f"Schema information: Unsupported database type {db_type}"
-
-
-def _collect_postgres_schema(
-    config: dict, target: str
-) -> tuple[Optional[SchemaInfo], str]:
-    """Collect schema from PostgreSQL database."""
-    try:
-        import psycopg2
-
-        from shared.db_connection import (
-            postgres_connection_kwargs,
-            resolve_connection_params,
-        )
-
-        params = resolve_connection_params(
-            target=target, target_config=config, lane="rdst/ask"
-        )
-
-        if not all([params["host"], params["user"], params["database"]]):
-            return None, "Schema information: Missing connection parameters"
-
-        conn = psycopg2.connect(**postgres_connection_kwargs(params))
-
-        schema_info = SchemaInfo(
-            target=target, db_type=DbType.POSTGRESQL, source=SchemaSource.DATABASE
-        )
-        parts = []
-
-        with conn.cursor() as cur:
-            # Get all tables
-            cur.execute("""
-                SELECT table_name
-                FROM information_schema.tables
-                WHERE table_schema = 'public'
-                AND table_type = 'BASE TABLE'
-                ORDER BY table_name
-            """)
-            tables = [row[0] for row in cur.fetchall()]
-
-            for table_name in tables:
-                # Get columns for this table
-                cur.execute(
-                    """
-                    SELECT column_name, data_type, is_nullable
-                    FROM information_schema.columns
-                    WHERE table_schema = 'public'
-                    AND table_name = %s
-                    ORDER BY ordinal_position
-                """,
-                    (table_name,),
+            metadata = [f"+{encoded_name}"]
+            if col.description:
+                metadata.append(f"d={_compact_schema_escape(col.description)}")
+            if col.enum_values:
+                enum_values = [
+                    [value, meaning]
+                    if meaning
+                    and meaning != str(value)
+                    and not meaning.startswith("TODO:")
+                    else value
+                    for value, meaning in col.enum_values.items()
+                ]
+                metadata.append(
+                    "e="
+                    + json.dumps(enum_values, ensure_ascii=False, separators=(",", ":"))
                 )
+            if col.value_pattern:
+                metadata.append(f"p={_compact_schema_escape(col.value_pattern)}")
+            if col.null_fraction is not None and col.null_fraction > 0.05:
+                metadata.append(f"n={col.null_fraction:.0%}")
+            if col.distinct_count is not None:
+                metadata.append(f"k={col.distinct_count:,}")
+            if len(metadata) > 1:
+                column_metadata.append("\t".join(metadata))
+        lines.append("\t".join(table_parts))
 
-                table_info = TableInfo(name=table_name)
-                col_strs = []
+        table_metadata = ["#"]
+        if table.description:
+            table_metadata.append(f"d={_compact_schema_escape(table.description)}")
+        if table.business_context:
+            table_metadata.append(f"b={_compact_schema_escape(table.business_context)}")
+        if len(table_metadata) > 1:
+            lines.append("\t".join(table_metadata))
+        lines.extend(column_metadata)
 
-                for col_name, data_type, nullable in cur.fetchall():
-                    table_info.columns[col_name] = ColumnInfo(
-                        name=col_name,
-                        data_type=data_type,
-                    )
-                    null_marker = " NULL" if nullable == "YES" else ""
-                    col_strs.append(f"  {col_name} ({data_type}){null_marker}")
+        if table.relationships:
+            lines.extend(
+                _compact_relationship_line(table_name, relationship)
+                for relationship in table.relationships
+            )
 
-                schema_info.tables[table_name] = table_info
-                parts.append(f"Table: {table_name}")
-                parts.append("\n".join(col_strs))
-                parts.append("")
-
-        conn.close()
-        return schema_info, "\n".join(parts)
-
-    except ImportError:
-        logger.error("psycopg2 not installed")
-        return None, "Schema information: psycopg2 not installed"
-    except Exception as e:
-        logger.error(f"PostgreSQL schema collection failed: {e}")
-        return None, f"Schema information: Collection failed ({e})"
-
-
-def _collect_mysql_schema(
-    config: dict, target: str
-) -> tuple[Optional[SchemaInfo], str]:
-    """Collect schema from MySQL database."""
-    try:
-        import pymysql  # noqa: F401 -- fail early with the existing import error path
-
-        from shared.db_connection import (
-            create_mysql_connection_from_params,
-            quote_identifier,
-            resolve_connection_params,
+    extensions_context = layer.get_extensions_context()
+    if extensions_context:
+        lines.append(
+            "!database_type_context="
+            + json.dumps(extensions_context, ensure_ascii=False)
         )
+    return "\n".join(lines)
 
-        params = resolve_connection_params(
-            target=target, target_config=config, lane="rdst/ask"
+
+@dataclass(frozen=True)
+class SemanticSchemaSerialization:
+    """Selected semantic schema text and the measurements behind the choice."""
+
+    formatted: str
+    format_version: str
+    policy: str
+    verbose_chars: int
+    compact_chars: int
+    compact_savings_ratio: float
+    compact_fallback: str = ""
+
+
+def _choose_semantic_schema_text(
+    verbose: str,
+    compact: str,
+) -> tuple[str, str]:
+    """Use compact only when it saves strictly more than the 15% cutoff."""
+    if len(compact) * 100 < len(verbose) * (100 - ADAPTIVE_SCHEMA_MIN_SAVINGS_PERCENT):
+        return compact, COMPACT_SCHEMA_FORMAT_VERSION
+    return verbose, VERBOSE_SCHEMA_FORMAT_VERSION
+
+
+def select_semantic_schema_serialization(
+    layer,
+    *,
+    forced_formatter: Callable[[Any], str] | None = None,
+) -> SemanticSchemaSerialization:
+    """Serialize a real semantic layer and select the measured smaller format."""
+    verbose = _format_semantic_schema(layer)
+    compact = format_semantic_schema_compact(layer)
+    compact_savings_ratio = (
+        (len(verbose) - len(compact)) / len(verbose) if verbose else 0.0
+    )
+
+    if forced_formatter is None or forced_formatter is format_semantic_schema_adaptive:
+        formatted, format_version = _choose_semantic_schema_text(verbose, compact)
+        policy = ADAPTIVE_SCHEMA_FORMAT_VERSION
+        compact_fallback = (
+            compact if format_version == VERBOSE_SCHEMA_FORMAT_VERSION else ""
         )
+    elif forced_formatter is _format_semantic_schema:
+        formatted = verbose
+        format_version = VERBOSE_SCHEMA_FORMAT_VERSION
+        policy = "diagnostic-forced"
+        compact_fallback = ""
+    elif forced_formatter is format_semantic_schema_compact:
+        formatted = compact
+        format_version = COMPACT_SCHEMA_FORMAT_VERSION
+        policy = "diagnostic-forced"
+        compact_fallback = ""
+    else:
+        formatted = forced_formatter(layer)
+        format_version = "diagnostic-custom"
+        policy = "diagnostic-forced"
+        compact_fallback = ""
 
-        if not all([params["host"], params["user"], params["database"]]):
-            return None, "Schema information: Missing connection parameters"
+    return SemanticSchemaSerialization(
+        formatted=formatted,
+        format_version=format_version,
+        policy=policy,
+        verbose_chars=len(verbose),
+        compact_chars=len(compact),
+        compact_savings_ratio=compact_savings_ratio,
+        compact_fallback=compact_fallback,
+    )
 
-        conn = create_mysql_connection_from_params(params)
 
-        schema_info = SchemaInfo(
-            target=target, db_type=DbType.MYSQL, source=SchemaSource.DATABASE
-        )
-        parts = []
-
-        with conn.cursor() as cur:
-            # Get all tables
-            cur.execute("SHOW TABLES")
-            tables = [row[0] for row in cur.fetchall()]
-
-            for table_name in tables:
-                # Get columns
-                cur.execute(f"DESCRIBE {quote_identifier(table_name, 'mysql')}")
-
-                table_info = TableInfo(name=table_name)
-                col_strs = []
-
-                for row in cur.fetchall():
-                    col_name = row[0]
-                    data_type = row[1]
-                    nullable = row[2]
-
-                    table_info.columns[col_name] = ColumnInfo(
-                        name=col_name,
-                        data_type=data_type,
-                    )
-                    null_marker = " NULL" if nullable == "YES" else ""
-                    col_strs.append(f"  {col_name} ({data_type}){null_marker}")
-
-                schema_info.tables[table_name] = table_info
-                parts.append(f"Table: {table_name}")
-                parts.append("\n".join(col_strs))
-                parts.append("")
-
-        conn.close()
-        return schema_info, "\n".join(parts)
-
-    except ImportError:
-        logger.error("pymysql not installed")
-        return None, "Schema information: pymysql not installed"
-    except Exception as e:
-        logger.error(f"MySQL schema collection failed: {e}")
-        return None, f"Schema information: Collection failed ({e})"
+def format_semantic_schema_adaptive(layer) -> str:
+    """Return verbose or compact schema text using the measured 15% cutoff."""
+    return select_semantic_schema_serialization(layer).formatted

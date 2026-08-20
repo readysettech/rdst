@@ -41,6 +41,7 @@ def generate_sql(
 
     # Import here to avoid circular imports
     # Path: lib/engines/ask3/phases/generate.py -> lib/functions/, lib/llm_manager/
+    from features.ask.engine.ask3.phases.schema import COMPACT_SCHEMA_FORMAT_VERSION
     from features.ask.sql_generation import generate_sql_from_nl
     from shared.llm_manager import LLMManager
 
@@ -62,13 +63,28 @@ def generate_sql(
         target_database=ctx.target,
         llm_manager=llm_manager,
         provided_context=ctx.provided_context,
+        schema_format=ctx.schema_format,
+        compact_fallback_schema=ctx.schema_compact_fallback,
+        compact_fallback_format=COMPACT_SCHEMA_FORMAT_VERSION,
         callback=lambda **kw: _track_llm_call(ctx, "generate", **kw),
     )
 
+    ctx.schema_prompt_utf8_bytes = result.get("prompt_utf8_bytes", 0)
+    ctx.schema_context_fallback_reason = result.get(
+        "schema_context_fallback_reason", ""
+    )
+    if result.get("schema_context_fallback_used"):
+        ctx.schema_formatted = ctx.schema_compact_fallback
+        ctx.schema_format = result.get("schema_format", COMPACT_SCHEMA_FORMAT_VERSION)
+        ctx.schema_context_fallback_used = True
+    ctx.schema_compact_fallback = ""
+
     if not result.get("success"):
         error = result.get("error", "Unknown error")
+        error_code = result.get("schema_request_failure_code") or None
+        error_category = "model-limit" if error_code else None
         logger.error(f"SQL generation failed: {error}")
-        ctx.mark_error(error)
+        ctx.mark_error(error, code=error_code, category=error_category)
         presenter.error(error)
         return ctx
 

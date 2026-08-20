@@ -797,7 +797,7 @@ Tests that guard rules are enforced when an agent generates and executes SQL thr
 
 **Pre-check**: Verify ANTHROPIC_API_KEY set and pgimdb target available.
 
-**Note on `rdst ask`**: Guards do NOT work with `rdst ask` — the `--agent` flag is a boolean mode toggle, not a named agent reference. All enforcement testing goes through `rdst agent chat`.
+**Note on `rdst ask`**: Guards do NOT work with `rdst ask`. All enforcement testing goes through `rdst agent chat`.
 
 **Setup**:
 ```bash

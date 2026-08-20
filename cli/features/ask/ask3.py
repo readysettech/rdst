@@ -7,9 +7,6 @@ from features.ask.engine.ask3.phases import (
     execute_query as _execute_query,
 )
 from features.ask.engine.ask3.phases import (
-    filter_schema as _filter_schema,
-)
-from features.ask.engine.ask3.phases import (
     generate_sql as _generate_sql,
 )
 from features.ask.engine.ask3.phases import (
@@ -31,12 +28,8 @@ def get_status_enum():
     return Status
 
 
-def load_schema(ctx, presenter, semantic_manager=None):
-    return _load_schema(ctx, presenter, semantic_manager)
-
-
-def filter_schema(ctx, presenter, llm_manager=None):
-    return _filter_schema(ctx, presenter, llm_manager)
+def load_schema(ctx, presenter, semantic_manager=None, semantic_schema_formatter=None):
+    return _load_schema(ctx, presenter, semantic_manager, semantic_schema_formatter)
 
 
 def generate_sql(ctx, presenter, llm_manager=None):

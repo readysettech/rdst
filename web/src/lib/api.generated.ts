@@ -3731,17 +3731,12 @@ export interface components {
          * AskPhase
          * @enum {string}
          */
-        AskPhase: "schema" | "filter" | "clarify" | "generate" | "validate" | "execute" | "config";
+        AskPhase: "schema" | "clarify" | "generate" | "validate" | "execute" | "config";
         /**
          * AskRequest
          * @description Request for text-to-SQL conversion.
          */
         AskRequest: {
-            /**
-             * Agent Mode
-             * @default false
-             */
-            agent_mode?: boolean;
             /** Clarification Answers */
             clarification_answers?: {
                 [key: string]: string;

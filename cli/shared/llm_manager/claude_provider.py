@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from collections.abc import Generator
 from enum import Enum
 from typing import Any
@@ -44,6 +45,18 @@ _RETIRED_MODEL_REPLACEMENTS = {
     AnthropicModel.SONNET_4.value: AnthropicModel.SONNET_4_6.value,
     AnthropicModel.OPUS_4.value: AnthropicModel.OPUS_4_6.value,
 }
+
+# Anthropic documents a 32 MB limit for a Messages API request body. HTTPX uses
+# the same compact UTF-8 JSON encoding below, so this measures the bytes that the
+# SDK will send instead of estimating tokens from characters.
+ANTHROPIC_MESSAGES_MAX_REQUEST_BYTES = 32 * 1024 * 1024
+
+_CONTEXT_WINDOW_ERROR_PATTERNS = (
+    re.compile(r"\bprompt is too long\b", re.IGNORECASE),
+    re.compile(r"\bcontext window\b.*\bexceed", re.IGNORECASE),
+    re.compile(r"\bexceed.*\bcontext window\b", re.IGNORECASE),
+    re.compile(r"\binput tokens?\b.*\b(?:exceed|maximum|limit)\b", re.IGNORECASE),
+)
 
 
 def normalize_anthropic_model(model: str | AnthropicModel) -> str:
@@ -140,6 +153,39 @@ class ClaudeProvider(Provider):
         return payload
 
     @staticmethod
+    def _request_payload_bytes(payload: dict[str, Any]) -> int:
+        """Return the serialized Messages API request-body size."""
+        return len(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        )
+
+    @classmethod
+    def _check_request_payload_size(cls, payload: dict[str, Any]) -> None:
+        request_bytes = cls._request_payload_bytes(payload)
+        if request_bytes <= ANTHROPIC_MESSAGES_MAX_REQUEST_BYTES:
+            return
+        raise LLMError(
+            "The Anthropic Messages API request body is "
+            f"{request_bytes:,} bytes, which exceeds the "
+            f"{ANTHROPIC_MESSAGES_MAX_REQUEST_BYTES:,}-byte limit.",
+            code="ANTHROPIC_REQUEST_TOO_LARGE",
+            status=413,
+        )
+
+    @staticmethod
+    def _is_context_window_error(
+        *, status: int, provider_type: Any, detail: str
+    ) -> bool:
+        if status != 400 or provider_type != "invalid_request_error":
+            return False
+        return any(pattern.search(detail) for pattern in _CONTEXT_WINDOW_ERROR_PATTERNS)
+
+    @staticmethod
     def _error_payload(exc: anthropic.APIStatusError):
         payload = exc.body if isinstance(exc.body, dict) else {}
         error = payload.get("error")
@@ -167,6 +213,32 @@ class ClaudeProvider(Provider):
         payload, error_obj, detail, request_id = cls._error_payload(exc)
         status = exc.status_code
         request_suffix = f" (request ID: {request_id})" if request_id else ""
+        provider_type = error_obj.get("type")
+
+        # The trial service forwards Anthropic error bodies unchanged. Classify
+        # this provider error before applying route-specific proxy messages.
+        if cls._is_context_window_error(
+            status=status,
+            provider_type=provider_type,
+            detail=detail,
+        ):
+            raise LLMError(
+                f"Anthropic could not fit the request in the model context window: "
+                f"{detail}{request_suffix}",
+                code="ANTHROPIC_CONTEXT_WINDOW_EXCEEDED",
+                status=status,
+                request_id=request_id,
+                cause=exc,
+            )
+        if status == 413 and provider_type == "request_too_large":
+            raise LLMError(
+                f"The Anthropic request exceeded the Messages API request-body "
+                f"limit: {detail}{request_suffix}",
+                code="ANTHROPIC_REQUEST_TOO_LARGE",
+                status=status,
+                request_id=request_id,
+                cause=exc,
+            )
 
         if base_url:
             code = payload.get("code") if isinstance(payload.get("code"), str) else None
@@ -197,7 +269,6 @@ class ClaudeProvider(Provider):
                 cause=exc,
             )
 
-        provider_type = error_obj.get("type")
         if status == 200 and isinstance(provider_type, str):
             raise LLMError(
                 f"Anthropic streaming error: {detail}{request_suffix}",
@@ -287,6 +358,8 @@ class ClaudeProvider(Provider):
         debug: bool = False,
     ) -> ProviderResponse:
         model = normalize_anthropic_model(request.model)
+        payload = self._request_payload(request)
+        self._check_request_payload_size(payload)
         client = self._client(
             api_key=api_key,
             base_url=base_url,
@@ -294,9 +367,7 @@ class ClaudeProvider(Provider):
             timeout=self._timeout(request),
         )
         try:
-            raw_response = client.messages.with_raw_response.create(
-                **self._request_payload(request)
-            )
+            raw_response = client.messages.with_raw_response.create(**payload)
             try:
                 message = raw_response.parse()
             except Exception as exc:
@@ -357,6 +428,8 @@ class ClaudeProvider(Provider):
     ) -> Generator[str, None, None]:
         """Stream response text from Claude using the official SDK."""
         model = normalize_anthropic_model(request.model)
+        payload = self._request_payload(request)
+        self._check_request_payload_size(payload)
         client = self._client(
             api_key=api_key,
             base_url=base_url,
@@ -364,7 +437,7 @@ class ClaudeProvider(Provider):
             timeout=120,
         )
         try:
-            with client.messages.stream(**self._request_payload(request)) as stream:
+            with client.messages.stream(**payload) as stream:
                 yield from stream.text_stream
         except anthropic.APIStatusError as exc:
             self._raise_status_error(exc, base_url=base_url, model=model)

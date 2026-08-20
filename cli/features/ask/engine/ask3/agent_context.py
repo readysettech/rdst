@@ -100,8 +100,8 @@ class AgentExplorationContext:
         )
 
         # Carry over already explored tables
-        if ctx.filtered_tables:
-            agent_ctx.explored_tables = set(ctx.filtered_tables)
+        if ctx.schema_info:
+            agent_ctx.explored_tables = set(ctx.schema_info.tables)
 
         # Carry over any clarifications collected in linear flow
         if ctx.clarifications:

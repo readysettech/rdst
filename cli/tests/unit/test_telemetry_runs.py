@@ -306,7 +306,6 @@ class TestGenericCommandFinalize:
                 "ask",
                 source="web",
                 target_engine="postgresql",
-                agent_mode=True,
                 dry_run=False,
             ) as run:
                 run.success = True
@@ -318,7 +317,6 @@ class TestGenericCommandFinalize:
         assert props["success"] is True
         assert props["source"] == "web"
         assert props["target_engine"] == "postgresql"
-        assert props["agent_mode"] is True
         assert props["dry_run"] is False  # default-falsy values still surface
         assert props["query_hash"] == "qh-1"
         assert "duration_ms" in props

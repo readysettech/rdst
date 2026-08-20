@@ -223,32 +223,6 @@ COMMON ISSUES TO CHECK:
 7. Case sensitivity issues
 8. Missing quotes around string literals"""
 
-SCHEMA_FILTER_PROMPT = """You are a database schema expert. Analyze a natural language question and identify which database tables and columns are relevant.
-
-USER QUESTION:
-{nl_question}
-
-AVAILABLE TABLES:
-{table_list}
-
-TASK: Identify which tables are likely needed to answer this question.
-
-Return your analysis in JSON format:
-
-{{
-  "relevant_tables": ["list", "of", "table", "names"],
-  "reasoning": "Why these tables were selected",
-  "confidence": 0.0-1.0,
-  "uncertain_references": ["terms in question that don't clearly map to tables"]
-}}
-
-GUIDELINES:
-1. Consider table names, typical database naming patterns
-2. Think about relationships between tables
-3. Include junction/join tables if many-to-many relationships are implied
-4. Be inclusive - better to include extra tables than miss important ones
-5. If completely uncertain, include all tables (confidence will be low)"""
-
 # Template validation
 PROMPT_REQUIRED_FIELDS = {
     "COMPREHENSIVE_ASK_PROMPT": [
@@ -278,7 +252,6 @@ PROMPT_REQUIRED_FIELDS = {
         "rows_returned",
         "execution_time_ms",
     ],
-    "SCHEMA_FILTER_PROMPT": ["nl_question", "table_list"],
 }
 
 

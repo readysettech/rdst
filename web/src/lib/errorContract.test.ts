@@ -3,6 +3,7 @@ import {
   classifyError,
   friendlySqlError,
   isConnectionFailure,
+  isModelContextLimitError,
   isTrialExhaustedError,
   normalizeExplainError,
   normalizeHttpError,
@@ -72,6 +73,28 @@ describe('classifyError', () => {
     expect(
       classifyError({ code: 'error', message: 'AI request was unauthorized' })
     ).toBe('provider')
+  })
+
+  it('recognizes model context limits without treating them as authentication', () => {
+    expect(
+      isModelContextLimitError({
+        code: 'ANTHROPIC_CONTEXT_WINDOW_EXCEEDED',
+        message: 'The complete database schema is too large.',
+      })
+    ).toBe(true)
+    expect(
+      isModelContextLimitError({
+        code: 'error',
+        message:
+          "The complete database schema could not fit within Anthropic's model context window.",
+      })
+    ).toBe(true)
+    expect(
+      isModelContextLimitError({
+        code: 'ANTHROPIC_AUTH_INVALID',
+        message: 'Anthropic rejected the API key.',
+      })
+    ).toBe(false)
   })
 
   it('routes DB credential failures to database, never provider', () => {
@@ -245,7 +268,10 @@ describe('normalizeSseError / normalizeHttpError', () => {
       })
     ).toBe('database')
     expect(
-      classifyError({ code: 'auth_invalid', message: 'AI authentication failed' })
+      classifyError({
+        code: 'auth_invalid',
+        message: 'AI authentication failed',
+      })
     ).toBe('provider')
   })
 

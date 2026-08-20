@@ -55,15 +55,31 @@ def test_run_parser_accepts_positive_paid_run_limits():
     assert args.max_normalized_cost_usd == Decimal("1.25")
     assert args.max_wall_time_seconds == 90.5
     assert args.context == ContextMode.AUTO_INIT.value
+    assert args.schema_format == "rdst-adaptive-schema-v2"
 
 
-def test_protocol_fingerprint_covers_canonical_schema_expansion():
+def test_run_parser_accepts_compact_v2_schema_format():
+    args = cli.build_parser().parse_args(
+        [
+            "run",
+            "--models",
+            "claude-sonnet-4.6-anthropic-sdk",
+            "--schema-format",
+            "rdst-compact-schema-v2",
+        ]
+    )
+
+    assert args.schema_format == "rdst-compact-schema-v2"
+
+
+def test_protocol_fingerprint_covers_canonical_schema_loading():
     relative_paths = {
         path.relative_to(cli.RDST_ROOT).as_posix()
         for path in cli._benchmark_protocol_paths()
     }
 
-    assert "features/ask/engine/ask3/phases/expand.py" in relative_paths
+    assert "features/ask/engine/ask3/phases/schema.py" in relative_paths
+    assert "features/ask/service.py" in relative_paths
     assert "features/analyze/functions/shallow_analysis.py" in relative_paths
 
 

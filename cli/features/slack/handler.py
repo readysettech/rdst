@@ -106,7 +106,6 @@ class SlackEventHandler:
                 max_rows=self.config.max_rows,
                 verbose=False,
                 no_interactive=True,  # Never prompt in Slack
-                agent_mode=False,  # Use fast linear flow
             )
 
             # Format and send response

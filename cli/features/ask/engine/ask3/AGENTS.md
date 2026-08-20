@@ -5,7 +5,7 @@
 ## FLOW
 
 ```
-SCHEMA → FILTER → CLARIFY → GENERATE ↔ VALIDATE → EXECUTE → [AGENT?] → PRESENT
+SCHEMA → CLARIFY → GENERATE ↔ VALIDATE → EXECUTE → [AGENT?] → PRESENT
                               ↑____________↓ (retry loop)
 ```
 
@@ -30,21 +30,20 @@ def generate_sql(ctx: Ask3Context, presenter: Ask3Presenter, llm: LLMManager) ->
     # Read from ctx
     schema = ctx.schema_formatted
     question = ctx.refined_question or ctx.question
-    
+
     # Do work
     result = llm.call(...)
-    
+
     # Write to ctx
     ctx.sql = result['sql']
-    ctx.generation_response = result  # For expansion detection
+    ctx.generation_response = result  # For diagnostics and escalation
     return ctx
 ```
 
 ### Escalation to Agent
-Linear flow escalates to `Ask3Agent` when:
+The internal legacy engine can escalate to `Ask3Agent` when:
 - Zero rows returned
 - Low LLM confidence
-- User requests `--agent` mode
 
 ```python
 # engine.py - escalation decision
@@ -91,17 +90,23 @@ if should_escalate:
 - **NO exception raising** - Use `ctx.mark_error()` pattern
 - **NO merging phases** - Keep them atomic and testable
 
-## SCHEMA EXPANSION
+## SCHEMA SELECTION
 
-When LLM signals schema is insufficient:
+Runtime Ask paths send the complete loaded schema to generation. If no semantic layer
+exists, Ask runs the structural introspector used by `rdst schema init`, persists the
+result, and continues. Do not add schema filtering back without execution-backed
+evidence that it improves accuracy and a model context that cannot hold the complete
+schema.
 
-```python
-# In _generate_and_validate loop
-expansion_request = self._detect_expansion_request(ctx)
-if expansion_request and ctx.can_expand_schema():
-    ctx = expand_schema(ctx, presenter, expansion_request.missing_concepts, ...)
-    continue  # Retry with expanded schema
-```
+Semantic schema serialization is adaptive. Build both complete representations and
+use compact v2 only when it is strictly more than 15% smaller than verbose by
+character count. Exactly 15% stays verbose. Keep the selected format and both measured
+sizes on `Ask3Context`; never use this rule to drop tables or semantic fields.
+
+Do not estimate model tokens from schema characters or maintain a local context-window
+table. Let the provider reject an oversized request, then retry the lossless compact
+form once. The Anthropic provider separately enforces its documented serialized
+request-body limit. Do not retry unrelated provider errors.
 
 ## TESTING
 
@@ -111,9 +116,9 @@ Phases are pure functions - test by creating context and asserting output:
 def test_generate_sql():
     ctx = Ask3Context(question="count users", target="test")
     ctx.schema_formatted = "CREATE TABLE users (id INT)"
-    
+
     ctx = generate_sql(ctx, mock_presenter, mock_llm)
-    
+
     assert ctx.sql is not None
     assert "SELECT" in ctx.sql
 ```

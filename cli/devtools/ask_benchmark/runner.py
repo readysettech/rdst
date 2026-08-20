@@ -16,6 +16,12 @@ import sqlglot
 from sqlglot import exp
 
 from features.ask.ambiguity_detection import NON_INTERACTIVE_CLARIFICATION_POLICY
+from features.ask.engine.ask3.phases.schema import (
+    ADAPTIVE_SCHEMA_FORMAT_VERSION,
+    COMPACT_SCHEMA_FORMAT_VERSION,
+    _format_semantic_schema,
+    format_semantic_schema_compact,
+)
 from features.ask.engine.ask3.types import SchemaSource
 from features.ask.events import (
     AskClarificationNeededEvent,
@@ -216,6 +222,7 @@ class BenchmarkRunner:
         oracle_executor: MySQLExecutor | None = None,
         adapter_factory: Callable[[ModelSpec, dict[str, ModelSpec]], Any] | None = None,
         run_limits: RunLimits | None = None,
+        semantic_schema_format: str = ADAPTIVE_SCHEMA_FORMAT_VERSION,
     ):
         self.run_id = run_id
         self.track = track
@@ -252,6 +259,20 @@ class BenchmarkRunner:
         self.protocol_fingerprint = protocol_fingerprint
         self.adapter_factory = adapter_factory or _build_adapter
         self.run_limits = run_limits or RunLimits()
+        if semantic_schema_format not in {
+            ADAPTIVE_SCHEMA_FORMAT_VERSION,
+            "verbose-v1",
+            COMPACT_SCHEMA_FORMAT_VERSION,
+        }:
+            raise ValueError(
+                f"Unsupported semantic schema format: {semantic_schema_format}"
+            )
+        if (
+            semantic_schema_format == COMPACT_SCHEMA_FORMAT_VERSION
+            and context_mode == ContextMode.RAW
+        ):
+            raise ValueError("Compact schema formatting requires a semantic context")
+        self.semantic_schema_format = semantic_schema_format
         self.budget_stop_reason: str | None = None
         self._gold_fingerprints: dict[int, str] = {}
         self._gold_results: dict[int, QueryResult] = {}
@@ -531,6 +552,13 @@ class BenchmarkRunner:
             persist_queries=False,
             session_store={},
             phase_observer=observe,
+            diagnostic_schema_formatter_fn=(
+                format_semantic_schema_compact
+                if self.semantic_schema_format == COMPACT_SCHEMA_FORMAT_VERSION
+                else _format_semantic_schema
+                if self.semantic_schema_format == "verbose-v1"
+                else None
+            ),
         )
         options = AskOptions(
             timeout_seconds=self.executor.bounds.timeout_seconds,
@@ -772,6 +800,7 @@ class BenchmarkRunner:
                     else self.interaction_mode.value
                 ),
                 "provided_context_policy": "first-class-authoritative-v1",
+                "semantic_schema_format": self.semantic_schema_format,
                 "generation_attempts": 1,
                 "max_validation_repair_attempts": 1,
                 "validation_attempts": 2,
@@ -833,8 +862,6 @@ def _classify_context_error(phase: str, message: str | None):
         return Outcome.LOW_CONFIDENCE_REFUSAL, "generation"
     if phase == "schema":
         return Outcome.SCHEMA_LOAD_ERROR, "schema"
-    if phase == "filter":
-        return Outcome.SCHEMA_FILTER_ERROR, "filter"
     if phase == "validate" or "validation" in text:
         return Outcome.VALIDATION_ERROR, "validation"
     if phase == "execute":
@@ -852,16 +879,34 @@ def _execution_error_outcome(error_kind: str | None):
 
 def _context_diagnostics(ctx, case: BenchmarkCase):
     gold_tables = {table.lower() for table in _sql_tables(case.gold_sql, case.dialect)}
-    filtered_tables = {table.lower() for table in ctx.filtered_tables}
+    schema_tables = list(ctx.schema_info.tables) if ctx.schema_info else []
+    normalized_schema_tables = {table.lower() for table in schema_tables}
     gold_table_recall = (
-        len(gold_tables & filtered_tables) / len(gold_tables) if gold_tables else None
+        len(gold_tables & normalized_schema_tables) / len(gold_tables)
+        if gold_tables
+        else None
     )
     return {
         "schema_source": ctx.schema_source,
-        "filtered_tables": ctx.filtered_tables,
-        "all_available_tables": ctx.all_available_tables,
-        "schema_filter_strategy": getattr(ctx, "schema_filter_strategy", ""),
-        "schema_expansion_count": getattr(ctx, "schema_expansion_count", 0),
+        "schema_format": getattr(ctx, "schema_format", ""),
+        "schema_format_policy": getattr(ctx, "schema_format_policy", ""),
+        "schema_verbose_chars": getattr(ctx, "schema_verbose_chars", 0),
+        "schema_compact_chars": getattr(ctx, "schema_compact_chars", 0),
+        "schema_compact_savings_ratio": getattr(
+            ctx, "schema_compact_savings_ratio", 0.0
+        ),
+        "schema_context_fallback_used": getattr(
+            ctx, "schema_context_fallback_used", False
+        ),
+        "schema_context_fallback_reason": getattr(
+            ctx, "schema_context_fallback_reason", ""
+        ),
+        "schema_prompt_utf8_bytes": getattr(ctx, "schema_prompt_utf8_bytes", 0),
+        "schema_tables": schema_tables,
+        # Historical aliases keep old analysis scripts readable. They now refer
+        # to the complete schema; filtering and expansion are gone.
+        "filtered_tables": schema_tables,
+        "all_available_tables": schema_tables,
         "retry_count": ctx.retry_count,
         "generation_confidence": ctx.generation_confidence,
         "clarifications": dict(getattr(ctx, "clarifications", {})),

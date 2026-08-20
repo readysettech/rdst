@@ -73,32 +73,6 @@ class ValidationError:
 
 
 @dataclass
-class SchemaExpansionRequest:
-    """LLM request for additional schema information."""
-
-    missing_concepts: List[str] = field(default_factory=list)
-    requested_tables: List[str] = field(default_factory=list)
-    reason: str = ""
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Serialize to dictionary."""
-        return {
-            "missing_concepts": self.missing_concepts,
-            "requested_tables": self.requested_tables,
-            "reason": self.reason,
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "SchemaExpansionRequest":
-        """Deserialize from dictionary."""
-        return cls(
-            missing_concepts=data.get("missing_concepts", []),
-            requested_tables=data.get("requested_tables", []),
-            reason=data.get("reason", ""),
-        )
-
-
-@dataclass
 class SchemaInfo:
     """Schema information for a database target."""
 

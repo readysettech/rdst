@@ -13,11 +13,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from shared.constants import rdst_data_dir
 from shared.error_parser import parse_syntax_error
+from shared.llm_manager.base import LLMError
 
 from .prompts.ask_prompts import (
     COMPREHENSIVE_ASK_PROMPT,
     ERROR_RECOVERY_PROMPT,
-    SCHEMA_FILTER_PROMPT,
     SQL_GENERATION_RESPONSE_SCHEMA,
     SQL_GENERATION_SYSTEM_PROMPT,
     SQL_REFINEMENT_PROMPT,
@@ -28,6 +28,96 @@ from .prompts.ask_prompts import (
 from .sql_validation import check_read_only
 
 logger = logging.getLogger(__name__)
+
+
+SQL_GENERATION_MAX_TOKENS = 800
+_SCHEMA_SIZE_ERROR_CODES = {
+    "ANTHROPIC_CONTEXT_WINDOW_EXCEEDED",
+    "ANTHROPIC_REQUEST_TOO_LARGE",
+}
+
+
+def _generation_response_format() -> Dict[str, Any]:
+    """Return the structured-output contract sent with generation requests."""
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "sql_generation",
+            "strict": True,
+            "schema": SQL_GENERATION_RESPONSE_SCHEMA,
+        },
+    }
+
+
+def _format_generation_prompt(
+    *,
+    nl_question: str,
+    schema: str,
+    database_engine: str,
+    target_database: str,
+    provided_context: str,
+) -> str:
+    return COMPREHENSIVE_ASK_PROMPT.format(
+        database_engine=database_engine,
+        target_database=target_database,
+        nl_question=nl_question,
+        provided_context_block=format_provided_context_block(provided_context),
+        filtered_schema=schema,
+    )
+
+
+def _is_schema_size_error(error: BaseException) -> bool:
+    return isinstance(error, LLMError) and error.code in _SCHEMA_SIZE_ERROR_CODES
+
+
+def _schema_size_failure(
+    *,
+    error: LLMError,
+    initial_schema: str,
+    initial_schema_format: str,
+    compact_schema: str,
+    compact_attempted: bool,
+    diagnostics: Dict[str, Any],
+) -> Dict[str, Any]:
+    limit = (
+        "Anthropic's model context window"
+        if error.code == "ANTHROPIC_CONTEXT_WINDOW_EXCEEDED"
+        else "Anthropic's Messages API request-body limit"
+    )
+    attempts = (
+        "RDST tried both complete lossless schema formats."
+        if compact_attempted
+        else "No smaller complete lossless schema representation was available."
+    )
+    request_id = f" Request ID: {error.request_id}." if error.request_id else ""
+    compact_bytes = len(compact_schema.encode("utf-8")) if compact_schema else 0
+    initial_label = (
+        "compact schema"
+        if "compact" in initial_schema_format.lower()
+        else "verbose schema"
+    )
+    return {
+        "success": False,
+        "sql": "",
+        "explanation": "",
+        "confidence": 0.0,
+        "error": (
+            f"The complete database schema could not fit within {limit}. "
+            f"{attempts} The {initial_label} is "
+            f"{len(initial_schema.encode('utf-8')):,} bytes"
+            + (
+                f" and the compact schema is {compact_bytes:,} bytes."
+                if compact_bytes
+                else "."
+            )
+            + " Limit the configured database role to the schemas and tables "
+            "Ask should access, or configure a model with a larger context window. "
+            "RDST did not truncate the schema." + request_id
+        ),
+        "schema_request_failure_code": error.code,
+        "schema_request_failure_request_id": error.request_id or "",
+        **diagnostics,
+    }
 
 
 @dataclass
@@ -85,41 +175,101 @@ def generate_sql_from_nl(
     """
     purpose = kwargs.pop("purpose", "sql_generation")
     system_message = kwargs.pop("system_message", SQL_GENERATION_SYSTEM_PROMPT)
+    compact_fallback_schema = kwargs.pop("compact_fallback_schema", "")
+    compact_fallback_format = kwargs.pop("compact_fallback_format", "")
+    schema_format = kwargs.pop("schema_format", "")
     try:
-        # Format the comprehensive prompt
-        prompt = COMPREHENSIVE_ASK_PROMPT.format(
+        prompt = _format_generation_prompt(
+            nl_question=nl_question,
+            schema=filtered_schema,
             database_engine=database_engine,
             target_database=target_database,
-            nl_question=nl_question,
-            provided_context_block=format_provided_context_block(provided_context),
-            filtered_schema=filtered_schema,
+            provided_context=provided_context,
         )
+        response_format = _generation_response_format()
+        context_fallback_used = False
+        context_fallback_reason = ""
 
         # Call LLM with JSON mode for structured output
         # LLMManager uses generate_response() method
         import time
 
         start_time = time.time()
-
-        llm_result = llm_manager.generate_response(
-            prompt=prompt,
-            system_message=system_message,
-            temperature=0.0,
-            max_tokens=800,
-            purpose=purpose,
-            extra={
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "sql_generation",
-                        "strict": True,
-                        "schema": SQL_GENERATION_RESPONSE_SCHEMA,
-                    },
+        try:
+            llm_result = llm_manager.generate_response(
+                prompt=prompt,
+                system_message=system_message,
+                temperature=0.0,
+                max_tokens=SQL_GENERATION_MAX_TOKENS,
+                purpose=purpose,
+                extra={"response_format": response_format},
+            )
+        except LLMError as first_error:
+            if not _is_schema_size_error(first_error):
+                raise
+            if not compact_fallback_schema:
+                diagnostics = {
+                    "schema_context_fallback_used": False,
+                    "schema_context_fallback_reason": "",
+                    "schema_format": "",
+                    "prompt_utf8_bytes": len(prompt.encode("utf-8")),
                 }
-            },
-        )
+                return _schema_size_failure(
+                    error=first_error,
+                    initial_schema=filtered_schema,
+                    initial_schema_format=schema_format,
+                    compact_schema="",
+                    compact_attempted=False,
+                    diagnostics=diagnostics,
+                )
+
+            prompt = _format_generation_prompt(
+                nl_question=nl_question,
+                schema=compact_fallback_schema,
+                database_engine=database_engine,
+                target_database=target_database,
+                provided_context=provided_context,
+            )
+            context_fallback_used = True
+            context_fallback_reason = (
+                "context_window"
+                if first_error.code == "ANTHROPIC_CONTEXT_WINDOW_EXCEEDED"
+                else "request_body_limit"
+            )
+            try:
+                llm_result = llm_manager.generate_response(
+                    prompt=prompt,
+                    system_message=system_message,
+                    temperature=0.0,
+                    max_tokens=SQL_GENERATION_MAX_TOKENS,
+                    purpose=purpose,
+                    extra={"response_format": response_format},
+                )
+            except LLMError as compact_error:
+                if not _is_schema_size_error(compact_error):
+                    raise
+                diagnostics = {
+                    "schema_context_fallback_used": True,
+                    "schema_context_fallback_reason": context_fallback_reason,
+                    "schema_format": compact_fallback_format,
+                    "prompt_utf8_bytes": len(prompt.encode("utf-8")),
+                }
+                return _schema_size_failure(
+                    error=compact_error,
+                    initial_schema=filtered_schema,
+                    initial_schema_format=schema_format,
+                    compact_schema=compact_fallback_schema,
+                    compact_attempted=True,
+                    diagnostics=diagnostics,
+                )
 
         latency_ms = (time.time() - start_time) * 1000
+        size_diagnostics = {
+            "schema_context_fallback_used": context_fallback_used,
+            "schema_context_fallback_reason": context_fallback_reason,
+            "schema_format": compact_fallback_format if context_fallback_used else "",
+            "prompt_utf8_bytes": len(prompt.encode("utf-8")),
+        }
 
         # Invoke callback for LLM call tracking
         if callback:
@@ -267,6 +417,7 @@ def generate_sql_from_nl(
             "missing_schema": result.missing_schema,
             "error": result.error,
             "raw_response": result_data,
+            **size_diagnostics,
         }
 
     except json.JSONDecodeError as e:
@@ -573,84 +724,6 @@ def recover_from_error(
         return {"success": False, "error": f"Error recovery failed: {str(e)}"}
 
 
-def filter_relevant_schema(
-    nl_question: str, full_schema: str, llm_manager=None, **kwargs
-) -> Dict[str, Any]:
-    """
-    Filter schema to include only tables relevant to the natural language question.
-
-    This reduces token usage and helps the LLM focus on relevant parts of the schema.
-    Uses simple heuristics first, falls back to LLM if needed.
-
-    Args:
-        nl_question: Natural language question
-        full_schema: Complete schema information string
-        llm_manager: LLMManager instance (optional)
-        **kwargs: Additional parameters
-
-    Returns:
-        Dict containing:
-        - success: bool
-        - filtered_schema: Schema subset relevant to question
-        - tables_included: List of table names included
-        - method: 'heuristic' or 'llm'
-    """
-    try:
-        # Try heuristic approach first: extract table names from question
-        table_names = _extract_table_names_from_schema(full_schema)
-        relevant_tables = _match_tables_heuristic(nl_question, table_names)
-
-        if relevant_tables:
-            # Filter schema to include only relevant tables
-            filtered = _filter_schema_by_tables(full_schema, relevant_tables)
-            return {
-                "success": True,
-                "filtered_schema": filtered,
-                "tables_included": relevant_tables,
-                "method": "heuristic",
-            }
-
-        # Fallback to LLM if heuristic fails and LLM is available
-        if llm_manager:
-            table_list = "\n".join([f"- {name}" for name in table_names])
-            prompt = SCHEMA_FILTER_PROMPT.format(
-                nl_question=nl_question, table_list=table_list
-            )
-
-            response = llm_manager.chat(prompt=prompt, temperature=0.0, json_mode=True)
-
-            result_data = json.loads(response, strict=False)
-            relevant_tables = result_data.get("relevant_tables", [])
-
-            if relevant_tables:
-                filtered = _filter_schema_by_tables(full_schema, relevant_tables)
-                return {
-                    "success": True,
-                    "filtered_schema": filtered,
-                    "tables_included": relevant_tables,
-                    "method": "llm",
-                    "confidence": result_data.get("confidence", 0.0),
-                }
-
-        # If all else fails, return full schema
-        return {
-            "success": True,
-            "filtered_schema": full_schema,
-            "tables_included": table_names,
-            "method": "fallback_full",
-        }
-
-    except Exception as e:
-        # On error, return full schema
-        return {
-            "success": True,
-            "filtered_schema": full_schema,
-            "tables_included": [],
-            "method": "error_fallback",
-            "error": str(e),
-        }
-
-
 # Helper functions
 
 
@@ -671,76 +744,6 @@ def _extract_table_names_from_schema(schema: str) -> List[str]:
 
     # Deduplicate and return
     return list(set(table_names))
-
-
-def _match_tables_heuristic(question: str, table_names: List[str]) -> List[str]:
-    """
-    Match table names to natural language question using heuristics.
-
-    Simple approach: check if table name (or singular/plural variants) appear in question.
-    """
-    question_lower = question.lower()
-    relevant = []
-
-    for table in table_names:
-        table_lower = table.lower()
-
-        # Direct match
-        if table_lower in question_lower:
-            relevant.append(table)
-            continue
-
-        # Try singular/plural variants
-        if table_lower.endswith("s") and table_lower[:-1] in question_lower:
-            relevant.append(table)
-            continue
-
-        if table_lower + "s" in question_lower:
-            relevant.append(table)
-            continue
-
-    return relevant
-
-
-def _filter_schema_by_tables(full_schema: str, table_names: List[str]) -> str:
-    """
-    Filter schema string to include only specified tables.
-
-    Preserves the structure of the schema output but only includes relevant sections.
-    """
-    if not table_names:
-        return full_schema
-
-    # Split schema into table sections
-    lines = full_schema.split("\n")
-    filtered_lines = []
-    include_section = False
-
-    for line in lines:
-        # Check if line is a table header
-        for table in table_names:
-            if (
-                f"Table: {table}" in line
-                or f"## {table}" in line
-                or f"CREATE TABLE {table}" in line.upper()
-            ):
-                include_section = True
-                break
-
-        # Include line if we're in a relevant section
-        if include_section:
-            filtered_lines.append(line)
-
-            # Check if section ends (next table or empty lines)
-            if line.strip() == "" and len(filtered_lines) > 10:
-                # Might be end of table section, prepare to check next table
-                include_section = False
-
-    if filtered_lines:
-        return "\n".join(filtered_lines)
-    else:
-        # If filtering failed, return full schema
-        return full_schema
 
 
 def _calculate_similarity(str1: str, str2: str) -> float:

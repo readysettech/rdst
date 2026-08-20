@@ -9,10 +9,8 @@ from typing import Any, Optional
 
 class AskPhase(str, Enum):
     SCHEMA = "schema"
-    FILTER = "filter"
     CLARIFY = "clarify"
     GENERATE = "generate"
-    EXPAND = "expand"
     VALIDATE = "validate"
     EXECUTE = "execute"
     CONFIG = "config"
@@ -36,7 +34,6 @@ class AskOptions:
     timeout_seconds: int = 30
     max_rows: int = 100
     verbose: bool = False
-    agent_mode: bool = False
     no_interactive: bool = False
     enforce_result_limit: bool = True
     persist_query: bool = True

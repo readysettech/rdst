@@ -67,7 +67,6 @@ class AskCommand:
         dry_run: bool = False,
         timeout: int = 30,
         verbose: bool = False,
-        agent_mode: bool = False,
         no_interactive: bool = False,
         **kwargs,
     ) -> RdstResult:
@@ -101,7 +100,6 @@ class AskCommand:
             "ask",
             source="cli",
             target_engine=target_engine,
-            agent_mode=agent_mode,
             dry_run=dry_run,
         ) as run:
             try:
@@ -111,7 +109,6 @@ class AskCommand:
                     dry_run=dry_run,
                     timeout=timeout,
                     verbose=verbose,
-                    agent_mode=agent_mode,
                     no_interactive=no_interactive,
                     **kwargs,
                 )
@@ -137,7 +134,6 @@ class AskCommand:
         dry_run: bool = False,
         timeout: int = 30,
         verbose: bool = False,
-        agent_mode: bool = False,
         no_interactive: bool = False,
         **kwargs,
     ) -> RdstResult:
@@ -189,7 +185,6 @@ class AskCommand:
                 dry_run=dry_run,
                 timeout_seconds=timeout,
                 verbose=verbose,
-                agent_mode=agent_mode,
                 no_interactive=no_interactive,
             )
 

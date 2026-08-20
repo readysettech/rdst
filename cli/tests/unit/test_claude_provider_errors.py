@@ -99,6 +99,86 @@ def test_streaming_400_preserves_detail_status_and_request_id():
     assert "retired-model is not available" in str(raised.value)
 
 
+def test_direct_context_overflow_has_specific_retryable_code():
+    error = _status_error(
+        400,
+        {
+            "error": {
+                "type": "invalid_request_error",
+                "message": "prompt is too long: 210000 tokens > 200000 maximum",
+            },
+            "request_id": "req_context",
+        },
+    )
+    with _patch_client(_completion_client(error)), pytest.raises(LLMError) as raised:
+        ClaudeProvider().complete(_request(), api_key="test-key")
+
+    assert raised.value.code == "ANTHROPIC_CONTEXT_WINDOW_EXCEEDED"
+    assert raised.value.status == 400
+    assert raised.value.request_id == "req_context"
+
+
+def test_proxy_context_overflow_preserves_anthropic_classification():
+    error = _status_error(
+        400,
+        {
+            "error": {
+                "type": "invalid_request_error",
+                "message": "The model context window has been exceeded.",
+            },
+            "request_id": "req_proxy_context",
+        },
+    )
+    with _patch_client(_completion_client(error)), pytest.raises(LLMError) as raised:
+        ClaudeProvider().complete(
+            _request(),
+            api_key="trial-token",
+            base_url="https://trial.example",
+        )
+
+    assert raised.value.code == "ANTHROPIC_CONTEXT_WINDOW_EXCEEDED"
+    assert raised.value.request_id == "req_proxy_context"
+
+
+def test_unrelated_invalid_request_is_not_classified_as_context_overflow():
+    error = _status_error(
+        400,
+        {
+            "error": {
+                "type": "invalid_request_error",
+                "message": "tools.0.input_schema is invalid",
+            }
+        },
+    )
+    with _patch_client(_completion_client(error)), pytest.raises(LLMError) as raised:
+        ClaudeProvider().complete(_request(), api_key="test-key")
+
+    assert raised.value.code == "ANTHROPIC_INVALID_REQUEST"
+
+
+def test_proxy_request_body_overflow_preserves_anthropic_classification():
+    error = _status_error(
+        413,
+        {
+            "error": {
+                "type": "request_too_large",
+                "message": "Request exceeds the maximum size",
+            },
+            "request_id": "req_proxy_size",
+        },
+    )
+    with _patch_client(_completion_client(error)), pytest.raises(LLMError) as raised:
+        ClaudeProvider().complete(
+            _request(),
+            api_key="trial-token",
+            base_url="https://trial.example",
+        )
+
+    assert raised.value.code == "ANTHROPIC_REQUEST_TOO_LARGE"
+    assert raised.value.status == 413
+    assert raised.value.request_id == "req_proxy_size"
+
+
 def test_proxy_error_preserves_keyservice_code():
     error = _status_error(
         403,

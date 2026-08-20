@@ -129,7 +129,7 @@ rdst ask "Show me top 10 orders by price" --target tpch
 rdst ask "Count customers by market segment" --target tpch --dry-run
 
 # Agent mode for complex queries
-rdst ask "Which suppliers have the most orders?" --target tpch --agent
+rdst ask "Which suppliers have the most orders?" --target tpch
 ```
 
 **How it works**:

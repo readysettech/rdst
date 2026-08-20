@@ -16,32 +16,30 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING, Optional, Dict, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
+from . import escalation
 from .context import Ask3Context
-from .presenter import Ask3Presenter
-from .types import Status, DbType, SchemaExpansionRequest, SchemaSource
 from .phases import (
-    load_schema,
-    filter_schema,
     clarify_question,
-    generate_sql,
-    validate_sql,
     execute_query,
+    generate_sql,
+    load_schema,
     present_results,
-    expand_schema,
+    validate_sql,
 )
 from .phases.generate import regenerate_sql_with_error
+from .phases.present import prompt_save_query, summarize_session
 from .phases.validate import build_error_message
-from .phases.present import summarize_session, prompt_save_query
-from . import escalation
+from .presenter import Ask3Presenter
+from .types import DbType, SchemaSource, Status
 
 if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
 
-# Feature flag for agent mode
+# Feature flag for automatic legacy-agent escalation
 AGENT_ENABLED = os.getenv("RDST_ASK3_AGENT_ENABLED", "true").lower() in (
     "true",
     "1",
@@ -104,12 +102,10 @@ class Ask3Engine:
         max_rows: int = 100,
         verbose: bool = False,
         no_interactive: bool = False,
-        agent_mode: bool = False,
         conversation_context: str = "",
         pre_execute_validator: Callable[[str], None] | None = None,
         allow_agent_escalation: bool = True,
         enforce_result_limit: bool = True,
-        max_schema_expansions: int = 2,
         raise_unexpected_errors: bool = False,
     ) -> Ask3Context:
         """
@@ -125,13 +121,11 @@ class Ask3Engine:
             max_rows: Max rows to return
             verbose: Show detailed progress
             no_interactive: Apply only interpretations that pass the ranked resolver
-            agent_mode: Skip linear flow and go directly to agent exploration
             conversation_context: Previous conversation history for follow-up questions
             pre_execute_validator: Optional callback to validate SQL before execution.
                 Takes SQL string, raises exception if blocked. Used by guards.
             allow_agent_escalation: Permit automatic escalation after linear execution
             enforce_result_limit: Add and cap result LIMIT clauses during validation
-            max_schema_expansions: Maximum generation retries after schema expansion
             raise_unexpected_errors: Propagate unexpected phase exceptions to the caller
 
         Returns:
@@ -150,7 +144,6 @@ class Ask3Engine:
             no_interactive=no_interactive,
             allow_agent_escalation=allow_agent_escalation,
             enforce_result_limit=enforce_result_limit,
-            max_schema_expansions=max_schema_expansions,
             conversation_context=conversation_context,
         )
 
@@ -158,34 +151,10 @@ class Ask3Engine:
         self.presenter.verbose = verbose
 
         try:
-            # Phase 1: Load schema (always needed, even for agent mode)
+            # Phase 1: Load or initialize the complete schema.
             ctx = load_schema(ctx, self.presenter, self.semantic_manager)
             if ctx.status == Status.ERROR:
                 return ctx
-
-            # Capture full table list before filtering (for expansion/agent)
-            if ctx.schema_info and ctx.schema_info.tables:
-                ctx.all_available_tables = list(ctx.schema_info.tables.keys())
-
-            # Direct agent mode - skip linear flow entirely
-            if agent_mode and AGENT_ENABLED:
-                self.presenter.info("Entering direct agent exploration mode")
-                ctx = self._run_agent(ctx, escalation.EscalationReason.USER_REQUEST)
-
-                # Execute the agent's query if found
-                if ctx.sql and ctx.status == Status.PENDING:
-                    ctx = execute_query(ctx, self.presenter, self.db_executor)
-
-                # Present results
-                ctx = present_results(ctx, self.presenter)
-                summarize_session(ctx, self.presenter)
-                prompt_save_query(ctx, self.presenter)
-                return ctx
-
-            # Normal linear flow continues below...
-
-            # Phase 1.5: Filter schema to relevant tables
-            ctx = filter_schema(ctx, self.presenter, self.llm_manager)
 
             # Phase 2: Clarify question
             ctx = clarify_question(ctx, self.presenter, self.llm_manager)
@@ -257,16 +226,14 @@ class Ask3Engine:
         pre_execute_validator: Callable[[str], None] | None = None,
     ) -> Ask3Context:
         """
-        Generate SQL with validation retry loop AND schema expansion loop.
+        Generate SQL with a bounded validation retry loop.
 
         Flow:
         1. Generate SQL (skip if just regenerated with error feedback)
-        2. Check for schema_insufficient signal from LLM
-           - If true AND can_expand_schema(): expand schema, goto 1
-        3. Validate SQL
-        4. If valid AND pre_execute_validator: run guard check
-           - If blocked AND can_retry(): regenerate with guard feedback, goto 3
-        5. If validation errors AND can_retry(): regenerate with error, goto 3
+        2. Validate SQL
+        3. If valid AND pre_execute_validator: run guard check
+           - If blocked AND can_retry(): regenerate with guard feedback, goto 2
+        4. If validation errors AND can_retry(): regenerate with error, goto 2
         """
         skip_generate = False  # Skip generate_sql after regenerate_sql_with_error
 
@@ -276,31 +243,6 @@ class Ask3Engine:
                 ctx = generate_sql(ctx, self.presenter, self.llm_manager)
                 if ctx.status == Status.ERROR:
                     return ctx
-
-                # Check for schema expansion request
-                expansion_request = self._detect_expansion_request(ctx)
-                if expansion_request and ctx.can_expand_schema():
-                    self.presenter.info(
-                        f"LLM signaled schema insufficiency "
-                        f"(expansion {ctx.schema_expansion_count + 1}/{ctx.max_schema_expansions})"
-                    )
-
-                    # Perform expansion
-                    prev_table_count = len(ctx.filtered_tables)
-                    ctx = expand_schema(
-                        ctx,
-                        self.presenter,
-                        expansion_request.missing_concepts,
-                        expansion_request.requested_tables,
-                    )
-
-                    # Only retry if expansion actually added tables
-                    if len(ctx.filtered_tables) > prev_table_count:
-                        continue  # Retry generation with expanded schema
-                    else:
-                        self.presenter.warning(
-                            "Expansion found no new tables, proceeding with current schema"
-                        )
 
             skip_generate = False  # Reset for next iteration
 
@@ -345,48 +287,6 @@ class Ask3Engine:
             skip_generate = True  # Don't overwrite the regenerated SQL
 
         return ctx
-
-    def _detect_expansion_request(
-        self, ctx: Ask3Context
-    ) -> Optional[SchemaExpansionRequest]:
-        """
-        Detect if LLM is signaling schema insufficiency.
-
-        Only uses generate phase response. Clarify phase hints are informational only -
-        the generate phase LLM has final say on whether schema is sufficient.
-
-        Returns SchemaExpansionRequest if expansion is needed, None otherwise.
-        """
-        if not ctx.generation_response:
-            return None
-
-        analysis = ctx.generation_response.get("analysis", {})
-
-        # Check explicit signal from generate phase
-        if analysis.get("schema_insufficient", False):
-            return SchemaExpansionRequest(
-                missing_concepts=analysis.get("missing_concepts", []),
-                requested_tables=analysis.get("requested_tables", []),
-                reason="LLM signaled schema insufficient",
-            )
-
-        # Backup: very low confidence without clarification needed
-        sql_gen = ctx.generation_response.get("sql_generation", {})
-        confidence = sql_gen.get("confidence", 1.0)
-        needs_clarification = analysis.get("needs_clarification", False)
-
-        if confidence <= 0.1 and not needs_clarification:
-            # LLM gave up but didn't ask for clarification -> likely schema issue
-            logger.debug(
-                f"Implicit expansion signal: confidence={confidence}, no clarification"
-            )
-            return SchemaExpansionRequest(
-                missing_concepts=[],
-                requested_tables=[],
-                reason=f"Implicit: confidence {confidence} without clarification request",
-            )
-
-        return None
 
     def _retry_on_execution_error(self, ctx: Ask3Context) -> Ask3Context:
         """

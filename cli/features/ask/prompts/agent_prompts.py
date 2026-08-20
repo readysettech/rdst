@@ -114,9 +114,7 @@ def _format_escalation_reason(reason: str) -> str:
         "zero_rows": "Previous query returned 0 rows - likely a semantic mismatch",
         "low_confidence": "LLM was uncertain about interpretation - needs exploration",
         "validation_exhausted": "Multiple validation failures - schema confusion",
-        "schema_exhausted": "Schema expansion didn't help - need different approach",
         "execution_error": "Query execution error - need to investigate",
-        "user_request": "User requested deeper analysis",
     }
     return reasons.get(reason, reason)
 

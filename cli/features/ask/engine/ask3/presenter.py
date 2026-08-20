@@ -67,25 +67,6 @@ class Ask3Presenter:
                 f"[{StyleTokens.MUTED}]Schema loaded from {source} ({table_count} tables)[/{StyleTokens.MUTED}]"
             )
 
-    # === Phase 1.5: Schema Filtering ===
-
-    def schema_filtered(self, original: int, filtered: int, tables: List[str]) -> None:
-        """Show schema filtering results."""
-        if self.verbose:
-            tables_str = ", ".join(tables)
-            self._print(
-                f"[{StyleTokens.MUTED}]Schema filtered: {original} → {filtered} tables ({tables_str})[/{StyleTokens.MUTED}]"
-            )
-
-    # === Phase 3.5: Schema Expansion ===
-
-    def schema_expanded(self, added: List[str], total: int) -> None:
-        """Show schema expansion results."""
-        added_str = ", ".join(added)
-        self._print(
-            f"[{StyleTokens.SECONDARY}]Schema expanded: +{len(added)} tables ({added_str}) → {total} total[/{StyleTokens.SECONDARY}]"
-        )
-
     # === Phase 2: Clarification ===
 
     def analyzing_question(self) -> None:

@@ -355,3 +355,48 @@ test('a streamed Ask failure keeps the question and Try again re-runs it', async
   ).toHaveValue('')
   await expect(page.getByRole('button', { name: 'Get answer' })).toBeDisabled()
 })
+
+test('a model context limit is shown as a schema-size error', async ({
+  page,
+}) => {
+  setBackendFixtures({
+    ask: [
+      {
+        events: serviceEvents([
+          {
+            event: 'error',
+            data: {
+              type: 'error',
+              code: 'ANTHROPIC_CONTEXT_WINDOW_EXCEEDED',
+              category: 'model-limit',
+              message:
+                "The complete database schema could not fit within Anthropic's model context window. RDST tried both complete lossless schema formats. RDST did not truncate the schema. Request ID: req_schema.",
+              phase: 'generate',
+            },
+          },
+        ]),
+      },
+    ],
+  })
+  await configureTestTarget(page, { hasPassword: true })
+  await mockConnectivityOk(page)
+  await page.goto('/ask')
+  await page
+    .getByPlaceholder(
+      'For example: Which customers placed the most orders this month?'
+    )
+    .fill('Show recent orders')
+  await page.getByRole('button', { name: 'Get answer' }).click()
+
+  await expect(
+    page.getByText('Database schema is too large', { exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByText('Failed while: Generating SQL', { exact: true })
+  ).toBeVisible()
+  await expect(page.getByText('AI service authentication failed')).toHaveCount(
+    0
+  )
+  await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Ask another' })).toBeVisible()
+})

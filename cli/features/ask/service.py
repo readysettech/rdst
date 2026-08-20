@@ -24,13 +24,11 @@ from .ask3 import (
     create_context,
     create_interpretation,
     execute_query,
-    filter_schema,
     generate_sql,
     get_status_enum,
     load_schema,
     validate_sql,
 )
-from .engine.ask3.phases.expand import expand_schema
 from .engine.ask3.phases.generate import repair_validation_error
 from .engine.ask3.phases.validate import build_error_message
 from .events import (
@@ -76,6 +74,7 @@ class AskService:
         session_store: MutableMapping[str, _PendingAskSession] | None = None,
         persist_queries: bool = True,
         phase_observer: Callable[[str, Any], None] | None = None,
+        diagnostic_schema_formatter_fn: Callable[[Any], str] | None = None,
     ):
         self._llm_manager = llm_manager
         self._semantic_manager = semantic_manager
@@ -85,6 +84,7 @@ class AskService:
         self._session_store = session_store if session_store is not None else _sessions
         self._persist_queries = persist_queries
         self._phase_observer = phase_observer
+        self._diagnostic_schema_formatter_fn = diagnostic_schema_formatter_fn
 
     def _observe(self, phase: AskPhase, ctx: Any) -> None:
         if self._phase_observer is not None:
@@ -162,14 +162,15 @@ class AskService:
             yield AskStatusEvent(
                 type="status",
                 phase=AskPhase.SCHEMA,
-                message="Loading schema...",
+                message="Loading or initializing schema...",
             )
-            ctx = await asyncio.to_thread(
-                load_schema, ctx, _NullPresenter(), self._semantic_manager
-            )
-            self._observe(AskPhase.SCHEMA, ctx)
+            load_args = [ctx, _NullPresenter(), self._semantic_manager]
+            if self._diagnostic_schema_formatter_fn is not None:
+                load_args.append(self._diagnostic_schema_formatter_fn)
+            ctx = await asyncio.to_thread(load_schema, *load_args)
 
             if ctx.status == Status.ERROR:
+                self._observe(AskPhase.SCHEMA, ctx)
                 yield self._database_error(
                     ctx.error_message or "Failed to load schema",
                     AskPhase.SCHEMA,
@@ -179,6 +180,7 @@ class AskService:
                 return
 
             if not ctx.schema_info or not ctx.schema_info.tables:
+                self._observe(AskPhase.SCHEMA, ctx)
                 yield AskErrorEvent(
                     type="error",
                     message=ctx.error_message
@@ -187,8 +189,8 @@ class AskService:
                 )
                 return
 
+            self._observe(AskPhase.SCHEMA, ctx)
             tables = list(ctx.schema_info.tables.keys())
-            ctx.all_available_tables = tables
             yield AskSchemaLoadedEvent(
                 type="schema_loaded",
                 source=ctx.schema_source,
@@ -196,16 +198,6 @@ class AskService:
                 tables=tables[:10],
                 target=ctx.target or "",
             )
-
-            yield AskStatusEvent(
-                type="status",
-                phase=AskPhase.FILTER,
-                message="Filtering relevant tables...",
-            )
-            ctx = await asyncio.to_thread(
-                filter_schema, ctx, _NullPresenter(), self._llm_manager
-            )
-            self._observe(AskPhase.FILTER, ctx)
 
             yield AskStatusEvent(
                 type="status",
@@ -340,48 +332,14 @@ class AskService:
             generate_sql, ctx, _NullPresenter(), self._llm_manager
         )
         self._observe(AskPhase.GENERATE, ctx)
-        generation_response = getattr(ctx, "generation_response", {}) or {}
-        if (
-            ctx.status == Status.ERROR
-            and generation_response.get("cannot_answer") is True
-            and generation_response.get("cannot_answer_reason") == "missing_schema"
-            and ctx.schema_expansion_count < 1
-        ):
-            original_error = ctx.error_message
-            previous_count = ctx.schema_expansion_count
-            missing_schema = list(generation_response.get("missing_schema") or [])
-            ctx.status = Status.PENDING
-            ctx.error_message = None
-            yield AskStatusEvent(
-                type="status",
-                phase=AskPhase.EXPAND,
-                message="Expanding relevant schema...",
-            )
-            ctx = await asyncio.to_thread(
-                expand_schema,
-                ctx,
-                _NullPresenter(),
-                missing_schema,
-                missing_schema,
-            )
-            self._observe(AskPhase.EXPAND, ctx)
-            if ctx.schema_expansion_count > previous_count:
-                yield AskStatusEvent(
-                    type="status",
-                    phase=AskPhase.GENERATE,
-                    message="Regenerating SQL with expanded schema...",
-                )
-                ctx = await asyncio.to_thread(
-                    generate_sql, ctx, _NullPresenter(), self._llm_manager
-                )
-                self._observe(AskPhase.GENERATE, ctx)
-            else:
-                ctx.mark_error(original_error or "Required schema is unavailable")
         if ctx.status == Status.ERROR:
             yield AskErrorEvent(
                 type="error",
                 message=ctx.error_message or "Failed to generate SQL",
                 phase=AskPhase.GENERATE,
+                code=ctx.error_code,
+                category=ctx.error_category,
+                target=ctx.target,
             )
             return
 

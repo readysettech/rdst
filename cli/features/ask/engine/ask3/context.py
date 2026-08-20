@@ -54,23 +54,22 @@ class Ask3Context:
 
     # === Schema (Phase 1) ===
     schema_info: Optional[SchemaInfo] = None
-    schema_full_formatted: str = ""
     schema_formatted: str = ""
     schema_source: str = SchemaSource.SEMANTIC
+    schema_format: str = ""
+    schema_format_policy: str = ""
+    schema_verbose_chars: int = 0
+    schema_compact_chars: int = 0
+    schema_compact_savings_ratio: float = 0.0
+    # Retained only in memory when the normal 15% policy selected verbose.
+    # Generation can retry this complete, lossless form if the provider rejects
+    # the verbose request for exceeding its context or request-body limit.
+    schema_compact_fallback: str = ""
+    schema_context_fallback_used: bool = False
+    schema_context_fallback_reason: str = ""
+    schema_prompt_utf8_bytes: int = 0
 
-    # === Schema Filtering (Phase 1.5) ===
-    filtered_tables: List[str] = field(default_factory=list)
-    all_available_tables: List[str] = field(
-        default_factory=list
-    )  # Full table list before filtering
-    schema_filter_strategy: str = ""
-
-    # === Schema Expansion (Phase 3.5) ===
-    schema_expansion_count: int = 0
-    max_schema_expansions: int = 2  # Hard limit to prevent infinite loops
-    generation_response: Dict[str, Any] = field(
-        default_factory=dict
-    )  # Raw LLM response for expansion detection
+    generation_response: Dict[str, Any] = field(default_factory=dict)
 
     # === Clarification (Phase 2) ===
     interpretations: List[Interpretation] = field(default_factory=list)
@@ -102,6 +101,8 @@ class Ask3Context:
     # === Overall Status ===
     status: str = Status.PENDING
     error_message: Optional[str] = None
+    error_code: Optional[str] = None
+    error_category: Optional[str] = None
     phase: str = "init"  # Current phase for tracking
 
     # === LLM Tracking ===
@@ -127,15 +128,17 @@ class Ask3Context:
             "allow_agent_escalation": self.allow_agent_escalation,
             # Schema
             "schema_source": self.schema_source,
+            "schema_format": self.schema_format,
+            "schema_format_policy": self.schema_format_policy,
+            "schema_verbose_chars": self.schema_verbose_chars,
+            "schema_compact_chars": self.schema_compact_chars,
+            "schema_compact_savings_ratio": self.schema_compact_savings_ratio,
+            "schema_context_fallback_used": self.schema_context_fallback_used,
+            "schema_context_fallback_reason": self.schema_context_fallback_reason,
+            "schema_prompt_utf8_bytes": self.schema_prompt_utf8_bytes,
             "schema_formatted_length": len(self.schema_formatted)
             if self.schema_formatted
             else 0,
-            "filtered_tables": self.filtered_tables,
-            "all_available_tables": self.all_available_tables,
-            "schema_filter_strategy": self.schema_filter_strategy,
-            # Schema Expansion
-            "schema_expansion_count": self.schema_expansion_count,
-            "max_schema_expansions": self.max_schema_expansions,
             # Clarification
             "interpretations": [i.to_dict() for i in self.interpretations],
             "selected_interpretation": self.selected_interpretation.to_dict()
@@ -166,6 +169,8 @@ class Ask3Context:
             # Status
             "status": self.status,
             "error_message": self.error_message,
+            "error_code": self.error_code,
+            "error_category": self.error_category,
             "phase": self.phase,
             # LLM tracking
             "total_tokens": self.total_tokens,
@@ -194,13 +199,18 @@ class Ask3Context:
 
         # Schema
         ctx.schema_source = data.get("schema_source", SchemaSource.SEMANTIC)
-        ctx.filtered_tables = data.get("filtered_tables", [])
-        ctx.all_available_tables = data.get("all_available_tables", [])
-        ctx.schema_filter_strategy = data.get("schema_filter_strategy", "")
-
-        # Schema Expansion
-        ctx.schema_expansion_count = data.get("schema_expansion_count", 0)
-        ctx.max_schema_expansions = data.get("max_schema_expansions", 2)
+        ctx.schema_format = data.get("schema_format", "")
+        ctx.schema_format_policy = data.get("schema_format_policy", "")
+        ctx.schema_verbose_chars = data.get("schema_verbose_chars", 0)
+        ctx.schema_compact_chars = data.get("schema_compact_chars", 0)
+        ctx.schema_compact_savings_ratio = data.get("schema_compact_savings_ratio", 0.0)
+        ctx.schema_context_fallback_used = data.get(
+            "schema_context_fallback_used", False
+        )
+        ctx.schema_context_fallback_reason = data.get(
+            "schema_context_fallback_reason", ""
+        )
+        ctx.schema_prompt_utf8_bytes = data.get("schema_prompt_utf8_bytes", 0)
 
         # Clarification
         ctx.interpretations = [
@@ -236,6 +246,8 @@ class Ask3Context:
         # Status
         ctx.status = data.get("status", Status.PENDING)
         ctx.error_message = data.get("error_message")
+        ctx.error_code = data.get("error_code")
+        ctx.error_category = data.get("error_category")
         ctx.phase = data.get("phase", "init")
 
         # LLM tracking
@@ -244,10 +256,18 @@ class Ask3Context:
 
         return ctx
 
-    def mark_error(self, message: str) -> None:
+    def mark_error(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        category: str | None = None,
+    ) -> None:
         """Mark context as errored with message."""
         self.status = Status.ERROR
         self.error_message = message
+        self.error_code = code
+        self.error_category = category
 
     def mark_cancelled(self) -> None:
         """Mark context as cancelled by user."""
@@ -312,11 +332,3 @@ class Ask3Context:
         """Increment retry counter."""
         self.retry_count += 1
         self.clear_validation_errors()
-
-    def can_expand_schema(self) -> bool:
-        """Check if we can attempt another schema expansion."""
-        return self.schema_expansion_count < self.max_schema_expansions
-
-    def increment_expansion(self) -> None:
-        """Increment schema expansion counter."""
-        self.schema_expansion_count += 1

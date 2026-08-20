@@ -79,7 +79,7 @@ class AskRenderer:
     def _render_status(self, event: "AskStatusEvent") -> None:
         """Render status/progress event with animated spinner for long operations."""
         # Phases that show animated spinner (long-running operations)
-        spinner_phases = {"schema", "filter", "clarify", "generate", "validate", "execute"}
+        spinner_phases = {"schema", "clarify", "generate", "validate", "execute"}
 
         if event.phase in spinner_phases:
             # Show animated spinner for long-running phases
@@ -182,7 +182,6 @@ class AskRenderer:
     # Map internal phase names to user-friendly error prefixes
     _PHASE_ERROR_PREFIX: dict[str, str] = {
         "schema": "Error loading schema:",
-        "filter": "Error filtering schema:",
         "clarify": "Error analyzing question:",
         "generate": "Error generating SQL:",
         "validate": "Error validating SQL:",

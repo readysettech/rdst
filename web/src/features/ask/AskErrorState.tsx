@@ -9,6 +9,7 @@ import type { AskErrorEvent } from '../../lib/ask'
 import {
   classifyError,
   isConnectionFailure,
+  isModelContextLimitError,
   isTrialExhaustedError,
   TRIAL_EXHAUSTED_MESSAGE,
 } from '../../lib/errorContract'
@@ -45,8 +46,10 @@ export function AskErrorState({
     message: error.message,
   }
   const errorClass = classifyError(envelope)
+  const modelContextLimit = isModelContextLimitError(envelope)
   const isAuthenticationError =
-    errorClass === 'provider' || errorClass === 'rdst-service'
+    !modelContextLimit &&
+    (errorClass === 'provider' || errorClass === 'rdst-service')
   const trialExhausted = isTrialExhaustedError(error.message)
   const phaseLabel = error.phase ? PHASE_LABELS[error.phase] : undefined
 
@@ -87,8 +90,11 @@ export function AskErrorState({
     )
   }
 
-  const title =
-    error.phase === 'generate' ? "Couldn't generate SQL" : 'Request failed'
+  const title = modelContextLimit
+    ? 'Database schema is too large'
+    : error.phase === 'generate'
+      ? "Couldn't generate SQL"
+      : 'Request failed'
 
   return (
     <div className="rounded-xl border border-border-negative-soft bg-surface-negative-soft/50 p-6">
@@ -114,15 +120,17 @@ export function AskErrorState({
           </VStack>
           {phaseLabel && <FailurePhase label={phaseLabel} />}
           <HStack className="gap-3 items-center">
-            <Button
-              onClick={onRetry}
-              variant="primary"
-              modifier="outline"
-              size="small"
-              label="Try again"
-              icon="arrow-left"
-              iconPosition="left"
-            />
+            {!modelContextLimit && (
+              <Button
+                onClick={onRetry}
+                variant="primary"
+                modifier="outline"
+                size="small"
+                label="Try again"
+                icon="arrow-left"
+                iconPosition="left"
+              />
+            )}
             <Button
               onClick={onNewQuestion}
               variant="primary"

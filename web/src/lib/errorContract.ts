@@ -40,6 +40,25 @@ export function isTrialExhaustedError(
   )
 }
 
+const MODEL_CONTEXT_LIMIT_CODES = new Set([
+  'anthropic_context_window_exceeded',
+  'anthropic_request_too_large',
+])
+
+export function isModelContextLimitError(
+  error: Pick<ApiErrorEnvelope, 'code' | 'message'>
+): boolean {
+  if (MODEL_CONTEXT_LIMIT_CODES.has((error.code ?? '').toLowerCase())) {
+    return true
+  }
+  const message = (error.message ?? '').toLowerCase()
+  return (
+    message.includes('complete database schema could not fit within') &&
+    (message.includes('model context window') ||
+      message.includes('messages api request-body limit'))
+  )
+}
+
 /** One routed recovery action: a human label + an app route to send them to. */
 export interface RecoveryTarget {
   label: string
@@ -383,9 +402,7 @@ export function normalizeHttpError(
   }
 }
 
-const CONNECTION_CODES = new Set([
-  'database_connection_failed',
-])
+const CONNECTION_CODES = new Set(['database_connection_failed'])
 
 /** True only for stable connection/tunnel/provider-network categories. */
 export function isConnectionFailure(

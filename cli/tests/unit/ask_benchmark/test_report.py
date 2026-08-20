@@ -260,7 +260,7 @@ def test_report_separates_detector_recommendations_from_actual_stops():
 def test_report_exposes_filter_bypass_and_model_stage_latency() -> None:
     attempts = _attempts("model", 0, 1, "0.1")
     attempts[0]["diagnostics"] = {
-        "schema_filter_strategy": "full-schema-below-budget",
+        "schema_filter_strategy": "full-schema-unfiltered",
         "ambiguity_report": {
             "ambiguities": [{"id": "status"}],
             "requires_clarification": True,

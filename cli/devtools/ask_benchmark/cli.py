@@ -29,6 +29,10 @@ from features.ask.ambiguity_detection import (
     AMBIGUITY_RESPONSE_MAX_TOKENS,
     NON_INTERACTIVE_CLARIFICATION_POLICY,
 )
+from features.ask.engine.ask3.phases.schema import (
+    ADAPTIVE_SCHEMA_FORMAT_VERSION,
+    COMPACT_SCHEMA_FORMAT_VERSION,
+)
 from features.schema.semantic_layer.ai_annotator import (
     SAMPLE_ROWS_PER_PROMPT,
     AIAnnotator,
@@ -323,6 +327,19 @@ def build_parser() -> argparse.ArgumentParser:
         ],
         default=InteractionMode.AUTO.value,
         help="Clarification policy for rdst-ask; model-only records not-applicable",
+    )
+    run.add_argument(
+        "--schema-format",
+        choices=[
+            ADAPTIVE_SCHEMA_FORMAT_VERSION,
+            "verbose-v1",
+            COMPACT_SCHEMA_FORMAT_VERSION,
+        ],
+        default=ADAPTIVE_SCHEMA_FORMAT_VERSION,
+        help=(
+            "Semantic schema serialization. Forced verbose and compact formats are "
+            "restricted to internal rdst-ask smoke diagnostics."
+        ),
     )
     run.add_argument("--max-cases", type=_positive_int)
     run.add_argument(
@@ -1319,6 +1336,14 @@ def _run(args) -> int:
         if track == EvaluationTrack.RDST
         else InteractionMode.NOT_APPLICABLE
     )
+    if args.schema_format != ADAPTIVE_SCHEMA_FORMAT_VERSION and (
+        args.suite != "smoke"
+        or track != EvaluationTrack.RDST
+        or ContextMode(args.context) == ContextMode.RAW
+    ):
+        raise ValueError(
+            "Forced schema formatting is restricted to semantic rdst-ask smoke runs"
+        )
     required_transports = {spec.transport for spec in selected}
     if len(required_transports) != 1:
         raise ValueError("Run each model transport in a separate benchmark cohort")
@@ -1491,6 +1516,7 @@ def _run_database_locked(
             max_normalized_cost_usd=args.max_normalized_cost_usd,
             max_wall_time_seconds=args.max_wall_time_seconds,
         ),
+        semantic_schema_format=args.schema_format,
     )
     cases, gold_failures = runner.preflight_gold(cases)
     if gold_failures:
@@ -1551,6 +1577,7 @@ def _run_database_locked(
         "track": track.value,
         "context_mode": context_mode.value,
         "interaction_mode": interaction_mode.value,
+        "semantic_schema_format": args.schema_format,
         "clarification_policy": (
             NON_INTERACTIVE_CLARIFICATION_POLICY
             if track == EvaluationTrack.RDST
@@ -2099,9 +2126,7 @@ def _benchmark_protocol_paths() -> tuple[Path, ...]:
         RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "context.py",
         RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "engine.py",
         RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "types.py",
-        RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "phases" / "filter.py",
         RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "phases" / "schema.py",
-        RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "phases" / "expand.py",
         RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "phases" / "generate.py",
         RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "phases" / "validate.py",
         RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "phases" / "execute.py",

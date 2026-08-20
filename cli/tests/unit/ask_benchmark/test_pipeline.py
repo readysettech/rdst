@@ -35,8 +35,8 @@ from devtools.ask_benchmark.runner import (
     _multiset_result_hash,
     _sql_tables,
 )
-from features.ask.engine.ask3.phases.filter import _extract_semantic_concepts
-from features.ask.engine.ask3.types import SchemaSource
+from features.ask.engine.ask3.phases.schema import format_semantic_schema_compact
+from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
 from features.ask.events import (
     AskClarificationNeededEvent,
     AskErrorEvent,
@@ -45,13 +45,6 @@ from features.ask.events import (
 )
 from features.ask.models import AskClarificationQuestion
 from features.schema.semantic_layer.manager import SemanticLayerManager
-
-
-class _StrictFailingAdapter:
-    propagate_query_errors = True
-
-    def query(self, **_kwargs):
-        raise BenchmarkTransportError("provider unavailable")
 
 
 def test_sql_table_diagnostics_exclude_cte_aliases() -> None:
@@ -150,8 +143,12 @@ class _RDSTExecutor(_Executor):
 def _rdst_context():
     return SimpleNamespace(
         schema_source=SchemaSource.DATABASE,
-        filtered_tables=["fixture_table"],
-        all_available_tables=["fixture_table"],
+        schema_info=SchemaInfo(
+            target="fixture",
+            db_type="mysql",
+            source=SchemaSource.DATABASE,
+            tables={"fixture_table": SimpleNamespace()},
+        ),
         retry_count=0,
         generation_confidence=1.0,
         limit_added=False,
@@ -187,6 +184,7 @@ def _rdst_runner(
     tmp_path,
     interaction_mode=InteractionMode.INTERACTIVE_NO_ANSWER,
     context_mode=ContextMode.RAW,
+    semantic_schema_format="verbose-v1",
 ):
     store = ArtifactStore(tmp_path / "run")
     store.initialize({"run_id": "run"})
@@ -203,6 +201,7 @@ def _rdst_runner(
         semantic_dir=tmp_path / "semantic",
         interaction_mode=interaction_mode,
         adapter_factory=lambda model, _aliases: _Adapter(model),
+        semantic_schema_format=semantic_schema_format,
     )
 
 
@@ -221,11 +220,6 @@ def test_query_worker_enforces_wall_clock_timeout(monkeypatch):
 
     assert result.timed_out is True
     assert result.error == "Query exceeded benchmark wall-clock timeout"
-
-
-def test_rdst_filter_propagates_benchmark_transport_errors():
-    with pytest.raises(BenchmarkTransportError, match="provider unavailable"):
-        _extract_semantic_concepts("question", ["table"], _StrictFailingAdapter())
 
 
 @pytest.mark.parametrize(
@@ -523,6 +517,54 @@ def test_rdst_auto_mode_reaches_ask_service_as_non_interactive(tmp_path: Path):
         result = runner._run_rdst(_case(), _Adapter(_spec()))
 
     assert result["outcome"] == "correct"
+
+
+def test_rdst_runner_binds_compact_semantic_formatter(tmp_path: Path):
+    ctx = _rdst_context()
+    ctx.schema_source = SchemaSource.SEMANTIC
+    configured_formatter = None
+
+    class FakeAskService:
+        def __init__(self, **kwargs):
+            nonlocal configured_formatter
+            configured_formatter = kwargs["diagnostic_schema_formatter_fn"]
+            self.observer = kwargs["phase_observer"]
+
+        async def ask(self, _input, _options):
+            self.observer("schema", ctx)
+            yield AskResultEvent(
+                type="result",
+                success=True,
+                sql="SELECT 1",
+                rows=[(1,)],
+                columns=["value"],
+                row_count=1,
+                execution_time_ms=1.0,
+                llm_calls=1,
+                total_tokens=10,
+            )
+
+        def abandon(self, _session_id):
+            raise AssertionError("Successful runs have no session")
+
+    runner = _rdst_runner(
+        tmp_path,
+        context_mode=ContextMode.AUTO_INIT,
+        semantic_schema_format="rdst-compact-schema-v2",
+    )
+    runner.preflight_gold([_case()])
+    with (
+        patch("devtools.ask_benchmark.runner.AskService", FakeAskService),
+        patch.object(SemanticLayerManager, "exists", return_value=True),
+    ):
+        result = runner._run_rdst(_case(), _Adapter(_spec()))
+
+    assert result["outcome"] == "correct"
+    assert configured_formatter is format_semantic_schema_compact
+    assert runner.configuration_fingerprint(_spec()) != _rdst_runner(
+        tmp_path / "verbose",
+        context_mode=ContextMode.AUTO_INIT,
+    ).configuration_fingerprint(_spec())
 
 
 def test_rdst_runner_scores_unnecessary_clarification_and_abandons_session(

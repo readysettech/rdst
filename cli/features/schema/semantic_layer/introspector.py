@@ -456,16 +456,31 @@ class SchemaIntrospector:
         """Add foreign key relationships to the semantic layer."""
         cursor.execute("""
             SELECT
-                tc.table_name as source_table,
-                kcu.column_name as source_column,
-                ccu.table_name as target_table,
-                ccu.column_name as target_column
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage kcu
-                ON tc.constraint_name = kcu.constraint_name
-            JOIN information_schema.constraint_column_usage ccu
-                ON ccu.constraint_name = tc.constraint_name
-            WHERE tc.constraint_type = 'FOREIGN KEY'
+                source.relname AS source_table,
+                source_column.attname AS source_column,
+                target.relname AS target_table,
+                target_column.attname AS target_column
+            FROM pg_constraint constraint_row
+            JOIN pg_class source
+                ON source.oid = constraint_row.conrelid
+            JOIN pg_namespace source_namespace
+                ON source_namespace.oid = source.relnamespace
+            JOIN pg_class target
+                ON target.oid = constraint_row.confrelid
+            JOIN LATERAL unnest(
+                constraint_row.conkey,
+                constraint_row.confkey
+            ) AS key_columns(source_attnum, target_attnum)
+                ON true
+            JOIN pg_attribute source_column
+                ON source_column.attrelid = source.oid
+                AND source_column.attnum = key_columns.source_attnum
+            JOIN pg_attribute target_column
+                ON target_column.attrelid = target.oid
+                AND target_column.attnum = key_columns.target_attnum
+            WHERE constraint_row.contype = 'f'
+              AND source_namespace.nspname = 'public'
+            ORDER BY source.relname, constraint_row.conname, source_column.attnum
         """)
 
         for row in cursor.fetchall():

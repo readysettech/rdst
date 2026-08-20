@@ -515,21 +515,11 @@ class RdstCLI:
         dry_run: bool = False,
         timeout: int = 30,
         verbose: bool = False,
-        agent_mode: bool = False,
         no_interactive: bool = False,
         **kwargs,
     ) -> RdstResult:
         """
-        Generate SQL from natural language using hybrid linear + agent architecture.
-
-        Uses a fast linear flow (schema → filter → clarify → generate → validate → execute)
-        for most queries, with automatic escalation to an intelligent agent for complex cases.
-
-        The agent can:
-        - Explore the schema iteratively
-        - Sample data to understand semantics
-        - Ask the user clarifying questions
-        - Refine its approach based on observations
+        Generate SQL from natural language using the canonical Ask service.
 
         Args:
             question: Natural language question (if None, prompt user interactively)
@@ -537,8 +527,7 @@ class RdstCLI:
             dry_run: Generate SQL but don't execute (default: False)
             timeout: Query timeout in seconds (default: 30)
             verbose: Show detailed information
-            agent_mode: Skip linear flow and go directly to agent exploration
-            no_interactive: Skip clarification prompts, use first interpretation
+            no_interactive: Stop instead of prompting when required intent is missing
             **kwargs: Additional parameters
 
         Returns:
@@ -550,9 +539,6 @@ class RdstCLI:
 
             # Dry run (generate but don't execute)
             rdst ask "Count active users" --dry-run
-
-            # Direct agent mode for complex queries
-            rdst ask "Find users who give the most downvotes" --agent
 
             # Verbose output
             rdst ask "Show slow queries" --verbose
@@ -582,7 +568,6 @@ class RdstCLI:
             dry_run=dry_run,
             timeout=timeout,
             verbose=verbose,
-            agent_mode=agent_mode,
             no_interactive=no_interactive,
             **kwargs,
         )

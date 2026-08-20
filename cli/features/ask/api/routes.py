@@ -158,7 +158,6 @@ async def _ask_generator(
 ) -> AsyncGenerator[dict, None]:
     extra: dict = {
         "is_resume": bool(session_id),
-        "agent_mode": options.agent_mode if options else False,
         "dry_run": options.dry_run if options else False,
     }
     async with telemetry.command_run(
@@ -295,7 +294,6 @@ async def ask(request: AskRequest, guard: TargetGuard = Depends(require_target_b
         dry_run=request.dry_run,
         timeout_seconds=request.timeout,
         verbose=False,
-        agent_mode=request.agent_mode,
         no_interactive=False,
     )
     return EventSourceResponse(

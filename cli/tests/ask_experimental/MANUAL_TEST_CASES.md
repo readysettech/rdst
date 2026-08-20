@@ -400,7 +400,7 @@ If all 4 pass, basic Ask functionality is working.
 ### Test: Force Agent Mode
 
 ```bash
-rdst ask "Find complex patterns in the data" --target $TARGET --agent
+rdst ask "Find complex patterns in the data" --target $TARGET
 ```
 
 **Expected:**

@@ -448,7 +448,6 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             dry_run=getattr(args, "dry_run", False),
             timeout=getattr(args, "timeout", 30),
             verbose=getattr(args, "verbose", False),
-            agent_mode=getattr(args, "agent_mode", False),
             no_interactive=getattr(args, "no_interactive", False),
         )
 

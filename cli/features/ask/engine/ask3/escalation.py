@@ -22,9 +22,7 @@ class EscalationReason:
     ZERO_ROWS = 'zero_rows'
     LOW_CONFIDENCE = 'low_confidence'
     VALIDATION_EXHAUSTED = 'validation_exhausted'
-    SCHEMA_EXHAUSTED = 'schema_exhausted'
     EXECUTION_ERROR = 'execution_error'
-    USER_REQUEST = 'user_request'
 
 
 def should_escalate(ctx: 'Ask3Context') -> Tuple[bool, str]:
@@ -55,12 +53,7 @@ def should_escalate(ctx: 'Ask3Context') -> Tuple[bool, str]:
         logger.info("Escalation trigger: validation retries exhausted")
         return True, EscalationReason.VALIDATION_EXHAUSTED
 
-    # Check 4: Schema expansion exhausted without success
-    if _check_schema_exhausted(ctx):
-        logger.info("Escalation trigger: schema expansion exhausted")
-        return True, EscalationReason.SCHEMA_EXHAUSTED
-
-    # Check 5: Execution error (not schema-related, which triggers retry)
+    # Check 4: Execution error (not schema-related, which triggers retry)
     if _check_execution_error(ctx):
         logger.info("Escalation trigger: execution error")
         return True, EscalationReason.EXECUTION_ERROR
@@ -116,25 +109,6 @@ def _check_validation_exhausted(ctx: 'Ask3Context') -> bool:
     )
 
 
-def _check_schema_exhausted(ctx: 'Ask3Context') -> bool:
-    """
-    Check if schema expansion is exhausted without resolving issues.
-
-    If we've expanded schema max times but still have low confidence or
-    validation errors, agent exploration might find a better approach.
-    """
-    if ctx.schema_expansion_count < ctx.max_schema_expansions:
-        return False
-
-    # Exhausted expansions AND still have issues
-    has_issues = (
-        ctx.has_validation_errors() or
-        _check_low_confidence(ctx)
-    )
-
-    return has_issues
-
-
 def _check_execution_error(ctx: 'Ask3Context') -> bool:
     """
     Check for execution errors that weren't schema-related.
@@ -184,15 +158,8 @@ def format_escalation_message(reason: str) -> str:
             "I'm having trouble finding the right tables and columns. "
             "Let me explore the schema more thoroughly."
         ),
-        EscalationReason.SCHEMA_EXHAUSTED: (
-            "The available schema doesn't seem to have what I need. "
-            "Let me investigate the data structure more carefully."
-        ),
         EscalationReason.EXECUTION_ERROR: (
             "The query encountered an error. Let me try a different approach."
-        ),
-        EscalationReason.USER_REQUEST: (
-            "Entering exploration mode as requested."
         ),
     }
 
