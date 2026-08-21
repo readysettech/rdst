@@ -1,13 +1,17 @@
-import { cleanup, fireEvent, screen } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderWithClient } from '@/test-utils'
 import {
   __resetAnalysisRunsForTests,
   startAnalysisRun,
 } from '../../../lib/analysisRuns'
-import { __resetBackgroundRunsForTests } from '../../../lib/backgroundRuns'
+import {
+  __resetBackgroundRunsForTests,
+  type BackgroundRunState,
+} from '../../../lib/backgroundRuns'
 import { OBSERVED_EVIDENCE_PROVENANCE } from '../../../lib/queryEvidence'
 import type { QueryRegistryEntry } from '../../../lib/useQueryRegistry'
+import type { CacheRunResult } from '../../../types/cache'
 import { SavedQueryRow } from './SavedQueryRow'
 import type { SavedQueriesController } from './useSavedQueriesController'
 
@@ -32,7 +36,6 @@ function entry(
 
 function makeState() {
   return {
-    expandedHash: null,
     highlightedHash: null,
     confirmingHash: null,
     editingHash: null,
@@ -49,7 +52,6 @@ function makeActions() {
     analyze: vi.fn(),
     cacheQuery: vi.fn(),
     runTest: vi.fn(),
-    toggleExpanded: vi.fn(),
     startEditSql: vi.fn(),
     startRename: vi.fn(),
     markReviewed: vi.fn(),
@@ -63,6 +65,7 @@ function makeActions() {
     setSqlDraft: vi.fn(),
     updateSqlPending: false,
     dismissRun: vi.fn(),
+    acknowledgeRun: vi.fn(),
     toggleStar: vi.fn(),
     openOverview: vi.fn(),
   } as unknown as SavedQueriesController['rowActions']
@@ -190,32 +193,6 @@ describe('SavedQueryRow stored analysis (A2/A3)', () => {
       await screen.findByRole('button', { name: 'View analysis' })
     )
     expect(screen.queryByRole('button', { name: 'Analyze' })).toBeNull()
-    expect(actions.analyze).toHaveBeenCalledWith(
-      'SELECT * FROM users WHERE id = 1',
-      'demo',
-      { p1: '7' },
-      { stored: { hash: 'abc1234567890', analysisId: 'an-7' } }
-    )
-  })
-
-  it('opens the stored record from the expanded details view action', async () => {
-    stubLatestAnalysis({ analysis_id: 'an-7' })
-    const actions = makeActions()
-    const analyzed = analyzedEntry()
-
-    renderWithClient(
-      <SavedQueryRow
-        entry={analyzed}
-        state={{ ...makeState(), expandedHash: analyzed.hash }}
-        actions={actions}
-        animateEntry={false}
-      />
-    )
-
-    const viewButtons = await screen.findAllByRole('button', {
-      name: 'View analysis',
-    })
-    fireEvent.click(viewButtons[viewButtons.length - 1])
     expect(actions.analyze).toHaveBeenCalledWith(
       'SELECT * FROM users WHERE id = 1',
       'demo',
@@ -382,7 +359,199 @@ describe('SavedQueryRow star and recall', () => {
     fireEvent.click(await screen.findByText('Users lookup'))
 
     expect(actions.openOverview).toHaveBeenCalledWith(row.hash)
-    // The inline Details toggle keeps its own job: it still expands in place.
-    expect(actions.toggleExpanded).not.toHaveBeenCalled()
+  })
+
+  it('opens the same Overview from the card Details action', async () => {
+    stubLatestAnalysis(null)
+    const actions = makeActions()
+    const row = entry()
+
+    renderWithClient(
+      <SavedQueryRow
+        entry={row}
+        state={makeState()}
+        actions={actions}
+        animateEntry={false}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Overview' }))
+
+    expect(actions.openOverview).toHaveBeenCalledWith(row.hash)
+  })
+})
+
+describe('SavedQueryRow running test', () => {
+  function runningRun(): BackgroundRunState {
+    return {
+      runId: 'cache_test_demo_1',
+      kind: 'cache_test',
+      target: 'demo',
+      stage: 'measuring',
+      status: 'running',
+      message: 'Measuring upstream',
+      lastSeq: 2,
+      current: 5,
+      total: 15,
+      hasWarnings: false,
+      queryHash: 'abc1234567890',
+    }
+  }
+
+  function completeCacheResult(): CacheRunResult {
+    return {
+      success: true,
+      query: 'SELECT 1',
+      iterations: 15,
+      origin_stats: {
+        mean: 20,
+        median: 19,
+        min: 15,
+        max: 30,
+        p50: 19,
+        p95: 28,
+        p99: 30,
+      },
+      cache_stats: {
+        mean: 1,
+        median: 1,
+        min: 0.5,
+        max: 2,
+        p50: 1,
+        p95: 1.8,
+        p99: 2,
+      },
+      speedup_mean: 20,
+      speedup_median: 19,
+      improvement_pct: 1_900,
+      winner: 'readyset',
+    }
+  }
+
+  it('reports a live test on the card without anything being opened', async () => {
+    stubLatestAnalysis(null)
+    const actions = {
+      ...makeActions(),
+      cacheRunFor: () => runningRun(),
+    } as unknown as SavedQueriesController['rowActions']
+
+    renderWithClient(
+      <SavedQueryRow
+        entry={entry()}
+        state={makeState()}
+        actions={actions}
+        animateEntry={false}
+      />
+    )
+
+    expect(await screen.findByText('Testing in the background')).toBeTruthy()
+    expect(screen.getByText('Measuring upstream')).toBeTruthy()
+  })
+
+  it('stops reporting a test the user has acknowledged', async () => {
+    stubLatestAnalysis(null)
+    const actions = {
+      ...makeActions(),
+      cacheRunFor: () => ({ ...runningRun(), hidden: true }),
+    } as unknown as SavedQueriesController['rowActions']
+
+    renderWithClient(
+      <SavedQueryRow
+        entry={entry()}
+        state={makeState()}
+        actions={actions}
+        animateEntry={false}
+      />
+    )
+
+    await screen.findByRole('button', { name: 'Overview' })
+    expect(screen.queryByText('Testing in the background')).toBeNull()
+  })
+
+  it('stays quiet for a completed run reattached from a past session', async () => {
+    // A result restored from `localStorage` on load never passed through a
+    // live status in this tab, so it must not reopen the panel on every card
+    // that ever ran a test — it stays reachable in the drawer instead.
+    stubLatestAnalysis(null)
+    const actions = {
+      ...makeActions(),
+      cacheRunFor: (): BackgroundRunState => ({
+        ...runningRun(),
+        status: 'done',
+        result: completeCacheResult(),
+      }),
+    } as unknown as SavedQueriesController['rowActions']
+
+    renderWithClient(
+      <SavedQueryRow
+        entry={entry()}
+        state={makeState()}
+        actions={actions}
+        animateEntry={false}
+      />
+    )
+
+    await screen.findByRole('button', { name: 'Overview' })
+    expect(screen.queryByText('Testing in the background')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Close details' })).toBeNull()
+  })
+
+  it('keeps reporting a test through its own completion, until closed', async () => {
+    // The run this tab watched go live must stay reported once it finishes —
+    // that is the completion the user is here for — and only goes away once
+    // they acknowledge it, not the instant it lands. The real controller
+    // vends a fresh `cacheRunFor` off the reactive background-run store, so
+    // each render below builds its own actions object the same way, rather
+    // than mutating a closure behind one stable reference.
+    stubLatestAnalysis(null)
+    const actionsFor = (run: BackgroundRunState) =>
+      ({
+        ...makeActions(),
+        cacheRunFor: () => run,
+      }) as unknown as SavedQueriesController['rowActions']
+
+    const liveRun: BackgroundRunState = { ...runningRun(), seenLive: true }
+    const { rerender } = renderWithClient(
+      <SavedQueryRow
+        entry={entry()}
+        state={makeState()}
+        actions={actionsFor(liveRun)}
+        animateEntry={false}
+      />
+    )
+
+    expect(await screen.findByText('Testing in the background')).toBeTruthy()
+
+    const finishedRun: BackgroundRunState = {
+      ...liveRun,
+      status: 'done',
+      result: completeCacheResult(),
+    }
+    rerender(
+      <SavedQueryRow
+        entry={entry()}
+        state={makeState()}
+        actions={actionsFor(finishedRun)}
+        animateEntry={false}
+      />
+    )
+
+    expect(
+      await screen.findByRole('button', { name: 'Close details' })
+    ).toBeTruthy()
+    expect(screen.queryByText('Testing in the background')).toBeNull()
+
+    rerender(
+      <SavedQueryRow
+        entry={entry()}
+        state={makeState()}
+        actions={actionsFor({ ...finishedRun, hidden: true })}
+        animateEntry={false}
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Close details' })).toBeNull()
+    )
   })
 })

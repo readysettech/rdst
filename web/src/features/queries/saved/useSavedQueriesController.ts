@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTarget } from '../../../hooks/useTarget'
 import {
+  acknowledgeBackgroundRun,
   dismissBackgroundRun,
   startCacheTestRun,
   useBackgroundRuns,
@@ -48,12 +49,15 @@ export function useSavedQueriesController({
   deepLinkRunId,
   onQueryAdded,
   onDeepLinkConsumed,
+  onRevealLinked,
   list,
 }: {
   deepLinkHash?: string
   deepLinkRunId?: string
   onQueryAdded?: (hash?: string | null) => void
   onDeepLinkConsumed?: (hash: string) => void
+  /** Show the linked query in full, which is the drawer's Overview. */
+  onRevealLinked?: (hash: string) => void
   list?: QueryRegistryListSource
 }) {
   const navigate = useNavigate()
@@ -78,7 +82,6 @@ export function useSavedQueriesController({
   const [newSql, setNewSql] = useState('')
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [addQueryMode, setAddQueryMode] = useState<AddQueryMode>('add')
-  const [expandedHash, setExpandedHash] = useState<string | null>(null)
   const [highlightedHash, setHighlightedHash] = useState<string | null>(
     deepLinkHash ?? null
   )
@@ -97,6 +100,7 @@ export function useSavedQueriesController({
   const reviewRequests = useRef(new Set<string>())
   const markReviewedRef = useRef<(hash: string) => void>(() => undefined)
   const onDeepLinkConsumedRef = useRef(onDeepLinkConsumed)
+  const onRevealLinkedRef = useRef(onRevealLinked)
 
   const markReviewed = useCallback(
     (hash: string) => {
@@ -157,12 +161,11 @@ export function useSavedQueriesController({
 
   useEffect(() => {
     onDeepLinkConsumedRef.current = onDeepLinkConsumed
-  }, [onDeepLinkConsumed])
+    onRevealLinkedRef.current = onRevealLinked
+  }, [onDeepLinkConsumed, onRevealLinked])
 
   useEffect(() => {
     setHighlightedHash(deepLinkHash ?? null)
-    if (!deepLinkHash) return
-    setExpandedHash(deepLinkHash)
   }, [deepLinkHash])
 
   const deepLinkAvailable = Boolean(
@@ -176,6 +179,9 @@ export function useSavedQueriesController({
     // Review and consume the link only once that query is actually present;
     // a slow request must never lose its reveal to a wall-clock timeout.
     markReviewedRef.current(deepLinkHash)
+    // A link to one query lands on that query in full, which is the drawer's
+    // Overview; the row underneath still highlights and scrolls into view.
+    onRevealLinkedRef.current?.(deepLinkHash)
 
     let scrollTimer: ReturnType<typeof setTimeout> | null = null
     let clearTimer: ReturnType<typeof setTimeout> | null = null
@@ -248,14 +254,13 @@ export function useSavedQueriesController({
     [cacheTestRuns, deepLinkRunId, target]
   )
 
-  // The comparison attaches inline on the expanded card via background runs.
-  // Starting one must leave the library's URL-owned state (view, search,
-  // deep-link params) untouched so the visible list never changes underneath
-  // the user.
+  // The comparison attaches to the card itself via background runs, which the
+  // card reports on its own. Starting one must leave the library's URL-owned
+  // state (view, search, deep-link params) untouched so the visible list never
+  // changes underneath the user.
   const runConcreteTest = useCallback(
     (hash: string, sql: string) => {
       if (!target) return
-      setExpandedHash(hash)
       setStartingTestHash(hash)
       const entry = queries.find((query) => query.hash === hash)
       void startCacheTestRun({
@@ -374,9 +379,6 @@ export function useSavedQueriesController({
               ...current,
               [hash]: result.hash as string,
             }))
-            setExpandedHash((current) =>
-              current === hash ? (result.hash as string) : current
-            )
             setHighlightedHash((current) =>
               current === hash ? (result.hash as string) : current
             )
@@ -524,7 +526,6 @@ export function useSavedQueriesController({
       importResult: importMutation.data,
     },
     rowState: {
-      expandedHash,
       highlightedHash,
       editingHash,
       tagDraft,
@@ -537,10 +538,6 @@ export function useSavedQueriesController({
       cacheRunFor,
       isCached,
       cachingHash,
-      toggleExpanded: (hash: string) => {
-        if (expandedHash !== hash) markReviewed(hash)
-        setExpandedHash((current) => (current === hash ? null : hash))
-      },
       markReviewed,
       markAllReviewed,
       // The cached rows carry the new state before the request leaves, so the
@@ -601,6 +598,9 @@ export function useSavedQueriesController({
         })
       },
       dismissRun: dismissBackgroundRun,
+      // Stop reporting a finished test on the card while keeping its result
+      // readable in Jobs and in the query's Overview.
+      acknowledgeRun: acknowledgeBackgroundRun,
     },
     navigation: {
       openBenchmark: () =>

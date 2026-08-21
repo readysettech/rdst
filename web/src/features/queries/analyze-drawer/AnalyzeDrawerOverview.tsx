@@ -8,8 +8,11 @@ import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import type { ReactNode } from 'react'
+import { ComparisonCard } from '../../../components/CacheComparison'
+import { QueryMetricRow } from '../../../components/QueryMetricRow'
 import { QueryCardSql } from '../../../components/query-card/QueryCardSql'
 import type { QueryRegistryEntry } from '../../../lib/api'
+import { useCacheTestRunForQuery } from '../../../lib/backgroundRuns'
 import {
   formatDuration,
   formatMeta,
@@ -17,11 +20,8 @@ import {
   formatTimestamp,
 } from '../../../lib/formatters'
 import { OBSERVED_EVIDENCE_PROVENANCE } from '../../../lib/queryEvidence'
-import {
-  formatDbTime,
-  formatRunCount,
-  queryImpactMs,
-} from '../../../lib/queryImpact'
+import { formatDbTime, queryImpactMs } from '../../../lib/queryImpact'
+import { isCacheRunResult } from '../../../types/cache'
 import { analysisOutcome } from '../results/resultsSelectors'
 import { relativeAge } from '../results/storedAnalysis'
 import { useAnalysisHistory } from '../results/useStoredAnalysis'
@@ -31,6 +31,8 @@ interface AnalyzeDrawerOverviewProps {
   entry: QueryRegistryEntry
   /** The stored analysis the Analyze tab is showing, if it has one. */
   currentAnalysisId?: string
+  /** The target the library is reading, when the row carries none. */
+  target?: string | null
   /** Open one stored analysis, which is the Analyze tab's job. */
   onOpenAnalysis: (analysisId: string) => void
   /** Measure the query again rather than reading what it already has. */
@@ -59,32 +61,90 @@ function Section({
   )
 }
 
+/** The workload behind the query, in the card's own stat treatment. */
+function EvidencePanel({ entry }: { entry: QueryRegistryEntry }) {
+  const impactMs = queryImpactMs(entry)
+  const runs = entry.observation_count ?? entry.frequency ?? 0
+  const avgMs = entry.avg_duration_ms ?? 0
+  const maxMs = entry.max_duration_ms ?? 0
+  // Database time is the number this library ranks on, so it leads wherever
+  // there is one; a query observed without it leads with how often it ran.
+  const lead =
+    impactMs > 0
+      ? { label: 'Database time', value: formatDbTime(impactMs) }
+      : { label: 'Observed runs', value: runs.toLocaleString() }
+
+  return (
+    <div
+      title={OBSERVED_EVIDENCE_PROVENANCE}
+      className="grid gap-6 rounded-lg border border-border-layout-1 p-4 laptop:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] laptop:gap-8"
+    >
+      <VStack className="items-start gap-1">
+        <Text level="caption" className="text-content-layout-3">
+          {lead.label}
+        </Text>
+        <Text level="headline-2" className="tabular-nums text-content-layout-1">
+          {lead.value}
+        </Text>
+        <Text level="caption" className="text-content-layout-3">
+          Across the captured workload
+        </Text>
+      </VStack>
+      <VStack className="items-stretch justify-center gap-3">
+        <Show when={impactMs > 0 && runs > 0}>
+          <QueryMetricRow
+            icon="database"
+            label="Observed runs"
+            value={runs.toLocaleString()}
+          />
+        </Show>
+        <Show when={avgMs > 0}>
+          <QueryMetricRow
+            icon="observe"
+            label="Avg latency"
+            value={formatMs(avgMs)}
+          />
+        </Show>
+        <Show when={maxMs > 0}>
+          <QueryMetricRow
+            icon="speedometer"
+            label="Max latency"
+            value={formatDuration(maxMs)}
+          />
+        </Show>
+      </VStack>
+    </div>
+  )
+}
+
 /**
  * What this query already is and what has already been learned about it, in
- * one read: identity, its SQL, every analysis it has, and the outcome of the
- * last comparison. Recall, not measurement — nothing here starts a run.
+ * one read: the workload behind it, its SQL, every analysis it has, and how it
+ * compared against Readyset. Recall, not measurement — nothing here starts a
+ * run.
  */
 export function AnalyzeDrawerOverview({
   entry,
   currentAnalysisId,
+  target,
   onOpenAnalysis,
   onAnalyzeAgain,
 }: AnalyzeDrawerOverviewProps) {
   const history = useAnalysisHistory(entry.hash)
-  const compare = compareOutcomeSummary(entry.last_compare)
   const parameterKeys = Object.keys(entry.most_recent_params ?? {})
-  const evidence = formatMeta([
-    formatRunCount(entry),
-    (entry.avg_duration_ms ?? 0) > 0
-      ? `avg ${formatMs(entry.avg_duration_ms)}`
-      : null,
-    (entry.max_duration_ms ?? 0) > 0
-      ? `max ${formatDuration(entry.max_duration_ms)}`
-      : null,
-    queryImpactMs(entry) > 0
-      ? `${formatDbTime(queryImpactMs(entry))} of database time`
-      : null,
-  ])
+  // The full paired-latency profile exists only where the test ran. Where this
+  // browser has one, it is the richer and more recent reading; everywhere else
+  // the server's record of the outcome is all there is to report.
+  const localRun = useCacheTestRunForQuery(entry.hash, entry.target || target)
+  const localResult = isCacheRunResult(localRun?.result)
+    ? localRun.result
+    : undefined
+  const durableCompare = localResult
+    ? null
+    : compareOutcomeSummary(entry.last_compare)
+  const hasEvidence =
+    queryImpactMs(entry) > 0 ||
+    (entry.observation_count ?? entry.frequency ?? 0) > 0
 
   return (
     <VStack
@@ -93,18 +153,17 @@ export function AnalyzeDrawerOverview({
     >
       {/* Identity itself belongs to the drawer header; what belongs here is
           the evidence behind the query and the query itself. */}
-      <VStack className="items-stretch gap-2">
-        <Show when={Boolean(evidence)}>
-          <span title={OBSERVED_EVIDENCE_PROVENANCE}>
-            <Text level="caption" className="text-content-layout-3">
-              {evidence}
-            </Text>
-          </span>
-        </Show>
+      <Show when={hasEvidence}>
+        <Section label="Evidence">
+          <EvidencePanel entry={entry} />
+        </Section>
+      </Show>
+
+      <Section label="SQL">
         <div className="overflow-hidden rounded-lg border border-border-layout-1">
           <QueryCardSql sql={entry.sql} expandable copyable />
         </div>
-      </VStack>
+      </Section>
 
       <Section
         label="Analyses"
@@ -174,30 +233,53 @@ export function AnalyzeDrawerOverview({
         </VStack>
       </Section>
 
-      {/* Absent until the server has recorded a comparison for this query.
-          There is no device-local fallback here: a comparison nobody can see
-          from another browser is exactly the bug this row fixes. */}
-      <Show when={compare}>
+      {/* Two readings of the same thing at two fidelities. The full profile —
+          per-lane mean, P50, P95, sample counts and ranges — is held by the
+          browser that measured it. The server row survives any browser but
+          records only the outcome, so it never gets dressed up as the profile.
+          With neither, the section is absent rather than empty. */}
+      <Show when={localResult}>
+        {(result) => (
+          <Section label="Comparison">
+            <VStack className="items-stretch gap-1.5">
+              <ComparisonCard result={result} appearance="contained" />
+              <Text level="caption" className="text-content-layout-3">
+                Measured by this browser, from the test it ran on this query.
+              </Text>
+            </VStack>
+          </Section>
+        )}
+      </Show>
+      <Show when={durableCompare}>
         {(summary) => (
-          <Section label="Last comparison">
-            <HStack className="flex-wrap items-center gap-2 rounded-lg border border-border-layout-1 px-3 py-2">
-              <Tag
-                size="small"
-                variant={summary.tone}
-                modifier="ghost"
-                label={summary.headline}
-              />
-              <Show when={Boolean(summary.when)}>
-                <Text level="caption" className="text-content-layout-3">
-                  {summary.when}
-                </Text>
-              </Show>
-              <Show when={Boolean(summary.detail)}>
-                <Text level="caption" className="ml-auto text-content-layout-3">
-                  {summary.detail}
-                </Text>
-              </Show>
-            </HStack>
+          <Section label="Comparison">
+            <VStack className="items-stretch gap-1.5">
+              <HStack className="flex-wrap items-center gap-2 rounded-lg border border-border-layout-1 px-3 py-2">
+                <Tag
+                  size="small"
+                  variant={summary.tone}
+                  modifier="ghost"
+                  label={summary.headline}
+                />
+                <Show when={Boolean(summary.detail)}>
+                  <Text level="caption" className="text-content-layout-3">
+                    {summary.detail}
+                  </Text>
+                </Show>
+                <Show when={Boolean(summary.when)}>
+                  <Text
+                    level="caption"
+                    className="ml-auto text-content-layout-3"
+                  >
+                    {summary.when}
+                  </Text>
+                </Show>
+              </HStack>
+              <Text level="caption" className="text-content-layout-3">
+                The recorded outcome of the last comparison. Run a test here to
+                see the full latency profile.
+              </Text>
+            </VStack>
           </Section>
         )}
       </Show>

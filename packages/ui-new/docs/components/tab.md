@@ -46,6 +46,7 @@ underline-only label — no container fill, no pill.
 | Active label | `text-content-primary-soft` |
 | Active underline | `absolute bottom-0 h-[2px] w-full rounded-full bg-content-primary-soft` (animated `m.div` with a shared `layoutId`) |
 | Disabled | `disabled:pointer-events-none disabled:opacity-50` |
+| Unavailable (`disabled` prop) | `aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:hover:text-content-layout-2` |
 | `TabList` row | `flex gap-6` (+ `role="tablist"` when `aria-label` is set) |
 
 ## Code
@@ -62,6 +63,8 @@ Exports: `TabItem` (link), `TabItemButton` (button), `TabList`,
 | `onClick` | `() => void` | Fired on selection. |
 | `layoutPrefix` | `string` | Namespaces the underline `layoutId` per tab group. |
 | `leftIcon` / `rightIcon` | `IconStrokeName` | Optional, decorative (`aria-hidden`). |
+| `disabled` | `boolean` | The view exists but cannot be opened yet: `aria-disabled`, dimmed, activation ignored. |
+| `hint` | `string` | Why the tab is unavailable — the button's `title`, shown on hover. |
 | `id` | `string` | Tab id — wire the panel's `aria-labelledby` to it. |
 | `aria-controls` | `string` | Id of the panel this tab controls. |
 
@@ -118,6 +121,9 @@ The underline animates because rdst wraps the tree in `LazyMotion features={domM
   roving tabindex, so arrow keys do not switch tabs.
 - Icons are decorative (`aria-hidden`); the accessible name is the label text
   alone.
+- A tab marked `disabled` uses `aria-disabled` rather than the native
+  `disabled` attribute, so it keeps its place in the tab order and its `hint`
+  stays hoverable — a tab nobody can reach cannot explain itself.
 - **Panel wiring** — set `id` = `${panelId}-tab-${value}` and
   `aria-controls` = the panel id on each tab, wrap the revealed region in a
   `role="tabpanel"` element, and point its `aria-labelledby` at the active

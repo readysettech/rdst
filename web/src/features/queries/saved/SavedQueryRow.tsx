@@ -19,6 +19,7 @@ import type { ReactNode } from 'react'
 import { QueryCacheStatus } from '../../../components/QueryCacheStatus'
 import { QueryCard, type QueryCardProps } from '../../../components/QueryCard'
 import { QueryCardImpact } from '../../../components/QueryCardImpact'
+import { QueryMetricRow } from '../../../components/QueryMetricRow'
 import { QueryStarButton } from '../../../components/QueryStarButton'
 import { SQLInput } from '../../../components/SQLInput'
 import { SqlTokens } from '../../../components/SqlTokens'
@@ -47,8 +48,8 @@ import type {
 } from '../library/queryLibraryDisplay'
 import { analysisOutcome } from '../results/resultsSelectors'
 import { analyzedAgoLabel } from '../results/storedAnalysis'
-import { SavedQueryDetails } from './SavedQueryDetails'
 import { SavedQueryMenu } from './SavedQueryMenu'
+import { reportsCacheTestRun, SavedQueryTestPanel } from './SavedQueryTestPanel'
 import { getSourceMeta } from './savedQuerySelectors'
 import { useLatestAnalysis } from './useLatestAnalysis'
 import type { SavedQueriesController } from './useSavedQueriesController'
@@ -64,36 +65,6 @@ interface SavedQueryRowProps {
   animateEntry?: boolean
   /** Optional presentation seam for isolated previews and consumers. */
   renderCard?: (props: QueryCardProps) => ReactNode
-}
-
-function QueryImpactMetric({
-  icon,
-  label,
-  value,
-}: {
-  icon: 'database' | 'observe'
-  label: string
-  value: string
-}) {
-  return (
-    <HStack className="min-w-0 items-center gap-2">
-      <Icon
-        name={icon}
-        label=""
-        aria-hidden="true"
-        className="h-4 w-4 shrink-0 text-content-layout-3"
-      />
-      <Text level="caption" className="truncate text-content-layout-3">
-        {label}
-      </Text>
-      <Text
-        level="mono-small"
-        className="ml-auto shrink-0 text-content-layout-1"
-      >
-        {value}
-      </Text>
-    </HStack>
-  )
 }
 
 function QueryImpactRail({ entry }: { entry: QueryRegistryEntry }) {
@@ -116,12 +87,12 @@ function QueryImpactRail({ entry }: { entry: QueryRegistryEntry }) {
         </Text>
       </VStack>
       <VStack className="items-stretch gap-3">
-        <QueryImpactMetric
+        <QueryMetricRow
           icon="database"
           label="Observed runs"
           value={runs.toLocaleString()}
         />
-        <QueryImpactMetric
+        <QueryMetricRow
           icon="observe"
           label="Avg latency"
           value={formatMs(entry.avg_duration_ms ?? 0)}
@@ -165,7 +136,6 @@ export function SavedQueryRow({
 }: SavedQueryRowProps) {
   const sourceMeta = getSourceMeta(entry.source)
   const displayName = queryDisplayName(entry)
-  const isExpanded = state.expandedHash === entry.hash
   const isHighlighted = state.highlightedHash === entry.hash
   const isConfirmingDelete = state.confirmingHash === entry.hash
   const isRenaming = state.editingHash === entry.hash
@@ -178,6 +148,16 @@ export function SavedQueryRow({
     cacheTestRun?.status === 'running' ||
     cacheTestRun?.status === 'reconnecting'
   const runResult = cacheTestRun?.result
+  // A test the user started reports itself: the card shows it while it runs and
+  // keeps the result up until it is acknowledged, with nothing to click first.
+  const testPanel =
+    isDefaultState && cacheTestRun && reportsCacheTestRun(cacheTestRun) ? (
+      <SavedQueryTestPanel
+        run={cacheTestRun}
+        onDismissRun={actions.dismissRun}
+        onClose={() => actions.acknowledgeRun(cacheTestRun.runId)}
+      />
+    ) : undefined
   const impactCaption = formatImpactCaption(entry)
   const runCount = formatRunCount(entry)
   // The card's own record of prior work: visible in the footer without
@@ -371,6 +351,18 @@ export function SavedQueryRow({
   ) : (
     sourceBadge
   )
+  // The same destination as the query's name: everything already known about
+  // it, read in the drawer over the library rather than inside the card.
+  const detailsAction = isDefaultState ? (
+    <Button
+      variant="primary"
+      modifier="ghost"
+      size="small"
+      label="Overview"
+      title="Open this query"
+      onClick={() => actions.openOverview(entry.hash)}
+    />
+  ) : null
   const secondaryActions = isConfirmingDelete ? (
     <Button
       variant="primary"
@@ -560,14 +552,7 @@ export function SavedQueryRow({
             </HStack>
 
             <HStack className="items-center justify-end gap-1.5">
-              <Button
-                variant="primary"
-                modifier="ghost"
-                size="small"
-                label="Details"
-                onClick={() => actions.toggleExpanded(entry.hash)}
-                aria-expanded={isExpanded}
-              />
+              {detailsAction}
               {secondaryActions}
               {primaryAction}
               <SavedQueryMenu
@@ -586,16 +571,8 @@ export function SavedQueryRow({
             </HStack>
           </Card.Content>
 
-          {isExpanded ? (
-            <Card.Content className="px-4 py-3">
-              <SavedQueryDetails
-                entry={entry}
-                cacheTestRun={cacheTestRun}
-                onDismissRun={actions.dismissRun}
-                onClose={() => actions.toggleExpanded(entry.hash)}
-                onViewAnalysis={openStoredAnalysis}
-              />
-            </Card.Content>
+          {testPanel ? (
+            <Card.Content className="px-4 py-3">{testPanel}</Card.Content>
           ) : null}
         </Card>
       </m.div>
@@ -634,10 +611,6 @@ export function SavedQueryRow({
               showPrettify
             />
           ) : undefined,
-          detailsOpen: isDefaultState && isExpanded,
-          onToggleDetails: isDefaultState
-            ? () => actions.toggleExpanded(entry.hash)
-            : undefined,
           menu: isDefaultState ? (
             <SavedQueryMenu
               onEditSql={() => actions.startEditSql(entry.hash, entry.sql)}
@@ -651,18 +624,14 @@ export function SavedQueryRow({
               onDelete={() => actions.confirmDelete(entry.hash)}
             />
           ) : undefined,
-          secondaryActions,
+          secondaryActions: (
+            <>
+              {detailsAction}
+              {secondaryActions}
+            </>
+          ),
           primaryAction,
-          expansion:
-            isDefaultState && isExpanded ? (
-              <SavedQueryDetails
-                entry={entry}
-                cacheTestRun={cacheTestRun}
-                onDismissRun={actions.dismissRun}
-                onClose={() => actions.toggleExpanded(entry.hash)}
-                onViewAnalysis={openStoredAnalysis}
-              />
-            ) : undefined,
+          expansion: testPanel,
         }
 
         if (renderCard) return renderCard(cardProps)

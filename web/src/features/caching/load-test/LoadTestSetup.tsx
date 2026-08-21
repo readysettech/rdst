@@ -152,6 +152,7 @@ export function LoadTestSetup({
     confirmIsRemote,
     confirmQueryCount,
     confirmLoadSummary,
+    confirmIncludesReadyset,
     confirmEstimatedExecutions,
   } = controller
   const confirmDialog = (
@@ -161,6 +162,7 @@ export function LoadTestSetup({
       isRemote={confirmIsRemote}
       queryCount={confirmQueryCount}
       loadSummary={confirmLoadSummary}
+      includesReadyset={confirmIncludesReadyset}
       estimatedExecutions={confirmEstimatedExecutions}
       executionCap={BENCHMARK_EXECUTION_CAP}
       onConfirm={handleConfirmRun}

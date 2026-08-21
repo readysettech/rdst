@@ -152,11 +152,22 @@ export function useQueryLibraryController({
     },
     target
   )
+  // A query added here arrives with the user already looking at the library:
+  // the toast and the row highlight are the whole reveal. Opening it in full
+  // belongs to hashes that arrived as links from somewhere else.
+  const addedHash = useRef<string | null>(null)
   const base = useSavedQueriesController({
     deepLinkHash: search.hash,
     deepLinkRunId: search.run,
-    onQueryAdded: (hash) => updateSearch(addedQuerySearchPatch(hash)),
+    onQueryAdded: (hash) => {
+      addedHash.current = hash ?? null
+      updateSearch(addedQuerySearchPatch(hash))
+    },
     onDeepLinkConsumed: search.run ? undefined : consumeTransientDeepLink,
+    onRevealLinked: (hash) => {
+      if (addedHash.current === hash) return
+      openAnalyzeDrawer({ hash, tab: 'overview' }, { replace: true })
+    },
     list: {
       queries: readModel.queries,
       total: readModel.total,

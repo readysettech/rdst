@@ -255,3 +255,70 @@ describe('LoadTestResults comparative lanes', () => {
     expect(screen.queryByText(/faster with Readyset/)).toBeNull()
   })
 })
+
+describe('LoadTestResults cache preparation', () => {
+  function renderRunning(progress: LoadTestProgress, stage: string) {
+    const model = deriveLoadTestResultModel({
+      state: 'running',
+      status: 'running',
+      stage,
+      progress,
+      request,
+      fallbackDurationSeconds: 30,
+      fallbackIntervalMs: 100,
+    })
+
+    render(
+      <LoadTestResults
+        model={model}
+        progress={progress}
+        timeline={[]}
+        request={request}
+        runMessage={undefined}
+        error={undefined}
+        targetLocked={false}
+        onStop={vi.fn()}
+        onAdjust={vi.fn()}
+        onRunAgain={vi.fn()}
+      />
+    )
+  }
+
+  const measuring: LoadTestProgress = {
+    type: 'progress',
+    elapsed_seconds: 2,
+    total_executions: 20,
+    total_successes: 20,
+    total_failures: 0,
+    qps: 10,
+    queries: [],
+  }
+
+  it('names the wait while Readyset caches the workload', () => {
+    renderRunning(
+      {
+        ...measuring,
+        elapsed_seconds: 0,
+        total_executions: 0,
+        total_successes: 0,
+        qps: 0,
+        phase: 'preparing',
+        prepared_count: 1,
+        prepare_total: 3,
+      } as unknown as LoadTestProgress,
+      'preparing'
+    )
+
+    expect(screen.getByText(/Preparing Readyset caches/)).toBeTruthy()
+    expect(screen.getByText(/1 of 3/)).toBeTruthy()
+    // The measurement has not started, so no metric claims to be one.
+    expect(screen.queryByText('Paced QPS')).toBeNull()
+  })
+
+  it('renders the measuring view for a tick without the phase', () => {
+    renderRunning(measuring, 'running')
+
+    expect(screen.queryByText(/Preparing Readyset caches/)).toBeNull()
+    expect(screen.getByText('Paced QPS')).toBeTruthy()
+  })
+})

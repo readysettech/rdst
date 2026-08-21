@@ -21,8 +21,11 @@ import {
   shortHash,
 } from '../../../lib/formatters'
 import type { QueryRegistryEntry } from '../../../lib/useQueryRegistry'
-import { SavedQueryDetails } from '../saved/SavedQueryDetails'
 import { SavedQueryRow } from '../saved/SavedQueryRow'
+import {
+  reportsCacheTestRun,
+  SavedQueryTestPanel,
+} from '../saved/SavedQueryTestPanel'
 import {
   QueryCardResultExperiment,
   QueryCardResultVariants,
@@ -309,12 +312,7 @@ function ImpactDetailsModal({
 
   const layoutId = `query-impact-details-${entry.hash}`
   const cacheTestRun = controller.rowActions.cacheRunFor(entry.hash)
-  const showPerformanceDetails = Boolean(
-    cacheTestRun &&
-      ['running', 'reconnecting', 'failed', 'done', 'partial'].includes(
-        cacheTestRun.status
-      )
-  )
+  const showPerformanceDetails = reportsCacheTestRun(cacheTestRun)
   const isRenaming = controller.rowState.editingHash === entry.hash
   const isEditingSql = controller.rowState.editingSqlHash === entry.hash
   const isConfirmingDelete = controller.rowState.confirmingHash === entry.hash
@@ -386,13 +384,13 @@ function ImpactDetailsModal({
                     expansionPlacement="before-footer"
                     motionLayout
                     expansion={
-                      showPerformanceDetails && !props.editor ? (
-                        <SavedQueryDetails
-                          entry={entry}
-                          cacheTestRun={cacheTestRun}
+                      showPerformanceDetails &&
+                      cacheTestRun &&
+                      !props.editor ? (
+                        <SavedQueryTestPanel
+                          run={cacheTestRun}
                           onDismissRun={controller.rowActions.dismissRun}
                           onClose={closeModal}
-                          showMetadata={false}
                         />
                       ) : undefined
                     }

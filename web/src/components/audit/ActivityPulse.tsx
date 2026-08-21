@@ -1,10 +1,4 @@
-export function ActivityPulse({
-  label = 'In progress',
-  compact = false,
-}: {
-  label?: string
-  compact?: boolean
-}) {
+export function ActivityPulse({ label = 'In progress' }: { label?: string }) {
   return (
     <output
       aria-label={label}
@@ -13,7 +7,7 @@ export function ActivityPulse({
       {[0, 1, 2].map((index) => (
         <span
           key={index}
-          className={`${compact ? 'h-1 w-1' : 'h-1.5 w-1.5'} rounded-full bg-content-primary-soft animate-pulse`}
+          className="h-1.5 w-1.5 rounded-full bg-content-primary-soft animate-pulse motion-reduce:animate-none"
           style={{ animationDelay: `${index * 160}ms` }}
         />
       ))}

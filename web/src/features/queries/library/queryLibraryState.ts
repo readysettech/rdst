@@ -74,10 +74,10 @@ export type QueryLibraryFilterKey =
 export type QueryLibraryAction = 'add'
 
 /**
- * The analyze drawer's two panes. A bare `?analyze=<hash>` opens Analyze, so
- * every link that predates the tabs behaves exactly as it did.
+ * The analyze drawer's panes. A bare `?analyze=<hash>` opens Analyze, so every
+ * link that predates the tabs behaves exactly as it did.
  */
-export const ANALYZE_DRAWER_TABS = ['overview', 'analyze'] as const
+export const ANALYZE_DRAWER_TABS = ['overview', 'analyze', 'follow-up'] as const
 
 export type AnalyzeDrawerTab = (typeof ANALYZE_DRAWER_TABS)[number]
 

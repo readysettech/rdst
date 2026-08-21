@@ -49,6 +49,12 @@ class QueryBenchmarkProgressEvent:
     warmup_executions: int = 0
     skipped_count: int = 0
     skipped_queries: list[QuerySkip] = field(default_factory=list)
+    # Set on the ticks the run emits while it prepares the Readyset lane's
+    # caches, before any worker starts and while every tally above is zero.
+    # ``prepared_count`` of ``prepare_total`` caches exist at that point.
+    phase: Optional[Literal["preparing"]] = None
+    prepared_count: Optional[int] = None
+    prepare_total: Optional[int] = None
 
 
 @dataclass

@@ -243,6 +243,84 @@ describe('deriveLoadTestResultModel', () => {
     expect(result.speedup).toBeNull()
   })
 
+  it('reports Readyset cache preparation while the run is still silent', () => {
+    const result = deriveLoadTestResultModel({
+      state: 'running',
+      status: 'running',
+      stage: 'preparing',
+      progress: {
+        type: 'progress',
+        elapsed_seconds: 0,
+        total_executions: 0,
+        total_successes: 0,
+        total_failures: 0,
+        qps: 0,
+        queries: [],
+        phase: 'preparing',
+        prepared_count: 1,
+        prepare_total: 3,
+      } as unknown as Parameters<
+        typeof deriveLoadTestResultModel
+      >[0]['progress'],
+      request,
+      fallbackDurationSeconds: 30,
+      fallbackIntervalMs: 100,
+    })
+
+    expect(result.preparation).toEqual({ preparedCount: 1, prepareTotal: 3 })
+    expect(result.statusLabel).toBe('Preparing')
+    expect(result.title).toContain('1 of 3')
+  })
+
+  it('keeps a measuring tick out of the preparing state', () => {
+    const result = deriveLoadTestResultModel({
+      state: 'running',
+      status: 'running',
+      stage: 'running',
+      progress: {
+        type: 'progress',
+        elapsed_seconds: 2,
+        total_executions: 20,
+        total_successes: 20,
+        total_failures: 0,
+        qps: 10,
+        queries: [],
+      },
+      request,
+      fallbackDurationSeconds: 30,
+      fallbackIntervalMs: 100,
+    })
+
+    expect(result.preparation).toBeUndefined()
+    expect(result.title).toBe('Load test in progress')
+  })
+
+  it('ignores a preparing tick whose counts are missing', () => {
+    const result = deriveLoadTestResultModel({
+      state: 'running',
+      status: 'running',
+      stage: 'preparing',
+      progress: {
+        type: 'progress',
+        elapsed_seconds: 0,
+        total_executions: 0,
+        total_successes: 0,
+        total_failures: 0,
+        qps: 0,
+        queries: [],
+        phase: 'preparing',
+      } as unknown as Parameters<
+        typeof deriveLoadTestResultModel
+      >[0]['progress'],
+      request,
+      fallbackDurationSeconds: 30,
+      fallbackIntervalMs: 100,
+    })
+
+    expect(result.preparation).toBeUndefined()
+    expect(result.statusLabel).toBe('Running')
+  })
+
   it('reads a neutral Readyset-unavailable note and keeps origin-only rendering', () => {
     const result = deriveLoadTestResultModel({
       state: 'complete',

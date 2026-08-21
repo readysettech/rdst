@@ -92,6 +92,9 @@ describe('query library URL state', () => {
       parseQueryLibrarySearch({ analyze: 'h1', tab: 'overview' }).tab
     ).toBe('overview')
     expect(
+      parseQueryLibrarySearch({ analyze: 'h1', tab: 'follow-up' }).tab
+    ).toBe('follow-up')
+    expect(
       parseQueryLibrarySearch({ analyze: 'h1', tab: 'nonsense' }).tab
     ).toBeUndefined()
   })

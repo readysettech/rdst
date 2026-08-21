@@ -1,11 +1,13 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { BackgroundRunState } from '../../../lib/backgroundRuns'
 import type {
   CacheCompareRunResult,
   CacheCompareSample,
 } from '../../../types/cache'
 import { ComparePage } from './ComparePage'
 import type { CompareBatchSnapshot, CompareQueryOutcome } from './compareRuns'
+import { compareBatchSnapshot } from './compareRuns'
 import { useCompareController } from './useCompareController'
 
 vi.mock('./useCompareController', () => ({
@@ -116,6 +118,7 @@ function batch(queries: Array<{ cacheId: string; label: string }>) {
     durationSeconds: 30,
     queries: queries.map((query) => ({
       ...query,
+      queryHash: query.cacheId,
       runId: `run-${query.cacheId}`,
     })),
   }
@@ -569,10 +572,10 @@ describe('ComparePage state matrix', () => {
     renderPage()
 
     expect(screen.getByText('10× faster with Readyset')).toBeTruthy()
-    // The rail persists past completion, so the headline keeps a visible
-    // source instead of handing over to a separate breakdown card.
-    expect(screen.getByText('Queries in this comparison')).toBeTruthy()
-    expect(screen.getByText('1 of 1 done')).toBeTruthy()
+    // The query's own card persists past completion, so the headline keeps a
+    // visible source instead of handing over to a separate breakdown card.
+    expect(screen.getByText('1 of 1 done · 1 compared')).toBeTruthy()
+    expect(screen.getByText('Compared')).toBeTruthy()
     expect(screen.queryByText('Per-query breakdown')).toBeNull()
   })
 
@@ -712,116 +715,222 @@ function fourQueryBatch() {
   return { compared, notComparable, measuring, waiting }
 }
 
-describe('Compare run rail', () => {
-  it('gives every query in the batch its own row and state', () => {
+const FOUR_QUERY_BATCH = batch([
+  { cacheId: 'one', label: 'orders_by_customer' },
+  { cacheId: 'two', label: 'recent_sessions' },
+  { cacheId: 'three', label: 'cart_totals' },
+  { cacheId: 'four', label: 'inventory_rollup' },
+])
+
+describe('Compare query cards', () => {
+  it('gives every query in the batch its own card and state', () => {
     const { compared, notComparable, measuring, waiting } = fourQueryBatch()
     vi.mocked(useCompareController).mockReturnValue(
       controller({
-        batch: batch([
-          { cacheId: 'one', label: 'orders_by_customer' },
-          { cacheId: 'two', label: 'recent_sessions' },
-          { cacheId: 'three', label: 'cart_totals' },
-          { cacheId: 'four', label: 'inventory_rollup' },
-        ]),
+        batch: FOUR_QUERY_BATCH,
         snapshot: snapshot({
           queryOutcomes: [compared, notComparable, measuring, waiting],
         }),
-        selectedOutcome: measuring,
       })
     )
     renderPage()
 
-    // Once visibly above the rail, once in the live region that announces it.
+    // Once visibly in the band, once in the live region that announces it.
     expect(
       screen.getAllByText(/2 of 4 done · 1 running · 1 queued/)
     ).toHaveLength(2)
+    // Each card carries its own verdict: the speedup beside the two lanes,
+    // the classification in the footer band.
     expect(screen.getByText('3.2× faster')).toBeTruthy()
+    expect(screen.getByText('Compared')).toBeTruthy()
     expect(screen.getByText('Not comparable')).toBeTruthy()
-    expect(screen.getByText('Running · 18s of 30s · 12s left')).toBeTruthy()
+    expect(screen.getByText('Running · 60% · ~12s left')).toBeTruthy()
     expect(screen.getByText('Queued for the Readyset sandbox')).toBeTruthy()
+  })
+
+  it('keeps a queued query to a single row and the measuring one raised', () => {
+    const { measuring, waiting } = fourQueryBatch()
+    vi.mocked(useCompareController).mockReturnValue(
+      controller({
+        batch: FOUR_QUERY_BATCH,
+        snapshot: snapshot({ queryOutcomes: [measuring, waiting] }),
+      })
+    )
+    renderPage()
+
+    const queuedCard = document.querySelector('[data-cache-id="four"]')
+    const runningCard = document.querySelector('[data-cache-id="three"]')
+    // A queued query has no numbers, no curve and no footer band to show.
+    expect(queuedCard?.querySelector('[role="progressbar"]')).toBeNull()
+    expect(queuedCard?.querySelector('svg[role="img"]')).toBeNull()
+    expect(queuedCard?.textContent).not.toContain('View query')
+    // A border rather than a ring: it sits inside the card's own box, so the
+    // page's scroll container cannot clip the measuring card's prominence.
+    expect(runningCard?.className).toContain('border-border-primary-soft')
+    expect(queuedCard?.className).not.toContain('border-border-primary-soft')
+    expect(
+      runningCard
+        ?.querySelector('[role="progressbar"]')
+        ?.getAttribute('aria-valuenow')
+    ).toBe('60')
   })
 
   it('never claims the batch is finished while a query is still queued (D1)', () => {
     const { compared, measuring, waiting } = fourQueryBatch()
     vi.mocked(useCompareController).mockReturnValue(
       controller({
-        batch: batch([
-          { cacheId: 'one', label: 'orders_by_customer' },
-          { cacheId: 'three', label: 'cart_totals' },
-          { cacheId: 'four', label: 'inventory_rollup' },
-        ]),
+        batch: FOUR_QUERY_BATCH,
         snapshot: snapshot({ queryOutcomes: [compared, measuring, waiting] }),
-        selectedOutcome: measuring,
       })
     )
     renderPage()
 
     // The only percentage on screen belongs to the query being measured.
-    expect(screen.queryByText('100%')).toBeNull()
-    expect(screen.getByText('60%')).toBeTruthy()
+    expect(screen.queryByText(/100%/)).toBeNull()
+    expect(screen.getByText(/60%/)).toBeTruthy()
     expect(screen.getByText(/~42s left/)).toBeTruthy()
   })
 
-  it('binds the chart to one query and names it in the title', () => {
-    const { compared, measuring, waiting } = fourQueryBatch()
+  it('draws each card its own chart, on a log axis by default', () => {
+    const { compared, measuring } = fourQueryBatch()
     vi.mocked(useCompareController).mockReturnValue(
       controller({
-        batch: batch([
-          { cacheId: 'one', label: 'orders_by_customer' },
-          { cacheId: 'three', label: 'cart_totals' },
-          { cacheId: 'four', label: 'inventory_rollup' },
-        ]),
-        snapshot: snapshot({ queryOutcomes: [compared, measuring, waiting] }),
-        selectedOutcome: measuring,
+        batch: FOUR_QUERY_BATCH,
+        snapshot: snapshot({ queryOutcomes: [compared, measuring] }),
       })
     )
     renderPage()
 
-    expect(screen.getByText('Live comparison · cart_totals')).toBeTruthy()
-    expect(screen.getByText('Following live')).toBeTruthy()
+    // A cached lane two orders of magnitude ahead would flatten the origin
+    // line onto the baseline, so the axis starts logarithmic and says so.
+    expect(screen.getAllByText('QPS · log scale')).toHaveLength(2)
+    expect(
+      screen.getByLabelText(
+        'cart_totals upstream and Readyset QPS, logarithmic scale'
+      )
+    ).toBeTruthy()
+    expect(screen.getByText('Live')).toBeTruthy()
+    expect(
+      screen.getByRole('radiogroup', { name: 'Chart scale for cart_totals' })
+    ).toBeTruthy()
   })
 
-  it('pins the chart to the query whose row was clicked', () => {
-    const { compared, measuring, waiting } = fourQueryBatch()
-    const pinQuery = vi.fn()
-    vi.mocked(useCompareController).mockReturnValue(
-      controller({
-        batch: batch([
-          { cacheId: 'one', label: 'orders_by_customer' },
-          { cacheId: 'three', label: 'cart_totals' },
-          { cacheId: 'four', label: 'inventory_rollup' },
-        ]),
-        snapshot: snapshot({ queryOutcomes: [compared, measuring, waiting] }),
-        selectedOutcome: compared,
-        followingLive: false,
-      })
-    )
-    renderPage()
-
-    // The pinned row is marked twice over: an explicit chip and aria-current.
-    const pinned = screen.getByRole('button', {
-      name: 'Show orders_by_customer in the comparison chart',
+  it('renders a legacy batch without stored curves as a verdict-only card', () => {
+    const measured = outcome('one', 'orders_by_customer', 'succeeded', {
+      result: { ...RESULT, timeline: [] },
     })
-    expect(pinned.getAttribute('aria-current')).toBe('true')
-    expect(screen.getByText('Showing')).toBeTruthy()
-    expect(
-      screen.getByText('Live comparison · orders_by_customer')
-    ).toBeTruthy()
-    expect(screen.queryByText('Following live')).toBeNull()
-
     vi.mocked(useCompareController).mockReturnValue(
       controller({
-        batch: batch([{ cacheId: 'three', label: 'cart_totals' }]),
-        snapshot: snapshot({ queryOutcomes: [measuring] }),
-        selectedOutcome: measuring,
-        pinQuery,
+        batch: batch([{ cacheId: 'one', label: 'orders_by_customer' }]),
+        snapshot: snapshot({
+          status: 'complete',
+          percent: 100,
+          queryOutcomes: [measured],
+        }),
       })
     )
-    cleanup()
     renderPage()
-    screen
-      .getByRole('button', { name: 'Show cart_totals in the comparison chart' })
-      .click()
-    expect(pinQuery).toHaveBeenCalledWith('three')
+
+    expect(screen.queryByRole('img')).toBeNull()
+    expect(
+      screen.getByText('No measurement curve was kept for this query.')
+    ).toBeTruthy()
+    // The verdict itself survives the missing curve.
+    expect(screen.getByText('10× faster')).toBeTruthy()
+    expect(screen.getByText('520')).toBeTruthy()
+  })
+
+  it('sends a card footer back to that query in the library', () => {
+    const measured = outcome('one', 'orders_by_customer', 'succeeded', {
+      result: RESULT,
+      timeline: [SAMPLE],
+    })
+    vi.mocked(useCompareController).mockReturnValue(
+      controller({
+        batch: batch([{ cacheId: 'one', label: 'orders_by_customer' }]),
+        snapshot: snapshot({
+          status: 'complete',
+          percent: 100,
+          queryOutcomes: [measured],
+        }),
+      })
+    )
+    renderPage()
+
+    expect(
+      screen.getByRole('link', { name: 'View query' }).getAttribute('href')
+    ).toBe('/queries')
+    expect(screen.getByText(/hash one/)).toBeTruthy()
+  })
+
+  it('keeps the drain window out of the curve it ends on', () => {
+    // The runner keeps sampling while in-flight requests drain, long after it
+    // stopped submitting: a window with no scheduled work and a handful of
+    // completions reads as a collapse the run never measured.
+    const steady = { ...SAMPLE, elapsed_seconds: 29 }
+    const drain: CacheCompareSample = {
+      elapsed_seconds: 30,
+      concurrency: 2,
+      origin: {
+        ...SAMPLE.origin,
+        scheduled: 0,
+        completed: 18,
+        throughput_rps: 121,
+      },
+      readyset: {
+        ...SAMPLE.readyset,
+        scheduled: 0,
+        completed: 9,
+        throughput_rps: 60,
+      },
+    }
+    const measuring: BackgroundRunState = {
+      runId: 'run-one',
+      kind: 'cache_compare',
+      target: 'demo',
+      stage: 'measuring',
+      status: 'running',
+      message: '',
+      lastSeq: 3,
+      current: 99,
+      total: 100,
+      hasWarnings: false,
+      compareSamples: [SAMPLE, steady, drain],
+    }
+    const craterBatch = batch([{ cacheId: 'one', label: 'orders_by_customer' }])
+    const live = compareBatchSnapshot(craterBatch, [measuring])
+
+    expect(live.queryOutcomes[0].timeline).toEqual([SAMPLE, steady])
+    expect(live.queryOutcomes[0].elapsedSeconds).toBe(29)
+
+    vi.mocked(useCompareController).mockReturnValue(
+      controller({ batch: craterBatch, snapshot: live })
+    )
+    renderPage()
+
+    // The end-of-line labels read the last measured sample, not the drain.
+    expect(screen.getByText('455 QPS')).toBeTruthy()
+    expect(screen.getByText('142 QPS')).toBeTruthy()
+    expect(screen.queryByText('60 QPS')).toBeNull()
+    expect(screen.queryByText('121 QPS')).toBeNull()
+  })
+
+  it('keeps the batch actions on the band, not on each card', () => {
+    const { compared, measuring } = fourQueryBatch()
+    vi.mocked(useCompareController).mockReturnValue(
+      controller({
+        batch: FOUR_QUERY_BATCH,
+        snapshot: snapshot({
+          status: 'partial',
+          percent: 100,
+          queryOutcomes: [compared, { ...measuring, status: 'failed' }],
+        }),
+      })
+    )
+    renderPage()
+
+    expect(screen.getByRole('button', { name: 'Run again' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Adjust' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'History 0' })).toBeTruthy()
   })
 })

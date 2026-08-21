@@ -9,6 +9,13 @@ import type { AnalyzeDrawerLink } from './analyzeDrawerState'
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   useResultsController: vi.fn(),
+  useAnalysisConversation: vi.fn(),
+  clearConversation: vi.fn(),
+  /** Flipped when the conversation module is first imported. */
+  conversationLoaded: { current: false },
+  run: undefined as
+    | { state: string; results?: { query_hash?: string } }
+    | undefined,
   latest: {
     summary: { analysis_id: 'a2' } as { analysis_id: string } | null,
     isResolved: true,
@@ -25,6 +32,27 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => mocks.navigate,
+}))
+// The chat stack (AI SDK transport, markdown renderer, key probe) is what the
+// Follow-up chunk is deferring; importing this module is what "the tab was
+// activated" means, so the factory doubles as the load sentinel.
+vi.mock('../../../components/AnalysisConversation', () => {
+  mocks.conversationLoaded.current = true
+  return {
+    AnalysisConversation: () => <div data-testid="analysis-conversation" />,
+    useAnalysisConversation: (...args: unknown[]) => {
+      mocks.useAnalysisConversation(...args)
+      return {
+        hasPreviousChat: true,
+        isLoading: false,
+        clearConversation: mocks.clearConversation,
+      }
+    },
+  }
+})
+vi.mock('../../../lib/analysisRuns', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../lib/analysisRuns')>()),
+  useAnalysisRunForQuery: () => mocks.run,
 }))
 vi.mock('../results/ResultsBody', () => ({
   ResultsBody: ({
@@ -119,6 +147,12 @@ function controllerShell(): ResultsShell {
   return mocks.useResultsController.mock.calls.at(-1)?.[1] as ResultsShell
 }
 
+const chatContext = {
+  analysis_id: 'a5',
+  target: 'demo',
+  query_sql: 'SELECT * FROM orders',
+}
+
 beforeEach(() => {
   mocks.navigate.mockClear()
   onClose.mockClear()
@@ -128,11 +162,17 @@ beforeEach(() => {
   mocks.latest.summary = { analysis_id: 'a2' }
   mocks.latest.isResolved = true
   mocks.useLatestAnalysisQuery.mockImplementation(() => mocks.latest)
+  mocks.run = undefined
+  mocks.useAnalysisConversation.mockClear()
+  mocks.clearConversation.mockClear()
   mocks.useResultsController.mockClear()
   mocks.useResultsController.mockReturnValue({
     origin: 'query-library',
     backLabel: 'Back to queries',
-    actions: {},
+    analysis: { state: 'complete', results: { query_hash: 'qh1' } },
+    stored: { isLoading: false },
+    chat: { results: chatContext },
+    actions: { reRunStored: vi.fn() },
   })
 })
 
@@ -322,7 +362,7 @@ describe('AnalyzeDrawer tabs', () => {
   it('shows the stored comparison, and omits the row when there is none', async () => {
     renderDrawer({ hash: 'h1', tab: 'overview' })
     await findOverview()
-    expect(screen.queryByText('Last comparison')).toBeNull()
+    expect(screen.queryByText('Comparison')).toBeNull()
 
     cleanup()
     renderDrawer({ hash: 'h1', tab: 'overview' }, {
@@ -347,5 +387,130 @@ describe('AnalyzeDrawer tabs', () => {
     fireEvent.click(screen.getByTestId('query-star-toggle'))
 
     expect(onToggleStar).toHaveBeenCalledWith('h1', true)
+  })
+})
+
+const findFollowUp = () =>
+  screen.findByTestId('analyze-drawer-follow-up', undefined, LAZY_CHUNK_TIMEOUT)
+
+const followUpTab = () => screen.getByRole('tab', { name: 'Follow-up' })
+
+describe('AnalyzeDrawer follow-up tab', () => {
+  // First in this block on purpose: the sentinel only proves deferral while no
+  // earlier case in this file has opened the tab.
+  it('loads the conversation chunk on first activation, not on open', async () => {
+    renderDrawer({ hash: 'h1', analysisId: 'a5' })
+    await findDrawer()
+    expect(mocks.conversationLoaded.current).toBe(false)
+
+    cleanup()
+    renderDrawer({ hash: 'h1', analysisId: 'a5', tab: 'follow-up' })
+
+    expect(await findFollowUp()).toBeTruthy()
+    expect(mocks.conversationLoaded.current).toBe(true)
+  })
+
+  it('holds the tab shut until the query has an analysis to discuss', async () => {
+    mocks.latest.summary = null
+    renderDrawer({ hash: 'h1' })
+    await findDrawer()
+
+    expect(followUpTab().getAttribute('aria-disabled')).toBe('true')
+    expect(followUpTab().getAttribute('title')).toBe('Run an analysis first')
+
+    fireEvent.click(followUpTab())
+    expect(onOpenLink).not.toHaveBeenCalled()
+  })
+
+  it('opens once a stored analysis or a finished run exists', async () => {
+    renderDrawer({ hash: 'h1' })
+    await findDrawer()
+    expect(followUpTab().getAttribute('aria-disabled')).toBeNull()
+
+    fireEvent.click(followUpTab())
+    expect(onOpenLink).toHaveBeenLastCalledWith({
+      hash: 'h1',
+      tab: 'follow-up',
+    })
+
+    // A re-run with no stored record yet: the run this session finished is
+    // just as much an analysis to ask about.
+    cleanup()
+    mocks.latest.summary = null
+    mocks.run = { state: 'complete', results: { query_hash: 'qh1' } }
+    renderDrawer({ hash: 'h1', rerun: true })
+    await findDrawer()
+
+    expect(followUpTab().getAttribute('aria-disabled')).toBeNull()
+  })
+
+  it('mounts the conversation on the analysis the drawer is showing', async () => {
+    renderDrawer({ hash: 'h1', analysisId: 'a5', tab: 'follow-up' })
+    await findFollowUp()
+
+    // The conversation is keyed by the analyzed query's hash, exactly as
+    // `/results` keys it, so both surfaces resume the same thread.
+    expect(mocks.useAnalysisConversation).toHaveBeenLastCalledWith(
+      'qh1',
+      chatContext
+    )
+    expect(controllerSearch().analysisId).toBe('a5')
+    expect(screen.getByTestId('analysis-conversation')).toBeTruthy()
+    // The analysis pane is not also rendered underneath it.
+    expect(screen.queryByTestId('results-body')).toBeNull()
+  })
+
+  it('hands the conversation to the full view it deep-links to', async () => {
+    renderDrawer({ hash: 'h1', analysisId: 'a5', tab: 'follow-up' })
+    await findFollowUp()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open full view' }))
+
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: '/results',
+      search: expect.objectContaining({
+        query: 'SELECT * FROM orders',
+        origin: 'query-library',
+        hash: 'h1',
+        analysisId: 'a5',
+      }),
+    })
+  })
+
+  it('explains a follow-up link the query has not earned, measuring nothing', async () => {
+    mocks.latest.summary = null
+    renderDrawer({ hash: 'h1', tab: 'follow-up' })
+    await findDrawer()
+
+    expect(screen.getByText('Run an analysis first')).toBeTruthy()
+    expect(screen.queryByTestId('analysis-conversation')).toBeNull()
+    expect(mocks.useResultsController).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Analyze' }))
+    expect(onOpenLink).toHaveBeenLastCalledWith({ hash: 'h1', tab: 'analyze' })
+  })
+
+  it('offers a re-run when the stored record kept no results to discuss', async () => {
+    const reRunStored = vi.fn()
+    mocks.useResultsController.mockReturnValue({
+      origin: 'query-library',
+      backLabel: 'Back to queries',
+      analysis: { state: 'idle', results: undefined },
+      stored: { isLoading: false },
+      chat: { results: chatContext },
+      actions: { reRunStored },
+    })
+    renderDrawer({ hash: 'h1', analysisId: 'a5', tab: 'follow-up' })
+
+    fireEvent.click(
+      await screen.findByRole(
+        'button',
+        { name: 'Run analysis again' },
+        LAZY_CHUNK_TIMEOUT
+      )
+    )
+
+    expect(reRunStored).toHaveBeenCalled()
+    expect(mocks.useAnalysisConversation).not.toHaveBeenCalled()
   })
 })

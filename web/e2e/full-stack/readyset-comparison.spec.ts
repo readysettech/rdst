@@ -101,10 +101,18 @@ test('pulls and uses the managed Readyset container from the web comparison', as
     await expect(page.getByText('Complete', { exact: true })).toBeVisible({
       timeout: 180_000,
     })
+    // The verdict band carries both lanes and the combined request count; the
+    // per-query card below it carries that query's measured window and errors.
     await expect(
-      page.getByText(/upstream and .* Readyset requests completed/)
+      page.getByText(/^Upstream [\d,]+ QPS · [\d.]+ ms p95$/)
     ).toBeVisible()
-    await expect(page.getByText('0 errors', { exact: true })).toHaveCount(2)
+    await expect(
+      page.getByText(/^Readyset [\d,]+ QPS · [\d.]+ ms p95$/)
+    ).toBeVisible()
+    await expect(page.getByText(/^[\d,]+ requests$/)).toBeVisible()
+    await expect(
+      page.getByText(/^\d+s measured · 0 errors · hash [0-9a-f]+$/)
+    ).toBeVisible()
 
     const statusResponse = await page.request.get('/api/cache/sandbox')
     expect(statusResponse.ok(), await statusResponse.text()).toBe(true)

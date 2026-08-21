@@ -49,6 +49,7 @@ export function BenchmarkPage({
     confirmIsRemote,
     confirmQueryCount,
     confirmLoadSummary,
+    confirmIncludesReadyset,
     confirmEstimatedExecutions,
   } = controller
   const confirmDialog = (
@@ -58,6 +59,7 @@ export function BenchmarkPage({
       isRemote={confirmIsRemote}
       queryCount={confirmQueryCount}
       loadSummary={confirmLoadSummary}
+      includesReadyset={confirmIncludesReadyset}
       estimatedExecutions={confirmEstimatedExecutions}
       executionCap={BENCHMARK_EXECUTION_CAP}
       onConfirm={handleConfirmRun}

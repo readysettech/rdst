@@ -6,6 +6,7 @@ import {
   DrawerDescription,
   DrawerTitle,
 } from '@rs/ui-new/drawer'
+import { EmptyState } from '@rs/ui-new/empty-state'
 import { ErrorState } from '@rs/ui-new/error-state'
 import { Scrollable } from '@rs/ui-new/scrollable'
 import { Skeleton } from '@rs/ui-new/skeleton'
@@ -14,6 +15,7 @@ import { TabItemButton, TabList } from '@rs/ui-new/tab'
 import { useNavigate } from '@tanstack/react-router'
 import { lazy, type ReactNode, Suspense, useId, useState } from 'react'
 import { QueryStarButton } from '../../../components/QueryStarButton'
+import { useAnalysisRunForQuery } from '../../../lib/analysisRuns'
 import type { QueryRegistryEntry } from '../../../lib/api'
 import { formatMeta, shortHash } from '../../../lib/formatters'
 import { queryDisplayName } from '../../../lib/queryIdentity'
@@ -45,11 +47,18 @@ export interface AnalyzeDrawerContentProps {
   onToggleStar: (hash: string, starred: boolean) => void
 }
 
-// Recall and analysis are separate reads with separate weight, so each tab
-// carries its own chunk: opening an analysis never pays for the Overview.
+// Recall, analysis and conversation are separate reads with separate weight,
+// so each tab carries its own chunk: opening an analysis never pays for the
+// Overview, and neither pays for the chat stack until it is asked for.
 const AnalyzeDrawerOverview = lazy(() =>
   import('./AnalyzeDrawerOverview').then((module) => ({
     default: module.AnalyzeDrawerOverview,
+  }))
+)
+
+const AnalyzeDrawerFollowUp = lazy(() =>
+  import('./AnalyzeDrawerFollowUp').then((module) => ({
+    default: module.AnalyzeDrawerFollowUp,
   }))
 )
 
@@ -57,13 +66,17 @@ const DRAWER_TITLE = 'Query'
 const DRAWER_DESCRIPTION =
   'Measured performance, practical improvements, and Readyset fit.'
 
+/** What the Follow-up tab is waiting for before it can be opened. */
+const FOLLOW_UP_HINT = 'Run an analysis first'
+
 const DRAWER_TABS: ReadonlyArray<{
   value: AnalyzeDrawerTab
   label: string
-  icon: 'folder-file' | 'speedometer'
+  icon: 'folder-file' | 'speedometer' | 'message-multiple'
 }> = [
   { value: 'overview', label: 'Overview', icon: 'folder-file' },
   { value: 'analyze', label: 'Analyze', icon: 'speedometer' },
+  { value: 'follow-up', label: 'Follow-up', icon: 'message-multiple' },
 ]
 
 /** The identity line: shown once, in the header, never again below it. */
@@ -77,6 +90,7 @@ function DrawerShell({
   action,
   tab,
   onOpenTab,
+  unavailableTabs,
   children,
 }: {
   title?: string
@@ -86,6 +100,8 @@ function DrawerShell({
   /** Absent until the drawer has a query, since there is nothing to tab over. */
   tab?: AnalyzeDrawerTab
   onOpenTab?: (tab: AnalyzeDrawerTab) => void
+  /** Panes that cannot be opened yet, each mapped to the reason why. */
+  unavailableTabs?: Partial<Record<AnalyzeDrawerTab, string>>
   children: ReactNode
 }) {
   const id = useId()
@@ -135,18 +151,23 @@ function DrawerShell({
         </DrawerDescription>
         {tab && onOpenTab ? (
           <TabList aria-label="Query views" className="mt-2">
-            {DRAWER_TABS.map((item) => (
-              <TabItemButton
-                key={item.value}
-                id={tabId(item.value)}
-                aria-controls={panelId}
-                layoutPrefix={`${id}-drawer-tabs`}
-                label={item.label}
-                leftIcon={item.icon}
-                active={tab === item.value}
-                onClick={() => onOpenTab(item.value)}
-              />
-            ))}
+            {DRAWER_TABS.map((item) => {
+              const unavailable = unavailableTabs?.[item.value]
+              return (
+                <TabItemButton
+                  key={item.value}
+                  id={tabId(item.value)}
+                  aria-controls={panelId}
+                  layoutPrefix={`${id}-drawer-tabs`}
+                  label={item.label}
+                  leftIcon={item.icon}
+                  active={tab === item.value}
+                  disabled={Boolean(unavailable)}
+                  hint={unavailable}
+                  onClick={() => onOpenTab(item.value)}
+                />
+              )
+            })}
           </TabList>
         ) : null}
       </VStack>
@@ -271,12 +292,27 @@ function LoadedAnalyzeDrawer({
     target,
   })
 
+  // A conversation is about an analysis, so the tab waits for one: a stored
+  // record the link resolved to, or a run this session finished. Reading the
+  // run store starts nothing — it only reports what is already there.
+  const run = useAnalysisRunForQuery({
+    hash: link.hash,
+    sql: search.query,
+    target: search.target,
+  })
+  const hasAnalysis =
+    Boolean(analysisId) ||
+    (run?.state === 'complete' && Boolean(run.results?.query_hash))
+
   return (
     <DrawerShell
       title={queryDisplayName(entry)}
       description={identityLine(entry)}
       tab={tab}
       onOpenTab={(next) => onOpenLink({ ...link, tab: next })}
+      unavailableTabs={
+        hasAnalysis ? undefined : { 'follow-up': FOLLOW_UP_HINT }
+      }
       action={
         <>
           <QueryStarButton
@@ -284,8 +320,9 @@ function LoadedAnalyzeDrawer({
             onToggle={(next) => onToggleStar(entry.hash, next)}
           />
           {/* `/results` has no overview mode, so the escape hatch belongs to
-              the tab that has an equivalent there. */}
-          {tab === 'analyze' ? (
+              the tabs that have an equivalent there — the analysis, and the
+              conversation the full view opens over it. */}
+          {tab === 'overview' ? null : (
             <Button
               variant="primary"
               modifier="ghost"
@@ -295,7 +332,7 @@ function LoadedAnalyzeDrawer({
               label="Open full view"
               onClick={() => onOpenFullView(search)}
             />
-          ) : null}
+          )}
         </>
       }
     >
@@ -304,6 +341,7 @@ function LoadedAnalyzeDrawer({
           <AnalyzeDrawerOverview
             entry={entry}
             currentAnalysisId={analysisId}
+            target={target}
             onOpenAnalysis={(id) =>
               onOpenLink({ hash: link.hash, analysisId: id, tab: 'analyze' })
             }
@@ -312,12 +350,27 @@ function LoadedAnalyzeDrawer({
             }
           />
         </Suspense>
+      ) : tab === 'follow-up' && !hasAnalysis ? (
+        // A hand-written link can ask for a conversation the query has not
+        // earned yet. Say so rather than mounting a chat with no subject —
+        // and never let asking for one start a measurement.
+        <EmptyState
+          icon="message-multiple"
+          title={FOLLOW_UP_HINT}
+          body="Follow-up questions are answered from a measured analysis, so this query needs one before it has anything to discuss."
+          action={{
+            label: 'Open Analyze',
+            icon: 'speedometer',
+            onClick: () => onOpenLink({ ...link, tab: 'analyze' }),
+          }}
+        />
       ) : (
-        // The analysis controller only mounts on its own tab: reading the
-        // Overview must never start a measurement.
-        <AnalyzeDrawerAnalysis
+        // The analysis controller only mounts on the tabs that show an
+        // analysis: reading the Overview must never start a measurement.
+        <AnalyzeDrawerResults
           entry={entry}
           hash={link.hash}
+          tab={tab}
           search={search}
           onSqlOverride={onSqlOverride}
           onOpenLink={onOpenLink}
@@ -328,9 +381,15 @@ function LoadedAnalyzeDrawer({
   )
 }
 
-function AnalyzeDrawerAnalysis({
+/**
+ * The analysis, and the conversation about it. Both are the same read, so both
+ * are the same controller: `/results` decides what a stored id or a live run
+ * means, and the drawer inherits that decision instead of repeating it.
+ */
+function AnalyzeDrawerResults({
   entry,
   hash,
+  tab,
   search,
   onSqlOverride,
   onOpenLink,
@@ -338,6 +397,7 @@ function AnalyzeDrawerAnalysis({
 }: {
   entry: QueryRegistryEntry
   hash: string
+  tab: AnalyzeDrawerTab
   search: ResultsSearch
   onSqlOverride: (sql: string) => void
   onOpenLink: (link: AnalyzeDrawerLink, options?: { replace?: boolean }) => void
@@ -364,6 +424,23 @@ function AnalyzeDrawerAnalysis({
   const controller = useResultsController(search, shell, {
     jobLabel: queryDisplayName(entry),
   })
+
+  if (tab === 'follow-up') {
+    // Until the record is read back there is no subject to key the thread on,
+    // and no way to tell a body-less record from one still in flight.
+    if (controller.stored.isLoading) {
+      return <Skeleton className="h-40 w-full" aria-hidden="true" />
+    }
+    return (
+      <Suspense fallback={<Skeleton className="h-40 w-full" />}>
+        <AnalyzeDrawerFollowUp
+          queryHash={controller.analysis.results?.query_hash ?? undefined}
+          context={controller.chat.results}
+          onReRun={() => controller.actions.reRunStored('missing-body')}
+        />
+      </Suspense>
+    )
+  }
 
   return (
     <ResultsBody controller={controller} followUp="none" prompts="inline" />

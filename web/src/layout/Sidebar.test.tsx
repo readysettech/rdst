@@ -151,17 +151,19 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
     expect(install).toHaveBeenCalledTimes(1)
   })
 
-  it('renders free credits directly above Settings and opens the trial dialog', () => {
+  it('renders free credits as a quiet footer control, above Settings, and opens the trial dialog', () => {
     render(<Sidebar />)
 
     const credits = screen.getByRole('button', {
       name: /Get free AI credits/,
     })
     const settings = screen.getByRole('link', { name: /Settings/ })
-    expect(credits.className).toContain('bg-gradient-to-r')
-    expect(credits.className).toContain('from-surface-primary-soft')
-    expect(credits.className).toContain('to-surface-info-soft')
-    expect(credits.className).toContain('shadow-elevation-1')
+    // F2: no gradient, colored border, or elevation shadow left to outshine
+    // the nav — just the quiet footer-utility treatment.
+    expect(credits.className).not.toContain('bg-gradient-to-r')
+    expect(credits.className).not.toContain('shadow-elevation')
+    expect(credits.className).toContain('border-0')
+    expect(credits.className).toContain('h-8')
     expect(
       credits.compareDocumentPosition(settings) &
         Node.DOCUMENT_POSITION_FOLLOWING
@@ -171,6 +173,38 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
     expect(
       screen.getByRole('dialog', { name: 'Free credits dialog' })
     ).toBeTruthy()
+  })
+
+  it('sizes footer utilities below the daily nav (F5)', () => {
+    render(<Sidebar />)
+    const home = screen.getByRole('link', { name: /Home/ })
+    const settings = screen.getByRole('link', { name: /Settings/ })
+    expect(home.className).toContain('h-10')
+    expect(home.className).toContain('font-medium')
+    expect(settings.className).toContain('h-8')
+    expect(settings.className).toContain('font-normal')
+  })
+
+  it('groups the footer into a status block and a utility block (F6)', () => {
+    render(<Sidebar />)
+    const status = screen.getByTestId('sidebar-footer-status')
+    const utilities = screen.getByTestId('sidebar-footer-utilities')
+    const credits = screen.getByRole('button', {
+      name: /Get free AI credits/,
+    })
+    expect(utilities.contains(credits)).toBe(true)
+    expect(
+      status.compareDocumentPosition(utilities) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it('gives nav links a focus-visible ring instead of the UA outline (F12)', () => {
+    render(<Sidebar />)
+    const home = screen.getByRole('link', { name: /Home/ })
+    const docs = screen.getByRole('link', { name: 'Docs' })
+    expect(home.className).toContain('focus-visible:ring-2')
+    expect(docs.className).toContain('focus-visible:ring-2')
   })
 
   it('shows and clears the Health Check running indicator from audit session state', () => {

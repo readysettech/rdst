@@ -13,6 +13,8 @@ interface BenchmarkConfirmDialogProps {
   queryCount: number
   /** Human load summary, e.g. "100ms interval · 30s" or "4 workers · 30s". */
   loadSummary: string
+  /** True when this run also drives the Readyset lane beside the origin. */
+  includesReadyset: boolean
   /** Theoretical request ceiling, or null for a tight loop (interval 0). */
   estimatedExecutions: number | null
   /** Server-side hard cap on total executions (shown for the tight-loop case). */
@@ -40,6 +42,7 @@ export function BenchmarkConfirmDialog({
   isRemote,
   queryCount,
   loadSummary,
+  includesReadyset,
   estimatedExecutions,
   executionCap,
   onConfirm,
@@ -54,6 +57,12 @@ export function BenchmarkConfirmDialog({
   }, [isOpen])
 
   const remoteConfirmed = !isRemote || typed.trim() === target
+
+  // Named only when the run drives it: the second lane makes the run
+  // heavier and leaves temporary caches on the sandbox until it ends.
+  const readysetNote = includesReadyset
+    ? ' This run also drives Readyset alongside it, creating a temporary cache per query that is dropped when the run ends.'
+    : ''
 
   const execLabel =
     estimatedExecutions === null
@@ -88,13 +97,13 @@ export function BenchmarkConfirmDialog({
               accent: 'negative',
               icon: 'alert',
               title: 'This is a remote database',
-              message: `${target} is not a local target. Load tests run real read-only traffic against a remote — possibly production — database. Type the target name below to confirm you intend to run load against it.`,
+              message: `${target} is not a local target. Load tests run real read-only traffic against a remote — possibly production — database.${readysetNote} Type the target name below to confirm you intend to run load against it.`,
             }
           : {
               accent: 'warning',
               icon: 'play',
               title: 'This runs real database load',
-              message: `The selected queries will execute repeatedly against ${target} for the configured duration. Only read-only SELECT queries are allowed — writes are rejected server-side.`,
+              message: `The selected queries will execute repeatedly against ${target} for the configured duration.${readysetNote} Only read-only SELECT queries are allowed — writes are rejected server-side.`,
             }
       }
       confirmLabel={isRemote ? 'Run against remote' : 'Run load test'}

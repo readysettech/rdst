@@ -38,6 +38,10 @@ const tabItemStyles = tv({
     'hover:text-content-primary-soft',
     'focus:text-content-primary-soft',
     'disabled:pointer-events-none disabled:opacity-50',
+    // Unavailable tabs stay focusable and hoverable, so the reason they give
+    // can actually be read.
+    'aria-disabled:cursor-not-allowed aria-disabled:opacity-50',
+    'aria-disabled:hover:text-content-layout-2',
   ],
 })
 
@@ -108,6 +112,13 @@ export const TabItem = ({
 export type TabButtonItemProps = {
   onClick: () => void
   active: boolean
+  /**
+   * The view exists but cannot be opened yet: the tab is announced as disabled
+   * and ignores activation, while `hint` says what would unlock it.
+   */
+  disabled?: boolean
+  /** Why the tab is unavailable, shown on hover. */
+  hint?: string
   /** Tab id — wire it to the panel's `aria-labelledby`. */
   id?: string
   /** Id of the panel this tab controls. */
@@ -122,6 +133,8 @@ export const TabItemButton = ({
   layoutPrefix,
   onClick,
   className,
+  disabled,
+  hint,
   id,
   'aria-controls': ariaControls,
   ...restProps
@@ -144,8 +157,10 @@ export const TabItemButton = ({
       id={id}
       aria-selected={active}
       aria-controls={ariaControls}
+      aria-disabled={disabled || undefined}
+      title={hint}
       data-tab-layout-prefix={layoutPrefix}
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
       className={tabItemStyles({ className })}
       {...restProps}
     >

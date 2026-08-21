@@ -28,10 +28,21 @@ vi.mock('../../../components/QueryCard', () => ({
   QueryCard: () => <div data-testid="query-card" />,
 }))
 
+// The chat stack is behind its own chunk; importing this module is what
+// "the conversation was opened" means.
+const chat = vi.hoisted(() => ({ chunkLoaded: false }))
+
+vi.mock('../../../components/InteractivePanel', () => {
+  chat.chunkLoaded = true
+  return { InteractivePanel: () => <div data-testid="interactive-panel" /> }
+})
+
 function controller(
   overrides: {
     parameters?: Partial<ResultsController['parameters']>
     consent?: Partial<ResultsController['consent']>
+    chat?: Partial<ResultsController['chat']>
+    analysis?: Partial<ResultsController['analysis']>
   } = {}
 ): ResultsController {
   return {
@@ -46,6 +57,7 @@ function controller(
       readysetCacheability: undefined,
       error: undefined,
       errorEnvelope: undefined,
+      ...overrides.analysis,
     },
     stored: {
       isActive: false,
@@ -66,7 +78,12 @@ function controller(
       ...overrides.parameters,
     },
     consent: { isOpen: false, skipFuturePrompts: false, ...overrides.consent },
-    chat: { isOpen: false, hasExisting: false, results: {} },
+    chat: {
+      isOpen: false,
+      hasExisting: false,
+      results: {},
+      ...overrides.chat,
+    },
     actions: {
       setSkipAnalyzeConsent: vi.fn(),
       confirmAnalysis: vi.fn(),
@@ -136,5 +153,30 @@ describe('pre-run steps on the results page', () => {
     expect(screen.getByTestId('parameter-form').dataset.presentation).toBe(
       'modal'
     )
+  })
+})
+
+describe('the follow-up conversation', () => {
+  it('loads the chat only once a question is actually asked', async () => {
+    const complete = {
+      analysis: {
+        state: 'complete',
+        results: { query_hash: 'qh1' },
+      } as unknown as Partial<ResultsController['analysis']>,
+    }
+
+    render(<ResultsBody controller={controller(complete)} />)
+    expect(chat.chunkLoaded).toBe(false)
+    expect(screen.queryByTestId('interactive-panel')).toBeNull()
+
+    cleanup()
+    render(
+      <ResultsBody
+        controller={controller({ ...complete, chat: { isOpen: true } })}
+      />
+    )
+
+    expect(await screen.findByTestId('interactive-panel')).toBeTruthy()
+    expect(chat.chunkLoaded).toBe(true)
   })
 })

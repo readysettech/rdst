@@ -206,6 +206,7 @@ export function LoadTestResults({
     description,
     statusLabel,
     skippedQueries,
+    preparation,
     comparative,
     readysetSetup,
     laneAggregates,
@@ -266,11 +267,11 @@ export function LoadTestResults({
         </Card.Header>
 
         <Card.Content>
-          {queued ? (
+          {queued || preparation ? (
             <HStack className="items-start gap-3 rounded-xl border border-border-info-soft p-4">
               <Icon
                 name="info"
-                label="Queued"
+                label={preparation ? 'Preparing' : 'Queued'}
                 className="mt-0.5 h-5 w-5 shrink-0 text-content-info-soft"
               />
               <VStack className="items-start gap-1">
@@ -278,8 +279,10 @@ export function LoadTestResults({
                   No action is required
                 </Text>
                 <Text level="body-small" className="text-content-layout-3">
-                  {runMessage ||
-                    'The timer starts only after the first query begins.'}
+                  {preparation
+                    ? 'Every query in this run is cached first; the timer starts after that.'
+                    : runMessage ||
+                      'The timer starts only after the first query begins.'}
                 </Text>
               </VStack>
             </HStack>

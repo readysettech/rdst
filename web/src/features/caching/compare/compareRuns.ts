@@ -134,6 +134,28 @@ function retainedTimeline(
   )
 }
 
+/**
+ * Keep only the samples the load generator actually fed.
+ *
+ * A comparison stops submitting work the moment its measurement window closes,
+ * then keeps sampling while the requests already in flight drain. Those
+ * trailing samples divide a handful of drain completions by real elapsed time,
+ * so their throughput reads two orders of magnitude below the steady rate --
+ * an artifact of an unfed window, not a measurement. A sample that scheduled
+ * no work in either lane is exactly one of those.
+ */
+function measuredTimeline(
+  timeline: CacheCompareSample[]
+): CacheCompareSample[] {
+  const fed = (sample: CacheCompareSample) =>
+    sample.origin.scheduled !== 0 || sample.readyset.scheduled !== 0
+  let end = timeline.length
+  while (end > 0 && !fed(timeline[end - 1])) end -= 1
+  // A curve that never reports scheduling is evidence of nothing either way,
+  // so it is kept whole rather than emptied.
+  return end === 0 ? timeline : timeline.slice(0, end)
+}
+
 function withoutTimelines(batch: CompareBatch): CompareBatch {
   return {
     ...batch,
@@ -293,7 +315,9 @@ function compareQueryOutcome(
   batchOutcome: CompareBatch['outcome']
 ): CompareQueryOutcome {
   const measured = storedResult?.result.timeline ?? []
-  const timeline = measured.length > 0 ? measured : (run?.compareSamples ?? [])
+  const timeline = measuredTimeline(
+    measured.length > 0 ? measured : (run?.compareSamples ?? [])
+  )
   const base = {
     cacheId: query.cacheId,
     label: query.label,
@@ -518,11 +542,13 @@ export function settleCompareBatch(
       result: {
         ...stored.result,
         timeline: retainedTimeline(
-          stored.result.timeline.length > 0
-            ? stored.result.timeline
-            : (snapshot.queryOutcomes.find(
-                (outcome) => outcome.cacheId === stored.cacheId
-              )?.timeline ?? [])
+          measuredTimeline(
+            stored.result.timeline.length > 0
+              ? stored.result.timeline
+              : (snapshot.queryOutcomes.find(
+                  (outcome) => outcome.cacheId === stored.cacheId
+                )?.timeline ?? [])
+          )
         ),
       },
     })),

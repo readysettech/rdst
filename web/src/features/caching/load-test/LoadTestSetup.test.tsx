@@ -53,7 +53,7 @@ function controller(overrides: Record<string, unknown> = {}) {
     setSourceFilter: vi.fn(),
     testProfile: 'paced',
     setTestProfile: vi.fn(),
-    comparative: true,
+    comparative: false,
     setComparative: vi.fn(),
     intervalMs: 100,
     setIntervalMs: vi.fn(),
@@ -227,26 +227,9 @@ describe('LoadTestSetup query rows', () => {
 })
 
 describe('LoadTestSetup comparison lane control', () => {
-  it('defaults to comparative and explains the side-by-side run', () => {
-    render(<LoadTestSetup controller={controller()} />)
-
-    const toggle = screen.getByRole('switch', {
-      name: 'Compare against Readyset',
-    })
-    expect(toggle.getAttribute('aria-checked')).toBe('true')
-    expect(
-      screen.getByText('Run against your database and Readyset side by side.')
-    ).toBeTruthy()
-    expect(screen.getByText('Origin + Readyset', { exact: true })).toBeTruthy()
-  })
-
-  it('switches to an origin-only run summary once the user opts out', () => {
+  it('measures the origin alone until the user asks for Readyset', () => {
     const setComparative = vi.fn()
-    render(
-      <LoadTestSetup
-        controller={controller({ comparative: false, setComparative })}
-      />
-    )
+    render(<LoadTestSetup controller={controller({ setComparative })} />)
 
     const toggle = screen.getByRole('switch', {
       name: 'Compare against Readyset',
@@ -259,6 +242,19 @@ describe('LoadTestSetup comparison lane control', () => {
 
     toggle.click()
     expect(setComparative).toHaveBeenCalledWith(true)
+  })
+
+  it('explains the side-by-side run once the lane is switched on', () => {
+    render(<LoadTestSetup controller={controller({ comparative: true })} />)
+
+    const toggle = screen.getByRole('switch', {
+      name: 'Compare against Readyset',
+    })
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    expect(
+      screen.getByText('Run against your database and Readyset side by side.')
+    ).toBeTruthy()
+    expect(screen.getByText('Origin + Readyset', { exact: true })).toBeTruthy()
   })
 })
 

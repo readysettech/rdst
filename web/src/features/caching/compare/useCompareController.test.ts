@@ -288,11 +288,6 @@ const IN_FLIGHT = [
   outcome('q2', 'running'),
   outcome('q3', 'queued'),
 ]
-const SECOND_DONE = [
-  outcome('q1', 'succeeded', 3.2),
-  outcome('q2', 'succeeded', 1.4),
-  outcome('q3', 'running'),
-]
 const ALL_DONE = [
   outcome('q1', 'succeeded', 3.2),
   outcome('q2', 'succeeded', 1.4),
@@ -348,69 +343,5 @@ describe('compare_run analytics (E1)', () => {
       'compare_abandoned',
       expect.anything()
     )
-  })
-})
-
-describe('chart selection across a batch', () => {
-  afterEach(() => {
-    cleanup()
-    vi.clearAllMocks()
-  })
-
-  it('follows the query being measured, then lands on the best improvement', async () => {
-    vi.mocked(startCompareBatch).mockResolvedValue(BATCH)
-    vi.mocked(settleCompareBatch).mockImplementation((batch) => batch)
-    vi.mocked(compareBatchSnapshot).mockReturnValue(
-      snapshotOf('running', IN_FLIGHT)
-    )
-    mocks.useQueryRegistry.mockReturnValue(registry([entry('q1')]))
-
-    const { result, rerender } = renderController()
-    await startBatch(result)
-
-    expect(result.current.selectedOutcome?.cacheId).toBe('q2')
-    expect(result.current.followingLive).toBe(true)
-
-    vi.mocked(compareBatchSnapshot).mockReturnValue(
-      snapshotOf('running', SECOND_DONE)
-    )
-    rerender()
-    expect(result.current.selectedOutcome?.cacheId).toBe('q3')
-
-    // Settled, selection lands on the best improvement so the headline
-    // speedup has a visible source in the rail.
-    vi.mocked(compareBatchSnapshot).mockReturnValue(
-      snapshotOf('complete', ALL_DONE)
-    )
-    rerender()
-    expect(result.current.selectedOutcome?.cacheId).toBe('q3')
-  })
-
-  it('keeps a pinned query selected through completion and settlement', async () => {
-    vi.mocked(startCompareBatch).mockResolvedValue(BATCH)
-    vi.mocked(settleCompareBatch).mockImplementation((batch) => batch)
-    vi.mocked(compareBatchSnapshot).mockReturnValue(
-      snapshotOf('running', IN_FLIGHT)
-    )
-    mocks.useQueryRegistry.mockReturnValue(registry([entry('q1')]))
-
-    const { result, rerender } = renderController()
-    await startBatch(result)
-
-    act(() => result.current.pinQuery('q1'))
-    expect(result.current.selectedOutcome?.cacheId).toBe('q1')
-    expect(result.current.followingLive).toBe(false)
-
-    vi.mocked(compareBatchSnapshot).mockReturnValue(
-      snapshotOf('running', SECOND_DONE)
-    )
-    rerender()
-    expect(result.current.selectedOutcome?.cacheId).toBe('q1')
-
-    vi.mocked(compareBatchSnapshot).mockReturnValue(
-      snapshotOf('complete', ALL_DONE)
-    )
-    rerender()
-    expect(result.current.selectedOutcome?.cacheId).toBe('q1')
   })
 })

@@ -8,15 +8,15 @@ const inputDir = path.join(cwd, "svg");
 const typeDir = path.join(cwd, "types");
 const outputDir = path.join(cwd, "dist");
 
-// Paths for cloud and marketing public directories
-const cloudIconsDir = path.join(cwd, "../../apps/cloud/public/icons");
-const marketingIconsDir = path.join(cwd, "../../apps/marketing/public/icons");
+// Every app that serves the sprites from its own public directory
+const appIconsDirs = ["cloud", "marketing", "rdst", "tenant-cache"].map((app) =>
+	path.join(cwd, `../../apps/${app}/public/icons`)
+);
 
 // Ensure directories exist
 await fsExtra.ensureDir(outputDir);
 await fsExtra.ensureDir(typeDir);
-await fsExtra.ensureDir(cloudIconsDir);
-await fsExtra.ensureDir(marketingIconsDir);
+for (const dir of appIconsDirs) await fsExtra.ensureDir(dir);
 
 const shouldVerboseLog = process.argv.includes("--log=verbose");
 const logVerbose = shouldVerboseLog ? console.log : () => {};
@@ -73,12 +73,11 @@ async function generateAllVariants() {
 				inputDir: variantInputDir,
 				outputPaths: [
 					spriteFilepath,
-					path.join(cloudIconsDir, spriteFileName),
-					path.join(marketingIconsDir, spriteFileName),
+					...appIconsDirs.map((dir) => path.join(dir, spriteFileName)),
 				],
 			});
 
-			logVerbose(`Sprite ${spriteFileName} saved to dist, cloud/public/icons, and marketing/public/icons`);
+			logVerbose(`Sprite ${spriteFileName} saved to dist and every app's public/icons`);
 			console.log(`Generated ${files.length} ${variant} icons → ${spriteFileName}`);
 		}
 	}

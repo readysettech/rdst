@@ -7,7 +7,7 @@ import { Icon } from '@rs/ui-new/icon'
 import { IconButton } from '@rs/ui-new/icon-button'
 import { Label } from '@rs/ui-new/label'
 import { Show } from '@rs/ui-new/show'
-import { HStack } from '@rs/ui-new/stack'
+import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useState } from 'react'
 import {
@@ -114,6 +114,12 @@ type QueryLibraryControlBarProps = {
   totalCount?: number
 }
 
+function countActiveFilters(filters: QueryLibraryFilters) {
+  return Object.entries(filters).filter(
+    ([key, value]) => value !== FILTER_DEFAULTS[key as QueryLibraryFilterKey]
+  ).length
+}
+
 function filterValueLabel<Key extends QueryLibraryFilterKey>(
   key: Key,
   value: QueryLibraryFilters[Key]
@@ -153,15 +159,15 @@ function FilterMenu({
   filters,
   selection,
   onFilterChange,
+  starred,
+  onStarredChange,
 }: Pick<QueryLibraryControlBarProps, 'idPrefix'> &
   Pick<
     QueryLibraryControlBarProps,
-    'filters' | 'selection' | 'onFilterChange'
+    'filters' | 'selection' | 'onFilterChange' | 'starred' | 'onStarredChange'
   >) {
   const [open, setOpen] = useState(false)
-  const activeFilterCount = Object.entries(filters).filter(
-    ([key, value]) => value !== FILTER_DEFAULTS[key as QueryLibraryFilterKey]
-  ).length
+  const activeFilterCount = countActiveFilters(filters) + (starred ? 1 : 0)
 
   const setFilterValue = (key: QueryLibraryFilterKey, value: string) => {
     switch (key) {
@@ -262,6 +268,50 @@ function FilterMenu({
         className="w-[30rem] max-w-[calc(100vw-2rem)] bg-surface-layout-2 p-0 shadow-elevation-3"
       >
         <Dropdown.Label>Filter queries</Dropdown.Label>
+        {/* The star is the user's own mark, not a status the system computed,
+            so it leads the panel in its own band rather than sitting among
+            the computed facets below. */}
+        <div className="border-b border-border-layout-1 bg-surface-layout-1/60 px-4 py-3">
+          <HStack className="items-center justify-between gap-4">
+            <HStack className="min-w-0 items-center gap-2">
+              <Icon
+                name={starred ? 'star-filled' : 'star'}
+                label=""
+                aria-hidden="true"
+                className={cn(
+                  'h-4 w-4',
+                  starred
+                    ? 'text-content-primary-soft'
+                    : 'text-content-layout-3'
+                )}
+              />
+              <VStack className="min-w-0 items-start gap-0.5">
+                <Text level="label-small" className="text-content-layout-1">
+                  Starred
+                </Text>
+                <Text level="caption" className="text-content-layout-3">
+                  Your own shortlist, on top of any filter below
+                </Text>
+              </VStack>
+            </HStack>
+            <Button
+              size="small"
+              variant="primary"
+              modifier="ghost"
+              label="Starred only"
+              icon={starred ? 'tick' : 'add'}
+              iconPosition="left"
+              aria-pressed={starred}
+              onClick={() => onStarredChange(!starred)}
+              className={cn(
+                'shrink-0',
+                starred
+                  ? 'bg-surface-primary-soft text-content-primary-soft'
+                  : 'bg-surface-layout-2 text-content-layout-2 hover:bg-surface-raised'
+              )}
+            />
+          </HStack>
+        </div>
         <div className="divide-y divide-border-layout-1 px-4">
           {FILTER_CATEGORIES.map((category) => {
             const filterId = `${idPrefix}-filter-${category.key}`
@@ -297,31 +347,6 @@ function FilterMenu({
         </div>
       </Dropdown.Content>
     </Dropdown>
-  )
-}
-
-/**
- * The star as its own control rather than a value of Status: a shortlist is
- * something the user asks for on top of a status, not instead of one.
- */
-function StarredToggle({
-  starred,
-  onStarredChange,
-}: Pick<QueryLibraryControlBarProps, 'starred' | 'onStarredChange'>) {
-  return (
-    <Button
-      size="base"
-      variant="primary"
-      modifier="ghost"
-      label="Starred"
-      icon="star"
-      iconPosition="left"
-      aria-pressed={starred}
-      onClick={() => onStarredChange(!starred)}
-      className={cn(
-        starred && 'bg-surface-primary-soft text-content-primary-soft'
-      )}
-    />
   )
 }
 
@@ -443,9 +468,7 @@ export function QueryLibraryControlBar({
   resultCount,
   totalCount,
 }: QueryLibraryControlBarProps) {
-  const activeFilterCount = Object.entries(filters).filter(
-    ([key, value]) => value !== FILTER_DEFAULTS[key as QueryLibraryFilterKey]
-  ).length
+  const activeFilterCount = countActiveFilters(filters)
   const searchId = `${idPrefix}-search`
   const sortId = `${idPrefix}-sort`
 
@@ -458,8 +481,9 @@ export function QueryLibraryControlBar({
             filters={filters}
             selection={selection}
             onFilterChange={onFilterChange}
+            starred={starred}
+            onStarredChange={onStarredChange}
           />
-          <StarredToggle starred={starred} onStarredChange={onStarredChange} />
           <DisplayMenu
             displayMode={displayMode}
             onDisplayModeChange={onDisplayModeChange}

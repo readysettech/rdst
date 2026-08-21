@@ -51,6 +51,30 @@ describe('analyze drawer URL state', () => {
     expect(analyzeDrawerPatch(null).tab).toBeUndefined()
   })
 
+  it('round-trips the Follow-up pane through the URL', () => {
+    expect(analyzeDrawerLink({ analyze: 'h1', tab: 'follow-up' })).toEqual({
+      hash: 'h1',
+      analysisId: undefined,
+      rerun: undefined,
+      tab: 'follow-up',
+    })
+    expect(analyzeDrawerPatch({ hash: 'h1', tab: 'follow-up' })).toEqual({
+      analyze: 'h1',
+      analysisId: undefined,
+      rerun: undefined,
+      tab: 'follow-up',
+    })
+    // A conversation about a specific stored run keeps both halves of the link.
+    expect(
+      analyzeDrawerPatch({ hash: 'h1', analysisId: 'a5', tab: 'follow-up' })
+    ).toEqual({
+      analyze: 'h1',
+      analysisId: 'a5',
+      rerun: undefined,
+      tab: 'follow-up',
+    })
+  })
+
   it('opens, switches and closes through the same three params', () => {
     expect(analyzeDrawerPatch({ hash: 'h1' })).toEqual({
       analyze: 'h1',

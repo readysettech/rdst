@@ -91,16 +91,19 @@ const navItemStyles = tv({
     'gap-2',
     'px-2',
     'py-1',
-    'h-10',
     'rounded-lg',
     'text-sm',
-    'font-medium',
     'text-content-layout-2',
     'transition-all',
     'duration-150',
     'w-full',
     'hover:bg-surface-layout-2',
     'hover:text-content-layout-1',
+    'focus-visible:outline-none',
+    'focus-visible:ring-2',
+    'focus-visible:ring-border-primary-soft',
+    'focus-visible:ring-offset-2',
+    'focus-visible:ring-offset-surface-layout-1',
     'group',
   ],
   variants: {
@@ -112,6 +115,15 @@ const navItemStyles = tv({
         'hover:text-content-primary-soft',
       ],
     },
+    // Daily nav vs. footer utility (F5): utilities sit visibly subordinate to
+    // the primary list — shorter and normal weight, same alignment and hover.
+    size: {
+      nav: ['h-10', 'font-medium'],
+      footer: ['h-8', 'font-normal'],
+    },
+  },
+  defaultVariants: {
+    size: 'nav',
   },
 })
 
@@ -151,17 +163,19 @@ function NavLink({
   item,
   active,
   running = false,
+  size = 'nav',
   onNavigate,
 }: {
   item: NavItem
   active: boolean
   running?: boolean
+  size?: 'nav' | 'footer'
   onNavigate?: () => void
 }) {
   return (
     <Link
       to={item.to}
-      className={navItemStyles({ active })}
+      className={navItemStyles({ active, size })}
       onClick={() => {
         trackEvent('nav_item_clicked', { label: item.label })
         onNavigate?.()
@@ -177,7 +191,7 @@ function NavLink({
       <span>{item.label}</span>
       {running && (
         <span className="ml-auto">
-          <ActivityPulse label={`${item.label} is running`} compact />
+          <ActivityPulse label={`${item.label} is running`} />
         </span>
       )}
     </Link>
@@ -334,9 +348,7 @@ export function Sidebar({
           strip above the target selector. */}
         {isElectronMac && <div className="draggable-region h-8 shrink-0" />}
 
-        {/* Target selector, plus the one value-proposition line attached to
-          it (C1 / D-5): the sidebar is the single owner of "what is this
-          app", so every other surface stops re-explaining it (USE-050). */}
+        {/* Target selector. */}
         <div className="border-b border-border-layout-1">
           <div className="draggable-region h-14">
             <div className="no-drag h-full">
@@ -346,18 +358,21 @@ export function Sidebar({
               />
             </div>
           </div>
-          <div className="no-drag px-3 pb-2">
-            <Text level="caption" className="text-content-layout-3">
-              {VALUE_PROPOSITION}
-            </Text>
-          </div>
+        </div>
+
+        {/* The one value-proposition line (C1 / D-5), sitting below the
+          switcher rather than inside its bordered block: the sidebar is the
+          single owner of "what is this app", not a caption on the current
+          database (USE-050). */}
+        <div className="no-drag px-3 pt-2 pb-3">
+          <Text level="caption" className="text-content-layout-3">
+            {VALUE_PROPOSITION}
+          </Text>
         </div>
 
         {/* Navigation — persistent scrollbar keeps the full list reachable
           below the fold at 1280×720. [QW2] */}
         <Scrollable className="flex-1" type="auto">
-          {/* gap-2 BETWEEN groups > gap-1 WITHIN a group — spacing carries the
-            grouping, one step up on the scale (design-system §1 [VIS-036]). */}
           <nav className="flex flex-col gap-2 p-2">
             <div className="flex flex-col gap-1">
               <NavLink
@@ -381,92 +396,118 @@ export function Sidebar({
           </nav>
         </Scrollable>
 
-        {/* Footer */}
-        <div className="p-2 border-t border-border-layout-1 space-y-2">
-          <SidebarIdentity />
-          <BackgroundRuns />
-          <TrialBalanceBadge />
-          <Button
-            type="button"
-            label="Get free AI credits"
-            icon="sparkles"
-            iconPosition="left"
-            modifier="outline"
-            fullWidth
-            onClick={() => setTrialOpen(true)}
-            classMerge={navItemStyles({
-              className:
-                'cursor-pointer border border-border-primary-soft bg-gradient-to-r from-surface-primary-soft to-surface-info-soft text-content-primary-soft shadow-elevation-1 hover:shadow-elevation-2',
-            })}
-          />
-          {/* Settings recedes here as a quiet utility, out of the daily nav. */}
-          <NavLink item={settingsItem} active={isActive(settingsItem)} />
-          {/* Docs — kept as a hand-roll: it reuses navItemStyles so it reads as
-              a sibling of the NavLinks above while opening the docs site in a
-              new tab rather than navigating in-app (C4). No help-center
-              build-out here, just the one reachable link. Icon label is empty
-              (decorative) so the composed accessible name reads just "Docs",
-              not a duplicate of the visible text. */}
-          <a
-            href="https://readyset.io/docs"
-            target="_blank"
-            rel="noreferrer"
-            onClick={() => trackEvent('nav_item_clicked', { label: 'Docs' })}
-            className={navItemStyles({ className: 'cursor-pointer' })}
-          >
-            <Icon
-              name="info"
-              label=""
-              aria-hidden="true"
-              className="w-4 h-4 text-content-layout-3 group-hover:scale-110 transition-transform"
-            />
-            <span>Docs</span>
-          </a>
-          {/* The dismissed setup guide's only way back (D). Absent unless it
-              was dismissed with steps still outstanding, so a finished install
-              never carries a dead utility. */}
-          <SetupGuideHelpEntry
-            className={navItemStyles({ className: 'cursor-pointer' })}
-          />
-          {/* Give Feedback — kept as a hand-roll: it reuses navItemStyles so it
-              reads as a sibling of the NavLinks above while opening a dialog
-              rather than navigating; a ui-new Button would break that shared
-              nav-item styling. */}
-          <Pressable
-            type="button"
-            onClick={() => setReportOpen(true)}
-            className={navItemStyles({ className: 'cursor-pointer' })}
-          >
-            {/* Distinct feedback glyph — no longer the Agents `message-multiple`
-              (chrome prescription #9, VIS-008/010). */}
-            <Icon
-              name="customer-support"
-              label="Give feedback"
-              className="w-4 h-4 text-content-layout-3 group-hover:scale-110 transition-transform"
-            />
-            <span>Give feedback</span>
-          </Pressable>
-
-          {(status?.version || desktopUpdateState) && (
-            <div className="flex items-center justify-between gap-2 px-3 py-2">
-              {status?.version && (
-                <div className="min-w-0" title={`v${status.version}`}>
-                  <Text
-                    level="caption"
-                    className="truncate text-content-layout-3"
-                  >
-                    v{status.version}
-                  </Text>
-                </div>
-              )}
-              <div className="ml-auto">
+        {/* Footer — status (who's signed in, what's running, trial credits,
+          app update) and utilities (upsell + links) are separate groups: the
+          gap between groups exceeds the gap within either one (F6, VIS-036). */}
+        <div className="p-2 border-t border-border-layout-1">
+          <div data-testid="sidebar-footer-status" className="space-y-1">
+            <SidebarIdentity />
+            <BackgroundRuns />
+            <TrialBalanceBadge />
+            {desktopUpdateState && (
+              <div className="flex justify-end px-3 py-2">
                 <DesktopUpdateControl
                   state={desktopUpdateState}
                   install={onInstallUpdate}
                 />
               </div>
-            </div>
-          )}
+            )}
+          </div>
+
+          <div
+            data-testid="sidebar-footer-utilities"
+            className="mt-4 space-y-1"
+          >
+            {/* Quiet secondary control, not a competing focal point: no
+              gradient/border/elevation, sized and weighted like the other
+              footer utilities, with just the icon carrying a small accent
+              color (F2, VIS-011/022/121). */}
+            <Button
+              type="button"
+              label="Get free AI credits"
+              icon="sparkles"
+              iconPosition="left"
+              modifier="outline"
+              fullWidth
+              onClick={() => setTrialOpen(true)}
+              classMerge={navItemStyles({
+                size: 'footer',
+                className:
+                  'cursor-pointer border-0 [&_svg]:text-content-primary-soft',
+              })}
+            />
+            {/* Settings recedes here as a quiet utility, out of the daily nav. */}
+            <NavLink
+              item={settingsItem}
+              active={isActive(settingsItem)}
+              size="footer"
+            />
+            {/* Docs — kept as a hand-roll: it reuses navItemStyles so it reads as
+                a sibling of the NavLinks above while opening the docs site in a
+                new tab rather than navigating in-app (C4). No help-center
+                build-out here, just the one reachable link. Icon label is empty
+                (decorative) so the composed accessible name reads just "Docs",
+                not a duplicate of the visible text. */}
+            <a
+              href="https://readyset.io/docs"
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => trackEvent('nav_item_clicked', { label: 'Docs' })}
+              className={navItemStyles({
+                size: 'footer',
+                className: 'cursor-pointer',
+              })}
+            >
+              <Icon
+                name="info"
+                label=""
+                aria-hidden="true"
+                className="w-4 h-4 text-content-layout-3 group-hover:scale-110 transition-transform"
+              />
+              <span>Docs</span>
+            </a>
+            {/* The dismissed setup guide's only way back (D). Absent unless it
+                was dismissed with steps still outstanding, so a finished install
+                never carries a dead utility. */}
+            <SetupGuideHelpEntry
+              className={navItemStyles({
+                size: 'footer',
+                className: 'cursor-pointer',
+              })}
+            />
+            {/* Give Feedback — kept as a hand-roll: it reuses navItemStyles so it
+              reads as a sibling of the NavLinks above while opening a dialog
+              rather than navigating; a ui-new Button would break that shared
+              nav-item styling. */}
+            <Pressable
+              type="button"
+              onClick={() => setReportOpen(true)}
+              className={navItemStyles({
+                size: 'footer',
+                className: 'cursor-pointer',
+              })}
+            >
+              {/* Distinct feedback glyph — no longer the Agents `message-multiple`
+                (chrome prescription #9, VIS-008/010). */}
+              <Icon
+                name="customer-support"
+                label="Give feedback"
+                className="w-4 h-4 text-content-layout-3 group-hover:scale-110 transition-transform"
+              />
+              <span>Give feedback</span>
+            </Pressable>
+
+            {status?.version && (
+              <div className="px-3 py-2" title={`v${status.version}`}>
+                <Text
+                  level="caption"
+                  className="truncate text-content-layout-3"
+                >
+                  v{status.version}
+                </Text>
+              </div>
+            )}
+          </div>
         </div>
 
         <ReportDialog

@@ -293,6 +293,43 @@ describe('compare batch persistence', () => {
     expect(restored.queryOutcomes[1].timeline).toHaveLength(2)
   })
 
+  it('retains a curve without the drain window it ends on', () => {
+    localStorage.setItem(
+      'rdst_capacity_compare_batches_v3',
+      JSON.stringify([BATCH])
+    )
+    // Once the measurement window closes the runner stops scheduling work but
+    // keeps sampling until the in-flight requests drain, so the trailing
+    // samples divide a few completions by real time.
+    const drain = (elapsedSeconds: number): CacheCompareSample => ({
+      ...sample(elapsedSeconds),
+      origin: { ...RESULT.origin, scheduled: 0, throughput_rps: 0.4 },
+      readyset: { ...RESULT.readyset, scheduled: 0, throughput_rps: 0.2 },
+    })
+    const measured = [sample(28), sample(29), sample(30)]
+    const snapshot = compareBatchSnapshot(BATCH, [
+      run('run-1', 'done', {
+        current: 100,
+        compareResult: {
+          ...RESULT,
+          timeline: [...measured, drain(30), drain(30)],
+        },
+      }),
+      run('run-2', 'done', {
+        current: 100,
+        compareResult: { ...RESULT, timeline: [sample(0), drain(30)] },
+      }),
+    ])
+
+    expect(snapshot.queryOutcomes[0].timeline).toEqual(measured)
+    expect(snapshot.queryOutcomes[0].elapsedSeconds).toBe(30)
+
+    settleCompareBatch(BATCH, snapshot)
+    const restored = compareBatchSnapshot(listCompareBatches('demo')[0], [])
+    expect(restored.queryOutcomes[0].timeline).toEqual(measured)
+    expect(restored.queryOutcomes[1].timeline).toEqual([sample(0)])
+  })
+
   it('keeps every verdict when the retained curves no longer fit storage', () => {
     localStorage.setItem(
       'rdst_capacity_compare_batches_v3',

@@ -9,9 +9,10 @@
  */
 
 import type { QueryRegistryEntry } from '../../../lib/api'
-import type {
-  AnalyzeDrawerTab,
-  QueryLibrarySearch,
+import {
+  ANALYZE_DRAWER_TABS,
+  type AnalyzeDrawerTab,
+  type QueryLibrarySearch,
 } from '../library/queryLibraryState'
 import type { ResultsSearch } from '../results/types'
 
@@ -27,11 +28,13 @@ export interface AnalyzeDrawerLink {
   tab?: AnalyzeDrawerTab
 }
 
-/** The pane a link is asking for, resolved. */
+/** The pane a link is asking for, resolved. Anything else means Analyze. */
 export function analyzeDrawerTab(link: {
   tab?: AnalyzeDrawerTab
 }): AnalyzeDrawerTab {
-  return link.tab === 'overview' ? 'overview' : 'analyze'
+  return link.tab && ANALYZE_DRAWER_TABS.includes(link.tab)
+    ? link.tab
+    : 'analyze'
 }
 
 /** The open drawer described by a Query Library URL, if any. */
@@ -59,12 +62,13 @@ export function analyzeDrawerPatch(
       tab: undefined,
     }
   }
+  const tab = analyzeDrawerTab(link)
   return {
     analyze: link.hash,
     analysisId: link.analysisId,
     rerun: link.rerun ? true : undefined,
-    // Analyze is the default, so only Overview needs saying.
-    tab: analyzeDrawerTab(link) === 'overview' ? 'overview' : undefined,
+    // Analyze is the default, so only the other panes need saying.
+    tab: tab === 'analyze' ? undefined : tab,
   }
 }
 

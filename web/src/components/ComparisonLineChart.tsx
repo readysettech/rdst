@@ -43,6 +43,7 @@ export function ComparisonLineChart({
   emptyLabel = 'Waiting for measurements',
   xDomain,
   yMax,
+  yScale = 'linear',
   xStartLabel,
   xEndLabel,
   formatAxisValue = defaultNumber,
@@ -55,6 +56,12 @@ export function ComparisonLineChart({
   emptyLabel?: string
   xDomain?: [number, number]
   yMax?: number
+  /**
+   * A logarithmic y-axis keeps a lane two orders of magnitude below the other
+   * readable instead of pinning it to the baseline. Its domain starts at 1,
+   * so callers must say so on the axis.
+   */
+  yScale?: 'linear' | 'log'
   xStartLabel: string
   xEndLabel: string
   formatAxisValue?: (value: number) => string
@@ -85,8 +92,17 @@ export function ComparisonLineChart({
     comparisonChartMax(Math.max(1, ...allPoints.map((point) => point.y)))
   const xFor = (value: number) =>
     margin.left + ((value - domainStart) / span) * plotWidth
+  // Decades between the axis floor of 1 and the top of the domain; at least
+  // one, so a chart whose values never reach 10 still has a drawable span.
+  const logSpan = Math.max(1, Math.log10(maxValue))
+  const fractionOf = (value: number) =>
+    yScale === 'log'
+      ? clamp(Math.log10(Math.max(value, 1)) / logSpan, 0, 1)
+      : clamp(value / maxValue, 0, 1)
+  const axisValueAt = (fraction: number) =>
+    yScale === 'log' ? 10 ** (fraction * logSpan) : fraction * maxValue
   const yFor = (value: number) =>
-    margin.top + plotHeight - (value / maxValue) * plotHeight
+    margin.top + plotHeight - fractionOf(value) * plotHeight
   const points = (item: ComparisonChartSeries) =>
     item.points.map((point) => `${xFor(point.x)},${yFor(point.y)}`).join(' ')
   const anchorPoints =
@@ -185,7 +201,7 @@ export function ComparisonLineChart({
 
         {[0, 0.5, 1].map((fraction) => {
           const y = margin.top + plotHeight - fraction * plotHeight
-          const value = fraction * maxValue
+          const value = axisValueAt(fraction)
           return (
             <Fragment key={fraction}>
               <line

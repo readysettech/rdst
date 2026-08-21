@@ -4,6 +4,12 @@ import type { QueryRegistryEntry } from '../../../lib/useQueryRegistry'
 import type { QueryLibrarySearch } from './queryLibraryState'
 import { useQueryLibraryController } from './useQueryLibraryController'
 
+/** The callbacks the library hands the saved-queries controller. */
+interface SavedQueriesOptions {
+  onQueryAdded?: (hash?: string | null) => void
+  onRevealLinked?: (hash: string) => void
+}
+
 const mocks = vi.hoisted(() => {
   const readModel = {
     queries: [] as QueryRegistryEntry[],
@@ -25,7 +31,7 @@ const mocks = vi.hoisted(() => {
     markReviewed,
     navigate: vi.fn(),
     useQueryRegistryReadModel: vi.fn(() => readModel),
-    useSavedQueriesController: vi.fn(() => ({
+    useSavedQueriesController: vi.fn((_options: SavedQueriesOptions) => ({
       target: 'demo',
       registry: { queries: readModel.queries, isLoading: false },
       rowState: { hashAliases: {} },
@@ -579,5 +585,45 @@ describe('the drawer Overview is the card body entry point', () => {
     renderHook(() => useQueryLibraryController({ search: { analyze: 'h1' } }))
 
     expect(mocks.markReviewed).not.toHaveBeenCalled()
+  })
+})
+
+describe('what a revealed query is worth interrupting for', () => {
+  function savedQueriesOptions(): SavedQueriesOptions {
+    return mocks.useSavedQueriesController.mock.calls.at(-1)?.[0] ?? {}
+  }
+
+  it('opens a query linked from elsewhere in full', () => {
+    const { result } = renderHook(() =>
+      useQueryLibraryController({ search: {} })
+    )
+
+    act(() => savedQueriesOptions().onRevealLinked?.('h1'))
+
+    expect(result.current.analyzeDrawer.link).toEqual({
+      hash: 'h1',
+      analysisId: undefined,
+      rerun: undefined,
+      tab: 'overview',
+    })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: '/queries',
+      search: expect.objectContaining({ analyze: 'h1', tab: 'overview' }),
+      replace: true,
+    })
+  })
+
+  it('leaves the library in front of a query added right here', () => {
+    const { result } = renderHook(() =>
+      useQueryLibraryController({ search: {} })
+    )
+
+    act(() => {
+      const options = savedQueriesOptions()
+      options.onQueryAdded?.('h1')
+      options.onRevealLinked?.('h1')
+    })
+
+    expect(result.current.analyzeDrawer.link).toBeNull()
   })
 })

@@ -8,7 +8,7 @@ import { Skeleton } from '@rs/ui-new/skeleton'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
-import { InteractivePanel } from '../../../components/InteractivePanel'
+import { lazy, Suspense } from 'react'
 import { QueryCard } from '../../../components/QueryCard'
 import { TargetConnectivityNotice } from '../../../components/TargetConnectivityNotice'
 import { TargetLockNotice } from '../../../components/TargetLockNotice'
@@ -16,6 +16,15 @@ import { ParameterDialog } from '../../../components/top'
 import { AnalysisResults } from './AnalysisResults'
 import { StoredAnalysisHeader } from './StoredAnalysisHeader'
 import type { ResultsController } from './useResultsController'
+
+// The chat stack (AI SDK transport, markdown renderer) is only worth loading
+// once someone actually asks a follow-up question, so the panel is a chunk of
+// its own — the same one the analyze drawer's Follow-up tab pulls.
+const InteractivePanel = lazy(() =>
+  import('../../../components/InteractivePanel').then((module) => ({
+    default: module.InteractivePanel,
+  }))
+)
 
 /** Container placeholder while a stored record is read back. */
 function StoredAnalysisSkeleton() {
@@ -300,14 +309,17 @@ export function ResultsBody({
       ) : null}
 
       {followUp === 'chat' &&
+      chat.isOpen &&
       analysis.state === 'complete' &&
       analysis.results?.query_hash ? (
-        <InteractivePanel
-          isOpen={chat.isOpen}
-          onClose={actions.closeInteractive}
-          queryHash={analysis.results.query_hash}
-          analysisResults={chat.results}
-        />
+        <Suspense fallback={null}>
+          <InteractivePanel
+            isOpen
+            onClose={actions.closeInteractive}
+            queryHash={analysis.results.query_hash}
+            analysisResults={chat.results}
+          />
+        </Suspense>
       ) : null}
 
       {inlinePrompts ? null : (

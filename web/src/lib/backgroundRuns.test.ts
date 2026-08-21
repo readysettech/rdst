@@ -201,6 +201,65 @@ describe('background run store', () => {
     )
   })
 
+  it('follows Readyset cache preparation without sampling it as measurement', async () => {
+    const request = {
+      target: 'imdb',
+      queries: [{ identifier: 'slow-query', sql: 'SELECT 1' }],
+      mode: 'interval' as const,
+      interval_ms: 50,
+      concurrency: 1,
+      duration_seconds: 5,
+      lanes: ['origin' as const, 'readyset' as const],
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input)
+        if (url === '/api/query-registry/load-test-runs') {
+          return new Response(
+            JSON.stringify({ run_id: 'load_test_imdb_prepare' }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        }
+        return sseResponse(
+          frames(
+            [
+              'progress',
+              {
+                type: 'progress',
+                elapsed_seconds: 0,
+                total_executions: 0,
+                total_successes: 0,
+                total_failures: 0,
+                qps: 0,
+                queries: [],
+                phase: 'preparing',
+                prepared_count: 1,
+                prepare_total: 2,
+                seq: 1,
+              },
+            ],
+            ['run_end', { status: 'done', seq: 2 }]
+          )
+        )
+      })
+    )
+
+    await startLoadTestRun(request)
+
+    await waitFor(() =>
+      expect(run('load_test_imdb_prepare')?.status).toBe('done')
+    )
+    const prepared = run('load_test_imdb_prepare')
+    expect(prepared?.stage).toBe('preparing')
+    expect(prepared?.message).toBe('Preparing Readyset caches (1/2)')
+    // The chart plots measurements; a preparing tick has none to plot.
+    expect(prepared?.loadSamples ?? []).toEqual([])
+    expect(prepared?.loadResult).toEqual(
+      expect.objectContaining({ phase: 'preparing', prepared_count: 1 })
+    )
+  })
+
   it('tracks table progress for manual annotation', async () => {
     vi.stubGlobal(
       'fetch',

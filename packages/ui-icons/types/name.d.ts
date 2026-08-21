@@ -85,6 +85,7 @@ export type IconStrokeName =
 	| "sidebar-open"
 	| "sparkles"
 	| "speedometer"
+	| "star-filled"
 	| "star"
 	| "test-tube"
 	| "tick-double"

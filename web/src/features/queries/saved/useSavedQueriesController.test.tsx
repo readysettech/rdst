@@ -18,6 +18,7 @@ vi.mock('../../../hooks/useTarget', () => ({
   useTarget: () => ({ target: 'demo' }),
 }))
 vi.mock('../../../lib/backgroundRuns', () => ({
+  acknowledgeBackgroundRun: vi.fn(),
   dismissBackgroundRun: vi.fn(),
   startCacheTestRun: mocks.startCacheTestRun,
   useBackgroundRuns: () => [],
@@ -120,6 +121,25 @@ describe('useSavedQueriesController deep links', () => {
     expect(onDeepLinkConsumed).toHaveBeenCalledWith(linked.hash)
   })
 
+  it('opens the linked query in full once it is present', () => {
+    const onRevealLinked = vi.fn()
+    const linked = entry('linked-hash')
+    const card = document.createElement('div')
+    card.dataset.queryHash = linked.hash
+    card.scrollIntoView = vi.fn()
+    document.body.append(card)
+
+    renderHook(() =>
+      useSavedQueriesController({
+        deepLinkHash: linked.hash,
+        onRevealLinked,
+        list: list([linked]),
+      })
+    )
+
+    expect(onRevealLinked).toHaveBeenCalledWith(linked.hash)
+  })
+
   it('releases the link when an SQL edit rewrites the linked hash', () => {
     const onDeepLinkConsumed = vi.fn()
     const linked = entry('linked-hash')
@@ -163,7 +183,7 @@ describe('useSavedQueriesController deep links', () => {
 })
 
 describe('useSavedQueriesController inline comparison', () => {
-  it('starts the run and expands the card without navigating', async () => {
+  it('starts the run on the card without navigating', async () => {
     mocks.startCacheTestRun.mockResolvedValue('run-1')
     const target = entry('inline-hash')
     const { result } = renderHook(() =>
@@ -178,7 +198,6 @@ describe('useSavedQueriesController inline comparison', () => {
     expect(mocks.startCacheTestRun).toHaveBeenCalledWith(
       expect.objectContaining({ query_hash: target.hash })
     )
-    expect(result.current.rowState.expandedHash).toBe(target.hash)
     expect(mocks.navigate).not.toHaveBeenCalled()
   })
 

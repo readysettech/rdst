@@ -1,77 +1,68 @@
-import { useEffect } from "react";
-import { useInteractiveChat } from "../lib/chat";
-import { MessageList } from "./MessageList";
-import { MessageInput } from "./MessageInput";
+import { Button } from '@rs/ui-new/button'
 import {
   Drawer,
-  DrawerContentContainer,
   DrawerContent,
+  DrawerContentContainer,
   DrawerHeader,
   DrawerTitle,
-} from "@rs/ui-new/drawer";
-import { Alert } from "@rs/ui-new/alert";
-import { Scrollable } from "@rs/ui-new/scrollable";
-import { VStack, HStack } from "@rs/ui-new/stack";
-import { Button } from "@rs/ui-new/button";
+} from '@rs/ui-new/drawer'
+import { HStack } from '@rs/ui-new/stack'
+import {
+  AnalysisConversation,
+  type AnalysisConversationContext,
+  useAnalysisConversation,
+} from './AnalysisConversation'
 
 interface InteractivePanelProps {
-  isOpen: boolean;
-  onClose: () => void;
-  queryHash: string;
-  analysisResults?: any;
+  isOpen: boolean
+  onClose: () => void
+  queryHash: string
+  analysisResults?: AnalysisConversationContext
 }
 
+/**
+ * The follow-up conversation as `/results` shows it: a drawer over the page.
+ * The conversation inside it is `AnalysisConversation`, the same one the Query
+ * Library's analyze drawer hosts on its Follow-up tab.
+ */
 export function InteractivePanel({
   isOpen,
   onClose,
   queryHash,
   analysisResults,
 }: InteractivePanelProps) {
-  const {
-    messages,
-    input,
-    handleInputChange,
-    handleSubmit,
-    isLoading,
-    error,
-    loadHistory,
-    checkStatus,
-    clearConversation,
-    conversationStatus,
-  } = useInteractiveChat(queryHash, analysisResults);
+  const conversation = useAnalysisConversation(
+    queryHash,
+    analysisResults,
+    isOpen
+  )
 
-  useEffect(() => {
-    if (isOpen) {
-      checkStatus();
-      loadHistory();
-    }
-  }, [isOpen, checkStatus, loadHistory]);
-
-  const handleOpenChange = (open: boolean) => {
-    if (!open) {
-      onClose();
-    }
-  };
-
-  const handleClear = async () => {
-    await clearConversation();
-  };
-
-  if (!isOpen) return null;
-
-  const hasPreviousChat = conversationStatus?.exists && conversationStatus.totalExchanges > 0;
+  if (!isOpen) return null
 
   return (
-    <Drawer open={isOpen} onOpenChange={handleOpenChange} direction="right">
+    <Drawer
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      direction="right"
+    >
       <DrawerContentContainer>
-        <DrawerContent size="large" direction="right" className="p-0" hideCloseButton>
-          <DrawerHeader className="p-4 border-b border-border-layout-1">
+        <DrawerContent
+          size="large"
+          direction="right"
+          className="p-0"
+          hideCloseButton
+        >
+          <DrawerHeader className="border-b border-border-layout-1 p-4">
             <HStack className="w-full justify-between">
               <DrawerTitle>
-                {hasPreviousChat ? "Continue conversation" : "Chat with AI"}
+                {conversation.hasPreviousChat
+                  ? 'Continue conversation'
+                  : 'Chat with AI'}
               </DrawerTitle>
               <HStack className="gap-1">
-                {hasPreviousChat && (
+                {conversation.hasPreviousChat ? (
                   <Button
                     variant="primary"
                     label="Clear conversation"
@@ -79,10 +70,10 @@ export function InteractivePanel({
                     size="small"
                     icon="trash"
                     iconPosition="icon"
-                    onClick={handleClear}
-                    disabled={isLoading}
+                    onClick={() => void conversation.clearConversation()}
+                    disabled={conversation.isLoading}
                   />
-                )}
+                ) : null}
                 <Button
                   variant="primary"
                   label="Close"
@@ -96,34 +87,9 @@ export function InteractivePanel({
             </HStack>
           </DrawerHeader>
 
-          {/* Messages - scrollable area */}
-          <Scrollable className="flex-1 p-4">
-            <VStack className="h-full items-stretch">
-              {error && (
-                <Alert
-                  variant="negative"
-                  modifier="outline"
-                  label={`Error: ${error.message}`}
-                  icon="alert"
-                  iconPosition="left"
-                  className="mb-4"
-                />
-              )}
-              <MessageList messages={messages} isStreaming={isLoading} />
-            </VStack>
-          </Scrollable>
-
-          {/* Input - fixed at bottom */}
-          <div className="p-4 border-t border-border-layout-1">
-            <MessageInput
-              value={input}
-              onChange={handleInputChange}
-              onSubmit={handleSubmit}
-              isLoading={isLoading}
-            />
-          </div>
+          <AnalysisConversation conversation={conversation} layout="panel" />
         </DrawerContent>
       </DrawerContentContainer>
     </Drawer>
-  );
+  )
 }

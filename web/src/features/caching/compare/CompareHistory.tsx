@@ -6,8 +6,8 @@ import { IconTile } from '@rs/ui-new/icon-tile'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
-import { compareStatusLabel } from './CompareRunning'
 import type { CompareBatchStatus } from './compareRuns'
+import { compareStatusLabel } from './compareUi'
 import {
   type CompareController,
   initialCompareConcurrency,

@@ -91,7 +91,6 @@ export function useCompareController(initialQueryHash?: string) {
   const [batch, setBatch] = useState<CompareBatch | null>(() =>
     latestCompareBatch(target)
   )
-  const [pinnedCacheId, setPinnedCacheId] = useState<string | null>(null)
   const [history, setHistory] = useState<CompareBatch[]>(() =>
     listCompareBatches(target)
   )
@@ -110,7 +109,6 @@ export function useCompareController(initialQueryHash?: string) {
     setSuggestionMessage(null)
     setSuggestionSchemaUnavailable(false)
     setResidualQueryHash(null)
-    setPinnedCacheId(null)
     initializedSelectionKey.current = null
     steppedBatchId.current = null
     reportedOutcomes.current.clear()
@@ -307,40 +305,6 @@ export function useCompareController(initialQueryHash?: string) {
   )
   const activeBatch = snapshot?.status === 'running'
 
-  // Which query the chart draws. Unpinned it follows the sandbox: the query
-  // being measured while the batch runs, then the best-improved measurement
-  // once it finishes, so the headline speedup has a visible source. A click
-  // pins one query, and a pinned choice is never yanked away by another
-  // query finishing or by the batch settling.
-  const selectedOutcome = useMemo(() => {
-    const outcomes = snapshot?.queryOutcomes ?? []
-    if (outcomes.length === 0) return null
-    const pinned = outcomes.find((outcome) => outcome.cacheId === pinnedCacheId)
-    if (pinned) return pinned
-    if (snapshot?.status === 'running') {
-      return (
-        outcomes.find((outcome) => outcome.status === 'running') ??
-        [...outcomes]
-          .reverse()
-          .find((outcome) => outcome.status === 'succeeded') ??
-        outcomes[0]
-      )
-    }
-    return (
-      outcomes
-        .filter((outcome) => outcome.status === 'succeeded')
-        .sort(
-          (a, b) =>
-            (b.result?.speedup_mean ?? 0) - (a.result?.speedup_mean ?? 0)
-        )[0] ?? outcomes[0]
-    )
-  }, [pinnedCacheId, snapshot])
-  const followingLive =
-    pinnedCacheId === null ||
-    !snapshot?.queryOutcomes.some(
-      (outcome) => outcome.cacheId === pinnedCacheId
-    )
-
   useEffect(() => {
     if (!batch || !snapshot || snapshot.status === 'running' || batch.outcome) {
       return
@@ -380,7 +344,8 @@ export function useCompareController(initialQueryHash?: string) {
   }, [batch, snapshot])
 
   // A batch the user walks away from before its last query goes terminal is
-  // the behaviour the run rail exists to change, so it is worth measuring.
+  // the behaviour the per-query cards exist to change, so it is worth
+  // measuring.
   // Abandonment is exactly that: an unfinished batch, and the user leaving
   // this page. Nothing here nags or blocks the navigation.
   const unfinishedBatch = useRef<{
@@ -621,7 +586,6 @@ export function useCompareController(initialQueryHash?: string) {
       })
       trackEvent('compare_run', { query_count: preparedQueries.length })
       setBatch(nextBatch)
-      setPinnedCacheId(null)
       setDurationSeconds(DEFAULT_COMPARE_DURATION)
       steppedBatchId.current = null
       setHistory(listCompareBatches(target))
@@ -634,7 +598,6 @@ export function useCompareController(initialQueryHash?: string) {
   const clearBatch = () => {
     clearActiveCompareBatch(target)
     setBatch(null)
-    setPinnedCacheId(null)
     setConcurrency(DEFAULT_COMPARE_CONCURRENCY)
     setDurationSeconds(DEFAULT_COMPARE_DURATION)
     steppedBatchId.current = null
@@ -678,7 +641,6 @@ export function useCompareController(initialQueryHash?: string) {
     openHistoryBatch: (historyBatch: CompareBatch) => {
       selectCompareBatch(historyBatch)
       setBatch(historyBatch)
-      setPinnedCacheId(null)
       setConcurrency(historyBatch.concurrency)
       setDurationSeconds(historyBatch.durationSeconds)
       setHistoryOpen(false)
@@ -689,9 +651,6 @@ export function useCompareController(initialQueryHash?: string) {
     startComparison,
     batch,
     snapshot,
-    selectedOutcome,
-    followingLive,
-    pinQuery: setPinnedCacheId,
     cancelComparison: () => (batch ? cancelCompareBatch(batch) : undefined),
     clearBatch,
   }

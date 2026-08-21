@@ -73,6 +73,13 @@ export interface BackgroundRunState {
    * probe, or cancel, and nothing to reattach to after a reload.
    */
   local?: boolean
+  /**
+   * Whether this run has been seen in a live (running/reconnecting) status in
+   * this tab. A run reattached from storage already terminal never sets this,
+   * so a completion from a past session reads as quiet rather than news;
+   * intentionally excluded from persistence so it never survives a reload.
+   */
+  seenLive?: boolean
 }
 
 /**
@@ -194,13 +201,20 @@ function storageSafeRun(run: BackgroundRunState): StoredRun {
       }
     : undefined
   const result = run.result ? { ...run.result, query: '' } : undefined
-  return { ...run, loadRequest, result }
+  // `seenLive` is this tab's own memory of what it watched happen, not a
+  // fact about the run; persisting it would let a past session's "just
+  // finished" bleed into a reload where nothing was actually watched.
+  const { seenLive: _seenLive, ...rest } = run
+  return { ...rest, loadRequest, result }
 }
 
 function updateRun(runId: string, partial: Partial<BackgroundRunState>): void {
   const current = runs.get(runId)
   if (!current) return
-  runs.set(runId, { ...current, ...partial })
+  const status = partial.status ?? current.status
+  const seenLive =
+    current.seenLive || status === 'running' || status === 'reconnecting'
+  runs.set(runId, { ...current, ...partial, seenLive })
   publish()
 }
 
@@ -248,6 +262,7 @@ function attachRun(
     current: null,
     total: null,
     hasWarnings: false,
+    seenLive: true,
     ...metadata,
   }
   runs.set(runId, run)
@@ -609,7 +624,10 @@ export function reattachBackgroundRuns(): void {
 
   for (const stored of readStoredRuns()) {
     if (!stored.runId || runs.has(stored.runId)) continue
-    runs.set(stored.runId, stored)
+    // A run already terminal when it was saved was never watched live in
+    // this tab; only one still in flight counts as seen, so its eventual
+    // completion is still news rather than a stale result resurfacing.
+    runs.set(stored.runId, { ...stored, seenLive: !isTerminal(stored.status) })
     publish()
     if (!isTerminal(stored.status)) void probeAndStream(stored.runId)
   }
@@ -814,6 +832,20 @@ function applyFrame(runId: string, event: string, data: unknown): void {
 
   switch (event) {
     case 'progress':
+      if (run.kind === 'load_test' && payload.phase === 'preparing') {
+        // Cache preparation happens before the clock starts: it carries the
+        // run's state so the view can report the wait, but its empty tallies
+        // are not a sample of the measurement.
+        updateRun(runId, {
+          ...base,
+          stage: 'preparing',
+          message: `Preparing Readyset caches (${Number(
+            payload.prepared_count ?? 0
+          ).toLocaleString()}/${Number(payload.prepare_total ?? 0).toLocaleString()})`,
+          loadResult: payload as unknown as LoadTestProgress,
+        })
+        break
+      }
       if (
         run.kind === 'load_test' &&
         typeof payload.total_executions === 'number'
@@ -1143,6 +1175,28 @@ export function useBackgroundRun(
   return [...allRuns]
     .reverse()
     .find((run) => run.kind === kind && run.target === target)
+}
+
+/**
+ * The most recent cache test this browser ran for one query.
+ *
+ * Full paired-latency results live on the device that measured them, so this
+ * is the only source for the detailed comparison; a view that has none must
+ * fall back to what the server recorded rather than invent it.
+ */
+export function useCacheTestRunForQuery(
+  hash: string,
+  target?: string | null
+): BackgroundRunState | undefined {
+  const allRuns = useBackgroundRuns()
+  return [...allRuns]
+    .reverse()
+    .find(
+      (run) =>
+        (run.kind === 'cache_test' || run.kind === 'speed_test') &&
+        run.queryHash === hash &&
+        (!target || run.target === target)
+    )
 }
 
 /**

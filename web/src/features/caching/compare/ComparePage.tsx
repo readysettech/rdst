@@ -3,13 +3,14 @@ import { ErrorState } from '@rs/ui-new/error-state'
 import { VStack } from '@rs/ui-new/stack'
 import { TargetConnectivityNotice, TargetLockNotice } from '../../../components'
 import { CompareHistory } from './CompareHistory'
-import { CompareLiveChart } from './CompareLiveChart'
-import { CompareResults } from './CompareResults'
-import { CompareRunning } from './CompareRunning'
-import { CompareRunRail } from './CompareRunRail'
+import { CompareQueryCard } from './CompareQueryCard'
 import { CompareSetup } from './CompareSetup'
+import { CompareVerdictBand } from './CompareVerdictBand'
 import { CompareSkeleton, compareErrorDetail } from './compareUi'
-import { useCompareController } from './useCompareController'
+import {
+  DEFAULT_COMPARE_DURATION,
+  useCompareController,
+} from './useCompareController'
 
 export function ComparePage({
   initialQueryHash,
@@ -28,7 +29,12 @@ export function ComparePage({
     (!controller.statusQuery.data.docker_installed ||
       !controller.statusQuery.data.docker_running)
   const hasRun = !!controller.batch
-  const runIsActive = controller.snapshot?.status === 'running'
+  const queryHashByCacheId = new Map(
+    (controller.batch?.queries ?? []).map((query) => [
+      query.cacheId,
+      query.queryHash,
+    ])
+  )
 
   const statusError = compareErrorDetail(controller.statusQuery.error)
   const listError = controller.registry.listError
@@ -156,34 +162,23 @@ export function ComparePage({
         controller.queries.length > 0 &&
         !hasRun && <CompareSetup controller={controller} />}
 
-      {/* Running and settled are the same screen: only the summary above the
-          rail swaps, so the roster of queries and the chart bound to it stay
-          put when the last query finishes. */}
-      {!controller.historyOpen && hasRun && (
-        <VStack className="items-stretch gap-6">
-          {runIsActive ? (
-            <CompareRunning controller={controller} />
-          ) : (
-            <CompareResults
-              controller={controller}
+      {/* Running and settled are the same screen: the band above swaps its
+          verdict and each card settles in place, so the stack of queries never
+          reorders and the measuring card stays where the reader left it. */}
+      {!controller.historyOpen && hasRun && controller.snapshot && (
+        <VStack className="items-stretch gap-4">
+          <CompareVerdictBand controller={controller} />
+          {controller.snapshot.queryOutcomes.map((outcome) => (
+            <CompareQueryCard
+              key={outcome.runId ?? outcome.cacheId}
+              outcome={outcome}
+              queryHash={queryHashByCacheId.get(outcome.cacheId)}
+              durationSeconds={
+                controller.batch?.durationSeconds ?? DEFAULT_COMPARE_DURATION
+              }
               onOpenQueries={onOpenQueries}
             />
-          )}
-          <div className="grid items-start gap-6 desktop:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)]">
-            <CompareRunRail controller={controller} />
-            {/* Batches settled before per-query curves were retained have
-                nothing to draw; the rail still carries their verdicts. */}
-            {controller.selectedOutcome &&
-              (runIsActive ||
-                controller.selectedOutcome.timeline.length > 0) && (
-                <CompareLiveChart
-                  timeline={controller.selectedOutcome.timeline}
-                  queryLabel={controller.selectedOutcome.label}
-                  live={runIsActive}
-                  following={controller.followingLive}
-                />
-              )}
-          </div>
+          ))}
         </VStack>
       )}
     </div>

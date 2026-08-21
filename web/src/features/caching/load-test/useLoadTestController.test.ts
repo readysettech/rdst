@@ -154,3 +154,32 @@ describe('Load Test picker target scoping', () => {
     expect(result.current.filteredQueries).toEqual([])
   })
 })
+
+describe('Load Test Readyset lane', () => {
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  it('leaves the Readyset lane off until the user asks for it', () => {
+    mocks.useQueryRegistry.mockReturnValue(registry([entry('q1')]))
+
+    const { result } = renderController()
+
+    expect(result.current.comparative).toBe(false)
+    // Nothing to warn about in the confirm dialog: the run is origin-only.
+    expect(result.current.confirmIncludesReadyset).toBe(false)
+  })
+
+  it('tells the confirm dialog when the run will drive Readyset too', () => {
+    mocks.useQueryRegistry.mockReturnValue(registry([entry('q1')]))
+
+    const { result } = renderController()
+
+    act(() => {
+      result.current.setComparative(true)
+    })
+
+    expect(result.current.confirmIncludesReadyset).toBe(true)
+  })
+})

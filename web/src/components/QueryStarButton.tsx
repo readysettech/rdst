@@ -5,11 +5,10 @@ import { IconButton } from '@rs/ui-new/icon-button'
  * The star a query carries wherever it is shown: always visible, one click,
  * and reversible.
  *
- * `@rs/ui-icons` ships one stroke star and no filled variant, and the sprite
- * symbol sets `fill="none"` on itself, so a filled glyph is not reachable from
- * the outside. The on-state therefore uses the design system's established
- * active-toggle treatment — a soft filled chip behind the glyph — plus
- * `aria-pressed`, so the mark never rests on colour alone.
+ * A marked query reads as marked from across the list: the glyph itself fills
+ * in (`star-filled`) and takes the primary content colour, so shape carries the
+ * state alongside colour, and `aria-pressed` plus the label carry it for
+ * assistive tech.
  */
 export function QueryStarButton({
   starred,
@@ -22,7 +21,7 @@ export function QueryStarButton({
 }) {
   return (
     <IconButton
-      icon="star"
+      icon={starred ? 'star-filled' : 'star'}
       size="small"
       variant="primary"
       modifier="ghost"
@@ -35,9 +34,7 @@ export function QueryStarButton({
         onToggle(!starred)
       }}
       className={cn(
-        starred
-          ? 'bg-surface-primary-soft text-content-primary-soft'
-          : 'text-content-layout-3',
+        starred ? 'text-content-primary-soft' : 'text-content-layout-3',
         className
       )}
     />

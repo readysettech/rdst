@@ -126,10 +126,11 @@ export function useLoadTestController({
   const [searchTerm, setSearchTerm] = useState('')
   const [sourceFilter, setSourceFilter] = useState(target || 'all')
   const [testProfile, setTestProfile] = useState<LoadTestProfile>('paced')
-  // Comparative (origin + Readyset) is the default; Readyset unavailability
-  // is handled entirely server-side as an automatic fallback, so this toggle
-  // only needs to express the user's own choice to skip Readyset.
-  const [comparative, setComparative] = useState(true)
+  // The Readyset lane is opt-in per run: it leases the sandbox and creates a
+  // cache per query first, which on a cold sandbox costs minutes before the
+  // measurement starts. A run says so explicitly rather than paying that by
+  // default.
+  const [comparative, setComparative] = useState(false)
   const [intervalMs, setIntervalMs] = useState(100)
   const [capacityClients, setCapacityClients] = useState(2)
   const [durationSeconds, setDurationSeconds] = useState(30)
@@ -685,6 +686,11 @@ export function useLoadTestController({
     handleRunAgain,
     confirmTarget,
     confirmIsRemote: remoteTargetNames.has(confirmTarget),
+    // The dialog names the Readyset lane only when this run drives it, which
+    // for a repeat is the previous request's choice rather than the form's.
+    confirmIncludesReadyset:
+      readRequestLanes(confirmRequest ?? undefined)?.includes('readyset') ??
+      false,
     confirmQueryCount: confirmRequest?.queries.length ?? runnableCount,
     confirmLoadSummary: `${
       confirmProfile === 'capacity'

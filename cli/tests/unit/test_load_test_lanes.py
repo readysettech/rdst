@@ -100,8 +100,12 @@ class _Endpoints:
         ]
 
 
-async def _run(endpoints: _Endpoints, *, refused=None, **kwargs):
-    """Drive one benchmark to completion against the fake endpoints."""
+async def _run(endpoints: _Endpoints, *, refused=None, prepare=None, **kwargs):
+    """Drive one benchmark to completion against the fake endpoints.
+
+    ``prepare`` stands in for the whole cache-preparation step when a test
+    cares how it reports itself; otherwise the step just returns ``refused``.
+    """
     run = {
         "target": "demo",
         "mode": "interval",
@@ -124,7 +128,11 @@ async def _run(endpoints: _Endpoints, *, refused=None, **kwargs):
         ),
         patch(
             "features.query_registry.service.prepare_lane_caches",
-            return_value=dict(refused or {}),
+            **(
+                {"side_effect": prepare}
+                if prepare is not None
+                else {"return_value": dict(refused or {})}
+            ),
         ),
     ):
         async for event in QueryService().stream_benchmark(**run):
@@ -268,6 +276,86 @@ class TestBothLanes:
             ("demo", "rdst/loadtest"),
             ("demo", "rdst/loadtest-readyset"),
         }
+
+
+class TestCachePreparationIsVisible:
+    """Preparation can hold a cold sandbox for minutes; the stream says so."""
+
+    QUERIES = [
+        {"identifier": "one", "sql": "SELECT 1"},
+        {"identifier": "two", "sql": "SELECT 2"},
+    ]
+
+    @staticmethod
+    def _prepare(endpoint, owner_id, queries, on_progress=None):
+        del endpoint, owner_id
+        for prepared, _query in enumerate(queries, start=1):
+            if on_progress is not None:
+                on_progress(prepared, len(queries))
+        return {}
+
+    @staticmethod
+    def _preparing(events):
+        return [
+            event
+            for event in events
+            if getattr(event, "phase", None) == "preparing"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_preparation_reports_its_progress_before_the_first_request(
+        self,
+    ):
+        events = await _run(
+            _Endpoints(),
+            queries=self.QUERIES,
+            lanes=["origin", "readyset"],
+            readyset=_sandbox(),
+            prepare=self._prepare,
+        )
+
+        preparing = self._preparing(events)
+        assert [
+            (event.prepared_count, event.prepare_total) for event in preparing
+        ] == [(0, 2), (1, 2), (2, 2)]
+        # The clock has not started, so every tally on these ticks is zero.
+        assert all(
+            event.type == "progress"
+            and event.total_executions == 0
+            and event.queries == []
+            for event in preparing
+        )
+        assert events[: len(preparing)] == preparing
+        assert events[-1].type == "complete"
+        assert events[-1].total_executions > 0
+
+    @pytest.mark.asyncio
+    async def test_the_phase_reaches_the_client(self):
+        import json
+
+        events = await _run(
+            _Endpoints(),
+            queries=self.QUERIES,
+            lanes=["origin", "readyset"],
+            readyset=_sandbox(),
+            prepare=self._prepare,
+        )
+
+        first = self._preparing(events)[0]
+        payload = json.loads(_progress_to_sse(first)["data"])
+        assert payload["phase"] == "preparing"
+        assert payload["prepared_count"] == 0
+        assert payload["prepare_total"] == 2
+        # A measuring tick is exactly what it always was.
+        assert "phase" not in json.loads(_progress_to_sse(events[-1])["data"])
+
+    @pytest.mark.asyncio
+    async def test_an_origin_only_run_prepares_nothing(self):
+        events = await _run(
+            _Endpoints(), queries=self.QUERIES, prepare=self._prepare
+        )
+
+        assert self._preparing(events) == []
 
 
 class TestReadysetLaneFallback:

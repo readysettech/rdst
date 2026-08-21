@@ -1040,6 +1040,31 @@ class QueryService:
                     detail="No Readyset sandbox was leased for this run.",
                 )
                 if endpoint.available:
+
+                    # A cold sandbox can spend minutes building the first
+                    # cache, so preparation reports itself on the stream
+                    # rather than leaving the client with nothing to show.
+                    def _note_preparing(prepared: int, total: int) -> None:
+                        """Report cache preparation progress."""
+                        try:
+                            progress_queue.put_nowait(
+                                QueryBenchmarkProgressEvent(
+                                    type="progress",
+                                    elapsed_seconds=0.0,
+                                    total_executions=0,
+                                    total_successes=0,
+                                    total_failures=0,
+                                    qps=0.0,
+                                    queries=[],
+                                    phase="preparing",
+                                    prepared_count=prepared,
+                                    prepare_total=total,
+                                )
+                            )
+                        except Exception:
+                            pass
+
+                    _note_preparing(0, len(resolved_queries))
                     refused = prepare_lane_caches(
                         endpoint,
                         uuid.uuid4().hex,
@@ -1047,6 +1072,7 @@ class QueryService:
                             (rq.identifier, rq.variants[0])
                             for rq in resolved_queries
                         ],
+                        on_progress=_note_preparing,
                     )
                     for rq in resolved_queries:
                         if rq.identifier in refused:

@@ -1228,7 +1228,13 @@ def _progress_to_sse(progress: Any) -> dict:
                 for skip in getattr(progress, "skipped_queries", ())
             ],
         }
-        for name in ("lanes_run", "readyset_setup"):
+        for name in (
+            "lanes_run",
+            "readyset_setup",
+            "phase",
+            "prepared_count",
+            "prepare_total",
+        ):
             value = getattr(progress, name, None)
             if value is not None:
                 body[name] = value

@@ -18,7 +18,7 @@ import logging
 import threading
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Iterable, Literal, Sequence
+from typing import Any, AsyncIterator, Callable, Iterable, Literal, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -182,12 +182,15 @@ def prepare_lane_caches(
     endpoint: ReadysetEndpoint,
     owner_id: str,
     queries: Sequence[tuple[str, str]],
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, str]:
     """Give each ``(identifier, sql)`` a cache; return the refusals by identifier.
 
     Blocking, and long: the first cache on a cold sandbox builds its state
     from the upstream tables, so each statement carries the same timeout
-    Compare gives its own cold create.
+    Compare gives its own cold create. ``on_progress(prepared, total)`` is
+    called as each query leaves the queue, refusal included, so a caller can
+    report the wait rather than go silent through it.
     """
     from features.cache.experiment_service import (
         COLD_CREATE_CACHE_TIMEOUT_MS,
@@ -202,35 +205,40 @@ def prepare_lane_caches(
     service = CacheService()
     connection = _connection_kwargs(endpoint.config)
     failures: dict[str, str] = {}
-    for identifier, sql in queries:
+    total = len(queries)
+    for prepared, (identifier, sql) in enumerate(queries, start=1):
         try:
-            name = temporary_cache_name(owner_id, sql)
-            statement = denormalize_for_readyset(
-                sql, engine=str(connection["engine"])
+            try:
+                name = temporary_cache_name(owner_id, sql)
+                statement = denormalize_for_readyset(
+                    sql, engine=str(connection["engine"])
+                )
+            except Exception as exc:
+                failures[identifier] = type(exc).__name__
+                logger.warning(
+                    "Load test could not build Readyset cache DDL for %s: %s",
+                    identifier,
+                    exc,
+                )
+                continue
+            result = service._run_readyset_sql(
+                f"CREATE CACHE {name} FROM {statement}",
+                statement_timeout_ms=COLD_CREATE_CACHE_TIMEOUT_MS,
+                **connection,
             )
-        except Exception as exc:
-            failures[identifier] = type(exc).__name__
+            if result.get("success"):
+                endpoint.note_cache(name)
+                continue
+            error = str(result.get("error") or "").strip()
+            failures[identifier] = error or "CREATE CACHE failed"
             logger.warning(
-                "Load test could not build Readyset cache DDL for %s: %s",
+                "Readyset refused a load test cache for %s: %s",
                 identifier,
-                exc,
+                failures[identifier],
             )
-            continue
-        result = service._run_readyset_sql(
-            f"CREATE CACHE {name} FROM {statement}",
-            statement_timeout_ms=COLD_CREATE_CACHE_TIMEOUT_MS,
-            **connection,
-        )
-        if result.get("success"):
-            endpoint.note_cache(name)
-            continue
-        error = str(result.get("error") or "").strip()
-        failures[identifier] = error or "CREATE CACHE failed"
-        logger.warning(
-            "Readyset refused a load test cache for %s: %s",
-            identifier,
-            failures[identifier],
-        )
+        finally:
+            if on_progress is not None:
+                on_progress(prepared, total)
     return failures
 
 

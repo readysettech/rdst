@@ -243,6 +243,28 @@ class TestPrepareLaneCaches:
         assert refused == {"two": "unsupported placeholder"}
         assert len(endpoint.created_caches()) == 1
 
+    def test_progress_is_reported_as_each_query_leaves_the_queue(
+        self, monkeypatch
+    ):
+        service = _Readyset(failures={"SELECT 2": "unsupported placeholder"})
+        monkeypatch.setattr(
+            "features.cache.service.CacheService", lambda *a, **k: service
+        )
+        endpoint = ReadysetEndpoint(config=dict(SANDBOX_CONFIG))
+        reported: list[tuple[int, int]] = []
+
+        prepare_lane_caches(
+            endpoint,
+            "0123456789abcdef",
+            [("one", "SELECT 1"), ("two", "SELECT 2")],
+            on_progress=lambda prepared, total: reported.append(
+                (prepared, total)
+            ),
+        )
+
+        # A refusal is still one query out of the wait.
+        assert reported == [(1, 2), (2, 2)]
+
     def test_without_a_sandbox_every_query_is_refused(self):
         endpoint = ReadysetEndpoint(status="unavailable", detail="none")
 

@@ -111,15 +111,18 @@ describe('Queries Display menu', () => {
 })
 
 describe('Queries Starred filter', () => {
-  it('is its own control, not a value of Status', () => {
+  it('lives inside Filter, separate from the computed statuses', () => {
     renderControlBar()
 
-    const starred = screen.getByRole('button', { name: 'Starred' })
-    expect(starred.getAttribute('aria-pressed')).toBe('false')
+    // Nothing outside the panel: the star is a filter, and filters live there.
+    expect(screen.queryByRole('button', { name: 'Starred only' })).toBeNull()
 
     openDropdown(screen.getByRole('button', { name: 'Filter' }))
+
+    const starred = screen.getByRole('button', { name: 'Starred only' })
+    expect(starred.getAttribute('aria-pressed')).toBe('false')
     expect(screen.getByText('Status')).toBeTruthy()
-    // The mark left the computed-status list when it became its own control.
+    // The mark is the user's own, so it never became a computed status value.
     expect(screen.queryByText(/Saved/)).toBeNull()
   })
 
@@ -138,25 +141,34 @@ describe('Queries Starred filter', () => {
       },
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Starred' }))
+    openDropdown(screen.getByRole('button', { name: 'Filter' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Starred only' }))
 
     expect(onStarredChange).toHaveBeenCalledWith(true)
     expect(onFilterChange).not.toHaveBeenCalled()
   })
 
-  it('shows the star among the removable filter chips while it is on', () => {
+  it('stays visible as a removable chip while the panel is closed', () => {
     const onStarredChange = vi.fn()
     renderControlBar({ starred: true, onStarredChange })
-
-    expect(
-      screen
-        .getByRole('button', { name: 'Starred' })
-        .getAttribute('aria-pressed')
-    ).toBe('true')
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Remove Starred filter' })
     )
     expect(onStarredChange).toHaveBeenCalledWith(false)
+  })
+
+  it('counts the star among the filters the panel holds', () => {
+    renderControlBar({ starred: true })
+
+    const filter = screen.getByRole('button', { name: 'Filter' })
+    expect(filter.textContent).toContain('1')
+
+    openDropdown(filter)
+    expect(
+      screen
+        .getByRole('button', { name: 'Starred only' })
+        .getAttribute('aria-pressed')
+    ).toBe('true')
   })
 })

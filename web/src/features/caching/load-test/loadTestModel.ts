@@ -46,6 +46,12 @@ export interface LoadTestReadysetSetup {
   detail?: string
 }
 
+/** Readyset cache preparation, which runs before the measurement starts. */
+export interface LoadTestPreparation {
+  preparedCount: number
+  prepareTotal: number
+}
+
 export interface LoadTestLaneAggregate {
   successes: number
   failures: number
@@ -74,6 +80,8 @@ export interface LoadTestResultModel {
   description: string
   statusLabel: string
   skippedQueries: LoadTestSkippedQuery[]
+  /** Set while the run is still creating this workload's Readyset caches. */
+  preparation: LoadTestPreparation | undefined
   /** True once every query in the payload carries both origin and Readyset lane stats. */
   comparative: boolean
   readysetSetup: LoadTestReadysetSetup | undefined
@@ -221,6 +229,28 @@ export function readReadysetSetup(
   }
 }
 
+/**
+ * A run that has to create this workload's Readyset caches first says so on
+ * its progress ticks (additive `phase` / `prepared_count` / `prepare_total`),
+ * because a cold sandbox can hold the run for minutes before the first
+ * request. Defensive by the same rule as the other readers here: a payload
+ * without the fields is a run that is already measuring.
+ */
+export function readPreparation(
+  progress: BenchmarkProgress | undefined
+): LoadTestPreparation | undefined {
+  const candidate = progress as
+    | { phase?: unknown; prepared_count?: unknown; prepare_total?: unknown }
+    | undefined
+  if (candidate?.phase !== 'preparing') return undefined
+  const prepareTotal = candidate.prepare_total
+  const preparedCount = candidate.prepared_count
+  if (typeof prepareTotal !== 'number' || typeof preparedCount !== 'number') {
+    return undefined
+  }
+  return { preparedCount, prepareTotal }
+}
+
 function aggregateLaneStats(
   queries: QueryBenchmarkStats[] | undefined,
   lane: LoadTestLane,
@@ -299,6 +329,7 @@ export function deriveLoadTestResultModel({
   const totalFailures = progress?.total_failures ?? 0
   const running = state === 'running'
   const queued = running && stage === 'queued' && !progress
+  const preparation = running ? readPreparation(progress) : undefined
   const allFailed =
     !running && totalExecutions > 0 && totalFailures >= totalExecutions
 
@@ -422,10 +453,15 @@ export function deriveLoadTestResultModel({
         ((progress?.elapsed_seconds ?? 0) / Math.max(1, durationSeconds)) * 100
       )
     ),
-    title: title[outcome],
-    description: description[outcome],
-    statusLabel: statusLabel[outcome],
+    title: preparation
+      ? `Preparing Readyset caches — ${preparation.preparedCount} of ${preparation.prepareTotal}`
+      : title[outcome],
+    description: preparation
+      ? 'Readyset caches every query in this run before the first request. A cold sandbox can take a few minutes.'
+      : description[outcome],
+    statusLabel: preparation ? 'Preparing' : statusLabel[outcome],
     skippedQueries,
+    preparation,
     comparative,
     readysetSetup,
     laneAggregates,
