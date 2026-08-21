@@ -653,7 +653,19 @@ class TestAskServiceSessionManagement:
         from features.ask.service import _PendingAskSession
 
         ctx = Ask3Context(question="Show active users", target="test")
-        sessions = {"pending": _PendingAskSession(context=ctx, persist_query=False)}
+        sessions = {
+            "pending": _PendingAskSession(
+                context=ctx,
+                persist_query=False,
+                clarification_context={
+                    "status": {
+                        "ambiguity_id": "status",
+                        "term": "active",
+                        "question": "What does active mean?",
+                    }
+                },
+            )
+        }
         service = AskService(session_store=sessions)
 
         async def fake_run(resumed_ctx, *, persist_query=True):
@@ -671,9 +683,101 @@ class TestAskServiceSessionManagement:
 
         assert events == []
         assert ctx.refined_question == (
-            "Show active users (status: active means enabled = 1)"
+            "Show active users\n\nResolved user clarifications:\n"
+            "- active: What does active mean? Answer: active means enabled = 1"
         )
+        assert ctx.clarification_resolutions == [
+            {
+                "ambiguity_id": "status",
+                "answer_key": "status",
+                "term": "active",
+                "question": "What does active mean?",
+                "action": "answer",
+                "answer": "active means enabled = 1",
+                "source": "user",
+                "applied": True,
+            }
+        ]
         assert sessions == {}
+
+    @pytest.mark.asyncio
+    async def test_resume_rejects_unknown_answer_key_without_consuming_session(self):
+        from features.ask.engine.ask3.context import Ask3Context
+        from features.ask.service import _PendingAskSession
+
+        sessions = {
+            "pending": _PendingAskSession(
+                context=Ask3Context(question="Show users", target="test"),
+                persist_query=False,
+                clarification_context={
+                    "status": {
+                        "ambiguity_id": "status",
+                        "term": "active",
+                        "question": "What does active mean?",
+                    }
+                },
+            )
+        }
+        service = AskService(session_store=sessions)
+
+        events = [
+            event async for event in service.resume("pending", {"unknown": "enabled"})
+        ]
+
+        assert isinstance(events[-1], AskErrorEvent)
+        assert events[-1].code == "invalid_clarification_answer"
+        assert "pending" in sessions
+
+    @pytest.mark.asyncio
+    async def test_resume_records_skipped_questions_without_inventing_answers(self):
+        from features.ask.engine.ask3.context import Ask3Context
+        from features.ask.service import _PendingAskSession
+
+        ctx = Ask3Context(question="Show active users", target="test")
+        sessions = {
+            "pending": _PendingAskSession(
+                context=ctx,
+                persist_query=False,
+                clarification_context={
+                    "status": {
+                        "ambiguity_id": "status",
+                        "term": "active",
+                        "question": "What does active mean?",
+                    },
+                    "window": {
+                        "ambiguity_id": "window",
+                        "term": "recent",
+                        "question": "What time window should recent mean?",
+                    },
+                },
+            )
+        }
+        service = AskService(session_store=sessions)
+
+        async def fake_run(_ctx, *, persist_query=True):
+            assert persist_query is False
+            if False:
+                yield None
+
+        with patch.object(service, "_run_from_generate", side_effect=fake_run):
+            events = [
+                event
+                async for event in service.resume(
+                    "pending", {"status": "Use enabled accounts."}
+                )
+            ]
+
+        assert events == []
+        assert ctx.clarifications == {"status": "Use enabled accounts."}
+        assert [
+            (item["ambiguity_id"], item["action"], item["applied"])
+            for item in ctx.clarification_resolutions
+        ] == [
+            ("status", "answer", True),
+            ("window", "skip", False),
+        ]
+        assert "Use enabled accounts." in ctx.refined_question
+        assert "time window" not in ctx.refined_question
 
 
 class TestAskServiceDependencyInjection:
@@ -833,8 +937,8 @@ class TestAskServiceDependencyInjection:
 
         assert isinstance(events[-1], AskClarificationNeededEvent)
         assert [question.id for question in events[-1].questions] == [
-            "status",
-            "status:2",
+            "status-1",
+            "status-2",
         ]
         assert list(sessions) == [events[-1].session_id]
         assert service.abandon(events[-1].session_id)
@@ -1469,6 +1573,7 @@ class TestAskServiceDryRun:
 
         assert isinstance(events[-1], AskResultEvent)
         assert events[-1].sql == "SELECT COUNT(*) FROM users"
+
 
 class TestAskServiceTimeoutScenarios:
     """Tests for timeout handling scenarios."""

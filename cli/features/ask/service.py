@@ -285,7 +285,7 @@ class AskService:
         session_id: str,
         clarification_answers: dict[str, str] | None = None,
     ) -> AsyncGenerator[AskEvent, None]:
-        pending = self._session_store.pop(session_id, None)
+        pending = self._session_store.get(session_id)
         if pending is None:
             yield AskErrorEvent(
                 type="error",
@@ -293,12 +293,57 @@ class AskService:
             )
             return
 
+        answers = clarification_answers or {}
+        unknown_keys = sorted(set(answers) - set(pending.clarification_context))
+        if unknown_keys:
+            yield AskErrorEvent(
+                type="error",
+                message=(
+                    "Clarification answers contain unknown question IDs: "
+                    + ", ".join(unknown_keys)
+                ),
+                phase=AskPhase.CLARIFY,
+                code="invalid_clarification_answer",
+            )
+            return
+        invalid_keys = sorted(
+            key
+            for key, answer in answers.items()
+            if not isinstance(answer, str) or not answer.strip()
+        )
+        if invalid_keys:
+            yield AskErrorEvent(
+                type="error",
+                message=(
+                    "Clarification answers must be non-empty text for: "
+                    + ", ".join(invalid_keys)
+                ),
+                phase=AskPhase.CLARIFY,
+                code="invalid_clarification_answer",
+            )
+            return
+
+        self._session_store.pop(session_id, None)
         ctx = pending.context
-        if clarification_answers:
-            ctx.clarifications.update(clarification_answers)
+        for answer_key, context in pending.clarification_context.items():
+            answer = answers.get(answer_key)
+            ctx.clarification_resolutions.append(
+                {
+                    "ambiguity_id": context["ambiguity_id"],
+                    "answer_key": answer_key,
+                    "term": context["term"],
+                    "question": context["question"],
+                    "action": "answer" if answer else "skip",
+                    "answer": answer,
+                    "source": "user",
+                    "applied": bool(answer),
+                }
+            )
+        if answers:
+            ctx.clarifications.update(answers)
             ctx.refined_question = self._build_refined_question(
                 ctx.question,
-                clarification_answers,
+                answers,
                 pending.clarification_context,
             )
         try:
@@ -592,17 +637,11 @@ class AskService:
 
     @staticmethod
     def _clarification_questions(ambiguities: list[Any]):
-        category_counts: dict[str, int] = {}
         questions = []
         for ambiguity in ambiguities:
-            count = category_counts.get(ambiguity.category, 0) + 1
-            category_counts[ambiguity.category] = count
-            answer_key = (
-                ambiguity.category if count == 1 else f"{ambiguity.category}:{count}"
-            )
             questions.append(
                 AskClarificationQuestion(
-                    id=answer_key,
+                    id=ambiguity.id,
                     question=ambiguity.clarifying_question,
                     options=[
                         option.text for option in ambiguity.possible_interpretations

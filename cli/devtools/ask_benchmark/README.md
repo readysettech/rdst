@@ -573,6 +573,15 @@ seconds, and cost $0.033695 across three calls. It covered three of four labeled
 the detector still asked one column-oriented question that a normal product user may
 not be able to answer.
 
+The current interactive detector rejects implementation-facing questions before they
+reach CLI or web. It also rejects duplicate options and options that claim the same
+SQL effect. The web interaction remains one batched event with a sequential
+question wizard, so this check does not add model round trips. Answer keys now use the
+detector's stable ambiguity IDs. `resume()` rejects unknown or empty supplied answers
+without consuming the session and records every answered or skipped question before
+generation. The v5 result predates these checks and must not be used as evidence for
+their quality.
+
 This is qualification-only evidence, not an official c-Interact reward. The public
 release omits ground-truth test cases, the sample is only two read-only tasks from one
 database, and Ask batches its questions instead of conducting repeated detector

@@ -29,6 +29,10 @@ IMPORTANT:
   choose tables, columns, joins, storage encodings, or SQL formulas unless those
   choices represent different business meanings that the question and schema cannot
   resolve.
+- Never mention tables, columns, fields, joins, schemas, SQL, or raw database
+  identifiers in a clarifying question. Translate each option into the business
+  meaning a product user can choose. If the only uncertainty is which schema
+  identifier implements an otherwise clear request, do not ask the user.
 - Treat an explicitly requested operation with a missing result-changing parameter as
   a genuine ambiguity. For example, "sorted by score" needs ascending versus
   descending direction, and "top products" needs a result count when no visible
@@ -42,7 +46,7 @@ IMPORTANT:
 Classify each ambiguity into one of these categories:
 
 **DB-Related Ambiguities:**
-1. **unclear_schema_reference**: Which table/column to use
+1. **unclear_schema_reference**: Which user-facing entity or attribute a term denotes
 2. **unclear_value_reference**: What a term means numerically/categorically
 3. **missing_sql_keywords**: Unclear how to structure the query (aggregation, ordering, filtering)
 
@@ -86,6 +90,8 @@ Rules:
 - Proceed with the simplest interpretation only when the remaining uncertainty is
   low and does not compound across multiple material choices
 - Provide at least two interpretations for each genuine ambiguity
+- Every interpretation must produce a materially different SQL operation or result.
+  Do not ask when the options have the same SQL effect.
 - Return at most three material ambiguities and at most three concise options per ambiguity
 - Keep each option text, reason, SQL effect, and clarifying question to one short sentence
 - Return at most one evidence phrase per option, using fewer than 12 words

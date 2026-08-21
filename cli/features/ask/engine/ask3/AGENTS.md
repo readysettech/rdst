@@ -11,6 +11,12 @@ SCHEMA → CLARIFY → GENERATE ↔ VALIDATE → EXECUTE → [AGENT?] → PRESEN
 
 ## CORE CONCEPTS
 
+Canonical interactive `AskService` returns up to three material clarification
+questions in one event. Web presents them as a sequential wizard and submits the
+answers together. Keep questions in business language. Never ask users to choose a
+table, column, join, schema element, or SQL construct. Options with duplicate wording
+or identical SQL effects are not useful clarifications and must not reach the UI.
+
 ### Ask3Context (Single Source of Truth)
 All state lives in `Ask3Context`. Phases read inputs and write outputs to it.
 

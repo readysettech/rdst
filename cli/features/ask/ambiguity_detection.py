@@ -53,6 +53,13 @@ _SORT_DIRECTION_PATTERN = re.compile(
     r"reverse\s+chronological(?:ly)?)\b",
     re.IGNORECASE,
 )
+_IMPLEMENTATION_FACING_QUESTION_PATTERN = re.compile(
+    r"\b(?:which|what)\s+(?:database\s+)?"
+    r"(?:tables?|columns?|fields?|joins?|schemas?|sql)\b"
+    r"|\b(?:choose|select)\s+(?:a|the|which)?\s*"
+    r"(?:tables?|columns?|fields?|joins?|schemas?|sql)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -390,6 +397,55 @@ def _ambiguity_covers_sort_direction(ambiguity: Ambiguity) -> bool:
     return has_sort and has_directions
 
 
+def _normalize_material_ambiguities(
+    ambiguities: List[Ambiguity],
+) -> tuple[List[Ambiguity], List[Dict[str, Any]]]:
+    """Remove choices that cannot produce a useful product clarification."""
+    accepted = []
+    normalizations = []
+    for ambiguity in ambiguities:
+        reason = _unusable_ambiguity_reason(ambiguity)
+        if reason is None:
+            accepted.append(ambiguity)
+            continue
+        normalizations.append(
+            {
+                "field": "ambiguities",
+                "action": "drop_unusable_clarification",
+                "ambiguity_id": ambiguity.id,
+                "reason": reason,
+            }
+        )
+    return accepted, normalizations
+
+
+def _unusable_ambiguity_reason(ambiguity: Ambiguity) -> str | None:
+    if ambiguity.category == "schema_insufficient":
+        return "schema_insufficiency_is_not_user_intent"
+    if _IMPLEMENTATION_FACING_QUESTION_PATTERN.search(ambiguity.clarifying_question):
+        return "implementation_facing_question"
+
+    option_texts = {
+        _normalized_choice_text(option.text)
+        for option in ambiguity.possible_interpretations
+        if option.text.strip()
+    }
+    if len(option_texts) != len(ambiguity.possible_interpretations):
+        return "duplicate_option_text"
+
+    sql_effects = [
+        _normalized_choice_text(option.sql_effect)
+        for option in ambiguity.possible_interpretations
+    ]
+    if all(sql_effects) and len(set(sql_effects)) != len(sql_effects):
+        return "identical_sql_effect"
+    return None
+
+
+def _normalized_choice_text(value: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", value.casefold()).split())
+
+
 def detect_ambiguities(
     nl_question: str,
     filtered_schema: str,
@@ -576,8 +632,11 @@ def detect_ambiguities(
             ambiguities,
             detect_missing_intent_ambiguities(nl_question),
         )
+        ambiguities, usability_normalizations = _normalize_material_ambiguities(
+            ambiguities
+        )
         derived_total = len(ambiguities)
-        normalizations = list(intent_normalizations)
+        normalizations = [*intent_normalizations, *usability_normalizations]
         if declared_total != derived_total:
             normalizations.append(
                 {
@@ -593,6 +652,8 @@ def detect_ambiguities(
             can_proceed_with_assumptions=bool(parsed["can_proceed_with_assumptions"]),
             overall_confidence=float(parsed["overall_confidence"]),
         )
+        if not ambiguities:
+            report.can_proceed_with_assumptions = True
         if intent_normalizations:
             report.can_proceed_with_assumptions = False
             report.overall_confidence = min(report.overall_confidence, 0.5)

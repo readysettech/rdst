@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from features.ask.ambiguity_detection import (
     AMBIGUITY_RESPONSE_MAX_TOKENS,
     Ambiguity,
@@ -37,6 +39,55 @@ class RecordingLLMManager:
             "usage": {"total_tokens": 1},
             "model": "test-model",
         }
+
+
+def _ambiguity_response(
+    *,
+    question: str = "Which meaning of active should be used?",
+    category: str = "unclear_value_reference",
+    first_text: str = "Use enabled accounts.",
+    second_text: str = "Use recently seen accounts.",
+    first_effect: str = "Filter enabled = true.",
+    second_effect: str = "Filter last_seen to the recent window.",
+) -> dict:
+    return {
+        "response": json.dumps(
+            {
+                "ambiguities": [
+                    {
+                        "id": "active-meaning",
+                        "category": category,
+                        "term": "active",
+                        "reason": "The meanings produce different result sets.",
+                        "possible_interpretations": [
+                            {
+                                "id": "enabled",
+                                "text": first_text,
+                                "score": 0.6,
+                                "evidence": ["The request says active."],
+                                "sql_effect": first_effect,
+                            },
+                            {
+                                "id": "recent",
+                                "text": second_text,
+                                "score": 0.4,
+                                "evidence": ["The request gives no definition."],
+                                "sql_effect": second_effect,
+                            },
+                        ],
+                        "clarifying_question": question,
+                        "priority": "high",
+                    }
+                ],
+                "total_ambiguities": 1,
+                "requires_clarification": True,
+                "can_proceed_with_assumptions": False,
+                "overall_confidence": 0.5,
+            }
+        ),
+        "usage": {"total_tokens": 1},
+        "model": "test-model",
+    }
 
 
 def test_detect_ambiguities_includes_complete_filtered_schema() -> None:
@@ -77,6 +128,73 @@ def test_detector_prompt_distinguishes_missing_intent_from_implementation() -> N
     assert '"top products" needs a result count' in manager.prompt
     assert "Do not ask the user to\n  choose tables, columns, joins" in manager.prompt
     assert "A safety row cap is\n  not a semantic default" in manager.prompt
+    assert (
+        "Never mention tables, columns, fields, joins, schemas, SQL" in manager.prompt
+    )
+
+
+@pytest.mark.parametrize(
+    ("response", "reason"),
+    [
+        (
+            _ambiguity_response(question="Which column should represent active users?"),
+            "implementation_facing_question",
+        ),
+        (
+            _ambiguity_response(
+                first_effect="Filter enabled = true.",
+                second_effect=" filter ENABLED = TRUE ",
+            ),
+            "identical_sql_effect",
+        ),
+        (
+            _ambiguity_response(
+                first_text="Use enabled accounts.",
+                second_text=" use enabled accounts ",
+            ),
+            "duplicate_option_text",
+        ),
+        (
+            _ambiguity_response(category="schema_insufficient"),
+            "schema_insufficiency_is_not_user_intent",
+        ),
+    ],
+)
+def test_detector_drops_questions_users_cannot_use(response, reason) -> None:
+    manager = RecordingLLMManager()
+    manager.generate_response = lambda **_kwargs: response
+
+    result = detect_ambiguities(
+        nl_question="Show active users",
+        filtered_schema="users(enabled, last_seen)",
+        database_engine="postgresql",
+        llm_manager=manager,
+    )
+
+    assert result["success"] is True
+    assert result["report"].ambiguities == []
+    assert result["report"].requires_clarification is False
+    assert result["report"].can_proceed_with_assumptions is True
+    assert {
+        item.get("reason")
+        for item in result["normalizations"]
+        if item.get("action") == "drop_unusable_clarification"
+    } == {reason}
+
+
+def test_detector_keeps_material_business_question() -> None:
+    manager = RecordingLLMManager()
+    manager.generate_response = lambda **_kwargs: _ambiguity_response()
+
+    result = detect_ambiguities(
+        nl_question="Show active users",
+        filtered_schema="users(enabled, last_seen)",
+        database_engine="postgresql",
+        llm_manager=manager,
+    )
+
+    assert result["report"].requires_clarification is True
+    assert [item.id for item in result["report"].ambiguities] == ["active-meaning"]
 
 
 def test_detector_adds_missing_sort_direction_when_model_misses_it() -> None:
