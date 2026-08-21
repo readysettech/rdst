@@ -17,6 +17,19 @@ DATASET_REVISION = "f65faf4ae3b638c1fa6df1d3370c8d92c8366301"
 GOLD_EXCLUSION_REVISION = "invalid-mysql-gold-v1"
 MYSQL_INVALID_GOLD_CASE_IDS = (208, 212, 227, 327)
 SCORABLE_CASE_COUNT = 500 - len(MYSQL_INVALID_GOLD_CASE_IDS)
+BIRD_MINI_DATABASE_IDS = (
+    "california_schools",
+    "card_games",
+    "codebase_community",
+    "debit_card_specializing",
+    "european_football_2",
+    "financial",
+    "formula_1",
+    "student_club",
+    "superhero",
+    "thrombosis_prediction",
+    "toxicology",
+)
 PARTITION_REVISION = "bird-mini-dev-50-holdout-450-v1"
 DEVELOPMENT_SIZE = 50
 DEVELOPMENT_SEED = "rdst-bird-canary-v1"

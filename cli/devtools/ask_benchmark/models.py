@@ -20,6 +20,7 @@ class InteractionMode(str, Enum):
 class ContextMode(str, Enum):
     RAW = "raw"
     AUTO_INIT = "auto-init"
+    AUTO_INIT_PROFILED_VALUES = "auto-init-profiled-values"
     LLM_ENRICHED = "llm-enriched"
     BIRD_CURATED = "bird-curated"
     SEMANTIC = "semantic"

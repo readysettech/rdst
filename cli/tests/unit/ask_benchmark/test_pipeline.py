@@ -261,6 +261,23 @@ def test_evidence_is_a_first_class_authoritative_context_for_both_tracks():
     assert "AUTHORITATIVE CALLER-PROVIDED CONTEXT:" not in no_context_prompt
 
 
+def test_matched_database_values_are_labeled_separately_for_direct_track():
+    matched_values = (
+        "These exact values occur in the database.\n- 'Monterey': schools.County"
+    )
+
+    _system, prompt = build_model_only_prompt(
+        _case(),
+        "Table: schools",
+        ContextMode.AUTO_INIT_PROFILED_VALUES,
+        matched_database_values=matched_values,
+    )
+
+    assert prompt.count(matched_values) == 1
+    assert "QUESTION-MATCHED DATABASE VALUES:" in prompt
+    assert "AUTHORITATIVE CALLER-PROVIDED CONTEXT:" not in prompt
+
+
 def test_gold_fingerprint_ignores_unordered_row_order():
     first = QueryResult(columns=("value",), rows=((1,), (2,), (1,)))
     reordered = QueryResult(columns=("value",), rows=((2,), (1,), (1,)))

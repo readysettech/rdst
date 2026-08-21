@@ -14,7 +14,7 @@ from typing import Any
 from anthropic import AsyncAnthropic
 from google.genai.types import HttpRetryOptions
 from openai import AsyncOpenAI
-from pydantic_ai import Agent, ToolOutput
+from pydantic_ai import Agent, StructuredDict, ToolOutput
 from pydantic_ai.exceptions import (
     ModelAPIError,
     ModelHTTPError,
@@ -138,7 +138,7 @@ class PydanticAIAdapter:
         spec = self._resolve_spec(model)
         structured = _requests_json(extra)
         stage = purpose or "general"
-        output_type = ToolOutput(dict[str, Any], max_retries=0) if structured else str
+        output_type = _structured_output(extra) if structured else str
         model_instance = self._model(spec)
         model_instance.drain_responses()
         agent = Agent(
@@ -647,6 +647,31 @@ def _requests_json(extra: dict[str, Any] | None) -> bool:
         "json_object",
         "json_schema",
     }
+
+
+def _structured_output(extra: dict[str, Any] | None) -> ToolOutput:
+    response_format = (extra or {}).get("response_format")
+    if not isinstance(response_format, dict):
+        raise ValueError("structured output requires a response_format object")
+    if response_format.get("type") == "json_object":
+        return ToolOutput(dict[str, Any], max_retries=0)
+    schema_config = response_format.get("json_schema")
+    if not isinstance(schema_config, dict):
+        raise ValueError("json_schema response format requires json_schema settings")
+    schema = schema_config.get("schema")
+    if not isinstance(schema, dict):
+        raise ValueError("json_schema response format requires an object schema")
+    name = schema_config.get("name")
+    if name is not None and not isinstance(name, str):
+        raise ValueError("json_schema name must be a string")
+    strict = schema_config.get("strict")
+    if strict is not None and not isinstance(strict, bool):
+        raise ValueError("json_schema strict must be a boolean")
+    # StructuredDict attaches the supplied schema to the PydanticAI output tool.
+    # Copy it because StructuredDict adds a title when a name is provided.
+    schema_copy = json.loads(json.dumps(schema))
+    output = StructuredDict(schema_copy, name=name)
+    return ToolOutput(output, name=name, strict=strict, max_retries=0)
 
 
 def _prompt_hash(**parts: Any) -> str:

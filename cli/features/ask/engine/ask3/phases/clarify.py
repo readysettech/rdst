@@ -58,6 +58,8 @@ def clarify_question(
         database_engine=ctx.db_type,
         llm_manager=llm_manager,
         preference_tree=None,  # Could integrate with preference tree later
+        provided_context=ctx.provided_context,
+        matched_database_values=ctx.matched_database_values,
         callback=lambda **kw: _track_llm_call(ctx, "clarify", **kw),
     )
 

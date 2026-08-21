@@ -51,6 +51,7 @@ from .bird_conformance import (
     verify_official_oracle_conformance,
 )
 from .bird_dataset import (
+    BIRD_MINI_DATABASE_IDS,
     DATASET_REVISION,
     GOLD_EXCLUSION_REVISION,
     MYSQL_INVALID_GOLD_CASE_IDS,
@@ -123,6 +124,12 @@ from .semantic import (
 )
 from .structured_response_ablation import run_structured_response_ablation
 from .structured_system_ablation import run_structured_system_ablation
+from .value_profiles import (
+    VALUE_GROUNDING_CONTEXT_VERSION,
+    VALUE_PROFILE_CONTEXT_VERSION,
+    VALUE_PROFILE_FORMAT_VERSION,
+    build_exact_value_profiles,
+)
 
 RDST_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RESULTS_DIR = RDST_ROOT / "test-results" / "ask_benchmark"
@@ -180,6 +187,14 @@ def build_parser() -> argparse.ArgumentParser:
     enrich.add_argument("--force", action="store_true")
     _add_cache_argument(enrich)
     _add_mysql_arguments(enrich, include_root=False)
+
+    profile_values = subparsers.add_parser(
+        "profile-values",
+        help="Build deterministic local exact-value profiles for BIRD",
+    )
+    profile_values.add_argument("--force", action="store_true")
+    _add_cache_argument(profile_values)
+    _add_mysql_arguments(profile_values, include_root=False)
 
     interact_prepare = subparsers.add_parser(
         "bird-interact-prepare",
@@ -420,6 +435,8 @@ def main(argv: list[str] | None = None) -> int:
             return _prepare(args)
         if args.command == "enrich-schema":
             return _enrich_schema(args)
+        if args.command == "profile-values":
+            return _profile_values(args)
         if args.command == "bird-interact-prepare":
             return _bird_interact_prepare(args)
         if args.command == "bird-interact-qualify":
@@ -766,6 +783,46 @@ def _enrich_schema(args) -> int:
     print(
         f"AI-enriched schemas ready: {len(paths)} databases, {len(calls)} calls, "
         f"${normalized_cost} normalized setup cost"
+    )
+    return 0
+
+
+def _profile_values(args) -> int:
+    source_dir = semantic_dir_for_context(args.cache_dir, ContextMode.AUTO_INIT)
+    expected_db_ids = set(BIRD_MINI_DATABASE_IDS)
+    actual_db_ids = {path.stem for path in source_dir.glob("*.yaml")}
+    if actual_db_ids != expected_db_ids:
+        raise ValueError(
+            "Auto-init schemas differ from the pinned BIRD database set: "
+            f"expected {sorted(expected_db_ids)}, got {sorted(actual_db_ids)}"
+        )
+    db_ids = list(BIRD_MINI_DATABASE_IDS)
+    output_dir = semantic_dir_for_context(
+        args.cache_dir, ContextMode.AUTO_INIT_PROFILED_VALUES
+    )
+    connection = MySQLConnectionConfig(
+        host=args.mysql_host,
+        port=args.mysql_port,
+        user=args.mysql_user,
+        password=args.mysql_password,
+        database_prefix=args.mysql_database_prefix,
+    )
+    verify_mysql_provision(args.cache_dir, connection, db_ids[0])
+    provenance = build_exact_value_profiles(
+        db_ids,
+        source_dir,
+        output_dir,
+        connection,
+        force=args.force,
+    )
+    stats = provenance["database_stats"]
+    action = "verified" if provenance.get("_reused") else "built"
+    print(
+        f"Exact value profiles {action}: "
+        f"{len(stats)} databases, "
+        f"{sum(item['indexed_columns'] for item in stats.values())} columns, "
+        f"{sum(item['indexed_values'] for item in stats.values())} values, "
+        f"frozen setup {provenance['wall_time_seconds']:.2f}s"
     )
     return 0
 
@@ -2103,6 +2160,7 @@ def _benchmark_protocol_paths() -> tuple[Path, ...]:
     return (
         Path(__file__).with_name("model_matrix.toml"),
         Path(__file__).with_name("models.py"),
+        Path(__file__).with_name("bird_dataset.py"),
         Path(__file__).with_name("config.py"),
         Path(__file__).with_name("openrouter.py"),
         Path(__file__).with_name("pydantic_adapter.py"),
@@ -2112,6 +2170,7 @@ def _benchmark_protocol_paths() -> tuple[Path, ...]:
         Path(__file__).with_name("oracle.py"),
         Path(__file__).with_name("schema.py"),
         Path(__file__).with_name("semantic.py"),
+        Path(__file__).with_name("value_profiles.py"),
         Path(__file__).with_name("anthropic_adapter.py"),
         Path(__file__).with_name("bird_interact.py"),
         RDST_ROOT / "features" / "ask" / "ask3.py",
@@ -2168,6 +2227,8 @@ def _verify_context_provenance(
     """Bind generated semantic contexts to their frozen preparation receipt."""
     if context_mode in {ContextMode.BIRD_CURATED, ContextMode.EVIDENCE}:
         return _verify_bird_curated_provenance(semantic_dir, db_ids)
+    if context_mode == ContextMode.AUTO_INIT_PROFILED_VALUES:
+        return _verify_profiled_value_provenance(semantic_dir, db_ids)
     if context_mode != ContextMode.LLM_ENRICHED:
         return None
     path = semantic_dir / "provenance.json"
@@ -2236,6 +2297,76 @@ def _verify_context_provenance(
         ),
         "output_hashes": actual_hashes,
         "output_hash_kind": output_hash_kind,
+    }
+
+
+def _verify_profiled_value_provenance(
+    semantic_dir: Path, db_ids: list[str]
+) -> dict[str, Any]:
+    path = semantic_dir / "provenance.json"
+    try:
+        raw = path.read_bytes()
+        provenance = json.loads(raw)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"Profiled-value context requires valid provenance at {path}: {exc}"
+        ) from exc
+    required = {
+        "format_version": VALUE_PROFILE_FORMAT_VERSION,
+        "context_version": VALUE_PROFILE_CONTEXT_VERSION,
+        "dataset_revision": DATASET_REVISION,
+        "source_context": ContextMode.AUTO_INIT.value,
+        "output_context": ContextMode.AUTO_INIT_PROFILED_VALUES.value,
+        "construction_policy": "local-exact-distinct-values-v1",
+        "contains_questions": False,
+        "contains_evidence": False,
+        "contains_gold_sql": False,
+        "contains_bird_curated_descriptions": False,
+        "contains_database_values": True,
+    }
+    for field, expected in required.items():
+        if provenance.get(field) != expected:
+            raise ValueError(
+                f"Profiled-value provenance has {field}="
+                f"{provenance.get(field)!r}; expected {expected!r}"
+            )
+    schema_hashes = provenance.get("output_schema_hashes")
+    profile_hashes = provenance.get("value_profile_hashes")
+    if not isinstance(schema_hashes, dict) or not isinstance(profile_hashes, dict):
+        raise TypeError("Profiled-value provenance is missing output hashes")
+    mismatches = []
+    actual_profiles = {}
+    for db_id in db_ids:
+        schema_path = semantic_dir / f"{db_id}.yaml"
+        profile_path = semantic_dir / f"{db_id}.values.json"
+        schema_hash = semantic_content_hash(schema_path)
+        try:
+            profile_hash = hashlib.sha256(profile_path.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise ValueError(
+                f"Exact value profile is unreadable: {profile_path}"
+            ) from exc
+        actual_profiles[db_id] = profile_hash
+        if (
+            schema_hashes.get(db_id) != schema_hash
+            or profile_hashes.get(db_id) != profile_hash
+        ):
+            mismatches.append(db_id)
+    if mismatches:
+        raise ValueError(
+            "Profiled-value context differs from frozen provenance: "
+            + ", ".join(sorted(mismatches))
+        )
+    return {
+        "provenance_sha256": hashlib.sha256(raw).hexdigest(),
+        "format_version": provenance["format_version"],
+        "context_version": provenance["context_version"],
+        "matching_policy_version": VALUE_GROUNDING_CONTEXT_VERSION,
+        "construction_policy": provenance["construction_policy"],
+        "max_values_per_column": provenance.get("max_values_per_column"),
+        "max_value_chars": provenance.get("max_value_chars"),
+        "value_profile_hashes": actual_profiles,
+        "contains_database_values": True,
     }
 
 

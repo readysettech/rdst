@@ -35,6 +35,7 @@ class Ask3Context:
     target: str
     db_type: str = DbType.POSTGRESQL
     provided_context: str = ""
+    matched_database_values: str = ""
 
     # === Configuration ===
     max_retries: int = 2
@@ -118,6 +119,7 @@ class Ask3Context:
             "target": self.target,
             "db_type": self.db_type,
             "provided_context": self.provided_context,
+            "matched_database_values": self.matched_database_values,
             # Config
             "max_retries": self.max_retries,
             "timeout_seconds": self.timeout_seconds,
@@ -186,6 +188,7 @@ class Ask3Context:
             target=data.get("target", ""),
             db_type=data.get("db_type", DbType.POSTGRESQL),
             provided_context=data.get("provided_context", ""),
+            matched_database_values=data.get("matched_database_values", ""),
         )
 
         # Config

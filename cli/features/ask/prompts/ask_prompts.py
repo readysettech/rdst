@@ -14,6 +14,14 @@ def format_provided_context_block(provided_context: str | None) -> str:
     return f"\n\nAUTHORITATIVE CALLER-PROVIDED CONTEXT:\n{value}"
 
 
+def format_matched_database_values_block(value_context: str | None) -> str:
+    """Render database-derived value matches without promoting them to user intent."""
+    value = (value_context or "").strip()
+    if not value:
+        return ""
+    return f"\n\nQUESTION-MATCHED DATABASE VALUES:\n{value}"
+
+
 SQL_GENERATION_SYSTEM_PROMPT = (
     "You are an expert text-to-SQL system. Generate exactly one read-only SQL "
     "query using the requested database dialect and only identifiers present in "
@@ -26,7 +34,7 @@ DATABASE ENGINE: {database_engine}
 TARGET DATABASE: {target_database}
 
 USER QUESTION:
-{nl_question}{provided_context_block}
+{nl_question}{provided_context_block}{matched_database_values_block}
 
 RELEVANT SCHEMA:
 {filtered_schema}
@@ -48,6 +56,8 @@ Requirements:
 - If the request cannot safely be expressed as a read-only query, use
   `cannot_answer_reason` = `unsupported_request`.
 - `confidence` is diagnostic only. It does not override `cannot_answer`.
+- Treat matched database values as storage candidates for phrases already present in
+  the question. Do not turn an incidental match into a new filter or assumption.
 
 Return only the response object required by the supplied JSON schema."""
 
@@ -58,7 +68,7 @@ DATABASE ENGINE: {database_engine}
 TARGET DATABASE: {target_database}
 
 USER QUESTION:
-{nl_question}{provided_context_block}
+{nl_question}{provided_context_block}{matched_database_values_block}
 
 RELEVANT SCHEMA:
 {filtered_schema}
@@ -73,6 +83,8 @@ Requirements:
 - Use only tables and columns present in the schema and the requested database dialect.
 - If the schema cannot answer the question, return `CANNOT_ANSWER:` followed by one
   short reason instead of inventing a query.
+- Treat matched database values as storage candidates for phrases already present in
+  the question. Do not turn an incidental match into a new filter or assumption.
 - Return only SQL with no explanation, JSON, markdown, or commentary when answerable."""
 
 ENUM_GROUNDING_RULES = """- Treat listed enum values as authoritative database values. If the user's
@@ -113,7 +125,7 @@ VALIDATION_REPAIR_PROMPT = """Repair one SQL query using deterministic validator
 DATABASE ENGINE: {database_engine}
 
 USER QUESTION:
-{nl_question}{provided_context_block}
+{nl_question}{provided_context_block}{matched_database_values_block}
 
 FAILED SQL:
 {failed_sql}

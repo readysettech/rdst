@@ -56,10 +56,10 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
     # Import validation functions
     # Path: lib/engines/ask3/phases/validate.py -> lib/functions/sql_validation.py
     from features.ask.sql_validation import (
+        validate_columns_against_schema,
         validate_filter_literal_provenance,
         validate_sql_for_ask,
         validate_tables_against_schema,
-        validate_columns_against_schema,
     )
 
     # Step 1: Read-only and LIMIT validation
@@ -145,6 +145,7 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
                 question=ctx.refined_question or ctx.question,
                 schema_formatted=ctx.schema_formatted,
                 provided_context=ctx.provided_context,
+                matched_database_values=ctx.matched_database_values,
                 clarifications=ctx.clarifications,
                 dialect=ctx.db_type,
             )

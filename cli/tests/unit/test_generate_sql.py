@@ -123,6 +123,7 @@ def test_generation_purpose_is_forwarded_to_receipts():
     class Manager:
         def generate_response(self, **kwargs):
             assert kwargs["purpose"] == "ablation_full_structured"
+            assert kwargs["max_tokens"] == 4000
             assert kwargs["system_message"].startswith(
                 "You are an expert text-to-SQL system."
             )

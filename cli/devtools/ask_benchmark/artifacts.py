@@ -105,7 +105,9 @@ class ArtifactStore:
                 "derived_from",
             )
             for field in resume_fields:
-                if _normalized(existing.get(field)) != _normalized(manifest.get(field)):
+                if _resume_value(field, existing.get(field)) != _resume_value(
+                    field, manifest.get(field)
+                ):
                     raise ValueError(
                         f"Run {manifest.get('run_id')!r} has different {field} settings"
                     )
@@ -213,3 +215,28 @@ def _repair_trailing_record(path: Path) -> None:
 
 def _normalized(value: Any) -> Any:
     return json.loads(json.dumps(value, sort_keys=True, default=str))
+
+
+def _resume_value(field: str, value: Any) -> Any:
+    normalized = _normalized(value)
+    if field != "route_checks":
+        return normalized
+    return _strip_endpoint_status(normalized)
+
+
+def _strip_endpoint_status(value: Any, *, in_endpoint: bool = False) -> Any:
+    """Remove transient endpoint health without weakening route identity checks."""
+    if isinstance(value, list):
+        return [_strip_endpoint_status(item, in_endpoint=in_endpoint) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    result: dict[str, Any] = {}
+    for key, item in value.items():
+        if in_endpoint and key == "status":
+            continue
+        result[key] = _strip_endpoint_status(
+            item,
+            in_endpoint=in_endpoint or key == "eligible_endpoints",
+        )
+    return result

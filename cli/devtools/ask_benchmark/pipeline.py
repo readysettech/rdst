@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import re
 
-from features.ask.prompts.ask_prompts import format_provided_context_block
+from features.ask.prompts.ask_prompts import (
+    format_matched_database_values_block,
+    format_provided_context_block,
+)
 
 from .models import BenchmarkCase, ContextMode
 
@@ -14,7 +17,11 @@ _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
 
 
 def build_model_only_prompt(
-    case: BenchmarkCase, schema: str, context_mode: ContextMode
+    case: BenchmarkCase,
+    schema: str,
+    context_mode: ContextMode,
+    *,
+    matched_database_values: str = "",
 ) -> tuple[str, str]:
     system = (
         "You are an expert text-to-SQL system. Return exactly one read-only SQL "
@@ -27,6 +34,7 @@ def build_model_only_prompt(
         f"Schema:\n{schema}\n\n"
         f"Question:\n{case.question}"
         f"{format_provided_context_block(provided_context)}"
+        f"{format_matched_database_values_block(matched_database_values)}"
     )
     return system, prompt
 

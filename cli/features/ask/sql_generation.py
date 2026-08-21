@@ -23,6 +23,7 @@ from .prompts.ask_prompts import (
     SQL_REFINEMENT_PROMPT,
     VALIDATION_REPAIR_PROMPT,
     VALIDATION_REPAIR_RESPONSE_SCHEMA,
+    format_matched_database_values_block,
     format_provided_context_block,
 )
 from .sql_validation import check_read_only
@@ -30,7 +31,11 @@ from .sql_validation import check_read_only
 logger = logging.getLogger(__name__)
 
 
-SQL_GENERATION_MAX_TOKENS = 800
+# The completion budget includes provider reasoning tokens on reasoning-capable
+# routes. Eight hundred tokens is sufficient for the visible response, but can
+# expire before those routes emit any structured output. Keep the response
+# contract concise while allowing the same Ask pipeline to evaluate such models.
+SQL_GENERATION_MAX_TOKENS = 4000
 _SCHEMA_SIZE_ERROR_CODES = {
     "ANTHROPIC_CONTEXT_WINDOW_EXCEEDED",
     "ANTHROPIC_REQUEST_TOO_LARGE",
@@ -56,12 +61,16 @@ def _format_generation_prompt(
     database_engine: str,
     target_database: str,
     provided_context: str,
+    matched_database_values: str = "",
 ) -> str:
     return COMPREHENSIVE_ASK_PROMPT.format(
         database_engine=database_engine,
         target_database=target_database,
         nl_question=nl_question,
         provided_context_block=format_provided_context_block(provided_context),
+        matched_database_values_block=format_matched_database_values_block(
+            matched_database_values
+        ),
         filtered_schema=schema,
     )
 
@@ -144,6 +153,7 @@ def generate_sql_from_nl(
     llm_manager,
     callback=None,
     provided_context: str = "",
+    matched_database_values: str = "",
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -185,6 +195,7 @@ def generate_sql_from_nl(
             database_engine=database_engine,
             target_database=target_database,
             provided_context=provided_context,
+            matched_database_values=matched_database_values,
         )
         response_format = _generation_response_format()
         context_fallback_used = False
@@ -229,6 +240,7 @@ def generate_sql_from_nl(
                 database_engine=database_engine,
                 target_database=target_database,
                 provided_context=provided_context,
+                matched_database_values=matched_database_values,
             )
             context_fallback_used = True
             context_fallback_reason = (
@@ -475,6 +487,7 @@ def repair_sql_after_validation(
     llm_manager,
     callback=None,
     provided_context: str = "",
+    matched_database_values: str = "",
 ) -> Dict[str, Any]:
     """Perform one narrowly scoped repair from deterministic validator feedback."""
     import time
@@ -482,6 +495,9 @@ def repair_sql_after_validation(
     prompt = VALIDATION_REPAIR_PROMPT.format(
         nl_question=nl_question,
         provided_context_block=format_provided_context_block(provided_context),
+        matched_database_values_block=format_matched_database_values_block(
+            matched_database_values
+        ),
         failed_sql=failed_sql,
         error_message=error_message,
         filtered_schema=filtered_schema,
@@ -492,7 +508,7 @@ def repair_sql_after_validation(
         result = llm_manager.generate_response(
             prompt=prompt,
             temperature=0.0,
-            max_tokens=800,
+            max_tokens=SQL_GENERATION_MAX_TOKENS,
             purpose="sql_validation_repair",
             extra={
                 "response_format": {

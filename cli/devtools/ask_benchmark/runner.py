@@ -64,6 +64,11 @@ from .pydantic_adapter import (
     RouteMismatchError,
 )
 from .schema import MySQLSchemaLoader, load_semantic_schema
+from .value_profiles import (
+    VALUE_GROUNDING_CONTEXT_VERSION,
+    ExactValueProfileStore,
+    ValueMatchResult,
+)
 
 
 class _BenchmarkTargetsConfig:
@@ -256,6 +261,11 @@ class BenchmarkRunner:
         self.filter_spec = filter_spec
         self.filter_aliases = filter_aliases
         self.semantic_dir = semantic_dir
+        self.value_profile_store = (
+            ExactValueProfileStore(semantic_dir)
+            if context_mode == ContextMode.AUTO_INIT_PROFILED_VALUES
+            else None
+        )
         self.protocol_fingerprint = protocol_fingerprint
         self.adapter_factory = adapter_factory or _build_adapter
         self.run_limits = run_limits or RunLimits()
@@ -476,9 +486,18 @@ class BenchmarkRunner:
             if self.context_mode == ContextMode.RAW
             else load_semantic_schema(self.semantic_dir, case.db_id)
         )
-        system, prompt = build_model_only_prompt(case, schema, self.context_mode)
+        value_matches = self._matched_database_values(case)
+        system, prompt = build_model_only_prompt(
+            case,
+            schema,
+            self.context_mode,
+            matched_database_values=value_matches.context,
+        )
         provided_context = provided_context_for_case(case, self.context_mode)
-        context_diagnostics = _provided_context_diagnostics(provided_context)
+        context_diagnostics = {
+            **_provided_context_diagnostics(provided_context),
+            "matched_database_values": value_matches.to_dict(),
+        }
         response = adapter.query(
             system_message=system,
             user_query=prompt,
@@ -528,6 +547,7 @@ class BenchmarkRunner:
             raise RuntimeError(f"Semantic layer is missing for {case.db_id}")
 
         config = self._target_config(case.db_id)
+        value_matches = self._matched_database_values(case)
         observed: dict[str, Any] = {
             "context": None,
             "phases": [],
@@ -580,6 +600,7 @@ class BenchmarkRunner:
                         provided_context=provided_context_for_case(
                             case, self.context_mode
                         ),
+                        matched_database_values=value_matches.context,
                     ),
                     options,
                 )
@@ -591,6 +612,7 @@ class BenchmarkRunner:
             "ask_service_phases": observed["phases"],
             "ask_service_phase_snapshots": observed["phase_snapshots"],
             "ask_service_events": [event.type for event in events],
+            "matched_database_values": value_matches.to_dict(),
         }
         if ctx is not None:
             diagnostics.update(_context_diagnostics(ctx, case))
@@ -800,6 +822,11 @@ class BenchmarkRunner:
                     else self.interaction_mode.value
                 ),
                 "provided_context_policy": "first-class-authoritative-v1",
+                "matched_database_values_policy": (
+                    VALUE_GROUNDING_CONTEXT_VERSION
+                    if self.value_profile_store is not None
+                    else "none"
+                ),
                 "semantic_schema_format": self.semantic_schema_format,
                 "generation_attempts": 1,
                 "max_validation_repair_attempts": 1,
@@ -812,6 +839,16 @@ class BenchmarkRunner:
             payload, sort_keys=True, separators=(",", ":"), default=str
         ).encode()
         return hashlib.sha256(encoded).hexdigest()
+
+    def _matched_database_values(self, case: BenchmarkCase) -> ValueMatchResult:
+        if self.value_profile_store is None:
+            return ValueMatchResult(
+                context_version="none",
+                target=case.db_id,
+                profile_sha256="",
+                matches=(),
+            )
+        return self.value_profile_store.match(case.db_id, case.question)
 
     def _target_config(self, db_id: str):
         config = self.executor.config

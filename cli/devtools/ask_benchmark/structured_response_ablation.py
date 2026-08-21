@@ -236,6 +236,7 @@ def _run_cell(
                 target_database=case.db_id,
                 nl_question=case.question,
                 provided_context_block="",
+                matched_database_values_block="",
                 filtered_schema=schema,
             )
             response = adapter.query(

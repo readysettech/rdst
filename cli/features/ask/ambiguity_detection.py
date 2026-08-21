@@ -21,7 +21,10 @@ from shared.ui import (
     get_console,
 )
 
-from .prompts.ask_prompts import format_provided_context_block
+from .prompts.ask_prompts import (
+    format_matched_database_values_block,
+    format_provided_context_block,
+)
 from .prompts.ask_prompts_v2 import (
     AMBIGUITY_DETECTION_PROMPT,
     AMBIGUITY_DETECTION_RESPONSE_SCHEMA,
@@ -454,6 +457,7 @@ def detect_ambiguities(
     preference_tree=None,
     callback=None,
     provided_context: str = "",
+    matched_database_values: str = "",
 ) -> Dict[str, Any]:
     try:
         pref_context = format_preference_tree_for_prompt(preference_tree)
@@ -474,6 +478,9 @@ def detect_ambiguities(
             filtered_schema=filtered_schema,
             preference_tree_summary=pref_context,
             provided_context_block=provided_context_block,
+            matched_database_values_block=format_matched_database_values_block(
+                matched_database_values
+            ),
         )
 
         logger.info("Detecting ambiguities in: %s", nl_question)

@@ -24,6 +24,7 @@ class AskInput:
     target: Optional[str] = None
     source: str = "cli"
     provided_context: str = ""
+    matched_database_values: str = ""
 
 
 @dataclass

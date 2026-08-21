@@ -165,7 +165,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
                     f"{board['interaction_mode']} / {board['transport']}"
                 ),
                 "",
-                "| Model | Reasoning | Coverage | Unscored | Official EX | Stable EX | 95% CI | Cold/task | Cold/correct | Billed/task | Mean/task | P95/task | Eligible | Pareto |",
+                "| Model | Reasoning | Coverage | Unresolved | Official EX | Stable EX | 95% CI | Cold/task | Cold/correct | Billed/task | Mean/task | P95/task | Eligible | Pareto |",
                 "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|:---:|",
             ]
         )
@@ -252,6 +252,26 @@ def render_markdown(summary: dict[str, Any]) -> str:
                     f"{repair_text} |"
                 )
             lines.append("")
+        if any(model.get("matched_value_attempt_count") for model in board["models"]):
+            lines.extend(
+                [
+                    "### Value grounding diagnostics",
+                    "",
+                    "| Model | Questions matched | Values | Multi-location values | Schema-name suppressions | Declared join paths | Mean context |",
+                    "|---|---:|---:|---:|---:|---:|---:|",
+                ]
+            )
+            for model in board["models"]:
+                lines.append(
+                    f"| {model['model_name']} | "
+                    f"{model.get('matched_value_attempt_count', 0)} | "
+                    f"{model.get('matched_value_count', 0)} | "
+                    f"{model.get('multi_location_value_count', 0)} | "
+                    f"{model.get('suppressed_schema_match_count', 0)} | "
+                    f"{model.get('declared_join_path_count', 0)} | "
+                    f"{model.get('mean_matched_value_context_chars', 0.0):.1f} chars |"
+                )
+            lines.append("")
         if any(model.get("cost_by_stage") for model in board["models"]):
             lines.extend(
                 [
@@ -308,6 +328,17 @@ def _summarize_model(
     unscored_attempts = [
         attempt for attempt in attempts if not _attempt_is_scored(attempt)
     ]
+    scored_attempt_keys = {
+        str(attempt["attempt_key"])
+        for attempt in scored_attempts
+        if attempt.get("attempt_key")
+    }
+    unresolved_attempt_keys = {
+        str(attempt["attempt_key"])
+        for attempt in unscored_attempts
+        if attempt.get("attempt_key")
+        and str(attempt["attempt_key"]) not in scored_attempt_keys
+    }
     correctness = [
         bool(attempt.get("execution_correct")) for attempt in scored_attempts
     ]
@@ -516,6 +547,20 @@ def _summarize_model(
         if attempt.get("diagnostics", {}).get("schema_filter_strategy")
         in {"full-schema-below-budget", "full-schema-unfiltered"}
     ]
+    value_grounding = [
+        attempt.get("diagnostics", {}).get("matched_database_values")
+        for attempt in scored_attempts
+    ]
+    value_grounding = [item for item in value_grounding if isinstance(item, dict)]
+    matched_value_attempts = [
+        item for item in value_grounding if len(item.get("matches", [])) > 0
+    ]
+    matched_values = [
+        match
+        for item in value_grounding
+        for match in item.get("matches", [])
+        if isinstance(match, dict)
+    ]
     latencies = [float(attempt.get("latency_ms", 0.0)) for attempt in scored_attempts]
     total_latency_ms = sum(latencies)
     reasoning_efforts = {
@@ -545,7 +590,8 @@ def _summarize_model(
         "reasoning_label": reasoning_label,
         "attempt_count": len(attempts),
         "scored_attempt_count": len(scored_attempts),
-        "unscored_attempt_count": len(unscored_attempts),
+        "unscored_attempt_count": len(unresolved_attempt_keys),
+        "historical_unscored_invocation_count": len(unscored_attempts),
         "repaired_pair_count": len(repaired_keys),
         "repair_invocation_count": len(repair_invocation_ids),
         "orphan_receipt_invocation_count": len(orphan_receipt_invocation_ids),
@@ -626,6 +672,23 @@ def _summarize_model(
         "mean_gold_table_recall": sum(gold_table_recalls) / len(gold_table_recalls)
         if gold_table_recalls
         else None,
+        "matched_value_attempt_count": len(matched_value_attempts),
+        "matched_value_count": len(matched_values),
+        "multi_location_value_count": sum(
+            len(match.get("occurrences", [])) > 1 for match in matched_values
+        ),
+        "suppressed_schema_match_count": sum(
+            len(item.get("suppressed_schema_matches", [])) for item in value_grounding
+        ),
+        "declared_join_path_count": sum(
+            len(item.get("declared_join_paths", [])) for item in value_grounding
+        ),
+        "mean_matched_value_context_chars": (
+            sum(float(item.get("context_chars", 0)) for item in matched_value_attempts)
+            / len(matched_value_attempts)
+            if matched_value_attempts
+            else 0.0
+        ),
         "schema_filter_bypass_attempt_count": len(schema_filter_bypass_attempts),
         "schema_filter_bypass_rate": (
             len(schema_filter_bypass_attempts) / len(scored_attempts)

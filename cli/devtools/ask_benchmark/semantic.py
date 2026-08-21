@@ -40,6 +40,8 @@ FROZEN_LLM_ENRICHED_DIR = (
 def semantic_dir_for_context(cache_dir: Path, context_mode: ContextMode) -> Path:
     if context_mode == ContextMode.AUTO_INIT:
         return cache_dir / "semantic-auto-init"
+    if context_mode == ContextMode.AUTO_INIT_PROFILED_VALUES:
+        return cache_dir / "semantic-auto-init-profiled-values"
     if context_mode == ContextMode.LLM_ENRICHED:
         return cache_dir / "semantic-llm-enriched"
     return cache_dir / "semantic"

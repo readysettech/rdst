@@ -9,6 +9,7 @@ Multi-layer validation to ensure queries are safe for execution:
 """
 
 import re
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 import sqlglot
@@ -234,6 +235,7 @@ def validate_filter_literal_provenance(
     question: str,
     schema_formatted: str,
     provided_context: str = "",
+    matched_database_values: str = "",
     clarifications: Optional[Dict[str, str]] = None,
     dialect: str = "",
 ) -> Dict[str, Any]:
@@ -255,6 +257,7 @@ def validate_filter_literal_provenance(
         for part in (
             question,
             provided_context,
+            matched_database_values,
             "\n".join(str(value) for value in (clarifications or {}).values()),
         )
         if part
@@ -280,8 +283,10 @@ def validate_filter_literal_provenance(
             for qualified, payload in enum_columns.items()
             if _normalized_text_contains(payload, normalized_value)
         )
-        source_supports_value = _normalized_text_contains(
-            _normalize_text(source_text), normalized_value
+        source_supports_value = _source_supports_filter_value(
+            source_text,
+            value,
+            normalized_value,
         )
         schema_supports_value = bool(enum_matches)
 
@@ -413,6 +418,54 @@ def _normalized_text_contains(haystack: str, needle: str) -> bool:
     if not needle:
         return False
     return re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack) is not None
+
+
+_COMPLETE_NUMERIC_DATE = re.compile(
+    r"(?<!\d)(?P<year>\d{4})[-/.](?P<month>\d{1,2})[-/.](?P<day>\d{1,2})(?!\d)"
+)
+
+
+def _source_supports_filter_value(
+    source_text: str,
+    raw_value: str,
+    normalized_value: str,
+) -> bool:
+    if _normalized_text_contains(_normalize_text(source_text), normalized_value):
+        return True
+    literal_date = _canonical_complete_date(raw_value)
+    if literal_date is None:
+        return False
+    return literal_date in _complete_dates_in_text(source_text)
+
+
+def _canonical_complete_date(value: str) -> str | None:
+    match = _COMPLETE_NUMERIC_DATE.fullmatch(value.strip("%_^$ "))
+    if match is None:
+        return None
+    try:
+        return date(
+            int(match.group("year")),
+            int(match.group("month")),
+            int(match.group("day")),
+        ).isoformat()
+    except ValueError:
+        return None
+
+
+def _complete_dates_in_text(value: str) -> set[str]:
+    dates = set()
+    for match in _COMPLETE_NUMERIC_DATE.finditer(value):
+        try:
+            dates.add(
+                date(
+                    int(match.group("year")),
+                    int(match.group("month")),
+                    int(match.group("day")),
+                ).isoformat()
+            )
+        except ValueError:
+            continue
+    return dates
 
 
 def _explicit_free_text_reference(

@@ -175,6 +175,238 @@ request-body limit, Ask retries once with the lossless compact form even below t
 cost threshold. It does not retry unrelated invalid requests. If compact also fails,
 Ask returns the provider request ID and size diagnostics without truncating the schema.
 
+The experimental `auto-init-profiled-values` context keeps the same complete
+auto-init schema and adds exact database values whose phrases occur in the question.
+Build or verify its local, model-free index before running that cohort:
+
+```bash
+uv run --group eval python -m devtools.ask_benchmark profile-values
+```
+
+The index is generated from read-only database scans and remains under the BIRD cache;
+it is not checked in. Frozen provenance asserts that questions, evidence, gold SQL,
+and curated descriptions were not construction inputs. The matcher sends only matched
+values and table/column locations, never the full value index or occurrence counts.
+Both direct generation and canonical Ask receive the same matched block. This context
+is benchmark-only until it passes the 50-case gate; desktop and web do not yet build
+or inject this index.
+
+### Exact-value selection algorithm
+
+Profile construction and question-time selection are deterministic. They make no
+model calls.
+
+1. The builder scans non-null `text`, `varchar`, and `enum` values between one and
+   160 characters. It retains at most 10,000 distinct values per column, ordered by
+   row frequency and then value. It records each value's table, column, and occurrence
+   count. Counts remain local.
+2. The matcher applies Unicode NFKC normalization, case folding, punctuation removal,
+   and whitespace collapsing to the question and indexed values.
+3. It generates every contiguous question phrase up to eight tokens. A one-token
+   phrase is eligible only when quoted or proper-name-like. The proper-name heuristic
+   requires an uppercase character and ignores the question's first token, where
+   capitalization alone is weak evidence.
+4. It performs an exact normalized lookup. A second exact lookup removes a small fixed
+   set of connector words such as `and`, `of`, and `the`. This permits punctuation and
+   connector differences without inferring synonyms.
+5. It rejects numeric-only values and common generic singletons, then deduplicates
+   matches that resolve to the same occurrences.
+6. It ranks longer phrases first, followed by longer character length, lower stored
+   frequency, and normalized lexical order. This favors specific names over common
+   fragments and makes ties reproducible.
+7. Within a matched value, it ranks locations by overlap between question terms and
+   normalized table/column identifiers. It splits camel case and underscores and
+   treats simple plurals as the same term. Stored frequency breaks ties only for
+   equivalent fields on the same table, such as `type` and `types`.
+8. If a matched phrase also names part of a non-value column, it suppresses the value
+   hint and records the schema collision. For example, `K-12` in a question about
+   `Enrollment (K-12)` is treated as a column reference rather than a row value.
+9. When the semantic layer contains declared relationships, it emits at most six
+   shortest join paths of at most three edges among candidate tables. It never infers
+   an undeclared relationship. Join paths are optional hints, not required joins.
+10. It returns at most 12 values and eight table/column locations per value. The prompt
+    includes ranked locations and declared join expressions. It excludes occurrence
+    counts and the unmatched index.
+
+The eight-token phrase limit, 12-value result limit, eight-location limit, 160-character
+value limit, and 10,000-value column limit are conservative resource bounds. The smoke
+qualified the policy as a whole; it did not optimize each constant independently.
+
+Fuzzy search is intentionally absent. A close string is not necessarily the user's
+database value, and a wrong near-match can produce valid SQL with plausible but wrong
+rows. The first exact-match audit already found accidental common-word matches such as
+`price`, `market`, and `member`; fuzzy matching would increase that candidate set.
+Across hundreds of thousands of values, fuzzy retrieval also needs labeled typo cases,
+a calibrated distance threshold, and a top-match margin before its output can be
+trusted. The benchmark has none of those yet.
+
+This policy therefore accepts case, punctuation, and connector variation but refuses
+spelling correction, aliases, abbreviations, and semantic similarity. It cannot infer,
+for example, that `phosphorus` means a stored code of `P`. It can also miss an unquoted
+lowercase one-word name or a value outside a truncated 10,000-value column. A future
+fuzzy cohort would need reviewed typo fixtures, an explicit approximate-match label,
+high-margin abstention, and separate reporting. Do not silently add fuzzy matches to
+this exact-value cohort.
+
+### Exact-value 50-case gate
+
+The fresh 50-case paired development gate did not reproduce the smoke's headline
+gain. Canonical Ask scored 24/50 official EX and 23/48 stable EX in both conditions.
+The stable paired delta was 0.0 points, with a 95% paired bootstrap interval of -8.3
+to +8.3 points and an exact McNemar p-value of 1.0. The runs share the same revision,
+working-copy diff, protocol hash, questions, model, interaction policy, schema format,
+and database provision. Only the context cohort differs.
+
+The matcher supplied 40 values to 23/50 questions. Within those 23 questions, accuracy
+moved from 13/23 to 14/23. Profiling fixed q72 and q427, but regressed q412. q412's
+`Creature` value appeared in both `cards.type` and `cards.types`; the extra grounding
+changed a correct `cards.types = 'Creature'` predicate into an incorrect
+`cards.type LIKE '%Creature%'` predicate. q11 moved from correct to incorrect despite
+receiving no value context, which demonstrates residual model variance in a single
+paired repetition.
+
+Mean task latency moved from 6.20 to 6.07 seconds, P95 from 8.55 to 8.37 seconds, and
+normalized cost from $0.588945 to $0.576915. The profiled run needed no validation
+repair; the control used one on q72. Matched context averaged 221 characters and
+never exceeded 318 characters.
+
+The local index stores raw database values in mode-600 files. It occupies about 50 MB
+for 11 BIRD databases, and 47 of 333 indexed columns reached the 10,000-value cap.
+Those limits can omit rare values and do not establish acceptable scaling or privacy
+for arbitrary desktop and web databases. Exact profiling therefore remains a
+benchmark-only cohort. Do not enable it in product runtime based on this gate.
+
+The post-gate matching policy is
+`rdst-question-matched-values-v4-ranked-locations`. Offline replay changed the
+grounding text for 10/50 development questions. It ranks `cards.types` ahead of
+`cards.type` for q412 and suppresses the misleading `K-12` value match for q28. The
+policy version is explicit in context provenance and the model configuration
+fingerprint. Reports count matched questions, values, multi-location values,
+schema-name suppressions, declared join paths, and mean grounding-context size.
+
+The BIRD auto-init snapshots contain no relationships because preparation creates
+read-only MySQL views and those views expose no foreign-key constraints. BIRD's
+`dev_tables.json` contains relationship metadata, but importing it here would change
+the cohort from database-introspected auto-init to BIRD-provided structure. The
+matcher therefore emits zero join paths in this cohort. It can use declared
+relationships in ordinary schemas, but BIRD has not tested that part of the policy.
+
+The fresh paid v4 pair also finished flat. The control and ranked grounding condition
+both scored 25/50 official EX and 24/48 stable EX. The stable paired delta was 0.0
+points, its 95% paired bootstrap interval was -6.2 to +6.2 points, and exact McNemar
+p was 1.0. The profiled condition matched 23 questions, supplied 39 values, ranked 15
+multi-location values, and recorded one schema-name suppression. It emitted no join
+paths.
+
+Prompt hashes make the result easier to interpret. Grounding changed 23 prompts;
+accuracy on those questions moved from 14/23 to 15/23, with q72 as the only correctness
+flip. The other 27 prompts were byte-identical between conditions. q11 alone flipped
+within that identical-prompt group, so it is model nondeterminism rather than a
+grounding regression. q412 and q427 were correct in both v4 conditions, and q28
+remained incorrect in both. Ranking removed the prior q412 regression but did not
+produce a headline gain.
+
+Mean latency moved from 6.03 to 5.99 seconds, P95 from 8.98 to 8.53 seconds, and
+normalized cost from $0.587772 to $0.579291. The control used one repair and the
+profiled condition used none. These operational differences are too small to motivate
+product deployment. Keep v4 as benchmark evidence; do not run the remaining variance
+repetitions or enable profiling in desktop and web without a new accuracy, storage,
+and privacy mechanism.
+
+### Three-candidate execution consistency
+
+The next diagnostic reused the unprofiled v4 control as candidate one and ran two
+fresh complete canonical `AskService` canaries under the same protocol, model,
+schema, interaction policy, temperature, validation, and execution limits. Each
+candidate was a real `rdst-ask` result. The combined selector remained an internal
+diagnostic and was never added to `AskService`.
+
+The offline analyzer re-executed all stored SQL and grouped successful non-empty
+results by exact typed row multiset. Two matching results formed a majority. Empty
+results could not override candidate one. With no majority, the selector kept
+candidate one, or the first executable candidate if candidate one failed. Gold
+results scored oracle pass@3 and selector EX but never influenced selection.
+
+| Candidate | Official EX | Stable EX | Mean latency | Normalized cost |
+|---:|---:|---:|---:|---:|
+| 1 | 25/50 (50.0%) | 24/48 (50.0%) | 6.03s | $0.587772 |
+| 2 | 24/50 (48.0%) | 23/48 (47.9%) | 6.11s | $0.589140 |
+| 3 | 24/50 (48.0%) | 23/48 (47.9%) | 6.24s | $0.590280 |
+
+Oracle pass@3 was still 25/50 official and 24/48 stable. The two additional
+candidates recovered no candidate-one failure. Twenty-four questions were correct
+in all three runs, 25 were wrong in all three, and q11 was correct only in candidate
+one. All 150 candidate queries executed successfully, so validation or execution
+success had no winner to identify.
+
+Non-empty result consensus covered 46/50 questions and selected 24/50 correctly. It
+lost q11 because candidates two and three agreed on the same wrong `Enrollment
+(K-12) > 500` interpretation while candidate one used the gold-aligned sum of both
+enrollment columns. Stable selector delta was -2.1 points, with a paired 95% interval
+from -6.2 to 0.0 points and exact McNemar p-value 1.0.
+
+Candidates two and three added $1.179420 normalized cost. Three-candidate serial
+latency averaged 18.38 seconds. An idealized parallel estimate was 6.47 seconds, but
+parallelism cannot rescue zero oracle headroom. Reject repeated temperature-zero
+generation with the same prompt. Do not add this selector or generic same-prompt
+retries to desktop and web.
+
+The immutable final analysis artifact is
+`rdst/test-results/ask_benchmark/sonnet46-rdst-ask-auto-init-three-candidate-consensus-50-v2/`.
+The v1 analysis is superseded because its resume check did not exempt the three
+predeclared unstable gold cases from fingerprint equality. The rejected selector
+implementation was removed from the merge stack; these results are retained as
+negative evidence.
+
+### Rejected DIN-SQL-inspired decomposition
+
+An internal no-evidence ablation tested the part of DIN-SQL that current Ask did not
+already have. Sonnet first linked exact schema identifiers, then classified and
+decomposed the question, then generated SQL with the production structured contract.
+The treatment kept the complete adaptive auto-init schema, deterministic validation,
+and one bounded validation repair. It did not use BIRD evidence, sample rows, NatSQL,
+few-shot demonstrations, gold SQL, or DIN-SQL's generic self-correction. Call it
+DIN-SQL-inspired, not a DIN-SQL reproduction.
+
+The 16-case smoke improved from 6/16 to 9/16. It added q72, q173, and q427 without
+losing a previously correct case. q72 and q427 used better table and join paths. q173
+was only an execution-equivalence win: the treatment filtered a single transaction
+amount, while the released gold query grouped orders and filtered their sum. The
+database happened to return the same result.
+
+The promoted 50-case development run rejected the approach:
+
+| Condition | Official EX | Stable EX | Mean latency | Normalized cost |
+|---|---:|---:|---:|---:|
+| Canonical Ask source | 25/50 (50.0%) | 24/48 (50.0%) | 6.03s | $0.587772 |
+| Decomposition treatment | 19/50 (38.0%) | 19/48 (39.6%) | 17.63s | $1.685376 |
+
+Official paired delta was -12.0 points. Stable delta was -10.4 points. The treatment
+gained q72 and q173 but lost q11, q412, q440, q671, q1375, q1460, q1486, and q1509.
+q671 is the declared unstable tie case.
+
+The plans caused the stable regressions. Schema linking omitted one of the two
+enrollment columns on q11 and chose `cards.type` instead of `cards.types` on q412.
+The plan discarded a useful value mapping on q440, added an unrequested ID column on
+q1375, split one exact expense description into three values on q1460, and added an
+extra boolean output on q1486. q1509 exposed a treatment-harness problem: its
+standalone validator rejected a normalized date literal that the canonical source
+run had accepted.
+
+The source and treatment shared the same protocol hash, schema hashes, questions,
+model route, and database provision, but came from different RDST revisions and
+working-copy diffs. Treat the paired numbers as an internal rejection diagnostic,
+not a publication-quality causal estimate. The large stable regression, plan-level
+failure evidence, extra calls, and q1509 inconsistency are enough to reject this
+candidate. Do not add the three-stage chain to desktop or web, repeat it on the
+development set, or open the holdout for it.
+
+The rejected decomposition runner was removed from the merge stack. The immutable
+artifacts are:
+
+- `rdst/test-results/ask_benchmark/sonnet46-din-sql-inspired-decomposition-smoke-16-v1/`
+- `rdst/test-results/ask_benchmark/sonnet46-din-sql-inspired-decomposition-50-v1/`
+
 `--interaction-mode auto` never converts an LLM-generated option into user intent.
 The broad ambiguity model is not invoked in non-interactive mode. Only a deterministic
 missing-intent rule, currently an explicit sort request with no stated or implied
@@ -517,7 +749,21 @@ uv run --group eval python -m devtools.ask_benchmark run \
   --run-id sonnet46-rdst-ask-llm-enriched-smoke-16-v1
 ```
 
-OpenRouter remains available for later model comparison against the frozen pipeline.
+OpenRouter model selection uses the v3 frozen pipeline receipt. Generation and the
+single bounded validation repair allow up to 4,000 completion tokens because provider
+reasoning shares that budget on reasoning-capable routes; the visible response remains
+constrained by the concise seven-field SQL contract. The PydanticAI adapter forwards
+the exact supplied JSON schema through a strict `StructuredDict` output tool. A generic
+dictionary tool is not sufficient: it previously allowed missing fields, invalid enum
+values, and out-of-range confidence values even though the route was labeled
+structured.
+
+Freeze receipts are immutable. v1 records the first post-experiment product pipeline;
+v2 supersedes its 800-token completion ceiling; v3 supersedes the generic-dictionary
+OpenRouter adapter. Do not compare artifacts across these protocol hashes as though
+they were the same run. Direct Anthropic Sonnet 4.6 does not execute the PydanticAI
+adapter, so its v2 three-repetition baseline remains product-behavior evidence; the v3
+confirmation cohort provides a protocol-compatible model-selection control.
 
 ## BIRD-Interact c-Interact qualification
 

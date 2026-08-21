@@ -84,6 +84,39 @@ def test_markdown_makes_a_budget_stop_explicit():
     assert "provider-call limit reached (1/1)" in markdown
 
 
+def test_report_exposes_value_grounding_diagnostics():
+    attempts = _attempts("model", 1, 1, "0.1")
+    attempts[0]["track"] = "rdst-ask"
+    attempts[0]["diagnostics"] = {
+        "matched_database_values": {
+            "context_chars": 120,
+            "matches": [
+                {
+                    "value": "Creature",
+                    "occurrences": [
+                        {"table": "cards", "column": "types"},
+                        {"table": "cards", "column": "type"},
+                    ],
+                }
+            ],
+            "suppressed_schema_matches": [{"value": "K-12"}],
+            "declared_join_paths": [{"joins": ["cards.uuid = foreign_data.uuid"]}],
+        }
+    }
+
+    summary = build_summary(attempts, expected_attempts_per_model=1)
+    model = summary["leaderboards"][0]["models"][0]
+    markdown = render_markdown(summary)
+
+    assert model["matched_value_attempt_count"] == 1
+    assert model["matched_value_count"] == 1
+    assert model["multi_location_value_count"] == 1
+    assert model["suppressed_schema_match_count"] == 1
+    assert model["declared_join_path_count"] == 1
+    assert model["mean_matched_value_context_chars"] == 120
+    assert "Value grounding diagnostics" in markdown
+
+
 def test_headline_uses_cold_cost_without_mixing_billed_cost():
     attempts = _attempts("cold-cheap", 1, 1, "10") + _attempts(
         "billed-cheap", 1, 1, "0.01"
@@ -125,6 +158,8 @@ def test_unscored_transport_attempt_blocks_coverage_until_repaired():
     assert repaired_model["coverage"] == 1
     assert repaired_model["execution_accuracy"] == 1
     assert repaired_model["normalized_cold_cost_usd"] == "0.2"
+    assert repaired_model["unscored_attempt_count"] == 0
+    assert repaired_model["historical_unscored_invocation_count"] == 1
     assert repaired_model["repaired_pair_count"] == 1
     assert repaired_model["repair_rate"] == 1
     assert repaired_model["repair_normalized_cold_cost_usd"] == "0.1"

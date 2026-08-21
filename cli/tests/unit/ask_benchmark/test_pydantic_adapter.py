@@ -165,6 +165,68 @@ def test_json_mode_serializes_structured_output_for_ask3():
     assert adapter.call_records[0].effective_settings["structured_output"] is True
 
 
+def test_json_schema_is_forwarded_to_the_output_tool():
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "sql": {"type": "string"},
+            "cannot_answer_reason": {
+                "type": "string",
+                "enum": ["", "missing_schema"],
+            },
+        },
+        "required": ["sql", "cannot_answer_reason"],
+    }
+
+    def respond(_messages, info):
+        output_tool = info.output_tools[0]
+        assert output_tool.name == "sql_generation"
+        assert output_tool.strict is True
+        assert output_tool.parameters_json_schema["additionalProperties"] is False
+        assert output_tool.parameters_json_schema["required"] == [
+            "sql",
+            "cannot_answer_reason",
+        ]
+        assert output_tool.parameters_json_schema["properties"]["cannot_answer_reason"][
+            "enum"
+        ] == ["", "missing_schema"]
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    output_tool.name,
+                    {"sql": "SELECT 1", "cannot_answer_reason": ""},
+                )
+            ]
+        )
+
+    adapter = PydanticAIAdapter(
+        _spec("mock"),
+        model_factory=lambda _spec: FunctionModel(respond),
+        verify_route=False,
+    )
+    with override_allow_model_requests(False):
+        result = adapter.generate_response(
+            "generate",
+            purpose="sql_generation",
+            extra={
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "sql_generation",
+                        "strict": True,
+                        "schema": schema,
+                    },
+                }
+            },
+        )
+
+    assert json.loads(result["response"]) == {
+        "sql": "SELECT 1",
+        "cannot_answer_reason": "",
+    }
+
+
 def test_structured_output_failure_retains_billable_usage():
     receipts = []
 

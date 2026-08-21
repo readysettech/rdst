@@ -1,6 +1,7 @@
 import hashlib
 import json
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,12 @@ from filelock import FileLock, Timeout
 from devtools.ask_benchmark import cli
 from devtools.ask_benchmark.bird_dataset import DATASET_REVISION, SCORABLE_CASE_COUNT
 from devtools.ask_benchmark.models import ContextMode
+from devtools.ask_benchmark.semantic import semantic_content_hash
+from devtools.ask_benchmark.value_profiles import (
+    VALUE_GROUNDING_CONTEXT_VERSION,
+    VALUE_PROFILE_CONTEXT_VERSION,
+    VALUE_PROFILE_FORMAT_VERSION,
+)
 
 
 @pytest.mark.skipif(cli.fcntl is None, reason="shared locks require Unix flock")
@@ -83,12 +90,69 @@ def test_protocol_fingerprint_covers_canonical_schema_loading():
     assert "features/analyze/functions/shallow_analysis.py" in relative_paths
 
 
+def test_frozen_pipeline_receipt_matches_current_protocol():
+    receipt_path = Path(cli.__file__).with_name("frozen_pipeline_v3.json")
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+
+    assert receipt["freeze_id"] == "rdst-ask-auto-init-no-evidence-v3"
+    assert receipt["benchmark_protocol_sha256"] == cli._benchmark_protocol_sha256()
+    assert receipt["holdout_partition"]["opened"] is False
+    assert receipt["acceptance"]["required_baseline_repetitions"] == 3
+
+
 def test_prepare_parser_accepts_an_isolated_mysql_root_password():
     args = cli.build_parser().parse_args(
         ["prepare", "--mysql-root-password", "ci-root-password"]
     )
 
     assert args.mysql_root_password == "ci-root-password"
+
+
+def test_profile_values_derives_databases_without_loading_questions(
+    tmp_path, monkeypatch
+):
+    source_dir = tmp_path / "semantic-auto-init"
+    source_dir.mkdir()
+    for db_id in cli.BIRD_MINI_DATABASE_IDS:
+        (source_dir / f"{db_id}.yaml").write_text(f"target: {db_id}\ntables: {{}}\n")
+
+    def fail_if_questions_are_loaded(*_args, **_kwargs):
+        raise AssertionError("question metadata must not be loaded")
+
+    monkeypatch.setattr(cli, "load_cached_cases", fail_if_questions_are_loaded)
+    monkeypatch.setattr(cli, "verify_mysql_provision", lambda *_args: {})
+    observed = {}
+
+    def build(db_ids, source, output, _connection, *, force):
+        observed.update(db_ids=db_ids, source=source, output=output, force=force)
+        return {
+            "database_stats": {
+                db_id: {
+                    "indexed_columns": 0,
+                    "indexed_values": 0,
+                    "truncated_columns": 0,
+                }
+                for db_id in db_ids
+            },
+            "wall_time_seconds": 1.0,
+            "_reused": True,
+        }
+
+    monkeypatch.setattr(cli, "build_exact_value_profiles", build)
+    args = SimpleNamespace(
+        cache_dir=tmp_path,
+        mysql_host="127.0.0.1",
+        mysql_port=13316,
+        mysql_user="rdst_bird",
+        mysql_password="rdst-benchmark",
+        mysql_database_prefix="bird_",
+        force=False,
+    )
+
+    assert cli._profile_values(args) == 0
+    assert observed["db_ids"] == list(cli.BIRD_MINI_DATABASE_IDS)
+    assert observed["source"] == source_dir
+    assert observed["force"] is False
 
 
 @pytest.mark.parametrize(
@@ -182,6 +246,53 @@ def test_llm_enriched_context_must_match_frozen_provenance(tmp_path):
     (tmp_path / "fixture.yaml").write_text("tampered")
     with pytest.raises(ValueError, match="differ from frozen provenance"):
         cli._verify_context_provenance(tmp_path, ContextMode.LLM_ENRICHED, ["fixture"])
+
+
+def test_profiled_values_context_must_match_frozen_provenance(tmp_path):
+    schema_path = tmp_path / "fixture.yaml"
+    schema_path.write_text("target: fixture\ntables: {}\n")
+    profile_path = tmp_path / "fixture.values.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "format_version": VALUE_PROFILE_FORMAT_VERSION,
+                "target": "fixture",
+                "columns": [],
+            }
+        )
+    )
+    profile_hash = hashlib.sha256(profile_path.read_bytes()).hexdigest()
+    (tmp_path / "provenance.json").write_text(
+        json.dumps(
+            {
+                "format_version": VALUE_PROFILE_FORMAT_VERSION,
+                "context_version": VALUE_PROFILE_CONTEXT_VERSION,
+                "dataset_revision": DATASET_REVISION,
+                "source_context": ContextMode.AUTO_INIT.value,
+                "output_context": ContextMode.AUTO_INIT_PROFILED_VALUES.value,
+                "construction_policy": "local-exact-distinct-values-v1",
+                "contains_questions": False,
+                "contains_evidence": False,
+                "contains_gold_sql": False,
+                "contains_bird_curated_descriptions": False,
+                "contains_database_values": True,
+                "output_schema_hashes": {"fixture": semantic_content_hash(schema_path)},
+                "value_profile_hashes": {"fixture": profile_hash},
+            }
+        )
+    )
+
+    provenance = cli._verify_context_provenance(
+        tmp_path, ContextMode.AUTO_INIT_PROFILED_VALUES, ["fixture"]
+    )
+    assert provenance["value_profile_hashes"] == {"fixture": profile_hash}
+    assert provenance["matching_policy_version"] == VALUE_GROUNDING_CONTEXT_VERSION
+
+    profile_path.write_text("tampered")
+    with pytest.raises(ValueError, match="differs from frozen provenance"):
+        cli._verify_context_provenance(
+            tmp_path, ContextMode.AUTO_INIT_PROFILED_VALUES, ["fixture"]
+        )
 
 
 @pytest.mark.parametrize(

@@ -25,7 +25,6 @@ from features.ask.sql_validation import (
     validate_tables_against_schema,
 )
 
-
 Q72_SCHEMA = """Table: frpm
   School Name (text) -- The official name of the school.
   County Name (text) -- The county containing the school.
@@ -101,6 +100,51 @@ class TestFilterLiteralProvenance:
         assert result["issues"] == []
         assert [(item["kind"], item["literal"]) for item in result["warnings"]] == [
             ("unsupported_literal", "Fellwar Stone")
+        ]
+
+    def test_matched_database_value_supports_a_storage_literal(self):
+        result = validate_filter_literal_provenance(
+            "SELECT language FROM foreign_data WHERE name = 'A Pedra Fellwar'",
+            question="Which foreign language is used by the card?",
+            schema_formatted="Table: foreign_data\n  name (text)\n  language (text)\n",
+            matched_database_values="- 'A Pedra Fellwar': foreign_data.name",
+            dialect="mysql",
+        )
+
+        assert result == {"is_valid": True, "issues": [], "warnings": []}
+
+    @pytest.mark.parametrize("question_date", ["2012/1/1", "2012.01.01"])
+    def test_accepts_an_equivalent_complete_calendar_date(self, question_date):
+        result = validate_filter_literal_provenance(
+            "SELECT COUNT(*) FROM transactions WHERE Date > '2012-01-01'",
+            question=f"How many transactions happened after {question_date}?",
+            schema_formatted="Table: transactions\n  Date (date)\n",
+            dialect="mysql",
+        )
+
+        assert result == {"is_valid": True, "issues": [], "warnings": []}
+
+    @pytest.mark.parametrize(
+        ("question_date", "sql_date"),
+        [
+            ("2012/1/2", "2012-01-01"),
+            ("2012/1", "2012-01-01"),
+            ("2012/2/30", "2012-02-30"),
+        ],
+    )
+    def test_does_not_equate_different_partial_or_invalid_dates(
+        self, question_date, sql_date
+    ):
+        result = validate_filter_literal_provenance(
+            f"SELECT COUNT(*) FROM transactions WHERE Date > '{sql_date}'",
+            question=f"How many transactions happened after {question_date}?",
+            schema_formatted="Table: transactions\n  Date (date)\n",
+            dialect="mysql",
+        )
+
+        assert result["is_valid"] is True
+        assert [(item["kind"], item["literal"]) for item in result["warnings"]] == [
+            ("unsupported_literal", sql_date)
         ]
 
     def test_phase_includes_advisory_literals_when_a_blocker_triggers_repair(self):

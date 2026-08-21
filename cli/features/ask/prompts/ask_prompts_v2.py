@@ -1,6 +1,6 @@
 AMBIGUITY_DETECTION_PROMPT = """You detect ambiguities that materially change SQL.
 
-User Question: "{nl_question}"{provided_context_block}
+User Question: "{nl_question}"{provided_context_block}{matched_database_values_block}
 
 Database Engine: {database_engine}
 

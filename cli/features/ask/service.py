@@ -149,6 +149,7 @@ class AskService:
                 target=target_name,
                 db_type=db_type,
                 provided_context=input.provided_context,
+                matched_database_values=input.matched_database_values,
                 target_config=target_config,
                 timeout_seconds=options.timeout_seconds,
                 max_rows=options.max_rows,
@@ -534,6 +535,7 @@ class AskService:
             llm_manager=llm_manager,
             preference_tree=None,
             provided_context=ctx.provided_context,
+            matched_database_values=ctx.matched_database_values,
             callback=lambda **kw: ctx.add_llm_call(phase="clarify", **kw),
         )
         raw_response = str(result.get("raw_response", ""))

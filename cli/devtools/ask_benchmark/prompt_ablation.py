@@ -256,6 +256,7 @@ def _run_cell(
                 target_database=case.db_id,
                 nl_question=case.question,
                 provided_context_block="",
+                matched_database_values_block="",
                 filtered_schema=schema,
             )
         elif cell == "enum-grounded-product-prompt":
@@ -264,6 +265,7 @@ def _run_cell(
                 target_database=case.db_id,
                 nl_question=case.question,
                 provided_context_block="",
+                matched_database_values_block="",
                 filtered_schema=schema,
             ).replace("Requirements:\n", f"Requirements:\n{ENUM_GROUNDING_RULES}\n")
         else:

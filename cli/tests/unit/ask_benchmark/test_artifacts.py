@@ -144,3 +144,66 @@ def test_initialize_binds_interaction_source_and_scoring_policy(tmp_path: Path):
         changed = {**manifest, field: "changed"}
         with pytest.raises(ValueError, match=field):
             store.initialize(changed)
+
+
+def test_initialize_ignores_transient_route_endpoint_status(tmp_path: Path):
+    store = ArtifactStore(tmp_path / "run")
+    manifest = {
+        "run_id": "run",
+        "route_checks": {
+            "model": {
+                "selected_provider": "provider-a",
+                "eligible_endpoints": [
+                    {
+                        "provider": "provider-a",
+                        "context_length": 1_000_000,
+                        "status": 0,
+                    }
+                ],
+            }
+        },
+    }
+    store.initialize(manifest)
+
+    changed_health = {
+        **manifest,
+        "route_checks": {
+            "model": {
+                "selected_provider": "provider-a",
+                "eligible_endpoints": [
+                    {
+                        "provider": "provider-a",
+                        "context_length": 1_000_000,
+                        "status": -2,
+                    }
+                ],
+            }
+        },
+    }
+    store.initialize(changed_health)
+
+
+def test_initialize_still_binds_route_identity(tmp_path: Path):
+    store = ArtifactStore(tmp_path / "run")
+    manifest = {
+        "run_id": "run",
+        "route_checks": {
+            "model": {
+                "selected_provider": "provider-a",
+                "eligible_endpoints": [{"provider": "provider-a", "status": 0}],
+            }
+        },
+    }
+    store.initialize(manifest)
+
+    changed_route = {
+        **manifest,
+        "route_checks": {
+            "model": {
+                "selected_provider": "provider-b",
+                "eligible_endpoints": [{"provider": "provider-b", "status": 0}],
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="route_checks"):
+        store.initialize(changed_route)

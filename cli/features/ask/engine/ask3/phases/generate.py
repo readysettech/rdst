@@ -66,6 +66,7 @@ def generate_sql(
         schema_format=ctx.schema_format,
         compact_fallback_schema=ctx.schema_compact_fallback,
         compact_fallback_format=COMPACT_SCHEMA_FORMAT_VERSION,
+        matched_database_values=ctx.matched_database_values,
         callback=lambda **kw: _track_llm_call(ctx, "generate", **kw),
     )
 
@@ -189,6 +190,7 @@ def repair_validation_error(
         database_engine=ctx.db_type,
         llm_manager=llm_manager,
         provided_context=ctx.provided_context,
+        matched_database_values=ctx.matched_database_values,
         callback=lambda **kw: _track_llm_call(ctx, "validation_repair", **kw),
     )
     if not result.get("success"):
