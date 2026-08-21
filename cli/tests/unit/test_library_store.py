@@ -1423,11 +1423,11 @@ class TestPlaceholderArtifactRepair:
         assert _user_version(db_path) == SCHEMA_VERSION
 
     def test_fresh_store_creates_at_current_version(self, tmp_path):
-        assert SCHEMA_VERSION == 12
+        assert SCHEMA_VERSION == 13
         toml_path = tmp_path / "queries.toml"
         registry = QueryRegistry(registry_path=str(toml_path))
         registry.add_query("SELECT 1", source="manual")
-        assert _user_version(library_db_path_for(toml_path)) == 12
+        assert _user_version(library_db_path_for(toml_path)) == 13
 
     def test_toml_import_repairs_damaged_entries(self, tmp_path):
         from shared.query_registry.query_registry import hash_sql, normalize_sql

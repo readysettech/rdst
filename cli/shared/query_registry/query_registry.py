@@ -1225,7 +1225,13 @@ class QueryRegistry:
         compared: bool,
         save_intent: bool,
     ) -> None:
-        """Update additive Query Library state without changing CLI metadata."""
+        """Update additive Query Library state without changing CLI metadata.
+
+        ``saved_at`` is the star the Query Library shows, so it is stamped
+        only for a caller that names a person's save intent, and the first
+        stamp is the one kept: a re-add reports the same moment the user
+        chose the query. Clearing it is the star toggle's own job.
+        """
         lifecycle = entry.lifecycle_for(target, create=True)
         if lifecycle is None:
             return
@@ -1263,7 +1269,7 @@ class QueryRegistry:
         observed: bool = False,
         analyzed: bool = False,
         compared: bool = False,
-        save_intent: bool = True,
+        save_intent: bool = False,
     ) -> tuple[str, bool]:
         """
         Add a query to the registry with parameter extraction and history.
@@ -1291,8 +1297,10 @@ class QueryRegistry:
             observed: Record a system observation for the target-scoped web lifecycle
             analyzed: Record a completed analysis for the web lifecycle
             compared: Record a completed cache comparison for the web lifecycle
-            save_intent: Record user/system save intent. Defaults to True to
-                preserve the existing CLI and registry contract.
+            save_intent: Star the query for this target, i.e. record that a
+                person chose to keep it. Opt-in, so that automatic capture,
+                cache runs, and every other caller RDST drives on its own
+                leave the user's starred set alone.
 
         Returns:
             Tuple of (query_hash, is_new) where is_new is True if this was a new query pattern

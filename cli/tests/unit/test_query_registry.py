@@ -553,20 +553,42 @@ class TestQueryRegistryLifecycle:
         assert lifecycle.reviewed_at == "2026-08-03T10:00:00Z"
         assert lifecycle.sources == ["top-historical"]
 
-    def test_default_add_query_keeps_cli_legacy_contract(self, tmp_path):
+    def test_add_query_stars_only_when_the_caller_asks(self, tmp_path):
+        """The star is the user's; an add says nothing about it by default."""
         registry = self._make_registry(tmp_path)
         query_hash, is_new = registry.add_query(
             "SELECT * FROM users",
             source="manual",
             target="demo",
         )
+        chosen_hash, _ = registry.add_query(
+            "SELECT * FROM orders",
+            source="manual",
+            target="demo",
+            save_intent=True,
+        )
 
         entry = registry.get_query(query_hash)
         assert is_new is True
         assert entry.first_analyzed
         assert entry.last_analyzed
-        assert entry.lifecycle_for("demo").saved_at
+        assert entry.lifecycle_for("demo").saved_at == ""
         assert entry.is_new_for("demo") is False
+        assert registry.get_query(chosen_hash).lifecycle_for("demo").saved_at
+
+    def test_a_re_add_keeps_the_moment_the_user_starred_it(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        query_hash, _ = registry.add_query(
+            "SELECT * FROM users", source="web", target="demo", save_intent=True,
+        )
+        first_starred_at = registry.get_query(query_hash).lifecycle_for("demo").saved_at
+
+        registry.add_query(
+            "SELECT * FROM users", source="web", target="demo", save_intent=True,
+        )
+
+        lifecycle = registry.get_query(query_hash).lifecycle_for("demo")
+        assert lifecycle.saved_at == first_starred_at
 
     def test_review_rejects_a_target_the_query_does_not_belong_to(self, tmp_path):
         registry = self._make_registry(tmp_path)
@@ -1698,7 +1720,7 @@ class TestPlaceholderStyleIdentity:
         assert is_new is True
 
         web_hash, web_is_new = registry.add_query(
-            sql=self.WEB_TEXT, source="web", target="demo"
+            sql=self.WEB_TEXT, source="web", target="demo", save_intent=True,
         )
         assert web_hash == observed_hash
         assert web_is_new is False

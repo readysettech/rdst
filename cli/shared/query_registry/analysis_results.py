@@ -4,20 +4,29 @@ Analysis Results Storage Extension for Query Registry
 Extends the query registry to store comprehensive analysis results from
 the RDST analyze workflow, including performance metrics, LLM insights,
 and rewrite test results.
+
+Bodies are stored in ``library.db`` (schema v13, see library_store.py),
+which imports whatever ``analysis_results.toml`` held when it first opens
+and leaves the file beside its backup for the previous release to read.
 """
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass, asdict
+import logging
+from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 import shared.constants as shared_constants
-import toml
 
-from .query_registry import QueryRegistry, hash_sql
+from .library_store import (
+    ANALYSIS_HISTORY_LIMIT,
+    LibraryStore,
+    library_db_path_for,
+)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -48,20 +57,31 @@ class AnalysisResult:
     llm_model_used: str = ""
     tokens_used: int = 0
 
+    # The finished analyze run exactly as the results view consumed it
+    # (explain_results, llm_analysis, rewrite_testing, index_testing,
+    # readyset_cacheability, formatted), so reopening a stored analysis
+    # renders from storage instead of re-running the query.
+    display_payload: Dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for TOML serialization."""
+        """Convert to dictionary for storage."""
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'AnalysisResult':
-        """Create AnalysisResult from dictionary (TOML deserialization)."""
-        # Handle backward compatibility
+        """Create AnalysisResult from a stored dictionary."""
+        # Handle backward compatibility. A body written by a newer build
+        # may carry fields this one does not model; they stay in storage
+        # and ride the read-only route, so dropping them here is safe.
+        known = set(cls.__dataclass_fields__)
+        data = {key: value for key, value in data.items() if key in known}
         for key, default_value in [
             ('rewrite_test_results', None),
             ('database_engine', ''),
             ('analysis_duration_ms', 0.0),
             ('llm_model_used', ''),
-            ('tokens_used', 0)
+            ('tokens_used', 0),
+            ('display_payload', {}),
         ]:
             if key not in data:
                 data[key] = default_value
@@ -73,15 +93,10 @@ class AnalysisResultsRegistry:
     """
     Registry for storing and retrieving query analysis results.
 
-    Stores results in TOML format at ~/.rdst/analysis_results.toml with structure:
-    [results.{query_hash}.{analysis_id}]
-    query_hash = "abc123def456"
-    analysis_id = "20240115_103000_001"
-    target = "production_db"
-    timestamp = "2024-01-15T10:30:00Z"
-    performance_metrics = {...}
-    llm_analysis = {...}
-    ...
+    Results live in the ``query_analysis`` table of the library store
+    beside the query registry, keyed by (query_hash, analysis_id) and
+    bounded to the most recent ANALYSIS_HISTORY_LIMIT runs per query. A
+    re-run appends a row; the oldest beyond the cap is dropped at insert.
     """
 
     def __init__(self, registry_path: Optional[str] = None):
@@ -89,74 +104,25 @@ class AnalysisResultsRegistry:
         Initialize the analysis results registry.
 
         Args:
-            registry_path: Custom path to registry file. Defaults to ~/.rdst/analysis_results.toml
+            registry_path: Custom path to the legacy TOML file. Defaults to
+                ~/.rdst/analysis_results.toml; the authoritative store is the
+                library.db serving the query registry beside it, and the TOML
+                is imported the first time that store opens.
         """
         if registry_path:
             self.registry_path = Path(registry_path)
         else:
             self.registry_path = shared_constants.rdst_data_dir() / "analysis_results.toml"
 
-        # In-memory cache of analysis results
-        self._results: Dict[str, Dict[str, AnalysisResult]] = {}  # {query_hash: {analysis_id: result}}
-        self._loaded = False
-
-    def _ensure_directory(self) -> None:
-        """Ensure the registry directory exists."""
-        self.registry_path.parent.mkdir(parents=True, exist_ok=True)
+        queries_path = _queries_toml_path_for(self.registry_path)
+        self._store = LibraryStore(library_db_path_for(queries_path), queries_path)
 
     def load(self) -> None:
-        """Load analysis results from TOML file into memory."""
-        if not self.registry_path.exists():
-            self._results = {}
-            self._loaded = True
-            return
-
-        try:
-            with open(self.registry_path, 'r', encoding='utf-8') as f:
-                data = toml.load(f)
-
-            # Load results from TOML structure
-            results_data = data.get('results', {})
-            self._results = {}
-
-            for query_hash, analyses in results_data.items():
-                self._results[query_hash] = {}
-                for analysis_id, analysis_data in analyses.items():
-                    try:
-                        self._results[query_hash][analysis_id] = AnalysisResult.from_dict(analysis_data)
-                    except Exception as e:
-                        print(f"Warning: Skipping malformed analysis result {query_hash}/{analysis_id}: {e}")
-                        continue
-
-            self._loaded = True
-
-        except Exception as e:
-            print(f"Warning: Could not load analysis results registry: {e}")
-            self._results = {}
-            self._loaded = True
+        """Open the backing store, importing a legacy TOML if one is there."""
+        self._store.ensure_open()
 
     def save(self) -> None:
-        """Save analysis results from memory to TOML file."""
-        if not self._loaded:
-            self.load()
-
-        self._ensure_directory()
-
-        # Convert to TOML structure
-        toml_data = {
-            'results': {}
-        }
-
-        for query_hash, analyses in self._results.items():
-            toml_data['results'][query_hash] = {}
-            for analysis_id, result in analyses.items():
-                toml_data['results'][query_hash][analysis_id] = result.to_dict()
-
-        try:
-            with open(self.registry_path, 'w', encoding='utf-8') as f:
-                toml.dump(toml_data, f)
-        except Exception as e:
-            raise RuntimeError(f"Failed to save analysis results registry: {e}")
+        """No-op: every write commits its own transaction."""
 
     def store_analysis_result(self, query_hash: str, result: AnalysisResult) -> str:
         """
@@ -169,23 +135,37 @@ class AnalysisResultsRegistry:
         Returns:
             The analysis_id for the stored result
         """
-        if not self._loaded:
-            self.load()
-
-        # Ensure query_hash exists in results
-        if query_hash not in self._results:
-            self._results[query_hash] = {}
-
-        # Generate analysis_id if not provided
         if not result.analysis_id:
-            timestamp = datetime.now(timezone.utc)
-            result.analysis_id = timestamp.strftime("%Y%m%d_%H%M%S_") + f"{len(self._results[query_hash]):03d}"
+            result.analysis_id = self._next_analysis_id(query_hash)
 
-        # Store the result
-        self._results[query_hash][result.analysis_id] = result
-        self.save()
-
+        self._store.record_analysis(
+            query_hash=query_hash,
+            analysis_id=result.analysis_id,
+            created_at=result.timestamp,
+            target=result.target,
+            payload=result.to_dict(),
+            keep=ANALYSIS_HISTORY_LIMIT,
+        )
         return result.analysis_id
+
+    def attach_display_payload(
+        self, query_hash: str, analysis_id: str, payload: Dict[str, Any]
+    ) -> bool:
+        """
+        Attach the finished results view to an already-stored analysis.
+
+        The workflow stores an analysis before the run's cacheability and
+        index findings exist, so the display payload lands in a second
+        write once the run has produced everything the viewer renders.
+
+        Returns:
+            True when the stored analysis was updated.
+        """
+        stored = self._store.analysis_payload(query_hash, analysis_id)
+        if stored is None:
+            return False
+        stored["display_payload"] = payload
+        return self._store.update_analysis_payload(query_hash, analysis_id, stored)
 
     def get_latest_analysis(self, query_hash: str) -> Optional[AnalysisResult]:
         """
@@ -197,23 +177,8 @@ class AnalysisResultsRegistry:
         Returns:
             Most recent AnalysisResult or None if not found
         """
-        if not self._loaded:
-            self.load()
-
-        query_analyses = self._results.get(query_hash, {})
-        if not query_analyses:
-            return None
-
-        # Find most recent analysis by timestamp
-        latest_result = None
-        latest_timestamp = ""
-
-        for analysis_result in query_analyses.values():
-            if analysis_result.timestamp > latest_timestamp:
-                latest_timestamp = analysis_result.timestamp
-                latest_result = analysis_result
-
-        return latest_result
+        analyses = self.get_all_analyses_for_query(query_hash)
+        return analyses[0] if analyses else None
 
     def get_analysis_by_id(self, query_hash: str, analysis_id: str) -> Optional[AnalysisResult]:
         """
@@ -226,10 +191,23 @@ class AnalysisResultsRegistry:
         Returns:
             AnalysisResult or None if not found
         """
-        if not self._loaded:
-            self.load()
+        payload = self._store.analysis_payload(query_hash, analysis_id)
+        return _decode(payload) if payload is not None else None
 
-        return self._results.get(query_hash, {}).get(analysis_id)
+    def get_stored_payload(
+        self, query_hash: str, analysis_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Return one stored body for read-only redisplay.
+
+        Every modeled field is present, so a body imported from an older
+        release reads the same shape as one written today, and any field a
+        newer build wrote rides along untouched.
+        """
+        stored = self._store.analysis_payload(query_hash, analysis_id)
+        if stored is None:
+            return None
+        decoded = _decode(stored)
+        return {**stored, **decoded.to_dict()} if decoded else stored
 
     def get_all_analyses_for_query(self, query_hash: str) -> List[AnalysisResult]:
         """
@@ -241,15 +219,11 @@ class AnalysisResultsRegistry:
         Returns:
             List of AnalysisResult objects
         """
-        if not self._loaded:
-            self.load()
-
-        query_analyses = self._results.get(query_hash, {})
-        results = list(query_analyses.values())
-
-        # Sort by timestamp, newest first
-        results.sort(key=lambda r: r.timestamp, reverse=True)
-
+        results = []
+        for payload in self._store.analysis_payloads(query_hash):
+            decoded = _decode(payload)
+            if decoded is not None:
+                results.append(decoded)
         return results
 
     def list_analyzed_queries(self, limit: Optional[int] = None) -> List[str]:
@@ -262,25 +236,28 @@ class AnalysisResultsRegistry:
         Returns:
             List of query hashes, sorted by most recent analysis
         """
-        if not self._loaded:
-            self.load()
-
-        # Get all query hashes with their most recent analysis timestamps
-        query_timestamps = []
-        for query_hash, analyses in self._results.items():
-            if analyses:
-                latest_timestamp = max(result.timestamp for result in analyses.values())
-                query_timestamps.append((query_hash, latest_timestamp))
-
-        # Sort by timestamp, newest first
-        query_timestamps.sort(key=lambda x: x[1], reverse=True)
-
-        query_hashes = [qh for qh, _ in query_timestamps]
-
+        query_hashes = self._store.analyzed_query_hashes()
         if limit:
             query_hashes = query_hashes[:limit]
-
         return query_hashes
+
+    def _next_analysis_id(self, query_hash: str) -> str:
+        """Mint an id for a run that arrived without one.
+
+        The timestamp prefix keeps ids sortable; the suffix counts this
+        query's stored runs and steps past whatever the history already
+        holds, so two runs in the same second stay distinct.
+        """
+        stored = {
+            str(payload.get("analysis_id") or "")
+            for payload in self._store.analysis_payloads(query_hash)
+        }
+        prefix = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_")
+        for sequence in range(len(stored), len(stored) + 1000):
+            candidate = f"{prefix}{sequence:03d}"
+            if candidate not in stored:
+                return candidate
+        return f"{prefix}{len(stored):03d}"
 
     def get_analysis_summary(self, query_hash: str) -> Optional[Dict[str, Any]]:
         """
@@ -333,20 +310,14 @@ class AnalysisResultsRegistry:
         Returns:
             Number of analyses removed
         """
-        if not self._loaded:
-            self.load()
+        return self._store.delete_analyses(query_hash)
 
-        if query_hash in self._results:
-            count = len(self._results[query_hash])
-            del self._results[query_hash]
-            self.save()
-            return count
-
-        return 0
-
-    def cleanup_old_analyses(self, keep_per_query: int = 10) -> int:
+    def cleanup_old_analyses(self, keep_per_query: int = ANALYSIS_HISTORY_LIMIT) -> int:
         """
         Clean up old analysis results, keeping only the most recent N per query.
+
+        Storing already trims to ANALYSIS_HISTORY_LIMIT, so this only has
+        work to do when asked for a tighter bound.
 
         Args:
             keep_per_query: Number of analyses to keep per query
@@ -354,30 +325,36 @@ class AnalysisResultsRegistry:
         Returns:
             Number of analyses removed
         """
-        if not self._loaded:
-            self.load()
+        return self._store.prune_analyses(keep_per_query)
 
-        removed_count = 0
 
-        for query_hash in list(self._results.keys()):
-            analyses = self.get_all_analyses_for_query(query_hash)
-            if len(analyses) > keep_per_query:
-                # Keep only the most recent analyses
-                to_keep = analyses[:keep_per_query]
-                keep_ids = {a.analysis_id for a in to_keep}
+def _queries_toml_path_for(analysis_path: Path) -> Path:
+    """Return the queries.toml whose library store holds this history.
 
-                # Remove older analyses
-                original_count = len(self._results[query_hash])
-                self._results[query_hash] = {
-                    aid: result for aid, result in self._results[query_hash].items()
-                    if aid in keep_ids
-                }
-                removed_count += original_count - len(self._results[query_hash])
+    Inverse of ``library_store.analysis_toml_path_for``, so a registry
+    opened on a custom analysis filename lands on that registry's own
+    store rather than the canonical one.
+    """
+    suffix = ".analysis_results.toml"
+    if analysis_path.name == "analysis_results.toml":
+        return analysis_path.with_name("queries.toml")
+    if analysis_path.name.endswith(suffix):
+        return analysis_path.with_name(analysis_path.name[: -len(suffix)])
+    return analysis_path.with_name(analysis_path.name + ".queries.toml")
 
-        if removed_count > 0:
-            self.save()
 
-        return removed_count
+def _decode(payload: Dict[str, Any]) -> Optional[AnalysisResult]:
+    """Decode a stored body, skipping (and reporting) one that is malformed."""
+    try:
+        return AnalysisResult.from_dict(dict(payload))
+    except Exception as exc:
+        logger.warning(
+            "Skipping malformed analysis result %s/%s: %s",
+            payload.get("query_hash"),
+            payload.get("analysis_id"),
+            exc,
+        )
+        return None
 
 
 def extract_performance_assessment(llm_analysis: Dict[str, Any]) -> Dict[str, Any]:
@@ -436,8 +413,10 @@ def create_analysis_result(query_hash: str, target: str,
         rewrite_suggestions=rewrite_suggestions or [],
         index_suggestions=index_suggestions or [],
         caching_recommendations=caching_recommendations or {},
+        rewrite_test_results=kwargs.get('rewrite_test_results'),
         database_engine=kwargs.get('database_engine', ''),
         analysis_duration_ms=kwargs.get('analysis_duration_ms', 0.0),
         llm_model_used=kwargs.get('llm_model_used', ''),
-        tokens_used=kwargs.get('tokens_used', 0)
+        tokens_used=kwargs.get('tokens_used', 0),
+        display_payload=kwargs.get('display_payload') or {},
     )

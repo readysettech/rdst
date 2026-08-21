@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field, StrictFloat, StrictInt, StrictStr
+from pydantic import BaseModel, Field, StrictBool, StrictFloat, StrictInt, StrictStr
 from typing import Any, Optional, Literal, AsyncGenerator, Union
 from datetime import datetime, timezone
 from sse_starlette.sse import EventSourceResponse
@@ -68,6 +68,21 @@ def _cached_read_model_store():
         return _read_model_store_instance
 
 
+class LastCompareOutcome(BaseModel):
+    """What the query's most recent Compare run found, as stored.
+
+    Written by the compare-outcome endpoint and read back here, so a
+    measurement survives the browser that took it. Fields the run did not
+    measure come back null.
+    """
+
+    status: str
+    at: str = ""
+    readyset_ms: Optional[float] = None
+    origin_ms: Optional[float] = None
+    detail: Optional[str] = None
+
+
 class QueryRegistryEntry(BaseModel):
     sql: str
     hash: str
@@ -102,6 +117,11 @@ class QueryRegistryEntry(BaseModel):
     comparison_count: int = 0
     sources: list[str] = Field(default_factory=list)
     is_new: bool = False
+    # The user's star, stored as saved_at. The pair is what the library
+    # renders; saved_at above stays for clients that already read it.
+    starred: bool = False
+    starred_at: str = ""
+    last_compare: Optional[LastCompareOutcome] = None
 
 
 class QueryRegistryResponse(BaseModel):
@@ -184,6 +204,35 @@ class LatestAnalysisResponse(BaseModel):
     error: Optional[str] = None
 
 
+class AnalysisHistoryEntry(BaseModel):
+    """One entry in a query's bounded analysis history."""
+
+    analysis_id: str
+    created_at: str
+    target: str
+    overall_rating: str = ""
+    efficiency_score: Optional[float] = None
+
+
+class AnalysisHistoryResponse(BaseModel):
+    """A query's stored analyses, newest first."""
+
+    hash: str
+    analyses: list[AnalysisHistoryEntry]
+
+
+class StoredAnalysisResponse(BaseModel):
+    """One stored analysis, whole, for read-only redisplay."""
+
+    hash: str
+    analysis_id: str
+    created_at: str
+    target: str
+    overall_rating: str = ""
+    efficiency_score: Optional[float] = None
+    analysis: dict
+
+
 @router.get("/query-registry/discovery/stream")
 async def stream_query_discovery(
     request: Request,
@@ -219,6 +268,28 @@ async def stream_query_discovery(
     # Bookmarks are the keepalive; the transport's comment ping only
     # backstops a stalled subscriber loop at the same cadence.
     return EventSourceResponse(event_stream(), ping=BOOKMARK_INTERVAL_SECONDS)
+
+
+def _compare_measurement(value: Any) -> Optional[float]:
+    """A measured millisecond value, or None for anything unmeasured."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _last_compare(lifecycle) -> Optional[LastCompareOutcome]:
+    """The stored Compare outcome for one target, when a run recorded one."""
+    outcome = getattr(lifecycle, "last_compare", None)
+    if not isinstance(outcome, dict) or not outcome.get("status"):
+        return None
+    detail = outcome.get("detail")
+    return LastCompareOutcome(
+        status=str(outcome["status"]),
+        at=str(outcome.get("at") or ""),
+        readyset_ms=_compare_measurement(outcome.get("readyset_ms")),
+        origin_ms=_compare_measurement(outcome.get("origin_ms")),
+        detail=str(detail) if detail is not None else None,
+    )
 
 
 def _to_registry_entry(q, target: Optional[str]) -> QueryRegistryEntry:
@@ -261,6 +332,9 @@ def _to_registry_entry(q, target: Optional[str]) -> QueryRegistryEntry:
             else ([q.source] if q.source else [])
         ),
         is_new=q.is_new_for(entry_target),
+        starred=bool(lifecycle and lifecycle.saved_at),
+        starred_at=lifecycle.saved_at if lifecycle else "",
+        last_compare=_last_compare(lifecycle),
     )
 
 
@@ -288,6 +362,7 @@ def _library_read_model(
     target: Optional[str],
     search: Optional[str],
     view: Optional[str],
+    starred: Optional[bool],
     source: Optional[str],
     params: Optional[str],
     activity: Optional[str],
@@ -301,6 +376,7 @@ def _library_read_model(
         "target": target or "",
         "search": search or "",
         "view": view or "all",
+        "starred": starred,
         "source": source or "all",
         "params": params or "all",
         "activity": activity or "all",
@@ -332,6 +408,7 @@ def _library_read_model(
                 target=target,
                 search=resolved["search"],
                 view=resolved["view"],
+                starred=resolved["starred"],
                 source=resolved["source"],
                 params=resolved["params"],
                 activity=resolved["activity"],
@@ -364,6 +441,7 @@ def _library_read_model(
                 entries,
                 search=resolved["search"],
                 view=resolved["view"],
+                starred=resolved["starred"],
                 source=resolved["source"],
                 params=resolved["params"],
                 activity=resolved["activity"],
@@ -405,6 +483,13 @@ async def get_query_registry(
     target: Optional[str] = None,
     search: Optional[str] = None,
     view: Optional[read_model.ViewName] = None,
+    starred: Optional[bool] = Query(
+        None,
+        description=(
+            "Restrict to starred queries (1) or unstarred ones (0). "
+            "Omit for both."
+        ),
+    ),
     source: Optional[read_model.SourceName] = None,
     params: Optional[read_model.ParamsName] = None,
     activity: Optional[read_model.ActivityName] = None,
@@ -414,20 +499,27 @@ async def get_query_registry(
 ) -> Union[QueryLibraryResponse, QueryRegistryResponse]:
     """Get queries from the shared query registry, optionally scoped to a target.
 
-    Passing any Query Library read-model parameter (search, view, source,
-    params, activity, impact, sort, cursor) switches the response to
+    Passing any Query Library read-model parameter (search, view, starred,
+    source, params, activity, impact, sort, cursor) switches the response to
     {queries, facet_counts, next_cursor, total, freshness}, computed over the
     full target-scoped set with keyset pagination. Without them the legacy
     limit/offset contract is unchanged.
+
+    ``starred`` is a facet of its own rather than a value of ``view``, so a
+    shortlist composes with every other filter ("starred and not yet
+    analyzed"). ``view=saved`` selects the same rows and keeps working.
     """
     if any(
         value is not None
-        for value in (search, view, source, params, activity, impact, sort, cursor)
+        for value in (
+            search, view, starred, source, params, activity, impact, sort, cursor,
+        )
     ):
         return _library_read_model(
             target=target,
             search=search,
             view=view,
+            starred=starred,
             source=source,
             params=params,
             activity=activity,
@@ -476,7 +568,11 @@ async def get_query_registry(
 
 @router.post("/query-registry")
 async def add_query_to_registry(request: AddQueryRequest) -> AddQueryResponse:
-    """Add a query to the registry."""
+    """Add a query to the registry.
+
+    Typing a query into the Add query dialog is the one place a person
+    hands RDST a query to keep, so the new entry arrives starred.
+    """
     try:
         from shared.query_registry import QueryRegistry
 
@@ -487,6 +583,7 @@ async def add_query_to_registry(request: AddQueryRequest) -> AddQueryResponse:
             sql=request.sql,
             source="web",
             target=request.target or "",
+            save_intent=True,
         )
 
         return AddQueryResponse(success=True, hash=query_hash)
@@ -534,6 +631,84 @@ async def mark_query_reviewed(
         return MarkQueryReviewedResponse(success=False, error=str(e))
 
 
+class SetQueryStarredRequest(BaseModel):
+    """Whether the user wants this query starred on one target."""
+
+    starred: StrictBool
+    target: StrictStr = ""
+
+
+class SetQueryStarredResponse(BaseModel):
+    hash: str
+    target: str
+    starred: bool
+    starred_at: str
+
+
+@router.patch("/query-registry/queries/{query_hash}/starred")
+async def set_query_starred(
+    query_hash: str,
+    request: SetQueryStarredRequest,
+    http_request: Request,
+) -> SetQueryStarredResponse:
+    """Star or unstar a query for one target.
+
+    The star is the library's only user-authored mark: nothing RDST does on
+    its own sets it, and this is the one place it is cleared. Starring a
+    query that already carries a star keeps the moment it was first
+    starred, so the toggle is idempotent.
+    """
+    require_local_request(http_request)
+    from shared.query_registry import QueryRegistry
+
+    registry = QueryRegistry()
+    registry.load()
+    entry = registry.get_query(query_hash)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Query not found")
+
+    target = request.target or entry.home_target
+    lifecycle = entry.lifecycle_for(target, create=request.starred)
+    if lifecycle is None:
+        # The query has no history on this target, so there is no star there
+        # to clear and nothing to write.
+        return SetQueryStarredResponse(
+            hash=entry.hash, target=target, starred=False, starred_at="",
+        )
+
+    if request.starred:
+        lifecycle.saved_at = lifecycle.saved_at or (
+            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        )
+    else:
+        lifecycle.saved_at = ""
+    registry.save()
+
+    return SetQueryStarredResponse(
+        hash=entry.hash,
+        target=target,
+        starred=bool(lifecycle.saved_at),
+        starred_at=lifecycle.saved_at,
+    )
+
+
+def _analysis_assessment(llm_analysis: Any) -> tuple[str, Optional[float]]:
+    """Return the (rating, score) pair the compact summary shows."""
+    from shared.query_registry import extract_performance_assessment
+
+    assessment = extract_performance_assessment(
+        llm_analysis if isinstance(llm_analysis, dict) else {}
+    )
+    rating = assessment.get("overall_rating")
+    score = assessment.get("efficiency_score")
+    return (
+        rating if isinstance(rating, str) else "",
+        float(score)
+        if isinstance(score, (int, float)) and not isinstance(score, bool)
+        else None,
+    )
+
+
 @router.get("/query-registry/{query_hash}/analysis/latest")
 async def get_latest_query_analysis(query_hash: str) -> LatestAnalysisResponse:
     """Get the most recent stored analysis summary for a query.
@@ -543,34 +718,78 @@ async def get_latest_query_analysis(query_hash: str) -> LatestAnalysisResponse:
     outcome on demand.
     """
     try:
-        from shared.query_registry import (
-            AnalysisResultsRegistry,
-            extract_performance_assessment,
-        )
+        from shared.query_registry import AnalysisResultsRegistry
 
         result = AnalysisResultsRegistry().get_latest_analysis(query_hash)
         if result is None:
             return LatestAnalysisResponse(found=False)
 
-        assessment = extract_performance_assessment(result.llm_analysis or {})
-        rating = assessment.get("overall_rating")
-        score = assessment.get("efficiency_score")
+        rating, score = _analysis_assessment(result.llm_analysis)
         return LatestAnalysisResponse(
             found=True,
             analysis=QueryAnalysisSummary(
                 analysis_id=result.analysis_id,
                 analyzed_at=result.timestamp,
                 target=result.target,
-                overall_rating=rating if isinstance(rating, str) else "",
-                efficiency_score=(
-                    float(score)
-                    if isinstance(score, (int, float)) and not isinstance(score, bool)
-                    else None
-                ),
+                overall_rating=rating,
+                efficiency_score=score,
             ),
         )
     except Exception as e:
         return LatestAnalysisResponse(found=False, error=str(e))
+
+
+@router.get("/query-registry/{query_hash}/analyses")
+async def list_query_analyses(query_hash: str) -> AnalysisHistoryResponse:
+    """List a query's stored analyses, newest first.
+
+    The bounded history behind the results viewer: enough of each run to
+    choose one, with the body left to the per-analysis route. A query that
+    was never analyzed has an empty history rather than an error.
+    """
+    from shared.query_registry import AnalysisResultsRegistry
+
+    entries = []
+    for result in AnalysisResultsRegistry().get_all_analyses_for_query(query_hash):
+        rating, score = _analysis_assessment(result.llm_analysis)
+        entries.append(
+            AnalysisHistoryEntry(
+                analysis_id=result.analysis_id,
+                created_at=result.timestamp,
+                target=result.target,
+                overall_rating=rating,
+                efficiency_score=score,
+            )
+        )
+    return AnalysisHistoryResponse(hash=query_hash, analyses=entries)
+
+
+@router.get("/query-registry/{query_hash}/analysis/{analysis_id}")
+async def get_stored_query_analysis(
+    query_hash: str, analysis_id: str
+) -> StoredAnalysisResponse:
+    """Return one stored analysis whole, so it can be reopened without a re-run.
+
+    The body is served exactly as it was stored, including any field a
+    newer build wrote, and ``display_payload`` carries the finished run in
+    the shape the results view already renders.
+    """
+    from shared.query_registry import AnalysisResultsRegistry
+
+    stored = AnalysisResultsRegistry().get_stored_payload(query_hash, analysis_id)
+    if stored is None:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    rating, score = _analysis_assessment(stored.get("llm_analysis"))
+    return StoredAnalysisResponse(
+        hash=query_hash,
+        analysis_id=str(stored.get("analysis_id") or analysis_id),
+        created_at=str(stored.get("timestamp") or ""),
+        target=str(stored.get("target") or ""),
+        overall_rating=rating,
+        efficiency_score=score,
+        analysis=stored,
+    )
 
 
 class UpdateTagRequest(BaseModel):
@@ -762,11 +981,15 @@ async def update_query_sql(
         if not entry:
             return UpdateSqlResponse(success=False, error="Query not found")
 
+        lifecycle = entry.lifecycle_for(entry.last_target)
         new_hash, _ = registry.add_query(
             sql=request.sql,
             tag=entry.tag,
             source=entry.source,
             target=entry.last_target,
+            # Editing rewrites a query the user already starred, so the star
+            # follows it rather than being dropped with the old hash.
+            save_intent=bool(lifecycle and lifecycle.saved_at),
         )
         if new_hash != query_hash:
             registry.remove_query(query_hash)

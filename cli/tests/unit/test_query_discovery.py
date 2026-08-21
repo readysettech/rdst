@@ -1863,6 +1863,7 @@ async def test_pg_activity_snapshot_refreshes_saved_literal_entry(tmp_path):
         sql="SELECT * FROM invoices WHERE id = 1",
         source="manual",
         target="demo",
+        save_intent=True,
     )
     saved_at = registry.get_query(saved_hash).lifecycle_for("demo").saved_at
     assert saved_at

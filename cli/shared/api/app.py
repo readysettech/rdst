@@ -361,7 +361,16 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     from features.trial.api import routes as trial
     from features.schema.api import semantic_layer_routes as semantic_layer
     from features.qpdemo.api import routes as qpdemo
-    from shared.api.routes import browse, dev, env, report, runs, settings, status
+    from shared.api.routes import (
+        browse,
+        dev,
+        env,
+        report,
+        runs,
+        settings,
+        setup_progress,
+        status,
+    )
 
     app.include_router(agent.router, prefix="/api")
     app.include_router(allowlist.router, prefix="/api")
@@ -378,6 +387,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     app.include_router(configure.router, prefix="/api", tags=["configure"])
     app.include_router(interactive.router, prefix="/api", tags=["interactive"])
     app.include_router(status.router, prefix="/api")
+    app.include_router(setup_progress.router, prefix="/api", tags=["status"])
     app.include_router(env.router, prefix="/api", tags=["env"])
     app.include_router(schema.router, prefix="/api")
     app.include_router(registry.router, prefix="/api")

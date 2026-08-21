@@ -371,6 +371,7 @@ def select_library(
     *,
     search: str = "",
     view: str = "all",
+    starred: Optional[bool] = None,
     source: str = "all",
     params: str = "all",
     activity: str = "all",
@@ -384,10 +385,16 @@ def select_library(
     search-filtered set with every OTHER facet's selected filter applied,
     never a facet's own filter, so each facet shows what selecting it
     would yield. Returns (sorted selected rows, facet_counts).
+
+    ``starred`` narrows the set the same way search does, before any facet
+    is counted: it is the user's own shortlist, so every other facet counts
+    within it rather than beside it.
     """
     if now_ms is None:
         now_ms = time.time() * 1000.0
     searched = filter_by_search(entries, search)
+    if starred is not None:
+        searched = [entry for entry in searched if bool(entry.saved_at) is starred]
 
     facet_counts = empty_facet_counts()
     selected: List[Any] = []
@@ -455,6 +462,7 @@ def spec_hash(
     activity: str,
     impact: str,
     sort: str,
+    starred: Optional[bool] = None,
 ) -> str:
     """Short fingerprint of everything that defines row order and membership.
 
@@ -466,6 +474,7 @@ def spec_hash(
             "target": target or "",
             "search": _normalize_search(search or ""),
             "view": view,
+            "starred": starred,
             "source": source,
             "params": params,
             "activity": activity,

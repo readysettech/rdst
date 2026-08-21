@@ -54,7 +54,12 @@ async def _get(app: FastAPI, params: dict):
 
 def _library_fixture(registry: QueryRegistry) -> dict[str, str]:
     """Six 'demo' rows exercising every view/source/params/activity/impact
-    bucket. Bucket membership per row is asserted in the facet test."""
+    bucket. Bucket membership per row is asserted in the facet test.
+
+    Two of the six carry the user's star ('invoices', analyzed, and
+    'payments', not), so a starred filter and a view filter intersect on
+    exactly one row.
+    """
     now = datetime.now(timezone.utc)
     hashes: dict[str, str] = {}
 
@@ -82,6 +87,7 @@ def _library_fixture(registry: QueryRegistry) -> dict[str, str]:
         target="demo",
         analyzed=True,
         skip_param_extraction=True,
+        save_intent=True,
     )
     invoices = registry.get_query(hashes["invoices"])
     invoices.most_recent_params = {"p1": "42"}
@@ -91,6 +97,7 @@ def _library_fixture(registry: QueryRegistry) -> dict[str, str]:
         source="file",
         target="demo",
         tag="Weekly revenue",
+        save_intent=True,
     )
     registry.get_query(hashes["payments"]).readyset_supported = "yes"
 
@@ -185,7 +192,7 @@ async def test_facets_computed_over_full_set_not_page(app, registry):
     assert facets["view"] == {
         "all": 6,
         "new": 1,
-        "saved": 6,
+        "saved": 2,
         "high-impact": 2,
         "needs-analysis": 5,
         "ready-to-cache": 1,
@@ -223,6 +230,84 @@ async def test_facet_dimension_excludes_its_own_filter(app, registry):
     }
 
 
+# -- the star, a facet of its own --------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_starred_selects_the_user_marked_rows(app, registry):
+    hashes = _library_fixture(registry)
+
+    response = await _get(app, {"target": "demo", "starred": 1})
+
+    body = response.json()
+    assert body["total"] == 2
+    assert {entry["hash"] for entry in body["queries"]} == {
+        hashes["invoices"], hashes["payments"],
+    }
+    assert all(entry["starred"] is True for entry in body["queries"])
+
+
+@pytest.mark.asyncio
+async def test_starred_composes_with_view_and_source(app, registry):
+    """The combination the single-select view could not ask for."""
+    hashes = _library_fixture(registry)
+
+    shortlist = await _get(
+        app, {"target": "demo", "starred": 1, "view": "needs-analysis"},
+    )
+    by_source = await _get(app, {"target": "demo", "starred": 1, "source": "file"})
+    unstarred = await _get(
+        app, {"target": "demo", "starred": 0, "view": "needs-analysis"},
+    )
+
+    assert [entry["hash"] for entry in shortlist.json()["queries"]] == [
+        hashes["payments"]
+    ]
+    assert [entry["hash"] for entry in by_source.json()["queries"]] == [
+        hashes["payments"]
+    ]
+    assert hashes["invoices"] not in {
+        entry["hash"] for entry in unstarred.json()["queries"]
+    }
+    assert unstarred.json()["total"] == 4
+
+
+@pytest.mark.asyncio
+async def test_starred_narrows_the_facet_counts_like_search(app, registry):
+    _library_fixture(registry)
+
+    response = await _get(app, {"target": "demo", "starred": 1})
+
+    facets = response.json()["facet_counts"]
+    assert facets["view"]["all"] == 2
+    assert facets["view"]["needs-analysis"] == 1
+    assert facets["source"] == {
+        "all": 2, "observed": 0, "ask": 0, "manual": 1, "file": 1, "scan": 0,
+    }
+    # The starred count itself does not move with the toggle, so the control
+    # can label itself from either state.
+    unfiltered = await _get(app, {"target": "demo", "view": "all"})
+    assert facets["view"]["saved"] == 2
+    assert unfiltered.json()["facet_counts"]["view"]["saved"] == 2
+
+
+@pytest.mark.asyncio
+async def test_view_saved_still_selects_the_same_rows(app, registry):
+    """Back-compat: the retired Status value and the star agree."""
+    _library_fixture(registry)
+
+    saved = await _get(app, {"target": "demo", "view": "saved"})
+    starred = await _get(app, {"target": "demo", "starred": 1})
+
+    assert [entry["hash"] for entry in saved.json()["queries"]] == [
+        entry["hash"] for entry in starred.json()["queries"]
+    ]
+    assert saved.json()["total"] == starred.json()["total"] == 2
+    # view=saved keeps counting every view over the whole target, so the
+    # Status dropdown it belongs to still shows what selecting each would give.
+    assert saved.json()["facet_counts"]["view"]["all"] == 6
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -231,6 +316,9 @@ async def test_facet_dimension_excludes_its_own_filter(app, registry):
         {"params": "values-ready"},
         {"activity": "30d"},
         {"impact": "1m"},
+        {"starred": True},
+        {"starred": False},
+        {"starred": True, "view": "needs-analysis"},
         {"sort": "recently-observed"},
         {"sort": "newest"},
         {"sort": "most-frequent"},
@@ -243,6 +331,7 @@ def test_sql_read_model_matches_python_selector(registry, overrides):
     resolved = {
         "search": "",
         "view": "all",
+        "starred": None,
         "source": "all",
         "params": "all",
         "activity": "all",
@@ -528,6 +617,7 @@ async def test_concurrent_pages_reuse_one_store_without_sharing_registry_state(
             target="demo",
             search="",
             view="all",
+            starred=None,
             source="all",
             params="all",
             activity="all",

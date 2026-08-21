@@ -61,7 +61,8 @@ async def test_registry_response_uses_requested_target_lifecycle(app, registry):
     assert entry["sources"] == ["top-historical"]
     assert entry["first_observed_at"]
     assert entry["last_observed_at"]
-    assert entry["saved_at"]
+    assert entry["saved_at"] == ""
+    assert entry["starred"] is False
     assert entry["is_new"] is True
 
 

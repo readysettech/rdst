@@ -290,7 +290,8 @@ class QueryCommand:
         # Add to registry
         try:
             query_hash, is_new = self.registry.add_query(
-                sql=sql, tag=name, source=source, target=target or ""
+                sql=sql, tag=name, source=source, target=target or "",
+                save_intent=True,
             )
 
             self.console.print(
@@ -420,6 +421,7 @@ class QueryCommand:
                             tag=name,
                             source="import",
                             target=query_target or "",
+                            save_intent=True,
                         )
                         if new_hash != existing.hash:
                             self.registry.remove_query(existing.hash)
@@ -433,7 +435,8 @@ class QueryCommand:
                 # Add new query
                 try:
                     self.registry.add_query(
-                        sql=sql, tag=name, source="import", target=query_target or ""
+                        sql=sql, tag=name, source="import",
+                        target=query_target or "", save_intent=True,
                     )
                     imported += 1
                 except Exception as e:
@@ -631,12 +634,16 @@ class QueryCommand:
         # Update registry
         # Note: If SQL changes significantly, hash will change
         # We'll remove old entry and add new one with same tag
+        old_lifecycle = entry.lifecycle_for(entry.last_target)
         try:
             new_hash, is_new = self.registry.add_query(
                 sql=new_sql,
                 tag=old_tag,  # Preserve tag
                 source=entry.source,
                 target=entry.last_target,
+                # An edit rewrites the query the user already starred, so the
+                # star follows it to the new hash.
+                save_intent=bool(old_lifecycle and old_lifecycle.saved_at),
             )
 
             # If hash changed, remove old entry

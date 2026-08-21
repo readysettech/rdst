@@ -100,16 +100,17 @@ def store_analysis_results(**kwargs) -> Dict[str, Any]:
             save_intent=False,
         )
 
-        _persist_analysis_summary(
-            stored_hash, target, _ensure_dict(kwargs.get("llm_analysis"))
-        )
+        stored_analysis_id = _persist_analysis_record(stored_hash, target, kwargs)
 
         return {
             "success": True,
             "query_hash": stored_hash,
-            # CLI follow-up hints treat this as the registry hash; the summary
+            # CLI follow-up hints treat this as the registry hash; the results
             # store keeps its own per-run analysis ids.
             "analysis_id": stored_hash,
+            # The stored analysis this run appended, for the caller that
+            # finishes it with the results the viewer redisplays.
+            "stored_analysis_id": stored_analysis_id,
             "is_new_query": is_new,
             "message": f"Query stored in registry with hash: {stored_hash}",
         }
@@ -123,42 +124,55 @@ def store_analysis_results(**kwargs) -> Dict[str, Any]:
         }
 
 
-def _persist_analysis_summary(
-    query_hash: str, target: str, llm_analysis: Dict[str, Any]
-) -> Optional[str]:
-    """Persist a compact per-analysis summary and return its analysis id.
+def _analysis_performance_metrics(explain_results: Dict[str, Any]) -> Dict[str, Any]:
+    """Project the measured numbers out of an EXPLAIN ANALYZE result."""
+    metrics: Dict[str, Any] = {}
+    for key in (
+        "execution_time_ms",
+        "rows_examined",
+        "rows_returned",
+        "cost_estimate",
+    ):
+        value = explain_results.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            metrics[key] = value
+    return metrics
 
-    The Query Library reads this store to show each query's latest analysis
-    outcome. Only the compact assessment is kept, so the store stays small;
-    the history is bounded per query. Best effort: the analysis itself has
-    already succeeded, so a summary-store failure returns None instead of
-    failing the workflow step.
+
+def _persist_analysis_record(
+    query_hash: str, target: str, context: Dict[str, Any]
+) -> Optional[str]:
+    """Persist this run's analysis body and return its analysis id.
+
+    The Query Library reads the newest record for each query's outcome, and
+    the results viewer reopens a stored one instead of re-running, so the
+    whole body is kept rather than the compact assessment alone. The history
+    is bounded per query. Best effort: the analysis itself has already
+    succeeded, so a store failure returns None instead of failing the
+    workflow step.
     """
     try:
         from shared.query_registry import (
             AnalysisResultsRegistry,
             create_analysis_result,
-            extract_performance_assessment,
         )
 
-        assessment = extract_performance_assessment(llm_analysis)
-        summary: Dict[str, Any] = {}
-        rating = assessment.get("overall_rating")
-        if isinstance(rating, str) and rating:
-            summary["overall_rating"] = rating
-        score = assessment.get("efficiency_score")
-        if isinstance(score, (int, float)) and not isinstance(score, bool):
-            summary["efficiency_score"] = float(score)
-
+        llm_analysis = _ensure_dict(context.get("llm_analysis"))
+        explain_results = _ensure_dict(context.get("explain_results"))
+        suggestions = _ensure_dict(context.get("optimization_suggestions"))
         tokens_used = llm_analysis.get("tokens_used")
         results_registry = AnalysisResultsRegistry()
         record = create_analysis_result(
             query_hash=query_hash,
             target=target,
-            performance_metrics={},
-            llm_analysis={"performance_assessment": summary} if summary else {},
-            explain_plan={},
-            query_metrics={},
+            performance_metrics=_analysis_performance_metrics(explain_results),
+            llm_analysis=llm_analysis,
+            explain_plan=_ensure_dict(explain_results.get("explain_plan")),
+            query_metrics=_ensure_dict(context.get("query_metrics")),
+            rewrite_suggestions=suggestions.get("rewrite_suggestions") or [],
+            index_suggestions=suggestions.get("index_recommendations") or [],
+            rewrite_test_results=_ensure_dict(context.get("rewrite_test_results")),
+            database_engine=str(explain_results.get("database_engine") or ""),
             llm_model_used=str(llm_analysis.get("llm_model") or ""),
             tokens_used=(
                 int(tokens_used)
@@ -172,7 +186,7 @@ def _persist_analysis_summary(
         return analysis_id
     except Exception:
         logger.warning(
-            "Could not persist the analysis summary for %s", query_hash, exc_info=True
+            "Could not persist the analysis record for %s", query_hash, exc_info=True
         )
         return None
 

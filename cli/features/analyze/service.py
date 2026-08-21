@@ -6,6 +6,7 @@ exposing an async generator interface that yields events during execution.
 
 import json
 import asyncio
+import logging
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, Optional, Tuple
 
@@ -24,6 +25,8 @@ from .events import (
 )
 from .functions import ANALYZE_WORKFLOW_FUNCTIONS
 from .models import AnalyzeInput, AnalyzeOptions
+
+logger = logging.getLogger(__name__)
 
 
 # Step progress mapping (extracted from API routes)
@@ -667,20 +670,63 @@ class AnalyzeService:
         formatted = context.get("FormatFinalResults", {})
         if isinstance(formatted, dict):
             formatted["readyset_cacheability"] = cacheability_payload
+        storage_result = context.get("storage_result", {})
+        # Deep links must use the identifier that was actually persisted
+        # in the registry. Parameter normalization can intentionally
+        # produce a different hash, which does not identify a Saved card.
+        query_hash = (
+            storage_result.get("query_hash")
+            or context.get("registry_normalization", {}).get("hash")
+            or input.hash
+        )
+        results = {
+            "explain_results": _serialize_for_json(explain_results),
+            "llm_analysis": _serialize_for_json(context.get("llm_analysis", {})),
+            "rewrite_testing": _serialize_for_json(rewrite_results),
+            "index_testing": _serialize_for_json(
+                _coerce_dict(context.get("index_test_results"))
+            ),
+            "readyset_cacheability": _serialize_for_json(cacheability_payload),
+            "formatted": _serialize_for_json(formatted),
+        }
+        await self._store_display_payload(
+            query_hash, storage_result.get("stored_analysis_id"), results
+        )
         yield CompleteEvent(
             type="complete",
             success=True,
-            analysis_id=context.get("storage_result", {}).get("analysis_id"),
-            # Deep links must use the identifier that was actually persisted
-            # in the registry. Parameter normalization can intentionally
-            # produce a different hash, which does not identify a Saved card.
-            query_hash=context.get("storage_result", {}).get("query_hash")
-            or context.get("registry_normalization", {}).get("hash")
-            or input.hash,
-            explain_results=_serialize_for_json(explain_results),
-            llm_analysis=_serialize_for_json(context.get("llm_analysis", {})),
-            rewrite_testing=_serialize_for_json(rewrite_results),
-            index_testing=_serialize_for_json(_coerce_dict(context.get("index_test_results"))),
-            readyset_cacheability=_serialize_for_json(cacheability_payload),
-            formatted=_serialize_for_json(formatted),
+            analysis_id=storage_result.get("analysis_id"),
+            query_hash=query_hash,
+            **results,
         )
+
+    @staticmethod
+    async def _store_display_payload(
+        query_hash: str, analysis_id: Optional[str], results: Dict[str, Any]
+    ) -> None:
+        """Finish the stored analysis with what the results view renders.
+
+        Cacheability and index findings are produced after the workflow's
+        storage step, so the record is completed here rather than written
+        twice. Best effort: the run has already succeeded, and a viewer
+        that lacks these sections is a better outcome than a failed run.
+        """
+        if not analysis_id:
+            return
+
+        def attach() -> None:
+            from shared.query_registry import AnalysisResultsRegistry
+
+            AnalysisResultsRegistry().attach_display_payload(
+                query_hash, analysis_id, results
+            )
+
+        try:
+            await asyncio.to_thread(attach)
+        except Exception:
+            logger.warning(
+                "Could not store the results view for analysis %s of %s",
+                analysis_id,
+                query_hash,
+                exc_info=True,
+            )

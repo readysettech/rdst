@@ -22,6 +22,10 @@ Q4/Q12 M2):
   ``reviewed_at`` for every imported target/query pair so the upgrade
   does not flood the New view. From then on the TOML is ignored; the
   on-demand projection is ``rdst query export --format=toml``.
+- Analysis bodies follow the same import philosophy: schema v13 reads
+  ``analysis_results.toml`` into ``query_analysis`` and leaves the file
+  beside its ``.pre-sqlite-<version>.bak`` copy, readable by the
+  previous release.
 - Entries round-trip losslessly: known QueryEntry fields map to typed
   columns, unknown (newer-build) fields ride in a JSON ``extra`` column.
 """
@@ -56,15 +60,22 @@ from shared.query_registry.observation_store import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "ANALYSIS_HISTORY_LIMIT",
     "LibraryMigrationError",
     "LibraryStore",
     "RegistryReadOnlyError",
     "SCHEMA_VERSION",
+    "analysis_toml_path_for",
     "default_library_db_path",
     "library_db_path_for",
 ]
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
+
+# Analyses kept per query. A re-run appends, and the oldest beyond this
+# many is dropped at insert, so the history stays bounded per query
+# without a sweep.
+ANALYSIS_HISTORY_LIMIT = 10
 
 # QueryRegistry is constructed by nearly every CLI command; run the SQLite
 # runtime check once per process, at first actual store use rather than at
@@ -114,6 +125,19 @@ def library_db_path_for(registry_path: Path) -> Path:
     if registry_path.name == "queries.toml":
         return registry_path.with_name("library.db")
     return registry_path.with_name(registry_path.name + ".library.db")
+
+
+def analysis_toml_path_for(registry_path: Path) -> Path:
+    """Return the legacy analysis_results.toml serving a queries.toml path.
+
+    Named on the same rule as ``library_db_path_for`` so a side-by-side
+    registry keeps its own analysis history: the canonical registry reads
+    ``analysis_results.toml``, any other registry filename reads
+    ``<name>.analysis_results.toml``.
+    """
+    if registry_path.name == "queries.toml":
+        return registry_path.with_name("analysis_results.toml")
+    return registry_path.with_name(registry_path.name + ".analysis_results.toml")
 
 
 # Scalar QueryEntry fields stored as typed columns, in schema order.
@@ -330,6 +354,36 @@ def _schema_v1(strict: bool) -> tuple[str, ...]:
     )
 
 
+def _schema_v13(strict: bool) -> tuple[str, ...]:
+    """Analysis bodies, the history the results viewer reopens.
+
+    One row per analysis run: the indexed identity columns answer the
+    history list and the setup signals, and ``payload`` carries the whole
+    AnalysisResult so a stored run round-trips unchanged.
+
+    The DDL is written IF NOT EXISTS so the step is re-runnable: a fresh
+    store creates this table alongside v1 and v7, and the ladder must be
+    able to pass over it again on a file whose version was rewound.
+    """
+    s_only = " STRICT" if strict else ""
+    return (
+        f"""
+        CREATE TABLE IF NOT EXISTS query_analysis (
+          id INTEGER PRIMARY KEY,
+          query_hash TEXT NOT NULL,
+          analysis_id TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT '',
+          target TEXT NOT NULL DEFAULT '',
+          payload TEXT NOT NULL DEFAULT '{{}}'
+        ){s_only}""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_qa_analysis"
+        " ON query_analysis(query_hash, analysis_id)",
+        "CREATE INDEX IF NOT EXISTS ix_qa_history"
+        " ON query_analysis(query_hash, created_at DESC, id DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_qa_target ON query_analysis(target)",
+    )
+
+
 # Migration ladder: version N maps to the DDL that brings a version N-1
 # file to version N. Additive only; this file is never rebuilt. Version 2
 # is a data cleanup with no DDL; its logic lives in
@@ -396,6 +450,10 @@ _MIGRATIONS: Dict[int, Any] = {
     # probe statements that reference no user relation, whatever review or
     # save intent they collected on the way in; see _prune_system_statements.
     12: lambda strict: (),
+    # Version 13 moves analysis bodies out of analysis_results.toml and into
+    # query_analysis, importing the file inside this transaction; see
+    # _import_analysis_toml.
+    13: _schema_v13,
 }
 
 # Data-cleanup versions: each runs _prune_system_only_entries inside its
@@ -891,6 +949,15 @@ def _json_dumps(value: Any) -> str:
     return json.dumps(value, sort_keys=True, default=str)
 
 
+def _decode_analysis_payload(payload: Any) -> Dict[str, Any]:
+    """Decode a stored analysis body, tolerating a row written by hand."""
+    try:
+        decoded = json.loads(payload or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
 def _finite_float(value: Any) -> float:
     """Return a SQLite/JSON-safe finite number for legacy numeric input."""
     try:
@@ -1234,6 +1301,8 @@ class LibraryStore:
                     self._prune_self_traffic(conn)
                 if version == 12:
                     self._prune_system_statements(conn)
+                if version == 13:
+                    self._import_analysis_toml(conn)
                 conn.execute(f"PRAGMA user_version = {version:d}")
                 conn.execute("COMMIT")
             except BaseException:
@@ -1281,6 +1350,8 @@ class LibraryStore:
             # entries below are inserted with materialized values directly.
             for statement in _MIGRATIONS[7](_strict_mode()):
                 conn.execute(statement)
+            for statement in _MIGRATIONS[13](_strict_mode()):
+                conn.execute(statement)
             for statement in _READ_MODEL_INDEXES:
                 conn.execute(statement)
             for query_hash, entry in entries.items():
@@ -1301,6 +1372,7 @@ class LibraryStore:
             self._repair_v9_residue(conn)
             self._prune_self_traffic(conn)
             self._prune_system_statements(conn)
+            self._import_analysis_toml(conn)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION:d}")
             conn.execute("COMMIT")
         except BaseException:
@@ -1313,6 +1385,250 @@ class LibraryStore:
                 self._toml_path,
                 self._db_path,
             )
+
+    def _import_analysis_toml(self, conn: sqlite3.Connection) -> int:
+        """Import analysis_results.toml into query_analysis, once.
+
+        Runs inside the caller's transaction, so a failure rolls the whole
+        migration back and the TOML stays authoritative for the next
+        attempt. The file is copied to
+        ``analysis_results.toml.pre-sqlite-<version>.bak`` and left in
+        place, readable by the previous release, matching what the
+        queries.toml import does. Rows already present are ignored, so a
+        second pass imports nothing twice.
+
+        A TOML this build cannot parse is reported and skipped rather than
+        failing the upgrade: the query library is the precious data, and an
+        unreadable analysis sidecar must not hold it at the old schema.
+        """
+        path = analysis_toml_path_for(self._toml_path)
+        if not path.exists():
+            return 0
+        try:
+            data = toml.load(path)
+        except Exception as exc:
+            logger.warning("Skipping unreadable analysis history at %s: %s", path, exc)
+            return 0
+
+        imported = 0
+        for query_hash, analyses in (data.get("results") or {}).items():
+            if not isinstance(analyses, dict):
+                continue
+            bodies = [body for body in analyses.values() if isinstance(body, dict)]
+            bodies.sort(key=lambda body: str(body.get("timestamp") or ""), reverse=True)
+            for body in bodies[:ANALYSIS_HISTORY_LIMIT]:
+                analysis_id = str(body.get("analysis_id") or "")
+                if not analysis_id:
+                    continue
+                cursor = conn.execute(
+                    "INSERT OR IGNORE INTO query_analysis"
+                    " (query_hash, analysis_id, created_at, target, payload)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (
+                        query_hash,
+                        analysis_id,
+                        str(body.get("timestamp") or ""),
+                        str(body.get("target") or ""),
+                        _json_dumps(body),
+                    ),
+                )
+                imported += cursor.rowcount or 0
+
+        backup = path.with_name(f"{path.name}.pre-sqlite-{SCHEMA_VERSION}.bak")
+        if not backup.exists():
+            shutil.copy2(path, backup)
+        if imported:
+            logger.info(
+                "Imported %d stored analyses from %s into %s",
+                imported,
+                path,
+                self._db_path,
+            )
+        return imported
+
+    # -- analyses -------------------------------------------------------------
+
+    def record_analysis(
+        self,
+        *,
+        query_hash: str,
+        analysis_id: str,
+        created_at: str,
+        target: str,
+        payload: Dict[str, Any],
+        keep: int = ANALYSIS_HISTORY_LIMIT,
+    ) -> None:
+        """Append one analysis, then drop the oldest beyond ``keep``.
+
+        A re-run appends rather than replacing, so before/after stays
+        comparable; the same analysis id written twice updates its own row.
+        """
+        with self._write() as conn:
+            conn.execute(
+                "INSERT INTO query_analysis"
+                " (query_hash, analysis_id, created_at, target, payload)"
+                " VALUES (?, ?, ?, ?, ?)"
+                " ON CONFLICT(query_hash, analysis_id) DO UPDATE SET"
+                " created_at = excluded.created_at, target = excluded.target,"
+                " payload = excluded.payload",
+                (query_hash, analysis_id, created_at, target, _json_dumps(payload)),
+            )
+            self._prune_analysis_history(conn, query_hash, keep)
+
+    def update_analysis_payload(
+        self, query_hash: str, analysis_id: str, payload: Dict[str, Any]
+    ) -> bool:
+        """Replace one stored analysis body; False when the row is gone."""
+        with self._write() as conn:
+            cursor = conn.execute(
+                "UPDATE query_analysis SET payload = ?"
+                " WHERE query_hash = ? AND analysis_id = ?",
+                (_json_dumps(payload), query_hash, analysis_id),
+            )
+            return bool(cursor.rowcount)
+
+    def analysis_payloads(self, query_hash: str) -> list[Dict[str, Any]]:
+        """Every stored body for one query, newest first."""
+        if not self._analyses_readable():
+            return []
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT payload FROM query_analysis WHERE query_hash = ?"
+                " ORDER BY created_at DESC, id DESC",
+                (query_hash,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [_decode_analysis_payload(row["payload"]) for row in rows]
+
+    def analysis_payload(
+        self, query_hash: str, analysis_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """One stored body by id, or None when it was never stored or aged out."""
+        if not self._analyses_readable():
+            return None
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT payload FROM query_analysis"
+                " WHERE query_hash = ? AND analysis_id = ?",
+                (query_hash, analysis_id),
+            ).fetchone()
+        finally:
+            conn.close()
+        return _decode_analysis_payload(row["payload"]) if row else None
+
+    def analyzed_query_hashes(self) -> list[str]:
+        """Query hashes that hold an analysis, most recently analyzed first."""
+        if not self._analyses_readable():
+            return []
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT query_hash FROM query_analysis GROUP BY query_hash"
+                " ORDER BY MAX(created_at) DESC"
+            ).fetchall()
+        finally:
+            conn.close()
+        return [row["query_hash"] for row in rows]
+
+    def delete_analyses(self, query_hash: str) -> int:
+        """Drop every stored analysis for one query; returns how many went."""
+        if not self._analyses_readable():
+            return 0
+        with self._write() as conn:
+            cursor = conn.execute(
+                "DELETE FROM query_analysis WHERE query_hash = ?", (query_hash,)
+            )
+            return cursor.rowcount or 0
+
+    def prune_analyses(self, keep: int) -> int:
+        """Trim every query's history to ``keep``; returns how many went."""
+        if not self._analyses_readable():
+            return 0
+        with self._write() as conn:
+            removed = 0
+            for row in conn.execute(
+                "SELECT query_hash FROM query_analysis GROUP BY query_hash"
+                " HAVING COUNT(*) > ?",
+                (max(keep, 0),),
+            ).fetchall():
+                removed += self._prune_analysis_history(conn, row["query_hash"], keep)
+            return removed
+
+    @staticmethod
+    def _prune_analysis_history(
+        conn: sqlite3.Connection, query_hash: str, keep: int
+    ) -> int:
+        cursor = conn.execute(
+            "DELETE FROM query_analysis WHERE query_hash = ? AND id NOT IN ("
+            "  SELECT id FROM query_analysis WHERE query_hash = ?"
+            "  ORDER BY created_at DESC, id DESC LIMIT ?"
+            ")",
+            (query_hash, query_hash, max(keep, 0)),
+        )
+        return cursor.rowcount or 0
+
+    def _analyses_readable(self) -> bool:
+        """Whether opening the store could serve an analysis at all.
+
+        A data dir with neither a store file nor a legacy TOML has no
+        history to read, and reading must not create the file.
+        """
+        if (
+            not self._opened
+            and not self._db_path.exists()
+            and not self._toml_path.exists()
+        ):
+            return False
+        self.ensure_open()
+        return True
+
+    # -- setup signals --------------------------------------------------------
+
+    def setup_signals(self, target: str) -> Dict[str, bool]:
+        """Answer the library-derived setup-guide questions in one connection.
+
+        ``queries_found`` counts only user workload: RDST's own diagnostic
+        statements are matched by structure and skipped, so a target that
+        has seen nothing but profiling reads still reads as empty.
+        """
+        signals = {"queries_found": False, "analyzed": False, "compared": False}
+        if not target or not self._analyses_readable():
+            return signals
+        from shared.query_registry.self_traffic import match_self_template
+
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT qi.sql, qi.original_sql FROM target_query AS tq"
+                " JOIN query_identity AS qi ON qi.id = tq.identity_id"
+                " WHERE tq.target_key = ?",
+                (target,),
+            )
+            signals["queries_found"] = any(
+                match_self_template(row["original_sql"] or row["sql"]) is None
+                for row in rows
+            )
+            signals["analyzed"] = (
+                conn.execute(
+                    "SELECT 1 FROM query_analysis WHERE target = ? LIMIT 1",
+                    (target,),
+                ).fetchone()
+                is not None
+            )
+            signals["compared"] = (
+                conn.execute(
+                    "SELECT 1 FROM target_query"
+                    " WHERE target_key = ? AND comparison_count > 0 LIMIT 1",
+                    (target,),
+                ).fetchone()
+                is not None
+            )
+        finally:
+            conn.close()
+        return signals
 
     # -- reads ----------------------------------------------------------------
 
@@ -2143,13 +2459,19 @@ class LibraryStore:
         cursor_position: Optional[tuple[float, str]],
         limit: int,
         now_ms: float,
+        starred: Optional[bool] = None,
     ) -> tuple[
         list[Dict[str, Any]],
         Dict[str, Dict[str, int]],
         int,
         Optional[tuple[float, str]],
     ]:
-        """Read one indexed target page and full-set facet counts in SQLite."""
+        """Read one indexed target page and full-set facet counts in SQLite.
+
+        ``starred`` narrows the candidate set beside search rather than
+        acting as one more facet, so with the star filter on every facet
+        count describes the user's shortlist.
+        """
         if (
             not self._opened
             and not self._db_path.exists()
@@ -2161,6 +2483,11 @@ class LibraryStore:
         self.ensure_open()
         values: Dict[str, Any] = {"target": target}
         search_clause = self._search_clause(search, values)
+        if starred is None:
+            candidate_clause = search_clause
+        else:
+            starred_clause = "rm_is_saved" if starred else "NOT rm_is_saved"
+            candidate_clause = f"({search_clause}) AND {starred_clause}"
         selected = self._dimension_predicates(
             view=view,
             source=source,
@@ -2200,14 +2527,14 @@ class LibraryStore:
         facet_sql = (
             "WITH candidate AS (SELECT * FROM target_query "
             "WHERE target_key = :target AND "
-            + search_clause
+            + candidate_clause
             + ") SELECT "
             + ", ".join(aggregates)
             + " FROM candidate"
         )
 
         sort_column, sort_index = _SORT_COLUMNS[sort]
-        page_predicates = [search_clause, *selected.values()]
+        page_predicates = [candidate_clause, *selected.values()]
         values["page_probe"] = limit + 1
         identity_columns = ", ".join(
             ["qi.hash", *[f"qi.{column}" for column in _IDENTITY_FIELDS]]

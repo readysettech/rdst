@@ -127,30 +127,53 @@ async def test_latest_analysis_returns_newest_of_multiple(app, analysis_registry
     assert analysis["efficiency_score"] == 90.0
 
 
-def test_store_analysis_results_persists_compact_summary(
+def test_store_analysis_results_persists_the_whole_record(
     registry, analysis_registry
 ):
+    llm_analysis = {
+        "performance_assessment": {
+            "overall_rating": "fair",
+            "efficiency_score": 55,
+        },
+        "llm_model": "test-model",
+        "tokens_used": 1234,
+    }
     result = workflow_integration.store_analysis_results(
         query="SELECT * FROM users WHERE id = 7",
         target="demo",
-        llm_analysis={
-            "performance_assessment": {
-                "overall_rating": "fair",
-                "efficiency_score": 55,
-            },
-            "llm_model": "test-model",
-            "tokens_used": 1234,
+        llm_analysis=llm_analysis,
+        explain_results={
+            "database_engine": "postgresql",
+            "execution_time_ms": 12.5,
+            "rows_returned": 3,
+            "explain_plan": {"Node Type": "Index Scan"},
         },
+        query_metrics={"calls": 42},
+        optimization_suggestions={
+            "rewrite_suggestions": [{"title": "add a filter"}],
+            "index_recommendations": [{"table": "users"}],
+        },
+        rewrite_test_results={"tested": True},
     )
 
     assert result["success"] is True
     stored = analysis_registry.get_latest_analysis(result["query_hash"])
     assert stored is not None
-    assert stored.analysis_id
+    assert stored.analysis_id == result["stored_analysis_id"]
     assert stored.target == "demo"
-    assert stored.llm_analysis == {
-        "performance_assessment": {"overall_rating": "fair", "efficiency_score": 55.0}
+    # The viewer reopens this record instead of re-running, so it keeps the
+    # measured numbers and the plan, not the assessment alone.
+    assert stored.llm_analysis == llm_analysis
+    assert stored.performance_metrics == {
+        "execution_time_ms": 12.5,
+        "rows_returned": 3,
     }
+    assert stored.explain_plan == {"Node Type": "Index Scan"}
+    assert stored.query_metrics == {"calls": 42}
+    assert stored.rewrite_suggestions == [{"title": "add a filter"}]
+    assert stored.index_suggestions == [{"table": "users"}]
+    assert stored.rewrite_test_results == {"tested": True}
+    assert stored.database_engine == "postgresql"
     assert stored.llm_model_used == "test-model"
     assert stored.tokens_used == 1234
 

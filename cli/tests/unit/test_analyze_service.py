@@ -775,6 +775,64 @@ class TestAnalyzeServiceProcessResults:
         }
 
     @pytest.mark.asyncio
+    async def test_process_results_finishes_the_stored_analysis(
+        self, service, input_data
+    ):
+        """The stored analysis gains exactly what the results view rendered."""
+        from shared.query_registry.analysis_results import (
+            AnalysisResultsRegistry,
+            create_analysis_result,
+        )
+
+        registry = AnalysisResultsRegistry()
+        analysis_id = registry.store_analysis_result(
+            "hash_456",
+            create_analysis_result(
+                query_hash="hash_456",
+                target="demo",
+                performance_metrics={},
+                llm_analysis={},
+                explain_plan={},
+                query_metrics={},
+            ),
+        )
+        workflow_result = {
+            "success": True,
+            "result": {
+                "explain_results": {"success": True, "execution_time_ms": 10},
+                "llm_analysis": {"recommendations": ["Add index"]},
+                "rewrite_test_results": {"tested": False},
+                "readyset_cacheability": {"checked": True, "cacheable": True},
+                "storage_result": {
+                    "analysis_id": "analysis_123",
+                    "query_hash": "hash_456",
+                    "stored_analysis_id": analysis_id,
+                },
+                "FormatFinalResults": {"summary": "Analysis complete"},
+            },
+        }
+
+        events = [
+            event
+            async for event in service._process_results(
+                workflow_result=workflow_result,
+                readyset_result=None,
+                input=input_data,
+            )
+        ]
+
+        complete = next(event for event in events if event.type == "complete")
+        stored = registry.get_analysis_by_id("hash_456", analysis_id)
+        assert stored.display_payload == {
+            "explain_results": complete.explain_results,
+            "llm_analysis": complete.llm_analysis,
+            "rewrite_testing": complete.rewrite_testing,
+            "index_testing": complete.index_testing,
+            "readyset_cacheability": complete.readyset_cacheability,
+            "formatted": complete.formatted,
+        }
+
+    @pytest.mark.asyncio
     async def test_process_results_workflow_failure(self, service, input_data):
         """Test _process_results yields ErrorEvent on workflow failure."""
         events = []
