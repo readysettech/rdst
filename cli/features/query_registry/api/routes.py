@@ -858,6 +858,10 @@ class BenchmarkRequest(BaseModel):
     concurrency: Optional[int] = 1  # For concurrency mode
     duration_seconds: Optional[int] = 30
     max_count: Optional[int] = None
+    # The endpoints the same workload runs against. The origin alone is the
+    # default and the fallback; asking for "readyset" adds a lane measured
+    # through the managed sandbox, reported beside the origin one.
+    lanes: list[Literal["origin", "readyset"]] = ["origin"]
     # Concrete parameter sets each stored query rotates through, so a run is
     # not one value's cache profile. 1 keeps the stored values only.
     parameter_sets: Optional[int] = None
@@ -908,14 +912,22 @@ class QueryBenchmarkStats(BaseModel):
     last_error: Optional[str] = None
     timeouts: int = 0
     variant_count: int = 1
+    # Per-lane numbers in the shape of the fields above, which themselves
+    # carry the origin lane. Absent from an origin-only run.
+    lanes: Optional[dict[str, dict[str, Any]]] = None
 
 
 class QuerySkip(BaseModel):
-    """A query the run left out, and why."""
+    """A query the run left out, and why.
+
+    A skip with no lanes is out of the whole run and counted in
+    ``skipped_count``; a skip that names lanes runs in the run's others.
+    """
 
     query_hash: str
     query_name: str
     reason: str
+    lanes: Optional[dict[str, str]] = None
 
 
 class BenchmarkProgress(BaseModel):
@@ -932,6 +944,23 @@ class BenchmarkProgress(BaseModel):
     warmup_executions: int = 0
     skipped_count: int = 0
     skipped_queries: list[QuerySkip] = []
+    # Completion only: the lanes that produced measurements, and how the
+    # Readyset lane's setup went when the caller asked for it.
+    lanes_run: Optional[list[str]] = None
+    readyset_setup: Optional[dict[str, str]] = None
+
+
+def _present_fields(value: Any) -> dict[str, Any]:
+    """Serialize a benchmark record, leaving an unset ``lanes`` field out.
+
+    Only a run with a second lane sets one, so an origin-only run keeps the
+    payload shape it has always had.
+    """
+    return {
+        name: field
+        for name, field in vars(value).items()
+        if field is not None or name != "lanes"
+    }
 
 
 def _progress_to_sse(progress: Any) -> dict:
@@ -961,23 +990,26 @@ def _progress_to_sse(progress: Any) -> dict:
             }
         )
     else:
-        payload = json.dumps(
-            {
-                "type": progress.type,
-                "elapsed_seconds": progress.elapsed_seconds,
-                "total_executions": progress.total_executions,
-                "total_successes": progress.total_successes,
-                "total_failures": progress.total_failures,
-                "qps": progress.qps,
-                "queries": [q.__dict__ for q in progress.queries],
-                "warmup_executions": getattr(progress, "warmup_executions", 0),
-                "skipped_count": getattr(progress, "skipped_count", 0),
-                "skipped_queries": [
-                    skip.__dict__
-                    for skip in getattr(progress, "skipped_queries", ())
-                ],
-            }
-        )
+        body = {
+            "type": progress.type,
+            "elapsed_seconds": progress.elapsed_seconds,
+            "total_executions": progress.total_executions,
+            "total_successes": progress.total_successes,
+            "total_failures": progress.total_failures,
+            "qps": progress.qps,
+            "queries": [_present_fields(q) for q in progress.queries],
+            "warmup_executions": getattr(progress, "warmup_executions", 0),
+            "skipped_count": getattr(progress, "skipped_count", 0),
+            "skipped_queries": [
+                _present_fields(skip)
+                for skip in getattr(progress, "skipped_queries", ())
+            ],
+        }
+        for name in ("lanes_run", "readyset_setup"):
+            value = getattr(progress, name, None)
+            if value is not None:
+                body[name] = value
+        payload = json.dumps(body)
     return {
         "event": event_name,
         "data": payload,
@@ -986,17 +1018,20 @@ def _progress_to_sse(progress: Any) -> dict:
 
 async def _benchmark_generator(
     queries, target, mode, interval_ms, concurrency, duration_seconds, max_count,
+    lanes=None,
     **tuning,
 ) -> AsyncGenerator[dict, None]:
     """Compatibility SSE path, protected by a measurement reservation."""
+    from ..readyset_lane import benchmark_sandbox
     from ..service import QueryService
-    from shared.deploy.sandbox_manager import sandbox_manager
 
     service = QueryService()
-    async with sandbox_manager.reserve_measurement(
+    lanes = lanes or ["origin"]
+    async with benchmark_sandbox(
+        target=target,
         owner_id=f"request-{uuid.uuid4().hex[:12]}",
-        purpose="load_test",
-    ):
+        lanes=lanes,
+    ) as readyset:
         async for progress in service.stream_benchmark(
             queries=queries,
             target=target,
@@ -1005,6 +1040,8 @@ async def _benchmark_generator(
             concurrency=concurrency,
             duration_seconds=duration_seconds,
             max_count=max_count,
+            lanes=lanes,
+            readyset=readyset,
             **tuning,
         ):
             yield _progress_to_sse(progress)
@@ -1049,6 +1086,7 @@ async def run_benchmark(
             30 if request.duration_seconds is None else request.duration_seconds
         ),
         max_count=request.max_count,
+        lanes=list(request.lanes),
         **_benchmark_tuning(request),
     ))
 
@@ -1063,10 +1101,10 @@ async def start_load_test_run(
     http_request: Request,
     guard: TargetGuard = Depends(require_target_body),
 ) -> LoadTestRunStartResponse:
-    """Start or attach to the target's detached origin-only benchmark."""
+    """Start or attach to the target's detached benchmark."""
     require_local_request(http_request)
-    from shared.deploy.sandbox_manager import sandbox_manager
     from shared.run_registry import run_registry
+    from ..readyset_lane import benchmark_sandbox
     from ..service import QueryService
 
     metadata = {
@@ -1086,10 +1124,11 @@ async def start_load_test_run(
         return LoadTestRunStartResponse(run_id=existing)
 
     async def factory(owner_id: str):
-        async with sandbox_manager.reserve_measurement(
+        async with benchmark_sandbox(
+            target=guard.target_name,
             owner_id=owner_id,
-            purpose="load_test",
-        ):
+            lanes=request.lanes,
+        ) as readyset:
             async for event in QueryService().stream_benchmark(
                 queries=request.queries,
                 target=guard.target_name,
@@ -1110,6 +1149,8 @@ async def start_load_test_run(
                     else 30
                 ),
                 max_count=request.max_count,
+                lanes=list(request.lanes),
+                readyset=readyset,
                 **_benchmark_tuning(request),
             ):
                 yield event

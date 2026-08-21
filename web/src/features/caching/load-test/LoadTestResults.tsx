@@ -11,7 +11,11 @@ import type { BenchmarkRequest } from '../../../lib/api'
 import type { LoadTestProgress } from '../../../lib/backgroundRuns'
 import { formatMs, shortHash } from '../../../lib/formatters'
 import { LoadTestLiveChart } from './LoadTestLiveChart'
-import type { LoadTestResultModel } from './loadTestModel'
+import {
+  type LoadTestLaneStats,
+  type LoadTestResultModel,
+  readQueryLanes,
+} from './loadTestModel'
 
 function formatNumber(value: number) {
   return value.toLocaleString()
@@ -50,6 +54,111 @@ function LoadMetric({
           {detail}
         </Text>
       )}
+    </VStack>
+  )
+}
+
+function LaneMetric({
+  label,
+  qps,
+  p95,
+  errors,
+  readyset = false,
+}: {
+  label: string
+  qps: number
+  p95: number
+  errors: number
+  readyset?: boolean
+}) {
+  return (
+    <VStack className="min-w-0 items-stretch gap-4 p-5">
+      <HStack className="items-center gap-2">
+        <span
+          aria-hidden="true"
+          className={cn(
+            'h-2 w-2 rounded-full',
+            readyset ? 'bg-surface-positive-solid' : 'bg-surface-layout-2'
+          )}
+        />
+        <Text level="label-small" className="text-content-layout-1">
+          {label}
+        </Text>
+      </HStack>
+      <HStack className="items-end justify-between gap-4">
+        <VStack className="items-start gap-0.5">
+          <Text
+            level="headline-2"
+            className={cn(
+              'tabular-nums',
+              readyset ? 'text-content-positive-soft' : 'text-content-layout-1'
+            )}
+          >
+            {qps.toFixed(qps >= 10 ? 0 : 1)}
+          </Text>
+          <Text level="caption" className="text-content-layout-3">
+            QPS
+          </Text>
+        </VStack>
+        <VStack className="items-end gap-1">
+          <Text
+            level="label-small"
+            className="text-content-layout-1 tabular-nums"
+          >
+            {formatMs(p95)} p95
+          </Text>
+          <Text
+            level="caption"
+            className={cn(
+              'tabular-nums',
+              errors > 0 ? 'text-content-warning-soft' : 'text-content-layout-3'
+            )}
+          >
+            {errors} {errors === 1 ? 'error' : 'errors'}
+          </Text>
+        </VStack>
+      </HStack>
+    </VStack>
+  )
+}
+
+function LaneStatCell({
+  label,
+  stats,
+  readyset = false,
+}: {
+  label: string
+  stats: Pick<LoadTestLaneStats, 'successes' | 'failures' | 'avg_ms' | 'p95_ms'>
+  readyset?: boolean
+}) {
+  const hasSuccess = stats.successes > 0
+  return (
+    <VStack className="items-stretch gap-1 px-3 py-2">
+      <HStack className="items-center gap-2">
+        <span
+          aria-hidden="true"
+          className={cn(
+            'h-1.5 w-1.5 rounded-full',
+            readyset ? 'bg-surface-positive-solid' : 'bg-surface-layout-2'
+          )}
+        />
+        <Text
+          level="caption"
+          className={
+            readyset ? 'text-content-positive-soft' : 'text-content-layout-3'
+          }
+        >
+          {label}
+        </Text>
+      </HStack>
+      <Text level="label-small" className="text-content-layout-1 tabular-nums">
+        {formatNumber(stats.successes)} completed
+        {stats.failures > 0 ? ` · ${formatNumber(stats.failures)} errors` : ''}
+      </Text>
+      <Text level="caption" className="text-content-layout-3 tabular-nums">
+        {hasSuccess ? formatMs(stats.avg_ms) : '—'} mean ·{' '}
+        {hasSuccess ? formatMs(stats.p95_ms) : '—'} p95
+      </Text>
     </VStack>
   )
 }
@@ -97,6 +206,10 @@ export function LoadTestResults({
     description,
     statusLabel,
     skippedQueries,
+    comparative,
+    readysetSetup,
+    laneAggregates,
+    speedup,
   } = model
   const failed = outcome === 'failed'
   const partial = outcome === 'partial'
@@ -172,6 +285,24 @@ export function LoadTestResults({
             </HStack>
           ) : (
             <>
+              {readysetSetup?.status === 'unavailable' && (
+                <HStack className="mb-4 items-start gap-3 rounded-xl border border-border-info-soft p-4">
+                  <Icon
+                    name="info"
+                    label=""
+                    className="mt-0.5 h-5 w-5 shrink-0 text-content-info-soft"
+                  />
+                  <VStack className="items-start gap-1">
+                    <Text level="label-small" className="text-content-layout-1">
+                      Readyset was unavailable for this run
+                    </Text>
+                    <Text level="body-small" className="text-content-layout-3">
+                      {readysetSetup.detail ||
+                        'This test ran against the origin database only.'}
+                    </Text>
+                  </VStack>
+                </HStack>
+              )}
               <div className="grid grid-cols-2 overflow-hidden rounded-xl border border-border-layout-soft tablet:grid-cols-4 tablet:divide-x tablet:divide-border-layout-soft">
                 <LoadMetric
                   label={
@@ -297,11 +428,128 @@ export function LoadTestResults({
         </Card.Footer>
       </Card>
 
+      {comparative && laneAggregates && (
+        <Card>
+          <Card.Header className="items-start gap-4 tablet:flex-row tablet:items-center tablet:justify-between">
+            <HStack className="items-center gap-3">
+              <IconTile
+                icon={
+                  speedup !== null && speedup >= 1 ? 'tick-double' : 'alert'
+                }
+                size="base"
+                accent={
+                  speedup !== null && speedup >= 1 ? 'positive' : 'warning'
+                }
+              />
+              <VStack className="items-start gap-0.5">
+                <Card.Title>
+                  {speedup === null
+                    ? 'Origin vs Readyset'
+                    : speedup >= 1
+                      ? `${speedup.toFixed(speedup >= 10 ? 0 : 1)}× faster with Readyset`
+                      : `${Math.abs((speedup - 1) * 100).toFixed(0)}% slower with Readyset`}
+                </Card.Title>
+                <Card.Description>
+                  The same workload ran against both lanes side by side.
+                </Card.Description>
+              </VStack>
+            </HStack>
+          </Card.Header>
+          <Card.Content>
+            <div className="grid overflow-hidden rounded-xl border border-border-layout-soft tablet:grid-cols-2 tablet:divide-x tablet:divide-border-layout-soft">
+              <LaneMetric
+                label="Origin"
+                qps={laneAggregates.origin.qps}
+                p95={laneAggregates.origin.p95}
+                errors={laneAggregates.origin.failures}
+              />
+              <LaneMetric
+                label="Readyset"
+                qps={laneAggregates.readyset.qps}
+                p95={laneAggregates.readyset.p95}
+                errors={laneAggregates.readyset.failures}
+                readyset
+              />
+            </div>
+          </Card.Content>
+        </Card>
+      )}
+
       {!queued && timeline.length > 0 && (
         <LoadTestLiveChart timeline={timeline} live={running} />
       )}
 
-      {(progress?.queries.length ?? 0) > 0 && (
+      {(progress?.queries.length ?? 0) > 0 && comparative && (
+        <Card>
+          <Card.Header>
+            <Card.Title>Per-query results</Card.Title>
+            <Card.Description>
+              Origin and Readyset throughput, latency, and errors for each
+              query.
+            </Card.Description>
+          </Card.Header>
+          <Card.Content className="p-0">
+            <div className="divide-y divide-border-layout-soft">
+              {progress?.queries.map((query) => {
+                const lanes = readQueryLanes(query)
+                return (
+                  <div
+                    key={query.query_hash}
+                    className="grid gap-5 px-6 py-5 tablet:grid-cols-[minmax(0,1fr)_minmax(20rem,1fr)]"
+                  >
+                    <VStack className="min-w-0 items-start gap-1">
+                      <Text
+                        level="label-small"
+                        className="truncate text-content-layout-1"
+                      >
+                        {query.query_name}
+                      </Text>
+                      <Text
+                        level="mono-small"
+                        className="text-content-layout-3"
+                      >
+                        {shortHash(query.query_hash)}
+                      </Text>
+                      {query.last_error && (
+                        <Text
+                          level="caption"
+                          className="line-clamp-2 text-content-negative-soft"
+                        >
+                          {query.last_error}
+                        </Text>
+                      )}
+                    </VStack>
+                    {lanes ? (
+                      <div className="grid overflow-hidden rounded-lg border border-border-layout-soft tablet:grid-cols-2 tablet:divide-x tablet:divide-border-layout-soft">
+                        <LaneStatCell label="Origin" stats={lanes.origin} />
+                        <LaneStatCell
+                          label="Readyset"
+                          stats={lanes.readyset}
+                          readyset
+                        />
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-border-layout-soft">
+                        <LaneStatCell
+                          label="Origin"
+                          stats={{
+                            successes: query.successes,
+                            failures: query.failures,
+                            avg_ms: query.avg_ms,
+                            p95_ms: query.p95_ms,
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </Card.Content>
+        </Card>
+      )}
+
+      {(progress?.queries.length ?? 0) > 0 && !comparative && (
         <Card>
           <Card.Header>
             <Card.Title>Per-query results</Card.Title>
@@ -422,12 +670,31 @@ export function LoadTestResults({
                       {shortHash(query.query_hash)}
                     </Text>
                   </VStack>
-                  <Text
-                    level="body-small"
-                    className="max-w-sm text-right text-content-warning-soft"
-                  >
-                    {query.reason}
-                  </Text>
+                  {query.laneReasons ? (
+                    <VStack className="max-w-sm items-end gap-1">
+                      {(['origin', 'readyset'] as const).map((lane) => {
+                        const reason = query.laneReasons?.[lane]
+                        if (!reason) return null
+                        return (
+                          <Text
+                            key={lane}
+                            level="body-small"
+                            className="text-right text-content-warning-soft"
+                          >
+                            {lane === 'origin' ? 'Origin' : 'Readyset'}:{' '}
+                            {reason}
+                          </Text>
+                        )
+                      })}
+                    </VStack>
+                  ) : (
+                    <Text
+                      level="body-small"
+                      className="max-w-sm text-right text-content-warning-soft"
+                    >
+                      {query.reason}
+                    </Text>
+                  )}
                 </HStack>
               ))}
             </div>

@@ -2,7 +2,11 @@ import { useDisclosure } from '@rs/ui-new/use-disclosure'
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTarget } from '../../../hooks/useTarget'
-import type { BenchmarkQueryInput, TargetInfo } from '../../../lib/api'
+import type {
+  BenchmarkQueryInput,
+  BenchmarkRequest,
+  TargetInfo,
+} from '../../../lib/api'
 import {
   fetchSchema,
   fetchTargets,
@@ -35,8 +39,14 @@ import { useQueryRegistry } from '../../../lib/useQueryRegistry'
 import { useSystemStatus } from '../../../lib/useSystemStatus'
 import { useTargetConnectivityGate } from '../../../lib/useTargetConnectivityGate'
 import { useTargetPasswordLock } from '../../../lib/useTargetPasswordLock'
+import { type LoadTestLane, readRequestLanes } from './loadTestModel'
 
 export type LoadTestProfile = 'paced' | 'capacity'
+
+/** `BenchmarkRequest` widened with the additive `lanes` field. */
+export type LoadTestBenchmarkRequest = BenchmarkRequest & {
+  lanes?: LoadTestLane[]
+}
 
 export const BENCHMARK_EXECUTION_CAP = 100_000
 const TABLE_REFERENCE_RE = /\b(?:FROM|JOIN)\s+(\w+)/gi
@@ -112,6 +122,10 @@ export function useLoadTestController({
   const [searchTerm, setSearchTerm] = useState('')
   const [sourceFilter, setSourceFilter] = useState(target || 'all')
   const [testProfile, setTestProfile] = useState<LoadTestProfile>('paced')
+  // Comparative (origin + Readyset) is the default; Readyset unavailability
+  // is handled entirely server-side as an automatic fallback, so this toggle
+  // only needs to express the user's own choice to skip Readyset.
+  const [comparative, setComparative] = useState(true)
   const [intervalMs, setIntervalMs] = useState(100)
   const [capacityClients, setCapacityClients] = useState(2)
   const [durationSeconds, setDurationSeconds] = useState(30)
@@ -486,7 +500,7 @@ export function useLoadTestController({
     [runnableQueryObjects, paramValues]
   )
 
-  const buildRequest = () => {
+  const buildRequest = (): LoadTestBenchmarkRequest | null => {
     if (!runTarget) return null
     const capacityTest = testProfile === 'capacity'
     return {
@@ -496,6 +510,7 @@ export function useLoadTestController({
       interval_ms: capacityTest ? 0 : intervalMs,
       concurrency: capacityTest ? capacityClients : 1,
       duration_seconds: durationSeconds,
+      lanes: comparative ? ['origin', 'readyset'] : ['origin'],
     }
   }
 
@@ -560,6 +575,8 @@ export function useLoadTestController({
       } else {
         setIntervalMs(activeRequest.interval_ms ?? 100)
       }
+      const previousLanes = readRequestLanes(activeRequest)
+      if (previousLanes) setComparative(previousLanes.includes('readyset'))
     }
     reset()
     onClearSelectedRun?.()
@@ -619,6 +636,8 @@ export function useLoadTestController({
     setSourceFilter,
     testProfile,
     setTestProfile,
+    comparative,
+    setComparative,
     intervalMs,
     setIntervalMs,
     capacityClients,

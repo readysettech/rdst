@@ -234,6 +234,24 @@ _ABSENT_SANDBOX = {
 }
 
 
+class _FakeSandboxConnection:
+    def __init__(self, config: dict[str, Any]) -> None:
+        self._config = config
+
+    def as_target_config(self) -> dict[str, Any]:
+        return dict(self._config)
+
+
+class _FakeSandboxLease:
+    def __init__(self, target: str, config: dict[str, Any]) -> None:
+        self.target = target
+        self.connection = _FakeSandboxConnection(config)
+        self.dirty_reason: str | None = None
+
+    async def mark_dirty(self, reason):
+        self.dirty_reason = reason
+
+
 class FakeSandboxManager:
     """No-Docker lifecycle boundary for browser-integration tests."""
 
@@ -242,6 +260,29 @@ class FakeSandboxManager:
 
     async def stop(self):
         return None
+
+    @asynccontextmanager
+    async def reserve_measurement(
+        self, *, owner_id, purpose, priority=None, progress=None
+    ):
+        del owner_id, purpose, priority, progress
+        yield None
+
+    @asynccontextmanager
+    async def lease(
+        self, *, target, owner_id, purpose, priority=None, progress=None
+    ):
+        """Lease the sandbox a fixture describes; without one there is none.
+
+        A load test that asks for the Readyset lane and finds no fixture
+        measures the origin alone, which is what a machine without a sandbox
+        does.
+        """
+        del owner_id, purpose, priority, progress
+        connection = fixtures.value("sandbox_lease", default=None)
+        if not connection:
+            raise RuntimeError("No Readyset sandbox is available.")
+        yield _FakeSandboxLease(target, connection)
 
     async def diagnostics(self):
         return fixtures.value(

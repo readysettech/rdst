@@ -16,10 +16,42 @@ export type LoadTestOutcome =
   | 'failed'
   | 'no_measurements'
 
+/** A load test lane: the origin database, or Readyset run alongside it. */
+export type LoadTestLane = 'origin' | 'readyset'
+
 export interface LoadTestSkippedQuery {
   query_hash: string
   query_name?: string
   reason: string
+  /** Per-lane skip reasons, when the backend distinguishes them. */
+  laneReasons?: Partial<Record<LoadTestLane, string>>
+}
+
+export interface LoadTestLaneStats {
+  successes: number
+  failures: number
+  avg_ms: number
+  p95_ms: number
+  p99_ms: number
+  last_error?: string | null
+}
+
+export interface LoadTestQueryLanes {
+  origin: LoadTestLaneStats
+  readyset: LoadTestLaneStats
+}
+
+export interface LoadTestReadysetSetup {
+  status: 'ok' | 'unavailable'
+  detail?: string
+}
+
+export interface LoadTestLaneAggregate {
+  successes: number
+  failures: number
+  qps: number
+  meanLatency: number
+  p95: number
 }
 
 export interface LoadTestResultModel {
@@ -42,6 +74,37 @@ export interface LoadTestResultModel {
   description: string
   statusLabel: string
   skippedQueries: LoadTestSkippedQuery[]
+  /** True once every query in the payload carries both origin and Readyset lane stats. */
+  comparative: boolean
+  readysetSetup: LoadTestReadysetSetup | undefined
+  laneAggregates:
+    | { origin: LoadTestLaneAggregate; readyset: LoadTestLaneAggregate }
+    | undefined
+  /** Origin mean latency divided by Readyset mean latency, when comparative. */
+  speedup: number | null
+}
+
+const KNOWN_LANES: readonly LoadTestLane[] = ['origin', 'readyset']
+
+function filterLanes(value: unknown): LoadTestLane[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const lanes = value.filter((entry): entry is LoadTestLane =>
+    KNOWN_LANES.includes(entry as LoadTestLane)
+  )
+  return lanes.length > 0 ? lanes : undefined
+}
+
+function readLaneReasons(
+  value: unknown
+): Partial<Record<LoadTestLane, string>> | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = value as Record<string, unknown>
+  const reasons: Partial<Record<LoadTestLane, string>> = {}
+  for (const lane of KNOWN_LANES) {
+    const reason = candidate[lane]
+    if (typeof reason === 'string') reasons[lane] = reason
+  }
+  return Object.keys(reasons).length > 0 ? reasons : undefined
 }
 
 /**
@@ -57,14 +120,139 @@ function readSkippedQueries(
   const value = (progress as { skipped_queries?: unknown } | undefined)
     ?.skipped_queries
   if (!Array.isArray(value)) return []
-  return value.filter((entry): entry is LoadTestSkippedQuery => {
-    if (!entry || typeof entry !== 'object') return false
-    const candidate = entry as Partial<LoadTestSkippedQuery>
-    return (
-      typeof candidate.query_hash === 'string' &&
-      typeof candidate.reason === 'string'
-    )
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return []
+    const candidate = entry as Partial<LoadTestSkippedQuery> & {
+      lanes?: unknown
+    }
+    if (
+      typeof candidate.query_hash !== 'string' ||
+      typeof candidate.reason !== 'string'
+    ) {
+      return []
+    }
+    const laneReasons = readLaneReasons(candidate.lanes)
+    return [
+      {
+        query_hash: candidate.query_hash,
+        query_name: candidate.query_name,
+        reason: candidate.reason,
+        ...(laneReasons ? { laneReasons } : {}),
+      },
+    ]
   })
+}
+
+function isLaneStats(value: unknown): value is LoadTestLaneStats {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<LoadTestLaneStats>
+  return (
+    typeof candidate.successes === 'number' &&
+    typeof candidate.failures === 'number' &&
+    typeof candidate.avg_ms === 'number' &&
+    typeof candidate.p95_ms === 'number' &&
+    typeof candidate.p99_ms === 'number'
+  )
+}
+
+/**
+ * A newer backend may report per-lane stats (origin vs Readyset) as an
+ * additive `lanes` field on each query entry. Nothing in the generated
+ * `QueryBenchmarkStats` type promises it exists, so this read is defensive --
+ * an older payload without it yields `undefined` and callers keep rendering
+ * the existing origin-only view for that query.
+ */
+export function readQueryLanes(
+  query: QueryBenchmarkStats
+): LoadTestQueryLanes | undefined {
+  const value = (query as { lanes?: unknown }).lanes
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = value as { origin?: unknown; readyset?: unknown }
+  if (!isLaneStats(candidate.origin) || !isLaneStats(candidate.readyset)) {
+    return undefined
+  }
+  return { origin: candidate.origin, readyset: candidate.readyset }
+}
+
+/**
+ * The complete event may report which lanes actually ran (an additive
+ * `lanes_run` field) -- e.g. `["origin"]` when Readyset fell back to
+ * unavailable mid-run. Defensive by the same rule as the other readers here.
+ */
+export function readLanesRun(
+  progress: BenchmarkProgress | undefined
+): LoadTestLane[] | undefined {
+  return filterLanes(
+    (progress as { lanes_run?: unknown } | undefined)?.lanes_run
+  )
+}
+
+/**
+ * The request sent to start a run may carry the lanes the user asked for (an
+ * additive `lanes` field on `BenchmarkRequest`). Read defensively since the
+ * generated request type does not declare it.
+ */
+export function readRequestLanes(
+  request: BenchmarkRequest | undefined
+): LoadTestLane[] | undefined {
+  return filterLanes((request as { lanes?: unknown } | undefined)?.lanes)
+}
+
+/**
+ * The complete event may report whether Readyset was available for this run
+ * (an additive `readyset_setup` field). Absent it, the run is treated as
+ * plain origin-only -- there is nothing to fall back to note.
+ */
+export function readReadysetSetup(
+  progress: BenchmarkProgress | undefined
+): LoadTestReadysetSetup | undefined {
+  const value = (progress as { readyset_setup?: unknown } | undefined)
+    ?.readyset_setup
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = value as Partial<LoadTestReadysetSetup>
+  if (candidate.status !== 'ok' && candidate.status !== 'unavailable') {
+    return undefined
+  }
+  return {
+    status: candidate.status,
+    ...(typeof candidate.detail === 'string'
+      ? { detail: candidate.detail }
+      : {}),
+  }
+}
+
+function aggregateLaneStats(
+  queries: QueryBenchmarkStats[] | undefined,
+  lane: LoadTestLane,
+  elapsedSeconds: number
+): LoadTestLaneAggregate | undefined {
+  if (!queries?.length) return undefined
+  const laneEntries = queries.map((query) => readQueryLanes(query)?.[lane])
+  if (laneEntries.some((entry) => entry === undefined)) return undefined
+  const entries = laneEntries as LoadTestLaneStats[]
+  const successes = entries.reduce(
+    (total, entry) => total + Math.max(0, entry.successes),
+    0
+  )
+  const failures = entries.reduce(
+    (total, entry) => total + Math.max(0, entry.failures),
+    0
+  )
+  const weighted = (select: (entry: LoadTestLaneStats) => number) =>
+    successes > 0
+      ? entries.reduce(
+          (total, entry) =>
+            total + select(entry) * Math.max(0, entry.successes),
+          0
+        ) / successes
+      : 0
+  return {
+    successes,
+    failures,
+    qps: elapsedSeconds > 0 ? successes / elapsedSeconds : 0,
+    meanLatency: weighted((entry) => entry.avg_ms),
+    p95: weighted((entry) => entry.p95_ms),
+  }
 }
 
 function aggregateLatency(
@@ -145,6 +333,29 @@ export function deriveLoadTestResultModel({
       : null
   const qps = progress?.qps ?? 0
   const skippedQueries = readSkippedQueries(progress)
+  const readysetSetup = readReadysetSetup(progress)
+  const elapsedSeconds = progress?.elapsed_seconds ?? 0
+  const originLane = aggregateLaneStats(
+    progress?.queries,
+    'origin',
+    elapsedSeconds
+  )
+  const readysetLane = aggregateLaneStats(
+    progress?.queries,
+    'readyset',
+    elapsedSeconds
+  )
+  const comparative = Boolean(originLane && readysetLane)
+  const laneAggregates = comparative
+    ? {
+        origin: originLane as LoadTestLaneAggregate,
+        readyset: readysetLane as LoadTestLaneAggregate,
+      }
+    : undefined
+  const speedup =
+    laneAggregates && laneAggregates.readyset.meanLatency > 0
+      ? laneAggregates.origin.meanLatency / laneAggregates.readyset.meanLatency
+      : null
 
   const statusLabel: Record<LoadTestOutcome, string> = {
     queued: 'Queued',
@@ -215,5 +426,9 @@ export function deriveLoadTestResultModel({
     description: description[outcome],
     statusLabel: statusLabel[outcome],
     skippedQueries,
+    comparative,
+    readysetSetup,
+    laneAggregates,
+    speedup,
   }
 }

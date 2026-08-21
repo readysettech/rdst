@@ -143,3 +143,115 @@ describe('LoadTestResults skipped queries', () => {
     expect(screen.getByText('No stored value for parameter $1')).toBeTruthy()
   })
 })
+
+const COMPARATIVE_QUERY = {
+  query_hash: 'q1',
+  query_name: 'Orders lookup',
+  executions: 10,
+  successes: 10,
+  failures: 0,
+  avg_ms: 10,
+  min_ms: 1,
+  max_ms: 20,
+  p50_ms: 9,
+  p95_ms: 15,
+  p99_ms: 20,
+  lanes: {
+    origin: {
+      successes: 10,
+      failures: 0,
+      avg_ms: 10,
+      p95_ms: 15,
+      p99_ms: 20,
+    },
+    readyset: {
+      successes: 10,
+      failures: 0,
+      avg_ms: 2,
+      p95_ms: 3,
+      p99_ms: 4,
+    },
+  },
+}
+
+describe('LoadTestResults comparative lanes', () => {
+  it('renders an origin vs Readyset comparison when every query carries lane stats', () => {
+    renderResult({
+      status: 'done',
+      progress: {
+        type: 'complete',
+        elapsed_seconds: 10,
+        total_executions: 10,
+        total_successes: 10,
+        total_failures: 0,
+        qps: 1,
+        queries: [COMPARATIVE_QUERY],
+      } as unknown as LoadTestProgress,
+    })
+
+    expect(screen.getByText(/faster with Readyset/)).toBeTruthy()
+    expect(screen.getAllByText('Origin').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Readyset').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Query')).toBeNull() // no table header in the comparative layout
+  })
+
+  it('renders the plain per-query table when no query carries lane stats', () => {
+    renderResult({
+      status: 'done',
+      progress: {
+        type: 'complete',
+        elapsed_seconds: 10,
+        total_executions: 10,
+        total_successes: 10,
+        total_failures: 0,
+        qps: 1,
+        queries: [
+          {
+            query_hash: 'q1',
+            query_name: 'Orders lookup',
+            executions: 10,
+            successes: 10,
+            failures: 0,
+            avg_ms: 10,
+            min_ms: 1,
+            max_ms: 20,
+            p50_ms: 9,
+            p95_ms: 15,
+            p99_ms: 20,
+          },
+        ],
+      } as unknown as LoadTestProgress,
+    })
+
+    expect(screen.getByText('Query')).toBeTruthy()
+    expect(screen.queryByText(/faster with Readyset/)).toBeNull()
+    expect(screen.queryByText('Origin')).toBeNull()
+  })
+
+  it('shows a neutral note and keeps the origin-only view when Readyset was unavailable', () => {
+    renderResult({
+      status: 'done',
+      progress: {
+        type: 'complete',
+        elapsed_seconds: 10,
+        total_executions: 10,
+        total_successes: 10,
+        total_failures: 0,
+        qps: 1,
+        queries: [],
+        readyset_setup: {
+          status: 'unavailable',
+          detail: 'Readyset could not be reached for this run.',
+        },
+      } as unknown as LoadTestProgress,
+    })
+
+    expect(
+      screen.getByText('Readyset was unavailable for this run')
+    ).toBeTruthy()
+    expect(
+      screen.getByText('Readyset could not be reached for this run.')
+    ).toBeTruthy()
+    expect(screen.queryByText(/faster with Readyset/)).toBeNull()
+  })
+})

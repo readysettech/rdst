@@ -65,6 +65,11 @@ class QueryBenchmarkCompleteEvent:
     warmup_executions: int = 0
     skipped_count: int = 0
     skipped_queries: list[QuerySkip] = field(default_factory=list)
+    # The lanes that produced measurements, in reporting order.
+    lanes_run: list[str] = field(default_factory=lambda: ["origin"])
+    # {"status": "ok" | "unavailable", "detail": str}, present when the
+    # caller asked for the Readyset lane.
+    readyset_setup: Optional[dict[str, str]] = None
 
 
 @dataclass

@@ -32,6 +32,15 @@ from .models import (
     QueryCommandInput,
     QuerySkip,
 )
+from .readyset_lane import (
+    LANE_ORIGIN,
+    LANE_READYSET,
+    LANE_TAGS,
+    SKIP_READYSET_CACHE_FAILED,
+    ReadysetEndpoint,
+    normalize_lanes,
+    prepare_lane_caches,
+)
 
 # ---------------------------------------------------------------------------
 # Benchmark safety rails (B5 / code-backend F4)
@@ -117,6 +126,11 @@ def _execution_error_summary(error: str) -> str:
     return _EXECUTION_ERROR_FALLBACK
 
 
+def _lane_stats_payload(stats: QueryBenchmarkStats) -> dict[str, Any]:
+    """One lane's numbers, in the shape of the top-level per-query fields."""
+    return {name: value for name, value in vars(stats).items() if name != "lanes"}
+
+
 class BenchmarkValidationError(Exception):
     """A benchmark request rejected before/at execution for a reason that is
     safe to show the user (read-only violation, over-cap, unresolved
@@ -162,11 +176,11 @@ class _BenchmarkController:
 
 
 class _LoadTestEvidenceRecorder:
-    """Thread-safe, run-scoped attribution buckets for a load test."""
+    """Thread-safe, run-scoped attribution buckets for one lane of a load test."""
 
-    def __init__(self, target: str) -> None:
+    def __init__(self, target: str, lane: str = LANE_TAGS[LANE_ORIGIN]) -> None:
         self.run_id = uuid.uuid4().hex
-        self._writer = ExecutionEvidenceWriter(target, lane="rdst/loadtest")
+        self._writer = ExecutionEvidenceWriter(target, lane=lane)
         self._lock = Lock()
         self._next_token = 0
         self._outstanding: dict[int, tuple[str, float]] = {}
@@ -500,6 +514,8 @@ class QueryService:
         parameter_sets: int = LOAD_TEST_PARAMETER_SETS,
         warmup_executions: int = LOAD_TEST_WARMUP_EXECUTIONS,
         statement_timeout_ms: int = LOAD_TEST_STATEMENT_TIMEOUT_MS,
+        lanes: Optional[List[str]] = None,
+        readyset: Optional[ReadysetEndpoint] = None,
     ) -> AsyncGenerator[QueryBenchmarkEvent, None]:
         """Stream benchmark progress events from a background worker."""
         progress_queue: Queue = Queue(maxsize=100)
@@ -521,6 +537,8 @@ class QueryService:
                 parameter_sets=parameter_sets,
                 warmup_executions=warmup_executions,
                 statement_timeout_ms=statement_timeout_ms,
+                lanes=lanes,
+                readyset=readyset,
             )
 
         loop = asyncio.get_event_loop()
@@ -580,9 +598,11 @@ class QueryService:
         parameter_sets: int = LOAD_TEST_PARAMETER_SETS,
         warmup_executions: int = LOAD_TEST_WARMUP_EXECUTIONS,
         statement_timeout_ms: int = LOAD_TEST_STATEMENT_TIMEOUT_MS,
+        lanes: Optional[List[str]] = None,
+        readyset: Optional[ReadysetEndpoint] = None,
     ) -> None:
         """Synchronous benchmark worker that reports progress events."""
-        evidence_recorder: _LoadTestEvidenceRecorder | None = None
+        evidence_recorders: list[_LoadTestEvidenceRecorder] = []
 
         @dataclass
         class _QueryStats:
@@ -639,7 +659,153 @@ class QueryService:
             # Requests that carry their own SQL have none.
             entry: Any = None
 
+        class _LaneRun:
+            """One lane: its endpoint, its workload, its schedule, its numbers.
+
+            Lanes measure the same workload against different endpoints and
+            share nothing but the cancellation controller, so neither lane's
+            pacing is a function of the other's latency.
+            """
+
+            def __init__(
+                self,
+                lane: str,
+                target_config: dict[str, Any],
+                queries: list[_ResolvedQuery],
+                evidence: _LoadTestEvidenceRecorder,
+            ) -> None:
+                self.lane = lane
+                self.target_config = target_config
+                self.queries = queries
+                self.evidence = evidence
+                self.stop = threading.Event()
+                self.failure: str | None = None
+                # Every query the lane runs is listed from the start, so one
+                # that never produced a measurement is visible as zeros
+                # rather than absent.
+                self.stats: dict[str, _QueryStats] = {
+                    rq.identifier: _QueryStats(
+                        rq.name, rq.identifier, variant_count=len(rq.variants)
+                    )
+                    for rq in queries
+                }
+                self.lock = Lock()
+                self.warmup_completed = 0
+                self.start_time = time.perf_counter()
+                self.scheduler_lock = Lock()
+                self.query_index = 0
+                self.variant_index = 0
+                self.claimed_count = 0
+                self.warmup_index = 0
+                self.measuring = False
+                # Deterministic warmup plan: a fixed number of executions per
+                # query, rotating its variants, drained by whichever worker is
+                # free first.
+                self.warmup_plan: list[tuple[int, int]] = [
+                    (index, execution % len(rq.variants))
+                    for index, rq in enumerate(queries)
+                    for execution in range(warmup_executions)
+                ]
+
+            def record_execution(
+                self,
+                query_hash: str,
+                query_name: str,
+                duration_ms: float,
+                success: bool,
+                error_msg: str | None = None,
+            ) -> None:
+                with self.lock:
+                    if query_hash not in self.stats:
+                        self.stats[query_hash] = _QueryStats(query_name, query_hash)
+                    stats = self.stats[query_hash]
+                    stats.executions += 1
+                    if success:
+                        stats.successes += 1
+                        stats.timings_ms.append(duration_ms)
+                    else:
+                        stats.failures += 1
+                        if error_msg:
+                            if error_msg != stats.last_error_detail:
+                                logger.warning(
+                                    "Benchmark query %s failed on the %s lane "
+                                    "of %s: %s",
+                                    query_name,
+                                    self.lane,
+                                    target,
+                                    error_msg,
+                                )
+                            stats.last_error_detail = error_msg
+                            stats.last_error = _execution_error_summary(error_msg)
+                            if stats.last_error == "statement timeout":
+                                stats.timeouts += 1
+
+            def record_warmup(self) -> None:
+                with self.lock:
+                    self.warmup_completed += 1
+
+            def has_measurements(self) -> bool:
+                with self.lock:
+                    return any(stats.executions > 0 for stats in self.stats.values())
+
+            def claim(self) -> tuple[_ResolvedQuery, str, bool] | None:
+                """Claim one execution: the query, its SQL, and whether it warms.
+
+                Queries rotate in round-robin order and each pass moves to the
+                next parameter variant, so a run covers every query at every
+                value before repeating any pair.
+                """
+                with self.scheduler_lock:
+                    if stop_event.is_set() or self.stop.is_set():
+                        return None
+                    if self.warmup_index < len(self.warmup_plan):
+                        planned_query, planned_variant = self.warmup_plan[
+                            self.warmup_index
+                        ]
+                        self.warmup_index += 1
+                        rq = self.queries[planned_query]
+                        return rq, rq.variants[planned_variant], True
+                    if not self.measuring:
+                        # Warmup runs off the clock, so the requested duration
+                        # is all measurement.
+                        self.measuring = True
+                        self.start_time = time.perf_counter()
+                    elapsed = time.perf_counter() - self.start_time
+                    if duration_seconds and elapsed >= duration_seconds:
+                        return None
+                    if (
+                        effective_max_count
+                        and self.claimed_count >= effective_max_count
+                    ):
+                        return None
+                    rq = self.queries[self.query_index]
+                    sql = rq.variants[self.variant_index % len(rq.variants)]
+                    self.query_index += 1
+                    if self.query_index >= len(self.queries):
+                        self.query_index = 0
+                        self.variant_index += 1
+                    self.claimed_count += 1
+                    return rq, sql, False
+
+            def snapshot(self) -> tuple[float, int, dict[str, QueryBenchmarkStats]]:
+                """Elapsed time, completed warmups, and per-query statistics."""
+                with self.lock:
+                    return (
+                        time.perf_counter() - self.start_time,
+                        self.warmup_completed,
+                        {
+                            identifier: stats.to_model()
+                            for identifier, stats in self.stats.items()
+                        },
+                    )
+
         try:
+            try:
+                requested_lanes = normalize_lanes(lanes)
+            except ValueError as exc:
+                raise BenchmarkValidationError(
+                    str(exc), code="benchmark_lane_invalid"
+                ) from exc
             # Cap rail: reject an over-cap request outright (do not silently
             # clamp) so a UI-bypassing caller cannot request an unbounded run.
             if (
@@ -863,82 +1029,125 @@ class QueryService:
                             reason, code="benchmark_read_only"
                         )
 
-            # Every requested query is listed from the start, so one that never
-            # produced a measurement is visible as zeros rather than absent.
-            query_stats: dict[str, _QueryStats] = {
-                rq.identifier: _QueryStats(
-                    rq.name, rq.identifier, variant_count=len(rq.variants)
+            # The Readyset lane needs a cache per query on the leased sandbox
+            # before any of its workers connect. A query the sandbox refuses
+            # to cache is out of that lane and stays in the origin one.
+            readyset_setup: dict[str, str] | None = None
+            readyset_queries: list[_ResolvedQuery] = []
+            if LANE_READYSET in requested_lanes:
+                endpoint = readyset or ReadysetEndpoint(
+                    status="unavailable",
+                    detail="No Readyset sandbox was leased for this run.",
                 )
-                for rq in resolved_queries
-            }
-            stats_lock = Lock()
-            start_time = time.perf_counter()
-            warmup_completed = 0
-            evidence_recorder = _LoadTestEvidenceRecorder(target)
-
-            def _record_execution(
-                query_hash: str,
-                query_name: str,
-                duration_ms: float,
-                success: bool,
-                error_msg: str | None = None,
-            ) -> None:
-                with stats_lock:
-                    if query_hash not in query_stats:
-                        query_stats[query_hash] = _QueryStats(query_name, query_hash)
-                    stats = query_stats[query_hash]
-                    stats.executions += 1
-                    if success:
-                        stats.successes += 1
-                        stats.timings_ms.append(duration_ms)
-                    else:
-                        stats.failures += 1
-                        if error_msg:
-                            if error_msg != stats.last_error_detail:
-                                logger.warning(
-                                    "Benchmark query %s failed on %s: %s",
-                                    query_name,
-                                    target,
-                                    error_msg,
+                if endpoint.available:
+                    refused = prepare_lane_caches(
+                        endpoint,
+                        uuid.uuid4().hex,
+                        [
+                            (rq.identifier, rq.variants[0])
+                            for rq in resolved_queries
+                        ],
+                    )
+                    for rq in resolved_queries:
+                        if rq.identifier in refused:
+                            skipped_queries.append(
+                                QuerySkip(
+                                    rq.identifier,
+                                    rq.name,
+                                    SKIP_READYSET_CACHE_FAILED,
+                                    lanes={
+                                        LANE_READYSET: SKIP_READYSET_CACHE_FAILED
+                                    },
                                 )
-                            stats.last_error_detail = error_msg
-                            stats.last_error = _execution_error_summary(error_msg)
-                            if stats.last_error == "statement timeout":
-                                stats.timeouts += 1
+                            )
+                        else:
+                            readyset_queries.append(rq)
+                    if not readyset_queries:
+                        endpoint = ReadysetEndpoint(
+                            status="unavailable",
+                            detail=(
+                                "Readyset could not cache any of this run's "
+                                "queries."
+                            ),
+                        )
+                readyset_setup = endpoint.as_payload()
 
-            def _record_warmup() -> None:
-                nonlocal warmup_completed
-                with stats_lock:
-                    warmup_completed += 1
+            lane_runs: list[_LaneRun] = []
+            for lane in requested_lanes:
+                if lane == LANE_ORIGIN:
+                    lane_runs.append(
+                        _LaneRun(
+                            lane,
+                            target_config,
+                            resolved_queries,
+                            _LoadTestEvidenceRecorder(target, LANE_TAGS[lane]),
+                        )
+                    )
+                elif readyset is not None and readyset.available and readyset_queries:
+                    lane_runs.append(
+                        _LaneRun(
+                            lane,
+                            dict(readyset.config or {}),
+                            readyset_queries,
+                            _LoadTestEvidenceRecorder(target, LANE_TAGS[lane]),
+                        )
+                    )
+            if not lane_runs:
+                # The Readyset lane is an addition to a run, never the whole
+                # of one: a run left with no lane measures the origin.
+                lane_runs.append(
+                    _LaneRun(
+                        LANE_ORIGIN,
+                        target_config,
+                        resolved_queries,
+                        _LoadTestEvidenceRecorder(
+                            target, LANE_TAGS[LANE_ORIGIN]
+                        ),
+                    )
+                )
+            evidence_recorders.extend(run.evidence for run in lane_runs)
+            # Back-compatible reporting: the top-level tallies and the
+            # per-query fields carry the first lane, which is the origin
+            # whenever the run measures it.
+            primary = lane_runs[0]
+            worker_errors: list[BenchmarkValidationError] = []
+
+            def _fail_lane(run: _LaneRun, error: BenchmarkValidationError) -> None:
+                """Stop one lane; the primary lane stops the whole run."""
+                run.failure = error.message
+                run.stop.set()
+                if run is primary:
+                    worker_errors.append(error)
+                    stop_event.set()
 
             def _progress(
                 event_type: Literal["progress", "complete"],
             ) -> QueryBenchmarkProgressEvent | QueryBenchmarkCompleteEvent:
-                with stats_lock:
-                    elapsed = time.perf_counter() - start_time
-                    total_exec = sum(s.executions for s in query_stats.values())
-                    total_succ = sum(s.successes for s in query_stats.values())
-                    total_fail = sum(s.failures for s in query_stats.values())
-                    # Throughput reports successful work. Failed attempts stay
-                    # visible in total_failures/error rate instead of inflating
-                    # the headline QPS while latency is success-only.
-                    qps = total_succ / elapsed if elapsed > 0 else 0
-                    queries_list = [s.to_model() for s in query_stats.values()]
-                    if event_type == "complete":
-                        return QueryBenchmarkCompleteEvent(
-                            type="complete",
-                            elapsed_seconds=elapsed,
-                            total_executions=total_exec,
-                            total_successes=total_succ,
-                            total_failures=total_fail,
-                            qps=qps,
-                            queries=queries_list,
-                            warmup_executions=warmup_completed,
-                            skipped_count=len(skipped_queries),
-                            skipped_queries=list(skipped_queries),
-                        )
-                    return QueryBenchmarkProgressEvent(
-                        type="progress",
+                snapshots = {run.lane: run.snapshot() for run in lane_runs}
+                elapsed, warmup_completed, models = snapshots[primary.lane]
+                total_exec = sum(model.executions for model in models.values())
+                total_succ = sum(model.successes for model in models.values())
+                total_fail = sum(model.failures for model in models.values())
+                # Throughput reports successful work. Failed attempts stay
+                # visible in total_failures/error rate instead of inflating
+                # the headline QPS while latency is success-only.
+                qps = total_succ / elapsed if elapsed > 0 else 0
+                queries_list = list(models.values())
+                if len(lane_runs) > 1:
+                    for model in queries_list:
+                        model.lanes = {
+                            lane: _lane_stats_payload(lane_models[model.query_hash])
+                            for lane, (_, _, lane_models) in snapshots.items()
+                            if model.query_hash in lane_models
+                        }
+                # A query missing from one lane is still in the run, so the
+                # count of queries the run left out stays what it was.
+                skipped_count = sum(
+                    1 for skip in skipped_queries if skip.lanes is None
+                )
+                if event_type == "complete":
+                    return QueryBenchmarkCompleteEvent(
+                        type="complete",
                         elapsed_seconds=elapsed,
                         total_executions=total_exec,
                         total_successes=total_succ,
@@ -946,109 +1155,80 @@ class QueryService:
                         qps=qps,
                         queries=queries_list,
                         warmup_executions=warmup_completed,
-                        skipped_count=len(skipped_queries),
+                        skipped_count=skipped_count,
                         skipped_queries=list(skipped_queries),
+                        lanes_run=[
+                            run.lane
+                            for run in lane_runs
+                            if run.failure is None or run.has_measurements()
+                        ],
+                        readyset_setup=_readyset_setup(),
                     )
+                return QueryBenchmarkProgressEvent(
+                    type="progress",
+                    elapsed_seconds=elapsed,
+                    total_executions=total_exec,
+                    total_successes=total_succ,
+                    total_failures=total_fail,
+                    qps=qps,
+                    queries=queries_list,
+                    warmup_executions=warmup_completed,
+                    skipped_count=skipped_count,
+                    skipped_queries=list(skipped_queries),
+                )
+
+            def _readyset_setup() -> dict[str, str] | None:
+                """The Readyset lane's outcome, including a mid-run failure."""
+                if readyset_setup is None:
+                    return None
+                for run in lane_runs:
+                    if run.lane == LANE_READYSET and run.failure:
+                        return {"status": "unavailable", "detail": run.failure}
+                return readyset_setup
 
             def _has_measurements() -> bool:
                 """Return whether the run has produced an observable result."""
-                with stats_lock:
-                    return any(stats.executions > 0 for stats in query_stats.values())
+                return any(run.has_measurements() for run in lane_runs)
 
-            scheduler_lock = Lock()
-            query_index = 0
-            variant_index = 0
-            claimed_count = 0
-            warmup_index = 0
-            measuring = False
-            worker_errors: list[BenchmarkValidationError] = []
-
-            # Deterministic warmup plan: a fixed number of executions per
-            # query, rotating its variants, drained by whichever worker is
-            # free first.
-            warmup_plan: list[tuple[int, int]] = [
-                (index, execution % len(rq.variants))
-                for index, rq in enumerate(resolved_queries)
-                for execution in range(warmup_executions)
-            ]
-
-            def _claim_query() -> tuple[_ResolvedQuery, str, bool] | None:
-                """Claim one execution: the query, its SQL, and whether it warms.
-
-                Queries rotate in round-robin order and each pass moves to the
-                next parameter variant, so a run covers every query at every
-                value before repeating any pair.
-                """
-                nonlocal query_index, variant_index, claimed_count
-                nonlocal warmup_index, measuring, start_time
-                with scheduler_lock:
-                    if stop_event.is_set():
-                        return None
-                    if warmup_index < len(warmup_plan):
-                        planned_query, planned_variant = warmup_plan[warmup_index]
-                        warmup_index += 1
-                        rq = resolved_queries[planned_query]
-                        return rq, rq.variants[planned_variant], True
-                    if not measuring:
-                        # Warmup runs off the clock, so the requested duration
-                        # is all measurement.
-                        measuring = True
-                        start_time = time.perf_counter()
-                    elapsed = time.perf_counter() - start_time
-                    if duration_seconds and elapsed >= duration_seconds:
-                        return None
-                    if (
-                        effective_max_count
-                        and claimed_count >= effective_max_count
-                    ):
-                        return None
-                    rq = resolved_queries[query_index]
-                    sql = rq.variants[variant_index % len(rq.variants)]
-                    query_index += 1
-                    if query_index >= len(resolved_queries):
-                        query_index = 0
-                        variant_index += 1
-                    claimed_count += 1
-                    return rq, sql, False
-
-            def _worker() -> None:
+            def _worker(run: _LaneRun) -> None:
                 conn = None
+                engine = str(run.target_config.get("engine", ""))
                 try:
                     # Each concurrent worker owns its connection. Sharing a DB
                     # connection would serialize driver calls and make the
                     # advertised concurrency fictional.
-                    conn = create_direct_connection(target_config, lane="rdst/loadtest")
+                    conn = create_direct_connection(
+                        run.target_config, lane=LANE_TAGS[run.lane]
+                    )
                     # Register with the controller so a cancel can abort a
                     # statement this worker is blocked in server-side.
                     controller.register(conn)
                     try:
-                        set_session_read_only(
-                            conn, str(target_config.get("engine", ""))
-                        )
+                        set_session_read_only(conn, engine)
                     except Exception as exc:
                         raise BenchmarkValidationError(
-                            "Could not establish a read-only session on the target; "
-                            "benchmark aborted.",
+                            "Could not establish a read-only session on the "
+                            f"{run.lane} endpoint; that lane was stopped.",
                             code="benchmark_read_only_session",
                         ) from exc
                     if statement_timeout_ms > 0:
                         try:
                             set_session_statement_timeout(
-                                conn,
-                                str(target_config.get("engine", "")),
-                                statement_timeout_ms,
+                                conn, engine, statement_timeout_ms
                             )
                         except Exception as exc:
                             # An engine that refuses the setting still runs the
                             # measurement; only the per-statement bound is lost.
                             logger.warning(
-                                "Could not bound benchmark statements on %s: %s",
+                                "Could not bound benchmark statements on the "
+                                "%s lane of %s: %s",
+                                run.lane,
                                 target,
                                 exc,
                             )
 
-                    while not stop_event.is_set():
-                        claim = _claim_query()
+                    while not stop_event.is_set() and not run.stop.is_set():
+                        claim = run.claim()
                         if claim is None:
                             break
                         rq, sql, warming = claim
@@ -1060,14 +1240,14 @@ class QueryService:
                             cursor = conn.cursor()
                             # This is the attribution boundary: connection and
                             # cursor failures before it record no traffic.
-                            evidence_token = evidence_recorder.note_started(sql)
+                            evidence_token = run.evidence.note_started(sql)
                             cursor.execute(sql)
                             cursor.fetchall()
-                            evidence_recorder.note_completed(evidence_token)
+                            run.evidence.note_completed(evidence_token)
                             if warming:
-                                _record_warmup()
+                                run.record_warmup()
                             else:
-                                _record_execution(
+                                run.record_execution(
                                     rq.identifier,
                                     rq.name,
                                     (time.perf_counter() - exec_start) * 1000,
@@ -1075,14 +1255,14 @@ class QueryService:
                                 )
                         except Exception as exc:
                             if evidence_token is not None:
-                                evidence_recorder.note_failed(evidence_token)
+                                run.evidence.note_failed(evidence_token)
                             if warming:
                                 # A warmup failure is not a measurement; the
                                 # same query fails again under measurement and
                                 # is reported there.
-                                _record_warmup()
+                                run.record_warmup()
                             else:
-                                _record_execution(
+                                run.record_execution(
                                     rq.identifier,
                                     rq.name,
                                     (time.perf_counter() - exec_start) * 1000,
@@ -1102,30 +1282,33 @@ class QueryService:
                         if mode == "interval" and interval_ms > 0:
                             stop_event.wait(interval_ms / 1000.0)
                 except BenchmarkValidationError as exc:
-                    with scheduler_lock:
-                        worker_errors.append(exc)
-                    stop_event.set()
+                    _fail_lane(run, exc)
                 except Exception:
-                    with scheduler_lock:
-                        worker_errors.append(
-                            BenchmarkValidationError(
-                                "A benchmark worker could not connect to the target.",
-                                code="benchmark_worker_failed",
-                            )
-                        )
-                    stop_event.set()
+                    _fail_lane(
+                        run,
+                        BenchmarkValidationError(
+                            "A benchmark worker could not connect to the "
+                            f"{run.lane} endpoint.",
+                            code="benchmark_worker_failed",
+                        ),
+                    )
                 finally:
                     if conn is not None:
                         controller.unregister(conn)
                         close_connection(conn)
 
+            # Each lane gets its own pool of the requested size, so both
+            # endpoints see the same offered load and neither lane's clients
+            # queue behind the other's.
             worker_count = concurrency if mode == "concurrency" else 1
             workers = [
                 threading.Thread(
                     target=_worker,
-                    name=f"query-benchmark-{index + 1}",
+                    args=(run,),
+                    name=f"query-benchmark-{run.lane}-{index + 1}",
                     daemon=True,
                 )
+                for run in lane_runs
                 for index in range(worker_count)
             ]
             for worker in workers:
@@ -1156,7 +1339,8 @@ class QueryService:
                     last_progress_time = now
                 for worker in workers:
                     worker.join(timeout=0.02)
-                evidence_recorder.flush_closed()
+                for recorder in evidence_recorders:
+                    recorder.flush_closed()
 
             if worker_errors:
                 raise worker_errors[0]
@@ -1193,6 +1377,6 @@ class QueryService:
             except Exception:
                 pass
         finally:
-            if evidence_recorder is not None:
-                evidence_recorder.flush_all()
-                evidence_recorder.close()
+            for recorder in evidence_recorders:
+                recorder.flush_all()
+                recorder.close()

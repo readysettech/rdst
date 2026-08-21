@@ -35,12 +35,21 @@ class QueryBenchmarkStats:
     timeouts: int = 0
     # Concrete parameter variants this query rotated through.
     variant_count: int = 1
+    # One entry per lane the query ran in, each in the shape of the fields
+    # above. The fields above carry the origin lane, so a reader that knows
+    # nothing about lanes still reads the origin measurement.
+    lanes: Optional[dict[str, dict[str, Any]]] = None
 
 
 @dataclass
 class QuerySkip:
-    """One query left out of a run, and the reason it was left out."""
+    """One query left out of a run, and the reason it was left out.
+
+    A skip with no lanes is out of the whole run. A skip that names lanes is
+    missing from those lanes only, and runs in the run's others.
+    """
 
     query_hash: str
     query_name: str
     reason: str
+    lanes: Optional[dict[str, str]] = None

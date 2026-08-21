@@ -1,6 +1,7 @@
 import { cn } from '@rs/tailwind-base'
 import { BaseInputRadioGroup } from '@rs/ui-new/base-input-radio-group'
 import { BaseInputSelect } from '@rs/ui-new/base-input-select'
+import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card-2'
@@ -106,6 +107,8 @@ export function LoadTestSetup({
     setSourceFilter,
     testProfile,
     setTestProfile,
+    comparative,
+    setComparative,
     intervalMs,
     setIntervalMs,
     capacityClients,
@@ -529,6 +532,25 @@ export function LoadTestSetup({
             </VStack>
 
             <VStack className="items-stretch gap-4">
+              <HStack className="items-center justify-between gap-3 rounded-xl border border-border-layout-soft px-4 py-3">
+                <VStack className="min-w-0 items-start gap-0.5">
+                  <Text level="label-small" className="text-content-layout-1">
+                    Compare against Readyset
+                  </Text>
+                  <Text level="caption" className="text-content-layout-3">
+                    {comparative
+                      ? 'Run against your database and Readyset side by side.'
+                      : 'Origin only. Readyset is skipped for this run.'}
+                  </Text>
+                </VStack>
+                <BaseInputSwitch
+                  name="load-test-comparative"
+                  aria-label="Compare against Readyset"
+                  checked={comparative}
+                  onCheckedChange={setComparative}
+                />
+              </HStack>
+
               <VStack className="items-start gap-0.5">
                 <Text level="label-small" className="text-content-layout-1">
                   Test goal
@@ -577,6 +599,10 @@ export function LoadTestSetup({
                 <SummaryRow
                   label="Database"
                   value={destinationTarget ?? 'Not selected'}
+                />
+                <SummaryRow
+                  label="Comparison"
+                  value={comparative ? 'Origin + Readyset' : 'Origin only'}
                 />
                 <SummaryRow
                   label="Queries"

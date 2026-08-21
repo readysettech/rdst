@@ -53,6 +53,8 @@ function controller(overrides: Record<string, unknown> = {}) {
     setSourceFilter: vi.fn(),
     testProfile: 'paced',
     setTestProfile: vi.fn(),
+    comparative: true,
+    setComparative: vi.fn(),
     intervalMs: 100,
     setIntervalMs: vi.fn(),
     capacityClients: 2,
@@ -221,5 +223,41 @@ describe('LoadTestSetup query rows', () => {
     expect(
       screen.queryByPlaceholderText('Enter a representative value')
     ).toBeNull()
+  })
+})
+
+describe('LoadTestSetup comparison lane control', () => {
+  it('defaults to comparative and explains the side-by-side run', () => {
+    render(<LoadTestSetup controller={controller()} />)
+
+    const toggle = screen.getByRole('switch', {
+      name: 'Compare against Readyset',
+    })
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    expect(
+      screen.getByText('Run against your database and Readyset side by side.')
+    ).toBeTruthy()
+    expect(screen.getByText('Origin + Readyset', { exact: true })).toBeTruthy()
+  })
+
+  it('switches to an origin-only run summary once the user opts out', () => {
+    const setComparative = vi.fn()
+    render(
+      <LoadTestSetup
+        controller={controller({ comparative: false, setComparative })}
+      />
+    )
+
+    const toggle = screen.getByRole('switch', {
+      name: 'Compare against Readyset',
+    })
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    expect(
+      screen.getByText('Origin only. Readyset is skipped for this run.')
+    ).toBeTruthy()
+    expect(screen.getByText('Origin only', { exact: true })).toBeTruthy()
+
+    toggle.click()
+    expect(setComparative).toHaveBeenCalledWith(true)
   })
 })
