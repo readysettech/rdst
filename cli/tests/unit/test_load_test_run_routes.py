@@ -3,9 +3,29 @@
 from contextlib import asynccontextmanager
 
 import pytest
+from fastapi import HTTPException
+from starlette.requests import Request
 
 from features.query_registry.api import routes
 from shared.api.target_guard import TargetGuard
+
+
+def _http_request(**headers: str) -> Request:
+    """A loopback POST, or a remote one once a source header is supplied."""
+    raw = [(b"host", b"127.0.0.1:8787")]
+    raw += [(name.encode(), value.encode()) for name, value in headers.items()]
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/query-registry/load-test-runs",
+            "scheme": "http",
+            "query_string": b"",
+            "headers": raw,
+            "client": ("127.0.0.1", 54321),
+            "server": ("127.0.0.1", 8787),
+        }
+    )
 
 
 class _Registry:
@@ -75,6 +95,7 @@ async def test_load_test_preserves_zero_interval_and_holds_reservation(monkeypat
             concurrency=1,
             duration_seconds=5,
         ),
+        _http_request(),
         TargetGuard("origin", {"engine": "postgresql"}, "postgresql"),
     )
 
@@ -90,6 +111,9 @@ async def test_load_test_preserves_zero_interval_and_holds_reservation(monkeypat
         "concurrency": 1,
         "duration_seconds": 5,
         "max_count": None,
+        "parameter_sets": None,
+        "warmup_executions": None,
+        "statement_timeout_ms": None,
     }
     async for _event in factory(response.run_id):
         pass
@@ -115,6 +139,7 @@ async def test_load_test_attaches_to_existing_target_run(monkeypatch):
 
     response = await routes.start_load_test_run(
         request,
+        _http_request(),
         TargetGuard("origin", {"engine": "postgresql"}, "postgresql"),
     )
 
@@ -138,8 +163,31 @@ async def test_load_test_does_not_attach_to_different_request(monkeypatch):
             queries=[routes.BenchmarkQueryInput(sql="SELECT 2")],
             duration_seconds=5,
         ),
+        _http_request(),
         TargetGuard("origin", {"engine": "postgresql"}, "postgresql"),
     )
 
     assert response.run_id == "load_test_origin_new"
     assert len(registry.started) == 1
+
+
+@pytest.mark.asyncio
+async def test_cross_site_load_test_start_is_forbidden(monkeypatch):
+    """A page on another site cannot start a run against the user's target."""
+    import shared.run_registry as registry_module
+
+    registry = _Registry()
+    monkeypatch.setattr(registry_module, "run_registry", registry)
+
+    with pytest.raises(HTTPException) as raised:
+        await routes.start_load_test_run(
+            routes.BenchmarkRequest(
+                target="origin",
+                queries=[routes.BenchmarkQueryInput(sql="SELECT 1")],
+            ),
+            _http_request(origin="https://evil.example"),
+            TargetGuard("origin", {"engine": "postgresql"}, "postgresql"),
+        )
+
+    assert raised.value.status_code == 403
+    assert registry.started == []

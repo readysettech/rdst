@@ -16,6 +16,12 @@ export type LoadTestOutcome =
   | 'failed'
   | 'no_measurements'
 
+export interface LoadTestSkippedQuery {
+  query_hash: string
+  query_name?: string
+  reason: string
+}
+
 export interface LoadTestResultModel {
   outcome: LoadTestOutcome
   running: boolean
@@ -35,6 +41,30 @@ export interface LoadTestResultModel {
   title: string
   description: string
   statusLabel: string
+  skippedQueries: LoadTestSkippedQuery[]
+}
+
+/**
+ * A newer backend may report queries it skipped rather than ran (e.g. one
+ * whose parameters had no stored value) as additive fields on the complete
+ * event. Nothing in the generated `QueryBenchmarkEvent` type promises they
+ * exist, so every read here is defensive -- an older payload without them
+ * yields an empty list and the UI section that depends on it stays hidden.
+ */
+function readSkippedQueries(
+  progress: BenchmarkProgress | undefined
+): LoadTestSkippedQuery[] {
+  const value = (progress as { skipped_queries?: unknown } | undefined)
+    ?.skipped_queries
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is LoadTestSkippedQuery => {
+    if (!entry || typeof entry !== 'object') return false
+    const candidate = entry as Partial<LoadTestSkippedQuery>
+    return (
+      typeof candidate.query_hash === 'string' &&
+      typeof candidate.reason === 'string'
+    )
+  })
 }
 
 function aggregateLatency(
@@ -114,6 +144,7 @@ export function deriveLoadTestResultModel({
       ? 1000 / (Math.max(0, intervalMs) + meanLatency)
       : null
   const qps = progress?.qps ?? 0
+  const skippedQueries = readSkippedQueries(progress)
 
   const statusLabel: Record<LoadTestOutcome, string> = {
     queued: 'Queued',
@@ -183,5 +214,6 @@ export function deriveLoadTestResultModel({
     title: title[outcome],
     description: description[outcome],
     statusLabel: statusLabel[outcome],
+    skippedQueries,
   }
 }

@@ -452,13 +452,15 @@ class TestBenchmarkExecutionEvidence:
         assert {(target, lane) for target, lane, *_ in recorded} == {
             ("demo", "rdst/loadtest")
         }
+        # Warmup executions reach the database like any other, so attribution
+        # counts them even though no statistic does.
         assert (
             sum(
                 execution["exec_count"]
                 for _, _, _, executions, _, _ in recorded
                 for execution in executions
             )
-            == complete.total_successes
+            == complete.total_successes + complete.warmup_executions
         )
         for _, _, run_id, _, started_at, ended_at in recorded:
             # Stable per-second run_id: no flush batch index in the key.
@@ -639,3 +641,173 @@ class TestBenchmarkExecutionEvidence:
 
         assert events[-1].type == "complete"
         assert events[-1].total_successes >= 1
+
+
+class TestBenchmarkParameterResolution:
+    """A `$N` identity runs on its stored values, and is refused without them."""
+
+    PG_TEXT = "SELECT * FROM orders WHERE customer_id = $1"
+
+    def _registry(self, monkeypatch, tmp_path, values=None):
+        from shared.query_registry.query_registry import QueryRegistry
+
+        registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+        registry.load()
+        query_hash, _ = registry.add_query(
+            sql=self.PG_TEXT, source="top-historical", target="demo"
+        )
+        if values:
+            registry.update_parameter_history(query_hash, values, source="user")
+
+        import shared.query_registry as shared_registry
+
+        monkeypatch.setattr(
+            shared_registry, "QueryRegistry", lambda *a, **k: registry
+        )
+        return query_hash
+
+    @pytest.mark.asyncio
+    async def test_stored_values_are_substituted_before_execution(
+        self, monkeypatch, tmp_path
+    ):
+        query_hash = self._registry(monkeypatch, tmp_path, {"p1": "42"})
+        conn = _FakeConnection()
+        with (
+            patch(
+                "shared.db_connection.create_direct_connection", return_value=conn
+            ),
+            patch(
+                "shared.config.targets.create_targets_config",
+                return_value=_FakeTargetsConfig(),
+            ),
+        ):
+            events = await _collect(
+                QueryService().stream_benchmark(
+                    queries=[query_hash],
+                    target="demo",
+                    mode="interval",
+                    interval_ms=0,
+                    concurrency=1,
+                    duration_seconds=1,
+                    max_count=2,
+                )
+            )
+
+        assert events[-1].type == "complete"
+        assert events[-1].total_successes >= 1
+        executed = [sql for sql in conn.executed if "orders" in sql]
+        assert executed and "$1" not in executed[0]
+        assert executed[0].endswith("= 42")
+
+    @pytest.mark.asyncio
+    async def test_missing_values_still_refuse_the_run(self, monkeypatch, tmp_path):
+        query_hash = self._registry(monkeypatch, tmp_path)
+
+        events = await _collect(
+            QueryService().stream_benchmark(
+                queries=[query_hash],
+                target="demo",
+                mode="interval",
+                interval_ms=0,
+                concurrency=1,
+                duration_seconds=1,
+                max_count=2,
+            )
+        )
+
+        assert events[-1].type == "error"
+        assert events[-1].code == "benchmark_unresolved_params"
+
+    @pytest.mark.asyncio
+    async def test_a_value_spelling_a_slot_does_not_refuse_the_run(
+        self, monkeypatch, tmp_path
+    ):
+        query_hash = self._registry(monkeypatch, tmp_path, {"p1": "$1"})
+        conn = _FakeConnection()
+        with (
+            patch(
+                "shared.db_connection.create_direct_connection", return_value=conn
+            ),
+            patch(
+                "shared.config.targets.create_targets_config",
+                return_value=_FakeTargetsConfig(),
+            ),
+        ):
+            events = await _collect(
+                QueryService().stream_benchmark(
+                    queries=[query_hash],
+                    target="demo",
+                    mode="interval",
+                    interval_ms=0,
+                    concurrency=1,
+                    duration_seconds=1,
+                    max_count=2,
+                )
+            )
+
+        assert events[-1].type == "complete"
+        executed = [sql for sql in conn.executed if "orders" in sql]
+        assert executed and executed[0].endswith("= '$1'")
+
+
+class TestBenchmarkErrorDisclosure:
+    """Per-query failures reach the browser as a stable summary.
+
+    Raw driver text names schemas, columns, hosts, and roles, and its
+    wording moves with every engine release. The server keeps it in its own
+    log and reports a summary the client can key on.
+    """
+
+    def test_summaries_are_stable_across_driver_wording(self):
+        from features.query_registry.service import _execution_error_summary
+
+        cases = {
+            "cannot execute setval() in a read-only transaction": (
+                "read-only transaction"
+            ),
+            "canceling statement due to statement timeout": "statement timeout",
+            'permission denied for table "salaries"': "permission denied",
+            'syntax error at or near "FRM"': "syntax error",
+            'column "secret_col" does not exist': "missing table or column",
+            "server closed the connection unexpectedly": "connection error",
+            "something nobody has seen before": "execution error",
+        }
+        for raw, summary in cases.items():
+            assert _execution_error_summary(raw) == summary
+
+    @pytest.mark.asyncio
+    async def test_driver_text_is_logged_not_returned(self, caplog):
+        import logging
+
+        conn = _FakeConnection()
+        with (
+            patch(
+                "shared.db_connection.create_direct_connection", return_value=conn
+            ),
+            patch(
+                "shared.config.targets.create_targets_config",
+                return_value=_FakeTargetsConfig(),
+            ),
+            caplog.at_level(logging.WARNING),
+        ):
+            events = await _collect(
+                QueryService().stream_benchmark(
+                    queries=[
+                        {
+                            "identifier": "sneaky",
+                            "sql": "SELECT setval('orders_id_seq', 42)",
+                        }
+                    ],
+                    target="demo",
+                    mode="interval",
+                    interval_ms=0,
+                    concurrency=1,
+                    duration_seconds=1,
+                    max_count=2,
+                )
+            )
+
+        complete = events[-1]
+        assert complete.queries[0].last_error == "read-only transaction"
+        assert "setval" not in (complete.queries[0].last_error or "")
+        assert "cannot execute setval()" in caplog.text

@@ -176,6 +176,74 @@ describe('buildParameterSuggestions', () => {
     expect(suggestions.$2).toBeUndefined()
   })
 
+  it('suggests a threshold for an aggregate comparison in HAVING', () => {
+    const sql =
+      'SELECT shop_id FROM orders GROUP BY shop_id HAVING COUNT(*) > $1'
+    expect(buildParameterSuggestions(sql, detectParameters(sql), null)).toEqual(
+      {
+        $1: { value: '1', provenance: 'Query shape · COUNT comparison' },
+      }
+    )
+  })
+
+  it('resolves a column referenced through a simple CTE', () => {
+    const sql =
+      'WITH recent AS (SELECT * FROM orders) SELECT * FROM recent r WHERE r.status = $1'
+    expect(
+      buildParameterSuggestions(sql, detectParameters(sql), SCHEMA)
+    ).toEqual({
+      $1: { value: 'paid', provenance: 'Schema enum · orders.status' },
+    })
+  })
+
+  it('suggests a unit string for DATE_TRUNC', () => {
+    const sql = 'SELECT DATE_TRUNC($1, created_at) FROM orders'
+    expect(buildParameterSuggestions(sql, detectParameters(sql), null)).toEqual(
+      {
+        $1: { value: 'day', provenance: 'Query shape · DATE_TRUNC unit' },
+      }
+    )
+  })
+
+  it('suggests a precision for ROUND', () => {
+    const sql = 'SELECT ROUND(avg_price, $1) FROM orders'
+    expect(buildParameterSuggestions(sql, detectParameters(sql), null)).toEqual(
+      {
+        $1: { value: '2', provenance: 'Query shape · ROUND precision' },
+      }
+    )
+  })
+
+  it('suggests a row count for a window frame bound', () => {
+    const sql =
+      'SELECT SUM(amount) OVER (ORDER BY created_at ROWS BETWEEN $1 PRECEDING AND CURRENT ROW) FROM orders'
+    expect(buildParameterSuggestions(sql, detectParameters(sql), null)).toEqual(
+      {
+        $1: { value: '5', provenance: 'Query shape · window frame' },
+      }
+    )
+  })
+
+  it('types a simple CASE comparison against its subject column', () => {
+    const sql =
+      "SELECT CASE status WHEN $1 THEN 'a' WHEN $2 THEN 'b' END FROM users"
+    expect(
+      buildParameterSuggestions(sql, detectParameters(sql), SCHEMA)
+    ).toEqual({
+      $1: { value: 'active', provenance: 'Schema enum · users.status' },
+      $2: { value: 'active', provenance: 'Schema enum · users.status' },
+    })
+  })
+
+  it('suggests a wildcard for a LIKE concatenation pattern', () => {
+    const sql = "SELECT * FROM users WHERE location LIKE ('%' || $1 || '%')"
+    expect(buildParameterSuggestions(sql, detectParameters(sql), null)).toEqual(
+      {
+        $1: { value: '%', provenance: 'Query shape · LIKE pattern' },
+      }
+    )
+  })
+
   it('covers a mixed aggregate query end to end', () => {
     const sql =
       'SELECT COALESCE(u.location, $1) AS region, PERCENTILE_DISC($2) WITHIN GROUP (ORDER BY u.reputation) AS p_rep FROM users u WHERE u.reputation > $3 GROUP BY 1 LIMIT $4'

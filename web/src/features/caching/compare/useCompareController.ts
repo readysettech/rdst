@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTarget } from '../../../hooks/useTarget'
+import { reportCompareOutcome, updateQueryParameters } from '../../../lib/api'
 import { useBackgroundRuns } from '../../../lib/backgroundRuns'
 import {
   buildParameterSuggestions,
@@ -8,20 +9,28 @@ import {
   parameterValueKey,
   suggestionSummaryMessage,
 } from '../../../lib/parameterSuggestions'
+import { byImpact } from '../../../lib/queryImpact'
 import {
   detectParameters,
+  hasResidualPlaceholders,
   resolveInitialValue,
   substituteParameters,
+  toBackendParams,
 } from '../../../lib/sqlParameters'
+import {
+  type AutoSuggestFill,
+  useAutoSuggestParameters,
+} from '../../../lib/useAutoSuggestParameters'
 import { useQueryRegistry } from '../../../lib/useQueryRegistry'
 import { useTargetConnectivityGate } from '../../../lib/useTargetConnectivityGate'
 import { useTargetPasswordLock } from '../../../lib/useTargetPasswordLock'
-import { fetchSandboxDiagnostics } from '../sandbox'
+import { fetchSandboxDiagnostics, queueSandboxPrewarm } from '../sandbox'
 import {
   type CompareBatch,
   cancelCompareBatch,
   clearActiveCompareBatch,
   compareBatchSnapshot,
+  deriveCompareOutcomeReport,
   forgetCompareBatch,
   latestCompareBatch,
   listCompareBatches,
@@ -73,6 +82,9 @@ export function useCompareController(initialQueryHash?: string) {
   )
   const [updatingLoad, setUpdatingLoad] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
+  const [residualQueryHash, setResidualQueryHash] = useState<string | null>(
+    null
+  )
   const [historyOpen, setHistoryOpen] = useState(false)
   const [starting, setStarting] = useState(false)
   const [batch, setBatch] = useState<CompareBatch | null>(() =>
@@ -83,6 +95,8 @@ export function useCompareController(initialQueryHash?: string) {
   )
   const initializedSelectionKey = useRef<string | null>(null)
   const steppedBatchId = useRef<string | null>(null)
+  const prewarmedTarget = useRef<string | null>(null)
+  const reportedOutcomes = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     setBatch(latestCompareBatch(target))
@@ -93,8 +107,10 @@ export function useCompareController(initialQueryHash?: string) {
     setParameterSources({})
     setSuggestionMessage(null)
     setSuggestionSchemaUnavailable(false)
+    setResidualQueryHash(null)
     initializedSelectionKey.current = null
     steppedBatchId.current = null
+    reportedOutcomes.current.clear()
   }, [target])
 
   const statusQuery = useQuery({
@@ -104,9 +120,37 @@ export function useCompareController(initialQueryHash?: string) {
     refetchInterval: 5_000,
   })
 
+  const dockerReady =
+    statusQuery.data?.docker_installed === true &&
+    statusQuery.data?.docker_running === true
+
+  // Warm the Readyset sandbox as soon as the user lands on Compare setup with
+  // a usable target, so it is ready by the time they finish configuring the
+  // run instead of only starting once they press "Run comparison". Asked for
+  // only once the diagnostics say a sandbox can exist at all, so a machine
+  // without Docker -- where the page offers "Check again" instead of a run --
+  // stays quiet. Guarded per target so re-renders don't re-queue it; the
+  // backend itself replaces an obsolete queued prewarm if the target changes
+  // again before it starts.
+  useEffect(() => {
+    if (!target || passwordLock.isLocked || !dockerReady) return
+    if (prewarmedTarget.current === target) return
+    prewarmedTarget.current = target
+    void queueSandboxPrewarm(target).catch(() => {
+      // A head start is a convenience; a failure here must stay silent and
+      // let the real run surface its own sandbox errors if any remain.
+    })
+  }, [dockerReady, target, passwordLock.isLocked])
+
   // Cacheability is evidence produced by a comparison, not query identity.
   // Keep candidates visible and let each run report unsupported SQL explicitly.
-  const queries = registry.queries
+  // The picker's own list has no sort control, so its one ordering should
+  // lead with the queries most worth comparing, same as the Query Library's
+  // impact-first default -- not the registry's last-analyzed API order.
+  const queries = useMemo(
+    () => [...registry.queries].sort(byImpact),
+    [registry.queries]
+  )
   const selected = useMemo(
     () => queries.filter((entry) => selectedIds.includes(entry.hash)),
     [queries, selectedIds]
@@ -201,6 +245,47 @@ export function useCompareController(initialQueryHash?: string) {
     (count, item) => count + item.parameters.length,
     0
   )
+
+  const applyAutoSuggestFills = useCallback((fills: AutoSuggestFill[]) => {
+    setParamValues((current) => {
+      const next = { ...current }
+      for (const fill of fills) {
+        if (!next[fill.key]?.trim()) next[fill.key] = fill.value
+      }
+      return next
+    })
+    setParameterSources((current) => {
+      const next = { ...current }
+      for (const fill of fills) next[fill.key] = fill.provenance
+      return next
+    })
+  }, [])
+
+  // Fire the backend value-suggestion service in the background as soon as a
+  // query with unfilled placeholders is selected, so values are ready before
+  // the user reaches "Run comparison" instead of only on an explicit
+  // "Suggest values" click.
+  useAutoSuggestParameters({
+    target,
+    items: useMemo(
+      () =>
+        selectedWithParams.map((item) => ({
+          id: item.entry.hash,
+          hash: item.entry.hash,
+          sql: item.entry.sql,
+          parameters: item.parameters,
+        })),
+      [selectedWithParams]
+    ),
+    values: paramValues,
+    keyFor: useCallback(
+      (id: string, parameter) =>
+        parameterKey(id, parameter.placeholder, parameter.index),
+      []
+    ),
+    onApply: applyAutoSuggestFills,
+  })
+
   useEffect(() => {
     setConcurrency(initialCompareConcurrency(selectedIds.length))
   }, [selectedIds.length])
@@ -227,6 +312,35 @@ export function useCompareController(initialQueryHash?: string) {
     setBatch(settled)
     setHistory(listCompareBatches(target))
   }, [batch, snapshot, target])
+
+  // Record what each query's comparison found beside the query itself, as
+  // soon as that one query reaches a terminal state -- not only once the
+  // whole batch finishes -- so the Query Library reflects results as they
+  // land. Fire-and-forget per query, same as updateQueryParameters: this
+  // history is a convenience for the next person who opens the query, and
+  // must not affect the run in progress or its local results.
+  useEffect(() => {
+    if (!batch || !snapshot) return
+    const queryHashByCacheId = new Map(
+      batch.queries.map((query) => [query.cacheId, query.queryHash])
+    )
+    for (const outcome of snapshot.queryOutcomes) {
+      if (outcome.status === 'running') continue
+      const key = `${batch.id}:${outcome.cacheId}`
+      if (reportedOutcomes.current.has(key)) continue
+      reportedOutcomes.current.add(key)
+      const report = deriveCompareOutcomeReport(
+        outcome,
+        queryHashByCacheId.get(outcome.cacheId),
+        batch.target
+      )
+      if (!report) continue
+      void reportCompareOutcome(report.queryHash, report.request).catch(() => {
+        // Best-effort history; the run and its local results already
+        // reflect this outcome regardless of whether the write lands.
+      })
+    }
+  }, [batch, snapshot])
 
   // The normal comparison has one safe, predictable load profile: begin at
   // two clients per lane, then step to four halfway through. Advanced/manual
@@ -282,6 +396,7 @@ export function useCompareController(initialQueryHash?: string) {
     value: string
   ) => {
     const key = parameterKey(queryHash, placeholder, index)
+    setResidualQueryHash((current) => (current === queryHash ? null : current))
     setParamValues((current) => ({
       ...current,
       [key]: value,
@@ -354,9 +469,6 @@ export function useCompareController(initialQueryHash?: string) {
     }
   }, [missingParameterCount, paramValues, selectedWithParams, target])
 
-  const dockerReady =
-    statusQuery.data?.docker_installed === true &&
-    statusQuery.data?.docker_running === true
   const canReview =
     !!target &&
     dockerReady &&
@@ -375,38 +487,73 @@ export function useCompareController(initialQueryHash?: string) {
       if (!(await connectivity.ensureReachable())) return
       const initialConcurrency = initialCompareConcurrency(selected.length)
       setConcurrency(initialConcurrency)
+      const preparedQueries = selectedWithParams.map((item) => {
+        const values: Record<string, string> = {}
+        for (const parameter of item.parameters) {
+          const value =
+            paramValues[
+              parameterKey(
+                item.entry.hash,
+                parameter.placeholder,
+                parameter.index
+              )
+            ] ?? ''
+          values[
+            parameter.placeholder === '?'
+              ? `?${parameter.index}`
+              : parameter.placeholder
+          ] = value
+        }
+        return {
+          hash: item.entry.hash,
+          parameters: item.parameters,
+          values,
+          cacheId: item.entry.hash,
+          label:
+            item.entry.tag?.trim() || `Query ${item.entry.hash.slice(0, 8)}`,
+          queryHash: item.entry.hash,
+          sql:
+            item.parameters.length > 0
+              ? substituteParameters(item.entry.sql, item.parameters, values)
+              : item.entry.sql,
+        }
+      })
+
+      // Defensive last line before running real queries: the Run gate
+      // already requires every detected placeholder to carry a value, but a
+      // substitution that silently failed (or a placeholder the detector
+      // missed) must not reach the database as broken SQL.
+      const unresolved = preparedQueries.find((query) =>
+        hasResidualPlaceholders(query.sql)
+      )
+      if (unresolved) {
+        setResidualQueryHash(unresolved.hash)
+        setReviewOpen(false)
+        return
+      }
+      setResidualQueryHash(null)
+
+      for (const query of preparedQueries) {
+        const backendValues = toBackendParams(query.parameters, query.values)
+        if (Object.keys(backendValues).length === 0) continue
+        void updateQueryParameters(query.hash, backendValues, 'user').catch(
+          () => {
+            // Persistence is a convenience for next time; it must not block
+            // this run.
+          }
+        )
+      }
+
       const nextBatch = await startCompareBatch({
         target,
         concurrency: initialConcurrency,
         durationSeconds: DEFAULT_COMPARE_DURATION,
-        queries: selectedWithParams.map((item) => {
-          const values: Record<string, string> = {}
-          for (const parameter of item.parameters) {
-            const value =
-              paramValues[
-                parameterKey(
-                  item.entry.hash,
-                  parameter.placeholder,
-                  parameter.index
-                )
-              ] ?? ''
-            values[
-              parameter.placeholder === '?'
-                ? `?${parameter.index}`
-                : parameter.placeholder
-            ] = value
-          }
-          return {
-            cacheId: item.entry.hash,
-            label:
-              item.entry.tag?.trim() || `Query ${item.entry.hash.slice(0, 8)}`,
-            queryHash: item.entry.hash,
-            sql:
-              item.parameters.length > 0
-                ? substituteParameters(item.entry.sql, item.parameters, values)
-                : item.entry.sql,
-          }
-        }),
+        queries: preparedQueries.map(({ cacheId, label, queryHash, sql }) => ({
+          cacheId,
+          label,
+          queryHash,
+          sql,
+        })),
       })
       setBatch(nextBatch)
       setDurationSeconds(DEFAULT_COMPARE_DURATION)
@@ -452,6 +599,7 @@ export function useCompareController(initialQueryHash?: string) {
     suggestParameterValues,
     parameterCount,
     missingParameterCount,
+    residualQueryHash,
     concurrency,
     durationSeconds,
     updatingLoad,

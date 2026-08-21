@@ -1075,3 +1075,47 @@ class TestCorrelateRegistryHash:
 
     def test_returns_empty_when_nothing_correlates(self):
         assert self._corr({"cache_id": "q_x", "query": "SELECT 2"}, {}, {}) == ""
+
+
+class TestCacheSaveAdmission:
+    """The Query Library holds user workload, whatever the cache ran.
+
+    A cache run happens against whatever it is pointed at, including RDST's
+    own probes, so the save path applies automatic discovery's admission
+    rule rather than admitting its input on sight.
+    """
+
+    @staticmethod
+    def _save(tmp_path, sql):
+        from features.cache.service import CacheService
+        from shared.query_registry.query_registry import QueryRegistry
+
+        registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+        registry.load()
+        with patch(
+            "shared.query_registry.QueryRegistry", lambda *a, **k: registry
+        ):
+            saved = CacheService()._save_to_registry(sql, None, "demo")
+        return saved, registry
+
+    def test_user_query_is_saved(self, tmp_path):
+        saved, registry = self._save(
+            tmp_path, "SELECT title FROM posts WHERE score > 10"
+        )
+
+        assert saved is not None
+        assert registry.get_query(saved) is not None
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT version()",
+            "SELECT current_setting('server_version_num')::int",
+            "SELECT relname FROM pg_stat_user_indexes",
+        ],
+    )
+    def test_system_statements_are_not_saved(self, tmp_path, sql):
+        saved, registry = self._save(tmp_path, sql)
+
+        assert saved is None
+        assert registry.list_queries() == []

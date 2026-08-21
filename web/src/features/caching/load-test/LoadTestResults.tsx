@@ -96,6 +96,7 @@ export function LoadTestResults({
     title,
     description,
     statusLabel,
+    skippedQueries,
   } = model
   const failed = outcome === 'failed'
   const partial = outcome === 'partial'
@@ -390,6 +391,45 @@ export function LoadTestResults({
                   })}
                 </tbody>
               </table>
+            </div>
+          </Card.Content>
+        </Card>
+      )}
+
+      {skippedQueries.length > 0 && (
+        <Card className="border-border-warning-soft">
+          <Card.Header>
+            <Card.Title>
+              {skippedQueries.length}{' '}
+              {skippedQueries.length === 1 ? 'query' : 'queries'} skipped
+            </Card.Title>
+            <Card.Description>
+              Excluded before the run started rather than counted as failures.
+            </Card.Description>
+          </Card.Header>
+          <Card.Content className="p-0">
+            <div className="divide-y divide-border-layout-soft">
+              {skippedQueries.map((query) => (
+                <HStack
+                  key={query.query_hash}
+                  className="items-start justify-between gap-4 px-6 py-4"
+                >
+                  <VStack className="min-w-0 items-start gap-1">
+                    <Text level="label-small" className="text-content-layout-1">
+                      {query.query_name || 'Query'}
+                    </Text>
+                    <Text level="mono-small" className="text-content-layout-3">
+                      {shortHash(query.query_hash)}
+                    </Text>
+                  </VStack>
+                  <Text
+                    level="body-small"
+                    className="max-w-sm text-right text-content-warning-soft"
+                  >
+                    {query.reason}
+                  </Text>
+                </HStack>
+              ))}
             </div>
           </Card.Content>
         </Card>

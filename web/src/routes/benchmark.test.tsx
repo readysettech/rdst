@@ -27,6 +27,13 @@ vi.mock('@tanstack/react-query', () => ({
     isFetching: false,
     error: null,
   }),
+  useQueries: ({ queries }: { queries: unknown[] }) =>
+    queries.map(() => ({
+      data: undefined,
+      isLoading: false,
+      isFetching: false,
+      error: null,
+    })),
   useMutation: () => ({
     mutate: vi.fn(),
     mutateAsync: vi.fn(),

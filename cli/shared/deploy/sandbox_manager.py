@@ -49,8 +49,25 @@ DEFAULT_IDLE_TTL = timedelta(days=1)
 DEFAULT_MANAGED_SANDBOX_PORTS = {"postgresql": 5433, "mysql": 3307}
 SANDBOX_STARTUP_ATTEMPTS = 3
 
+# Readyset accepts SQL well before it has snapshotted the upstream tables, and
+# a cache created against an unsnapshotted table stalls or fails. Readiness
+# therefore waits for the snapshot, which on a large upstream takes minutes.
+DEFAULT_READINESS_TIMEOUT_SECONDS = 300.0
+SNAPSHOT_COMPLETED = "Completed"
+_SNAPSHOT_STATUS_FIELD = "snapshot status"
+_READINESS_LOG_INTERVAL_SECONDS = 15.0
+
 ProgressCallback = Callable[[str, str], Awaitable[None] | None]
 _T = TypeVar("_T")
+
+
+class SandboxNotReadyError(TimeoutError):
+    """The sandbox answers SQL but has not finished snapshotting upstream.
+
+    Distinct from a sandbox that never answered: the container is healthy and
+    only needs more time, so callers report "not ready yet" rather than a
+    failure or a verdict about the query they were about to run.
+    """
 
 
 class SandboxPriority(IntEnum):
@@ -390,14 +407,18 @@ class LocalDockerSandboxAdapter:
         )
         from shared.db_connection import probe_readyset_status
 
-        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_seconds
+        next_log = loop.time() + _READINESS_LOG_INTERVAL_SECONDS
         last_error = "Readyset SQL listener did not become ready"
-        while asyncio.get_running_loop().time() < deadline:
+        still_snapshotting = False
+        while loop.time() < deadline:
             try:
                 identity = await asyncio.to_thread(inspect_managed_sandbox)
             except Exception as exc:
                 last_error = str(exc) or type(exc).__name__
-                remaining = deadline - asyncio.get_running_loop().time()
+                still_snapshotting = False
+                remaining = deadline - loop.time()
                 if remaining > 0:
                     await asyncio.sleep(min(1, remaining))
                 continue
@@ -410,12 +431,20 @@ class LocalDockerSandboxAdapter:
                 raise RuntimeError(str(failure.get("error") or "Readyset stopped"))
             self._require_identity(sandbox, identity)
             try:
-                remaining = deadline - asyncio.get_running_loop().time()
-                await asyncio.to_thread(
+                remaining = deadline - loop.time()
+                rows = await asyncio.to_thread(
                     probe_readyset_status,
                     sandbox.connection.as_target_config(),
                     min(3, max(remaining, 0.001)),
                 )
+                snapshot = _snapshot_status(rows)
+                if (
+                    snapshot is not None
+                    and snapshot.lower() != SNAPSHOT_COMPLETED.lower()
+                ):
+                    # The listener answers well before the upstream snapshot
+                    # finishes, and a cache created in that window stalls.
+                    raise SandboxNotReadyError(f"snapshot status is '{snapshot}'")
                 identity = await asyncio.to_thread(inspect_managed_sandbox)
                 if not identity or not identity.get("running"):
                     raise RuntimeError(
@@ -436,9 +465,21 @@ class LocalDockerSandboxAdapter:
                 raise
             except Exception as exc:
                 last_error = str(exc) or type(exc).__name__
-                remaining = deadline - asyncio.get_running_loop().time()
+                still_snapshotting = isinstance(exc, SandboxNotReadyError)
+                if loop.time() >= next_log:
+                    logger.info(
+                        "Still waiting for the Readyset sandbox on %s: %s",
+                        sandbox.target,
+                        last_error,
+                    )
+                    next_log = loop.time() + _READINESS_LOG_INTERVAL_SECONDS
+                remaining = deadline - loop.time()
                 if remaining > 0:
                     await asyncio.sleep(min(1, remaining))
+        if still_snapshotting:
+            raise SandboxNotReadyError(
+                f"Readyset sandbox is still preparing: {last_error}"
+            )
         raise TimeoutError(f"Readyset sandbox readiness timed out: {last_error}")
 
     @staticmethod
@@ -503,7 +544,7 @@ class ReadysetSandboxManager:
         *,
         adapter: SandboxAdapter | None = None,
         idle_ttl: timedelta = DEFAULT_IDLE_TTL,
-        readiness_timeout_seconds: float = 90,
+        readiness_timeout_seconds: float = DEFAULT_READINESS_TIMEOUT_SECONDS,
         clock: Callable[[], datetime] | None = None,
         metadata_path: Path | None = None,
     ) -> None:
@@ -1309,21 +1350,43 @@ class ReadysetSandboxManager:
                 "preparing_sandbox",
                 "Checking the existing Readyset sandbox",
             )
-            try:
-                await _finish_before_cancelling(
-                    self._adapter.wait_ready(
-                        self._sandbox,
-                        timeout_seconds=min(5.0, self._readiness_timeout_seconds),
+            health_error: Exception | None = None
+            probes = (
+                min(5.0, self._readiness_timeout_seconds),
+                self._readiness_timeout_seconds,
+            )
+            for index, timeout_seconds in enumerate(probes):
+                try:
+                    await _finish_before_cancelling(
+                        self._adapter.wait_ready(
+                            self._sandbox, timeout_seconds=timeout_seconds
+                        )
                     )
-                )
-            except Exception as exc:
-                async with self._condition:
-                    self._state.dirty_reason = (
-                        "Readyset sandbox health check failed: "
-                        f"{type(exc).__name__}"
-                    )
-            else:
+                except SandboxNotReadyError as exc:
+                    health_error = exc
+                    if index == 0:
+                        # The container answers SQL and is only still
+                        # snapshotting. Waiting the snapshot out beats
+                        # replacing the sandbox, which starts the same
+                        # snapshot again from scratch.
+                        await _emit(
+                            waiter.progress,
+                            "waiting_for_readyset",
+                            "Waiting for the Readyset snapshot to finish",
+                        )
+                        continue
+                except Exception as exc:
+                    health_error = exc
+                else:
+                    health_error = None
+                break
+            if health_error is None:
                 return self._sandbox
+            async with self._condition:
+                self._state.dirty_reason = (
+                    "Readyset sandbox health check failed: "
+                    f"{type(health_error).__name__}"
+                )
 
         provisioning_started = False
         try:
@@ -1681,6 +1744,23 @@ async def _settle_transition(
     return task.result(), cancelled
 
 
+def _snapshot_status(rows: list[Any]) -> str | None:
+    """Read the snapshot status out of a SHOW READYSET STATUS reply.
+
+    Returns None when the reply carries no snapshot field at all, which a
+    caller reads as "this build reports no snapshot state" rather than as an
+    unfinished snapshot.
+    """
+    for row in rows or ():
+        try:
+            name, value = row[0], row[1]
+        except (IndexError, KeyError, TypeError):
+            continue
+        if str(name).strip().lower() == _SNAPSHOT_STATUS_FIELD:
+            return str(value).strip()
+    return None
+
+
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
@@ -1859,12 +1939,15 @@ sandbox_manager = ReadysetSandboxManager()
 
 __all__ = [
     "DEFAULT_IDLE_TTL",
+    "DEFAULT_READINESS_TIMEOUT_SECONDS",
     "SANDBOX_CONTAINER_NAME",
+    "SNAPSHOT_COMPLETED",
     "LocalDockerSandboxAdapter",
     "ProvisionedSandbox",
     "ReadysetSandboxManager",
     "SandboxConnection",
     "SandboxLease",
+    "SandboxNotReadyError",
     "SandboxOwnershipError",
     "SandboxPortConflictError",
     "SandboxPriority",

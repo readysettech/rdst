@@ -31,7 +31,11 @@ from sqlglot.errors import ParseError
 
 from shared.persistence import update_toml
 from shared.query_capture_limits import MAX_QUERY_LENGTH
-from shared.query_registry.library_store import LibraryStore, library_db_path_for
+from shared.query_registry.library_store import (
+    LibraryMigrationError,
+    LibraryStore,
+    library_db_path_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +93,11 @@ class QueryTargetLifecycle:
     last_compared_at: str = ""
     comparison_count: int = 0
     sources: List[str] = field(default_factory=list)
+    # What the most recent comparison found: status plus whichever of
+    # ``at``, ``readyset_ms``, ``origin_ms``, and ``detail`` the run
+    # measured. Absent keys mean the run reported nothing for them, so the
+    # mapping stays TOML-serializable.
+    last_compare: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "QueryTargetLifecycle":
@@ -97,6 +106,8 @@ class QueryTargetLifecycle:
         values = {key: value for key, value in data.items() if key in known_fields}
         if not isinstance(values.get("sources", []), list):
             values["sources"] = []
+        if not isinstance(values.get("last_compare", {}), dict):
+            values["last_compare"] = {}
         return cls(**values)
 
 
@@ -669,6 +680,42 @@ def _identity_slot_count(identity_sql: str) -> int:
     return len(dollar_slots)
 
 
+_PARAM_KEY = re.compile(r"^(?::?p|param_|\$)(\d+)$")
+
+
+def canonical_param_key(name: str) -> str:
+    """Return the `pN` name a parameter key stands for.
+
+    Callers spell one slot several ways: the registry's own `pN`, the
+    interactive prompt's `param_N`, and a statement's `$N` or `:pN`. A named
+    parameter (`:since`) keeps its name without the colon.
+    """
+    match = _PARAM_KEY.match(name.strip())
+    return f"p{int(match.group(1))}" if match else name.strip().lstrip(":")
+
+
+def typed_parameter(value: Any, source: str = "") -> Dict[str, Any]:
+    """Store one parameter value in the shape reconstruct_sql reads.
+
+    A string spelling a number is stored as a number, so a slot the engine
+    requires to be numeric (LIMIT, OFFSET) gets an unquoted literal. `source`
+    records provenance ("user", "suggested", "observed") when the caller
+    knows it.
+    """
+    if isinstance(value, str):
+        for cast in (int, float):
+            try:
+                value = cast(value)
+                break
+            except ValueError:
+                continue
+    is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
+    param = {"value": value, "type": "number" if is_number else "string"}
+    if source:
+        param["source"] = source
+    return param
+
+
 def extract_observed_params(
     sample_sql: str, identity_sql: str, dialect: str = None
 ) -> Dict[str, dict]:
@@ -1053,6 +1100,9 @@ class QueryRegistry:
                 query_hash: QueryEntry.from_dict(query_data)
                 for query_hash, query_data in self._store.load_all().items()
             }
+        except LibraryMigrationError:
+            # Already the whole explanation, including where the backup is.
+            raise
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to load query registry at {self.registry_path}: {exc}"
@@ -1693,14 +1743,7 @@ class QueryRegistry:
         for param_name in missing:
             try:
                 value = input(f"  Enter value for :{param_name}: ").strip()
-                # Infer type from input
-                try:
-                    params[param_name] = {"value": int(value), "type": "number"}
-                except ValueError:
-                    try:
-                        params[param_name] = {"value": float(value), "type": "number"}
-                    except ValueError:
-                        params[param_name] = {"value": value, "type": "string"}
+                params[param_name] = typed_parameter(value, source="user")
             except KeyboardInterrupt:
                 print("\nCancelled.")
                 raise
@@ -1727,19 +1770,27 @@ class QueryRegistry:
         return self.get_executable_query(entry.hash, interactive)
 
     def update_parameter_history(
-        self, query_hash: str, parameters: Dict[str, Any], target: str = ""
+        self,
+        query_hash: str,
+        parameters: Dict[str, Any],
+        target: str = "",
+        source: str = "",
     ) -> bool:
         """
         Update the stored parameters for an existing query.
 
-        This is used when a user provides parameter values interactively
-        for a parameterized query. The values are stored for auto-substitution
-        on subsequent runs.
+        This is used when a user provides parameter values for a
+        parameterized query. Both parameter fields are written from the same
+        values: most_recent_params for display and auto-substitution, and
+        parameters in the typed shape get_executable_query reconstructs from,
+        so the values also make the query runnable.
 
         Args:
             query_hash: Hash of the query to update
             parameters: Dictionary of parameter values (e.g., {'p1': 'value1', 'p2': 123})
             target: Optional target database name
+            source: Optional provenance ("user", "suggested", "observed"),
+                stored per value alongside its type
 
         Returns:
             True if update succeeded, False if query not found
@@ -1753,7 +1804,13 @@ class QueryRegistry:
 
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
-        entry.most_recent_params = parameters
+        values = {
+            canonical_param_key(name): value for name, value in parameters.items()
+        }
+        entry.most_recent_params = values
+        entry.parameters = {
+            name: typed_parameter(value, source) for name, value in values.items()
+        }
         entry.last_analyzed = now
 
         if target:

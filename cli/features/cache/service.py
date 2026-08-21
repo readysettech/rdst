@@ -6,6 +6,7 @@ Provides async generator methods consumed by both CLI and web API.
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 import subprocess
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
@@ -28,6 +29,9 @@ from .events import (
     CacheStatusEvent,
 )
 from .models import CacheInput, CacheOptions
+
+# Bound on an interactive Readyset statement (SHOW, DROP, EXPLAIN).
+DEFAULT_READYSET_STATEMENT_TIMEOUT_MS = 30_000
 
 
 def _normalize_for_match(sql: str) -> str:
@@ -188,9 +192,16 @@ class CacheService:
         user: str,
         database: str,
         password: str,
+        statement_timeout_ms: int = DEFAULT_READYSET_STATEMENT_TIMEOUT_MS,
     ) -> Dict[str, Any]:
-        """Execute SQL against a Readyset instance. Synchronous."""
+        """Execute SQL against a Readyset instance. Synchronous.
+
+        ``statement_timeout_ms`` bounds the statement itself. A cold CREATE
+        CACHE builds its state from the upstream tables and needs far longer
+        than an interactive SHOW or DROP.
+        """
         conn = None
+        timeout_ms = max(1000, int(statement_timeout_ms))
         try:
             if engine == "mysql":
                 import pymysql
@@ -199,7 +210,8 @@ class CacheService:
                 conn = pymysql.connect(
                     host=host, port=int(port), user=user,
                     password=password, database=database,
-                    connect_timeout=10, read_timeout=30,
+                    connect_timeout=10,
+                    read_timeout=math.ceil(timeout_ms / 1000),
                     autocommit=True, cursorclass=pymysql.cursors.Cursor,
                 )
             else:
@@ -208,7 +220,8 @@ class CacheService:
                 conn = psycopg2.connect(
                     host=host, port=int(port), user=user,
                     password=password, database=database,
-                    connect_timeout=10, options="-c statement_timeout=30000",
+                    connect_timeout=10,
+                    options=f"-c statement_timeout={timeout_ms}",
                 )
                 conn.autocommit = True
 
@@ -239,9 +252,21 @@ class CacheService:
     def _save_to_registry(
         self, query: str, tag: Optional[str], target: str
     ) -> Optional[str]:
-        """Save query to registry. Returns hash or None."""
+        """Save query to registry. Returns hash or None.
+
+        Admission matches automatic discovery's: the cache pipeline runs
+        against whatever it is pointed at, including RDST's own probes, and
+        the Query Library holds user workload only.
+        """
         try:
             from shared.query_registry import QueryRegistry
+            from shared.query_registry.self_traffic import match_self_template
+            from shared.query_registry.sql_normalizer import (
+                references_user_relations,
+            )
+
+            if not references_user_relations(query) or match_self_template(query):
+                return None
 
             registry = QueryRegistry()
             registry.load()
@@ -645,7 +670,7 @@ class CacheService:
             saved_hash = await asyncio.to_thread(
                 self._save_to_registry, query, input_data.tag, input_data.target,
             )
-            if readyset_query_id:
+            if readyset_query_id and saved_hash:
                 await asyncio.to_thread(
                     self._update_registry_readyset_identity,
                     saved_hash, readyset_query_id, supported_status or "yes",

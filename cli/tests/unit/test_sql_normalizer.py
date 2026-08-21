@@ -11,6 +11,7 @@ from shared.query_registry.sql_normalizer import (
     normalize_and_extract,
     reconstruct_sql,
     get_placeholder_names,
+    mask_string_literals,
     denormalize_for_readyset,
     parse_query_id_from_explain,
     parse_supported_from_explain,
@@ -331,6 +332,86 @@ class TestGetPlaceholderNames:
         sql = "SELECT * FROM users WHERE id = :p1 OR parent_id = :p1"
         names = get_placeholder_names(sql)
         assert names == {'p1'}
+
+
+class TestPositionalPlaceholders:
+    """`$N` slots of engine-normalized texts name the same parameters as `:pN`."""
+
+    def test_dollar_slots_are_named_positionally(self):
+        sql = "SELECT * FROM users WHERE id = $1 LIMIT $2"
+        assert get_placeholder_names(sql) == {"p1", "p2"}
+
+    def test_mixed_styles_are_both_named(self):
+        sql = "SELECT * FROM users WHERE name = :p1 AND id = $2"
+        assert get_placeholder_names(sql) == {"p1", "p2"}
+
+    def test_dollar_quoted_string_is_not_a_placeholder(self):
+        assert get_placeholder_names("SELECT $$100$$ FROM users") == set()
+        assert get_placeholder_names("SELECT $tag$x$1$tag$ FROM users") == set()
+
+    def test_dollar_quoted_string_keeps_real_slots(self):
+        sql = "SELECT $$100$$ FROM users WHERE id = $1"
+        assert get_placeholder_names(sql) == {"p1"}
+
+    def test_slot_inside_string_literal_is_not_a_placeholder(self):
+        assert get_placeholder_names("SELECT * FROM t WHERE s = '$1'") == set()
+
+    def test_reconstruct_substitutes_dollar_slots(self):
+        sql = "SELECT * FROM users WHERE id = $1 AND name = $2"
+        params = {
+            "p1": {"value": 7, "type": "number"},
+            "p2": {"value": "ana", "type": "string"},
+        }
+
+        result = reconstruct_sql(sql, params, dialect="postgres")
+
+        assert "$1" not in result and "$2" not in result
+        assert "7" in result
+        assert "'ana'" in result
+
+    def test_reconstruct_substitutes_mixed_styles(self):
+        sql = "SELECT * FROM users WHERE name = :p1 AND id = $2"
+        params = {
+            "p1": {"value": "ana", "type": "string"},
+            "p2": {"value": 7, "type": "number"},
+        }
+
+        result = reconstruct_sql(sql, params, dialect="postgres")
+
+        assert "'ana'" in result
+        assert "7" in result
+        assert "$2" not in result and ":p1" not in result
+
+    def test_reconstruct_leaves_dollar_quoted_text_alone(self):
+        sql = "SELECT $$100$$ FROM users WHERE id = $1"
+        params = {"p1": {"value": 7, "type": "number"}}
+
+        result = reconstruct_sql(sql, params)
+
+        assert "$$100$$" in result
+        assert result.endswith("= 7")
+
+    def test_reconstruct_keeps_unknown_slot(self):
+        sql = "SELECT * FROM users WHERE id = $1 AND org = $2"
+        params = {"p1": {"value": 7, "type": "number"}}
+
+        result = reconstruct_sql(sql, params, dialect="postgres")
+
+        assert "$2" in result
+
+    def test_reconstruct_quotes_a_value_that_spells_a_slot(self):
+        sql = "SELECT * FROM users WHERE name = $1"
+        params = {"p1": {"value": "$1", "type": "string"}}
+
+        assert reconstruct_sql(sql, params, dialect="postgres").endswith("= '$1'")
+
+    def test_mask_string_literals_preserves_offsets(self):
+        sql = "SELECT $$a$$, 'b' FROM t WHERE id = $1"
+        masked = mask_string_literals(sql)
+
+        assert len(masked) == len(sql)
+        assert masked.endswith("= $1")
+        assert "$$a$$" not in masked and "'b'" not in masked
 
 
 class TestEdgeCases:

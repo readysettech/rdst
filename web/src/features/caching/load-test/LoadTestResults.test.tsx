@@ -98,3 +98,48 @@ describe('LoadTestResults terminal states', () => {
     ).toBeTruthy()
   })
 })
+
+describe('LoadTestResults skipped queries', () => {
+  it('stays hidden for a payload that predates skip reporting', () => {
+    renderResult({
+      status: 'partial',
+      progress: {
+        type: 'complete',
+        elapsed_seconds: 30,
+        total_executions: 10,
+        total_successes: 8,
+        total_failures: 2,
+        qps: 4,
+        queries: [],
+      },
+    })
+
+    expect(screen.queryByText(/skipped/i)).toBeNull()
+  })
+
+  it('surfaces a per-query reason once the backend reports one', () => {
+    renderResult({
+      status: 'partial',
+      progress: {
+        type: 'complete',
+        elapsed_seconds: 30,
+        total_executions: 10,
+        total_successes: 8,
+        total_failures: 0,
+        qps: 4,
+        queries: [],
+        skipped_queries: [
+          {
+            query_hash: 'abc12345',
+            query_name: 'Slow orders lookup',
+            reason: 'No stored value for parameter $1',
+          },
+        ],
+      } as unknown as LoadTestProgress,
+    })
+
+    expect(screen.getByText('1 query skipped')).toBeTruthy()
+    expect(screen.getByText('Slow orders lookup')).toBeTruthy()
+    expect(screen.getByText('No stored value for parameter $1')).toBeTruthy()
+  })
+})

@@ -33,6 +33,76 @@ def _is_check_incomplete(text: str) -> bool:
     return any(token in lowered for token in _CHECK_INCOMPLETE_TOKENS)
 
 
+def _explain_columns(output: str) -> list[str] | None:
+    """Split the first line of a tabular EXPLAIN reply into its columns.
+
+    Readyset's reply reaches this module either tab-separated (driver paths)
+    or pipe-separated (``psql -A``). Tabs win when both appear, since a query
+    body carries a pipe far more readily than a tab.
+    """
+    first_line = (output or "").strip().splitlines()[:1]
+    if not first_line:
+        return None
+    line = first_line[0]
+    separator = "\t" if "\t" in line else "|" if "|" in line else None
+    if separator is None:
+        return None
+    columns = line.split(separator)
+    return columns if len(columns) >= 3 else None
+
+
+def explain_query_id(output: str) -> str:
+    """Return Readyset's ``q_<hash>`` id from an EXPLAIN reply, when present."""
+    columns = _explain_columns(output)
+    if not columns:
+        return ""
+    query_id = columns[0].strip()
+    return query_id if query_id.startswith("q_") else ""
+
+
+def explain_cacheability_verdict(output: str) -> tuple[str, str]:
+    """Classify an EXPLAIN CREATE CACHE reply into a verdict and its reason.
+
+    Returns one of ``yes`` / ``pending`` / ``unsupported`` with a short reason
+    for the latter two. A check that did not complete is ``pending``, never
+    ``unsupported``: a startup, connectivity, or timeout failure says nothing
+    about the query (P69).
+    """
+    text = (output or "").strip()
+    if not text:
+        return "pending", "Readyset returned no compatibility verdict"
+
+    columns = _explain_columns(text)
+    if columns is not None:
+        support = columns[2].strip().lower()
+        if _is_check_incomplete(support):
+            return "pending", support
+        if support in ("yes", "cached"):
+            return "yes", ""
+        if support == "no":
+            return "unsupported", "Readyset does not support this query"
+        return "pending", f"unrecognized support status '{support}'"
+
+    if _is_check_incomplete(text):
+        return "pending", "the compatibility check did not complete"
+    if "unsupported" in text.lower():
+        return "unsupported", "Readyset does not support this query"
+    return "yes", ""
+
+
+def readyset_support_text(verdict: str, reason: str = "") -> str:
+    """Spell one verdict the way the ``readyset_supported`` column stores it.
+
+    The column's vocabulary is ``yes``, ``pending``, and
+    ``unsupported: <reason>``; every path that decides cacheability writes it
+    through here so one query reads the same wherever it was decided.
+    """
+    if verdict == "unsupported" or verdict == "no":
+        detail = (reason or "").strip()
+        return f"unsupported: {detail}" if detail else "unsupported"
+    return verdict
+
+
 def explain_create_cache_readyset(
     query: str = None,
     readyset_port: int | str = 5433,

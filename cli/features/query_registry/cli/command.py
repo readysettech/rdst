@@ -2072,6 +2072,7 @@ class QueryCommand:
                         query=sql,
                         iterations=iteration_limits[index],
                         warmup=1,
+                        query_hash=entry.hash,
                         **options,
                     ):
                         if isinstance(event, CacheRunCompleteEvent):

@@ -9,7 +9,7 @@ import logging
 import select
 import socket
 import time
-from typing import Dict, Any, Literal, Optional, Tuple
+from typing import Dict, Any, List, Literal, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -310,16 +310,19 @@ def apply_diagnostic_statement_timeout(connection, engine: str, seconds: int = 3
 
 def probe_readyset_status(
     target_config: Dict[str, Any], timeout_seconds: float = 3
-) -> None:
-    """Run a Readyset status query with a client-enforced I/O deadline."""
+) -> List[Any]:
+    """Run a Readyset status query with a client-enforced I/O deadline.
+
+    Returns the status rows so callers can read fields such as the snapshot
+    state; a caller that only needs liveness can ignore them.
+    """
     params = resolve_connection_params(
         target_config=target_config,
         lane="rdst/sandbox-readiness",
     )
     timeout_seconds = max(float(timeout_seconds), 0.001)
     if params['engine'] == 'postgresql':
-        _probe_postgres_readyset_status(params, timeout_seconds)
-        return
+        return _probe_postgres_readyset_status(params, timeout_seconds)
 
     connection = create_direct_connection(
         target_config,
@@ -331,7 +334,7 @@ def probe_readyset_status(
         cursor = connection.cursor()
         try:
             cursor.execute("SHOW READYSET STATUS")
-            cursor.fetchall()
+            return list(cursor.fetchall())
         finally:
             cursor.close()
     finally:
@@ -340,7 +343,7 @@ def probe_readyset_status(
 
 def _probe_postgres_readyset_status(
     params: Dict[str, Any], timeout_seconds: float
-) -> None:
+) -> List[Any]:
     """Use libpq's nonblocking mode so a silent server cannot hang readiness."""
     try:
         import psycopg2
@@ -366,7 +369,7 @@ def _probe_postgres_readyset_status(
         try:
             cursor.execute("SHOW READYSET STATUS")
             _wait_for_postgres_io(connection, deadline, extensions)
-            cursor.fetchall()
+            return list(cursor.fetchall())
         finally:
             cursor.close()
     finally:

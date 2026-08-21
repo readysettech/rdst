@@ -30,3 +30,17 @@ class QueryBenchmarkStats:
     p99_ms: float
     max_ms: float
     last_error: Optional[str] = None
+    # Failures the per-statement timeout stopped, counted apart from the rest
+    # so a query that is merely too slow reads differently from a broken one.
+    timeouts: int = 0
+    # Concrete parameter variants this query rotated through.
+    variant_count: int = 1
+
+
+@dataclass
+class QuerySkip:
+    """One query left out of a run, and the reason it was left out."""
+
+    query_hash: str
+    query_name: str
+    reason: str

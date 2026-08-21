@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import threading
 import time
@@ -20,6 +21,7 @@ from shared.config.targets import TargetsConfig
 from shared.deploy.sandbox_manager import (
     ReadysetSandboxManager,
     SandboxLease,
+    SandboxNotReadyError,
     SandboxPriority,
     sandbox_manager,
 )
@@ -38,13 +40,32 @@ from .performance_comparison import (
     ComparisonController,
     run_comparison,
 )
+from .readyset_explain_cache import (
+    explain_cacheability_verdict,
+    explain_query_id,
+    readyset_support_text,
+)
 from .service import CacheService
+
+logger = logging.getLogger(__name__)
 
 _DONE = object()
 _CACHE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 
 # Bound on post-cancel settling so a hung driver connect or execute cannot stall cancellation.
 COMPARE_CANCEL_GRACE_SECONDS = 10
+
+# The first CREATE CACHE on a sandbox reads the upstream tables to build the
+# cache's state, which on a large table outlasts an interactive timeout.
+COLD_CREATE_CACHE_TIMEOUT_MS = 300_000
+
+
+class ReadysetCheckIncomplete(RuntimeError):
+    """The compatibility check did not finish, so the query has no verdict.
+
+    Kept apart from an unsupported query: the caller reports a sandbox that
+    needs more time, and the stored verdict stays 'pending'.
+    """
 
 
 class _CompareEvidenceRecorder:
@@ -200,6 +221,7 @@ class ReadysetExperimentService:
         interval_ms: int | None = None,
         concurrency: int | None = None,
         duration_seconds: int | None = None,
+        query_hash: str = "",
     ) -> AsyncGenerator[CacheEvent, None]:
         """Provision, verify, create, validate, run bounded measurements, and clean up."""
         queue: asyncio.Queue[Any] = asyncio.Queue()
@@ -215,6 +237,7 @@ class ReadysetExperimentService:
                 concurrency=concurrency,
                 duration_seconds=duration_seconds,
                 live_controller=None,
+                query_hash=query_hash,
             )
         )
         try:
@@ -246,6 +269,7 @@ class ReadysetExperimentService:
         query: str,
         duration_seconds: int,
         controller: LiveComparisonController,
+        query_hash: str = "",
     ) -> AsyncGenerator[CacheEvent, None]:
         """Run a live equal-concurrency comparison in the managed sandbox."""
         queue: asyncio.Queue[Any] = asyncio.Queue()
@@ -261,6 +285,7 @@ class ReadysetExperimentService:
                 concurrency=controller.concurrency,
                 duration_seconds=duration_seconds,
                 live_controller=controller,
+                query_hash=query_hash,
             )
         )
         try:
@@ -299,6 +324,7 @@ class ReadysetExperimentService:
         concurrency: int | None,
         duration_seconds: int | None,
         live_controller: LiveComparisonController | None,
+        query_hash: str = "",
     ) -> None:
         cache_name = temporary_cache_name(owner_id, query)
         created = False
@@ -357,11 +383,36 @@ class ReadysetExperimentService:
                     if cancelled:
                         raise asyncio.CancelledError
                     if not explain.get("success"):
-                        raise RuntimeError(
+                        await _record_cacheability(
+                            query_hash,
+                            query,
+                            acquired,
+                            "pending",
+                            "the compatibility check did not complete",
+                            "",
+                        )
+                        raise ReadysetCheckIncomplete(
                             "Readyset could not verify this query. "
                             + str(explain.get("error") or "")
                         )
-                    if _explain_is_unsupported(str(explain.get("output") or "")):
+                    explain_output = str(explain.get("output") or "")
+                    verdict, reason = explain_cacheability_verdict(explain_output)
+                    # Readyset's own verdict belongs on the query, not just in
+                    # this run's events: the Query Library reads it next.
+                    await _record_cacheability(
+                        query_hash,
+                        query,
+                        acquired,
+                        verdict,
+                        reason,
+                        explain_query_id(explain_output),
+                    )
+                    if verdict == "pending":
+                        raise ReadysetCheckIncomplete(
+                            "Readyset has not finished preparing; this query "
+                            "has no compatibility verdict yet."
+                        )
+                    if verdict == "unsupported":
                         raise ValueError("This query is unsupported by Readyset.")
 
                     await progress(
@@ -373,6 +424,7 @@ class ReadysetExperimentService:
                         self._cache,
                         f"CREATE CACHE {cache_name} FROM {readyset_query}",
                         acquired,
+                        statement_timeout_ms=COLD_CREATE_CACHE_TIMEOUT_MS,
                     )
                     if not create.get("success"):
                         raise RuntimeError(
@@ -564,6 +616,15 @@ class ReadysetExperimentService:
                                 )
         except asyncio.CancelledError:
             raise
+        except (ReadysetCheckIncomplete, SandboxNotReadyError) as exc:
+            # A sandbox that is still preparing is not a verdict on the query;
+            # the client retries rather than reporting it as unsupported.
+            error_event = ErrorEvent(
+                type="error",
+                message=str(exc),
+                code="readyset_not_ready",
+                stage="checking_query",
+            )
         except ValueError as exc:
             error_event = ErrorEvent(
                 type="error",
@@ -674,14 +735,59 @@ def _readyset_query(query: str, engine: str) -> str:
     return denormalize_for_readyset(query, engine=engine)
 
 
-def _explain_is_unsupported(output: str) -> bool:
-    lowered = output.lower()
-    if any(
-        marker in lowered
-        for marker in ("db error", "connection refused", "timed out", "unavailable")
-    ):
-        raise RuntimeError("Readyset could not complete the compatibility check.")
-    return "unsupported" in lowered or "\tno" in lowered or "|no" in lowered
+async def _record_cacheability(
+    query_hash: str,
+    query: str,
+    lease: SandboxLease,
+    verdict: str,
+    reason: str,
+    readyset_query_id: str,
+) -> None:
+    """Store Readyset's verdict on the query's registry identity.
+
+    The verdict is a by-product of the experiment, so a store that refuses the
+    write is logged and the run carries on.
+    """
+    try:
+        await asyncio.to_thread(
+            _persist_cacheability,
+            query_hash,
+            query,
+            lease.connection.cache_target,
+            verdict,
+            reason,
+            readyset_query_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not persist the Readyset verdict for %s: %s",
+            query_hash or "an unregistered query",
+            exc,
+        )
+
+
+def _persist_cacheability(
+    query_hash: str,
+    query: str,
+    cache_target: str,
+    verdict: str,
+    reason: str,
+    readyset_query_id: str,
+) -> None:
+    from shared.query_registry import QueryRegistry, hash_sql
+
+    registry = QueryRegistry()
+    registry.load()
+    identity = query_hash or hash_sql(query)
+    entry = registry.get_query(identity)
+    if entry is None:
+        return
+    registry.update_readyset_identity(
+        query_hash=identity,
+        readyset_query_id=readyset_query_id or entry.readyset_query_id,
+        readyset_supported=readyset_support_text(verdict, reason),
+        cache_target=cache_target,
+    )
 
 
 def _execute_rows(
@@ -814,20 +920,28 @@ async def _run_readyset_sql_settled(
     cache_service: CacheService,
     statement: str,
     lease: SandboxLease,
+    statement_timeout_ms: int | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Let bounded Readyset DDL settle before releasing its sandbox lease."""
+    timeout = (
+        {}
+        if statement_timeout_ms is None
+        else {"statement_timeout_ms": statement_timeout_ms}
+    )
     future = start_blocking(
         cache_service._run_readyset_sql,
         statement,
         **_connection_kwargs(lease),
+        **timeout,
     )
     try:
         while not future.done():
             await asyncio.sleep(0.01)
     except asyncio.CancelledError:
-        # _run_readyset_sql has 30-second driver timeouts, so settled DDL
-        # cannot race the next lease. A stall past the cancel grace abandons
-        # the statement and quarantines the sandbox instead of hanging.
+        # _run_readyset_sql bounds every statement with a driver timeout, so
+        # settled DDL cannot race the next lease. A stall past the cancel
+        # grace abandons the statement and quarantines the sandbox instead of
+        # hanging.
         if not await _settle_after_cancel(future):
             await asyncio.shield(
                 lease.mark_dirty("Readyset DDL was abandoned during cancel")
@@ -1099,6 +1213,8 @@ async def _run_live_comparison_cancellable(
 
 
 __all__ = [
+    "COLD_CREATE_CACHE_TIMEOUT_MS",
+    "ReadysetCheckIncomplete",
     "ReadysetExperimentService",
     "parameter_fingerprint",
     "temporary_cache_name",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import statistics
 import threading
@@ -14,6 +15,7 @@ from threading import Lock
 from typing import Any, AsyncGenerator, Callable, List, Literal, Optional
 
 from shared.query_registry.observation_store import ExecutionEvidenceWriter
+from shared.query_registry.sql_normalizer import mask_string_literals
 
 from .events import (
     QueryBenchmarkCompleteEvent,
@@ -28,6 +30,7 @@ from .events import (
 from .models import (
     QueryBenchmarkStats,
     QueryCommandInput,
+    QuerySkip,
 )
 
 # ---------------------------------------------------------------------------
@@ -39,9 +42,28 @@ from .models import (
 # to /api/query-registry/benchmark cannot run writes or an unbounded loop.
 # ---------------------------------------------------------------------------
 
+logger = logging.getLogger(__name__)
+
 MAX_BENCHMARK_DURATION_SECONDS = 300
 MAX_BENCHMARK_MAX_COUNT = 100_000
 MAX_BENCHMARK_CONCURRENCY = 32
+
+# A load test that replays one concrete value measures that value's cache
+# profile, not the query's. Each query rotates through several parameter sets:
+# the stored values, plus sets derived from what the database itself knows
+# about the compared columns.
+LOAD_TEST_PARAMETER_SETS = 5
+# Short, per-query, and off the clock: enough to leave the first-execution
+# costs (plan caching, buffer warming) out of the measured window.
+LOAD_TEST_WARMUP_EXECUTIONS = 3
+# One pathological statement must not hold a worker for the whole run.
+LOAD_TEST_STATEMENT_TIMEOUT_MS = 30_000
+MAX_LOAD_TEST_WARMUP_EXECUTIONS = 20
+
+# Why a query the caller asked for is not in the run. Stable codes: the client
+# renders them, and they sit beside the sanitized execution-error summaries.
+SKIP_UNRESOLVED_PARAMETERS = "unresolved_parameters"
+SKIP_TARGET_MISMATCH = "target_mismatch"
 
 # After a cancel, how long to wait for workers blocked in driver calls before
 # force-closing their connections and returning the cancelled result.
@@ -68,6 +90,31 @@ _BENCHMARK_WRITE_KEYWORDS = frozenset(
         "COMMENT",
     }
 )
+
+
+# Stable summaries for a failing benchmark statement, matched in order. Raw
+# driver text names schemas, columns, hosts, and roles, and it changes with
+# every engine release; the client sees one of these instead (B7/T24).
+_MISSING_OBJECT = ("does not exist", "unknown column", "unknown table")
+_CONNECTION_LOST = ("connection", "server closed", "broken pipe", "gone away")
+_EXECUTION_ERROR_SUMMARIES = (
+    (("read-only", "read only"), "read-only transaction"),
+    (("timeout", "timed out", "canceling statement"), "statement timeout"),
+    (("permission denied", "access denied", "not allowed"), "permission denied"),
+    (("syntax error", "parse error"), "syntax error"),
+    (_MISSING_OBJECT, "missing table or column"),
+    (_CONNECTION_LOST, "connection error"),
+)
+_EXECUTION_ERROR_FALLBACK = "execution error"
+
+
+def _execution_error_summary(error: str) -> str:
+    """Classify one driver error into text that is safe and stays stable."""
+    lowered = error.lower()
+    for needles, summary in _EXECUTION_ERROR_SUMMARIES:
+        if any(needle in lowered for needle in needles):
+            return summary
+    return _EXECUTION_ERROR_FALLBACK
 
 
 class BenchmarkValidationError(Exception):
@@ -247,6 +294,119 @@ def set_session_read_only(conn: Any, engine: str) -> None:
         cursor.close()
 
 
+def set_session_statement_timeout(conn: Any, engine: str, timeout_ms: int) -> None:
+    """Bound every statement this session runs.
+
+    Without it one pathological query holds its worker until the run's own
+    deadline, and a concurrency-mode run loses that worker entirely. A
+    statement stopped this way surfaces as a 'statement timeout' failure and
+    the worker moves on to the next query.
+    """
+    statement = (
+        f"SET SESSION MAX_EXECUTION_TIME = {int(timeout_ms)}"
+        if "mysql" in (engine or "").lower()
+        else f"SET statement_timeout = {int(timeout_ms)}"
+    )
+    cursor = conn.cursor()
+    try:
+        cursor.execute(statement)
+    finally:
+        cursor.close()
+
+
+def parameter_variants(
+    entry: Any,
+    resolved_sql: str,
+    target: str,
+    target_config: dict[str, Any],
+    wanted: int,
+) -> list[str]:
+    """Build up to ``wanted`` concrete SQL variants for one stored query.
+
+    The stored values are the first set; the rest come from the same
+    suggestion machinery the parameter editor offers, so a rotation replays
+    values the database actually holds. Ordering is deterministic, so two runs
+    of the same query rotate through the same SQL in the same order.
+    """
+    variants = [resolved_sql]
+    if wanted <= 1:
+        return variants
+    # Column sampling needs a database to read; a target that names none
+    # cannot be sampled, so the stored values stand alone.
+    if not target_config.get("database"):
+        return variants
+
+    from shared.query_registry.query_registry import (
+        dialect_for_target,
+        typed_parameter,
+    )
+    from shared.query_registry.sql_normalizer import (
+        get_placeholder_names,
+        reconstruct_sql,
+    )
+
+    template = entry.sql
+    placeholder_names = get_placeholder_names(template)
+    if not placeholder_names:
+        return variants
+
+    try:
+        from features.analyze.parameter_suggestions import suggest_parameter_values
+
+        suggested = suggest_parameter_values(
+            template, target, target_config, query_hash=entry.hash
+        )
+    except Exception as exc:
+        logger.debug("Load test could not suggest parameter values: %s", exc)
+        return variants
+
+    by_name: dict[str, list[str]] = {}
+    for placeholder in suggested.get("placeholders") or ():
+        name = str(placeholder.get("placeholder") or "").lstrip(":")
+        values = [
+            str(suggestion.get("value"))
+            for suggestion in placeholder.get("suggestions") or ()
+            if suggestion.get("value") is not None
+        ]
+        if name in placeholder_names and values:
+            by_name[name] = values
+    if not by_name:
+        return variants
+
+    stored = dict(entry.parameters or {})
+    dialect = dialect_for_target(target)
+    for offset in range(wanted - 1):
+        params = dict(stored)
+        used_any = False
+        for name, values in by_name.items():
+            if offset >= len(values):
+                continue
+            params[name] = typed_parameter(values[offset], "suggested")
+            used_any = True
+        if not used_any:
+            break
+        if set(params) < placeholder_names:
+            continue
+        try:
+            candidate = reconstruct_sql(template, params, dialect)
+        except Exception as exc:
+            logger.debug("Load test could not build a parameter variant: %s", exc)
+            continue
+        if candidate not in variants and not _has_unresolved_placeholders(candidate):
+            variants.append(candidate)
+    return variants
+
+
+def _has_unresolved_placeholders(sql: str) -> bool:
+    """True when ``sql`` still carries a placeholder rather than a value."""
+    # Scan code only: a substituted value may legitimately spell `?` or `$1`
+    # inside a string literal.
+    sql = mask_string_literals(sql)
+    return bool(
+        re.search(r"\$\d+", sql) or re.search(r"(?<!:):\w+", sql) or "?" in sql
+    )
+
+
 def benchmark_read_only_reason(sql: str) -> Optional[str]:
     """Return a human reason if ``sql`` is not a single read-only statement,
     else ``None``.
@@ -337,6 +497,9 @@ class QueryService:
         concurrency: int,
         duration_seconds: int,
         max_count: Optional[int],
+        parameter_sets: int = LOAD_TEST_PARAMETER_SETS,
+        warmup_executions: int = LOAD_TEST_WARMUP_EXECUTIONS,
+        statement_timeout_ms: int = LOAD_TEST_STATEMENT_TIMEOUT_MS,
     ) -> AsyncGenerator[QueryBenchmarkEvent, None]:
         """Stream benchmark progress events from a background worker."""
         progress_queue: Queue = Queue(maxsize=100)
@@ -355,6 +518,9 @@ class QueryService:
                 progress_queue=progress_queue,
                 stop_event=stop_event,
                 controller=controller,
+                parameter_sets=parameter_sets,
+                warmup_executions=warmup_executions,
+                statement_timeout_ms=statement_timeout_ms,
             )
 
         loop = asyncio.get_event_loop()
@@ -411,6 +577,9 @@ class QueryService:
         progress_queue: Queue,
         stop_event: threading.Event,
         controller: _BenchmarkController,
+        parameter_sets: int = LOAD_TEST_PARAMETER_SETS,
+        warmup_executions: int = LOAD_TEST_WARMUP_EXECUTIONS,
+        statement_timeout_ms: int = LOAD_TEST_STATEMENT_TIMEOUT_MS,
     ) -> None:
         """Synchronous benchmark worker that reports progress events."""
         evidence_recorder: _LoadTestEvidenceRecorder | None = None
@@ -419,11 +588,16 @@ class QueryService:
         class _QueryStats:
             query_name: str
             query_hash: str
+            variant_count: int = 1
             executions: int = 0
             successes: int = 0
             failures: int = 0
+            timeouts: int = 0
             timings_ms: list[float] = field(default_factory=list)
             last_error: str | None = None
+            # Server-side only: the driver text behind last_error, kept to
+            # log each distinct failure once rather than every occurrence.
+            last_error_detail: str | None = None
 
             def to_model(self) -> QueryBenchmarkStats:
                 timings = self.timings_ms
@@ -448,22 +622,22 @@ class QueryService:
                     ),
                     max_ms=max(timings) if timings else 0.0,
                     last_error=self.last_error,
+                    timeouts=self.timeouts,
+                    variant_count=self.variant_count,
                 )
 
         @dataclass
         class _ResolvedQuery:
             identifier: str
             name: str
-            sql: str
-
-        def _has_unresolved_placeholders(sql: str) -> bool:
-            if re.search(r"\$\d+", sql):
-                return True
-            if re.search(r"(?<!:):\w+", sql):
-                return True
-            if "?" in sql:
-                return True
-            return False
+            # The concrete SQL this query rotates through. A later dual-target
+            # run pairs each variant with a second endpoint; nothing here
+            # assumes one connection.
+            variants: tuple[str, ...]
+            # The registry entry behind an identifier-only request, which is
+            # what a rotation needs to derive further parameter sets from.
+            # Requests that carry their own SQL have none.
+            entry: Any = None
 
         try:
             # Cap rail: reject an over-cap request outright (do not silently
@@ -499,6 +673,20 @@ class QueryService:
             effective_max_count = (
                 max_count if max_count is not None else MAX_BENCHMARK_MAX_COUNT
             )
+            # Tuning knobs, unlike the safety rails above, are clamped: a
+            # caller that asks for more rotation or warmup than is useful gets
+            # the useful amount rather than a rejected run.
+            parameter_sets = max(1, min(int(parameter_sets), LOAD_TEST_PARAMETER_SETS))
+            warmup_executions = max(
+                0, min(int(warmup_executions), MAX_LOAD_TEST_WARMUP_EXECUTIONS)
+            )
+            statement_timeout_ms = max(
+                0,
+                min(
+                    int(statement_timeout_ms),
+                    MAX_BENCHMARK_DURATION_SECONDS * 1000,
+                ),
+            )
 
             from shared.config.targets import create_targets_config
             from shared.db_connection import close_connection, create_direct_connection
@@ -508,27 +696,28 @@ class QueryService:
             registry.load()
 
             resolved_queries: list[_ResolvedQuery] = []
-            skipped_queries: list[str] = []
+            skipped_queries: list[QuerySkip] = []
 
             for spec in queries:
                 if isinstance(spec, dict) or hasattr(spec, "sql"):
                     spec_dict = spec if isinstance(spec, dict) else spec.model_dump()
                     raw_sql = spec_dict.get("sql")
                     identifier = spec_dict.get("identifier") or "custom"
+                    name = identifier[:8] if len(identifier) > 8 else identifier
 
                     if raw_sql:
                         if _has_unresolved_placeholders(raw_sql):
                             skipped_queries.append(
-                                f"{identifier[:8]} (has unresolved parameters)"
+                                QuerySkip(
+                                    identifier, name, SKIP_UNRESOLVED_PARAMETERS
+                                )
                             )
                             continue
                         resolved_queries.append(
                             _ResolvedQuery(
                                 identifier=identifier,
-                                name=identifier[:8]
-                                if len(identifier) > 8
-                                else identifier,
-                                sql=raw_sql,
+                                name=name,
+                                variants=(raw_sql,),
                             )
                         )
                         continue
@@ -554,29 +743,46 @@ class QueryService:
                         code="benchmark_query_not_found",
                     )
 
+                name = entry.tag or entry.hash[:8]
                 sql = registry.get_executable_query(entry.hash, interactive=False)
                 if not sql:
                     sql = entry.sql
 
                 if _has_unresolved_placeholders(sql):
                     skipped_queries.append(
-                        f"{entry.tag or entry.hash[:8]} (has unresolved parameters like $1, :p1)"
+                        QuerySkip(entry.hash, name, SKIP_UNRESOLVED_PARAMETERS)
                     )
                     continue
 
                 resolved_queries.append(
                     _ResolvedQuery(
                         identifier=entry.hash,
-                        name=entry.tag or entry.hash[:8],
-                        sql=sql,
+                        name=name,
+                        variants=(sql,),
+                        entry=entry,
                     )
                 )
 
             if skipped_queries and not resolved_queries:
+                if all(
+                    skip.reason == SKIP_UNRESOLVED_PARAMETERS
+                    for skip in skipped_queries
+                ):
+                    raise BenchmarkValidationError(
+                        "All queries have unresolved parameters: "
+                        + ", ".join(skip.query_name for skip in skipped_queries)
+                        + ". Benchmark requires queries with concrete values, "
+                        "not placeholders.",
+                        code="benchmark_unresolved_params",
+                    )
                 raise BenchmarkValidationError(
-                    f"All queries have unresolved parameters: {', '.join(skipped_queries)}. "
-                    "Benchmark requires queries with concrete values, not placeholders.",
-                    code="benchmark_unresolved_params",
+                    "No query could be run: "
+                    + ", ".join(
+                        f"{skip.query_name} ({skip.reason})"
+                        for skip in skipped_queries
+                    )
+                    + ".",
+                    code="benchmark_all_queries_skipped",
                 )
 
             if not resolved_queries:
@@ -588,7 +794,7 @@ class QueryService:
             # single read-only statement — enforced server-side regardless of the
             # UI, before opening a DB connection.
             for rq in resolved_queries:
-                reason = benchmark_read_only_reason(rq.sql)
+                reason = benchmark_read_only_reason(rq.variants[0])
                 if reason:
                     raise BenchmarkValidationError(reason, code="benchmark_read_only")
 
@@ -610,9 +816,64 @@ class QueryService:
                     code="benchmark_target_not_found",
                 )
 
-            query_stats: dict[str, _QueryStats] = {}
+            # With the target settled, a stored query can be scoped to it and
+            # rotated across the values that target knows about. A request that
+            # brought its own SQL is left exactly as it was sent.
+            scoped_queries: list[_ResolvedQuery] = []
+            for rq in resolved_queries:
+                if rq.entry is None:
+                    scoped_queries.append(rq)
+                    continue
+                # A run measures one target, so a query with no activity on it
+                # is not part of this run's workload.
+                if not rq.entry.belongs_to_target(target):
+                    skipped_queries.append(
+                        QuerySkip(rq.identifier, rq.name, SKIP_TARGET_MISMATCH)
+                    )
+                    continue
+                rq.variants = tuple(
+                    parameter_variants(
+                        rq.entry,
+                        rq.variants[0],
+                        target,
+                        target_config,
+                        parameter_sets,
+                    )
+                )
+                scoped_queries.append(rq)
+            resolved_queries = scoped_queries
+
+            if not resolved_queries:
+                raise BenchmarkValidationError(
+                    "No query could be run: "
+                    + ", ".join(
+                        f"{skip.query_name} ({skip.reason})"
+                        for skip in skipped_queries
+                    )
+                    + ".",
+                    code="benchmark_all_queries_skipped",
+                )
+
+            # A substituted value must not turn a read into anything else.
+            for rq in resolved_queries:
+                for variant in rq.variants[1:]:
+                    reason = benchmark_read_only_reason(variant)
+                    if reason:
+                        raise BenchmarkValidationError(
+                            reason, code="benchmark_read_only"
+                        )
+
+            # Every requested query is listed from the start, so one that never
+            # produced a measurement is visible as zeros rather than absent.
+            query_stats: dict[str, _QueryStats] = {
+                rq.identifier: _QueryStats(
+                    rq.name, rq.identifier, variant_count=len(rq.variants)
+                )
+                for rq in resolved_queries
+            }
             stats_lock = Lock()
             start_time = time.perf_counter()
+            warmup_completed = 0
             evidence_recorder = _LoadTestEvidenceRecorder(target)
 
             def _record_execution(
@@ -633,7 +894,22 @@ class QueryService:
                     else:
                         stats.failures += 1
                         if error_msg:
-                            stats.last_error = error_msg
+                            if error_msg != stats.last_error_detail:
+                                logger.warning(
+                                    "Benchmark query %s failed on %s: %s",
+                                    query_name,
+                                    target,
+                                    error_msg,
+                                )
+                            stats.last_error_detail = error_msg
+                            stats.last_error = _execution_error_summary(error_msg)
+                            if stats.last_error == "statement timeout":
+                                stats.timeouts += 1
+
+            def _record_warmup() -> None:
+                nonlocal warmup_completed
+                with stats_lock:
+                    warmup_completed += 1
 
             def _progress(
                 event_type: Literal["progress", "complete"],
@@ -657,6 +933,9 @@ class QueryService:
                             total_failures=total_fail,
                             qps=qps,
                             queries=queries_list,
+                            warmup_executions=warmup_completed,
+                            skipped_count=len(skipped_queries),
+                            skipped_queries=list(skipped_queries),
                         )
                     return QueryBenchmarkProgressEvent(
                         type="progress",
@@ -666,6 +945,9 @@ class QueryService:
                         total_failures=total_fail,
                         qps=qps,
                         queries=queries_list,
+                        warmup_executions=warmup_completed,
+                        skipped_count=len(skipped_queries),
+                        skipped_queries=list(skipped_queries),
                     )
 
             def _has_measurements() -> bool:
@@ -675,15 +957,43 @@ class QueryService:
 
             scheduler_lock = Lock()
             query_index = 0
+            variant_index = 0
             claimed_count = 0
+            warmup_index = 0
+            measuring = False
             worker_errors: list[BenchmarkValidationError] = []
 
-            def _claim_query() -> _ResolvedQuery | None:
-                """Claim one bounded round-robin execution for a worker."""
-                nonlocal query_index, claimed_count
+            # Deterministic warmup plan: a fixed number of executions per
+            # query, rotating its variants, drained by whichever worker is
+            # free first.
+            warmup_plan: list[tuple[int, int]] = [
+                (index, execution % len(rq.variants))
+                for index, rq in enumerate(resolved_queries)
+                for execution in range(warmup_executions)
+            ]
+
+            def _claim_query() -> tuple[_ResolvedQuery, str, bool] | None:
+                """Claim one execution: the query, its SQL, and whether it warms.
+
+                Queries rotate in round-robin order and each pass moves to the
+                next parameter variant, so a run covers every query at every
+                value before repeating any pair.
+                """
+                nonlocal query_index, variant_index, claimed_count
+                nonlocal warmup_index, measuring, start_time
                 with scheduler_lock:
                     if stop_event.is_set():
                         return None
+                    if warmup_index < len(warmup_plan):
+                        planned_query, planned_variant = warmup_plan[warmup_index]
+                        warmup_index += 1
+                        rq = resolved_queries[planned_query]
+                        return rq, rq.variants[planned_variant], True
+                    if not measuring:
+                        # Warmup runs off the clock, so the requested duration
+                        # is all measurement.
+                        measuring = True
+                        start_time = time.perf_counter()
                     elapsed = time.perf_counter() - start_time
                     if duration_seconds and elapsed >= duration_seconds:
                         return None
@@ -693,9 +1003,13 @@ class QueryService:
                     ):
                         return None
                     rq = resolved_queries[query_index]
-                    query_index = (query_index + 1) % len(resolved_queries)
+                    sql = rq.variants[variant_index % len(rq.variants)]
+                    query_index += 1
+                    if query_index >= len(resolved_queries):
+                        query_index = 0
+                        variant_index += 1
                     claimed_count += 1
-                    return rq
+                    return rq, sql, False
 
             def _worker() -> None:
                 conn = None
@@ -717,11 +1031,27 @@ class QueryService:
                             "benchmark aborted.",
                             code="benchmark_read_only_session",
                         ) from exc
+                    if statement_timeout_ms > 0:
+                        try:
+                            set_session_statement_timeout(
+                                conn,
+                                str(target_config.get("engine", "")),
+                                statement_timeout_ms,
+                            )
+                        except Exception as exc:
+                            # An engine that refuses the setting still runs the
+                            # measurement; only the per-statement bound is lost.
+                            logger.warning(
+                                "Could not bound benchmark statements on %s: %s",
+                                target,
+                                exc,
+                            )
 
                     while not stop_event.is_set():
-                        rq = _claim_query()
-                        if rq is None:
+                        claim = _claim_query()
+                        if claim is None:
                             break
+                        rq, sql, warming = claim
 
                         exec_start = time.perf_counter()
                         cursor = None
@@ -730,26 +1060,35 @@ class QueryService:
                             cursor = conn.cursor()
                             # This is the attribution boundary: connection and
                             # cursor failures before it record no traffic.
-                            evidence_token = evidence_recorder.note_started(rq.sql)
-                            cursor.execute(rq.sql)
+                            evidence_token = evidence_recorder.note_started(sql)
+                            cursor.execute(sql)
                             cursor.fetchall()
                             evidence_recorder.note_completed(evidence_token)
-                            _record_execution(
-                                rq.identifier,
-                                rq.name,
-                                (time.perf_counter() - exec_start) * 1000,
-                                success=True,
-                            )
+                            if warming:
+                                _record_warmup()
+                            else:
+                                _record_execution(
+                                    rq.identifier,
+                                    rq.name,
+                                    (time.perf_counter() - exec_start) * 1000,
+                                    success=True,
+                                )
                         except Exception as exc:
                             if evidence_token is not None:
                                 evidence_recorder.note_failed(evidence_token)
-                            _record_execution(
-                                rq.identifier,
-                                rq.name,
-                                (time.perf_counter() - exec_start) * 1000,
-                                success=False,
-                                error_msg=str(exc),
-                            )
+                            if warming:
+                                # A warmup failure is not a measurement; the
+                                # same query fails again under measurement and
+                                # is reported there.
+                                _record_warmup()
+                            else:
+                                _record_execution(
+                                    rq.identifier,
+                                    rq.name,
+                                    (time.perf_counter() - exec_start) * 1000,
+                                    success=False,
+                                    error_msg=str(exc),
+                                )
                         finally:
                             if cursor is not None:
                                 try:

@@ -3,7 +3,11 @@ import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTarget } from '../../../hooks/useTarget'
 import type { BenchmarkQueryInput, TargetInfo } from '../../../lib/api'
-import { fetchSchema, fetchTargets } from '../../../lib/api'
+import {
+  fetchSchema,
+  fetchTargets,
+  updateQueryParameters,
+} from '../../../lib/api'
 import {
   buildParameterSuggestions,
   fetchParameterSchema,
@@ -16,11 +20,17 @@ import {
 } from '../../../lib/queryIdentity'
 import {
   detectParameters,
+  hasResidualPlaceholders,
   resolveInitialValue,
   substituteParameters,
+  toBackendParams,
 } from '../../../lib/sqlParameters'
 import { useBenchmark } from '../../../lib/sse'
 import { isRemoteTargetHost } from '../../../lib/targetHost'
+import {
+  type AutoSuggestFill,
+  useAutoSuggestParameters,
+} from '../../../lib/useAutoSuggestParameters'
 import { useQueryRegistry } from '../../../lib/useQueryRegistry'
 import { useSystemStatus } from '../../../lib/useSystemStatus'
 import { useTargetConnectivityGate } from '../../../lib/useTargetConnectivityGate'
@@ -116,6 +126,9 @@ export function useLoadTestController({
   const [suggestionSchemaUnavailable, setSuggestionSchemaUnavailable] =
     useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [residualQueryHash, setResidualQueryHash] = useState<string | null>(
+    null
+  )
   const [repeatPrevious, setRepeatPrevious] = useState(false)
   const [loadSettingsOpen, setLoadSettingsOpen] = useDisclosure({})
 
@@ -296,7 +309,49 @@ export function useLoadTestController({
       delete next[key]
       return next
     })
+    setResidualQueryHash(null)
   }, [])
+
+  const autoSuggestTarget = destinationLock.targetName ?? destinationTarget
+  const applyAutoSuggestFills = useCallback((fills: AutoSuggestFill[]) => {
+    setParamValues((current) => {
+      const next = { ...current }
+      for (const fill of fills) {
+        if (!next[fill.key]?.trim()) next[fill.key] = fill.value
+      }
+      return next
+    })
+    setParameterSources((current) => {
+      const next = { ...current }
+      for (const fill of fills) next[fill.key] = fill.provenance
+      return next
+    })
+  }, [])
+
+  // Fire the backend value-suggestion service in the background as soon as a
+  // query with unfilled placeholders is selected, so values are ready before
+  // the user reaches "Start test" instead of only on an explicit
+  // "Suggest values" click.
+  useAutoSuggestParameters({
+    target: autoSuggestTarget,
+    items: useMemo(
+      () =>
+        runnableQueryObjects.map((query) => ({
+          id: query.identifier,
+          hash: query.hash,
+          sql: query.sql,
+          parameters: query.parameters,
+        })),
+      [runnableQueryObjects]
+    ),
+    values: paramValues,
+    keyFor: useCallback(
+      (id: string, parameter) =>
+        `${id}:${parameter.placeholder === '?' ? `?${parameter.index}` : parameter.placeholder}`,
+      []
+    ),
+    onApply: applyAutoSuggestFills,
+  })
 
   const suggestParameterValues = useCallback(async () => {
     const suggestionTarget = destinationLock.targetName ?? destinationTarget
@@ -396,13 +451,19 @@ export function useLoadTestController({
     setSourceFilter('all')
   }
 
-  const buildRequest = () => {
-    if (!runTarget) return null
-    const capacityTest = testProfile === 'capacity'
-    const queryInputs: BenchmarkQueryInput[] = runnableQueryObjects.map(
-      (query) => {
-        if (query.parameters.length === 0)
-          return { identifier: query.identifier }
+  const prepareRunQueries = useCallback(
+    () =>
+      runnableQueryObjects.map((query) => {
+        if (query.parameters.length === 0) {
+          return {
+            hash: query.hash,
+            parameters: query.parameters,
+            values: {},
+            input: {
+              identifier: query.identifier,
+            } satisfies BenchmarkQueryInput,
+          }
+        }
         const values: Record<string, string> = {}
         for (const parameter of query.parameters) {
           const suffix =
@@ -411,14 +472,25 @@ export function useLoadTestController({
               : parameter.placeholder
           values[suffix] = paramValues[`${query.identifier}:${suffix}`] || ''
         }
+        const sql = substituteParameters(query.sql, query.parameters, values)
         return {
-          identifier: query.identifier,
-          sql: substituteParameters(query.sql, query.parameters, values),
+          hash: query.hash,
+          parameters: query.parameters,
+          values,
+          input: {
+            identifier: query.identifier,
+            sql,
+          } satisfies BenchmarkQueryInput,
         }
-      }
-    )
+      }),
+    [runnableQueryObjects, paramValues]
+  )
+
+  const buildRequest = () => {
+    if (!runTarget) return null
+    const capacityTest = testProfile === 'capacity'
     return {
-      queries: queryInputs,
+      queries: prepareRunQueries().map((query) => query.input),
       target: runTarget,
       mode: capacityTest ? ('concurrency' as const) : ('interval' as const),
       interval_ms: capacityTest ? 0 : intervalMs,
@@ -428,8 +500,36 @@ export function useLoadTestController({
   }
 
   const runConfiguredTest = () => {
+    const preparedQueries = prepareRunQueries()
+
+    // Defensive last line before running real queries: canStart already
+    // requires every detected placeholder to carry a value, but a
+    // substitution that silently failed must not reach the database as
+    // broken SQL.
+    const unresolved = preparedQueries.find((query) =>
+      hasResidualPlaceholders(query.input.sql ?? '')
+    )
+    if (unresolved) {
+      setResidualQueryHash(unresolved.hash)
+      setConfirmOpen(false)
+      return
+    }
+    setResidualQueryHash(null)
+
     const request = buildRequest()
     if (!request || !canStart) return
+
+    for (const query of preparedQueries) {
+      const backendValues = toBackendParams(query.parameters, query.values)
+      if (Object.keys(backendValues).length === 0) continue
+      void updateQueryParameters(query.hash, backendValues, 'user').catch(
+        () => {
+          // Persistence is a convenience for next time; it must not block
+          // this run.
+        }
+      )
+    }
+
     setPageState('run')
     void start(request)
   }
@@ -463,6 +563,7 @@ export function useLoadTestController({
     }
     reset()
     onClearSelectedRun?.()
+    setResidualQueryHash(null)
     setPageState('configure')
   }
   const handleRunAgain = () => {
@@ -550,6 +651,7 @@ export function useLoadTestController({
     hiddenSelectedCount,
     queriesWithParameters,
     missingParameterCount,
+    residualQueryHash,
     missingTables,
     canStart,
     toggleQuery,

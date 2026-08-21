@@ -1763,6 +1763,13 @@ class QueryDiscoveryCollector:
             persist_started = time.monotonic()
             with registry.defer_save():
                 for query in queries:
+                    # The two-phase lane's admission rule, applied here too:
+                    # the fallback reads the same engine views, so it sees the
+                    # same catalog statements and RDST diagnostics.
+                    if not references_user_relations(
+                        query.query_text
+                    ) or match_self_template(query.query_text):
+                        continue
                     try:
                         query_hash, _ = registry.add_query(
                             sql=query.query_text,

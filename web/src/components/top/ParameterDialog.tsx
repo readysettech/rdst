@@ -7,8 +7,8 @@ import { Button } from '@rs/ui-new/button'
 import { Modal, ModalContentContainer } from '@rs/ui-new/modal'
 import * as ScrollArea from '@rs/ui-new/scroll'
 import { Text } from '@rs/ui-new/text'
-import { useEffect, useMemo, useState } from 'react'
-import type { ParameterSuggestion } from '../../lib/api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { type ParameterSuggestion, updateQueryParameters } from '../../lib/api'
 import {
   buildParameterSuggestions,
   fetchParameterSchema,
@@ -17,9 +17,11 @@ import {
 } from '../../lib/parameterSuggestions'
 import {
   detectParameters,
+  findResidualPlaceholders,
   hasParameters,
   resolveInitialValue,
   substituteParameters,
+  toBackendParams,
 } from '../../lib/sqlParameters'
 import { useFormatSql } from '../../lib/useFormatSql'
 import { useParameterSuggestions } from '../../lib/useParameterSuggestions'
@@ -105,6 +107,8 @@ export function ParameterDialog({
     null
   )
   const [schemaUnavailable, setSchemaUnavailable] = useState(false)
+  const [residualError, setResidualError] = useState<string | null>(null)
+  const rowRefs = useRef(new Map<string, HTMLDivElement>())
 
   useEffect(() => {
     const init: Record<string, string> = {}
@@ -119,6 +123,7 @@ export function ParameterDialog({
     setProvenance(sources)
     setSuggestionMessage(null)
     setSchemaUnavailable(false)
+    setResidualError(null)
   }, [query, parameters, initialValues])
 
   const handleValueChange = (key: string, value: string) => {
@@ -129,6 +134,7 @@ export function ParameterDialog({
       delete next[key]
       return next
     })
+    setResidualError(null)
   }
 
   const missingCount = parameters.filter(
@@ -189,6 +195,45 @@ export function ParameterDialog({
 
   const handleSubmit = () => {
     const substituted = substituteParameters(query, parameters, values)
+
+    // Defensive last line before running real SQL: allFilled already
+    // requires every detected placeholder to carry a value, but a
+    // substitution that silently failed (or a shape the detector missed)
+    // must not reach the database as broken SQL. Reopen focused on the
+    // first slot that did not resolve instead of running it.
+    const residual = findResidualPlaceholders(substituted)
+    if (residual.length > 0) {
+      const token = residual[0]
+      const parameter =
+        parameters.find((p) => p.placeholder === token) ??
+        parameters.find((p) => !values[parameterValueKey(p)]?.trim())
+      const key = parameter ? parameterValueKey(parameter) : null
+      setResidualError(
+        key
+          ? `Value for ${key} did not apply. Check the highlighted field.`
+          : 'A parameter value did not apply. Re-check the values and try again.'
+      )
+      if (key) {
+        const row = rowRefs.current.get(key)
+        row?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        row?.querySelector<HTMLInputElement>('input')?.focus()
+      }
+      return
+    }
+    setResidualError(null)
+
+    if (queryHash) {
+      const backendValues = toBackendParams(parameters, values)
+      if (Object.keys(backendValues).length > 0) {
+        void updateQueryParameters(queryHash, backendValues, 'user').catch(
+          () => {
+            // Persistence is a convenience for next time; it must not block
+            // this run.
+          }
+        )
+      }
+    }
+
     onSubmit(substituted)
   }
 
@@ -204,7 +249,15 @@ export function ParameterDialog({
           description={`${parameters.length} parameter${parameters.length === 1 ? '' : 's'} detected. Values apply only to this run.`}
           bodyClassName="p-0"
           footer={
-            <div className="flex justify-end gap-3">
+            <div className="flex items-center justify-end gap-3">
+              {residualError ? (
+                <Text
+                  level="caption"
+                  className="mr-auto text-content-negative-soft"
+                >
+                  {residualError}
+                </Text>
+              ) : null}
               <Button
                 variant="primary"
                 modifier="ghost"
@@ -274,7 +327,14 @@ export function ParameterDialog({
                         colorByPlaceholder.get(param.placeholder) ?? 0
                       const color = getParameterColor(colorIndex)
                       return (
-                        <div key={key} className="flex items-center gap-3">
+                        <div
+                          key={key}
+                          ref={(node) => {
+                            if (node) rowRefs.current.set(key, node)
+                            else rowRefs.current.delete(key)
+                          }}
+                          className="flex items-center gap-3"
+                        >
                           <div className="w-14 flex-shrink-0 text-right">
                             <span
                               className="inline-block px-2 py-1 rounded border font-mono text-sm"
@@ -307,7 +367,10 @@ export function ParameterDialog({
                             ) : null}
                             {(() => {
                               const suggestion = sampledByKey.get(key)
-                              if (!suggestion || suggestion.suggestions.length === 0)
+                              if (
+                                !suggestion ||
+                                suggestion.suggestions.length === 0
+                              )
                                 return null
                               return (
                                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -346,10 +409,15 @@ export function ParameterDialog({
                     })}
                     {capturedSample ? (
                       <div className="space-y-2 rounded-lg border border-border-layout-1 bg-surface-layout-1 p-3">
-                        <Text level="body-small" className="text-content-layout-2">
+                        <Text
+                          level="body-small"
+                          className="text-content-layout-2"
+                        >
                           A real run of this query was captured (
                           {capturedSample.source}
-                          {capturedSample.seen_at ? `, ${capturedSample.seen_at}` : ''}
+                          {capturedSample.seen_at
+                            ? `, ${capturedSample.seen_at}`
+                            : ''}
                           ).
                         </Text>
                         <SQLDisplay
@@ -371,12 +439,15 @@ export function ParameterDialog({
                       and FALSE are used as entered.
                     </Text>
                     {sampledByKey.size > 0 || capturedSample ? (
-                      <Text level="body-small" className="text-content-layout-3">
-                        EXPLAIN ANALYZE runs with the values you pick, and the plan
-                        can change a lot with them. Values seen in real traffic
-                        (observed values, a captured run) represent production
-                        best; the other suggestions are real rows from the table
-                        and may produce a very different plan.
+                      <Text
+                        level="body-small"
+                        className="text-content-layout-3"
+                      >
+                        EXPLAIN ANALYZE runs with the values you pick, and the
+                        plan can change a lot with them. Values seen in real
+                        traffic (observed values, a captured run) represent
+                        production best; the other suggestions are real rows
+                        from the table and may produce a very different plan.
                       </Text>
                     ) : null}
                     <ParameterSuggestionSummary

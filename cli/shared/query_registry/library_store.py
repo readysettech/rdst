@@ -56,6 +56,7 @@ from shared.query_registry.observation_store import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "LibraryMigrationError",
     "LibraryStore",
     "RegistryReadOnlyError",
     "SCHEMA_VERSION",
@@ -63,7 +64,7 @@ __all__ = [
     "library_db_path_for",
 ]
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # QueryRegistry is constructed by nearly every CLI command; run the SQLite
 # runtime check once per process, at first actual store use rather than at
@@ -85,6 +86,15 @@ class RegistryReadOnlyError(RuntimeError):
 
     Reads keep serving the columns this build understands; the user should
     upgrade rdst or recover the data with ``rdst query export``.
+    """
+
+
+class LibraryMigrationError(RuntimeError):
+    """A schema migration failed; library.db still holds its prior version.
+
+    Carries the whole user-facing explanation -- which step failed, why, and
+    where the pre-migration backup is -- so the message needs no traceback
+    to act on.
     """
 
 
@@ -382,6 +392,10 @@ _MIGRATIONS: Dict[int, Any] = {
     # diagnostic statements admitted before the self markers existed; see
     # _prune_self_traffic.
     11: lambda strict: (),
+    # Version 12 is a data migration with no DDL: it drops the catalog and
+    # probe statements that reference no user relation, whatever review or
+    # save intent they collected on the way in; see _prune_system_statements.
+    12: lambda strict: (),
 }
 
 # Data-cleanup versions: each runs _prune_system_only_entries inside its
@@ -402,6 +416,11 @@ _PRUNE_VERSIONS = (2, 3, 4, 5, 6)
 # Sources produced by automatic observation rather than a user action.
 # Mirrors the web library's observed-source set plus the realtime spelling.
 _AUTO_OBSERVED_SOURCES = {"top", "top-historical", "top-realtime", "audit"}
+
+# Sources RDST itself writes: automatic observation plus the cache pipeline,
+# which admits whatever a cache run happened to touch. Every other source
+# names a person choosing a query, so v12 leaves those entries alone.
+_SYSTEM_ADMITTED_SOURCES = _AUTO_OBSERVED_SOURCES | {"cache"}
 
 
 def _prune_system_only_entries(conn: sqlite3.Connection) -> int:
@@ -614,14 +633,30 @@ def _param_value(params: Dict[str, Any], name: str) -> str:
     return "" if value is None else str(value)
 
 
+def _has_explicit_source(params: Dict[str, Any]) -> bool:
+    """True when stored values record where they came from.
+
+    Only the typed parameter shape carries provenance, and only a caller
+    that knows it writes one (see query_registry.typed_parameter): a user
+    typing values into a dialog, or a suggestion they accepted. Such values
+    name real input whatever they spell.
+    """
+    return any(
+        isinstance(value, dict) and value.get("source")
+        for value in params.values()
+    )
+
+
 def _lifted_slot_indices(params: Dict[str, Any]) -> bool:
     """True when parameter values are the slot indices a digit lift stored.
 
     The digit-lifting normalizer numbered slots in AST-traversal order and
     recorded each slot's own index as its "value", so the values of such
     an entry are exactly 1..N in some order rather than observed data.
+    Values carrying their own provenance are exempt: `{"p1": "1"}` is a
+    perfectly ordinary thing to ask a query about.
     """
-    if not params:
+    if not params or _has_explicit_source(params):
         return False
     values = [_param_value(params, name) for name in params]
     if not all(value.isdigit() for value in values):
@@ -769,7 +804,12 @@ def _repaired_parameters(
             substituted = sql
         if substituted != sql and hash_sql(substituted) == query_hash:
             return params, observed
-    if _lifted_slot_indices(params) or _lifted_slot_indices(observed):
+    # most_recent_params stores bare values, so the typed parameters are the
+    # only place provenance can be read; when they carry it, the pair of
+    # them belongs to whoever wrote them.
+    if _lifted_slot_indices(params) or (
+        not _has_explicit_source(params) and _lifted_slot_indices(observed)
+    ):
         return {}, {}
     # A slot-bearing text resolves its k-th engine slot as `pk`; a text
     # spelling `:pN` names its own.
@@ -1097,11 +1137,72 @@ class LibraryStore:
                             "automatically; restore the file from backup or "
                             "re-import from the queries.toml backup beside it."
                         )
-                    self._migrate(conn, version)
+                    if version < SCHEMA_VERSION:
+                        backup = self._backup_before_migration(conn, version)
+                        try:
+                            self._migrate(conn, version)
+                        except BaseException as exc:
+                            raise LibraryMigrationError(
+                                self._migration_failure_message(
+                                    version, backup, exc
+                                )
+                            ) from None
             finally:
                 conn.close()
             self._rekey_observation_history()
             self._opened = True
+
+    def _backup_before_migration(
+        self, conn: sqlite3.Connection, version: int
+    ) -> Path:
+        """Copy the file aside before the ladder changes anything.
+
+        One backup per source version: an install that upgrades from v9 keeps
+        ``library.db.pre-v9.bak`` and never rewrites it, so a second attempt
+        after a failed migration still restores the original. The copy goes
+        through SQLite's own backup API, which captures committed WAL frames
+        the raw file does not yet hold, and lands atomically under its final
+        name so a partial copy is never mistaken for a backup.
+        """
+        backup = self._db_path.with_name(f"{self._db_path.name}.pre-v{version}.bak")
+        if backup.exists():
+            return backup
+        staging = backup.with_name(backup.name + ".tmp")
+        staging.unlink(missing_ok=True)
+        target = sqlite3.connect(staging)
+        try:
+            conn.backup(target)
+        finally:
+            target.close()
+        os.replace(staging, backup)
+        logger.info("Backed up %s to %s before migrating", self._db_path, backup)
+        return backup
+
+    def _migration_failure_message(
+        self, from_version: int, backup: Path, exc: BaseException
+    ) -> str:
+        """Explain a failed migration in one actionable sentence sequence.
+
+        The version is re-read rather than assumed: a ladder that failed on
+        its third step has already committed the first two.
+        """
+        stored = from_version
+        try:
+            conn = self._connect()
+            try:
+                stored = conn.execute("PRAGMA user_version").fetchone()[0]
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            pass
+        return (
+            f"library.db at {self._db_path} could not be migrated to schema "
+            f"{stored + 1:d} ({type(exc).__name__}: {exc}). The migration was "
+            f"rolled back, so the file still holds every query at schema "
+            f"{stored:d}, and a copy of it as it stood before this upgrade is "
+            f"at {backup}. Reinstall the previous rdst to keep working, and "
+            "report this message."
+        )
 
     def _migrate(self, conn: sqlite3.Connection, from_version: int) -> None:
         for version in range(from_version + 1, SCHEMA_VERSION + 1):
@@ -1131,6 +1232,8 @@ class LibraryStore:
                     self._repair_v9_residue(conn)
                 if version == 11:
                     self._prune_self_traffic(conn)
+                if version == 12:
+                    self._prune_system_statements(conn)
                 conn.execute(f"PRAGMA user_version = {version:d}")
                 conn.execute("COMMIT")
             except BaseException:
@@ -1197,6 +1300,7 @@ class LibraryStore:
             self._repair_placeholder_artifacts(conn)
             self._repair_v9_residue(conn)
             self._prune_self_traffic(conn)
+            self._prune_system_statements(conn)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION:d}")
             conn.execute("COMMIT")
         except BaseException:
@@ -1809,6 +1913,79 @@ class LibraryStore:
                 "Library cleanup removed %d RDST self-traffic entries (%s)",
                 len(pruned),
                 ", ".join(f"{name} {count}" for name, count in sorted(shapes.items())),
+            )
+        return len(pruned)
+
+    def _prune_system_statements(self, conn: sqlite3.Connection) -> int:
+        """Schema v12 data migration: drop entries that are not user workload.
+
+        Two provable classes leave, whatever a bulk review sweep or an
+        automatic save stamped on them:
+
+        - a statement referencing no user relation (catalog introspection,
+          ``SELECT VERSION()``, connection probes), which nothing in Readyset
+          can cache and no measurement can improve;
+        - an exact instance of an RDST diagnostic template (see
+          shared.query_registry.self_traffic), including the setting probe the
+          v11 pass did not yet recognize.
+
+        Only entries the system admitted are eligible: an entry a user typed,
+        imported, or asked for keeps its place even when its SQL touches no
+        table. Real investment wins over the match -- an entry someone
+        analyzed or compared stays, because its measurements would otherwise
+        lose their subject. saved_at and reviewed_at do not count: both are
+        written by flows that sweep whatever the list happened to show.
+
+        cache.db observation history is left alone for the reasons
+        _prune_self_traffic gives, and re-keys landing on a pruned hash are
+        dropped the same way. Idempotent: a second run finds no match left.
+        """
+        from shared.query_registry.self_traffic import match_self_template
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        pruned: set = set()
+        for row in conn.execute(
+            "SELECT id, hash, sql, original_sql, question, source,"
+            " readyset_query_id FROM query_identity"
+        ).fetchall():
+            if row["source"] not in _SYSTEM_ADMITTED_SOURCES:
+                continue
+            sql_text = row["original_sql"] or row["sql"]
+            if references_user_relations(sql_text) and not match_self_template(
+                sql_text
+            ):
+                continue
+            if row["question"]:
+                continue
+            measured = conn.execute(
+                """
+                SELECT 1 FROM target_query
+                WHERE identity_id = ?
+                  AND (last_analyzed_at != '' OR last_compared_at != ''
+                       OR analysis_count > 0 OR comparison_count > 0)
+                LIMIT 1
+                """,
+                (row["id"],),
+            ).fetchone()
+            if measured is not None:
+                continue
+            conn.execute("DELETE FROM target_query WHERE identity_id = ?", (row["id"],))
+            conn.execute("DELETE FROM query_identity WHERE id = ?", (row["id"],))
+            pruned.add(row["hash"])
+            logger.info(
+                "Pruned system statement %s%s: %.60s",
+                row["hash"],
+                " (cached in Readyset)" if row["readyset_query_id"] else "",
+                " ".join(sql_text.split()),
+            )
+        if pruned:
+            self._identity_moves = {
+                old: new
+                for old, new in self._identity_moves.items()
+                if new not in pruned
+            }
+            logger.info(
+                "Library cleanup removed %d system statements", len(pruned)
             )
         return len(pruned)
 

@@ -248,12 +248,84 @@ def normalize_and_extract(sql: str, dialect: str = None) -> Tuple[str, Dict[str,
     return _compat_generator(dialect).generate(tree), params
 
 
+# Positional `$N` slots (pg_stat_statements texts) name the same parameter as
+# RDST's own `:pN`: slot k is `pk`, the mapping query_registry's
+# _identity_slot_count already assumes. A `$` that opens a dollar-quoted string
+# ($$...$$, $tag$...$tag$) starts literal text instead, and a tag never starts
+# with a digit, so masking the quoted regions keeps `$$100$$` out of the scan.
+_DOLLAR_SLOT = re.compile(r"\$(\d+)")
+_DOLLAR_QUOTE_OPEN = re.compile(r"\$(?:[A-Za-z_]\w*)?\$")
+_SINGLE_QUOTED = re.compile(r"'(?:[^']|'')*'")
+
+
+def mask_string_literals(sql: str) -> str:
+    """Blank the body of every string literal, preserving offsets."""
+    masked = []
+    position = 0
+    while position < len(sql):
+        char = sql[position]
+        if char == "'":
+            match = _SINGLE_QUOTED.match(sql, position)
+            end = match.end() if match else len(sql)
+        elif char == "$":
+            opening = _DOLLAR_QUOTE_OPEN.match(sql, position)
+            if opening is None:
+                masked.append(char)
+                position += 1
+                continue
+            closing = sql.find(opening.group(0), opening.end())
+            end = closing + len(opening.group(0)) if closing >= 0 else len(sql)
+        else:
+            masked.append(char)
+            position += 1
+            continue
+        masked.append(" " * (end - position))
+        position = end
+    return "".join(masked)
+
+
+def _dollar_slot_names(sql: str) -> Set[str]:
+    """Parameter names for the `$N` slots that sit outside string literals."""
+    return {f"p{index}" for index in _DOLLAR_SLOT.findall(mask_string_literals(sql))}
+
+
+def _param_literal(param_info: Dict[str, Any]) -> str:
+    """Render one stored parameter as a SQL literal."""
+    value = param_info.get("value")
+    if param_info.get("type") == "string":
+        # Double embedded quotes so a value cannot terminate its own literal
+        return "'" + str(value).replace("'", "''") + "'"
+    return str(value)
+
+
+def _substitute_dollar_slots(sql: str, params: Dict[str, dict]) -> str:
+    """Replace each `$k` slot with the value stored under `pk`.
+
+    sqlglot only reads `$N` as a parameter under a dialect that spells
+    placeholders that way, and regenerates it verbatim otherwise, so the
+    positional style is substituted textually before the AST pass.
+    """
+    masked = mask_string_literals(sql)
+    pieces = []
+    last = 0
+    for match in _DOLLAR_SLOT.finditer(masked):
+        param_info = params.get(f"p{match.group(1)}")
+        if not isinstance(param_info, dict):
+            continue
+        pieces.append(sql[last : match.start()])
+        pieces.append(_param_literal(param_info))
+        last = match.end()
+    pieces.append(sql[last:])
+    return "".join(pieces)
+
+
 def reconstruct_sql(normalized_sql: str, params: Dict[str, dict], dialect: str = None) -> str:
     """
-    Reconstruct executable SQL by replacing :p1, :p2 placeholders with values.
+    Reconstruct executable SQL by replacing :p1, :p2 and $1, $2 placeholders
+    with values.
 
     Args:
-        normalized_sql: SQL with :p1, :p2 placeholders
+        normalized_sql: SQL with :p1, :p2 or $1, $2 placeholders
         params: {'p1': {'value': ..., 'type': ...}, ...}
         dialect: Optional dialect
 
@@ -265,6 +337,8 @@ def reconstruct_sql(normalized_sql: str, params: Dict[str, dict], dialect: str =
 
     if not params:
         return normalized_sql
+
+    normalized_sql = _substitute_dollar_slots(normalized_sql, params)
 
     try:
         tree = parse_one(normalized_sql, dialect=dialect)
@@ -413,10 +487,13 @@ def parse_supported_from_explain(output: str) -> str:
 
 def get_placeholder_names(normalized_sql: str, dialect: str = None) -> Set[str]:
     """
-    Get all placeholder names (:p1, :p2, etc.) in normalized SQL.
+    Get all placeholder names in normalized SQL.
+
+    Both spellings name the same parameter set: `:pk` names itself and the
+    positional `$k` of an engine-normalized text names `pk`.
 
     Args:
-        normalized_sql: SQL with :p1, :p2 placeholders
+        normalized_sql: SQL with :p1, :p2 or $1, $2 placeholders
         dialect: Optional dialect
 
     Returns:
@@ -425,14 +502,15 @@ def get_placeholder_names(normalized_sql: str, dialect: str = None) -> Set[str]:
     if not normalized_sql or not normalized_sql.strip():
         return set()
 
+    names = _dollar_slot_names(normalized_sql)
     try:
         tree = parse_one(normalized_sql, dialect=dialect)
-        return {p.this for p in tree.find_all(exp.Placeholder) if p.this}
+        return names | {p.this for p in tree.find_all(exp.Placeholder) if p.this}
     except Exception as e:
         logger.debug(f"SQLGlot parsing failed, falling back to regex: {e}")
         # Fallback: find :pN patterns with regex
         matches = re.findall(r':p(\d+)', normalized_sql)
-        return {f"p{m}" for m in matches}
+        return names | {f"p{m}" for m in matches}
 
 
 def _fallback_normalize(sql: str) -> Tuple[str, Dict[str, dict]]:
@@ -492,15 +570,6 @@ def _fallback_reconstruct(normalized_sql: str, params: Dict[str, dict]) -> str:
     result = normalized_sql
 
     for param_name, param_info in params.items():
-        placeholder = f":{param_name}"
-        value = param_info['value']
-
-        if param_info['type'] == 'string':
-            # Double embedded quotes so a value cannot terminate its own literal
-            replacement = "'" + str(value).replace("'", "''") + "'"
-        else:
-            replacement = str(value)
-
-        result = result.replace(placeholder, replacement, 1)
+        result = result.replace(f":{param_name}", _param_literal(param_info), 1)
 
     return result

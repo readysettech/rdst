@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictFloat, StrictInt, StrictStr
 from typing import Any, Optional, Literal, AsyncGenerator, Union
-from datetime import datetime
+from datetime import datetime, timezone
 from sse_starlette.sse import EventSourceResponse
 import json
 import asyncio
@@ -14,6 +14,7 @@ import threading
 import time
 import uuid
 
+from shared.api.guards import require_local_request
 from shared.api.target_guard import TargetGuard, require_target, require_target_body
 from .. import read_model
 from ..discovery import BOOKMARK_INTERVAL_SECONDS, query_discovery
@@ -603,6 +604,138 @@ async def update_query_tag(
         return UpdateTagResponse(success=False, error=str(e))
 
 
+class UpdateParametersRequest(BaseModel):
+    """Concrete values for one query's placeholders, keyed by parameter name."""
+
+    values: dict[str, Union[StrictStr, StrictInt, StrictFloat]] = Field(min_length=1)
+    source: Literal["user", "suggested"] = "user"
+
+
+class UpdateParametersResponse(BaseModel):
+    hash: str
+    parameters: dict
+
+
+@router.patch("/query-registry/queries/{query_hash}/parameters")
+async def update_query_parameters(
+    query_hash: str,
+    request: UpdateParametersRequest,
+    http_request: Request,
+) -> UpdateParametersResponse:
+    """Store values for a query's placeholders and return what was stored.
+
+    The values land in both parameter fields, so they show as the query's
+    most recent values and also substitute into its placeholders when it is
+    next run.
+    """
+    require_local_request(http_request)
+    from shared.query_registry import QueryRegistry
+
+    registry = QueryRegistry()
+    registry.load()
+    updated = registry.update_parameter_history(
+        query_hash, request.values, source=request.source
+    )
+    entry = registry.get_query(query_hash) if updated else None
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Query not found")
+    return UpdateParametersResponse(hash=query_hash, parameters=entry.parameters)
+
+
+class CompareOutcomeRequest(BaseModel):
+    """What one Compare run found for a query on one target."""
+
+    target: StrictStr = ""
+    status: Literal[
+        "improved", "regressed", "equivalent", "not_comparable", "error"
+    ]
+    readyset_ms: Optional[float] = Field(default=None, ge=0)
+    origin_ms: Optional[float] = Field(default=None, ge=0)
+    detail: Optional[str] = Field(default=None, max_length=500)
+    # Readyset's own verdict on the query, when the run reached the EXPLAIN
+    # CREATE CACHE that decides it.
+    readyset_supported: Optional[Literal["yes", "no", "pending"]] = None
+    unsupported_reason: Optional[str] = Field(default=None, max_length=500)
+
+
+class CompareOutcomeResponse(BaseModel):
+    hash: str
+    target: str
+    comparison_count: int
+    last_compared_at: str
+    last_compare: dict
+    readyset_supported: str
+
+
+def _readyset_support_value(
+    verdict: str, reason: Optional[str], current: str
+) -> str:
+    """Map a compare run's verdict onto the stored readyset_supported text.
+
+    The column's vocabulary predates this endpoint, so the spelling comes from
+    the cache feature that owns it rather than from a second copy here.
+    """
+    from features.cache.readyset_explain_cache import readyset_support_text
+
+    if not verdict:
+        return current
+    return readyset_support_text(verdict, reason or "")
+
+
+@router.post("/query-registry/queries/{query_hash}/compare-outcome")
+async def record_compare_outcome(
+    query_hash: str,
+    request: CompareOutcomeRequest,
+    http_request: Request,
+) -> CompareOutcomeResponse:
+    """Record what comparing a query against Readyset found.
+
+    Compare is the measurement the Query Library is for, so its result
+    belongs beside the query rather than in one browser: the target's
+    lifecycle counts the run, and the latest outcome stays readable for the
+    next person who opens the query.
+    """
+    require_local_request(http_request)
+    from shared.query_registry import QueryRegistry
+
+    registry = QueryRegistry()
+    registry.load()
+    entry = registry.get_query(query_hash)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Query not found")
+
+    target = request.target or entry.home_target
+    lifecycle = entry.lifecycle_for(target, create=True)
+    recorded_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    outcome: dict[str, Any] = {"status": request.status, "at": recorded_at}
+    for key, value in (
+        ("readyset_ms", request.readyset_ms),
+        ("origin_ms", request.origin_ms),
+        ("detail", request.detail),
+    ):
+        if value is not None:
+            outcome[key] = value
+    lifecycle.comparison_count += 1
+    lifecycle.last_compared_at = recorded_at
+    lifecycle.last_compare = outcome
+    if request.readyset_supported is not None:
+        entry.readyset_supported = _readyset_support_value(
+            request.readyset_supported,
+            request.unsupported_reason,
+            entry.readyset_supported,
+        )
+    registry.save()
+
+    return CompareOutcomeResponse(
+        hash=entry.hash,
+        target=target,
+        comparison_count=lifecycle.comparison_count,
+        last_compared_at=lifecycle.last_compared_at,
+        last_compare=outcome,
+        readyset_supported=entry.readyset_supported,
+    )
+
+
 class UpdateSqlRequest(BaseModel):
     sql: str
 
@@ -725,6 +858,13 @@ class BenchmarkRequest(BaseModel):
     concurrency: Optional[int] = 1  # For concurrency mode
     duration_seconds: Optional[int] = 30
     max_count: Optional[int] = None
+    # Concrete parameter sets each stored query rotates through, so a run is
+    # not one value's cache profile. 1 keeps the stored values only.
+    parameter_sets: Optional[int] = None
+    # Executions per query before the clock starts, excluded from every stat.
+    warmup_executions: Optional[int] = None
+    # Bound on one statement, so a pathological query cannot hold its worker.
+    statement_timeout_ms: Optional[int] = None
 
 
 class LoadTestRunStartResponse(BaseModel):
@@ -766,6 +906,16 @@ class QueryBenchmarkStats(BaseModel):
     p99_ms: float
     max_ms: float
     last_error: Optional[str] = None
+    timeouts: int = 0
+    variant_count: int = 1
+
+
+class QuerySkip(BaseModel):
+    """A query the run left out, and why."""
+
+    query_hash: str
+    query_name: str
+    reason: str
 
 
 class BenchmarkProgress(BaseModel):
@@ -779,6 +929,9 @@ class BenchmarkProgress(BaseModel):
     qps: float
     queries: list[QueryBenchmarkStats]
     error: Optional[str] = None
+    warmup_executions: int = 0
+    skipped_count: int = 0
+    skipped_queries: list[QuerySkip] = []
 
 
 def _progress_to_sse(progress: Any) -> dict:
@@ -817,6 +970,12 @@ def _progress_to_sse(progress: Any) -> dict:
                 "total_failures": progress.total_failures,
                 "qps": progress.qps,
                 "queries": [q.__dict__ for q in progress.queries],
+                "warmup_executions": getattr(progress, "warmup_executions", 0),
+                "skipped_count": getattr(progress, "skipped_count", 0),
+                "skipped_queries": [
+                    skip.__dict__
+                    for skip in getattr(progress, "skipped_queries", ())
+                ],
             }
         )
     return {
@@ -827,6 +986,7 @@ def _progress_to_sse(progress: Any) -> dict:
 
 async def _benchmark_generator(
     queries, target, mode, interval_ms, concurrency, duration_seconds, max_count,
+    **tuning,
 ) -> AsyncGenerator[dict, None]:
     """Compatibility SSE path, protected by a measurement reservation."""
     from ..service import QueryService
@@ -845,17 +1005,40 @@ async def _benchmark_generator(
             concurrency=concurrency,
             duration_seconds=duration_seconds,
             max_count=max_count,
+            **tuning,
         ):
             yield _progress_to_sse(progress)
 
 
+def _benchmark_tuning(request: BenchmarkRequest) -> dict[str, int]:
+    """Collect the run's optional tuning, leaving unset fields to the service."""
+    return {
+        name: value
+        for name, value in (
+            ("parameter_sets", request.parameter_sets),
+            ("warmup_executions", request.warmup_executions),
+            ("statement_timeout_ms", request.statement_timeout_ms),
+        )
+        if value is not None
+    }
+
+
 @router.post("/query-registry/benchmark")
-async def run_benchmark(request: BenchmarkRequest, guard: TargetGuard = Depends(require_target_body)):
+async def run_benchmark(
+    request: BenchmarkRequest,
+    http_request: Request,
+    guard: TargetGuard = Depends(require_target_body),
+):
     """
     Run benchmark on queries with live progress updates via SSE.
 
     Returns Server-Sent Events with progress updates during execution.
+
+    This path executes SQL the body carries, so it is restricted to the
+    same callers as every other write endpoint: loopback, or the page RDST
+    itself served.
     """
+    require_local_request(http_request)
     return EventSourceResponse(_benchmark_generator(
         queries=request.queries,
         target=guard.target_name,
@@ -866,6 +1049,7 @@ async def run_benchmark(request: BenchmarkRequest, guard: TargetGuard = Depends(
             30 if request.duration_seconds is None else request.duration_seconds
         ),
         max_count=request.max_count,
+        **_benchmark_tuning(request),
     ))
 
 
@@ -876,9 +1060,11 @@ async def run_benchmark(request: BenchmarkRequest, guard: TargetGuard = Depends(
 )
 async def start_load_test_run(
     request: BenchmarkRequest,
+    http_request: Request,
     guard: TargetGuard = Depends(require_target_body),
 ) -> LoadTestRunStartResponse:
     """Start or attach to the target's detached origin-only benchmark."""
+    require_local_request(http_request)
     from shared.deploy.sandbox_manager import sandbox_manager
     from shared.run_registry import run_registry
     from ..service import QueryService
@@ -924,6 +1110,7 @@ async def start_load_test_run(
                     else 30
                 ),
                 max_count=request.max_count,
+                **_benchmark_tuning(request),
             ):
                 yield event
 

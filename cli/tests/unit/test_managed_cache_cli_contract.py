@@ -418,6 +418,7 @@ def test_cache_compare_auto_provisions_through_sandbox_manager() -> None:
             "query": "SELECT * FROM orders WHERE id = 1",
             "iterations": 3,
             "warmup": 1,
+            "query_hash": "abcdef1234567890",
         }
     ]
     start.assert_awaited_once()
@@ -575,6 +576,7 @@ def test_cache_compare_forwards_load_generation_flags() -> None:
             "query": "SELECT 1",
             "iterations": 20,
             "warmup": 1,
+            "query_hash": "abcdef1234567890",
             "interval_ms": 25,
             "duration_seconds": 10,
         }

@@ -1713,3 +1713,96 @@ class TestPlaceholderStyleIdentity:
         assert lifecycle.saved_at
         assert sorted(lifecycle.sources) == ["top-historical", "web"]
         assert entry.is_new_for("demo") is True
+
+
+class TestParameterHistoryMakesQueriesRunnable:
+    """Supplied values both display as recent values and drive substitution."""
+
+    PG_TEXT = "SELECT * FROM orders WHERE customer_id = $1 LIMIT $2"
+
+    def _registry(self, tmp_path: Path) -> QueryRegistry:
+        registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+        registry.load()
+        return registry
+
+    def _stored(self, tmp_path: Path):
+        registry = self._registry(tmp_path)
+        query_hash, _ = registry.add_query(
+            sql=self.PG_TEXT, source="top-historical", target="demo"
+        )
+        return registry, query_hash
+
+    def test_slot_identity_is_unrunnable_until_values_arrive(self, tmp_path):
+        registry, query_hash = self._stored(tmp_path)
+
+        assert registry.get_executable_query(query_hash, interactive=False) is None
+
+    def test_stored_values_substitute_into_slots(self, tmp_path):
+        registry, query_hash = self._stored(tmp_path)
+
+        registry.update_parameter_history(
+            query_hash, {"p1": "42", "p2": "10"}, source="user"
+        )
+        executable = registry.get_executable_query(query_hash, interactive=False)
+
+        assert "$1" not in executable and "$2" not in executable
+        assert "42" in executable
+        assert executable.endswith("LIMIT 10")
+
+    def test_partial_values_leave_the_query_unrunnable(self, tmp_path):
+        registry, query_hash = self._stored(tmp_path)
+
+        registry.update_parameter_history(query_hash, {"p1": "42"}, source="user")
+
+        assert registry.get_executable_query(query_hash, interactive=False) is None
+
+    def test_both_parameter_fields_are_written(self, tmp_path):
+        registry, query_hash = self._stored(tmp_path)
+
+        registry.update_parameter_history(
+            query_hash, {"p1": "42", "p2": "ana"}, source="user"
+        )
+        entry = registry.get_query(query_hash)
+
+        assert entry.most_recent_params == {"p1": "42", "p2": "ana"}
+        assert entry.parameters == {
+            "p1": {"value": 42, "type": "number", "source": "user"},
+            "p2": {"value": "ana", "type": "string", "source": "user"},
+        }
+
+    def test_provenance_is_omitted_when_unknown(self, tmp_path):
+        registry, query_hash = self._stored(tmp_path)
+
+        registry.update_parameter_history(query_hash, {"p1": 42})
+        entry = registry.get_query(query_hash)
+
+        assert entry.parameters == {"p1": {"value": 42, "type": "number"}}
+
+    def test_keys_are_canonicalized_to_slot_names(self, tmp_path):
+        registry, query_hash = self._stored(tmp_path)
+
+        registry.update_parameter_history(
+            query_hash, {"param_1": 42, "$2": 10}, source="suggested"
+        )
+        entry = registry.get_query(query_hash)
+
+        assert set(entry.most_recent_params) == {"p1", "p2"}
+        assert registry.get_executable_query(
+            query_hash, interactive=False
+        ).endswith("LIMIT 10")
+
+    def test_values_persist_across_reload(self, tmp_path):
+        registry, query_hash = self._stored(tmp_path)
+        registry.update_parameter_history(
+            query_hash, {"p1": "42", "p2": "10"}, source="user"
+        )
+
+        reloaded = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+        reloaded.load()
+
+        assert reloaded.get_query(query_hash).parameters["p1"]["source"] == "user"
+
+    def test_unknown_hash_is_reported(self, tmp_path):
+        registry = self._registry(tmp_path)
+
+        assert registry.update_parameter_history("deadbeef0000", {"p1": 1}) is False

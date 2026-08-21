@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Optional, Union
 
-from .models import QueryBenchmarkStats
+from .models import QueryBenchmarkStats, QuerySkip
 
 
 @dataclass
@@ -44,6 +44,11 @@ class QueryBenchmarkProgressEvent:
     total_failures: int
     qps: float
     queries: list[QueryBenchmarkStats]
+    # Warmup runs before the clock starts and stays out of every statistic;
+    # its tally is reported so the count of real work is not a mystery.
+    warmup_executions: int = 0
+    skipped_count: int = 0
+    skipped_queries: list[QuerySkip] = field(default_factory=list)
 
 
 @dataclass
@@ -57,6 +62,9 @@ class QueryBenchmarkCompleteEvent:
     total_failures: int
     qps: float
     queries: list[QueryBenchmarkStats]
+    warmup_executions: int = 0
+    skipped_count: int = 0
+    skipped_queries: list[QuerySkip] = field(default_factory=list)
 
 
 @dataclass

@@ -46,6 +46,7 @@ _NAMED_PLACEHOLDER_RE = re.compile(r"(?<![:\w]):([A-Za-z_]\w*)")
 _STRING_OR_QUESTION_RE = re.compile(r"'[^']*'|\"[^\"]*\"|\?")
 _LITERAL_RE = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|-?\b\d+(?:\.\d+)?\b")
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
+_REGISTRY_HASH_RE = re.compile(r"^[0-9a-f]{12}$")
 
 _JSON_EXTRACT_NODES = tuple(
     getattr(exp, name)
@@ -84,7 +85,7 @@ def suggest_parameter_values(
 
     if conn is not None:
         try:
-            sample = _fetch_sample(conn, engine, sql, query_hash)
+            sample = _fetch_sample(conn, engine, sql, query_hash, target)
             if sample:
                 aligned = align_sample_values(sample["sql"], placeholders)
                 sample["aligned"] = aligned is not None
@@ -251,7 +252,63 @@ def _describe_binding(node: exp.Expression, aliases: Dict[str, str], tables: Lis
     }
 
 
-def _fetch_sample(conn, engine: str, sql: str, query_hash: Optional[str]) -> Optional[Dict[str, Any]]:
+def _registry_hash_query_ids(target: str, query_hash: str) -> List[int]:
+    """Return the pg_stat_statements queryids a registry hash identifies.
+
+    The discovery collector already resolves each engine key to the
+    normalized hash the Query Library stores, and keeps those aliases per
+    epoch in the observation store; reading them back is the only mapping
+    between the two identities. A missing store, epoch, or alias yields
+    nothing, and the caller skips the activity lane.
+    """
+    if not target:
+        return []
+    try:
+        from features.query_registry.discovery import query_discovery
+        from features.query_registry.statement_stats import parse_pg_engine_key
+
+        store = query_discovery.existing_store()
+        if store is None:
+            return []
+        epoch_id = (store.get_collector_state(target) or {}).get("epoch_id")
+        if not epoch_id:
+            return []
+        aliases = store.get_identity_aliases(target, epoch_id)
+    except Exception as exc:
+        logger.debug("Parameter suggestions: identity alias lookup failed: %s", exc)
+        return []
+
+    query_ids = []
+    for engine_key, normalized_hash in aliases.items():
+        if normalized_hash != query_hash:
+            continue
+        try:
+            query_ids.append(parse_pg_engine_key(engine_key)[2])
+        except ValueError:
+            continue
+    return query_ids
+
+
+def _pg_query_ids(query_hash: Optional[str], target: str) -> List[int]:
+    """Resolve the caller's query identity to pg_stat_activity query_id values.
+
+    A numeric hash is a pg query_id already; both signs are matched because
+    the engine reports the jumble signed. A 12-hex hash is a registry
+    identity and routes through the collector's alias mapping.
+    """
+    if not query_hash:
+        return []
+    if query_hash.lstrip("-").isdigit():
+        value = abs(int(query_hash))
+        return [value, -value]
+    if _REGISTRY_HASH_RE.match(query_hash):
+        return _registry_hash_query_ids(target, query_hash)
+    return []
+
+
+def _fetch_sample(
+    conn, engine: str, sql: str, query_hash: Optional[str], target: str = ""
+) -> Optional[Dict[str, Any]]:
     cur = conn.cursor()
     try:
         if engine == "mysql":
@@ -275,17 +332,18 @@ def _fetch_sample(conn, engine: str, sql: str, query_hash: Optional[str]) -> Opt
                 return {"sql": row[0], "source": SOURCE_MYSQL_DIGEST_SAMPLE, "seen_at": str(row[1])}
             return None
 
-        if not query_hash or not query_hash.lstrip("-").isdigit():
+        query_ids = _pg_query_ids(query_hash, target)
+        if not query_ids:
             return None
         cur.execute("SELECT current_setting('server_version_num')::int")
         if (cur.fetchone() or [0])[0] < 140000:
             return None
         cur.execute(
             "SELECT query, query_start FROM pg_stat_activity "
-            "WHERE query_id IS NOT NULL AND abs(query_id)::text = %s "
+            "WHERE query_id = ANY(%s) "
             "AND pid <> pg_backend_pid() AND query NOT LIKE '%%$1%%' "
             "ORDER BY query_start DESC LIMIT 1",
-            (query_hash.lstrip("-"),),
+            (query_ids,),
         )
         row = cur.fetchone()
         if row and row[0]:

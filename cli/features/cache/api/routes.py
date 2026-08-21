@@ -268,6 +268,7 @@ async def start_cache_test_run(
             query=request.query,
             iterations=request.iterations,
             warmup=request.warmup,
+            query_hash=request.query_hash or "",
         ),
         metadata=metadata,
     )
@@ -304,6 +305,7 @@ async def start_cache_compare_run(
             query=request.query,
             duration_seconds=request.duration_seconds,
             controller=controller,
+            query_hash=request.query_hash or "",
         ),
         metadata=metadata,
     )

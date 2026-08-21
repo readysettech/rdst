@@ -135,7 +135,8 @@ export async function fetchSchema(target?: string): Promise<SchemaResponse> {
 
 export type ParameterSuggestionsResponse =
   apiComponents['schemas']['ParameterSuggestionsResponse']
-export type ParameterSuggestion = apiComponents['schemas']['ParameterSuggestion']
+export type ParameterSuggestion =
+  apiComponents['schemas']['ParameterSuggestion']
 export type ParameterValueSuggestion =
   apiComponents['schemas']['ParameterValueSuggestion']
 
@@ -369,6 +370,84 @@ export async function updateQuerySql(
   await throwIfNotOk(response, 'Failed to update SQL')
   if (!data) throw new Error('Missing response body')
   return data
+}
+
+export type QueryParametersSource = 'user' | 'suggested'
+export type UpdateQueryParametersResponse = {
+  hash: string
+  parameters: Record<string, unknown>
+}
+
+/**
+ * Persist parameter values against a registry query so a later dialog open
+ * or run reuses them instead of asking again. `source` distinguishes a
+ * value the user typed and confirmed from one a background suggestion
+ * filled in. Untyped by the generated client until gen:api picks up this
+ * endpoint.
+ */
+export async function updateQueryParameters(
+  hash: string,
+  values: Record<string, string>,
+  source: QueryParametersSource
+): Promise<UpdateQueryParametersResponse> {
+  const response = await fetch(
+    `/api/query-registry/queries/${encodeURIComponent(hash)}/parameters`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values, source }),
+    }
+  )
+  await throwIfNotOk(response, 'Failed to save parameter values')
+  return response.json()
+}
+
+export type CompareOutcomeStatus =
+  | 'improved'
+  | 'regressed'
+  | 'equivalent'
+  | 'not_comparable'
+  | 'error'
+
+export interface CompareOutcomeRequest {
+  target?: string
+  status: CompareOutcomeStatus
+  readyset_ms?: number | null
+  origin_ms?: number | null
+  detail?: string | null
+  readyset_supported?: 'yes' | 'no' | 'pending' | null
+  unsupported_reason?: string | null
+}
+
+export interface CompareOutcomeResponse {
+  hash: string
+  target: string
+  comparison_count: number
+  last_compared_at: string
+  last_compare: Record<string, unknown>
+  readyset_supported: string
+}
+
+/**
+ * Report what one Compare run found for a query, so the Query Library shows
+ * a durable outcome instead of one that only ever lived in a browser's
+ * localStorage history. Untyped by the generated client until gen:api picks
+ * up this endpoint.
+ */
+export async function reportCompareOutcome(
+  hash: string,
+  request: CompareOutcomeRequest
+): Promise<CompareOutcomeResponse> {
+  const response = await fetch(
+    `/api/query-registry/queries/${encodeURIComponent(hash)}/compare-outcome`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    }
+  )
+  await throwIfNotOk(response, 'Failed to report compare outcome')
+  return response.json()
 }
 
 export type ImportQueriesResponse =

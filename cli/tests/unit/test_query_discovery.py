@@ -2653,3 +2653,36 @@ async def test_self_template_identities_never_enter_the_library(tmp_path):
         assert sqls == ["SELECT * FROM orders"]
     finally:
         store.close()
+
+
+@pytest.mark.asyncio
+async def test_legacy_lane_admits_only_user_workload(tmp_path):
+    """The fallback reads the same engine views as the two-phase lane, so it
+    meets the same catalog statements and RDST diagnostics."""
+    registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+    user_sql = "SELECT title FROM posts WHERE score > 10"
+    service = FakeTopService(
+        [
+            top_query(user_sql),
+            top_query("SELECT relname FROM pg_stat_user_indexes"),
+            top_query("SELECT version()"),
+            top_query("SELECT current_setting($1)::int"),
+            top_query(
+                'SELECT "body"::text, COUNT(*) AS cnt FROM "posts" '
+                'TABLESAMPLE SYSTEM($1) WHERE "body" IS NOT NULL '
+                'GROUP BY "body" ORDER BY cnt DESC LIMIT $2'
+            ),
+        ]
+    )
+    collector = QueryDiscoveryCollector(
+        "demo",
+        service_factory=lambda: service,
+        registry_factory=lambda: registry,
+        clock=lambda: "2026-08-10T10:00:00Z",
+    )
+
+    event = await collector.collect_now()
+
+    registry.load()
+    assert [entry.original_sql for entry in registry.list_queries()] == [user_sql]
+    assert event.data["new_hashes"] == [hash_sql(user_sql)]

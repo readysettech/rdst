@@ -186,6 +186,7 @@ class FakeReadysetExperimentService(ReadysetExperimentService):
         interval_ms=None,
         concurrency=None,
         duration_seconds=None,
+        query_hash="",
     ):
         del (
             owner_id,
@@ -196,6 +197,7 @@ class FakeReadysetExperimentService(ReadysetExperimentService):
             interval_ms,
             concurrency,
             duration_seconds,
+            query_hash,
         )
         async for event in fixtures.events("speed_test", CACHE_EVENT):
             yield event
@@ -208,8 +210,9 @@ class FakeReadysetExperimentService(ReadysetExperimentService):
         query,
         duration_seconds,
         controller,
+        query_hash="",
     ):
-        del owner_id, target, query, duration_seconds, controller
+        del owner_id, target, query, duration_seconds, controller, query_hash
         async for event in fixtures.events("cache_compare", CACHE_EVENT):
             yield event
 

@@ -1108,6 +1108,8 @@ def _invoked_as_mcp_server() -> bool:
 
 
 def main():
+    from shared.query_registry.library_store import LibraryMigrationError
+
     configure_utf8_stdio()
     if sys.argv[1:] == ["_mcp_server"]:
         from mcp_server import main as mcp_main
@@ -1165,6 +1167,11 @@ def main():
 
     except KeyboardInterrupt:
         print("\nOperation cancelled.", file=sys.stderr)
+        sys.exit(1)
+    except LibraryMigrationError as e:
+        # The message names the failed step and where the backup sits; a
+        # traceback above it only obscures what the user has to act on.
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
         # Report crash to telemetry

@@ -1,11 +1,17 @@
 """Unit tests for sampled parameter value suggestions (pure parts)."""
 
+from unittest.mock import MagicMock
+
+import features.analyze.parameter_suggestions as mod
 from features.analyze.parameter_suggestions import (
+    SOURCE_PG_STAT_ACTIVITY,
     align_sample_values,
     bind_placeholders_to_columns,
     enumerate_placeholders,
     suggest_parameter_values,
 )
+
+REGISTRY_HASH = "aabbccdd1122"
 
 
 def test_enumerate_placeholders_uses_desktop_keys():
@@ -92,9 +98,107 @@ def test_connect_carries_analyze_lane(monkeypatch):
     assert captured["lane"] == "rdst/analyze"
 
 
-def test_suggest_parameter_values_without_connection_still_gives_shape_hints(monkeypatch):
-    import features.analyze.parameter_suggestions as mod
+class _FakeStore:
+    """Minimal stand-in for the collector's observation store."""
 
+    def __init__(self, epoch_id, aliases):
+        self._epoch_id = epoch_id
+        self._aliases = aliases
+
+    def get_collector_state(self, target):
+        return {"epoch_id": self._epoch_id} if self._epoch_id else {}
+
+    def get_identity_aliases(self, target, epoch_id):
+        return dict(self._aliases) if epoch_id == self._epoch_id else {}
+
+
+def _use_store(monkeypatch, store):
+    from features.query_registry.discovery import query_discovery
+
+    monkeypatch.setattr(query_discovery, "existing_store", lambda: store)
+
+
+def _pg_cursor(rows):
+    cur = MagicMock()
+    cur.fetchone.side_effect = rows
+    conn = MagicMock()
+    conn.cursor.return_value = cur
+    return conn, cur
+
+
+def test_numeric_hash_matches_both_signs_of_the_query_id():
+    assert mod._pg_query_ids("-123", "demo") == [123, -123]
+    assert mod._pg_query_ids("123", "demo") == [123, -123]
+
+
+def test_unrecognized_hash_resolves_to_nothing():
+    assert mod._pg_query_ids(None, "demo") == []
+    assert mod._pg_query_ids("not-a-hash", "demo") == []
+
+
+def test_registry_hash_resolves_through_the_collector_aliases(monkeypatch):
+    _use_store(
+        monkeypatch,
+        _FakeStore(
+            "epoch-1",
+            {"10:20:987:t": REGISTRY_HASH, "10:20:5:t": "0011223344ff"},
+        ),
+    )
+
+    assert mod._pg_query_ids(REGISTRY_HASH, "demo") == [987]
+
+
+def test_registry_hash_without_a_collector_epoch_resolves_to_nothing(monkeypatch):
+    _use_store(monkeypatch, _FakeStore("", {}))
+
+    assert mod._pg_query_ids(REGISTRY_HASH, "demo") == []
+
+
+def test_registry_hash_without_a_store_resolves_to_nothing(monkeypatch):
+    _use_store(monkeypatch, None)
+
+    assert mod._pg_query_ids(REGISTRY_HASH, "demo") == []
+
+
+def test_fetch_sample_reads_activity_for_a_resolved_registry_hash(monkeypatch):
+    _use_store(monkeypatch, _FakeStore("epoch-1", {"10:20:987:t": REGISTRY_HASH}))
+    conn, cur = _pg_cursor(
+        [(160000,), ("SELECT * FROM orders WHERE id = 7", "2026-08-20 10:00:00")]
+    )
+
+    sample = mod._fetch_sample(
+        conn,
+        "postgresql",
+        "SELECT * FROM orders WHERE id = $1",
+        REGISTRY_HASH,
+        "demo",
+    )
+
+    assert sample["source"] == SOURCE_PG_STAT_ACTIVITY
+    activity = [c for c in cur.execute.call_args_list if "pg_stat_activity" in c.args[0]]
+    assert len(activity) == 1
+    assert "query_id = ANY(%s)" in activity[0].args[0]
+    assert activity[0].args[1] == ([987],)
+
+
+def test_fetch_sample_skips_the_activity_lane_when_unresolvable(monkeypatch):
+    _use_store(monkeypatch, _FakeStore("epoch-1", {}))
+    conn, cur = _pg_cursor([])
+
+    assert (
+        mod._fetch_sample(
+            conn,
+            "postgresql",
+            "SELECT * FROM orders WHERE id = $1",
+            REGISTRY_HASH,
+            "demo",
+        )
+        is None
+    )
+    assert cur.execute.call_args_list == []
+
+
+def test_suggest_parameter_values_without_connection_still_gives_shape_hints(monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("no db")
 

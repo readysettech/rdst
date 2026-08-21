@@ -3,9 +3,13 @@ import type { BackgroundRunState } from '../../../lib/backgroundRuns'
 import type { CacheCompareRunResult } from '../../../types/cache'
 import {
   type CompareBatch,
+  type CompareQueryOutcome,
   clearActiveCompareBatch,
   compareBatchSnapshot,
+  deriveCompareOutcomeReport,
   forgetCompareBatch,
+  isNotComparableCompareOutcome,
+  isUnsupportedCompareOutcome,
   latestCompareBatch,
   listCompareBatches,
   selectCompareBatch,
@@ -201,5 +205,119 @@ describe('compare batch persistence', () => {
       cacheId: 'two',
       status: 'failed',
     })
+  })
+})
+
+function outcome(
+  status: CompareQueryOutcome['status'],
+  overrides: Partial<CompareQueryOutcome> = {}
+): CompareQueryOutcome {
+  return { cacheId: 'one', label: 'One', status, ...overrides }
+}
+
+describe('deriveCompareOutcomeReport', () => {
+  it('reports a clear win as improved, with the measured means', () => {
+    const report = deriveCompareOutcomeReport(
+      outcome('succeeded', { result: RESULT }),
+      'query-hash',
+      'demo'
+    )
+    expect(report).toEqual({
+      queryHash: 'query-hash',
+      request: {
+        target: 'demo',
+        status: 'improved',
+        readyset_ms: 1,
+        origin_ms: 10,
+        readyset_supported: 'yes',
+      },
+    })
+  })
+
+  it('reports a clear loss as regressed', () => {
+    const slower: CacheCompareRunResult = {
+      ...RESULT,
+      improvement_pct: -40,
+      winner: 'origin',
+    }
+    const report = deriveCompareOutcomeReport(
+      outcome('succeeded', { result: slower }),
+      'query-hash',
+      'demo'
+    )
+    expect(report?.request.status).toBe('regressed')
+  })
+
+  it('reports a near-tie as equivalent rather than improved or regressed', () => {
+    const tied: CacheCompareRunResult = { ...RESULT, improvement_pct: 2 }
+    const report = deriveCompareOutcomeReport(
+      outcome('succeeded', { result: tied }),
+      'query-hash',
+      'demo'
+    )
+    expect(report?.request.status).toBe('equivalent')
+  })
+
+  it('reports a Readyset-unsupported failure as not_comparable with the verdict', () => {
+    const failure = outcome('failed', {
+      errorCode: 'readyset_unsupported',
+      message: 'This query is unsupported by Readyset.',
+    })
+    expect(isUnsupportedCompareOutcome(failure)).toBe(true)
+
+    const report = deriveCompareOutcomeReport(failure, 'query-hash', 'demo')
+    expect(report).toEqual({
+      queryHash: 'query-hash',
+      request: {
+        target: 'demo',
+        status: 'not_comparable',
+        detail: 'This query is unsupported by Readyset.',
+        readyset_supported: 'no',
+        unsupported_reason: 'This query is unsupported by Readyset.',
+      },
+    })
+  })
+
+  it('reports a result-mismatch pre-flight exclusion as not_comparable without a support verdict', () => {
+    const failure = outcome('failed', {
+      message:
+        'Origin and Readyset returned different rows. This query uses ' +
+        'LIMIT without ORDER BY, so the database may return any matching ' +
+        'rows and the two results are not comparable.',
+    })
+    expect(isUnsupportedCompareOutcome(failure)).toBe(false)
+    expect(isNotComparableCompareOutcome(failure)).toBe(true)
+
+    const report = deriveCompareOutcomeReport(failure, 'query-hash', 'demo')
+    expect(report?.request.status).toBe('not_comparable')
+    expect(report?.request.readyset_supported).toBeUndefined()
+  })
+
+  it('reports any other failure as a plain error', () => {
+    const failure = outcome('failed', { message: 'Speed test failed' })
+    expect(isNotComparableCompareOutcome(failure)).toBe(false)
+
+    const report = deriveCompareOutcomeReport(failure, 'query-hash', 'demo')
+    expect(report?.request.status).toBe('error')
+    expect(report?.request.detail).toBe('Speed test failed')
+  })
+
+  it('reports nothing for a still-running or a cancelled outcome', () => {
+    expect(
+      deriveCompareOutcomeReport(outcome('running'), 'query-hash', 'demo')
+    ).toBeNull()
+    expect(
+      deriveCompareOutcomeReport(outcome('cancelled'), 'query-hash', 'demo')
+    ).toBeNull()
+  })
+
+  it('reports nothing without a registry query hash to attach it to', () => {
+    expect(
+      deriveCompareOutcomeReport(
+        outcome('succeeded', { result: RESULT }),
+        undefined,
+        'demo'
+      )
+    ).toBeNull()
   })
 })

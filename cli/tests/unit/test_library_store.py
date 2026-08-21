@@ -764,8 +764,10 @@ class TestSystemEntryPrune:
             entries = store.load_all()
         assert "cccccccccccc" not in entries
         assert "acacacacacac" not in entries
+        # v12 takes the saved catalog row too: saving is not the investment
+        # that makes a relation-free statement worth keeping.
+        assert "dddddddddddd" not in entries
         assert set(entries) == {
-            "dddddddddddd",
             "ffffffffffff",
             "eeeeeeeeeeee",
             "abababababab",
@@ -1421,11 +1423,11 @@ class TestPlaceholderArtifactRepair:
         assert _user_version(db_path) == SCHEMA_VERSION
 
     def test_fresh_store_creates_at_current_version(self, tmp_path):
-        assert SCHEMA_VERSION == 11
+        assert SCHEMA_VERSION == 12
         toml_path = tmp_path / "queries.toml"
         registry = QueryRegistry(registry_path=str(toml_path))
         registry.add_query("SELECT 1", source="manual")
-        assert _user_version(library_db_path_for(toml_path)) == 11
+        assert _user_version(library_db_path_for(toml_path)) == 12
 
     def test_toml_import_repairs_damaged_entries(self, tmp_path):
         from shared.query_registry.query_registry import hash_sql, normalize_sql
@@ -2053,7 +2055,8 @@ class TestSelfTrafficPrune:
         _, _, surviving = self._migrate(tmp_path, texts)
         assert surviving == set()
 
-    def test_curated_template_rows_survive(self, tmp_path):
+    def test_measured_template_rows_survive(self, tmp_path):
+        """v11 spares a saved template row; v12 keeps only measured ones."""
         texts = [self.PG_TOP_VALUES, self.PG_SAMPLE_ROWS, self.PG_ENUM_SAMPLE]
         lifecycles = {
             self.PG_TOP_VALUES: {"saved_at": "2026-08-19T12:00:00Z"},
@@ -2067,7 +2070,10 @@ class TestSelfTrafficPrune:
             },
         }
         _, hashes, surviving = self._migrate(tmp_path, texts, lifecycles)
-        assert surviving == set(hashes.values())
+        assert surviving == {
+            hashes[self.PG_SAMPLE_ROWS],
+            hashes[self.PG_ENUM_SAMPLE],
+        }
 
     def test_reviewed_only_template_row_is_pruned(self, tmp_path):
         texts = [self.PG_TOP_VALUES]
@@ -2147,12 +2153,24 @@ class TestSelfTemplateRecognizer:
                     "delimiter_probe"
                 )
 
+    def test_setting_probe_matches_the_statement_stats_reader(self):
+        from features.query_registry.statement_stats import PG_VERSION_SQL
+        from shared.query_registry.self_traffic import match_self_template
+
+        assert match_self_template(PG_VERSION_SQL) == "setting_probe"
+        # pg_stat_statements stores it with the GUC name already replaced.
+        assert match_self_template("SELECT current_setting($1)::int") == (
+            "setting_probe"
+        )
+
     def test_non_template_statements_are_not_matched(self):
         from shared.query_registry.self_traffic import match_self_template
 
         for sql in (
             "",
             "SELECT 1",
+            "SELECT current_setting($1)",
+            'SELECT current_setting($1)::int FROM "settings"',
             'SELECT * FROM "tags" LIMIT $1',
             'SELECT DISTINCT "class" FROM "badges" WHERE "class" IS NOT NULL LIMIT $1',
             'SELECT "name"::text, COUNT(*) AS cnt FROM "badges" '
@@ -2164,3 +2182,348 @@ class TestSelfTemplateRecognizer:
             'SELECT * FROM "votes" TABLESAMPLE SYSTEM($1) WHERE id > $2 LIMIT $3',
         ):
             assert match_self_template(sql) is None
+
+
+class TestSystemStatementPrune:
+    """Schema v12: statements that are not user workload leave the library.
+
+    Saving and reviewing are sweeps over whatever the list showed, so they
+    no longer hold a catalog statement or an RDST probe in place; analysis
+    and comparison do, because their measurements need their subject.
+    """
+
+    CATALOG = "SELECT relname FROM pg_stat_user_indexes"
+    VERSION = "SELECT version()"
+    SETTING_PROBE = "SELECT current_setting($1)::int"
+    USER_QUERY = "SELECT title FROM posts WHERE score > $1"
+
+    def _seed_v11(self, tmp_path, entries):
+        toml_path = tmp_path / "queries.toml"
+        db_path = library_db_path_for(toml_path)
+        library_store.LibraryStore(db_path, toml_path).apply_changes({}, entries)
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("PRAGMA user_version = 11")
+            conn.commit()
+        finally:
+            conn.close()
+        return db_path, toml_path
+
+    @staticmethod
+    def _entry(sql, source="top-historical", **lifecycle):
+        from shared.query_registry.query_registry import hash_sql
+
+        query_hash = hash_sql(sql)
+        target = {
+            "first_observed_at": "2026-08-19T10:00:00Z",
+            "last_observed_at": "2026-08-19T11:00:00Z",
+            "sources": [source],
+        }
+        target.update(lifecycle)
+        return query_hash, {
+            "hash": query_hash,
+            "sql": sql,
+            "original_sql": sql,
+            "source": source,
+            "target_lifecycle": {"demo": target},
+        }
+
+    def _migrate(self, tmp_path, specs):
+        entries = {}
+        hashes = {}
+        for sql, kwargs in specs:
+            query_hash, entry = self._entry(sql, **kwargs)
+            entries[query_hash] = entry
+            hashes[sql] = query_hash
+        db_path, toml_path = self._seed_v11(tmp_path, entries)
+        surviving = set(library_store.LibraryStore(db_path, toml_path).load_all())
+        return db_path, hashes, surviving
+
+    def test_relation_free_statements_are_pruned(self, tmp_path):
+        specs = [
+            (self.CATALOG, {}),
+            (self.VERSION, {"source": "cache"}),
+            (self.SETTING_PROBE, {"source": "cache"}),
+            (self.USER_QUERY, {}),
+        ]
+        db_path, hashes, surviving = self._migrate(tmp_path, specs)
+
+        assert surviving == {hashes[self.USER_QUERY]}
+        assert _user_version(db_path) == SCHEMA_VERSION
+
+    def test_saved_and_reviewed_statements_are_pruned(self, tmp_path):
+        specs = [
+            (
+                self.VERSION,
+                {
+                    "source": "cache",
+                    "saved_at": "2026-08-19T12:00:00Z",
+                    "reviewed_at": "2026-08-19T12:30:00Z",
+                },
+            ),
+        ]
+        _, _, surviving = self._migrate(tmp_path, specs)
+
+        assert surviving == set()
+
+    def test_a_cached_statement_is_still_pruned(self, tmp_path):
+        """A relation-free statement cannot be a useful cache."""
+        query_hash, entry = self._entry(self.VERSION, source="cache")
+        entry["readyset_query_id"] = "q_491622c7e943fcc7"
+        entry["readyset_supported"] = "yes"
+        db_path, toml_path = self._seed_v11(tmp_path, {query_hash: entry})
+
+        surviving = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert surviving == {}
+
+    @pytest.mark.parametrize(
+        "lifecycle",
+        [
+            {"last_analyzed_at": "2026-08-19T12:00:00Z"},
+            {"analysis_count": 1},
+            {"last_compared_at": "2026-08-19T12:00:00Z"},
+            {"comparison_count": 2},
+        ],
+    )
+    def test_measured_statements_survive(self, tmp_path, lifecycle):
+        specs = [(self.CATALOG, lifecycle)]
+        _, hashes, surviving = self._migrate(tmp_path, specs)
+
+        assert surviving == {hashes[self.CATALOG]}
+
+    def test_user_authored_statements_survive(self, tmp_path):
+        """A person who typed, imported, or asked for it keeps it."""
+        specs = [
+            (self.CATALOG, {"source": "manual"}),
+            (self.VERSION, {"source": "web"}),
+            (self.SETTING_PROBE, {"source": "file"}),
+        ]
+        _, hashes, surviving = self._migrate(tmp_path, specs)
+
+        assert surviving == set(hashes.values())
+
+    def test_an_asked_statement_survives(self, tmp_path):
+        query_hash, entry = self._entry(self.CATALOG)
+        entry["question"] = "which indexes are unused?"
+        db_path, toml_path = self._seed_v11(tmp_path, {query_hash: entry})
+
+        surviving = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert set(surviving) == {query_hash}
+
+    def test_prune_is_idempotent(self, tmp_path):
+        specs = [(self.CATALOG, {}), (self.USER_QUERY, {})]
+        db_path, hashes, surviving = self._migrate(tmp_path, specs)
+        assert surviving == {hashes[self.USER_QUERY]}
+
+        toml_path = db_path.with_name("queries.toml")
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("PRAGMA user_version = 11")
+            conn.commit()
+        finally:
+            conn.close()
+        again = library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert set(again) == surviving
+        assert _user_version(db_path) == SCHEMA_VERSION
+
+    def test_clean_store_is_untouched(self, tmp_path, caplog):
+        specs = [(self.USER_QUERY, {})]
+        with caplog.at_level(logging.INFO, logger=library_store.__name__):
+            _, hashes, surviving = self._migrate(tmp_path, specs)
+
+        assert surviving == set(hashes.values())
+        assert "system statements" not in caplog.text
+
+
+class TestMigrationSafetyNet:
+    """A migration never leaves a user without their queries."""
+
+    def _seed_v11(self, tmp_path):
+        from shared.query_registry.query_registry import hash_sql
+
+        sql = "SELECT title FROM posts WHERE score > $1"
+        query_hash = hash_sql(sql)
+        toml_path = tmp_path / "queries.toml"
+        db_path = library_db_path_for(toml_path)
+        library_store.LibraryStore(db_path, toml_path).apply_changes(
+            {},
+            {
+                query_hash: {
+                    "hash": query_hash,
+                    "sql": sql,
+                    "original_sql": sql,
+                    "source": "top-historical",
+                    "target_lifecycle": {"demo": {"sources": ["top-historical"]}},
+                }
+            },
+        )
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("PRAGMA user_version = 11")
+            conn.commit()
+        finally:
+            conn.close()
+        return db_path, toml_path, query_hash
+
+    def test_upgrade_backs_the_file_up_first(self, tmp_path):
+        db_path, toml_path, query_hash = self._seed_v11(tmp_path)
+
+        library_store.LibraryStore(db_path, toml_path).load_all()
+
+        backup = db_path.with_name(f"{db_path.name}.pre-v11.bak")
+        assert backup.exists()
+        assert _user_version(backup) == 11
+        conn = sqlite3.connect(backup)
+        try:
+            assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            stored = conn.execute("SELECT hash FROM query_identity").fetchall()
+        finally:
+            conn.close()
+        assert stored == [(query_hash,)]
+
+    def test_backup_is_kept_once_per_source_version(self, tmp_path):
+        db_path, toml_path, _ = self._seed_v11(tmp_path)
+        library_store.LibraryStore(db_path, toml_path).load_all()
+        backup = db_path.with_name(f"{db_path.name}.pre-v11.bak")
+        original = backup.read_bytes()
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("PRAGMA user_version = 11")
+            conn.commit()
+        finally:
+            conn.close()
+        library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert backup.read_bytes() == original
+        assert sorted(path.name for path in tmp_path.glob("*.bak")) == [
+            backup.name
+        ]
+
+    def test_a_current_store_is_not_backed_up(self, tmp_path):
+        toml_path = tmp_path / "queries.toml"
+        db_path = library_db_path_for(toml_path)
+        library_store.LibraryStore(db_path, toml_path).apply_changes({}, {})
+
+        library_store.LibraryStore(db_path, toml_path).load_all()
+
+        assert list(tmp_path.glob("*.bak")) == []
+
+    def test_a_failed_migration_keeps_the_prior_version(self, tmp_path, monkeypatch):
+        db_path, toml_path, query_hash = self._seed_v11(tmp_path)
+
+        def explode(self, conn):
+            raise sqlite3.OperationalError("no such column: nope")
+
+        monkeypatch.setattr(
+            library_store.LibraryStore, "_prune_system_statements", explode
+        )
+        with pytest.raises(library_store.LibraryMigrationError) as raised:
+            library_store.LibraryStore(db_path, toml_path).load_all()
+
+        message = str(raised.value)
+        assert "schema 12" in message
+        assert "no such column: nope" in message
+        assert f"{db_path.name}.pre-v11.bak" in message
+        assert "still holds every query at schema 11" in message
+        # The failure names its own cause, so it needs no chained traceback.
+        assert raised.value.__cause__ is None
+        assert _user_version(db_path) == 11
+        conn = sqlite3.connect(db_path)
+        try:
+            assert conn.execute("SELECT hash FROM query_identity").fetchall() == [
+                (query_hash,)
+            ]
+        finally:
+            conn.close()
+
+    def test_the_registry_passes_the_explanation_through(self, tmp_path, monkeypatch):
+        """A command that reads the library reports the message, not a wrapper."""
+        _, toml_path, _ = self._seed_v11(tmp_path)
+
+        def explode(self, conn):
+            raise sqlite3.OperationalError("no such column: nope")
+
+        monkeypatch.setattr(
+            library_store.LibraryStore, "_prune_system_statements", explode
+        )
+        registry = QueryRegistry(registry_path=str(toml_path))
+        with pytest.raises(library_store.LibraryMigrationError) as raised:
+            registry.load()
+
+        assert str(raised.value).startswith("library.db at ")
+
+    def test_a_command_that_never_reads_the_library_is_unaffected(
+        self, tmp_path, monkeypatch
+    ):
+        _, toml_path, _ = self._seed_v11(tmp_path)
+
+        def explode(self, conn):
+            raise sqlite3.OperationalError("no such column: nope")
+
+        monkeypatch.setattr(
+            library_store.LibraryStore, "_prune_system_statements", explode
+        )
+
+        # Construction opens nothing; the store is reached by the first read
+        # or write, so commands that touch no query keep working.
+        QueryRegistry(registry_path=str(toml_path))
+
+
+class TestParameterProvenanceGuard:
+    """Values someone chose are never mistaken for digit-lift residue.
+
+    The repair recognizes the digit-lifting normalizer's residue by its
+    shape: values that are exactly 1..N. A user is free to ask a query
+    about those same numbers, and says so by storing them with a source.
+    """
+
+    SQL = "SELECT * FROM orders WHERE id = :p1 AND status = :p2"
+    OBSERVED = {"p1": "1", "p2": "2"}
+
+    @staticmethod
+    def _typed(source=""):
+        from shared.query_registry.query_registry import typed_parameter
+
+        return {
+            "p1": typed_parameter("1", source),
+            "p2": typed_parameter("2", source),
+        }
+
+    def test_slot_indices_without_provenance_are_residue(self):
+        assert library_store._lifted_slot_indices(self._typed()) is True
+        assert library_store._lifted_slot_indices(self.OBSERVED) is True
+
+    def test_slot_indices_with_provenance_are_values(self):
+        for source in ("user", "suggested"):
+            assert library_store._lifted_slot_indices(self._typed(source)) is False
+
+    def test_repair_scrubs_unsourced_slot_indices(self):
+        params, observed = library_store._repaired_parameters(
+            self.SQL, "", self._typed(), dict(self.OBSERVED), None, "000000000000"
+        )
+
+        assert (params, observed) == ({}, {})
+
+    def test_repair_keeps_values_a_user_stored(self):
+        typed = self._typed("user")
+
+        params, observed = library_store._repaired_parameters(
+            self.SQL, "", typed, dict(self.OBSERVED), None, "000000000000"
+        )
+
+        assert params == typed
+        assert observed == self.OBSERVED
+
+    def test_repair_keeps_accepted_suggestions(self):
+        typed = self._typed("suggested")
+
+        params, observed = library_store._repaired_parameters(
+            self.SQL, "", typed, dict(self.OBSERVED), None, "000000000000"
+        )
+
+        assert params == typed
+        assert observed == self.OBSERVED

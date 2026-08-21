@@ -80,46 +80,74 @@ export function formatValue(value: string): string {
   return `'${trimmed.replace(/'/g, "''")}'`
 }
 
+/**
+ * Substitute detected placeholders with their values in a single left-to-right
+ * pass, mirroring the quote-aware scan in `findResidualPlaceholders` so a
+ * placeholder-shaped substring inside a string literal is never touched. `$N`
+ * and `:name`/`@name` are matched by their longest run of digits/identifier
+ * characters, so `$1` never fires on the first two characters of `$10` (and
+ * likewise for `:p1` vs `:p10`) -- a naive per-placeholder regex replace
+ * would mangle the longer placeholder.
+ */
 export function substituteParameters(
   sql: string,
   params: Parameter[],
   values: Record<string, string>
 ): string {
-  let result = sql
+  const byPlaceholder = new Map(params.map((p) => [p.placeholder, p]))
+  let result = ''
+  let questionIndex = 0
+  let inString = false
 
-  // Handle MySQL ? parameters (replace in order)
-  const questionParams = params.filter((p) => p.placeholder === '?')
-  if (questionParams.length > 0) {
-    const parts: string[] = []
-    let lastIndex = 0
-    let qIndex = 0
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i]
 
-    for (let i = 0; i < result.length; i++) {
-      if (result[i] === '?') {
-        parts.push(result.slice(lastIndex, i))
-        const value = values[`?${qIndex + 1}`] || ''
-        parts.push(formatValue(value))
-        lastIndex = i + 1
-        qIndex++
+    if (ch === "'") {
+      if (inString && sql[i + 1] === "'") {
+        result += "''"
+        i++
+        continue
+      }
+      inString = !inString
+      result += ch
+      continue
+    }
+    if (inString) {
+      result += ch
+      continue
+    }
+
+    if (ch === '?' && byPlaceholder.has('?')) {
+      questionIndex++
+      result += formatValue(values[`?${questionIndex}`] || '')
+      continue
+    }
+
+    if (ch === '$' && /\d/.test(sql[i + 1] ?? '')) {
+      const match = sql.slice(i).match(/^\$\d+/)
+      if (match) {
+        const param = byPlaceholder.get(match[0])
+        result += param ? formatValue(values[match[0]] || '') : match[0]
+        i += match[0].length - 1
+        continue
       }
     }
-    parts.push(result.slice(lastIndex))
-    result = parts.join('')
-  }
 
-  // Handle PostgreSQL $N and named parameters
-  for (const param of params) {
-    if (param.placeholder !== '?') {
-      const value = values[param.placeholder] || ''
-      const escapedPlaceholder = param.placeholder.replace(
-        /[.*+?^${}()|[\]\\]/g,
-        '\\$&'
-      )
-      result = result.replace(
-        new RegExp(escapedPlaceholder, 'g'),
-        formatValue(value)
-      )
+    if (
+      (ch === ':' || ch === '@') &&
+      sql[i - 1] !== ':' &&
+      sql[i + 1] !== ':'
+    ) {
+      const match = sql.slice(i).match(/^[:@][a-zA-Z_][a-zA-Z0-9_]*/)
+      if (match) {
+        const param = byPlaceholder.get(match[0])
+        result += param ? formatValue(values[match[0]] || '') : match[0]
+        i += match[0].length - 1
+        continue
+      }
     }
+
+    result += ch
   }
 
   return result
@@ -168,4 +196,89 @@ export function fillCapturedParams(
   })
   if (toFill.length === 0) return sql
   return substituteParameters(sql, toFill, values)
+}
+
+/**
+ * The backend's SQLGlot-normalized key for a parameter, the inverse of
+ * `resolveInitialValue`'s key derivation: named parameters use their bare
+ * name, `?` and `$N` placeholders normalize to `pN`.
+ */
+export function toBackendParamKey(param: Parameter): string {
+  if (param.type === 'named') return param.placeholder.replace(/^[:@]/, '')
+  if (param.placeholder.startsWith('$'))
+    return param.placeholder.replace('$', 'p')
+  return `p${param.index}`
+}
+
+/**
+ * Convert placeholder-keyed dialog values (e.g. `{"$1": "42"}`) into the
+ * backend's normalized keys (e.g. `{"p1": "42"}`) for persisting to the query
+ * registry. Blank values are dropped rather than persisted as empty strings.
+ */
+export function toBackendParams(
+  parameters: Parameter[],
+  values: Record<string, string>
+): Record<string, string> {
+  const result: Record<string, string> = {}
+  for (const parameter of parameters) {
+    const key =
+      parameter.placeholder === '?'
+        ? `?${parameter.index}`
+        : parameter.placeholder
+    const value = values[key]
+    if (value?.trim()) result[toBackendParamKey(parameter)] = value
+  }
+  return result
+}
+
+/**
+ * Placeholder syntax ($N, :name, @name, bare ?) still present in a query
+ * after substitution, ignoring any that fall inside a single-quoted string
+ * literal (a substituted value's own text may legitimately contain "$1").
+ * A non-empty result means at least one slot failed to resolve and the SQL
+ * is not safe to run.
+ */
+export function findResidualPlaceholders(sql: string): string[] {
+  const found = new Set<string>()
+  let inString = false
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i]
+    if (ch === "'") {
+      if (inString && sql[i + 1] === "'") {
+        i++
+        continue
+      }
+      inString = !inString
+      continue
+    }
+    if (inString) continue
+    if (ch === '$' && /\d/.test(sql[i + 1] ?? '')) {
+      const match = sql.slice(i).match(/^\$\d+/)
+      if (match) {
+        found.add(match[0])
+        i += match[0].length - 1
+      }
+      continue
+    }
+    if (ch === '?') {
+      found.add('?')
+      continue
+    }
+    if (
+      (ch === ':' || ch === '@') &&
+      sql[i - 1] !== ':' &&
+      sql[i + 1] !== ':'
+    ) {
+      const match = sql.slice(i).match(/^[:@][a-zA-Z_][a-zA-Z0-9_]*/)
+      if (match) {
+        found.add(match[0])
+        i += match[0].length - 1
+      }
+    }
+  }
+  return Array.from(found)
+}
+
+export function hasResidualPlaceholders(sql: string): boolean {
+  return findResidualPlaceholders(sql).length > 0
 }

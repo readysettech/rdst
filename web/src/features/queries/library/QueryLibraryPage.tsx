@@ -48,6 +48,7 @@ export function QueryLibraryPage({
           isOpen
           query={controller.paramDialog.sql}
           target={controller.target}
+          queryHash={controller.paramDialog.hash}
           initialValues={
             registry.queries.find(
               (query) => query.hash === controller.paramDialog?.hash

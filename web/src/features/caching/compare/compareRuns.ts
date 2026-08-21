@@ -1,9 +1,11 @@
+import type { CompareOutcomeRequest } from '../../../lib/api'
 import {
   type BackgroundRunState,
   cancelBackgroundRun,
   startCacheCompareRun,
   updateCacheCompareLoad,
 } from '../../../lib/backgroundRuns'
+import { sanitizeWebError } from '../../../lib/errorContract'
 import type {
   CacheCompareLaneSample,
   CacheCompareRunResult,
@@ -554,4 +556,101 @@ export async function updateCompareBatchLoad(
   )
   if (updates.some((updated) => !updated)) return batch
   return saveCompareBatch({ ...batch, concurrency })
+}
+
+// A query's outcome is classification -- Readyset declining to cache it, or a
+// pre-flight check finding the two lanes can't be compared -- rather than a
+// system failure, whenever its evidence says so. Both the per-query chip and
+// the reported compare-outcome status read this the same way.
+const COMPARE_EQUIVALENT_THRESHOLD_PCT = 5
+const COMPARE_OUTCOME_DETAIL_MAX = 500
+
+function truncateDetail(text: string): string {
+  return text.length > COMPARE_OUTCOME_DETAIL_MAX
+    ? text.slice(0, COMPARE_OUTCOME_DETAIL_MAX)
+    : text
+}
+
+function compareFailureEvidence(outcome: CompareQueryOutcome): string {
+  return [outcome.errorCode, outcome.errorCategory, outcome.message]
+    .filter(Boolean)
+    .join(' ')
+}
+
+/** Readyset itself declined to cache the query (an EXPLAIN CREATE CACHE
+ * verdict), so the comparison never ran. */
+export function isUnsupportedCompareOutcome(outcome: CompareQueryOutcome) {
+  return (
+    outcome.status === 'failed' &&
+    /unsupported|uncacheable|not cacheable/i.test(
+      compareFailureEvidence(outcome)
+    )
+  )
+}
+
+/** Any pre-flight exclusion, Readyset-support or not -- e.g. a LIMIT-without-
+ * ORDER-BY query whose origin and Readyset rows can't be compared. */
+export function isNotComparableCompareOutcome(outcome: CompareQueryOutcome) {
+  return (
+    isUnsupportedCompareOutcome(outcome) ||
+    (outcome.status === 'failed' &&
+      /not comparable/i.test(compareFailureEvidence(outcome)))
+  )
+}
+
+/**
+ * Map one query's terminal Compare outcome onto the compare-outcome API
+ * contract (POST /query-registry/queries/{hash}/compare-outcome). Running
+ * and cancelled outcomes are not durable measurements, so this reports
+ * nothing for them.
+ */
+export function deriveCompareOutcomeReport(
+  outcome: CompareQueryOutcome,
+  queryHash: string | undefined,
+  target: string
+): { queryHash: string; request: CompareOutcomeRequest } | null {
+  if (!queryHash) return null
+
+  if (outcome.status === 'succeeded' && outcome.result) {
+    const pct = outcome.result.improvement_pct
+    const status =
+      Math.abs(pct) < COMPARE_EQUIVALENT_THRESHOLD_PCT
+        ? 'equivalent'
+        : pct > 0
+          ? 'improved'
+          : 'regressed'
+    return {
+      queryHash,
+      request: {
+        target,
+        status,
+        readyset_ms: outcome.result.readyset.mean_ms,
+        origin_ms: outcome.result.origin.mean_ms,
+        readyset_supported: 'yes',
+      },
+    }
+  }
+
+  if (outcome.status !== 'failed') return null
+
+  const detail = truncateDetail(sanitizeWebError(outcome.message))
+  if (isUnsupportedCompareOutcome(outcome)) {
+    return {
+      queryHash,
+      request: {
+        target,
+        status: 'not_comparable',
+        detail,
+        readyset_supported: 'no',
+        unsupported_reason: detail,
+      },
+    }
+  }
+  if (isNotComparableCompareOutcome(outcome)) {
+    return {
+      queryHash,
+      request: { target, status: 'not_comparable', detail },
+    }
+  }
+  return { queryHash, request: { target, status: 'error', detail } }
 }

@@ -16,6 +16,9 @@ template-generating site:
   ``_sample_postgres_enum_values`` and ``_sample_mysql_enum_values``.
 - ``features/schema/semantic_layer/pattern_detector.py``:
   ``detect_delimiter_columns_sql_postgres`` / ``_mysql``.
+- ``features/query_registry/statement_stats.py``: ``PG_VERSION_SQL``, whose
+  shape the ``max_connections`` read in ``features/audit/metrics.py``
+  shares.
 
 A candidate is matched by extracting the table and column names out of the
 stored text, re-instantiating the template for exactly those names, and
@@ -29,6 +32,12 @@ statements to recognize are historical, so the recognizer has to keep
 describing the templates as they stood when those rows were admitted.
 ``tests/unit/test_library_store.py`` pins the delimiter shapes against the
 live ``pattern_detector`` builders, which are pure functions.
+
+The setting probe is the one shape that names no relation, so it is
+recognized by its whole text rather than by re-instantiation. pg_stat_
+statements stores it with its GUC name already replaced by ``$1``, which
+leaves the name unprovable; every statement of that shape reads a server
+setting, so none of them is user workload.
 
 Two template forms are deliberately absent, because their emitted text is
 indistinguishable from an ordinary user query: the small-table
@@ -135,6 +144,11 @@ def _enum_sample(table: str, column: str, engine: str) -> str:
         f"TABLESAMPLE SYSTEM(1) LIMIT 50000) SELECT DISTINCT {q} FROM sampled "
         f"WHERE {q} IS NOT NULL LIMIT 21"
     )
+
+
+def _setting_probe() -> str:
+    """statement_stats ``PG_VERSION_SQL``, marker stripped."""
+    return "SELECT current_setting('server_version_num')::int"
 
 
 def _delimiter(table: str, columns: list[str], engine: str, sampled: bool) -> str:
@@ -250,12 +264,17 @@ def _delimiter_candidates(sql: str) -> Iterator[tuple[str, str]]:
         )
 
 
+def _setting_probe_candidates(sql: str) -> Iterator[tuple[str, str]]:
+    yield "setting_probe", _setting_probe()
+
+
 _SHAPES: tuple[Callable[[str], Iterator[tuple[str, str]]], ...] = (
     _column_stats_candidates,
     _top_values_candidates,
     _sample_rows_candidates,
     _enum_sample_candidates,
     _delimiter_candidates,
+    _setting_probe_candidates,
 )
 
 
@@ -263,8 +282,8 @@ def match_self_template(sql: str) -> Optional[str]:
     """Name the RDST diagnostic template a statement is an exact instance of.
 
     Returns the shape name (``column_stats``, ``top_values``,
-    ``sample_rows``, ``enum_sample``, ``delimiter_probe``) or None when the
-    text is anything else.
+    ``sample_rows``, ``enum_sample``, ``delimiter_probe``,
+    ``setting_probe``) or None when the text is anything else.
     """
     if not sql or not sql.strip():
         return None

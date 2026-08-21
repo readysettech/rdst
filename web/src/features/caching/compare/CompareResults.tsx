@@ -8,7 +8,12 @@ import { Text } from '@rs/ui-new/text'
 import { summarizeSustainedComparison } from '../comparisonMetrics'
 import { CompareLiveChart } from './CompareLiveChart'
 import { compareStatusLabel } from './CompareRunning'
-import type { CompareQueryOutcome } from './compareRuns'
+import {
+  type CompareBatchSnapshot,
+  type CompareQueryOutcome,
+  isNotComparableCompareOutcome,
+  isUnsupportedCompareOutcome,
+} from './compareRuns'
 import type { CompareController } from './useCompareController'
 
 function formatQps(value: number | null) {
@@ -26,15 +31,31 @@ export function compareQueryOutcomePresentation(outcome: CompareQueryOutcome): {
   if (outcome.status === 'cancelled') {
     return { label: 'Cancelled', variant: 'warning' }
   }
-  const failureEvidence = [
-    outcome.errorCode,
-    outcome.errorCategory,
-    outcome.message,
-  ].join(' ')
-  if (/unsupported|uncacheable|not cacheable/i.test(failureEvidence)) {
+  if (isUnsupportedCompareOutcome(outcome)) {
     return { label: 'Unsupported', variant: 'warning' }
   }
+  if (isNotComparableCompareOutcome(outcome)) {
+    return { label: 'Not comparable', variant: 'warning' }
+  }
   return { label: 'Failed', variant: 'negative' }
+}
+
+// An incomplete batch reads as classification, not as an app failure: most of
+// what keeps a query out of "compared" is Readyset declining to cache it or a
+// pre-flight check ruling the two lanes out, not something breaking.
+function compareBatchOutcomeSummary(
+  snapshot: CompareBatchSnapshot,
+  queryOutcomes: CompareQueryOutcome[]
+): string {
+  const notComparable = queryOutcomes.filter(
+    isNotComparableCompareOutcome
+  ).length
+  const failed = snapshot.failed - notComparable
+  const parts = [`${snapshot.succeeded} compared`]
+  if (notComparable > 0) parts.push(`${notComparable} not comparable`)
+  if (failed > 0) parts.push(`${failed} failed`)
+  if (snapshot.cancelled > 0) parts.push(`${snapshot.cancelled} cancelled`)
+  return `${parts.join(', ')}.`
 }
 
 function ResultLane({
@@ -148,7 +169,7 @@ export function CompareResults({
                   ? `Based on a sustained load across ${results.length} ${
                       results.length === 1 ? 'query' : 'queries'
                     }.`
-                  : `${snapshot.succeeded} succeeded, ${snapshot.failed} failed, ${snapshot.cancelled} cancelled.`}
+                  : compareBatchOutcomeSummary(snapshot, queryOutcomes)}
               </Card.Description>
             </VStack>
           </HStack>

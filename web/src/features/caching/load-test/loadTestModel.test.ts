@@ -89,4 +89,57 @@ describe('deriveLoadTestResultModel', () => {
     expect(result.outcome).toBe('complete')
     expect(result.title).toContain('observed QPS')
   })
+
+  it('reads no skipped queries from a payload that predates skip reporting', () => {
+    const result = deriveLoadTestResultModel({
+      state: 'complete',
+      status: 'done',
+      stage: 'complete',
+      progress: {
+        type: 'complete',
+        elapsed_seconds: 30,
+        total_executions: 10,
+        total_successes: 10,
+        total_failures: 0,
+        qps: 4,
+        queries: [],
+      },
+      request,
+      fallbackDurationSeconds: 30,
+      fallbackIntervalMs: 100,
+    })
+
+    expect(result.skippedQueries).toEqual([])
+  })
+
+  it('reads well-formed skipped queries and drops malformed entries', () => {
+    const result = deriveLoadTestResultModel({
+      state: 'complete',
+      status: 'partial',
+      stage: 'complete',
+      progress: {
+        type: 'complete',
+        elapsed_seconds: 30,
+        total_executions: 10,
+        total_successes: 10,
+        total_failures: 0,
+        qps: 4,
+        queries: [],
+        skipped_queries: [
+          { query_hash: 'abc123', reason: 'No stored value for $1' },
+          { reason: 'missing a query_hash' },
+          'not an object',
+        ],
+      } as unknown as Parameters<
+        typeof deriveLoadTestResultModel
+      >[0]['progress'],
+      request,
+      fallbackDurationSeconds: 30,
+      fallbackIntervalMs: 100,
+    })
+
+    expect(result.skippedQueries).toEqual([
+      { query_hash: 'abc123', reason: 'No stored value for $1' },
+    ])
+  })
 })

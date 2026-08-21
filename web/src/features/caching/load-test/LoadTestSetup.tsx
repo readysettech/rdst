@@ -12,6 +12,7 @@ import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
+import { useEffect } from 'react'
 import { TargetConnectivityNotice, TargetLockNotice } from '../../../components'
 import { BenchmarkConfirmDialog } from '../../../components/BenchmarkConfirmDialog'
 import { formatMeta, shortHash } from '../../../lib/formatters'
@@ -135,6 +136,7 @@ export function LoadTestSetup({
     hiddenSelectedCount,
     queriesWithParameters,
     missingParameterCount,
+    residualQueryHash,
     missingTables,
     canStart,
     toggleQuery,
@@ -169,8 +171,9 @@ export function LoadTestSetup({
       : missingParameterCount === 0
         ? 'Values ready'
         : `${missingParameterCount} missing`
-  const readinessMessage =
-    runnableCount === 0
+  const readinessMessage = residualQueryHash
+    ? 'A parameter value did not apply. Re-enter the highlighted value and try again.'
+    : runnableCount === 0
       ? 'Select at least one visible query.'
       : missingParameterCount > 0
         ? `Add ${missingParameterCount} missing parameter ${
@@ -179,6 +182,19 @@ export function LoadTestSetup({
         : `Ready to run ${runnableCount} ${
             runnableCount === 1 ? 'query' : 'queries'
           } against ${destinationTarget ?? 'the selected database'}.`
+
+  // A parameter value that didn't apply cleanly must not run silently as
+  // broken SQL; steer the user straight back to the offending query's
+  // inline parameter fields instead.
+  useEffect(() => {
+    if (!residualQueryHash) return
+    const card = document.querySelector<HTMLElement>(
+      `[data-query-hash="${residualQueryHash}"]`
+    )
+    card?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const input = card?.querySelector<HTMLInputElement>('input')
+    input?.focus()
+  }, [residualQueryHash])
 
   return (
     <VStack className="h-full min-h-0 w-full items-stretch gap-6">
@@ -713,7 +729,14 @@ export function LoadTestSetup({
 
         <Card.Footer className="flex-wrap justify-between gap-3">
           <VStack className="mr-auto items-start gap-1">
-            <Text level="caption" className="text-content-layout-3">
+            <Text
+              level="caption"
+              className={
+                residualQueryHash
+                  ? 'text-content-negative-soft'
+                  : 'text-content-layout-3'
+              }
+            >
               {readinessMessage}
             </Text>
             {missingTables.length > 0 && (

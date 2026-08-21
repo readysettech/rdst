@@ -4,6 +4,7 @@ import { ConfirmDialog } from '@rs/ui-new/confirm-dialog'
 import { IconTile } from '@rs/ui-new/icon-tile'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
+import { useEffect } from 'react'
 import { formatMeta, shortHash } from '../../../lib/formatters'
 import { queryDisplayName } from '../../../lib/queryIdentity'
 import { detectParameters } from '../../../lib/sqlParameters'
@@ -127,6 +128,20 @@ export function CompareSetup({
       : controller.missingParameterCount === 0
         ? `${controller.parameterCount} ready`
         : `${controller.missingParameterCount} missing`
+
+  // A parameter value that didn't apply cleanly must not run silently as
+  // broken SQL; steer the user straight back to the offending query's
+  // inline parameter fields instead.
+  useEffect(() => {
+    if (!controller.residualQueryHash) return
+    const card = document.querySelector<HTMLElement>(
+      `[data-query-hash="${controller.residualQueryHash}"]`
+    )
+    card?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const input = card?.querySelector<HTMLInputElement>('input')
+    input?.focus()
+  }, [controller.residualQueryHash])
+
   return (
     <>
       <Card className="h-full min-h-0">
@@ -209,18 +224,29 @@ export function CompareSetup({
         </Card.Content>
 
         <Card.Footer className="flex-wrap justify-between">
-          <Text level="caption" className="mr-auto text-content-layout-3">
-            {controller.selectedIds.length === 0
-              ? 'Select at least one query.'
-              : controller.missingParameterCount > 0
-                ? `Add ${controller.missingParameterCount} missing parameter ${
-                    controller.missingParameterCount === 1 ? 'value' : 'values'
-                  }.`
-                : `Ready to compare ${controller.selectedIds.length} ${
-                    controller.selectedIds.length === 1 ? 'query' : 'queries'
-                  } at ${adaptiveLoadLabel(controller)} clients per lane for ${
-                    controller.durationSeconds
-                  } seconds.`}
+          <Text
+            level="caption"
+            className={
+              controller.residualQueryHash
+                ? 'mr-auto text-content-negative-soft'
+                : 'mr-auto text-content-layout-3'
+            }
+          >
+            {controller.residualQueryHash
+              ? 'A parameter value did not apply. Re-enter the highlighted value and try again.'
+              : controller.selectedIds.length === 0
+                ? 'Select at least one query.'
+                : controller.missingParameterCount > 0
+                  ? `Add ${controller.missingParameterCount} missing parameter ${
+                      controller.missingParameterCount === 1
+                        ? 'value'
+                        : 'values'
+                    }.`
+                  : `Ready to compare ${controller.selectedIds.length} ${
+                      controller.selectedIds.length === 1 ? 'query' : 'queries'
+                    } at ${adaptiveLoadLabel(controller)} clients per lane for ${
+                      controller.durationSeconds
+                    } seconds.`}
           </Text>
           <Button
             variant="rising"
