@@ -14,11 +14,17 @@ services:
       interval: 2s
       timeout: 5s
       retries: 30
+    ports:
+      # Keep a host port for local inspection. The E2E processes communicate
+      # over the Compose network below.
+      - "15432:5432"
     volumes:
       - ../../../../rdst/tests/integration/init-scripts/postgres:/docker-entrypoint-initdb.d:ro
 
   browser:
-    image: mcr.microsoft.com/playwright:v1.61.0-noble
+    build:
+      context: ../../../..
+      dockerfile: web-apps/apps/rdst/e2e/Dockerfile.postgres-e2e
     # Run as the image default (root) so writes to the mounted checkout
     # always succeed, matching the pipeline's docker-plugin steps. Playwright
     # launches Chromium without the sandbox by default, so root is fine.
@@ -30,8 +36,10 @@ services:
       RDST_E2E_DB_HOST: postgres
       RDST_E2E_DB_PORT: "5432"
       RDST_E2E_DB_PASSWORD: rdst_e2e_password
+      RDST_DOCKER_PUBLISHED_HOST: rdst-readyset-sandbox
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
       - ../../../..:/workdir
+      - /var/run/docker.sock:/var/run/docker.sock

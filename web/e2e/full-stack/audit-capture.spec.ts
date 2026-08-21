@@ -77,7 +77,11 @@ test('capture window closes on schedule and reports phase timings', async ({
   }).toPass({ timeout: 150_000, intervals: [3_000] })
 
   const summary = complete!.summary
-  expect(summary.duration_seconds).toBe(12)
+  // Report the observed capture duration, not merely the requested value.
+  // A loaded event loop can resume the two-second sampling sleep late, but
+  // the window must remain tightly bounded rather than regressing to minutes.
+  expect(summary.duration_seconds).toBeGreaterThanOrEqual(12)
+  expect(summary.duration_seconds).toBeLessThan(20)
   const timings = summary.phase_timings_ms
   expect(Object.keys(timings)).toEqual(
     expect.arrayContaining(['metrics_audit', 'connect', 'capture'])
@@ -95,5 +99,5 @@ test('capture window closes on schedule and reports phase timings', async ({
   }
   const saved = savedRuns.find((run) => run.run_id === summary.run_id)
   expect(saved).toBeTruthy()
-  expect(saved!.duration_seconds).toBe(12)
+  expect(saved!.duration_seconds).toBe(summary.duration_seconds)
 })

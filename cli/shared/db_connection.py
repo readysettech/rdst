@@ -6,7 +6,9 @@ without using DataManager infrastructure.
 """
 
 import logging
+import select
 import socket
+import time
 from typing import Dict, Any, Literal, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -191,6 +193,7 @@ def create_direct_connection(
     target: Optional[str] = None,
     force_fresh_tunnel: bool = False,
     lane: Optional[str] = None,
+    query_timeout_seconds: float | None = None,
 ):
     """
     Create a direct database connection from target configuration.
@@ -245,13 +248,23 @@ def create_direct_connection(
             tls_verify=tls_verify, tls_ca=tls_ca,
             hostaddr=params.get('hostaddr'), connect_timeout=connect_timeout,
             application_name=params['application_name'],
+            query_timeout_seconds=query_timeout_seconds,
         )
     elif engine == 'mysql':
+        query_timeouts = (
+            {}
+            if query_timeout_seconds is None
+            else {
+                'read_timeout': query_timeout_seconds,
+                'write_timeout': query_timeout_seconds,
+            }
+        )
         conn = _create_mysql_connection(
             host, port, user, password, database, use_tls,
             tls_verify=tls_verify, tls_ca=tls_ca,
             hostaddr=params.get('hostaddr'), connect_timeout=connect_timeout,
             program_name=params['application_name'],
+            **query_timeouts,
         )
     else:
         raise ValueError(f"Unsupported database engine: {engine}")
@@ -281,6 +294,92 @@ def apply_diagnostic_statement_timeout(connection, engine: str, seconds: int = 3
         cursor.close()
     except Exception as exc:
         logger.debug("Could not set diagnostic statement timeout: %s", exc)
+
+
+def probe_readyset_status(
+    target_config: Dict[str, Any], timeout_seconds: float = 3
+) -> None:
+    """Run a Readyset status query with a client-enforced I/O deadline."""
+    params = resolve_connection_params(
+        target_config=target_config,
+        lane="rdst/sandbox-readiness",
+    )
+    timeout_seconds = max(float(timeout_seconds), 0.001)
+    if params['engine'] == 'postgresql':
+        _probe_postgres_readyset_status(params, timeout_seconds)
+        return
+
+    connection = create_direct_connection(
+        target_config,
+        connect_timeout=timeout_seconds,
+        lane="rdst/sandbox-readiness",
+        query_timeout_seconds=timeout_seconds,
+    )
+    try:
+        cursor = connection.cursor()
+        try:
+            cursor.execute("SHOW READYSET STATUS")
+            cursor.fetchall()
+        finally:
+            cursor.close()
+    finally:
+        connection.close()
+
+
+def _probe_postgres_readyset_status(
+    params: Dict[str, Any], timeout_seconds: float
+) -> None:
+    """Use libpq's nonblocking mode so a silent server cannot hang readiness."""
+    try:
+        import psycopg2
+        from psycopg2 import extensions
+    except ImportError:
+        raise RuntimeError(
+            "psycopg2-binary not installed. Run: pip install psycopg2-binary"
+        )
+
+    deadline = time.monotonic() + timeout_seconds
+    timeout_ms = max(1, int(timeout_seconds * 1000))
+    connection = psycopg2.connect(
+        **postgres_connection_kwargs(
+            params,
+            connect_timeout=max(1, int(timeout_seconds)),
+            options=f'-c statement_timeout={timeout_ms}',
+            async_=True,
+        )
+    )
+    try:
+        _wait_for_postgres_io(connection, deadline, extensions)
+        cursor = connection.cursor()
+        try:
+            cursor.execute("SHOW READYSET STATUS")
+            _wait_for_postgres_io(connection, deadline, extensions)
+            cursor.fetchall()
+        finally:
+            cursor.close()
+    finally:
+        connection.close()
+
+
+def _wait_for_postgres_io(connection, deadline: float, extensions) -> None:
+    while True:
+        state = connection.poll()
+        if state == extensions.POLL_OK:
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Readyset PostgreSQL readiness probe timed out")
+        descriptor = connection.fileno()
+        if state == extensions.POLL_READ:
+            ready = select.select([descriptor], [], [], remaining)
+        elif state == extensions.POLL_WRITE:
+            ready = select.select([], [descriptor], [], remaining)
+        else:
+            raise RuntimeError(
+                f"Unexpected PostgreSQL readiness poll state: {state}"
+            )
+        if not any(ready):
+            raise TimeoutError("Readyset PostgreSQL readiness probe timed out")
 
 
 def apply_read_only_session(connection, engine: str) -> None:
@@ -387,6 +486,7 @@ def _create_postgres_connection(
     hostaddr: Optional[str] = None,
     connect_timeout: int = 10,
     application_name: Optional[str] = None,
+    query_timeout_seconds: float | None = None,
 ):
     """Create PostgreSQL connection using psycopg2."""
     try:
@@ -405,6 +505,9 @@ def _create_postgres_connection(
             'connect_timeout': connect_timeout,
             'application_name': application_name or DEFAULT_LANE,
         }
+        if query_timeout_seconds is not None:
+            timeout_ms = max(1, int(query_timeout_seconds * 1000))
+            conn_params['options'] = f'-c statement_timeout={timeout_ms}'
 
         conn_params.update(
             postgres_ssl_kwargs(

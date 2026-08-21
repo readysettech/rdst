@@ -138,6 +138,7 @@ export async function clearTargets(request: APIRequestContext) {
       `/api/configure/targets/${encodeURIComponent(target.name)}`
     )
     expect(deleted.ok()).toBe(true)
+    await expect(deleted.json()).resolves.toMatchObject({ success: true })
   }
 }
 

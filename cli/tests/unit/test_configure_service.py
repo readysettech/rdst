@@ -7,6 +7,7 @@ target listing, connection testing, and configuration operations.
 
 import os
 import sys
+from contextlib import asynccontextmanager
 import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
@@ -53,10 +54,11 @@ async def test_remove_target_cancels_runs_and_retires_sandbox_before_config(
         async def start(self):
             actions.append("start")
 
-        async def remove_target(self, name):
+        @asynccontextmanager
+        async def retire_target(self, name):
             assert name == "app"
             actions.append("sandbox")
-            return True
+            yield True
 
         async def stop(self):
             actions.append("stop")
@@ -75,9 +77,9 @@ async def test_remove_target_cancels_runs_and_retires_sandbox_before_config(
         "runs",
         "start",
         "sandbox",
-        "stop",
         "config",
         "save",
+        "stop",
     ]
 
 

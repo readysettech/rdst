@@ -81,3 +81,9 @@ def test_autocomplete_fake_matches_the_real_collector(fakes):
     assert _signature_fingerprint(fakes.fake_autocomplete_schema) == (
         _signature_fingerprint(collect_all_tables_schema)
     )
+
+
+@pytest.mark.asyncio
+async def test_fake_sandbox_manager_supports_configure_retirement(fakes):
+    async with fakes.fake_sandbox_manager.retire_target("target") as removed:
+        assert removed is False

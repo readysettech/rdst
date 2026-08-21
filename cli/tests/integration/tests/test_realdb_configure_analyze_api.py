@@ -27,12 +27,9 @@ import pytest
 # Every test in this module is gated on a real DB container being up.
 pytestmark = pytest.mark.realdb
 
-# The Readyset-cache assertion in `test_analyze_with_readyset_cache_flag`
-# additionally requires a Readyset container; that single test is skipped
-# via the same gate as the rest of slice 5.
-_SKIP_READYSET = (
-    os.environ.get("SKIP_READYSET_CACHE_TESTS", "false").lower() == "true"
-)
+# Developers can opt out of Readyset-specific coverage when Docker is not
+# available. The PostgreSQL API CI job deliberately leaves this enabled.
+_SKIP_READYSET = os.environ.get("SKIP_READYSET_CACHE_TESTS", "false").lower() == "true"
 
 
 TARGET_NAME = "ittest"
@@ -172,9 +169,7 @@ async def test_analyze_with_readyset_cache_flag(
     error_events = [e for e in events if e.get("event") == "error"]
     assert not error_events, f"Analyze stream emitted error events: {error_events}"
 
-    checked = next(
-        (e for e in events if e.get("event") == "readyset_checked"), None
-    )
+    checked = next((e for e in events if e.get("event") == "readyset_checked"), None)
     assert checked is not None, (
         f"Analyze stream did not emit 'readyset_checked'. Events seen: "
         f"{[e.get('event') for e in events]}"

@@ -5,7 +5,12 @@ Every connection RDST opens against a target carries an application name
 activity views can tell RDST's own sessions apart from production traffic.
 """
 
+import socket
+import threading
+import time
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from features.top.command_sets import TOP_COMMAND_SETS
 from shared.db_connection import (
@@ -13,6 +18,7 @@ from shared.db_connection import (
     create_direct_connection,
     create_mysql_connection_from_params,
     postgres_connection_kwargs,
+    probe_readyset_status,
     resolve_application_name,
     resolve_connection_params,
 )
@@ -83,10 +89,137 @@ def test_create_direct_connection_tags_postgres_with_lane():
     assert connect.call_args.kwargs["application_name"] == "rdst/loadtest"
 
 
+def test_create_direct_connection_bounds_postgres_queries():
+    with patch("psycopg2.connect") as connect:
+        create_direct_connection(
+            dict(PG_CONFIG), query_timeout_seconds=3
+        )
+    assert connect.call_args.kwargs["options"] == "-c statement_timeout=3000"
+
+
 def test_create_direct_connection_tags_mysql_program_name():
     with patch("pymysql.connect", return_value=MagicMock()) as connect:
         create_direct_connection(dict(MYSQL_CONFIG), lane="rdst/audit")
     assert connect.call_args.kwargs["program_name"] == "rdst/audit"
+
+
+def test_create_direct_connection_bounds_mysql_reads_and_writes():
+    with patch("pymysql.connect", return_value=MagicMock()) as connect:
+        create_direct_connection(
+            dict(MYSQL_CONFIG), query_timeout_seconds=3
+        )
+    assert connect.call_args.kwargs["read_timeout"] == 3
+    assert connect.call_args.kwargs["write_timeout"] == 3
+
+
+def test_postgres_readiness_probe_has_client_side_io_deadline():
+    from psycopg2 import extensions
+
+    connection = MagicMock()
+    connection.poll.return_value = extensions.POLL_READ
+    connection.fileno.return_value = 17
+    with (
+        patch("psycopg2.connect", return_value=connection) as connect,
+        patch("shared.db_connection.select.select", return_value=([], [], [])),
+        pytest.raises(TimeoutError, match="readiness probe timed out"),
+    ):
+        probe_readyset_status(dict(PG_CONFIG), timeout_seconds=0.01)
+
+    assert connect.call_args.kwargs["async_"] is True
+    connection.close.assert_called_once_with()
+
+
+def test_postgres_readiness_probe_times_out_against_silent_real_socket():
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    release = threading.Event()
+
+    def silent_server():
+        connection, _address = listener.accept()
+        try:
+            release.wait(timeout=2)
+        finally:
+            connection.close()
+
+    server = threading.Thread(target=silent_server, daemon=True)
+    server.start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(TimeoutError, match="readiness probe timed out"):
+            probe_readyset_status(
+                dict(PG_CONFIG, host="127.0.0.1", port=listener.getsockname()[1]),
+                timeout_seconds=0.05,
+            )
+        assert time.monotonic() - started < 1
+    finally:
+        release.set()
+        listener.close()
+        server.join(timeout=2)
+    assert server.is_alive() is False
+
+
+def test_mysql_readiness_probe_uses_bounded_connection_and_query():
+    connection = MagicMock()
+    with patch(
+        "shared.db_connection.create_direct_connection",
+        return_value=connection,
+    ) as create:
+        probe_readyset_status(dict(MYSQL_CONFIG), timeout_seconds=2)
+
+    assert create.call_args.kwargs["connect_timeout"] == 2
+    assert create.call_args.kwargs["query_timeout_seconds"] == 2
+    cursor = connection.cursor.return_value
+    cursor.execute.assert_called_once_with("SHOW READYSET STATUS")
+    cursor.fetchall.assert_called_once_with()
+    cursor.close.assert_called_once_with()
+    connection.close.assert_called_once_with()
+
+
+def test_mysql_readiness_probe_preserves_subsecond_deadline():
+    connection = MagicMock()
+    with patch(
+        "shared.db_connection.create_direct_connection",
+        return_value=connection,
+    ) as create:
+        probe_readyset_status(dict(MYSQL_CONFIG), timeout_seconds=0.05)
+
+    assert create.call_args.kwargs["connect_timeout"] == 0.05
+    assert create.call_args.kwargs["query_timeout_seconds"] == 0.05
+
+
+def test_mysql_readiness_probe_times_out_against_silent_real_socket():
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    release = threading.Event()
+
+    def silent_server():
+        connection, _address = listener.accept()
+        try:
+            release.wait(timeout=2)
+        finally:
+            connection.close()
+
+    server = threading.Thread(target=silent_server, daemon=True)
+    server.start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(RuntimeError, match="Failed to connect to MySQL"):
+            probe_readyset_status(
+                dict(
+                    MYSQL_CONFIG,
+                    host="127.0.0.1",
+                    port=listener.getsockname()[1],
+                ),
+                timeout_seconds=0.05,
+            )
+        assert time.monotonic() - started < 1
+    finally:
+        release.set()
+        listener.close()
+        server.join(timeout=2)
+    assert server.is_alive() is False
 
 
 def test_create_direct_connection_defaults_untagged_callers():

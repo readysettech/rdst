@@ -298,11 +298,11 @@ class ConfigureService:
             run_registry.cancel_target(name)
             await sandbox_manager.start()
             try:
-                await sandbox_manager.remove_target(name)
+                async with sandbox_manager.retire_target(name):
+                    cfg.remove(name)
+                    cfg.save()
             finally:
                 await sandbox_manager.stop()
-            cfg.remove(name)
-            cfg.save()
             from shared.ssh_tunnel import get_tunnel_manager
 
             get_tunnel_manager().close(name)

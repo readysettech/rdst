@@ -27,6 +27,19 @@ def test_local_linux_loopback_upstream_uses_host_network():
     assert network.listen_host == "127.0.0.1"
 
 
+@pytest.mark.parametrize(
+    "host",
+    ["LOCALHOST", "localhost.", "127.0.0.2", "0:0:0:0:0:0:0:1", "[::1]"],
+)
+def test_local_linux_recognizes_equivalent_loopback_spellings(host):
+    topology = DockerTopology.from_environment({})
+
+    network = topology.container_network_for(host, platform_name="linux")
+
+    assert network.host_network is True
+    assert network.upstream_host == "localhost"
+
+
 def test_local_linux_remote_upstream_keeps_bridge_network():
     topology = DockerTopology.from_environment({})
 
@@ -37,6 +50,22 @@ def test_local_linux_remote_upstream_keeps_bridge_network():
 
     assert network.host_network is False
     assert network.upstream_host == "database.example.com"
+    assert network.listen_host == "0.0.0.0"
+
+
+def test_explicit_docker_network_overrides_linux_host_network():
+    topology = DockerTopology.from_environment(
+        {"RDST_DOCKER_NETWORK": "rdst-e2e_default"}
+    )
+
+    network = topology.container_network_for(
+        "localhost",
+        platform_name="linux",
+    )
+
+    assert network.host_network is False
+    assert network.docker_network == "rdst-e2e_default"
+    assert network.upstream_host == "host.docker.internal"
     assert network.listen_host == "0.0.0.0"
 
 

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import socket
 import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404
+import time
+import uuid
 from typing import Any, Dict, Optional
 from urllib.parse import quote as urlquote
 
@@ -16,6 +19,18 @@ from shared.deploy.docker_topology import (
 
 MANAGED_SANDBOX_NAME = "rdst-readyset-sandbox"
 MANAGED_SANDBOX_LABEL = "io.readyset.rdst.sandbox"
+MANAGED_SANDBOX_INSTANCE_LABEL = "io.readyset.rdst.instance"
+MANAGED_SANDBOX_PORT_ATTEMPTS = 3
+MANAGED_CREATE_RECONCILE_ATTEMPTS = 60
+MANAGED_CREATE_RECONCILE_INTERVAL_SECONDS = 0.5
+
+_PORT_CONFLICT_MARKERS = (
+    "port already in use",
+    "port is already allocated",
+    "address already in use",
+    "ports are not available",
+    "only one usage of each socket address",
+)
 
 
 def publish_bind() -> str:
@@ -29,17 +44,23 @@ def publish_bind() -> str:
 def _container_network_args(
     network: ContainerNetworkPlan,
     readyset_port: str | int,
-    metrics_port: str | int,
+    metrics_port: str | int | None,
 ) -> list[str]:
     if network.host_network:
         return ["--network=host"]
-    return [
+    args: list[str] = []
+    if network.docker_network:
+        args.extend(["--network", network.docker_network])
+    args.extend([
         "-p",
         f"{publish_bind()}{readyset_port}:{readyset_port}",
-        "-p",
-        f"{publish_bind()}{metrics_port}:{metrics_port}",
-        "--add-host=host.docker.internal:host-gateway",
-    ]
+    ])
+    if metrics_port is not None:
+        args.extend(
+            ["-p", f"{publish_bind()}{metrics_port}:{metrics_port}"]
+        )
+    args.append("--add-host=host.docker.internal:host-gateway")
+    return args
 
 
 def docker_runtime_status() -> Dict[str, bool]:
@@ -56,6 +77,114 @@ def docker_runtime_status() -> Dict[str, bool]:
     except (subprocess.TimeoutExpired, OSError):
         return {"installed": True, "running": False}
     return {"installed": True, "running": result.returncode == 0}
+
+
+def _local_tcp_port_free(port: int) -> bool:
+    """Return whether a local Docker daemon can claim this host TCP port."""
+    for family, address in (
+        (socket.AF_INET, ("127.0.0.1", port)),
+        (socket.AF_INET6, ("::1", port)),
+    ):
+        try:
+            with socket.socket(family, socket.SOCK_STREAM) as probe:
+                probe.settimeout(0.05)
+                if probe.connect_ex(address) == 0:
+                    return False
+        except OSError:
+            pass
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as ipv4:
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            ipv4.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        try:
+            ipv4.bind(("", port))
+        except OSError:
+            return False
+
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as ipv6:
+            ipv6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                ipv6.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            try:
+                ipv6.bind(("::", port))
+            except OSError:
+                return False
+    except OSError:
+        # Some hosts have no IPv6 support. The IPv4 probe is sufficient there.
+        pass
+    return True
+
+
+def _docker_published_ports() -> set[int]:
+    """Return host TCP ports published by running containers."""
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--format", "{{.Ports}}"],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if result.returncode != 0:
+        return set()
+    # Covers loopback/wildcard/IPv6 addresses and collapsed Docker port ranges.
+    ports: set[int] = set()
+    for start, end, protocol in re.findall(
+        r":(\d+)(?:-(\d+))?->\d+(?:-\d+)?/(tcp|udp)",
+        result.stdout,
+    ):
+        if protocol != "tcp":
+            continue
+        ports.update(range(int(start), int(end or start) + 1))
+    return ports
+
+
+def _next_managed_sandbox_port(
+    base: int,
+    taken: set[int],
+    *,
+    probe_local_host: bool,
+) -> int:
+    port = base
+    while port <= 65535 and (
+        port in taken or (probe_local_host and not _local_tcp_port_free(port))
+    ):
+        port += 1
+    if port > 65535:
+        raise RuntimeError(
+            f"No free TCP port is available at or above {base}. "
+            "Stop a local listener or container, then retry."
+        )
+    taken.add(port)
+    return port
+
+
+def _allocate_managed_sandbox_ports(
+    variables: Dict[str, Any],
+    *,
+    exclude: set[int] | None = None,
+) -> Dict[str, Any]:
+    """Choose a non-conflicting SQL port for the one local sandbox."""
+    topology = DockerTopology.from_environment()
+    taken = _docker_published_ports()
+    taken.update(exclude or ())
+    allocated = dict(variables)
+    allocated["readyset_port"] = str(
+        _next_managed_sandbox_port(
+            int(variables["readyset_port"]),
+            taken,
+            probe_local_host=not topology.remote,
+        )
+    )
+    return allocated
+
+
+def _is_port_conflict(error: str) -> bool:
+    lowered = error.lower()
+    return any(marker in lowered for marker in _PORT_CONFLICT_MARKERS)
 
 
 def deploy_local_docker(
@@ -305,6 +434,7 @@ def deploy_managed_sandbox(
     variables = dict(variables)
     variables["container_name"] = MANAGED_SANDBOX_NAME
     variables["query_caching"] = "explicit"
+    instance_id = uuid.uuid4().hex
     existing, inspection_error = _inspect_exact_container_checked(
         MANAGED_SANDBOX_NAME
     )
@@ -326,23 +456,63 @@ def deploy_managed_sandbox(
         if not removed.get("success"):
             return removed
 
-    result = _create_container_command(
-        variables,
-        password,
-        extra_args=[
-            "--label",
-            f"{MANAGED_SANDBOX_LABEL}=true",
-            "--label",
-            f"io.readyset.rdst.target={target_name}",
-            "--label",
-            f"io.readyset.rdst.fingerprint={fingerprint}",
-        ],
-        restart_policy=False,
-    )
-    if result.get("success"):
-        result["target"] = target_name
-        result["fingerprint"] = fingerprint
-    return result
+    excluded_ports: set[int] = set()
+    for attempt in range(MANAGED_SANDBOX_PORT_ATTEMPTS):
+        try:
+            candidate = _allocate_managed_sandbox_ports(
+                variables,
+                exclude=excluded_ports,
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            return {"success": False, "error": str(exc)}
+
+        result = _create_container_command(
+            candidate,
+            password,
+            extra_args=[
+                "--label",
+                f"{MANAGED_SANDBOX_LABEL}=true",
+                "--label",
+                f"io.readyset.rdst.target={target_name}",
+                "--label",
+                f"io.readyset.rdst.fingerprint={fingerprint}",
+                "--label",
+                f"{MANAGED_SANDBOX_INSTANCE_LABEL}={instance_id}",
+            ],
+            restart_policy=False,
+        )
+        if result.get("success"):
+            result["target"] = target_name
+            result["fingerprint"] = fingerprint
+            result["instance_id"] = instance_id
+            return result
+
+        error = str(result.get("error") or "")
+        if not _is_port_conflict(error):
+            if result.get("resource_may_exist"):
+                removed = remove_managed_sandbox()
+                if not removed.get("success"):
+                    return removed
+            return result
+        if attempt + 1 == MANAGED_SANDBOX_PORT_ATTEMPTS:
+            removed = remove_managed_sandbox()
+            if not removed.get("success"):
+                return removed
+            return {
+                "success": False,
+                "error": (
+                    "Readyset could not claim a free SQL port after "
+                    f"{MANAGED_SANDBOX_PORT_ATTEMPTS} attempts. Stop conflicting "
+                    "local listeners or containers, then retry."
+                ),
+            }
+
+        excluded_ports.add(int(candidate["readyset_port"]))
+        removed = remove_managed_sandbox()
+        if not removed.get("success"):
+            return removed
+
+    raise AssertionError("managed sandbox port retry loop did not return")
 
 
 def inspect_managed_sandbox() -> Optional[Dict[str, Any]]:
@@ -417,19 +587,58 @@ def remove_managed_sandbox() -> Dict[str, Any]:
                 f"Refusing to remove foreign container '{MANAGED_SANDBOX_NAME}'."
             ),
         }
+    container_id = str(existing.get("id") or "")
+    if not container_id:
+        return {
+            "success": False,
+            "removed": False,
+            "error": "Docker inspection did not return the sandbox container ID.",
+        }
     try:
         result = subprocess.run(
-            ["docker", "rm", "-f", MANAGED_SANDBOX_NAME],
+            ["docker", "rm", "-f", container_id],
             capture_output=True,
             text=True,
             timeout=30,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
-        return {"success": False, "error": f"Failed to remove sandbox: {exc}"}
-    if result.returncode != 0:
+    except subprocess.TimeoutExpired:
+        return _confirm_managed_container_removed(container_id)
+    except (FileNotFoundError, OSError) as exc:
         return {
             "success": False,
-            "error": result.stderr.strip() or "docker rm failed",
+            "removed": False,
+            "error": f"Failed to remove sandbox: {exc}",
+        }
+    if result.returncode != 0:
+        error = result.stderr.strip() or "docker rm failed"
+        if _is_missing_container_error(error):
+            return _confirm_managed_container_removed(container_id)
+        return {
+            "success": False,
+            "removed": False,
+            "error": error,
+        }
+    return _confirm_managed_container_removed(container_id)
+
+
+def _confirm_managed_container_removed(container_id: str) -> Dict[str, Any]:
+    current, inspection_error = _inspect_exact_container_checked(
+        MANAGED_SANDBOX_NAME
+    )
+    if inspection_error:
+        return {
+            "success": False,
+            "removed": False,
+            "error": (
+                "Docker did not confirm sandbox removal: "
+                f"{inspection_error}"
+            ),
+        }
+    if current and current.get("id") == container_id:
+        return {
+            "success": False,
+            "removed": False,
+            "error": "Docker did not remove the expected sandbox container.",
         }
     return {"success": True, "removed": True}
 
@@ -442,32 +651,62 @@ def remove_configured_legacy_container(name: str) -> Dict[str, Any]:
         or "/" in name
     ):
         return {"success": False, "error": "Not an RDST legacy container name"}
-    state = _docker_inspect_state(name)
+    state, inspection_error = _docker_inspect_state_checked(name)
+    if inspection_error:
+        return {
+            "success": False,
+            "removed": False,
+            "error": (
+                f"Could not verify legacy container '{name}': "
+                f"{inspection_error}"
+            ),
+        }
     if state is None:
-        runtime = docker_runtime_status()
-        if not runtime.get("running"):
-            return {
-                "success": False,
-                "removed": False,
-                "error": (
-                    "Docker is unavailable, so RDST could not verify or remove "
-                    f"legacy container '{name}'."
-                ),
-            }
         return {"success": True, "removed": False}
+    container_id = str(state.get("id") or "")
+    if not container_id:
+        return {
+            "success": False,
+            "removed": False,
+            "error": f"Docker returned no identity for legacy container '{name}'.",
+        }
     try:
         result = subprocess.run(
-            ["docker", "rm", "-f", name],
+            ["docker", "rm", "-f", container_id],
             capture_output=True,
             text=True,
             timeout=30,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+    except subprocess.TimeoutExpired:
+        return _confirm_legacy_container_removed(name, container_id)
+    except (FileNotFoundError, OSError) as exc:
         return {"success": False, "error": f"Failed to remove {name}: {exc}"}
     if result.returncode != 0:
+        error = result.stderr.strip() or f"docker rm {name} failed"
+        if _is_missing_container_error(error):
+            return _confirm_legacy_container_removed(name, container_id)
         return {
             "success": False,
-            "error": result.stderr.strip() or f"docker rm {name} failed",
+            "error": error,
+        }
+    return _confirm_legacy_container_removed(name, container_id)
+
+
+def _confirm_legacy_container_removed(
+    name: str, container_id: str
+) -> Dict[str, Any]:
+    current, inspection_error = _docker_inspect_state_checked(name)
+    if inspection_error:
+        return {
+            "success": False,
+            "removed": False,
+            "error": f"Docker did not confirm removal of '{name}': {inspection_error}",
+        }
+    if current and current.get("id") == container_id:
+        return {
+            "success": False,
+            "removed": False,
+            "error": f"Docker did not remove legacy container '{name}'.",
         }
     return {"success": True, "removed": True}
 
@@ -487,10 +726,12 @@ def _inspect_exact_container_checked(
                 "inspect",
                 "--format",
                 (
-                    "{{.State.Running}}|"
+                    "{{.Id}}|{{.State.Status}}|{{.State.Running}}|"
+                    "{{.State.ExitCode}}|{{.State.OOMKilled}}|"
                     f'{{{{index .Config.Labels "{MANAGED_SANDBOX_LABEL}"}}}}|'
                     '{{index .Config.Labels "io.readyset.rdst.target"}}|'
-                    '{{index .Config.Labels "io.readyset.rdst.fingerprint"}}'
+                    '{{index .Config.Labels "io.readyset.rdst.fingerprint"}}|'
+                    f'{{{{index .Config.Labels "{MANAGED_SANDBOX_INSTANCE_LABEL}"}}}}'
                 ),
                 name,
             ],
@@ -507,18 +748,74 @@ def _inspect_exact_container_checked(
     if result.returncode != 0:
         error = result.stderr.strip() or "docker inspect failed"
         lowered = error.lower()
-        if "no such object" in lowered or "no such container" in lowered:
+        if _is_missing_container_error(lowered):
             return None, None
         return None, error
     parts = result.stdout.strip().split("|")
-    if len(parts) != 4:
+    if len(parts) != 9:
         return None, "docker inspect returned an invalid response"
     return {
-        "running": parts[0].lower() == "true",
-        "managed": parts[1],
-        "target": parts[2],
-        "fingerprint": parts[3],
+        "id": parts[0],
+        "status": parts[1],
+        "running": parts[2].lower() == "true",
+        "exit_code": parts[3],
+        "oom_killed": parts[4].lower() == "true",
+        "managed": parts[5],
+        "target": parts[6],
+        "fingerprint": parts[7],
+        "instance_id": parts[8],
     }, None
+
+
+def managed_sandbox_startup_failure() -> Dict[str, str]:
+    """Classify why the managed sandbox stopped without exposing its logs."""
+    existing, inspection_error = _inspect_exact_container_checked(
+        MANAGED_SANDBOX_NAME
+    )
+    if inspection_error:
+        return {"kind": "inspection", "error": inspection_error}
+    if not existing:
+        return {"kind": "missing", "error": "sandbox container disappeared"}
+    if existing.get("running"):
+        return {"kind": "running", "error": "sandbox container is running"}
+
+    logs = ""
+    try:
+        result = subprocess.run(
+            ["docker", "logs", "--tail", "40", str(existing["id"])],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            logs = result.stdout + "\n" + result.stderr
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+
+    if existing.get("oom_killed") or str(existing.get("exit_code")) == "137":
+        return {
+            "kind": "oom",
+            "error": "Readyset exceeded the sandbox memory limit during startup",
+        }
+    if _is_port_conflict(logs):
+        return {
+            "kind": "port_conflict",
+            "error": "Readyset could not bind the selected SQL port",
+        }
+    status = str(existing.get("status") or "stopped")
+    exit_code = str(existing.get("exit_code") or "unknown")
+    return {
+        "kind": "exited",
+        "error": (
+            f"Readyset stopped during startup with status {status} "
+            f"and exit code {exit_code}"
+        ),
+    }
+
+
+def _is_missing_container_error(error: str) -> bool:
+    lowered = error.lower()
+    return "no such object" in lowered or "no such container" in lowered
 
 
 def _create_container_command(
@@ -544,8 +841,7 @@ def _create_container_command(
         f"{variables['db_port']}/{variables['db_name']}"
     )
     readyset_port = variables["readyset_port"]
-    metrics_port = variables.get("metrics_port", "6034")
-    command = ["docker", "run", "-d"]
+    command = ["docker", "create", "--pull=never"]
     if restart_policy:
         command.append("--restart=unless-stopped")
     command.extend(
@@ -557,7 +853,7 @@ def _create_container_command(
         ]
     )
     command.extend(extra_args or [])
-    command.extend(_container_network_args(network, readyset_port, metrics_port))
+    command.extend(_container_network_args(network, readyset_port, None))
     command.extend(
         [
             "-e",
@@ -573,17 +869,15 @@ def _create_container_command(
             "-e",
             "QUERY_LOG_MODE=enabled",
             "-e",
-            "PROMETHEUS_METRICS=true",
+            "PROMETHEUS_METRICS=false",
             "-e",
             "CACHE_MODE=shallow",
             "-e",
-            "SHALLOW_MEMORY_PERCENT=100",
+            "SHALLOW_MEMORY_PERCENT=80",
             "-e",
             f"READYSET_MEMORY_LIMIT={variables.get('memory_bytes', 4 * 1024 * 1024 * 1024)}",
             "-e",
             "DEFAULT_TTL_MS=600000",
-            "-e",
-            f"METRICS_ADDRESS={network.listen_host}:{metrics_port}",
             variables["readyset_image"],
         ]
     )
@@ -591,26 +885,138 @@ def _create_container_command(
         docker_check = subprocess.run(
             ["docker", "info"], capture_output=True, timeout=5
         )
-        if docker_check.returncode != 0:
+    except FileNotFoundError:
+        return {"success": False, "error": "Docker CLI was not found on RDST's PATH."}
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Docker daemon status check timed out."}
+    if docker_check.returncode != 0:
+        return {
+            "success": False,
+            "error": "Docker is not running. Start Docker and try again.",
+        }
+    try:
+        image_check = subprocess.run(
+            ["docker", "image", "inspect", variables["readyset_image"]],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "error": "Docker image inspection timed out before container creation.",
+        }
+    except (FileNotFoundError, OSError) as exc:
+        return {"success": False, "error": f"Could not inspect Readyset image: {exc}"}
+    if image_check.returncode != 0:
+        try:
+            pull_result = subprocess.run(
+                ["docker", "pull", variables["readyset_image"]],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
             return {
                 "success": False,
-                "error": "Docker is not running. Start Docker and try again.",
+                "error": "Readyset image download timed out (5 min).",
             }
-        result = subprocess.run(
+        except (FileNotFoundError, OSError) as exc:
+            return {
+                "success": False,
+                "error": f"Could not download Readyset image: {exc}",
+            }
+        if pull_result.returncode != 0:
+            return {
+                "success": False,
+                "error": _format_docker_error(pull_result.stderr.strip()),
+            }
+    try:
+        create_result = subprocess.run(
             command, capture_output=True, text=True, timeout=300
         )
     except FileNotFoundError:
         return {"success": False, "error": "Docker CLI was not found on RDST's PATH."}
     except subprocess.TimeoutExpired:
+        cleanup = _reconcile_ambiguous_managed_create()
+        if not cleanup.get("success"):
+            return cleanup
         return {"success": False, "error": "Container creation timed out (5 min)."}
-    if result.returncode != 0:
-        return {"success": False, "error": _format_docker_error(result.stderr.strip())}
+    if create_result.returncode != 0:
+        return {
+            "success": False,
+            "error": _format_docker_error(create_result.stderr.strip()),
+        }
+    container_id = create_result.stdout.strip()
+    if not container_id:
+        return {
+            "success": False,
+            "error": "Docker create returned no container identity.",
+            "resource_may_exist": True,
+        }
+    try:
+        start_result = subprocess.run(
+            ["docker", "start", container_id],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "error": "Container startup timed out after Docker created it.",
+            "resource_may_exist": True,
+        }
+    except (FileNotFoundError, OSError) as exc:
+        return {
+            "success": False,
+            "error": f"Could not start container: {exc}",
+            "resource_may_exist": True,
+        }
+    if start_result.returncode != 0:
+        return {
+            "success": False,
+            "error": _format_docker_error(start_result.stderr.strip()),
+            "resource_may_exist": True,
+        }
     return {
         "success": True,
         "container_name": variables["container_name"],
+        "container_id": container_id,
         "created": True,
         "port": readyset_port,
     }
+
+
+def _reconcile_ambiguous_managed_create() -> Dict[str, Any]:
+    """Remove a managed container that appeared after a timed-out create."""
+    for attempt in range(MANAGED_CREATE_RECONCILE_ATTEMPTS):
+        current, inspection_error = _inspect_exact_container_checked(
+            MANAGED_SANDBOX_NAME
+        )
+        if inspection_error:
+            return {
+                "success": False,
+                "removed": False,
+                "error": (
+                    "Container creation timed out and Docker could not confirm "
+                    f"the final state: {inspection_error}"
+                ),
+            }
+        if current is not None:
+            if current.get("managed") != "true":
+                return {
+                    "success": False,
+                    "removed": False,
+                    "error": (
+                        "Container creation timed out and the sandbox name is "
+                        "now owned by a foreign container."
+                    ),
+                }
+            return remove_managed_sandbox()
+        if attempt + 1 < MANAGED_CREATE_RECONCILE_ATTEMPTS:
+            time.sleep(MANAGED_CREATE_RECONCILE_INTERVAL_SECONDS)
+    return {"success": True, "removed": False}
 
 
 def _container_name(target_name: str) -> str:
@@ -623,25 +1029,51 @@ def _docker_inspect_state(name: str) -> Optional[Dict[str, Any]]:
     Result keys: status (running|exited|created|paused|restarting|...), running (bool),
     started_at, exit_code.
     """
+    state, _error = _docker_inspect_state_checked(name)
+    return state
+
+
+def _docker_inspect_state_checked(
+    name: str,
+) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Inspect state while distinguishing absence from Docker failures."""
     try:
         result = subprocess.run(
-            ["docker", "inspect", "--format", "{{.State.Status}}|{{.State.Running}}|{{.State.ExitCode}}", name],
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{.Id}}|{{.State.Status}}|{{.State.Running}}|{{.State.ExitCode}}",
+                name,
+            ],
             capture_output=True,
             text=True,
             timeout=5,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return None
+    except subprocess.TimeoutExpired:
+        return None, "docker inspect timed out"
+    except FileNotFoundError:
+        return None, "Docker CLI was not found"
+    except OSError as exc:
+        return None, str(exc)
     if result.returncode != 0:
-        return None
+        error = result.stderr.strip() or "docker inspect failed"
+        lowered = error.lower()
+        if "no such object" in lowered or "no such container" in lowered:
+            return None, None
+        return None, error
     parts = result.stdout.strip().split("|")
-    if len(parts) < 3:
-        return None
-    return {
-        "status": parts[0],
-        "running": parts[1].lower() == "true",
-        "exit_code": parts[2],
-    }
+    if len(parts) != 4:
+        return None, "docker inspect returned an invalid state response"
+    return (
+        {
+            "id": parts[0],
+            "status": parts[1],
+            "running": parts[2].lower() == "true",
+            "exit_code": parts[3],
+        },
+        None,
+    )
 
 
 def _docker_inspect_port(name: str, container_port: int) -> Optional[int]:

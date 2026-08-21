@@ -24,15 +24,15 @@ for variable in (
     "RDST_DOCKER_REMOTE",
     "RDST_DOCKER_PUBLISHED_HOST",
     "RDST_DOCKER_UPSTREAM_HOST",
+    "RDST_DOCKER_NETWORK",
 ):
     os.environ.pop(variable, None)
 
 # Disable telemetry for all tests before shared.telemetry_manager is imported.
 os.environ.setdefault("RDST_TESTING", "true")
 
-# Driver-free test environments (CI installs tests/requirements.txt, which has
-# no database drivers) need importable psycopg2/pymysql stand-ins registered
-# before any test module is imported: production modules such as
+# Driver-free developer environments need importable psycopg2/pymysql stand-ins
+# registered before any test module is imported: production modules such as
 # shared.data_manager.data_manager bind these modules at import time, and test
 # module imports happen in collection order, so a stub installed by one test
 # file arrives too late for modules imported earlier. Tests patch each stub's
@@ -139,6 +139,10 @@ def pytest_configure(config):
         "markers",
         "realdb: API integration tests that require a real database container "
         "(managed by .buildkite/run_api_integration_tests.sh)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "realdocker: lifecycle tests that create disposable Docker containers",
     )
 
 
@@ -299,6 +303,7 @@ def tmp_rdst_home(monkeypatch, tmp_path: Path) -> Path:
         "RDST_DOCKER_REMOTE",
         "RDST_DOCKER_PUBLISHED_HOST",
         "RDST_DOCKER_UPSTREAM_HOST",
+        "RDST_DOCKER_NETWORK",
     ):
         monkeypatch.delenv(variable, raising=False)
 

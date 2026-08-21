@@ -48,7 +48,9 @@ def test_equal_concurrency_leaves_readyset_free_to_reach_higher_qps(monkeypatch)
         query="SELECT 1",
         original_db_config={"lane": "origin"},
         readyset_db_config={"lane": "readyset"},
-        duration_seconds=0.25,
+        # Keep the window long enough for an xdist worker to be descheduled
+        # briefly without reducing both lanes to their initial four requests.
+        duration_seconds=1,
         controller=controller,
         on_origin_progress=lambda token, occurred_at, count: origin_progress.append(
             (token, occurred_at, count)

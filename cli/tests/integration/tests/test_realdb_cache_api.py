@@ -1,15 +1,10 @@
-"""Real-database integration tests for the cache API lifecycle.
+"""Docker-backed proof of the web Readyset comparison flow.
 
-These tests stand up a Readyset container against the live test DB
-and walk through the full deploy → add → run → list → remove cycle
-through `/api/cache/*`. They share a single test on purpose because
-container startup dominates the cost and splitting per endpoint just
-multiplies that cost.
-
-Skipped when `SKIP_READYSET_CACHE_TESTS=true` (which the CI runner
-sets — Readyset can't reach the upstream DB across the compose
-network in our current Buildkite shape). Locally, leave that var
-unset to run the full lifecycle.
+This test enters through the API used by the React comparison page, lets the
+production lifecycle manager create the managed Readyset container, drains the
+real background-run stream, and inspects the physical Docker resource before
+deleting the target. Docker, the lifecycle manager, and the cache service are
+not replaced with test doubles.
 
 To run locally:
 
@@ -17,16 +12,20 @@ To run locally:
     docker compose up -d postgres
     export RDST_TEST_PASSWORD=testpassword
     export RDST_TEST_ENGINE=postgresql
-    unset SKIP_READYSET_CACHE_TESTS
     pytest tests/test_realdb_cache_api.py -v -m realdb
 """
 
 from __future__ import annotations
 
-import asyncio
+import json
 import os
+import subprocess
 
 import pytest
+from shared.deploy import READYSET_IMAGE
+from shared.deploy.local_docker import inspect_managed_sandbox
+from shared.deploy.sandbox_manager import sandbox_manager
+from shared.run_registry import run_registry
 
 pytestmark = [
     pytest.mark.realdb,
@@ -36,11 +35,10 @@ pytestmark = [
     ),
 ]
 
-
 TARGET_NAME = "itcache"
 SAMPLE_QUERY = (
-    "SELECT primarytitle, startyear FROM title_basics "
-    "WHERE titletype = 'movie' LIMIT 5"
+    "SELECT tconst, primarytitle FROM title_basics "
+    "WHERE titletype = 'movie' ORDER BY tconst LIMIT 5"
 )
 
 
@@ -56,105 +54,96 @@ async def _add_target(client, payload: dict) -> None:
         json={"name": TARGET_NAME, "target": payload},
     )
     assert response.status_code == 200, response.text
+    assert response.json()["success"] is True
 
 
-async def _wait_for_running(client, *, timeout_s: int = 60) -> dict:
-    """Poll `/api/cache/status` until `running=True` or timeout."""
-    deadline = asyncio.get_event_loop().time() + timeout_s
-    last_body: dict = {}
-    while asyncio.get_event_loop().time() < deadline:
-        response = await client.get(f"/api/cache/status?target={TARGET_NAME}")
-        assert response.status_code == 200, response.text
-        last_body = response.json()
-        if last_body.get("running") is True:
-            return last_body
-        await asyncio.sleep(2)
-    pytest.fail(
-        f"Cache never reached running=True within {timeout_s}s; "
-        f"last status: {last_body!r}"
+def _docker_inspect(container_id: str) -> dict:
+    result = subprocess.run(
+        ["docker", "inspect", container_id],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
+    return json.loads(result.stdout)[0]
 
 
-async def test_cache_deploy_add_run_remove_lifecycle(
+async def test_web_comparison_creates_uses_and_removes_real_container(
     client, db_target_payload, collect_sse_events
 ):
-    """End-to-end: deploy a Readyset container, cache a query, run the
-    speedup comparison, list it, then remove and confirm status flips.
-
-    Asserts only the high-level flow: every step succeeds, terminal
-    events are emitted, the listed cache references our query. We do
-    not pin speedup numbers — they are environment-dependent.
-    """
+    """Prove the current web comparison API owns one real Docker sandbox."""
+    run_registry.reset()
     await _add_target(client, db_target_payload)
 
-    # Step 1: deploy. Container creation can take a while on cold start.
-    deploy_events = await collect_sse_events(
-        client,
-        "POST",
-        "/api/cache/deploy",
-        json_body={"target": TARGET_NAME, "mode": "docker"},
-    )
-    deploy_errors = [e for e in deploy_events if e.get("event") == "error"]
-    assert not deploy_errors, f"Deploy emitted errors: {deploy_errors}"
-    deploy_complete = next(
-        (e for e in deploy_events if e.get("event") == "complete"), None
-    )
-    assert deploy_complete is not None, (
-        f"Deploy never completed; events: {[e.get('event') for e in deploy_events]}"
-    )
-    assert deploy_complete["data"].get("running") is True, deploy_complete
+    try:
+        start = await client.post(
+            "/api/cache/compare-runs",
+            json={
+                "target": TARGET_NAME,
+                "query": SAMPLE_QUERY,
+                "concurrency": 1,
+                "duration_seconds": 10,
+            },
+        )
+        assert start.status_code == 200, start.text
+        run_id = start.json()["run_id"]
 
-    # Step 2: confirm running via status (defensive; deploy may have
-    # already reported running, but status is the canonical source).
-    status_body = await _wait_for_running(client)
-    assert status_body.get("deployed") is True
+        events = await collect_sse_events(
+            client,
+            "GET",
+            f"/api/runs/{run_id}/events",
+        )
+        errors = [event for event in events if event.get("event") == "error"]
+        assert not errors, f"Comparison emitted errors: {errors}"
 
-    # Step 3: add the query as a cache.
-    add = await client.post(
-        "/api/cache/add",
-        json={"target": TARGET_NAME, "query": SAMPLE_QUERY},
-    )
-    assert add.status_code == 200, add.text
-    add_body = add.json()
-    assert add_body.get("success") is True, add_body
-    assert add_body.get("supported") is True, add_body
+        complete = next(
+            (
+                event
+                for event in events
+                if event.get("event") == "cache_compare_complete"
+            ),
+            None,
+        )
+        assert complete is not None, (
+            "Comparison never completed; events: "
+            f"{[event.get('event') for event in events]}"
+        )
+        assert complete["data"]["success"] is True
+        assert complete["data"]["origin"]["completed"] > 0
+        assert complete["data"]["readyset"]["completed"] > 0
+        assert events[-1]["event"] == "run_end"
+        assert events[-1]["data"]["status"] == "done"
 
-    # Step 4: run the comparison (origin DB vs cache).
-    run_events = await collect_sse_events(
-        client,
-        "POST",
-        "/api/cache/run",
-        json_body={
-            "target": TARGET_NAME,
-            "query": SAMPLE_QUERY,
-            "iterations": 5,
-            "warmup": 2,
-        },
-    )
-    run_errors = [e for e in run_events if e.get("event") == "error"]
-    assert not run_errors, f"Run emitted errors: {run_errors}"
-    run_complete = next(
-        (e for e in run_events if e.get("event") == "complete"), None
-    )
-    assert run_complete is not None, (
-        f"Run never completed; events: {[e.get('event') for e in run_events]}"
-    )
-    assert run_complete["data"].get("success") is True, run_complete
+        physical = inspect_managed_sandbox()
+        assert physical is not None
+        assert physical["running"] is True
+        assert physical["managed"] == "true"
+        assert physical["target"] == TARGET_NAME
+        container_id = physical["id"]
 
-    # Step 5: list — our cache should be visible.
-    listing = await client.get(f"/api/cache/list?target={TARGET_NAME}")
-    assert listing.status_code == 200, listing.text
-    listing_body = listing.json()
-    assert listing_body.get("success") is True, listing_body
-    caches = listing_body.get("caches") or []
-    assert caches, f"List returned no caches: {listing_body}"
+        inspected = _docker_inspect(container_id)
+        assert inspected["Id"] == container_id
+        assert inspected["Config"]["Image"] == READYSET_IMAGE
+        environment = set(inspected["Config"]["Env"])
+        assert "PROMETHEUS_METRICS=false" in environment
+        assert "SHALLOW_MEMORY_PERCENT=80" in environment
+        assert inspected["State"]["Running"] is True
 
-    # Step 6: remove the cache target — status must reflect it's gone.
-    remove = await client.delete(f"/api/cache/remove?target={TARGET_NAME}")
-    assert remove.status_code == 200, remove.text
-    assert remove.json().get("success") is True, remove.text
+        sandbox_status = await client.get("/api/cache/sandbox")
+        assert sandbox_status.status_code == 200, sandbox_status.text
+        status = sandbox_status.json()
+        assert status["phase"] == "ready"
+        assert status["current_target"] == TARGET_NAME
+        assert status["lease_owner"] is None
+        assert status["queued_requests"] == 0
+        assert status["healthy"] is True
+        assert status["docker_installed"] is True
+        assert status["docker_running"] is True
+    finally:
+        delete = await client.delete(f"/api/configure/targets/{TARGET_NAME}")
+        assert delete.status_code == 200, delete.text
+        assert delete.json()["success"] is True
+        await sandbox_manager.stop()
+        run_registry.reset()
 
-    final_status = await client.get(f"/api/cache/status?target={TARGET_NAME}")
-    assert final_status.status_code == 200, final_status.text
-    final_body = final_status.json()
-    assert final_body.get("running") is False, final_body
+    assert inspect_managed_sandbox() is None

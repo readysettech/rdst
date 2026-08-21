@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import shutil
@@ -13,12 +14,25 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
-_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
 class DockerTopologyError(RuntimeError):
     """The Docker daemon cannot route an address required by RDST."""
+
+
+def _is_local_host(host: str) -> bool:
+    """Recognize DNS and IP spellings that refer to this machine."""
+    normalized = host.strip().lower().rstrip(".")
+    if normalized == "localhost":
+        return True
+    if normalized.startswith("[") and normalized.endswith("]"):
+        normalized = normalized[1:-1]
+    try:
+        address = ipaddress.ip_address(normalized)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_unspecified
 
 
 @dataclass(frozen=True)
@@ -27,6 +41,7 @@ class ContainerNetworkPlan:
 
     upstream_host: str
     host_network: bool
+    docker_network: str | None = None
 
     @property
     def listen_host(self) -> str:
@@ -88,6 +103,7 @@ class DockerTopology:
     remote: bool
     published_host: str
     upstream_host: str | None = None
+    docker_network: str | None = None
     desktop: bool = False
     rootless: bool = False
 
@@ -108,12 +124,12 @@ class DockerTopology:
         )
         daemon_host = _daemon_host(endpoint)
         explicit_remote = env.get("RDST_DOCKER_REMOTE", "").lower() in _TRUE_VALUES
-        detected_remote = bool(daemon_host and daemon_host not in _LOCAL_HOSTS)
+        detected_remote = bool(daemon_host and not _is_local_host(daemon_host))
         remote = explicit_remote or detected_remote
 
         published_host = env.get("RDST_DOCKER_PUBLISHED_HOST")
         if remote and not published_host:
-            if explicit_remote and daemon_host in _LOCAL_HOSTS:
+            if explicit_remote and daemon_host and _is_local_host(daemon_host):
                 raise DockerTopologyError(
                     "A tunneled remote Docker daemon requires "
                     "RDST_DOCKER_PUBLISHED_HOST"
@@ -124,6 +140,8 @@ class DockerTopology:
             remote=remote,
             published_host=published_host or "127.0.0.1",
             upstream_host=env.get("RDST_DOCKER_UPSTREAM_HOST"),
+            docker_network=(env.get("RDST_DOCKER_NETWORK") or "").strip()
+            or None,
             desktop=(
                 not remote
                 and (
@@ -142,7 +160,7 @@ class DockerTopology:
 
     def container_host_for(self, host: str) -> str:
         """Return the address a container should use for a client-side host."""
-        if host not in _LOCAL_HOSTS:
+        if not _is_local_host(host):
             return host
         if not self.remote:
             return "host.docker.internal"
@@ -167,12 +185,18 @@ class DockerTopology:
         continue to use an explicitly routable upstream address.
         """
         platform_name = platform_name or sys.platform
+        if self.docker_network:
+            return ContainerNetworkPlan(
+                upstream_host=self.container_host_for(host),
+                host_network=False,
+                docker_network=self.docker_network,
+            )
         if (
             platform_name.startswith("linux")
             and not self.remote
             and not self.desktop
             and not self.rootless
-            and host in _LOCAL_HOSTS
+            and _is_local_host(host)
         ):
             return ContainerNetworkPlan(
                 upstream_host="localhost",

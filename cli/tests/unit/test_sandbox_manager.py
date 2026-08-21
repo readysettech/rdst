@@ -2,17 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
+import sys
 import threading
 from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock
 
 import pytest
 
+from shared.deploy import sandbox_manager as sandbox_manager_module
 from shared.deploy.sandbox_manager import (
     LocalDockerSandboxAdapter,
     ProvisionedSandbox,
     ReadysetSandboxManager,
     SandboxConnection,
+    SandboxOwnershipError,
+    SandboxPortConflictError,
     SandboxPriority,
+    SandboxReconciliationError,
+    SandboxResourceError,
     _finish_before_cancelling,
     _settle_transition,
     target_fingerprint,
@@ -34,7 +42,7 @@ def test_target_fingerprint_changes_with_sandbox_deployment_version(monkeypatch)
 
     monkeypatch.setattr(
         "shared.deploy.sandbox_manager.SANDBOX_DEPLOYMENT_VERSION",
-        3,
+        sandbox_manager_module.SANDBOX_DEPLOYMENT_VERSION + 1,
     )
 
     assert target_fingerprint("app", config) != current
@@ -51,9 +59,11 @@ class FakeAdapter:
         self.provisioned: list[str] = []
         self.removed = 0
         self.ready = 0
+        self.inspections = 0
         self.remove_error: Exception | None = None
 
     async def inspect(self) -> ProvisionedSandbox | None:
+        self.inspections += 1
         return self.current
 
     async def require_healthy_upstream(self, target_config):
@@ -148,6 +158,133 @@ async def test_startup_discards_container_interrupted_before_readiness(
 
 
 @pytest.mark.asyncio
+async def test_startup_discards_container_left_active_by_process_crash(
+    tmp_path, monkeypatch
+):
+    metadata_path = tmp_path / "metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "target": "one",
+                "fingerprint": "fingerprint",
+                "container_id": "container-id",
+                "instance_id": "instance-id",
+                "ready": True,
+                "clean": False,
+                "lease_active": True,
+                "connection": {},
+            }
+        )
+    )
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.inspect_managed_sandbox",
+        lambda: {
+            "running": True,
+            "managed": "true",
+            "target": "one",
+            "fingerprint": "fingerprint",
+            "id": "container-id",
+            "instance_id": "instance-id",
+        },
+    )
+    removed: list[bool] = []
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.remove_managed_sandbox",
+        lambda: removed.append(True) or {"success": True, "removed": True},
+    )
+
+    assert await LocalDockerSandboxAdapter(metadata_path).inspect() is None
+    assert removed == [True]
+    assert not metadata_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_startup_discards_stale_metadata_for_different_container_id(
+    tmp_path, monkeypatch
+):
+    metadata_path = tmp_path / "metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "target": "one",
+                "fingerprint": "fingerprint",
+                "container_id": "old-id",
+                "instance_id": "old-instance",
+                "ready": True,
+                "clean": True,
+                "lease_active": False,
+                "connection": {},
+            }
+        )
+    )
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.inspect_managed_sandbox",
+        lambda: {
+            "running": True,
+            "managed": "true",
+            "target": "one",
+            "fingerprint": "fingerprint",
+            "id": "new-id",
+            "instance_id": "new-instance",
+        },
+    )
+    removed: list[bool] = []
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.remove_managed_sandbox",
+        lambda: removed.append(True) or {"success": True, "removed": True},
+    )
+
+    assert await LocalDockerSandboxAdapter(metadata_path).inspect() is None
+    assert removed == [True]
+
+
+@pytest.mark.asyncio
+async def test_stale_metadata_cleanup_failure_does_not_hide_container(
+    tmp_path, monkeypatch
+):
+    metadata_path = tmp_path / "metadata.json"
+    metadata_path.write_text("not-json")
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.inspect_managed_sandbox",
+        lambda: {
+            "running": True,
+            "managed": "true",
+            "id": "container-id",
+            "instance_id": "instance-id",
+        },
+    )
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.remove_managed_sandbox",
+        lambda: {
+            "success": False,
+            "removed": False,
+            "error": "Docker daemon unavailable",
+        },
+    )
+
+    with pytest.raises(
+        SandboxReconciliationError, match="Docker daemon unavailable"
+    ):
+        await LocalDockerSandboxAdapter(metadata_path).inspect()
+
+
+@pytest.mark.asyncio
+async def test_physical_removal_succeeds_when_metadata_delete_fails(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.remove_managed_sandbox",
+        lambda: {"success": True, "removed": True},
+    )
+    monkeypatch.setattr(
+        "shared.deploy.sandbox_manager._delete_metadata",
+        lambda _path: (_ for _ in ()).throw(OSError("read-only filesystem")),
+    )
+
+    await LocalDockerSandboxAdapter(tmp_path / "metadata.json").remove()
+
+
+@pytest.mark.asyncio
 async def test_local_adapter_rejects_unhealthy_upstream_before_docker(
     tmp_path, monkeypatch
 ):
@@ -167,6 +304,466 @@ async def test_local_adapter_rejects_unhealthy_upstream_before_docker(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("engine", "upstream_port", "base_port"),
+    [("postgresql", 5432, 5433), ("mysql", 3306, 3307)],
+)
+async def test_local_adapter_uses_allocated_sandbox_port(
+    tmp_path, monkeypatch, engine, upstream_port, base_port
+):
+    class EmptyTargets:
+        def load(self):
+            return None
+
+        def list_targets(self):
+            return []
+
+        def save(self):
+            return None
+
+    monkeypatch.setattr(
+        "shared.deploy.sandbox_manager.TargetsConfig", EmptyTargets
+    )
+    monkeypatch.setattr(
+        "shared.deploy.sandbox_manager.resolve_password_value",
+        lambda _config: "secret",
+    )
+    launched = {}
+
+    def deploy(_target, variables, _password, _fingerprint):
+        launched.update(variables)
+        return {
+            "success": True,
+            "port": str(base_port + 1),
+            "container_id": "container-id",
+            "instance_id": "instance-id",
+        }
+
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.deploy_managed_sandbox", deploy
+    )
+
+    sandbox = await LocalDockerSandboxAdapter(
+        tmp_path / "metadata.json"
+    ).provision(
+        "one",
+        "fingerprint",
+        {
+            "engine": engine,
+            "host": "localhost",
+            "port": upstream_port,
+            "database": "app",
+            "user": "app",
+        },
+    )
+
+    assert launched["readyset_port"] == str(base_port)
+    assert "metrics_port" not in launched
+    assert sandbox.connection.port == base_port + 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("engine", "upstream_port", "base_port"),
+    [("postgresql", 5432, 5433), ("mysql", 3306, 3307)],
+)
+async def test_real_allocator_command_connection_and_metadata_agree(
+    tmp_path, monkeypatch, engine, upstream_port, base_port
+):
+    class EmptyTargets:
+        def load(self):
+            return None
+
+        def list_targets(self):
+            return []
+
+        def save(self):
+            return None
+
+    topology = MagicMock(remote=False, published_host="127.0.0.1")
+    topology.container_network_for.return_value = MagicMock(
+        upstream_host="host.docker.internal",
+        host_network=False,
+        listen_host="0.0.0.0",
+    )
+    monkeypatch.setattr(
+        "shared.deploy.sandbox_manager.TargetsConfig", EmptyTargets
+    )
+    monkeypatch.setattr(
+        "shared.deploy.sandbox_manager.resolve_password_value",
+        lambda _config: "secret",
+    )
+    monkeypatch.setattr(
+        "shared.deploy.sandbox_manager.DockerTopology.from_environment",
+        lambda: topology,
+    )
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.DockerTopology.from_environment",
+        lambda: topology,
+    )
+    monkeypatch.setattr(
+        "shared.deploy.local_docker._docker_published_ports",
+        lambda: {base_port},
+    )
+    monkeypatch.setattr(
+        "shared.deploy.local_docker._local_tcp_port_free", lambda _port: True
+    )
+    monkeypatch.setattr(
+        "shared.deploy.local_docker._inspect_exact_container_checked",
+        lambda _name: (None, None),
+    )
+    run = MagicMock(
+        side_effect=[
+            MagicMock(returncode=0),
+            MagicMock(returncode=0),
+            MagicMock(returncode=0, stdout="container-id", stderr=""),
+            MagicMock(returncode=0, stdout="container-id", stderr=""),
+        ]
+    )
+    monkeypatch.setattr("shared.deploy.local_docker.subprocess.run", run)
+    metadata_path = tmp_path / "metadata.json"
+
+    sandbox = await LocalDockerSandboxAdapter(metadata_path).provision(
+        "one",
+        "fingerprint",
+        {
+            "engine": engine,
+            "host": "localhost",
+            "port": upstream_port,
+            "database": "app",
+            "user": "app",
+        },
+    )
+
+    allocated_port = base_port + 1
+    create_command = run.call_args_list[2].args[0]
+    assert f"127.0.0.1:{allocated_port}:{allocated_port}" in create_command
+    assert f"LISTEN_ADDRESS=0.0.0.0:{allocated_port}" in create_command
+    assert sandbox.connection.port == allocated_port
+    metadata = json.loads(metadata_path.read_text())
+    assert metadata["connection"]["port"] == allocated_port
+
+
+@pytest.mark.asyncio
+async def test_legacy_reconciliation_is_scoped_and_runs_for_each_upstream(
+    tmp_path, monkeypatch
+):
+    entries = {
+        "one-readyset": {
+            "target_type": "readyset",
+            "upstream_target": "one",
+            "container_name": "rdst-readyset-one",
+        },
+        "two-readyset": {
+            "target_type": "readyset",
+            "upstream_target": "two",
+            "container_name": "rdst-readyset-two",
+        },
+    }
+
+    class LegacyTargets:
+        def load(self):
+            return None
+
+        def list_targets(self):
+            return list(entries)
+
+        def get(self, name):
+            return entries.get(name)
+
+        def remove(self, name):
+            entries.pop(name)
+
+        def save(self):
+            return None
+
+    removed: list[str] = []
+    monkeypatch.setattr(
+        "shared.deploy.sandbox_manager.TargetsConfig", LegacyTargets
+    )
+    monkeypatch.setattr(
+        "shared.deploy.sandbox_manager.resolve_password_value",
+        lambda _config: "secret",
+    )
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.remove_configured_legacy_container",
+        lambda name: removed.append(name)
+        or {"success": True, "removed": True},
+    )
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.deploy_managed_sandbox",
+        lambda *_args, **_kwargs: {
+            "success": True,
+            "port": "5433",
+            "container_id": "container-id",
+            "instance_id": "instance-id",
+        },
+    )
+
+    adapter = LocalDockerSandboxAdapter(tmp_path / "metadata.json")
+    await adapter.provision(
+        "one",
+        "fingerprint",
+        {
+            "engine": "postgresql",
+            "host": "localhost",
+            "port": 5432,
+            "database": "app",
+            "user": "app",
+        },
+    )
+
+    assert removed == ["rdst-readyset-one"]
+    assert set(entries) == {"two-readyset"}
+
+    await adapter.provision(
+        "two",
+        "fingerprint-two",
+        {
+            "engine": "postgresql",
+            "host": "localhost",
+            "port": 5432,
+            "database": "app",
+            "user": "app",
+        },
+    )
+
+    assert removed == ["rdst-readyset-one", "rdst-readyset-two"]
+    assert entries == {}
+
+
+@pytest.mark.asyncio
+async def test_legacy_reconciliation_failure_blocks_managed_deploy(
+    tmp_path, monkeypatch
+):
+    entries = {
+        "one-readyset": {
+            "target_type": "readyset",
+            "upstream_target": "one",
+            "container_name": "rdst-readyset-one",
+        }
+    }
+
+    class LegacyTargets:
+        def load(self):
+            return None
+
+        def list_targets(self):
+            return list(entries)
+
+        def get(self, name):
+            return entries.get(name)
+
+        def remove(self, name):
+            entries.pop(name)
+
+        def save(self):
+            return None
+
+    deploy = MagicMock()
+    monkeypatch.setattr(
+        "shared.deploy.sandbox_manager.TargetsConfig", LegacyTargets
+    )
+    monkeypatch.setattr(
+        "shared.deploy.sandbox_manager.resolve_password_value",
+        lambda _config: "secret",
+    )
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.remove_configured_legacy_container",
+        lambda _name: {"success": False, "error": "Docker is unavailable"},
+    )
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.deploy_managed_sandbox", deploy
+    )
+
+    with pytest.raises(SandboxReconciliationError, match="Docker is unavailable"):
+        await LocalDockerSandboxAdapter(tmp_path / "metadata.json").provision(
+            "one",
+            "fingerprint",
+            {
+                "engine": "postgresql",
+                "host": "localhost",
+                "port": 5432,
+                "database": "app",
+                "user": "app",
+            },
+        )
+
+    deploy.assert_not_called()
+    assert "one-readyset" in entries
+
+
+@pytest.mark.asyncio
+async def test_local_adapter_fails_fast_when_container_stops(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.inspect_managed_sandbox",
+        lambda: {"running": False},
+    )
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.managed_sandbox_startup_failure",
+        lambda: {"kind": "exited", "error": "container stopped"},
+    )
+    sandbox = ProvisionedSandbox(
+        target="one",
+        fingerprint="fingerprint",
+        connection=SandboxConnection(
+            engine="postgresql",
+            host="127.0.0.1",
+            port=5433,
+            database="app",
+            user="app",
+            password="secret",
+            cache_target="one-sandbox",
+        ),
+        container_id="container-id",
+        instance_id="instance-id",
+    )
+
+    with pytest.raises(RuntimeError, match="container stopped"):
+        await LocalDockerSandboxAdapter(
+            tmp_path / "metadata.json"
+        ).wait_ready(sandbox, timeout_seconds=90)
+
+
+@pytest.mark.asyncio
+async def test_local_adapter_classifies_startup_oom(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.inspect_managed_sandbox",
+        lambda: {"running": False},
+    )
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.managed_sandbox_startup_failure",
+        lambda: {"kind": "oom", "error": "memory limit exceeded"},
+    )
+    sandbox = ProvisionedSandbox(
+        target="one",
+        fingerprint="fingerprint",
+        connection=SandboxConnection(
+            engine="postgresql",
+            host="127.0.0.1",
+            port=5433,
+            database="app",
+            user="app",
+            password="secret",
+            cache_target="one-sandbox",
+        ),
+        container_id="container-id",
+        instance_id="instance-id",
+    )
+
+    with pytest.raises(SandboxResourceError, match="memory limit"):
+        await LocalDockerSandboxAdapter(
+            tmp_path / "metadata.json"
+        ).wait_ready(sandbox, timeout_seconds=90)
+
+
+@pytest.mark.asyncio
+async def test_local_adapter_rejects_replaced_container_identity(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.inspect_managed_sandbox",
+        lambda: {
+            "running": True,
+            "id": "replacement-id",
+            "instance_id": "replacement-instance",
+            "target": "two",
+            "fingerprint": "other",
+        },
+    )
+    sandbox = ProvisionedSandbox(
+        target="one",
+        fingerprint="fingerprint",
+        connection=SandboxConnection(
+            engine="postgresql",
+            host="127.0.0.1",
+            port=5433,
+            database="app",
+            user="app",
+            password="secret",
+            cache_target="one-sandbox",
+        ),
+        container_id="container-id",
+        instance_id="instance-id",
+    )
+
+    with pytest.raises(SandboxReconciliationError, match="identity changed"):
+        await LocalDockerSandboxAdapter(
+            tmp_path / "metadata.json"
+        ).wait_ready(sandbox, timeout_seconds=90)
+
+
+@pytest.mark.asyncio
+async def test_local_adapter_retries_transient_initial_inspection(
+    tmp_path, monkeypatch
+):
+    metadata_path = tmp_path / "metadata.json"
+    sandbox = ProvisionedSandbox(
+        target="one",
+        fingerprint="fingerprint",
+        connection=SandboxConnection(
+            engine="postgresql",
+            host="127.0.0.1",
+            port=5433,
+            database="app",
+            user="app",
+            password="secret",
+            cache_target="one-sandbox",
+        ),
+        container_id="container-id",
+        instance_id="instance-id",
+    )
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "target": sandbox.target,
+                "fingerprint": sandbox.fingerprint,
+                "container_id": sandbox.container_id,
+                "instance_id": sandbox.instance_id,
+                "ready": False,
+                "clean": False,
+                "lease_active": False,
+            }
+        )
+    )
+    identity = {
+        "running": True,
+        "id": sandbox.container_id,
+        "instance_id": sandbox.instance_id,
+        "target": sandbox.target,
+        "fingerprint": sandbox.fingerprint,
+    }
+    inspections = 0
+
+    def inspect():
+        nonlocal inspections
+        inspections += 1
+        if inspections == 1:
+            raise RuntimeError("temporary Docker inspection failure")
+        return identity
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(
+        "shared.deploy.local_docker.inspect_managed_sandbox", inspect
+    )
+    monkeypatch.setattr(
+        "shared.db_connection.probe_readyset_status", lambda *_args: None
+    )
+    monkeypatch.setattr(sandbox_manager_module.asyncio, "sleep", no_sleep)
+
+    await LocalDockerSandboxAdapter(metadata_path).wait_ready(
+        sandbox, timeout_seconds=3
+    )
+
+    assert inspections == 3
+    assert json.loads(metadata_path.read_text())["ready"] is True
+
+
+@pytest.mark.asyncio
 async def test_same_target_reuses_one_sandbox(tmp_path, target_configs):
     adapter = FakeAdapter()
     manager = ReadysetSandboxManager(
@@ -180,6 +777,123 @@ async def test_same_target_reuses_one_sandbox(tmp_path, target_configs):
 
     assert adapter.provisioned == ["one"]
     assert adapter.removed == 0
+
+
+@pytest.mark.asyncio
+async def test_lease_journals_active_then_clean_release(
+    tmp_path, target_configs
+):
+    metadata_path = tmp_path / "metadata.json"
+
+    class JournalAdapter(FakeAdapter):
+        async def provision(self, target, fingerprint, target_config):
+            created = await super().provision(target, fingerprint, target_config)
+            self.current = ProvisionedSandbox(
+                target=created.target,
+                fingerprint=created.fingerprint,
+                connection=created.connection,
+                container_id="container-id",
+                instance_id="instance-id",
+            )
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "target": target,
+                        "fingerprint": fingerprint,
+                        "container_id": "container-id",
+                        "instance_id": "instance-id",
+                        "ready": True,
+                        "clean": True,
+                        "dirty": False,
+                        "lease_active": False,
+                        "connection": {},
+                    }
+                )
+            )
+            return self.current
+
+    manager = ReadysetSandboxManager(
+        adapter=JournalAdapter(), metadata_path=metadata_path
+    )
+
+    async with manager.lease(target="one", owner_id="run", purpose="test"):
+        active = json.loads(metadata_path.read_text())
+        assert active["lease_active"] is True
+        assert active["clean"] is False
+        assert isinstance(active["lease_token"], str)
+
+    released = json.loads(metadata_path.read_text())
+    assert released["lease_active"] is False
+    assert released["clean"] is True
+    assert released["dirty"] is False
+    assert "lease_token" not in released
+
+
+@pytest.mark.asyncio
+async def test_dirty_lease_is_not_restart_adoptable(tmp_path, target_configs):
+    metadata_path = tmp_path / "metadata.json"
+
+    class JournalAdapter(FakeAdapter):
+        async def provision(self, target, fingerprint, target_config):
+            created = await super().provision(target, fingerprint, target_config)
+            self.current = ProvisionedSandbox(
+                target=created.target,
+                fingerprint=created.fingerprint,
+                connection=created.connection,
+                container_id="container-id",
+                instance_id="instance-id",
+            )
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "target": target,
+                        "fingerprint": fingerprint,
+                        "container_id": "container-id",
+                        "instance_id": "instance-id",
+                        "ready": True,
+                        "clean": True,
+                        "dirty": False,
+                        "lease_active": False,
+                        "connection": {},
+                    }
+                )
+            )
+            return self.current
+
+    manager = ReadysetSandboxManager(
+        adapter=JournalAdapter(), metadata_path=metadata_path
+    )
+
+    async with manager.lease(
+        target="one", owner_id="run", purpose="test"
+    ) as lease:
+        await lease.mark_dirty("cleanup failed")
+
+    released = json.loads(metadata_path.read_text())
+    assert released["clean"] is False
+    assert released["dirty"] is True
+
+
+@pytest.mark.asyncio
+async def test_host_network_port_exit_reprovisions_in_same_lease(
+    tmp_path, target_configs
+):
+    class PortRaceAdapter(FakeAdapter):
+        async def wait_ready(self, sandbox, timeout_seconds):
+            await super().wait_ready(sandbox, timeout_seconds)
+            if self.ready == 1:
+                raise SandboxPortConflictError("address already in use")
+
+    adapter = PortRaceAdapter()
+    manager = ReadysetSandboxManager(
+        adapter=adapter, metadata_path=tmp_path / "metadata.json"
+    )
+
+    async with manager.lease(target="one", owner_id="run", purpose="test"):
+        pass
+
+    assert adapter.provisioned == ["one", "one"]
+    assert adapter.removed == 1
 
 
 @pytest.mark.asyncio
@@ -288,6 +1002,31 @@ async def test_start_keeps_web_available_when_inspection_fails(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_startup_reconciliation_recovers_after_docker_returns(tmp_path):
+    class RecoversInspect(FakeAdapter):
+        def __init__(self):
+            super().__init__()
+            self.inspections = 0
+
+        async def inspect(self):
+            self.inspections += 1
+            if self.inspections == 1:
+                raise RuntimeError("Docker unavailable")
+            return self.current
+
+    adapter = RecoversInspect()
+    manager = ReadysetSandboxManager(
+        adapter=adapter, metadata_path=tmp_path / "metadata.json"
+    )
+
+    await manager.start()
+    assert (await manager.diagnostics())["phase"] == "error"
+    assert await manager._retry_reconciliation() is True
+    assert (await manager.diagnostics())["phase"] == "absent"
+    await manager.stop()
+
+
+@pytest.mark.asyncio
 async def test_start_restores_persisted_generation(tmp_path, target_configs):
     adapter = FakeAdapter()
     adapter.current = await adapter.provision(
@@ -312,6 +1051,379 @@ async def test_start_restores_persisted_generation(tmp_path, target_configs):
         assert diagnostics["generation"] == 7
     finally:
         await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_start_treats_legacy_naive_release_time_as_utc(
+    tmp_path, target_configs
+):
+    adapter = FakeAdapter()
+    adapter.current = await adapter.provision(
+        "one", "fingerprint", target_configs["one"]
+    )
+    metadata_path = tmp_path / "metadata.json"
+    metadata_path.write_text(
+        json.dumps({"last_released_at": "2026-01-01T00:00:00"})
+    )
+    manager = ReadysetSandboxManager(
+        adapter=adapter,
+        metadata_path=metadata_path,
+        idle_ttl=timedelta(hours=1),
+        clock=lambda: datetime(2026, 1, 1, 0, 30, tzinfo=timezone.utc),
+    )
+
+    await manager.start()
+    try:
+        diagnostics = await manager.diagnostics()
+        assert diagnostics["expires_at"] == "2026-01-01T01:00:00+00:00"
+    finally:
+        await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_start_clamps_far_future_release_time(tmp_path, target_configs):
+    adapter = FakeAdapter()
+    adapter.current = await adapter.provision(
+        "one", "fingerprint", target_configs["one"]
+    )
+    metadata_path = tmp_path / "metadata.json"
+    metadata_path.write_text(
+        json.dumps({"last_released_at": "9999-12-31T23:59:59+00:00"})
+    )
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    manager = ReadysetSandboxManager(
+        adapter=adapter,
+        metadata_path=metadata_path,
+        idle_ttl=timedelta(hours=1),
+        clock=lambda: now,
+    )
+
+    await manager.start()
+    try:
+        diagnostics = await manager.diagnostics()
+        assert diagnostics["last_released_at"] == now.isoformat()
+        assert diagnostics["expires_at"] == (now + timedelta(hours=1)).isoformat()
+    finally:
+        await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_second_manager_cannot_reconcile_same_sandbox(tmp_path):
+    metadata_path = tmp_path / "metadata.json"
+    first = ReadysetSandboxManager(
+        adapter=FakeAdapter(), metadata_path=metadata_path
+    )
+    second = ReadysetSandboxManager(
+        adapter=FakeAdapter(), metadata_path=metadata_path
+    )
+
+    await first.start()
+    await second.start()
+    try:
+        diagnostics = await second.diagnostics()
+        assert diagnostics["lifecycle_owned"] is False
+        assert "Another RDST process" in diagnostics["ownership_error"]
+        with pytest.raises(SandboxOwnershipError):
+            async with second.lease(
+                target="one", owner_id="second", purpose="test"
+            ):
+                pass
+        with pytest.raises(SandboxOwnershipError):
+            async with second.retire_target("one"):
+                pass
+    finally:
+        await second.stop()
+        await first.stop()
+
+
+@pytest.mark.asyncio
+async def test_manager_recovers_after_other_process_releases_lifecycle_lock(
+    tmp_path, target_configs
+):
+    metadata_path = tmp_path / "metadata.json"
+    first = ReadysetSandboxManager(
+        adapter=FakeAdapter(), metadata_path=metadata_path
+    )
+    second_adapter = FakeAdapter()
+    second = ReadysetSandboxManager(
+        adapter=second_adapter, metadata_path=metadata_path
+    )
+
+    await first.start()
+    await second.start()
+    assert (await second.diagnostics())["lifecycle_owned"] is False
+
+    await first.stop()
+    async with second.lease(target="one", owner_id="second", purpose="test"):
+        pass
+
+    diagnostics = await second.diagnostics()
+    assert diagnostics["lifecycle_owned"] is True
+    assert diagnostics["ownership_error"] is None
+    assert second_adapter.provisioned == ["one"]
+    await second.stop()
+
+
+@pytest.mark.asyncio
+async def test_manager_recovers_after_external_process_releases_file_lock(
+    tmp_path, target_configs
+):
+    metadata_path = tmp_path / "metadata.json"
+    lock_path = metadata_path.with_name(f"{metadata_path.name}.lifecycle.lock")
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from filelock import FileLock; import sys; "
+                "lock = FileLock(sys.argv[1]); lock.acquire(); "
+                "print('locked', flush=True); sys.stdin.read(1)"
+            ),
+            str(lock_path),
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    manager = ReadysetSandboxManager(
+        adapter=FakeAdapter(), metadata_path=metadata_path
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "locked"
+        await manager.start()
+        assert (await manager.diagnostics())["lifecycle_owned"] is False
+
+        assert holder.stdin is not None
+        holder.stdin.write("x")
+        holder.stdin.flush()
+        assert holder.wait(timeout=5) == 0
+
+        async with manager.lease(
+            target="one", owner_id="after-process", purpose="test"
+        ):
+            pass
+        assert (await manager.diagnostics())["lifecycle_owned"] is True
+    finally:
+        if holder.poll() is None:
+            holder.kill()
+            holder.wait(timeout=5)
+        await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_restart_during_active_lease_preserves_owner_and_container(
+    tmp_path, target_configs
+):
+    adapter = FakeAdapter()
+    manager = ReadysetSandboxManager(
+        adapter=adapter, metadata_path=tmp_path / "metadata.json"
+    )
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def hold_lease():
+        async with manager.lease(
+            target="one", owner_id="holder", purpose="test"
+        ):
+            entered.set()
+            await release.wait()
+
+    await manager.start()
+    holder = asyncio.create_task(hold_lease())
+    await entered.wait()
+    inspections_before_restart = adapter.inspections
+
+    await manager.stop()
+    await manager.start()
+
+    diagnostics = await manager.diagnostics()
+    assert diagnostics["lease_owner"] == "holder"
+    assert diagnostics["current_target"] == "one"
+    assert adapter.inspections == inspections_before_restart
+    assert adapter.removed == 0
+
+    release.set()
+    await holder
+    await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_local_manager_lazily_restarts_after_completed_stop(
+    tmp_path, monkeypatch
+):
+    adapter = LocalDockerSandboxAdapter(tmp_path / "metadata.json")
+
+    async def inspect():
+        return None
+
+    monkeypatch.setattr(adapter, "inspect", inspect)
+    manager = ReadysetSandboxManager(
+        adapter=adapter, metadata_path=tmp_path / "metadata.json"
+    )
+
+    await manager.start()
+    await manager.stop()
+
+    async with manager.reserve_measurement(
+        owner_id="restarted-request", purpose="benchmark"
+    ):
+        diagnostics = await manager.diagnostics()
+        assert diagnostics["lease_owner"] == "restarted-request"
+        assert diagnostics["lifecycle_owned"] is True
+
+    await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_stop_rejects_queued_waiter_before_releasing_process_lock(
+    tmp_path, target_configs
+):
+    metadata_path = tmp_path / "metadata.json"
+    manager = ReadysetSandboxManager(
+        adapter=FakeAdapter(), metadata_path=metadata_path
+    )
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def hold_lease():
+        async with manager.lease(
+            target="one", owner_id="holder", purpose="test"
+        ):
+            entered.set()
+            await release.wait()
+
+    async def queued_lease():
+        async with manager.lease(
+            target="one", owner_id="queued", purpose="test"
+        ):
+            pytest.fail("queued lease ran after manager shutdown")
+
+    await manager.start()
+    holder = asyncio.create_task(hold_lease())
+    await entered.wait()
+    queued = asyncio.create_task(queued_lease())
+    while not manager._waiters:
+        await asyncio.sleep(0)
+
+    await manager.stop()
+    with pytest.raises(SandboxOwnershipError, match="shutting down"):
+        await queued
+    assert (await manager.diagnostics())["lifecycle_owned"] is True
+
+    release.set()
+    await holder
+    assert manager._ownership_release_task is not None
+    await manager._ownership_release_task
+    assert (await manager.diagnostics())["lifecycle_owned"] is False
+
+    successor = ReadysetSandboxManager(
+        adapter=FakeAdapter(), metadata_path=metadata_path
+    )
+    await successor.start()
+    assert (await successor.diagnostics())["lifecycle_owned"] is True
+    await successor.stop()
+
+
+@pytest.mark.asyncio
+async def test_warm_start_replaces_stale_error_and_dirty_state(
+    tmp_path, target_configs
+):
+    adapter = FakeAdapter()
+    adapter.current = await adapter.provision(
+        "one", "fingerprint", target_configs["one"]
+    )
+    manager = ReadysetSandboxManager(
+        adapter=adapter, metadata_path=tmp_path / "metadata.json"
+    )
+    manager._state.phase = "error"
+    manager._state.current_target = "old"
+    manager._state.dirty_reason = "stale dirty state"
+    manager._state.failed_target = "old"
+    manager._state.last_error = "stale error"
+
+    await manager.start()
+    diagnostics = await manager.diagnostics()
+    assert diagnostics["phase"] == "ready"
+    assert diagnostics["current_target"] == "one"
+    assert diagnostics["dirty_reason"] is None
+    assert diagnostics["failed_target"] is None
+    assert diagnostics["last_error"] is None
+    await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_start_drains_inspection_and_releases_ownership(tmp_path):
+    class BlockingInspectAdapter(FakeAdapter):
+        def __init__(self):
+            super().__init__()
+            self.inspect_started = asyncio.Event()
+            self.allow_inspect = asyncio.Event()
+
+        async def inspect(self):
+            self.inspect_started.set()
+            await self.allow_inspect.wait()
+            return None
+
+    metadata_path = tmp_path / "metadata.json"
+    adapter = BlockingInspectAdapter()
+    first = ReadysetSandboxManager(
+        adapter=adapter, metadata_path=metadata_path
+    )
+    second = ReadysetSandboxManager(
+        adapter=FakeAdapter(), metadata_path=metadata_path
+    )
+
+    startup = asyncio.create_task(first.start())
+    await adapter.inspect_started.wait()
+    startup.cancel()
+    await asyncio.sleep(0)
+    assert startup.done() is False
+    adapter.allow_inspect.set()
+    with pytest.raises(asyncio.CancelledError):
+        await startup
+
+    await second.start()
+    try:
+        assert (await second.diagnostics())["lifecycle_owned"] is True
+    finally:
+        await second.stop()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_reconciliation_clears_transition_for_retry(tmp_path):
+    class BlockingRetryAdapter(FakeAdapter):
+        def __init__(self):
+            super().__init__()
+            self.inspections = 0
+            self.retry_started = asyncio.Event()
+            self.allow_retry = asyncio.Event()
+
+        async def inspect(self):
+            self.inspections += 1
+            if self.inspections == 1:
+                raise RuntimeError("Docker unavailable")
+            if self.inspections == 2:
+                self.retry_started.set()
+                await self.allow_retry.wait()
+            return None
+
+    adapter = BlockingRetryAdapter()
+    manager = ReadysetSandboxManager(
+        adapter=adapter, metadata_path=tmp_path / "metadata.json"
+    )
+    await manager.start()
+    retry = asyncio.create_task(manager._retry_reconciliation())
+    await adapter.retry_started.wait()
+    retry.cancel()
+    adapter.allow_retry.set()
+    with pytest.raises(asyncio.CancelledError):
+        await retry
+
+    assert manager._transition_in_progress is False
+    assert await manager._retry_reconciliation() is True
+    await manager.stop()
 
 
 @pytest.mark.asyncio
@@ -809,6 +1921,59 @@ async def test_cancelled_waiter_is_removed(tmp_path, target_configs):
 
 
 @pytest.mark.asyncio
+async def test_release_metadata_failure_does_not_strand_queued_lease(
+    tmp_path, target_configs, monkeypatch
+):
+    manager = ReadysetSandboxManager(
+        adapter=FakeAdapter(), metadata_path=tmp_path / "metadata.json"
+    )
+
+    async def queued():
+        async with manager.lease(
+            target="one", owner_id="queued", purpose="test"
+        ):
+            return
+
+    def fail_update(*_args):
+        raise OSError("disk full")
+
+    async with manager.lease(
+        target="one", owner_id="holder", purpose="test"
+    ):
+        monkeypatch.setattr(
+            "shared.deploy.sandbox_manager._update_metadata",
+            fail_update,
+        )
+        waiting = asyncio.create_task(queued())
+        while (await manager.diagnostics())["queued_requests"] != 1:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(waiting, timeout=1)
+    assert (await manager.diagnostics())["lease_owner"] is None
+
+
+@pytest.mark.asyncio
+async def test_release_clock_failure_does_not_strand_next_lease(
+    tmp_path, target_configs
+):
+    def broken_clock():
+        raise RuntimeError("clock unavailable")
+
+    manager = ReadysetSandboxManager(
+        adapter=FakeAdapter(),
+        metadata_path=tmp_path / "metadata.json",
+        clock=broken_clock,
+    )
+
+    async with manager.lease(target="one", owner_id="first", purpose="test"):
+        pass
+    async with manager.lease(target="one", owner_id="second", purpose="test"):
+        pass
+
+    assert (await manager.diagnostics())["lease_owner"] is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("cleanup", ["target", "expiry"])
 async def test_failed_rollback_remains_tracked_for_cleanup(
     tmp_path, target_configs, cleanup
@@ -945,6 +2110,41 @@ async def test_idle_expiry_failure_keeps_sandbox_dirty_for_retry(
 
 
 @pytest.mark.asyncio
+async def test_expiry_loop_survives_one_failed_check(tmp_path, monkeypatch):
+    manager = ReadysetSandboxManager(
+        adapter=FakeAdapter(),
+        idle_ttl=timedelta(seconds=1),
+        metadata_path=tmp_path / "metadata.json",
+    )
+    original_sleep = asyncio.sleep
+    recovered = asyncio.Event()
+    calls = 0
+
+    async def immediate_sleep(_delay):
+        await original_sleep(0)
+
+    async def flaky_expiry():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("transient expiry failure")
+        recovered.set()
+        return False
+
+    monkeypatch.setattr(sandbox_manager_module.asyncio, "sleep", immediate_sleep)
+    monkeypatch.setattr(manager, "expire_idle", flaky_expiry)
+    task = asyncio.create_task(manager._expiry_loop())
+    try:
+        await asyncio.wait_for(recovered.wait(), timeout=1)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert calls >= 2
+
+
+@pytest.mark.asyncio
 async def test_idle_expiry_blocks_a_new_lease_until_removal_finishes(
     tmp_path, target_configs
 ):
@@ -1050,6 +2250,20 @@ async def test_remove_unrelated_target_does_not_wait_for_active_lease(
 
 
 @pytest.mark.asyncio
+async def test_retiring_target_rejects_new_lease(tmp_path, target_configs):
+    manager = ReadysetSandboxManager(
+        adapter=FakeAdapter(), metadata_path=tmp_path / "metadata.json"
+    )
+
+    async with manager.retire_target("one"):
+        with pytest.raises(ValueError, match="being removed"):
+            async with manager.lease(
+                target="one", owner_id="late", purpose="test"
+            ):
+                pass
+
+
+@pytest.mark.asyncio
 async def test_remove_unrelated_target_does_not_wait_for_transition(
     tmp_path, target_configs
 ):
@@ -1100,6 +2314,49 @@ async def test_remove_target_waits_for_active_lease_then_removes_sandbox(
     assert await removal is True
     assert adapter.removed == 1
     assert (await manager.diagnostics())["phase"] == "absent"
+
+
+@pytest.mark.asyncio
+async def test_remove_target_waits_for_cancelled_provision_rollback(
+    tmp_path, target_configs
+):
+    class BlockingProvisionAdapter(FakeAdapter):
+        def __init__(self):
+            super().__init__()
+            self.provision_started = asyncio.Event()
+            self.allow_provision = asyncio.Event()
+
+        async def provision(self, target, fingerprint, target_config):
+            self.provision_started.set()
+            await self.allow_provision.wait()
+            return await super().provision(target, fingerprint, target_config)
+
+    adapter = BlockingProvisionAdapter()
+    manager = ReadysetSandboxManager(
+        adapter=adapter, metadata_path=tmp_path / "metadata.json"
+    )
+
+    async def acquire():
+        async with manager.lease(
+            target="one", owner_id="provisioning", purpose="test"
+        ):
+            pass
+
+    acquisition = asyncio.create_task(acquire())
+    await adapter.provision_started.wait()
+    removal = asyncio.create_task(manager.remove_target("one"))
+    acquisition.cancel()
+    await asyncio.sleep(0)
+    assert removal.done() is False
+
+    adapter.allow_provision.set()
+    with pytest.raises(asyncio.CancelledError):
+        await acquisition
+    assert await removal is False
+    assert adapter.removed == 1
+    diagnostics = await manager.diagnostics()
+    assert diagnostics["phase"] == "absent"
+    assert diagnostics["lease_owner"] is None
 
 
 @pytest.mark.asyncio

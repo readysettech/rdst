@@ -37,12 +37,14 @@ The runner starts the server on `127.0.0.1:8787` with a temporary `HOME` and
 one worker. Tests configure service responses with `setBackendFixtures`; they
 must not use `page.route()` or `route.fulfill()` for RDST API endpoints.
 
-## Postgres E2E smoke
+## Postgres and Readyset E2E
 
 The Postgres tier has no service adapters. It drives the browser through the
 production frontend and FastAPI app, configures a live PostgreSQL target,
-calls the real schema collector, initializes the semantic layer with the real
-`SchemaService`, and checks that the UI displays the introspected tables.
+calls the real schema collector, and initializes the semantic layer with the
+real `SchemaService`. It also starts a comparison through the web UI, pulls and
+runs the managed Readyset image through the host Docker daemon, verifies the
+physical container, and removes it by deleting the target.
 
 Buildkite starts both the browser runner and PostgreSQL with:
 

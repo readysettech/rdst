@@ -13,6 +13,7 @@ so the read paths stay real.
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from typing import Any
 
 from pydantic import TypeAdapter
@@ -250,8 +251,13 @@ class FakeSandboxManager:
         fixtures.take("sandbox_prewarm", default={"value": True})
 
     async def remove_target(self, target):
+        async with self.retire_target(target) as removed:
+            return removed
+
+    @asynccontextmanager
+    async def retire_target(self, target):
         del target
-        return False
+        yield False
 
 
 fake_sandbox_manager = FakeSandboxManager()
