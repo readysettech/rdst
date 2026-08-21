@@ -37,10 +37,16 @@ function Legend({ color, label }: { color: string; label: string }) {
 
 export function CompareLiveChart({
   timeline,
+  queryLabel,
   live = false,
+  following = false,
 }: {
   timeline: CacheCompareSample[]
+  /** The one query this curve belongs to; the chart never mixes queries. */
+  queryLabel?: string
   live?: boolean
+  /** Selection is still tracking whichever query the sandbox is measuring. */
+  following?: boolean
 }) {
   const [metric, setMetric] = useState<Metric>('qps')
   const lastSecond = Math.max(
@@ -106,12 +112,14 @@ export function CompareLiveChart({
     )
   )
 
+  const title = live ? 'Live comparison' : 'Load comparison'
+
   return (
-    <Card aria-live={live ? 'polite' : undefined}>
+    <Card>
       <Card.Header className="items-start gap-4 tablet:flex-row tablet:items-center tablet:justify-between">
         <VStack className="items-start gap-0.5">
           <Card.Title>
-            {live ? 'Live comparison' : 'Load comparison'}
+            {queryLabel ? `${title} · ${queryLabel}` : title}
           </Card.Title>
           <Card.Description>
             {metric === 'qps'
@@ -137,7 +145,7 @@ export function CompareLiveChart({
               level="caption"
               className="ml-auto text-content-positive-soft"
             >
-              Live
+              {following ? 'Following live' : 'Live'}
             </Text>
           )}
         </HStack>

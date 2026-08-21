@@ -85,6 +85,15 @@ export function setBackendFixtures(operations: BackendFixtures = {}) {
   )
 }
 
+/**
+ * The page's own content, without the chrome around it. A run's error message
+ * is reported both on the page and by the Jobs sidebar, so assertions about
+ * what a page says need to name the page.
+ */
+export function mainContent(page: Page) {
+  return page.locator('#main-content')
+}
+
 export function consumeBrowserError(browserErrors: string[], expected: string) {
   expect(browserErrors).toEqual([expected])
   browserErrors.splice(0, 1)

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addedQuerySearchPatch,
   parseQueryLibrarySearch,
+  QUERY_LIBRARY_VIEWS,
   resolvedQueryLibraryState,
 } from './queryLibraryState'
 
@@ -56,8 +57,43 @@ describe('query library URL state', () => {
 
   it('maps legacy workspace views without retaining the old IA', () => {
     expect(parseQueryLibrarySearch({ view: 'slow' }).view).toBe('high-impact')
-    expect(parseQueryLibrarySearch({ view: 'saved' }).view).toBe('saved')
     expect(parseQueryLibrarySearch({ view: 'analyze' }).action).toBeUndefined()
+  })
+
+  it('keeps Status to the statuses the server computes', () => {
+    expect(QUERY_LIBRARY_VIEWS).not.toContain('saved')
+  })
+
+  it('migrates the old Saved status into the independent star', () => {
+    const migrated = parseQueryLibrarySearch({ view: 'saved' })
+    expect(migrated.starred).toBe(true)
+    expect(migrated.view).toBeUndefined()
+  })
+
+  it('reads the star from either spelling and composes it with a status', () => {
+    expect(parseQueryLibrarySearch({ starred: '1' }).starred).toBe(true)
+    expect(parseQueryLibrarySearch({ starred: true }).starred).toBe(true)
+    expect(parseQueryLibrarySearch({ starred: 'no' }).starred).toBeUndefined()
+
+    const composed = parseQueryLibrarySearch({
+      view: 'needs-analysis',
+      starred: '1',
+    })
+    expect(composed).toMatchObject({ view: 'needs-analysis', starred: true })
+    expect(resolvedQueryLibraryState(composed)).toMatchObject({
+      view: 'needs-analysis',
+      starred: true,
+    })
+  })
+
+  it('reads the drawer tab, defaulting a bare analyze link to Analyze', () => {
+    expect(parseQueryLibrarySearch({ analyze: 'h1' }).tab).toBeUndefined()
+    expect(
+      parseQueryLibrarySearch({ analyze: 'h1', tab: 'overview' }).tab
+    ).toBe('overview')
+    expect(
+      parseQueryLibrarySearch({ analyze: 'h1', tab: 'nonsense' }).tab
+    ).toBeUndefined()
   })
 
   it('keeps live capture as a contextual library action', () => {
@@ -73,12 +109,14 @@ describe('query library URL state', () => {
       activity: 'all',
       impact: 'all',
       sort: 'highest-impact',
+      starred: false,
     })
   })
 
   it('orients the library to a newly added query', () => {
     expect(addedQuerySearchPatch('new-hash')).toEqual({
-      view: 'saved',
+      view: undefined,
+      starred: true,
       q: undefined,
       source: undefined,
       params: undefined,

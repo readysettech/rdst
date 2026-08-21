@@ -76,6 +76,8 @@ export function QueryLibraryToolbar({
         onClearFilters={library.clearFilterSelections}
         sort={library.sort}
         onSortChange={library.setSort}
+        starred={library.starred}
+        onStarredChange={library.setStarred}
         displayMode={library.displayMode}
         onDisplayModeChange={library.setDisplayMode}
         properties={library.properties}

@@ -98,9 +98,7 @@ describe('cache route validateSearch', () => {
 describe('CachingPage workspace', () => {
   it('renders only the two dedicated performance-test modes', () => {
     render(<CachingPage view="compare" />)
-    expect(
-      screen.getByRole('heading', { name: 'Performance tests' })
-    ).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Benchmarks' })).toBeTruthy()
     expect(screen.queryByRole('tab', { name: 'Quick test' })).toBeNull()
     expect(screen.getByRole('tab', { name: 'Compare' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Load test' })).toBeTruthy()

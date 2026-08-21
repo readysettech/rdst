@@ -69,7 +69,6 @@ describe('selectQueryLibrary', () => {
       }).queries.map((entry) => entry.hash)
 
     expect(select('new')).toEqual(['new'])
-    expect(select('saved')).toEqual(['saved'])
     expect(select('needs-analysis')).toEqual(['new'])
     expect(select('ready-to-cache')).toEqual(['ready'])
     expect(select('cached')).toEqual(['cached'])

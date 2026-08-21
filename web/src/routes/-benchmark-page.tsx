@@ -15,9 +15,11 @@ import {
 export function BenchmarkPage({
   selectedRunId,
   onClearSelectedRun,
+  onFindQueries,
 }: {
   selectedRunId?: string
   onClearSelectedRun?: () => void
+  onFindQueries?: () => void
 }) {
   const controller = useLoadTestController({
     selectedRunId,
@@ -64,7 +66,9 @@ export function BenchmarkPage({
   )
 
   if (pageState === 'configure') {
-    return <LoadTestSetup controller={controller} />
+    return (
+      <LoadTestSetup controller={controller} onFindQueries={onFindQueries} />
+    )
   }
 
   const resultModel = deriveLoadTestResultModel({

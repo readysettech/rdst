@@ -18,18 +18,22 @@ import {
   type QueryRegistryEntry,
   type QueryRegistryReadModelPage,
   removeQueryFromRegistry,
+  setQueryStarred,
   updateQuerySql,
   updateQueryTag,
 } from './api'
 
 export type { QueryRegistryEntry }
 
+/** Every registry read, whatever its target: the widest invalidation prefix. */
+export const QUERY_REGISTRY_ROOT_KEY = ['queryRegistry'] as const
+
 /**
  * Target-scoped registry key prefix. Full list keys append limit and offset,
  * so invalidating this prefix refetches only the given target's variants.
  */
 export const queryRegistryQueryKey = (target?: string | null) =>
-  ['queryRegistry', target ?? null] as const
+  [...QUERY_REGISTRY_ROOT_KEY, target ?? null] as const
 
 export function useQueryRegistry(
   initialLimit = 100,
@@ -194,6 +198,75 @@ export function useQueryRegistry(
   }
 }
 
+/** One row's star, as the optimistic cache patch writes it. */
+type StarUpdate = { hash: string; starred: boolean; starred_at: string | null }
+
+/**
+ * Write a star into one cached registry payload. Every shape cached under the
+ * registry prefix keeps its rows in a `queries` array — the paged read model
+ * nests one per page — so the patch walks to that array and returns the
+ * payload untouched when this query is not in it.
+ */
+function patchCachedStar(data: unknown, update: StarUpdate): unknown {
+  if (!data || typeof data !== 'object') return data
+  const paged = data as { pages?: unknown[] }
+  if (Array.isArray(paged.pages)) {
+    return {
+      ...data,
+      pages: paged.pages.map((page) => patchCachedStar(page, update)),
+    }
+  }
+  const listed = data as { queries?: QueryRegistryEntry[] }
+  if (!Array.isArray(listed.queries)) return data
+  if (!listed.queries.some((entry) => entry.hash === update.hash)) return data
+  return {
+    ...data,
+    queries: listed.queries.map((entry) =>
+      entry.hash === update.hash
+        ? { ...entry, starred: update.starred, starred_at: update.starred_at }
+        : entry
+    ),
+  }
+}
+
+/**
+ * The star, set and cleared from wherever a query is shown. The cached rows
+ * are rewritten before the request leaves, so one click flips the affordance;
+ * a failed request restores the exact rows that click replaced.
+ */
+export function useStarQuery(target?: string | null) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ hash, starred }: { hash: string; starred: boolean }) =>
+      setQueryStarred(hash, starred, target),
+    onMutate: async ({ hash, starred }) => {
+      await queryClient.cancelQueries({ queryKey: QUERY_REGISTRY_ROOT_KEY })
+      const snapshot = queryClient.getQueriesData({
+        queryKey: QUERY_REGISTRY_ROOT_KEY,
+      })
+      const update: StarUpdate = {
+        hash,
+        starred,
+        starred_at: starred ? new Date().toISOString() : null,
+      }
+      queryClient.setQueriesData(
+        { queryKey: QUERY_REGISTRY_ROOT_KEY },
+        (data: unknown) => patchCachedStar(data, update)
+      )
+      return { snapshot }
+    },
+    onError: (_error, _variables, context) => {
+      for (const [key, data] of context?.snapshot ?? []) {
+        queryClient.setQueryData(key, data)
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_REGISTRY_ROOT_KEY })
+    },
+  })
+}
+
 /** Filter and sort values as the read model understands them. */
 export type QueryRegistryReadModelSpec = {
   search: string
@@ -203,6 +276,8 @@ export type QueryRegistryReadModelSpec = {
   activity: string
   impact: string
   sort: string
+  /** The star: an independent boolean that composes with every other value. */
+  starred: boolean
 }
 
 export const QUERY_REGISTRY_READ_MODEL_PAGE_SIZE = 100
@@ -221,16 +296,27 @@ export function useQueryRegistryReadModel(
   pageSize = QUERY_REGISTRY_READ_MODEL_PAGE_SIZE
 ) {
   const queryClient = useQueryClient()
-  const { search, view, source, params, activity, impact, sort } = spec
+  const { search, view, source, params, activity, impact, sort, starred } = spec
   const queryKey = useMemo(
     () =>
       [
         ...queryRegistryQueryKey(target),
         'read-model',
-        { search, view, source, params, activity, impact, sort },
+        { search, view, source, params, activity, impact, sort, starred },
         pageSize,
       ] as const,
-    [search, view, source, params, activity, impact, sort, pageSize, target]
+    [
+      search,
+      view,
+      source,
+      params,
+      activity,
+      impact,
+      sort,
+      starred,
+      pageSize,
+      target,
+    ]
   )
 
   const query = useInfiniteQuery({
@@ -245,6 +331,7 @@ export function useQueryRegistryReadModel(
         activity,
         impact,
         sort,
+        starred,
         limit: pageSize,
         cursor: pageParam ?? undefined,
       }),

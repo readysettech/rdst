@@ -11,12 +11,25 @@ import {
 import { useTarget } from '../../../hooks/useTarget'
 import { useQueryDiscoverySnapshot } from '../../../lib/useQueryDiscovery'
 import { useQueryRegistryReadModel } from '../../../lib/useQueryRegistry'
-import { useSavedQueriesController } from '../saved/useSavedQueriesController'
+import {
+  type AnalyzeDrawerLink,
+  analyzeDrawerLink,
+  analyzeDrawerPatch,
+} from '../analyze-drawer/analyzeDrawerState'
+import {
+  type AnalyzeOptions,
+  useSavedQueriesController,
+} from '../saved/useSavedQueriesController'
 import {
   QUERY_LIBRARY_DEFAULT_DISPLAY_PROPERTIES,
   type QueryLibraryDisplayMode,
   type QueryLibraryDisplayProperty,
 } from './queryLibraryDisplay'
+import {
+  QUERY_LIBRARY_DEFAULT_DISPLAY_MODE,
+  readQueryLibraryDisplayPreference,
+  writeQueryLibraryDisplayPreference,
+} from './queryLibraryDisplayStore'
 import {
   isQueryLibraryFiltered,
   normalizeQueryLibraryFacetCounts,
@@ -66,6 +79,38 @@ export function useQueryLibraryController({
     [navigate]
   )
 
+  /**
+   * The analyze drawer is URL-owned, and its URL is not a filter: writing it
+   * immediately (and as a real history entry) is what makes opening, closing
+   * and back behave. The debounced filter write is cancelled first so a queued
+   * search change cannot land on top of the drawer's own state.
+   */
+  const updateSearchNow = useCallback(
+    (patch: Partial<QueryLibrarySearch>, options?: { replace?: boolean }) => {
+      cancelPendingSearchNavigation()
+      const nextSearch = { ...optimisticSearchRef.current, ...patch }
+      optimisticSearchRef.current = nextSearch
+      setOptimisticSearch(nextSearch)
+      void navigate({
+        to: '/queries',
+        search: nextSearch,
+        replace: options?.replace ?? false,
+      })
+    },
+    [cancelPendingSearchNavigation, navigate]
+  )
+
+  const openAnalyzeDrawer = useCallback(
+    (link: AnalyzeDrawerLink, options?: { replace?: boolean }) => {
+      updateSearchNow(analyzeDrawerPatch(link), options)
+    },
+    [updateSearchNow]
+  )
+
+  const closeAnalyzeDrawer = useCallback(() => {
+    updateSearchNow(analyzeDrawerPatch(null))
+  }, [updateSearchNow])
+
   const consumeTransientDeepLink = useCallback(
     (hash: string) => {
       if (optimisticSearchRef.current.hash !== hash) return
@@ -83,6 +128,7 @@ export function useQueryLibraryController({
       optimisticSearch.q,
       optimisticSearch.sort,
       optimisticSearch.source,
+      optimisticSearch.starred,
       optimisticSearch.view,
     ]
   )
@@ -102,6 +148,7 @@ export function useQueryLibraryController({
       activity: deferredState.activity,
       impact: deferredState.impact,
       sort: deferredState.sort,
+      starred: deferredState.starred,
     },
     target
   )
@@ -120,13 +167,21 @@ export function useQueryLibraryController({
     },
   })
   const discovery = useQueryDiscoverySnapshot(target).data
+  // The Display menu's choices (view mode and visible properties) persist
+  // across visits; Filter deliberately stays URL-owned and untouched here.
+  const [storedDisplay] = useState(readQueryLibraryDisplayPreference)
   const [properties, setProperties] = useState<QueryLibraryDisplayProperty[]>(
-    QUERY_LIBRARY_DEFAULT_DISPLAY_PROPERTIES
+    storedDisplay?.properties ?? QUERY_LIBRARY_DEFAULT_DISPLAY_PROPERTIES
   )
-  const [displayMode, setDisplayModeState] =
-    useState<QueryLibraryDisplayMode>('card-1')
+  const [displayMode, setDisplayModeState] = useState<QueryLibraryDisplayMode>(
+    storedDisplay?.mode ?? QUERY_LIBRARY_DEFAULT_DISPLAY_MODE
+  )
   const deferredDisplayMode = useDeferredValue(displayMode)
   const deferredProperties = useDeferredValue(properties)
+
+  useEffect(() => {
+    writeQueryLibraryDisplayPreference({ mode: displayMode, properties })
+  }, [displayMode, properties])
 
   // Filtering, sorting, and facet counts come from the read model; the client
   // only presents the loaded rows.
@@ -151,6 +206,7 @@ export function useQueryLibraryController({
     deferredState.activity,
     deferredState.impact,
     deferredState.sort,
+    String(deferredState.starred),
     String(readModel.pageCount),
   ].join('\u0000')
   const stableList = useStableQueryList({
@@ -180,6 +236,10 @@ export function useQueryLibraryController({
   }, [
     search.action,
     search.activity,
+    search.analyze,
+    search.analysisId,
+    search.rerun,
+    search.tab,
     search.hash,
     search.impact,
     search.params,
@@ -187,6 +247,7 @@ export function useQueryLibraryController({
     search.run,
     search.sort,
     search.source,
+    search.starred,
     search.view,
   ])
 
@@ -194,15 +255,39 @@ export function useQueryLibraryController({
     if (search.action === 'add') base.addDialog.openDialog()
   }, [base.addDialog.openDialog, search.action])
 
+  // Reading a query's Overview is what expanding its card used to be, so it
+  // drains the New mark the same way. Analyze is a different act and leaves it.
+  useEffect(() => {
+    if (!optimisticSearch.analyze || optimisticSearch.tab !== 'overview') return
+    base.rowActions.markReviewed(optimisticSearch.analyze)
+  }, [
+    base.rowActions.markReviewed,
+    optimisticSearch.analyze,
+    optimisticSearch.tab,
+  ])
+
   const analyzeFromLibrary = (
     sql: string,
     queryTarget?: string,
-    mostRecentParams?: Record<string, unknown>
+    mostRecentParams?: Record<string, unknown>,
+    options?: AnalyzeOptions
   ) => {
     // Search and filter changes are reflected in the URL after a short delay so
     // the library stays responsive while typing. Do not let that queued
     // navigation pull the user back to Queries after they choose Analyze.
     cancelPendingSearchNavigation()
+    const hash = options?.stored?.hash ?? options?.hash
+    if (hash) {
+      // A registry query opens over the library. Asking for it without a
+      // stored id is asking for a measurement, not for the analysis it
+      // already has.
+      openAnalyzeDrawer({
+        hash,
+        analysisId: options?.stored?.analysisId,
+        rerun: !options?.stored,
+      })
+      return
+    }
     const current = optimisticSearchRef.current
     const returnSearch: QueryLibrarySearch = {
       view: current.view,
@@ -224,6 +309,9 @@ export function useQueryLibraryController({
             ? JSON.stringify(mostRecentParams)
             : undefined,
         returnSearch: JSON.stringify(returnSearch),
+        origin: 'query-library',
+        hash: options?.stored?.hash,
+        analysisId: options?.stored?.analysisId,
       },
     })
   }
@@ -233,6 +321,16 @@ export function useQueryLibraryController({
     rowActions: {
       ...base.rowActions,
       analyze: analyzeFromLibrary,
+      // Recall opens over the library rather than navigating away from it.
+      openOverview: (hash: string) =>
+        openAnalyzeDrawer({ hash, tab: 'overview' }),
+    },
+    analyzeDrawer: {
+      link: analyzeDrawerLink(optimisticSearch),
+      librarySearch: optimisticSearch,
+      entries: readModel.queries,
+      open: openAnalyzeDrawer,
+      close: closeAnalyzeDrawer,
     },
     library: {
       ...state,
@@ -264,6 +362,8 @@ export function useQueryLibraryController({
         updateSearch({ activity }),
       setImpact: (impact: typeof state.impact) => updateSearch({ impact }),
       setSort: (sort: typeof state.sort) => updateSearch({ sort }),
+      setStarred: (starred: boolean) =>
+        updateSearch({ starred: starred || undefined }),
       toggleProperty: (property: QueryLibraryDisplayProperty) =>
         setProperties((current) =>
           current.includes(property)
@@ -277,6 +377,7 @@ export function useQueryLibraryController({
           params: undefined,
           activity: undefined,
           impact: undefined,
+          starred: undefined,
         }),
       clearAdvancedFilters: () =>
         updateSearch({
@@ -294,6 +395,7 @@ export function useQueryLibraryController({
           activity: undefined,
           impact: undefined,
           sort: undefined,
+          starred: undefined,
         }),
       markAllReviewed: () => base.rowActions.markAllReviewed(newVisibleHashes),
       // Pending rows were served by the active filter's read model, so

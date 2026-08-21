@@ -7,13 +7,12 @@ import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { ComparisonCard } from '../../../components/CacheComparison'
-import type { QueryAnalysisSummary } from '../../../lib/api'
 import type { BackgroundRunState } from '../../../lib/backgroundRuns'
 import { formatDuration, formatTimestamp } from '../../../lib/formatters'
 import { OBSERVED_EVIDENCE_PROVENANCE } from '../../../lib/queryEvidence'
 import type { QueryRegistryEntry } from '../../../lib/useQueryRegistry'
 import { isCacheRunResult } from '../../../types/cache'
-import { getResultTone, getScoreTone } from '../results/resultsSelectors'
+import { analysisOutcome } from '../results/resultsSelectors'
 import { useLatestAnalysis } from './useLatestAnalysis'
 
 interface SavedQueryDetailsProps {
@@ -21,31 +20,9 @@ interface SavedQueryDetailsProps {
   cacheTestRun?: BackgroundRunState
   onDismissRun: (runId: string) => void
   onClose: () => void
-  /** Opens Analyze for this query; the analysis re-runs on that action. */
+  /** Opens the stored analysis read-only. Absent when none is stored yet. */
   onViewAnalysis?: () => void
   showMetadata?: boolean
-}
-
-/** Compact "Good / 82 of 100" style outcome for the last-analysis row. */
-function analysisOutcome(summary: QueryAnalysisSummary | null) {
-  if (!summary) return null
-  const rating = summary.overall_rating.trim()
-  const ratingLabel = rating
-    ? rating[0].toUpperCase() + rating.slice(1).toLowerCase()
-    : ''
-  const score =
-    typeof summary.efficiency_score === 'number' && summary.efficiency_score > 0
-      ? Math.round(summary.efficiency_score)
-      : null
-  const label =
-    ratingLabel && score !== null
-      ? `${ratingLabel} · ${score}/100`
-      : ratingLabel || (score !== null ? `${score}/100` : '')
-  if (!label) return null
-  return {
-    label,
-    tone: score !== null ? getScoreTone(score) : getResultTone(rating),
-  }
 }
 
 export function SavedQueryDetails({
@@ -151,7 +128,7 @@ export function SavedQueryDetails({
               icon="speedometer"
               iconPosition="left"
               label="View analysis"
-              title="Opens Analyze and re-runs this query"
+              title="Opens the stored analysis without re-running it"
               onClick={onViewAnalysis}
             />
           </Show>

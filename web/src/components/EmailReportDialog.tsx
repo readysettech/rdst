@@ -91,7 +91,8 @@ export function EmailReportDialog({
       }
       toast({
         title: 'Report service unavailable',
-        description: 'We could not reach the RDST report service. Try again shortly.',
+        description:
+          'We could not reach the RDST report service. Try again shortly.',
         variant: 'negative',
       })
     },
@@ -132,7 +133,9 @@ export function EmailReportDialog({
         const data = (await response.json()) as { verified: boolean }
         if (data.verified && !cancelled) {
           setStep('success')
-          void queryClient.invalidateQueries({ queryKey: ['settings', 'email'] })
+          void queryClient.invalidateQueries({
+            queryKey: ['settings', 'email'],
+          })
         }
       } catch {
         // Transient failure: the next tick retries.
@@ -202,7 +205,9 @@ export function EmailReportDialog({
               </div>
               <VStack className="gap-0.5 items-start">
                 <Text level="headline-4" className="text-content-layout-1">
-                  {step === 'success' ? 'Report on its way' : 'Email me this report'}
+                  {step === 'success'
+                    ? 'Report on its way'
+                    : 'Email me this report'}
                 </Text>
                 <Text level="body-small" className="text-content-layout-3">
                   {step === 'verify'
@@ -215,7 +220,11 @@ export function EmailReportDialog({
 
           <div className="p-6 space-y-4">
             {errorMessage && (
-              <Alert variant="negative" modifier="outline" label={errorMessage} />
+              <Alert
+                variant="negative"
+                modifier="outline"
+                label={errorMessage}
+              />
             )}
 
             {step === 'loading' && (

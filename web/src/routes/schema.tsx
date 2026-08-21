@@ -550,7 +550,7 @@ function SchemaPage() {
                   level="headline-3"
                   className="text-content-layout-1"
                 >
-                  Semantic Layer
+                  Schema
                 </Text>
                 <SemanticLayerInfoTooltip />
               </HStack>
@@ -628,7 +628,7 @@ function SchemaPage() {
                   level="headline-3"
                   className="text-content-layout-1"
                 >
-                  Semantic Layer
+                  Schema
                 </Text>
                 <SemanticLayerInfoTooltip />
                 <Tag

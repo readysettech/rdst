@@ -64,12 +64,6 @@ export function useLoadTestController({
   selectedRunId?: string
   onClearSelectedRun?: () => void
 }) {
-  const {
-    queries,
-    isLoading: registryLoading,
-    listError,
-    refetch: refetchRegistry,
-  } = useQueryRegistry()
   const { target } = useTarget()
   const {
     data: status,
@@ -94,6 +88,16 @@ export function useLoadTestController({
     userOverrodeDestination.current = true
     setDestinationTarget(value || null)
   }, [])
+
+  // The picker offers only queries that belong to the destination database:
+  // otherwise switching Database left cross-target queries selectable even
+  // though the run always executes against destinationTarget.
+  const {
+    queries,
+    isLoading: registryLoading,
+    listError,
+    refetch: refetchRegistry,
+  } = useQueryRegistry(undefined, destinationTarget)
 
   const destinationLock = useTargetPasswordLock(destinationTarget)
   const connectivity = useTargetConnectivityGate(

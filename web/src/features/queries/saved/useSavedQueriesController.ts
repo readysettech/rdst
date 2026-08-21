@@ -11,6 +11,7 @@ import { formatDbTime, queryImpactMs } from '../../../lib/queryImpact'
 import {
   type QueryRegistryEntry,
   useQueryRegistry,
+  useStarQuery,
 } from '../../../lib/useQueryRegistry'
 import type { AddQueryMode } from './AddQueryDialog'
 import {
@@ -30,6 +31,16 @@ export type QueryRegistryListSource = {
   isFetching: boolean
   listError: string | null
   refetch: () => Promise<unknown>
+}
+
+/**
+ * Opening a query's analysis. With `stored`, `/results` reopens that persisted
+ * record read-only; without it, the page measures the query again.
+ */
+export type AnalyzeOptions = {
+  stored?: { hash: string; analysisId: string }
+  /** Registry hash of a query with no stored analysis yet. */
+  hash?: string
 }
 
 export function useSavedQueriesController({
@@ -81,6 +92,7 @@ export function useSavedQueriesController({
     sql: string
   } | null>(null)
   const [startingTestHash, setStartingTestHash] = useState<string | null>(null)
+  const starMutation = useStarQuery(target)
   const backgroundRuns = useBackgroundRuns()
   const reviewRequests = useRef(new Set<string>())
   const markReviewedRef = useRef<(hash: string) => void>(() => undefined)
@@ -440,7 +452,8 @@ export function useSavedQueriesController({
   const handleAnalyze = (
     sql: string,
     queryTarget?: string,
-    mostRecentParams?: Record<string, unknown>
+    mostRecentParams?: Record<string, unknown>,
+    options?: AnalyzeOptions
   ) => {
     void navigate({
       to: '/results',
@@ -451,6 +464,8 @@ export function useSavedQueriesController({
           mostRecentParams && Object.keys(mostRecentParams).length > 0
             ? JSON.stringify(mostRecentParams)
             : undefined,
+        hash: options?.stored?.hash,
+        analysisId: options?.stored?.analysisId,
       },
     })
   }
@@ -528,6 +543,24 @@ export function useSavedQueriesController({
       },
       markReviewed,
       markAllReviewed,
+      // The cached rows carry the new state before the request leaves, so the
+      // star flips on the click; a failure restores it and says why.
+      toggleStar: (hash: string, starred: boolean) => {
+        starMutation.mutate(
+          { hash, starred },
+          {
+            onError: (error) => {
+              toast({
+                title: starred
+                  ? "Couldn't star this query"
+                  : "Couldn't remove this star",
+                description: error.message,
+                variant: 'negative',
+              })
+            },
+          }
+        )
+      },
       startRename: (hash: string, name: string) => {
         setEditingHash(hash)
         setTagDraft(name)
@@ -561,6 +594,12 @@ export function useSavedQueriesController({
       },
       runTest,
       analyze: handleAnalyze,
+      openOverview: (hash: string) => {
+        void navigate({
+          to: '/queries',
+          search: { analyze: hash, tab: 'overview' },
+        })
+      },
       dismissRun: dismissBackgroundRun,
     },
     navigation: {

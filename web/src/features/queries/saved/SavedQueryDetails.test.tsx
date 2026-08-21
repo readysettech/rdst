@@ -1,11 +1,6 @@
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { renderWithClient } from '@/test-utils'
 import type { BackgroundRunState } from '../../../lib/backgroundRuns'
 import type { QueryRegistryEntry } from '../../../lib/useQueryRegistry'
 import type { CacheRunResult } from '../../../types/cache'
@@ -100,7 +95,7 @@ const completeResult: CacheRunResult = {
 
 describe('SavedQueryDetails', () => {
   it('renders query metadata without a linked performance run', () => {
-    render(
+    renderWithClient(
       <SavedQueryDetails
         entry={entry}
         cacheTestRun={undefined}
@@ -114,7 +109,7 @@ describe('SavedQueryDetails', () => {
   })
 
   it('can hide metadata when the surrounding detail rail owns it', () => {
-    render(
+    renderWithClient(
       <SavedQueryDetails
         entry={entry}
         cacheTestRun={undefined}
@@ -133,7 +128,7 @@ describe('SavedQueryDetails', () => {
       winner: 'readyset',
     } as unknown as CacheRunResult
 
-    render(
+    renderWithClient(
       <SavedQueryDetails
         entry={entry}
         cacheTestRun={cacheTestRun(incompleteResult)}
@@ -157,7 +152,7 @@ describe('SavedQueryDetails', () => {
     })
     const onViewAnalysis = vi.fn()
 
-    render(
+    renderWithClient(
       <SavedQueryDetails
         entry={{
           ...entry,
@@ -185,7 +180,7 @@ describe('SavedQueryDetails', () => {
   it('keeps the last-analysis row without an outcome when no summary is stored', async () => {
     const fetchMock = stubLatestAnalysis(null)
 
-    render(
+    renderWithClient(
       <SavedQueryDetails
         entry={{ ...entry, last_analyzed_at: '2026-08-18T08:00:00Z' }}
         cacheTestRun={undefined}
@@ -203,7 +198,7 @@ describe('SavedQueryDetails', () => {
   it('hides the last-analysis row for entries that were never analyzed', () => {
     const fetchMock = stubLatestAnalysis(null)
 
-    render(
+    renderWithClient(
       <SavedQueryDetails
         entry={entry}
         cacheTestRun={undefined}
@@ -222,7 +217,7 @@ describe('SavedQueryDetails', () => {
     const onDismissRun = vi.fn()
     const onClose = vi.fn()
 
-    render(
+    renderWithClient(
       <SavedQueryDetails
         entry={entry}
         cacheTestRun={cacheTestRun(completeResult)}

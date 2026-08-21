@@ -2,12 +2,12 @@ import type { CompareOutcomeRequest } from '../../../lib/api'
 import {
   type BackgroundRunState,
   cancelBackgroundRun,
+  isQueuedRun,
   startCacheCompareRun,
   updateCacheCompareLoad,
 } from '../../../lib/backgroundRuns'
 import { sanitizeWebError } from '../../../lib/errorContract'
 import type {
-  CacheCompareLaneSample,
   CacheCompareRunResult,
   CacheCompareSample,
 } from '../../../types/cache'
@@ -15,6 +15,15 @@ import type {
 const STORAGE_KEY = 'rdst_capacity_compare_batches_v3'
 const ACTIVE_STORAGE_KEY = 'rdst_active_capacity_compare_batches_v3'
 const MAX_STORED_BATCHES = 5
+
+/**
+ * Samples kept per query when a batch settles, so a finished comparison can
+ * still draw each query's own curve. The budget is
+ * `MAX_STORED_BATCHES x MAX_COMPARE_QUERIES x MAX_RETAINED_SAMPLES` samples;
+ * `writeBatches` drops the curves rather than the verdicts if storage still
+ * refuses the write.
+ */
+const MAX_RETAINED_SAMPLES = 60
 
 export interface CompareBatchQuery {
   cacheId: string
@@ -26,13 +35,14 @@ export interface CompareBatchQuery {
 }
 
 export type CompareQueryOutcomeStatus =
+  | 'queued'
   | 'running'
   | 'succeeded'
   | 'failed'
   | 'cancelled'
 
 export interface CompareQueryTerminalOutcome {
-  status: Exclude<CompareQueryOutcomeStatus, 'running'>
+  status: Exclude<CompareQueryOutcomeStatus, 'queued' | 'running'>
   message?: string
   errorCode?: string
   errorCategory?: string
@@ -47,6 +57,12 @@ export interface CompareQueryOutcome {
   errorCode?: string
   errorCategory?: string
   result?: CacheCompareRunResult
+  /** This query's own samples: live while it measures, retained once it settles. */
+  timeline: CacheCompareSample[]
+  /** Seconds this query has measured for, from its last sample. */
+  elapsedSeconds: number
+  /** Backend-reported progress through this query's own measurement. */
+  percent?: number
 }
 
 export interface CompareBatch {
@@ -56,7 +72,6 @@ export interface CompareBatch {
   concurrency: number
   durationSeconds: number
   queries: CompareBatchQuery[]
-  timeline?: CacheCompareSample[]
   outcome?: {
     status: Exclude<CompareBatchStatus, 'running'>
     completedAt: string
@@ -75,16 +90,20 @@ export type CompareBatchStatus =
 
 export interface CompareBatchSnapshot {
   status: CompareBatchStatus
+  /** Queries that reached a terminal outcome, however it was classified. */
   completed: number
   total: number
   succeeded: number
   failed: number
   cancelled: number
+  /** Queries measuring right now -- at most one, since the sandbox serializes. */
+  running: number
+  /** Queries still waiting for the sandbox lease. */
+  queued: number
   percent: number
   runs: BackgroundRunState[]
   results: CompareStoredResult[]
   queryOutcomes: CompareQueryOutcome[]
-  timeline: CacheCompareSample[]
 }
 
 export interface CompareStoredResult {
@@ -103,14 +122,44 @@ function readBatches(): CompareBatch[] {
   }
 }
 
+/** Downsample to at most `MAX_RETAINED_SAMPLES` points, keeping both ends. */
+function retainedTimeline(
+  timeline: CacheCompareSample[]
+): CacheCompareSample[] {
+  if (timeline.length <= MAX_RETAINED_SAMPLES) return timeline
+  const step = (timeline.length - 1) / (MAX_RETAINED_SAMPLES - 1)
+  return Array.from(
+    { length: MAX_RETAINED_SAMPLES },
+    (_, index) => timeline[Math.round(index * step)]
+  )
+}
+
+function withoutTimelines(batch: CompareBatch): CompareBatch {
+  return {
+    ...batch,
+    results: batch.results?.map((stored) => ({
+      ...stored,
+      result: { ...stored.result, timeline: [] },
+    })),
+  }
+}
+
 function writeBatches(batches: CompareBatch[]): void {
+  const kept = batches.slice(-MAX_STORED_BATCHES)
   try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(batches.slice(-MAX_STORED_BATCHES))
-    )
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(kept))
   } catch {
-    // Route persistence is progressive enhancement when storage is unavailable.
+    try {
+      // Retained curves are by far the largest part of a stored batch. If they
+      // no longer fit, keep every verdict and lose only the redrawn charts.
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(kept.map(withoutTimelines))
+      )
+    } catch {
+      // Route persistence is progressive enhancement when storage is
+      // unavailable.
+    }
   }
 }
 
@@ -234,67 +283,8 @@ export async function startCompareBatch(input: {
   return saved
 }
 
-function aggregateLane(
-  lanes: CacheCompareLaneSample[]
-): CacheCompareLaneSample {
-  const completed = lanes.reduce((sum, lane) => sum + lane.completed, 0)
-  const attempts = lanes.reduce(
-    (sum, lane) => sum + lane.completed + lane.errors,
-    0
-  )
-  const weighted = (key: 'mean_ms' | 'p50_ms' | 'p95_ms' | 'p99_ms') =>
-    completed > 0
-      ? lanes.reduce((sum, lane) => sum + lane[key] * lane.completed, 0) /
-        completed
-      : 0
-  return {
-    scheduled: lanes.reduce((sum, lane) => sum + lane.scheduled, 0),
-    completed,
-    errors: lanes.reduce((sum, lane) => sum + lane.errors, 0),
-    dropped: lanes.reduce((sum, lane) => sum + lane.dropped, 0),
-    in_flight: lanes.reduce((sum, lane) => sum + (lane.in_flight ?? 0), 0),
-    throughput_rps: lanes.reduce((sum, lane) => sum + lane.throughput_rps, 0),
-    error_rate:
-      attempts > 0
-        ? lanes.reduce(
-            (sum, lane) =>
-              sum + lane.error_rate * (lane.completed + lane.errors),
-            0
-          ) / attempts
-        : 0,
-    mean_ms: weighted('mean_ms'),
-    p50_ms: weighted('p50_ms'),
-    p95_ms: weighted('p95_ms'),
-    p99_ms: weighted('p99_ms'),
-  }
-}
-
-function aggregateSampleTimelines(
-  timelines: CacheCompareSample[][]
-): CacheCompareSample[] {
-  const maxLength = Math.max(0, ...timelines.map((timeline) => timeline.length))
-  return Array.from({ length: maxLength }, (_, index) => {
-    const samples = timelines.flatMap((timeline) => {
-      const sample = timeline[index]
-      return sample ? [sample] : []
-    })
-    return {
-      elapsed_seconds: Math.max(
-        0,
-        ...samples.map((sample) => sample.elapsed_seconds)
-      ),
-      concurrency: samples.reduce((sum, sample) => sum + sample.concurrency, 0),
-      origin: aggregateLane(samples.map((sample) => sample.origin)),
-      readyset: aggregateLane(samples.map((sample) => sample.readyset)),
-    }
-  })
-}
-
-export function aggregateCompareTimeline(
-  results: CompareStoredResult[]
-): CacheCompareSample[] {
-  return aggregateSampleTimelines(results.map(({ result }) => result.timeline))
-}
+/** The label a queued query carries, naming what it is waiting for. */
+export const COMPARE_QUEUED_MESSAGE = 'Queued for the Readyset sandbox'
 
 function compareQueryOutcome(
   query: CompareBatchQuery,
@@ -302,40 +292,37 @@ function compareQueryOutcome(
   storedResult: CompareStoredResult | undefined,
   batchOutcome: CompareBatch['outcome']
 ): CompareQueryOutcome {
+  const measured = storedResult?.result.timeline ?? []
+  const timeline = measured.length > 0 ? measured : (run?.compareSamples ?? [])
+  const base = {
+    cacheId: query.cacheId,
+    label: query.label,
+    runId: query.runId,
+    timeline,
+    elapsedSeconds:
+      timeline[timeline.length - 1]?.elapsed_seconds ??
+      storedResult?.result.elapsed_seconds ??
+      0,
+  }
+
   if (storedResult) {
     return {
-      cacheId: query.cacheId,
-      label: query.label,
-      runId: query.runId,
+      ...base,
       status: 'succeeded',
       result: storedResult.result,
+      percent: 100,
     }
   }
 
-  if (query.outcome) {
-    return {
-      cacheId: query.cacheId,
-      label: query.label,
-      runId: query.runId,
-      ...query.outcome,
-    }
-  }
+  if (query.outcome) return { ...base, ...query.outcome }
 
   if (query.startError) {
-    return {
-      cacheId: query.cacheId,
-      label: query.label,
-      runId: query.runId,
-      status: 'failed',
-      message: query.startError,
-    }
+    return { ...base, status: 'failed', message: query.startError }
   }
 
   if (run?.status === 'cancelled') {
     return {
-      cacheId: query.cacheId,
-      label: query.label,
-      runId: query.runId,
+      ...base,
       status: 'cancelled',
       message: run.message || 'Comparison was cancelled.',
       errorCode: run.errorCode,
@@ -348,9 +335,7 @@ function compareQueryOutcome(
     ['done', 'failed', 'interrupted', 'partial'].includes(run.status)
   ) {
     return {
-      cacheId: query.cacheId,
-      label: query.label,
-      runId: query.runId,
+      ...base,
       status: 'failed',
       message: run.message || 'No comparison measurement was produced.',
       errorCode: run.errorCode,
@@ -362,9 +347,7 @@ function compareQueryOutcome(
   // terminal state without hiding the queries that produced no measurement.
   if (batchOutcome) {
     return {
-      cacheId: query.cacheId,
-      label: query.label,
-      runId: query.runId,
+      ...base,
       status: batchOutcome.status === 'cancelled' ? 'cancelled' : 'failed',
       message:
         batchOutcome.status === 'cancelled'
@@ -373,12 +356,21 @@ function compareQueryOutcome(
     }
   }
 
+  // The sandbox admits one comparison at a time, so the queries behind the
+  // measuring one are waiting rather than running.
+  if (run && isQueuedRun(run)) {
+    return {
+      ...base,
+      status: 'queued',
+      message: run.message || COMPARE_QUEUED_MESSAGE,
+    }
+  }
+
   return {
-    cacheId: query.cacheId,
-    label: query.label,
-    runId: query.runId,
+    ...base,
     status: 'running',
     message: run?.message,
+    percent: run?.current ?? 0,
   }
 }
 
@@ -422,14 +414,6 @@ export function compareBatchSnapshot(
       batch.outcome
     )
   )
-  const timeline =
-    batch.timeline && batch.timeline.length > 0
-      ? batch.timeline
-      : aggregateSampleTimelines(
-          runs.some((run) => (run.compareSamples?.length ?? 0) > 0)
-            ? runs.map((run) => run.compareSamples ?? [])
-            : results.map(({ result }) => result.timeline)
-        )
 
   if (batch.outcome) {
     return {
@@ -439,30 +423,30 @@ export function compareBatchSnapshot(
       succeeded: results.length,
       failed: batch.outcome.failed,
       cancelled: batch.outcome.cancelled,
+      running: 0,
+      queued: 0,
       percent: 100,
       runs,
       results,
       queryOutcomes,
-      timeline,
     }
   }
 
-  const succeeded = queryOutcomes.filter(
-    (outcome) => outcome.status === 'succeeded'
-  ).length
-  const cancelled = queryOutcomes.filter(
-    (outcome) => outcome.status === 'cancelled'
-  ).length
-  const failed = queryOutcomes.filter(
-    (outcome) => outcome.status === 'failed'
-  ).length
-  const running = runs.filter((run) =>
-    ['running', 'reconnecting', 'needs_key'].includes(run.status)
-  )
+  const countOf = (status: CompareQueryOutcomeStatus) =>
+    queryOutcomes.filter((outcome) => outcome.status === status).length
+  const succeeded = countOf('succeeded')
+  const cancelled = countOf('cancelled')
+  const failed = countOf('failed')
+  const queued = countOf('queued')
+  const running = countOf('running')
   const terminal = succeeded + failed + cancelled
   const total = batch.queries.length
+  // Batch progress is whole queries plus the one being measured -- a queued
+  // query has made none, whatever its run's last reported percent was.
   const progress =
-    running.reduce((sum, run) => sum + (run.current ?? 0), 0) / 100
+    queryOutcomes
+      .filter((outcome) => outcome.status === 'running')
+      .reduce((sum, outcome) => sum + (outcome.percent ?? 0), 0) / 100
   const percent =
     total > 0
       ? Math.min(100, Math.round(((terminal + progress) / total) * 100))
@@ -488,11 +472,12 @@ export function compareBatchSnapshot(
     succeeded,
     failed,
     cancelled,
+    running,
+    queued,
     percent,
     runs,
     results,
     queryOutcomes,
-    timeline,
   }
 }
 
@@ -509,21 +494,37 @@ export function settleCompareBatch(
       failed: snapshot.failed,
       cancelled: snapshot.cancelled,
     },
-    timeline: snapshot.timeline,
     queries: batch.queries.map((query) => {
       const outcome = snapshot.queryOutcomes.find(
         (candidate) => candidate.cacheId === query.cacheId
       )
-      if (!outcome || outcome.status === 'running') return query
+      if (
+        !outcome ||
+        outcome.status === 'running' ||
+        outcome.status === 'queued'
+      )
+        return query
       const { status, message, errorCode, errorCategory } = outcome
       return {
         ...query,
         outcome: { status, message, errorCode, errorCategory },
       }
     }),
+    // Keep each query's own curve, downsampled: after settlement the
+    // background runs are cleaned up, and this is the only record of what
+    // each query measured.
     results: snapshot.results.map((stored) => ({
       ...stored,
-      result: { ...stored.result, timeline: [] },
+      result: {
+        ...stored.result,
+        timeline: retainedTimeline(
+          stored.result.timeline.length > 0
+            ? stored.result.timeline
+            : (snapshot.queryOutcomes.find(
+                (outcome) => outcome.cacheId === stored.cacheId
+              )?.timeline ?? [])
+        ),
+      },
     })),
   })
 }

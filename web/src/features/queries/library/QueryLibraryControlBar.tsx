@@ -12,11 +12,11 @@ import { Text } from '@rs/ui-new/text'
 import { useState } from 'react'
 import {
   QUERY_LIBRARY_DEFAULT_DISPLAY_PROPERTIES,
-  QUERY_LIBRARY_DISPLAY_MODES,
   QUERY_LIBRARY_DISPLAY_PROPERTIES,
   type QueryLibraryDisplayMode,
   type QueryLibraryDisplayProperty,
 } from './queryLibraryDisplay'
+import { QUERY_LIBRARY_VISIBLE_DISPLAY_MODES } from './queryLibraryDisplayStore'
 import {
   QUERY_LIBRARY_ACTIVITY_LABELS,
   QUERY_LIBRARY_IMPACT_LABELS,
@@ -102,6 +102,9 @@ type QueryLibraryControlBarProps = {
   onClearFilters: () => void
   sort: QueryLibrarySort
   onSortChange: (sort: QueryLibrarySort) => void
+  /** The star, kept out of `filters` because it composes with all of them. */
+  starred: boolean
+  onStarredChange: (starred: boolean) => void
   displayMode: QueryLibraryDisplayMode
   onDisplayModeChange: (mode: QueryLibraryDisplayMode) => void
   properties: QueryLibraryDisplayProperty[]
@@ -297,6 +300,31 @@ function FilterMenu({
   )
 }
 
+/**
+ * The star as its own control rather than a value of Status: a shortlist is
+ * something the user asks for on top of a status, not instead of one.
+ */
+function StarredToggle({
+  starred,
+  onStarredChange,
+}: Pick<QueryLibraryControlBarProps, 'starred' | 'onStarredChange'>) {
+  return (
+    <Button
+      size="base"
+      variant="primary"
+      modifier="ghost"
+      label="Starred"
+      icon="star"
+      iconPosition="left"
+      aria-pressed={starred}
+      onClick={() => onStarredChange(!starred)}
+      className={cn(
+        starred && 'bg-surface-primary-soft text-content-primary-soft'
+      )}
+    />
+  )
+}
+
 function DisplayMenu({
   displayMode,
   onDisplayModeChange,
@@ -334,8 +362,8 @@ function DisplayMenu({
       </Dropdown.Trigger>
       <Dropdown.Content align="end" className="w-96 p-0">
         <Dropdown.Label>Display options</Dropdown.Label>
-        <div className="grid grid-cols-3 gap-2 border-b border-border-layout-1 p-3">
-          {QUERY_LIBRARY_DISPLAY_MODES.map((option) => {
+        <div className="grid grid-cols-2 gap-2 border-b border-border-layout-1 p-3">
+          {QUERY_LIBRARY_VISIBLE_DISPLAY_MODES.map((option) => {
             const selected = displayMode === option.value
             return (
               <Button
@@ -405,6 +433,8 @@ export function QueryLibraryControlBar({
   onClearFilters,
   sort,
   onSortChange,
+  starred,
+  onStarredChange,
   displayMode,
   onDisplayModeChange,
   properties = QUERY_LIBRARY_DEFAULT_DISPLAY_PROPERTIES,
@@ -429,6 +459,7 @@ export function QueryLibraryControlBar({
             selection={selection}
             onFilterChange={onFilterChange}
           />
+          <StarredToggle starred={starred} onStarredChange={onStarredChange} />
           <DisplayMenu
             displayMode={displayMode}
             onDisplayModeChange={onDisplayModeChange}
@@ -486,8 +517,20 @@ export function QueryLibraryControlBar({
         </div>
       </HStack>
 
-      <Show when={activeFilterCount > 0}>
+      <Show when={activeFilterCount > 0 || starred}>
         <HStack className="items-center gap-2 flex-wrap">
+          <Show when={starred}>
+            <Button
+              size="small"
+              variant="primary"
+              modifier="ghost"
+              label="Starred"
+              icon="close"
+              iconPosition="right"
+              aria-label="Remove Starred filter"
+              onClick={() => onStarredChange(false)}
+            />
+          </Show>
           {(Object.keys(FILTER_DEFAULTS) as QueryLibraryFilterKey[]).map(
             (filterKey) => (
               <ActiveFilterChip

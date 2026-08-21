@@ -34,6 +34,10 @@ export interface SlowQueryResultsProps {
   error?: unknown
   onStart?: () => void
   onRetry?: () => void
+  /** True when a pattern or threshold filter could be hiding rows. */
+  filtersActive?: boolean
+  /** Clears those filters and runs again; the way out of an empty result. */
+  onClearFilters?: () => void
 }
 
 export function SlowQueryResults({
@@ -47,6 +51,8 @@ export function SlowQueryResults({
   error,
   onStart,
   onRetry,
+  filtersActive = false,
+  onClearFilters,
 }: SlowQueryResultsProps) {
   // Per-row view-models: the hash, the max-latency text, the one muted meta line
   // and the cached flag derive only from the row data, the realtime toggle and
@@ -134,7 +140,9 @@ export function SlowQueryResults({
                 ? isRealtime
                   ? 'Watch database traffic and rank slow queries as they run.'
                   : 'Rank the queries putting the most load on this database.'
-                : 'Loosen the filters or wait for more database traffic.'
+                : filtersActive
+                  ? 'Your filters ruled out every query this run measured.'
+                  : 'Wait for more database traffic, then look again.'
             }
             action={
               state === 'idle' && onStart
@@ -145,7 +153,15 @@ export function SlowQueryResults({
                     icon: isRealtime ? 'play' : 'search',
                     onClick: onStart,
                   }
-                : undefined
+                : // A filtered-out result needs the way back to every row, not
+                  // a re-run of the same filters.
+                  state !== 'idle' && filtersActive && onClearFilters
+                  ? {
+                      label: 'Clear filters',
+                      icon: 'filter-reset',
+                      onClick: onClearFilters,
+                    }
+                  : undefined
             }
           />
         }

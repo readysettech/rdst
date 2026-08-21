@@ -671,7 +671,11 @@ export function ScanAnalysisTable({
     if (!detailQuery?.sql) return
     navigate({
       to: '/results',
-      search: { query: detailQuery.sql, target: scanTarget || undefined },
+      search: {
+        query: detailQuery.sql,
+        target: scanTarget || undefined,
+        origin: 'scan',
+      },
     })
   }, [detailQuery, navigate, scanTarget])
   // Sort by score descending (best first)

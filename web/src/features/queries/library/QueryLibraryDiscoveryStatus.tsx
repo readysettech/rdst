@@ -1,4 +1,5 @@
 import { Popover, PopoverContent, PopoverTrigger } from '@rs/ui-new/popover'
+import { Pressable } from '@rs/ui-new/pressable'
 import { StatusRipple } from '@rs/ui-new/status'
 import { Text } from '@rs/ui-new/text'
 import { useEffect, useState } from 'react'
@@ -88,13 +89,12 @@ export function QueryLibraryDiscoveryStatus({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button
-          type="button"
+        <Pressable
           aria-label={`${status.label}. Discovery details`}
-          className="inline-flex cursor-pointer items-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-primary-soft"
+          className="inline-flex cursor-pointer items-center rounded-lg"
         >
           <StatusRipple color={status.color} label={status.label} />
-        </button>
+        </Pressable>
       </PopoverTrigger>
       <PopoverContent
         align="start"

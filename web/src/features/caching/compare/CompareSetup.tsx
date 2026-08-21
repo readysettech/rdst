@@ -15,7 +15,7 @@ import {
   PerformanceQueryParameters,
 } from '../shared/PerformanceQueryList'
 import { SuggestValuesPanel } from '../shared/SuggestValuesPanel'
-import { CompareSummaryRow } from './compareUi'
+import { CompareSummaryRow, compareBatchDurationEstimate } from './compareUi'
 import {
   type CompareController,
   MAX_COMPARE_CONCURRENCY,
@@ -122,6 +122,12 @@ export function CompareSetup({
 }: {
   controller: CompareController
 }) {
+  // The sandbox admits one comparison at a time, so a four-query batch is a
+  // two-minute wait. Say so before the click, not during the wait.
+  const batchCost = compareBatchDurationEstimate(
+    controller.selectedIds.length,
+    controller.durationSeconds
+  )
   const ready =
     controller.parameterCount === 0
       ? 'No parameters'
@@ -199,7 +205,7 @@ export function CompareSetup({
                 />
                 <CompareSummaryRow
                   label="Duration"
-                  value={`${controller.durationSeconds} seconds`}
+                  value={batchCost ?? `${controller.durationSeconds} seconds`}
                 />
                 <CompareSummaryRow
                   label="Parameter readiness"
@@ -242,11 +248,15 @@ export function CompareSetup({
                         ? 'value'
                         : 'values'
                     }.`
-                  : `Ready to compare ${controller.selectedIds.length} ${
-                      controller.selectedIds.length === 1 ? 'query' : 'queries'
-                    } at ${adaptiveLoadLabel(controller)} clients per lane for ${
-                      controller.durationSeconds
-                    } seconds.`}
+                  : batchCost
+                    ? `Ready to compare at ${adaptiveLoadLabel(controller)} clients per lane. ${batchCost}.`
+                    : `Ready to compare ${controller.selectedIds.length} ${
+                        controller.selectedIds.length === 1
+                          ? 'query'
+                          : 'queries'
+                      } at ${adaptiveLoadLabel(controller)} clients per lane for ${
+                        controller.durationSeconds
+                      } seconds.`}
           </Text>
           <Button
             variant="rising"
@@ -264,11 +274,15 @@ export function CompareSetup({
         onClose={() => controller.setReviewOpen(false)}
         onConfirm={() => void controller.startComparison()}
         title="Start this comparison?"
-        subtitle={`${controller.selectedIds.length} ${
-          controller.selectedIds.length === 1 ? 'query' : 'queries'
-        } · ${adaptiveLoadLabel(controller)} clients per lane · ${
-          controller.durationSeconds
-        } seconds`}
+        subtitle={
+          batchCost
+            ? `${batchCost} · ${adaptiveLoadLabel(controller)} clients per lane`
+            : `${controller.selectedIds.length} ${
+                controller.selectedIds.length === 1 ? 'query' : 'queries'
+              } · ${adaptiveLoadLabel(controller)} clients per lane · ${
+                controller.durationSeconds
+              } seconds`
+        }
         notice={{
           accent: 'warning',
           icon: 'play',

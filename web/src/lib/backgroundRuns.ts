@@ -24,6 +24,7 @@ export type BackgroundRunKind =
   | 'audit_capture'
   | 'fleet_audit'
   | 'cache_compare'
+  | 'analyze'
 export type BackgroundRunStatus =
   | 'running'
   | 'reconnecting'
@@ -67,6 +68,21 @@ export interface BackgroundRunState {
   hidden?: boolean
   /** Saved audit/capture run to deep-link to once the run has produced one. */
   snapshotId?: string
+  /**
+   * The browser owns this job end to end: there is no server run id to stream,
+   * probe, or cancel, and nothing to reattach to after a reload.
+   */
+  local?: boolean
+}
+
+/**
+ * The run holds a place in a server-side queue and is not measuring yet: the
+ * backend emits `progress("queued", ...)` while a run waits for the exclusive
+ * sandbox lease. Shared so the jobs sidebar and Compare's run rail read the
+ * same signal.
+ */
+export function isQueuedRun(run: BackgroundRunState): boolean {
+  return run.status === 'running' && run.stage === 'queued'
 }
 
 /** Single-target health-check kinds (a fleet audit covers many targets). */
@@ -101,6 +117,7 @@ const INITIAL_STAGES: Record<BackgroundRunKind, string> = {
   audit_capture: 'config',
   fleet_audit: 'config',
   cache_compare: 'connecting',
+  analyze: 'analyzing',
 }
 
 const BOOTSTRAP_STAGE_LABELS: Record<string, string> = {
@@ -123,6 +140,8 @@ const streaming = new Map<string, symbol>()
 const streamControllers = new Map<string, AbortController>()
 const probing = new Set<string>()
 const reconnectStatuses = new Map<string, BackgroundRunStatus>()
+/** Cancellation for client-owned jobs, which have no server run to DELETE. */
+const localCancellers = new Map<string, () => void>()
 
 interface RunMetadata {
   queryHash?: string
@@ -146,10 +165,13 @@ function publish(): void {
 
 function persist(): void {
   try {
-    if (snapshot.length > 0) {
+    // Client-owned jobs die with the page, so persisting them would resurface
+    // chips for work no reload can reattach to.
+    const durable = snapshot.filter((run) => !run.local)
+    if (durable.length > 0) {
       localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify(snapshot.map(storageSafeRun))
+        JSON.stringify(durable.map(storageSafeRun))
       )
     } else {
       localStorage.removeItem(STORAGE_KEY)
@@ -184,6 +206,7 @@ function updateRun(runId: string, partial: Partial<BackgroundRunState>): void {
 
 function removeRun(runId: string): void {
   if (!runs.delete(runId)) return
+  localCancellers.delete(runId)
   stopStream(runId)
   reconnectStatuses.delete(runId)
   publish()
@@ -255,6 +278,46 @@ function kickoffFailed(
   })
   publish()
   return runId
+}
+
+/**
+ * Publish a job this browser owns to the sidebar. Unlike `attachRun` there is
+ * no server run to stream: the caller reports every state change itself, which
+ * is what lets analyze — measured over a stream this client holds — list next
+ * to the runs the server drives.
+ */
+export function upsertLocalRun(
+  run: {
+    runId: string
+    kind: BackgroundRunKind
+    target: string
+    status: BackgroundRunStatus
+    message: string
+  } & RunMetadata,
+  options: { onCancel?: () => void } = {}
+): void {
+  const { runId, kind, target, status, message, ...metadata } = run
+  if (options.onCancel) localCancellers.set(runId, options.onCancel)
+  const existing = runs.get(runId)
+  runs.set(runId, {
+    ...(existing ?? {
+      runId,
+      kind,
+      target,
+      stage: INITIAL_STAGES[kind],
+      lastSeq: 0,
+      current: null,
+      total: null,
+      hasWarnings: false,
+    }),
+    kind,
+    target,
+    status,
+    message,
+    local: true,
+    ...metadata,
+  })
+  publish()
 }
 
 /** Start automatic database setup. Failures surface in the sidebar. */
@@ -1022,6 +1085,12 @@ function applyFrame(runId: string, event: string, data: unknown): void {
 }
 
 export async function cancelBackgroundRun(runId: string): Promise<void> {
+  if (runs.get(runId)?.local) {
+    localCancellers.get(runId)?.()
+    localCancellers.delete(runId)
+    removeRun(runId)
+    return
+  }
   updateRun(runId, { status: 'stopping', message: 'Stopping active query...' })
   try {
     const { data, error } = await api.DELETE('/api/runs/{run_id}', {
@@ -1088,6 +1157,7 @@ export function clearAllBackgroundRuns(): void {
   snapshot = []
   streaming.clear()
   streamControllers.clear()
+  localCancellers.clear()
   probing.clear()
   reconnectStatuses.clear()
   try {

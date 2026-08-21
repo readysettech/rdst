@@ -1,7 +1,11 @@
+/**
+ * Lifecycle statuses the server computes for a query. The user's own mark is
+ * not one of them: it is the independent `starred` boolean below, so a
+ * shortlist can be asked for alongside any status.
+ */
 export const QUERY_LIBRARY_VIEWS = [
   'all',
   'new',
-  'saved',
   'high-impact',
   'needs-analysis',
   'ready-to-cache',
@@ -69,6 +73,14 @@ export type QueryLibraryFilterKey =
 
 export type QueryLibraryAction = 'add'
 
+/**
+ * The analyze drawer's two panes. A bare `?analyze=<hash>` opens Analyze, so
+ * every link that predates the tabs behaves exactly as it did.
+ */
+export const ANALYZE_DRAWER_TABS = ['overview', 'analyze'] as const
+
+export type AnalyzeDrawerTab = (typeof ANALYZE_DRAWER_TABS)[number]
+
 export type QueryLibrarySearch = {
   view?: QueryLibraryView
   q?: string
@@ -77,9 +89,30 @@ export type QueryLibrarySearch = {
   activity?: QueryLibraryActivityWindow
   impact?: QueryLibraryImpactFilter
   sort?: QueryLibrarySort
+  /**
+   * The user's own mark, independent of `view`: "my shortlist, not yet
+   * analysed" is `?view=needs-analysis&starred=1`.
+   */
+  starred?: boolean
   action?: QueryLibraryAction
   hash?: string
   run?: string
+  /**
+   * Registry hash of the query whose analysis is open in the drawer. The
+   * drawer is URL-owned, so opening, closing and switching analyses are all
+   * history entries. [RDST UX plan, A5]
+   */
+  analyze?: string
+  /** A stored analysis to show read-only; absent means measure the query. */
+  analysisId?: string
+  /**
+   * Measure the query even though stored analyses exist. Without it a drawer
+   * opened on a query that was analyzed before shows that analysis rather
+   * than silently spending another run.
+   */
+  rerun?: boolean
+  /** Which drawer pane is showing. Absent means Analyze. */
+  tab?: AnalyzeDrawerTab
 }
 
 const CLEARED_QUERY_LIBRARY_FILTERS = {
@@ -93,15 +126,17 @@ const CLEARED_QUERY_LIBRARY_FILTERS = {
 } as const
 
 /**
- * An explicit add is a context change: show the saved library in newest-first
- * order and keep the new card identifiable after the dialog closes.
+ * An explicit add is a context change: an added query is starred, so show the
+ * starred shortlist in newest-first order and keep the new card identifiable
+ * after the dialog closes.
  */
 export function addedQuerySearchPatch(
   hash?: string | null
 ): Partial<QueryLibrarySearch> {
   return {
     ...CLEARED_QUERY_LIBRARY_FILTERS,
-    view: 'saved',
+    view: undefined,
+    starred: true,
     sort: 'newest',
     hash: hash || undefined,
   }
@@ -118,6 +153,12 @@ function optionalString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value : undefined
 }
 
+function optionalFlag(value: unknown) {
+  return value === true || value === 'true' || value === '1' || value === 1
+    ? true
+    : undefined
+}
+
 /**
  * Keep old query workspace URLs useful while the three-pane UI is retired.
  * The compatibility values are interpreted here rather than leaking legacy
@@ -129,11 +170,9 @@ export function parseQueryLibrarySearch(
   const legacyView = search.view
   const view = includes(QUERY_LIBRARY_VIEWS, legacyView)
     ? legacyView
-    : legacyView === 'saved'
-      ? 'saved'
-      : legacyView === 'slow'
-        ? 'high-impact'
-        : undefined
+    : legacyView === 'slow'
+      ? 'high-impact'
+      : undefined
   return {
     view,
     q: optionalString(search.q),
@@ -150,11 +189,20 @@ export function parseQueryLibrarySearch(
       ? search.impact
       : undefined,
     sort: includes(QUERY_LIBRARY_SORTS, search.sort) ? search.sort : undefined,
+    // The mark used to be a value of `view`; a link written then still asks
+    // for the same rows, now as the independent boolean.
+    starred:
+      optionalFlag(search.starred) ??
+      (legacyView === 'saved' ? true : undefined),
     action: includes(['add'] as const, search.action)
       ? search.action
       : undefined,
     hash: optionalString(search.hash),
     run: optionalString(search.run),
+    analyze: optionalString(search.analyze),
+    analysisId: optionalString(search.analysisId),
+    rerun: optionalFlag(search.rerun),
+    tab: includes(ANALYZE_DRAWER_TABS, search.tab) ? search.tab : undefined,
   }
 }
 
@@ -167,6 +215,7 @@ export function resolvedQueryLibraryState(search: QueryLibrarySearch) {
     activity: search.activity ?? 'all',
     impact: search.impact ?? 'all',
     sort: search.sort ?? 'highest-impact',
+    starred: search.starred === true,
   } satisfies {
     view: QueryLibraryView
     searchTerm: string
@@ -175,5 +224,6 @@ export function resolvedQueryLibraryState(search: QueryLibrarySearch) {
     activity: QueryLibraryActivityWindow
     impact: QueryLibraryImpactFilter
     sort: QueryLibrarySort
+    starred: boolean
   }
 }

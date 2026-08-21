@@ -19,6 +19,13 @@ vi.mock('@tanstack/react-router', () => ({
 
 vi.mock('../lib/useQueryRegistry', () => ({
   useQueryRegistry: vi.fn(),
+  useStarQuery: () => ({ mutate: vi.fn() }),
+}))
+
+// The card footer's stored-analysis summary is enrichment this suite does not
+// exercise; stubbing it keeps these renders free of a query client.
+vi.mock('../features/queries/saved/useLatestAnalysis', () => ({
+  useLatestAnalysis: () => null,
 }))
 
 import { SavedQueriesPage } from '../features/queries/saved/SavedQueriesPage'
@@ -385,7 +392,7 @@ describe('query-registry add dialog', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'SQL editor' }), {
       target: { value: 'SELECT email FROM users' },
     })
-    fireEvent.click(screen.getByRole('button', { name: /Save query/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Add query/ }))
 
     expect(addQuery).toHaveBeenCalledWith(
       {

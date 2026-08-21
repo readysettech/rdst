@@ -40,20 +40,12 @@ const routeConfig: Record<string, RouteConfig> = {
   },
   '/ask': { label: 'Ask', icon: 'sparkles' },
   '/scan': { label: 'Code scan', icon: 'search' },
-  '/cache': { label: 'Performance tests', icon: 'speedometer' },
-  '/benchmark': {
-    label: 'Load test',
-    icon: 'play',
-    parent: '/cache',
-  },
+  '/cache': { label: 'Benchmarks', icon: 'speedometer' },
   '/schema': { label: 'Schema', icon: 'layers' },
   '/audit': { label: 'Health check', icon: 'document-validation' },
   '/guards': { label: 'Guards', icon: 'user-shield' },
-  '/agents': { label: 'Agents', icon: 'message-multiple' },
-  '/fleet': { label: 'Fleet', icon: 'building' },
   '/configure': { label: 'Settings', icon: 'settings' },
   '/onboarding': { label: 'Get started', icon: 'querypilot' },
-  '/dev-settings': { label: 'Dev settings', icon: 'adjustment-horizontal' },
   '/test': { label: 'Test', icon: 'adjustment-horizontal' },
   '/lab/performance-cards': {
     label: 'Performance cards lab',
@@ -92,8 +84,18 @@ export function Header({
     icon: 'test-tube',
     parent: '/queries',
   }
+  // Benchmarks is one page with two named tabs (B5) — the page identity names
+  // the active one rather than staying generic, so "open Load test" resolves
+  // to a findable breadcrumb.
+  const cacheSearch = router.location.search as { view?: string }
+  const cacheConfig: RouteConfig = {
+    label: `Benchmarks - ${
+      cacheSearch.view === 'load-test' ? 'Load test' : 'Compare'
+    }`,
+    icon: 'speedometer',
+  }
   const config =
-    routeConfig[currentPath] ??
+    (currentPath === '/cache' ? cacheConfig : routeConfig[currentPath]) ??
     (currentPath.startsWith('/audit/runs/')
       ? auditRunConfig
       : currentPath.startsWith('/lab/queries/')

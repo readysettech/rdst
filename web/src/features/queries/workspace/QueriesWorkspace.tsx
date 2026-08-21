@@ -2,6 +2,7 @@ import { Button } from '@rs/ui-new/button'
 import { HStack } from '@rs/ui-new/stack'
 import { lazy, Suspense } from 'react'
 import { WorkspaceLayout } from '../../../components/workspace/WorkspaceLayout'
+import { AnalyzeDrawer } from '../analyze-drawer/AnalyzeDrawer'
 import { QueryLibraryDiscoveryStatus } from '../library/QueryLibraryDiscoveryStatus'
 import type {
   QueryLibrarySearch,
@@ -53,6 +54,15 @@ export function QueriesWorkspace({ search }: { search: QueryLibrarySearch }) {
       <Suspense fallback={<QueriesPaneSkeleton />}>
         <QueryLibraryPage controller={controller} />
       </Suspense>
+      <AnalyzeDrawer
+        link={controller.analyzeDrawer.link}
+        loaded={controller.analyzeDrawer.entries}
+        librarySearch={controller.analyzeDrawer.librarySearch}
+        target={controller.target}
+        onClose={controller.analyzeDrawer.close}
+        onOpenLink={controller.analyzeDrawer.open}
+        onToggleStar={controller.rowActions.toggleStar}
+      />
     </WorkspaceLayout>
   )
 }

@@ -1,68 +1,68 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { Alert } from '@rs/ui-new/alert'
+import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
+import { BaseInputText } from '@rs/ui-new/base-input-text'
+import { Button } from '@rs/ui-new/button'
+import { Icon } from '@rs/ui-new/icon'
 import {
   Modal,
   ModalContent,
   ModalContentContainer,
   ModalDescription,
   ModalTitle,
-} from '@rs/ui-new/modal';
-import { Text } from '@rs/ui-new/text';
-import { Button } from '@rs/ui-new/button';
-import { BaseInputText } from '@rs/ui-new/base-input-text';
-import { BaseInputSwitch } from '@rs/ui-new/base-input-switch';
-import { Alert } from '@rs/ui-new/alert';
-import { HStack, VStack } from '@rs/ui-new/stack';
-import { Icon } from '@rs/ui-new/icon';
-import type { EnvRequirement } from '../lib/api';
-import { setEnvSecret } from '../lib/api';
+} from '@rs/ui-new/modal'
+import { HStack, VStack } from '@rs/ui-new/stack'
+import { Text } from '@rs/ui-new/text'
+import { useMutation } from '@tanstack/react-query'
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react'
+import type { EnvRequirement } from '../lib/api'
+import { setEnvSecret } from '../lib/api'
 
 interface EnvSecretsDialogProps {
-  isOpen: boolean;
-  onClose: () => void;
-  requirements: EnvRequirement[];
-  keyringAvailable: boolean;
-  onSuccess?: () => void;
-  onTrialRegister?: () => void;
+  isOpen: boolean
+  onClose: () => void
+  requirements: EnvRequirement[]
+  keyringAvailable: boolean
+  onSuccess?: () => void
+  onTrialRegister?: () => void
   // Label for the trial pivot action; callers vary it by trial state (e.g.
   // "Email me my trial token" when a trial is already the active source).
-  trialActionLabel?: string;
-  showManualAnthropicInput?: boolean;
+  trialActionLabel?: string
+  showManualAnthropicInput?: boolean
 }
 
 // Trial tokens are UUIDs; Anthropic keys are sk-ant-... strings. The one key
 // input accepts both and files each under the right name so users never deal
 // with environment variable names themselves.
 const TRIAL_TOKEN_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 interface MissingEntry {
-  key: string;
-  envName: string;
-  label: string;
-  hint: string;
+  key: string
+  envName: string
+  label: string
+  hint: string
 }
 
-const maskedSecretStyle = { WebkitTextSecurity: 'disc' } as CSSProperties;
+const maskedSecretStyle = { WebkitTextSecurity: 'disc' } as CSSProperties
 
 function toMissingEntries(requirements: EnvRequirement[]): MissingEntry[] {
   return requirements.map((item) => {
-      const envName = item.accepted_names[0] || '';
-      const label =
-        item.kind === 'target_password'
-          ? `Password${item.target ? ` (${item.target})` : ''}`
-          : 'Anthropic API Key';
-      const hint =
-        item.kind === 'target_password'
-          ? `Enter the password${item.target ? ` for ${item.target}` : ''}.`
-          : 'Paste your Anthropic API key or your Readyset trial token.';
-      return {
-        key: `${item.kind}:${envName}:${item.target || 'global'}`,
-        envName,
-        label,
-        hint,
-      };
-    });
+    const envName = item.accepted_names[0] || ''
+    const label =
+      item.kind === 'target_password'
+        ? `Password${item.target ? ` (${item.target})` : ''}`
+        : 'Anthropic API Key'
+    const hint =
+      item.kind === 'target_password'
+        ? `Enter the password${item.target ? ` for ${item.target}` : ''}.`
+        : 'Paste your Anthropic API key or your Readyset trial token.'
+    return {
+      key: `${item.kind}:${envName}:${item.target || 'global'}`,
+      envName,
+      label,
+      hint,
+    }
+  })
 }
 
 export function EnvSecretsDialog({
@@ -76,52 +76,55 @@ export function EnvSecretsDialog({
   showManualAnthropicInput = false,
 }: EnvSecretsDialogProps) {
   const entries = useMemo(() => {
-    const missingEntries = toMissingEntries(requirements);
+    const missingEntries = toMissingEntries(requirements)
     if (missingEntries.length > 0 || !showManualAnthropicInput) {
-      return missingEntries;
+      return missingEntries
     }
     return [
       {
-        key: "anthropic_api_key:ANTHROPIC_API_KEY:global",
-        envName: "ANTHROPIC_API_KEY",
-        label: "Anthropic API Key",
-        hint: "Paste your Anthropic API key or your Readyset trial token.",
+        key: 'anthropic_api_key:ANTHROPIC_API_KEY:global',
+        envName: 'ANTHROPIC_API_KEY',
+        label: 'Anthropic API Key',
+        hint: 'Paste your Anthropic API key or your Readyset trial token.',
       },
-    ];
-  }, [requirements, showManualAnthropicInput]);
+    ]
+  }, [requirements, showManualAnthropicInput])
   // When the dialog is only asking for the AI key, its title matches the
   // trigger ("Update Anthropic API key") instead of the generic "Set Required
   // Secrets" — "Required" is wrong once a key is already configured.
   // (configure-settings Copy #1)
   const isAnthropicOnly =
-    entries.length > 0 && entries.every((e) => e.key.startsWith("anthropic_api_key"));
+    entries.length > 0 &&
+    entries.every((e) => e.key.startsWith('anthropic_api_key'))
   const hasTargetPasswordEntries = entries.some((entry) =>
     entry.key.startsWith('target_password:')
-  );
-  const dialogTitle = isAnthropicOnly ? "Update Anthropic API key" : "Set required secrets";
+  )
+  const dialogTitle = isAnthropicOnly
+    ? 'Update Anthropic API key'
+    : 'Set required secrets'
   const anthropicProcessEnvShadow =
     isAnthropicOnly &&
     requirements.some(
-      (r) => r.kind === "anthropic_api_key" && r.source === "process_env",
-    );
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [persist, setPersist] = useState(true);
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const wasOpenRef = useRef(false);
-  type EnvSecretPayload = { name: string; value: string; persist: boolean };
+      (r) => r.kind === 'anthropic_api_key' && r.source === 'process_env'
+    )
+  const [values, setValues] = useState<Record<string, string>>({})
+  const [persist, setPersist] = useState(true)
+  const [validationError, setValidationError] = useState<string | null>(null)
+  const wasOpenRef = useRef(false)
+  type EnvSecretPayload = { name: string; value: string; persist: boolean }
   const setEnvSecretMutation = useMutation({
     mutationFn: async (payloads: EnvSecretPayload[]) => {
-      let resolvedResultMessage: string | null = null;
+      let resolvedResultMessage: string | null = null
 
       for (const payload of payloads) {
-        const response = await setEnvSecret(payload);
+        const response = await setEnvSecret(payload)
         if (!response.success) {
-          throw new Error(response.message || 'Could not save this secret.');
+          throw new Error(response.message || 'Could not save this secret.')
         }
         if (response.message) {
-          resolvedResultMessage = response.message;
+          resolvedResultMessage = response.message
         } else if (response.session_only) {
-          resolvedResultMessage = 'Saved for this session only.';
+          resolvedResultMessage = 'Saved for this session only.'
         }
       }
 
@@ -131,55 +134,55 @@ export function EnvSecretsDialog({
           (payloads.length > 0 && payloads[0].persist && keyringAvailable
             ? 'Secrets saved securely and applied.'
             : 'Secrets applied to this RDST web session.'),
-      };
+      }
     },
     onSuccess: () => {
-      onSuccess?.();
-      onClose();
+      onSuccess?.()
+      onClose()
     },
-  });
+  })
   const mutationError =
     setEnvSecretMutation.error instanceof Error
       ? setEnvSecretMutation.error.message
-      : null;
-  const errorMessage = validationError ?? mutationError;
-  const resultMessage = setEnvSecretMutation.data?.resultMessage ?? null;
+      : null
+  const errorMessage = validationError ?? mutationError
+  const resultMessage = setEnvSecretMutation.data?.resultMessage ?? null
 
   useEffect(() => {
     if (isOpen && !wasOpenRef.current) {
-      const nextValues: Record<string, string> = {};
+      const nextValues: Record<string, string> = {}
       for (const entry of entries) {
-        nextValues[entry.envName] = '';
+        nextValues[entry.envName] = ''
       }
-      setValues(nextValues);
-      setPersist(true);
-      setValidationError(null);
-      setEnvSecretMutation.reset();
+      setValues(nextValues)
+      setPersist(true)
+      setValidationError(null)
+      setEnvSecretMutation.reset()
     }
-    wasOpenRef.current = isOpen;
-  }, [isOpen, entries]);
+    wasOpenRef.current = isOpen
+  }, [isOpen, entries])
 
   const handleSubmit = () => {
     const payloads = entries
       .map((entry) => {
-        const value = (values[entry.envName] || '').trim();
+        const value = (values[entry.envName] || '').trim()
         const name =
           entry.envName === 'ANTHROPIC_API_KEY' && TRIAL_TOKEN_RE.test(value)
             ? 'RDST_TRIAL_TOKEN'
-            : entry.envName;
-        return { name, value, persist };
+            : entry.envName
+        return { name, value, persist }
       })
-      .filter((item) => item.value.length > 0);
+      .filter((item) => item.value.length > 0)
 
     if (payloads.length === 0) {
-      setValidationError('Enter at least one secret value before saving.');
-      return;
+      setValidationError('Enter at least one secret value before saving.')
+      return
     }
 
-    setValidationError(null);
-    setEnvSecretMutation.reset();
-    setEnvSecretMutation.mutate(payloads);
-  };
+    setValidationError(null)
+    setEnvSecretMutation.reset()
+    setEnvSecretMutation.mutate(payloads)
+  }
 
   return (
     <Modal open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -192,7 +195,11 @@ export function EnvSecretsDialog({
           <div className="px-6 py-5 border-b border-border-layout-1 bg-surface-layout-2">
             <HStack className="gap-3 items-center">
               <div className="w-10 h-10 rounded-xl bg-surface-warning-soft flex items-center justify-center">
-                <Icon name="key" label="Secrets" className="w-5 h-5 text-content-warning-soft" />
+                <Icon
+                  name="key"
+                  label="Secrets"
+                  className="w-5 h-5 text-content-warning-soft"
+                />
               </div>
               <VStack className="gap-0.5 items-start">
                 <Text level="headline-4" className="text-content-layout-1">
@@ -227,10 +234,20 @@ export function EnvSecretsDialog({
               />
             )}
 
-            {errorMessage && <Alert variant="negative" modifier="outline" label={errorMessage} />}
+            {errorMessage && (
+              <Alert
+                variant="negative"
+                modifier="outline"
+                label={errorMessage}
+              />
+            )}
 
             {entries.length === 0 ? (
-              <Alert variant="positive" modifier="outline" label="No missing secrets." />
+              <Alert
+                variant="positive"
+                modifier="outline"
+                label="No missing secrets."
+              />
             ) : (
               <div className="space-y-4">
                 {entries.map((entry, index) => (
@@ -243,7 +260,7 @@ export function EnvSecretsDialog({
                         {entry.label}
                       </Text>
                     </label>
-                  <BaseInputText
+                    <BaseInputText
                       id={`rdst-secret-${index}`}
                       type="text"
                       name={`rdst-secret-${index}`}
@@ -277,20 +294,23 @@ export function EnvSecretsDialog({
             {onTrialRegister &&
               (requirements.some((r) => r.kind === 'anthropic_api_key') ||
                 showManualAnthropicInput) && (
-              <div className="flex justify-center">
-                <Button
-                  variant="primary"
-                  modifier="ghost"
-                  icon="sparkles"
-                  iconPosition="left"
-                  label={trialActionLabel ?? "Don't have a key? Claim free trial credits"}
-                  onClick={() => {
-                    onClose();
-                    onTrialRegister();
-                  }}
-                />
-              </div>
-            )}
+                <div className="flex justify-center">
+                  <Button
+                    variant="primary"
+                    modifier="ghost"
+                    icon="sparkles"
+                    iconPosition="left"
+                    label={
+                      trialActionLabel ??
+                      "Don't have a key? Claim free trial credits"
+                    }
+                    onClick={() => {
+                      onClose()
+                      onTrialRegister()
+                    }}
+                  />
+                </div>
+              )}
 
             {keyringAvailable && (
               <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/60 px-4 py-3 border border-border-layout-1">
@@ -312,7 +332,11 @@ export function EnvSecretsDialog({
             )}
 
             {resultMessage && (
-              <Alert variant="positive" modifier="outline" label={resultMessage} />
+              <Alert
+                variant="positive"
+                modifier="outline"
+                label={resultMessage}
+              />
             )}
           </div>
 
@@ -332,12 +356,14 @@ export function EnvSecretsDialog({
                 iconPosition="right"
                 onClick={handleSubmit}
                 loading={setEnvSecretMutation.isPending}
-                disabled={entries.length === 0 || setEnvSecretMutation.isPending}
+                disabled={
+                  entries.length === 0 || setEnvSecretMutation.isPending
+                }
               />
             </HStack>
           </div>
         </ModalContent>
       </ModalContentContainer>
     </Modal>
-  );
+  )
 }

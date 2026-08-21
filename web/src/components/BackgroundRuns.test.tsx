@@ -29,6 +29,8 @@ vi.mock('../lib/backgroundRuns', () => ({
   dismissBackgroundRun: vi.fn(),
   cancelBackgroundRun: vi.fn(),
   isAuditKind: (kind: string) => kind === 'audit' || kind === 'audit_capture',
+  isQueuedRun: (run: { status: string; stage: string }) =>
+    run.status === 'running' && run.stage === 'queued',
   isHealthCheckKind: (kind: string) =>
     kind === 'audit' || kind === 'audit_capture' || kind === 'fleet_audit',
 }))
@@ -300,7 +302,7 @@ describe('BackgroundRuns', () => {
 
     expect(navigate).toHaveBeenCalledWith({
       to: '/queries',
-      search: { view: 'saved', hash: 'abc123', run: 'cache_test_imdb_done' },
+      search: { hash: 'abc123', run: 'cache_test_imdb_done' },
     })
     expect(setTarget).toHaveBeenCalledWith('imdb')
     expect(backgroundRuns.acknowledgeBackgroundRun).toHaveBeenCalledWith(
@@ -483,5 +485,62 @@ describe('BackgroundRuns', () => {
 
     expect(screen.getByText('Partially complete')).toBeTruthy()
     expect(screen.getAllByText('Annotated 23 tables; 1 failed')).toHaveLength(2)
+  })
+})
+
+describe('BackgroundRuns analyze jobs', () => {
+  beforeEach(() => vi.clearAllMocks())
+  afterEach(cleanup)
+
+  it('lists a running analysis and opens the drawer it belongs to', () => {
+    useRuns.mockReturnValue([
+      run({
+        runId: 'analyze_1',
+        kind: 'analyze',
+        target: 'demo',
+        message: 'Measuring the query...',
+        queryHash: 'h1',
+        queryLabel: 'Orders lookup',
+        current: null,
+        total: null,
+        local: true,
+      }),
+    ])
+
+    render(<BackgroundRuns />)
+    expect(screen.getByTestId('jobs-trigger').textContent).toContain(
+      'Analyzing Orders lookup'
+    )
+
+    openJobs()
+    fireEvent.click(screen.getAllByText('Analyzing Orders lookup')[1])
+
+    expect(setTarget).toHaveBeenCalledWith('demo')
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/queries',
+      search: { analyze: 'h1' },
+    })
+  })
+
+  it('reports a finished analysis', () => {
+    useRuns.mockReturnValue([
+      run({
+        runId: 'analyze_1',
+        kind: 'analyze',
+        target: 'demo',
+        status: 'done',
+        message: 'Analysis complete',
+        queryHash: 'h1',
+        queryLabel: 'Orders lookup',
+        current: null,
+        total: null,
+        local: true,
+      }),
+    ])
+
+    render(<BackgroundRuns />)
+    openJobs()
+
+    expect(screen.getAllByText('Analysis complete').length).toBeGreaterThan(0)
   })
 })

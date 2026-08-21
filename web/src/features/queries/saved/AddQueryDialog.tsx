@@ -63,7 +63,7 @@ export function AddQueryDialog({
           size="extra-large"
           icon="folder-file"
           title="Add query"
-          description="Save SQL to analyze, test, and cache later."
+          description="Add SQL to analyze, test, and cache later. Added queries are starred."
           bodyClassName="p-0"
           footer={
             <HStack className="justify-end gap-2">
@@ -77,7 +77,7 @@ export function AddQueryDialog({
                 <Button
                   variant="rising"
                   modifier="solid"
-                  label="Save query"
+                  label="Add query"
                   icon="tick"
                   iconPosition="left"
                   onClick={onSaveQuery}

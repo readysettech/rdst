@@ -60,6 +60,7 @@ function spec(
     activity: 'all',
     impact: 'all',
     sort: 'highest-impact',
+    starred: false,
     ...overrides,
   }
 }
@@ -95,6 +96,7 @@ describe('useQueryRegistryReadModel', () => {
       activity: 'all',
       impact: 'all',
       sort: 'highest-impact',
+      starred: false,
       limit: QUERY_REGISTRY_READ_MODEL_PAGE_SIZE,
       cursor: undefined,
     })

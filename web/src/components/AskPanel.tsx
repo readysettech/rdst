@@ -127,7 +127,7 @@ export function AskPanel({
     const answerTarget = schemaLoaded?.target || askedTarget || target
     navigate({
       to: '/results',
-      search: { query: sql, target: answerTarget || undefined },
+      search: { query: sql, target: answerTarget || undefined, origin: 'ask' },
     })
   }, [result, sqlGenerated, schemaLoaded, askedTarget, target, navigate])
 

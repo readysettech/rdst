@@ -1,63 +1,74 @@
-import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from '@tanstack/react-router';
-import { m, AnimatePresence } from '@rs/ui-new/motion';
-import { getTransition } from '@rs/ui-new/transition';
-import { Icon } from '@rs/ui-new/icon';
-import { Text } from '@rs/ui-new/text';
-import { HStack, VStack } from '@rs/ui-new/stack';
-import { Button } from '@rs/ui-new/button';
-import { CopyButton } from '@rs/ui-new/copy-button';
-import { EnvSecretsDialog } from './EnvSecretsDialog';
-import { type EnvRequirement } from '../lib/api';
-import { useInitStatus } from '../lib/useInitStatus';
-import { useSystemStatus } from '../lib/useSystemStatus';
-import { TrialRegistrationDialog } from './TrialRegistrationDialog';
-import { invalidateTrialRelatedQueries, useTrialSource } from '../lib/trialQueries';
-import { TRIAL_EXHAUSTED_MESSAGE } from '../lib/errorContract';
+import { Button } from '@rs/ui-new/button'
+import { CopyButton } from '@rs/ui-new/copy-button'
+import { Icon } from '@rs/ui-new/icon'
+import { AnimatePresence, m } from '@rs/ui-new/motion'
+import { HStack, VStack } from '@rs/ui-new/stack'
+import { Text } from '@rs/ui-new/text'
+import { getTransition } from '@rs/ui-new/transition'
+import { useQueryClient } from '@tanstack/react-query'
+import { useLocation, useNavigate } from '@tanstack/react-router'
+import { useEffect, useState } from 'react'
+import type { EnvRequirement } from '../lib/api'
+import { TRIAL_EXHAUSTED_MESSAGE } from '../lib/errorContract'
+import {
+  invalidateTrialRelatedQueries,
+  useTrialSource,
+} from '../lib/trialQueries'
+import { useInitStatus } from '../lib/useInitStatus'
+import { useSystemStatus } from '../lib/useSystemStatus'
+import { EnvSecretsDialog } from './EnvSecretsDialog'
+import { TrialRegistrationDialog } from './TrialRegistrationDialog'
 
 interface WarningConfig {
-  title: string;
-  description: string;
-  command?: string;
-  severity: 'error' | 'warning';
-  actionLabel?: string;
-  actionType?: 'open-env-dialog' | 'open-trial-dialog';
-  secondaryActionLabel?: string;
-  secondaryActionType?: 'open-trial-dialog' | 'open-env-dialog';
+  title: string
+  description: string
+  command?: string
+  severity: 'error' | 'warning'
+  actionLabel?: string
+  actionType?: 'open-env-dialog' | 'open-trial-dialog'
+  secondaryActionLabel?: string
+  secondaryActionType?: 'open-trial-dialog' | 'open-env-dialog'
 }
 
 interface TrialState {
-  active: boolean;
-  percent_remaining?: number;
-  remaining_tokens_display?: string;
-  limit_tokens_display?: string;
+  active: boolean
+  percent_remaining?: number
+  remaining_tokens_display?: string
+  limit_tokens_display?: string
 }
 
 function getWarningConfig(
   missingAnthropicRequirements: EnvRequirement[],
-  trialState?: TrialState,
+  trialState?: TrialState
 ): WarningConfig | null {
   // Trial exhausted — needs a real key
-  if (trialState?.active && trialState.percent_remaining != null && trialState.percent_remaining <= 0) {
+  if (
+    trialState?.active &&
+    trialState.percent_remaining != null &&
+    trialState.percent_remaining <= 0
+  ) {
     return {
       title: 'Trial Credits Exhausted',
       description: TRIAL_EXHAUSTED_MESSAGE,
       severity: 'error',
       actionLabel: 'Set API Key',
       actionType: 'open-env-dialog',
-    };
+    }
   }
 
   // Trial low balance
-  if (trialState?.active && trialState.percent_remaining != null && trialState.percent_remaining < 25) {
+  if (
+    trialState?.active &&
+    trialState.percent_remaining != null &&
+    trialState.percent_remaining < 25
+  ) {
     return {
       title: 'Low Trial Balance',
       description: `${trialState.remaining_tokens_display} of ${trialState.limit_tokens_display} trial tokens remaining. Consider getting your own API key.`,
       severity: 'warning',
       actionLabel: 'Set API Key',
       actionType: 'open-env-dialog',
-    };
+    }
   }
 
   // Missing key — offer both trial and set key
@@ -71,10 +82,10 @@ function getWarningConfig(
       actionType: 'open-trial-dialog',
       secondaryActionLabel: 'Set API key',
       secondaryActionType: 'open-env-dialog',
-    };
+    }
   }
 
-  return null;
+  return null
 }
 
 function ConfigBanner({
@@ -83,12 +94,12 @@ function ConfigBanner({
   onAction,
   onSecondaryAction,
 }: {
-  config: WarningConfig;
-  onDismiss?: () => void;
-  onAction?: () => void;
-  onSecondaryAction?: () => void;
+  config: WarningConfig
+  onDismiss?: () => void
+  onAction?: () => void
+  onSecondaryAction?: () => void
 }) {
-  const isError = config.severity === 'error';
+  const isError = config.severity === 'error'
 
   return (
     <m.div
@@ -99,9 +110,10 @@ function ConfigBanner({
       className={`
         relative overflow-hidden rounded-2xl mb-4
         border-(length:--border-base)
-        ${isError
-          ? 'bg-surface-negative-soft border-border-negative-soft'
-          : 'bg-surface-warning-soft border-border-warning-soft'
+        ${
+          isError
+            ? 'bg-surface-negative-soft border-border-negative-soft'
+            : 'bg-surface-warning-soft border-border-warning-soft'
         }
       `}
     >
@@ -109,9 +121,10 @@ function ConfigBanner({
       <div
         className={`
           absolute top-0 left-0 right-0 h-[2px]
-          ${isError
-            ? 'bg-gradient-to-r from-transparent via-content-negative-soft to-transparent'
-            : 'bg-gradient-to-r from-transparent via-content-warning-soft to-transparent'
+          ${
+            isError
+              ? 'bg-gradient-to-r from-transparent via-content-negative-soft to-transparent'
+              : 'bg-gradient-to-r from-transparent via-content-warning-soft to-transparent'
           }
         `}
       />
@@ -121,10 +134,12 @@ function ConfigBanner({
           {/* Left: Icon + Content */}
           <HStack className="gap-3 items-start flex-1 min-w-0">
             {/* Icon container */}
-            <div className={`
+            <div
+              className={`
               flex-shrink-0 mt-0.5 p-1.5 rounded-lg
               ${isError ? 'bg-surface-negative-soft' : 'bg-surface-warning-soft'}
-            `}>
+            `}
+            >
               <Icon
                 name="alert"
                 label="Warning"
@@ -141,25 +156,28 @@ function ConfigBanner({
               <VStack className="gap-0.5 items-start">
                 <Text
                   level="label-small"
-                  className={isError ? 'text-content-negative-soft' : 'text-content-warning-soft'}
+                  className={
+                    isError
+                      ? 'text-content-negative-soft'
+                      : 'text-content-warning-soft'
+                  }
                 >
                   {config.title}
                 </Text>
-                <Text
-                  level="body-small"
-                  className="text-content-layout-2"
-                >
+                <Text level="body-small" className="text-content-layout-2">
                   {config.description}
                 </Text>
               </VStack>
 
               {config.command && (
-                <HStack className="
+                <HStack
+                  className="
                   gap-2 items-center w-full
                   bg-surface-layout-2/50
                   rounded-lg px-3 py-2
                   border-(length:--border-base) border-border-layout-1
-                ">
+                "
+                >
                   <Text
                     level="mono-small"
                     className="text-content-layout-1 flex-1 truncate select-all"
@@ -170,13 +188,17 @@ function ConfigBanner({
                 </HStack>
               )}
 
-              {(config.actionLabel && onAction) && (
+              {config.actionLabel && onAction && (
                 <HStack className="gap-2 items-center">
                   <Button
                     variant="primary"
                     modifier="outline"
                     label={config.actionLabel}
-                    icon={config.actionType === 'open-trial-dialog' ? 'sparkles' : 'key'}
+                    icon={
+                      config.actionType === 'open-trial-dialog'
+                        ? 'sparkles'
+                        : 'key'
+                    }
                     iconPosition="left"
                     onClick={onAction}
                   />
@@ -210,38 +232,43 @@ function ConfigBanner({
         </HStack>
       </div>
     </m.div>
-  );
+  )
 }
 
 export function ConfigWarning() {
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [dismissed, setDismissed] = useState<string | null>(null);
-  const [showSecretsDialog, setShowSecretsDialog] = useState(false);
-  const [showTrialDialog, setShowTrialDialog] = useState(false);
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [dismissed, setDismissed] = useState<string | null>(null)
+  const [showSecretsDialog, setShowSecretsDialog] = useState(false)
+  const [showTrialDialog, setShowTrialDialog] = useState(false)
 
-  const { data: status, isLoading, error } = useSystemStatus();
-  const { data: initStatus, isLoading: initLoading } = useInitStatus();
-  const { envRequirements, isTrialSource, trialStatus } = useTrialSource();
+  const { data: status, isLoading, error } = useSystemStatus()
+  const { data: initStatus, isLoading: initLoading } = useInitStatus()
+  const { envRequirements, isTrialSource, trialStatus } = useTrialSource()
 
   const missingAnthropicRequirements =
     envRequirements?.requirements.filter(
       (item) => !item.satisfied && item.kind === 'anthropic_api_key'
-    ) || [];
+    ) || []
 
   const trialState: TrialState | undefined =
-    isTrialSource && (trialStatus?.active || trialStatus?.status === 'exhausted')
+    isTrialSource &&
+    (trialStatus?.active || trialStatus?.status === 'exhausted')
       ? {
           active: true,
-          percent_remaining: trialStatus.status === 'exhausted' ? 0 : (trialStatus.percent_remaining ?? undefined),
-          remaining_tokens_display: trialStatus.remaining_tokens_display ?? undefined,
+          percent_remaining:
+            trialStatus.status === 'exhausted'
+              ? 0
+              : (trialStatus.percent_remaining ?? undefined),
+          remaining_tokens_display:
+            trialStatus.remaining_tokens_display ?? undefined,
           limit_tokens_display: trialStatus.limit_tokens_display ?? undefined,
         }
-      : undefined;
+      : undefined
 
   useEffect(() => {
-    if (isLoading || initLoading || !status || !initStatus) return;
+    if (isLoading || initLoading || !status || !initStatus) return
     if (
       location.pathname === '/' ||
       location.pathname === '/onboarding' ||
@@ -251,37 +278,41 @@ export function ConfigWarning() {
       // it away traps a fresh or wiped install with no way back in.
       location.pathname === '/configure' ||
       location.pathname.startsWith('/demo')
-    ) return;
+    )
+      return
     // Targets are the one true signal: a database added from ANY surface
     // (onboarding form, AWS discovery, CSV import) ends the lockout, even
     // if the guided init flow never ran.
     if (status.targets.length === 0) {
       // Route to Connect preserving where the user was headed, so they land
       // back there after connecting (configure-and-identity open-dep #4).
-      navigate({ to: '/onboarding', search: { redirect: location.pathname } });
+      navigate({ to: '/onboarding', search: { redirect: location.pathname } })
     }
-  }, [isLoading, initLoading, status, initStatus, location.pathname, navigate]);
+  }, [isLoading, initLoading, status, initStatus, location.pathname, navigate])
 
   // Reset dismissed state when status changes
   useEffect(() => {
-    const config = getWarningConfig(missingAnthropicRequirements, trialState);
+    const config = getWarningConfig(missingAnthropicRequirements, trialState)
     if (config?.title !== dismissed) {
-      setDismissed(null);
+      setDismissed(null)
     }
-  }, [missingAnthropicRequirements, trialState, dismissed]);
+  }, [missingAnthropicRequirements, trialState, dismissed])
 
   if (isLoading) {
-    return null;
+    return null
   }
 
-  if (error) return null;
+  if (error) return null
 
-  if (!status) return null;
+  if (!status) return null
 
-  const warningConfig = getWarningConfig(missingAnthropicRequirements, trialState);
+  const warningConfig = getWarningConfig(
+    missingAnthropicRequirements,
+    trialState
+  )
 
   if (!warningConfig || dismissed === warningConfig.title) {
-    return null;
+    return null
   }
 
   // The banner only belongs on pages that use the key (Ask, Audit, ...).
@@ -294,32 +325,32 @@ export function ConfigWarning() {
     location.pathname.startsWith('/demo') ||
     location.pathname.startsWith('/audit')
   ) {
-    return null;
+    return null
   }
 
   const shouldShowManualAnthropicInput =
     warningConfig.actionType === 'open-env-dialog' ||
-    warningConfig.secondaryActionType === 'open-env-dialog';
+    warningConfig.secondaryActionType === 'open-env-dialog'
 
   const handleAction = () => {
     if (warningConfig.actionType === 'open-env-dialog') {
-      setShowSecretsDialog(true);
+      setShowSecretsDialog(true)
     } else if (warningConfig.actionType === 'open-trial-dialog') {
-      setShowTrialDialog(true);
+      setShowTrialDialog(true)
     }
-  };
+  }
 
   const handleSecondaryAction = () => {
     if (warningConfig.secondaryActionType === 'open-env-dialog') {
-      setShowSecretsDialog(true);
+      setShowSecretsDialog(true)
     } else if (warningConfig.secondaryActionType === 'open-trial-dialog') {
-      setShowTrialDialog(true);
+      setShowTrialDialog(true)
     }
-  };
+  }
 
   const invalidateAll = () => {
-    void invalidateTrialRelatedQueries(queryClient);
-  };
+    void invalidateTrialRelatedQueries(queryClient)
+  }
 
   return (
     <>
@@ -328,7 +359,11 @@ export function ConfigWarning() {
           config={warningConfig}
           onDismiss={() => setDismissed(warningConfig.title)}
           onAction={warningConfig.actionType ? handleAction : undefined}
-          onSecondaryAction={warningConfig.secondaryActionType ? handleSecondaryAction : undefined}
+          onSecondaryAction={
+            warningConfig.secondaryActionType
+              ? handleSecondaryAction
+              : undefined
+          }
         />
       </AnimatePresence>
       <EnvSecretsDialog
@@ -344,10 +379,10 @@ export function ConfigWarning() {
         isOpen={showTrialDialog}
         onClose={() => setShowTrialDialog(false)}
         onSuccess={() => {
-          invalidateAll();
-          setShowTrialDialog(false);
+          invalidateAll()
+          setShowTrialDialog(false)
         }}
       />
     </>
-  );
+  )
 }

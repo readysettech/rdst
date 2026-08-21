@@ -148,6 +148,41 @@ export function getScoreTone(score?: number): ResultTone {
   return 'negative'
 }
 
+/** A stored analysis reduced to the rating and score a card can show. */
+export interface AnalysisAssessment {
+  overall_rating: string
+  efficiency_score: number | null
+}
+
+/**
+ * Compact "Good · 82/100" outcome with the tone that matches it. Null when the
+ * stored record carries neither a rating nor a score, so a card shows nothing
+ * rather than an empty placeholder.
+ */
+export function analysisOutcome(
+  assessment: AnalysisAssessment | null | undefined
+): { label: string; tone: ResultTone } | null {
+  if (!assessment) return null
+  const rating = assessment.overall_rating.trim()
+  const ratingLabel = rating
+    ? rating[0].toUpperCase() + rating.slice(1).toLowerCase()
+    : ''
+  const score =
+    typeof assessment.efficiency_score === 'number' &&
+    assessment.efficiency_score > 0
+      ? Math.round(assessment.efficiency_score)
+      : null
+  const label =
+    ratingLabel && score !== null
+      ? `${ratingLabel} · ${score}/100`
+      : ratingLabel || (score !== null ? `${score}/100` : '')
+  if (!label) return null
+  return {
+    label,
+    tone: score !== null ? getScoreTone(score) : getResultTone(rating),
+  }
+}
+
 export function getRatingTitle(rating?: string) {
   switch (rating?.toLowerCase()) {
     case 'excellent':
@@ -330,20 +365,28 @@ function getNextStep({
 
   // An index the planner actually picks up (hypopg) beats a guessed impact.
   const verified = indexes
-    .map((candidate) => ({ candidate, verdict: findPlannerResult(indexTesting, candidate) }))
+    .map((candidate) => ({
+      candidate,
+      verdict: findPlannerResult(indexTesting, candidate),
+    }))
     .filter((entry) => entry.verdict?.planner_used_index)
     .sort(
-      (a, b) => (b.verdict?.cost_reduction_pct ?? 0) - (a.verdict?.cost_reduction_pct ?? 0)
+      (a, b) =>
+        (b.verdict?.cost_reduction_pct ?? 0) -
+        (a.verdict?.cost_reduction_pct ?? 0)
     )[0]
   const index =
     verified?.candidate ??
     indexes.find((candidate) => candidate.estimated_impact === 'high') ??
     indexes[0]
   if (index) {
-    const plannerVerdict = verified?.verdict ?? findPlannerResult(indexTesting, index)
+    const plannerVerdict =
+      verified?.verdict ?? findPlannerResult(indexTesting, index)
     return {
       kind: 'index',
-      evidence: plannerVerdict?.planner_used_index ? 'Planner-verified' : 'Suggested',
+      evidence: plannerVerdict?.planner_used_index
+        ? 'Planner-verified'
+        : 'Suggested',
       tone: 'informative',
       title: `Add an index on ${index.table}`,
       body: index.rationale,
@@ -419,7 +462,8 @@ export function selectResultsViewModel(
     ? getReadysetVerdict(cacheability)
     : undefined
   const indexRecommendations = modelAnalysis?.index_recommendations ?? []
-  const indexTesting = results.index_testing ?? formatted?.index_testing ?? undefined
+  const indexTesting =
+    results.index_testing ?? formatted?.index_testing ?? undefined
   const hasModelAnalysis =
     modelAnalysis?.success !== false &&
     Boolean(

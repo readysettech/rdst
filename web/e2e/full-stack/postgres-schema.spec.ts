@@ -53,9 +53,7 @@ test('configures Postgres and bootstraps its schema through the UI', async ({
   }).toPass({ timeout: 30_000 })
 
   await page.goto('/schema')
-  await expect(
-    page.getByRole('heading', { name: 'Semantic Layer' })
-  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Schema' })).toBeVisible()
 
   await expect(
     page.getByRole('button').filter({ hasText: 'title_basics' })

@@ -4,6 +4,7 @@ import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card-2'
 import { Icon } from '@rs/ui-new/icon'
 import { m } from '@rs/ui-new/motion'
+import { Pressable } from '@rs/ui-new/pressable'
 import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
@@ -18,8 +19,11 @@ import type { ReactNode } from 'react'
 import { QueryCacheStatus } from '../../../components/QueryCacheStatus'
 import { QueryCard, type QueryCardProps } from '../../../components/QueryCard'
 import { QueryCardImpact } from '../../../components/QueryCardImpact'
+import { QueryStarButton } from '../../../components/QueryStarButton'
 import { SQLInput } from '../../../components/SQLInput'
 import { SqlTokens } from '../../../components/SqlTokens'
+import { useAnalysisRunForQuery } from '../../../lib/analysisRuns'
+import { trackEvent } from '../../../lib/analytics'
 import {
   formatMeta,
   formatMs,
@@ -41,9 +45,12 @@ import type {
   QueryLibraryDisplayMode,
   QueryLibraryDisplayProperty,
 } from '../library/queryLibraryDisplay'
+import { analysisOutcome } from '../results/resultsSelectors'
+import { analyzedAgoLabel } from '../results/storedAnalysis'
 import { SavedQueryDetails } from './SavedQueryDetails'
 import { SavedQueryMenu } from './SavedQueryMenu'
 import { getSourceMeta } from './savedQuerySelectors'
+import { useLatestAnalysis } from './useLatestAnalysis'
 import type { SavedQueriesController } from './useSavedQueriesController'
 
 interface SavedQueryRowProps {
@@ -173,6 +180,38 @@ export function SavedQueryRow({
   const runResult = cacheTestRun?.result
   const impactCaption = formatImpactCaption(entry)
   const runCount = formatRunCount(entry)
+  // The card's own record of prior work: visible in the footer without
+  // expanding, so a user can see at a glance which queries they have already
+  // analyzed (A2).
+  const latestAnalysis = useLatestAnalysis(
+    entry.hash,
+    Boolean(entry.last_analyzed_at)
+  )
+  // A run started here outlives the drawer it was started from, so the card
+  // keeps reporting it while the drawer is closed.
+  const analysisRun = useAnalysisRunForQuery({
+    hash: entry.hash,
+    sql: entry.sql,
+    target: entry.target || target,
+  })
+  const isAnalyzing = analysisRun?.state === 'analyzing'
+  const outcome = analysisOutcome(latestAnalysis)
+  const analyzedAgo = latestAnalysis
+    ? analyzedAgoLabel(latestAnalysis.analyzed_at)
+    : null
+  const openAnalysis = () =>
+    actions.analyze(entry.sql, entry.target, entry.most_recent_params, {
+      hash: entry.hash,
+    })
+  const openStoredAnalysis = latestAnalysis
+    ? () =>
+        actions.analyze(entry.sql, entry.target, entry.most_recent_params, {
+          stored: {
+            hash: entry.hash,
+            analysisId: latestAnalysis.analysis_id,
+          },
+        })
+    : undefined
   const visible = visibleProperties
     ? new Set<QueryLibraryDisplayProperty>(visibleProperties)
     : null
@@ -218,6 +257,37 @@ export function SavedQueryRow({
     `hash ${shortHash(entry.hash)}`,
     entry.target || null,
   ])
+  // The badge itself carries only the outcome; the relative time it was
+  // measured lives in a tooltip so the footer line stays short.
+  const outcomeTag = outcome ? (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Tag
+            tabIndex={0}
+            size="small"
+            variant={outcome.tone}
+            modifier="ghost"
+            label={outcome.label}
+          />
+        </TooltipTrigger>
+        <TooltipContent label={analyzedAgo ?? ''} />
+      </Tooltip>
+    </TooltipProvider>
+  ) : analyzedAgo ? (
+    <Tag size="small" variant="neutral" modifier="ghost" label={analyzedAgo} />
+  ) : null
+  // The outcome leads the meta band so prior work is the first thing read on
+  // the line; the identity metadata keeps its place after it.
+  const withOutcome = (content: ReactNode) =>
+    outcomeTag ? (
+      <HStack className="min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        {outcomeTag}
+        <span className="min-w-0">{content}</span>
+      </HStack>
+    ) : (
+      content
+    )
   const sourceBadge = (
     <Tag
       size="small"
@@ -226,13 +296,27 @@ export function SavedQueryRow({
       label={sourceMeta.label}
     />
   )
+  // The name is the way into everything this query already has: its analyses,
+  // its last comparison, its identity. That is the drawer's Overview.
   const defaultTitle = (
-    <Text
-      level="label-medium"
-      className="text-content-layout-1 font-semibold truncate"
+    <Pressable
+      className="min-w-0 rounded text-left"
+      title="Open this query"
+      onClick={() => actions.openOverview(entry.hash)}
     >
-      {displayName}
-    </Text>
+      <Text
+        level="label-medium"
+        className="text-content-layout-1 font-semibold truncate hover:text-content-primary-soft"
+      >
+        {displayName}
+      </Text>
+    </Pressable>
+  )
+  const starButton = (
+    <QueryStarButton
+      starred={entry.starred === true}
+      onToggle={(next) => actions.toggleStar(entry.hash, next)}
+    />
   )
   const title = isConfirmingDelete ? (
     <HStack className="gap-2 items-center">
@@ -322,21 +406,43 @@ export function SavedQueryRow({
               size="small"
               icon="speedometer"
               iconPosition="left"
-              label="Analyze"
-              onClick={() =>
-                actions.analyze(
-                  entry.sql,
-                  entry.target,
-                  entry.most_recent_params
-                )
+              label={
+                isAnalyzing
+                  ? 'Analyzing...'
+                  : openStoredAnalysis
+                    ? 'View analysis'
+                    : 'Analyze'
+              }
+              // A run in flight reopens where it is being measured; the drawer
+              // attaches to it rather than measuring the query a second time.
+              onClick={
+                isAnalyzing
+                  ? openAnalysis
+                  : (openStoredAnalysis ?? openAnalysis)
               }
             />
           </div>
         </TooltipTrigger>
-        <TooltipContent label="Analyze this query" />
+        <TooltipContent
+          label={
+            isAnalyzing
+              ? 'Analysis in progress. Open it.'
+              : openStoredAnalysis
+                ? 'Open the analysis you already ran'
+                : 'Analyze this query'
+          }
+        />
       </Tooltip>
     </TooltipProvider>
   )
+  const reRunAnalysis = openStoredAnalysis
+    ? () => {
+        trackEvent('analysis_rerun', { reason: 'manual' })
+        actions.analyze(entry.sql, entry.target, entry.most_recent_params, {
+          hash: entry.hash,
+        })
+      }
+    : undefined
   const primaryAction = isConfirmingDelete ? (
     <Button
       variant="negative"
@@ -431,6 +537,7 @@ export function SavedQueryRow({
         >
           <Card.Content className="grid min-h-20 min-w-0 grid-cols-1 items-center gap-3 overflow-hidden rounded-none border-0 bg-transparent px-4 py-3 laptop:grid-cols-[minmax(0,0.8fr)_minmax(0,1.4fr)_minmax(0,1fr)_auto]">
             <HStack className="min-w-0 items-center gap-2">
+              {starButton}
               <div className="min-w-0">{defaultTitle}</div>
               <HStack className="shrink-0 gap-1.5">{badges}</HStack>
             </HStack>
@@ -442,14 +549,15 @@ export function SavedQueryRow({
               />
             </div>
 
-            <div className="min-w-0" title={meta}>
+            <HStack className="min-w-0 items-center gap-2" title={meta}>
+              {outcomeTag}
               <Text
                 level="mono-small"
                 className="truncate text-content-layout-3"
               >
                 {metaContent}
               </Text>
-            </div>
+            </HStack>
 
             <HStack className="items-center justify-end gap-1.5">
               <Button
@@ -472,6 +580,7 @@ export function SavedQueryRow({
                     ? () => actions.markReviewed(entry.hash)
                     : undefined
                 }
+                onReRunAnalysis={reRunAnalysis}
                 onDelete={() => actions.confirmDelete(entry.hash)}
               />
             </HStack>
@@ -484,13 +593,7 @@ export function SavedQueryRow({
                 cacheTestRun={cacheTestRun}
                 onDismissRun={actions.dismissRun}
                 onClose={() => actions.toggleExpanded(entry.hash)}
-                onViewAnalysis={() =>
-                  actions.analyze(
-                    entry.sql,
-                    entry.target,
-                    entry.most_recent_params
-                  )
-                }
+                onViewAnalysis={openStoredAnalysis}
               />
             </Card.Content>
           ) : null}
@@ -511,9 +614,12 @@ export function SavedQueryRow({
           'data-testid': 'query-registry-row',
           'data-query-hash': entry.hash,
           sql: entry.sql,
+          leading: starButton,
           title,
           badges,
-          meta: displayMode === 'card-2' ? impactMeta : metaContent,
+          meta: withOutcome(
+            displayMode === 'card-2' ? impactMeta : metaContent
+          ),
           highlighted: isHighlighted,
           className: cn(
             isConfirmingDelete && 'ring-1 ring-border-negative-soft'
@@ -541,6 +647,7 @@ export function SavedQueryRow({
                   ? () => actions.markReviewed(entry.hash)
                   : undefined
               }
+              onReRunAnalysis={reRunAnalysis}
               onDelete={() => actions.confirmDelete(entry.hash)}
             />
           ) : undefined,
@@ -553,13 +660,7 @@ export function SavedQueryRow({
                 cacheTestRun={cacheTestRun}
                 onDismissRun={actions.dismissRun}
                 onClose={() => actions.toggleExpanded(entry.hash)}
-                onViewAnalysis={() =>
-                  actions.analyze(
-                    entry.sql,
-                    entry.target,
-                    entry.most_recent_params
-                  )
-                }
+                onViewAnalysis={openStoredAnalysis}
               />
             ) : undefined,
         }

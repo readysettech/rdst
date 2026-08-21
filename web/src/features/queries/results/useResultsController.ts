@@ -2,6 +2,17 @@ import { useNavigate } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { hasParameters } from '../../../components/top'
 import { useTarget } from '../../../hooks/useTarget'
+import { analysisRunKey } from '../../../lib/analysisRuns'
+import type { AnalysisRerunReason } from '../../../lib/analytics'
+import { trackEvent } from '../../../lib/analytics'
+import type {
+  AnalysisState,
+  CompleteEvent,
+  ProgressEvent,
+  ReadysetCacheability,
+  RewriteTesting,
+} from '../../../lib/api'
+import type { ApiErrorEnvelope } from '../../../lib/errorContract'
 import { useAnalyze } from '../../../lib/sse'
 import { useCacheAction } from '../../../lib/useCacheAction'
 import { useTargetConnectivityGate } from '../../../lib/useTargetConnectivityGate'
@@ -10,7 +21,21 @@ import {
   parseQueryLibrarySearch,
   type QueryLibrarySearch,
 } from '../library/queryLibraryState'
-import type { ResultsSearch } from './types'
+import { analysisAgeBucket } from './storedAnalysis'
+import type { ResultsOrigin, ResultsSearch } from './types'
+import { useStoredAnalysis } from './useStoredAnalysis'
+
+// Legacy/direct links carry neither `origin` nor `returnSearch` — they have
+// always landed on the Query Library, so that stays the fallback origin.
+const DEFAULT_ORIGIN: ResultsOrigin = 'query-library'
+
+const ORIGIN_BACK_LABEL: Record<ResultsOrigin, string> = {
+  home: 'Back to Home',
+  ask: 'Back to Ask',
+  'slow-queries': 'Back to Slow queries',
+  scan: 'Back to Code scan',
+  'query-library': 'Back to queries',
+}
 
 const ANALYZE_CONSENT_KEY = 'rdst.explain-analyze-consent'
 
@@ -44,15 +69,77 @@ function parseReturnSearch(value?: string): QueryLibrarySearch | undefined {
   }
 }
 
-export function useResultsController(search: ResultsSearch) {
+/**
+ * What the results presentation needs from a finished or in-flight analysis.
+ * A live run and a replayed stored record both satisfy it, which is what lets
+ * `/results` show either without forking the rendering tree.
+ */
+type ResultsAnalysisView = {
+  state: AnalysisState
+  progress: ProgressEvent | undefined
+  results: CompleteEvent | undefined
+  rewriteTesting: RewriteTesting | undefined
+  readysetCacheability: ReadysetCacheability | undefined
+  error: string | undefined
+  errorEnvelope: ApiErrorEnvelope | undefined
+}
+
+/**
+ * How a results view moves. `/results` navigates; the analyze drawer rewrites
+ * its own `?analyze=` state over the Query Library. One controller, two
+ * shells — the presentation below it is identical.
+ */
+export interface ResultsShell {
+  /** Show different results in the same shell. */
+  openSearch: (next: ResultsSearch, options?: { replace?: boolean }) => void
+  /** Leave the results view for wherever the user came from. */
+  goBack: () => void
+}
+
+export interface ResultsControllerOptions {
+  /** What the sidebar job for a run this view starts is called. */
+  jobLabel?: string
+}
+
+export function useResultsController(
+  search: ResultsSearch,
+  shell?: ResultsShell,
+  options: ResultsControllerOptions = {}
+) {
   const navigate = useNavigate()
-  const { query, target, fast = false, params, returnSearch } = search
+  const {
+    query,
+    target,
+    fast = false,
+    params,
+    returnSearch,
+    origin,
+    hash,
+    analysisId,
+  } = search
+  const resolvedOrigin = origin ?? DEFAULT_ORIGIN
+  const backLabel = ORIGIN_BACK_LABEL[resolvedOrigin]
   const storedParams = useMemo(() => parseStoredParameters(params), [params])
   const queryLibraryReturnSearch = useMemo(
     () => parseReturnSearch(returnSearch),
     [returnSearch]
   )
-  const analysis = useAnalyze()
+  // Attaching by request identity is what lets a run outlive the view that
+  // started it: closing the analyze drawer leaves the run in flight, and
+  // reopening it — or opening `/results` for the same query — picks it back up.
+  const runKey = query ? analysisRunKey({ query, target, fast }) : null
+  const live = useAnalyze(runKey)
+  const stored = useStoredAnalysis({ hash, analysisId })
+  const storedView: ResultsAnalysisView = {
+    state: stored.hasBody ? 'complete' : 'idle',
+    progress: undefined,
+    results: stored.results,
+    rewriteTesting: stored.rewriteTesting,
+    readysetCacheability: stored.readysetCacheability,
+    error: undefined,
+    errorEnvelope: undefined,
+  }
+  const analysis: ResultsAnalysisView = stored.isActive ? storedView : live
   const { setTarget } = useTarget()
   const passwordLock = useTargetPasswordLock(target)
   const connectivity = useTargetConnectivityGate(
@@ -69,13 +156,42 @@ export function useResultsController(search: ResultsSearch) {
   const [skipAnalyzeConsent, setSkipAnalyzeConsent] = useState(false)
   const queryHasParams = useMemo(() => hasParameters(query), [query])
 
-  const goToQueries = useCallback(() => {
+  const openSearch = useCallback(
+    (next: ResultsSearch, options?: { replace?: boolean }) => {
+      if (shell) {
+        shell.openSearch(next, options)
+        return
+      }
+      navigate({ to: '/results', search: next, replace: options?.replace })
+    },
+    [navigate, shell]
+  )
+
+  const goBack = useCallback(() => {
+    if (shell) {
+      shell.goBack()
+      return
+    }
+    if (resolvedOrigin === 'home') {
+      navigate({ to: '/' })
+      return
+    }
+    if (resolvedOrigin === 'ask') {
+      navigate({ to: '/ask' })
+      return
+    }
+    if (resolvedOrigin === 'scan') {
+      navigate({ to: '/scan' })
+      return
+    }
+    // 'slow-queries' lives inside the Query Library's live-capture panel, and
+    // 'query-library' (the default) is the Query Library itself.
     if (queryLibraryReturnSearch) {
       navigate({ to: '/queries', search: queryLibraryReturnSearch })
       return
     }
     navigate({ to: '/queries' })
-  }, [navigate, queryLibraryReturnSearch])
+  }, [navigate, queryLibraryReturnSearch, resolvedOrigin, shell])
 
   const cacheQuery = useCallback(() => {
     if (query && target) cache.cacheQuery(query, query)
@@ -98,10 +214,10 @@ export function useResultsController(search: ResultsSearch) {
       } else if (to === '/configure') {
         navigate({ to: '/configure' })
       } else {
-        goToQueries()
+        goBack()
       }
     },
-    [goToQueries, navigate]
+    [goBack, navigate]
   )
 
   const startAnalysis = useCallback(async () => {
@@ -110,17 +226,24 @@ export function useResultsController(search: ResultsSearch) {
     analysisRequestPending.current = true
     try {
       if (!(await connectivity.ensureReachable())) return
-      analysis.analyze({ query, target, fast })
+      trackEvent('analysis_started', { origin: resolvedOrigin })
+      live.analyze(
+        { query, target, fast },
+        { queryHash: hash, queryLabel: options.jobLabel }
+      )
     } finally {
       analysisRequestPending.current = false
     }
   }, [
-    analysis.analyze,
+    live.analyze,
     connectivity.ensureReachable,
     fast,
+    hash,
+    options.jobLabel,
     passwordLock.isLocked,
     passwordLock.isResolved,
     query,
+    resolvedOrigin,
     target,
   ])
 
@@ -156,8 +279,52 @@ export function useResultsController(search: ResultsSearch) {
   const cancelAnalysis = useCallback(() => {
     setShowAnalyzeConsent(false)
     setSkipAnalyzeConsent(false)
-    goToQueries()
-  }, [goToQueries])
+    goBack()
+  }, [goBack])
+
+  /**
+   * Leave the stored record and measure the query again. Dropping `analysisId`
+   * from the URL is the whole switch: the same page becomes a live run, and
+   * the stored analysis stays in the history rather than being replaced.
+   */
+  const reRunStored = useCallback(
+    (reason: AnalysisRerunReason) => {
+      trackEvent('analysis_rerun', { reason })
+      openSearch({
+        query,
+        target,
+        fast,
+        params,
+        returnSearch,
+        origin,
+        hash,
+        analysisId: undefined,
+      })
+    },
+    [fast, hash, openSearch, origin, params, query, returnSearch, target]
+  )
+
+  /** The live view's own re-measure, always a deliberate choice by the user. */
+  const runAgainDeliberately = useCallback(() => {
+    trackEvent('analysis_rerun', { reason: 'manual' })
+    requestAnalysis()
+  }, [requestAnalysis])
+
+  const openStoredAnalysis = useCallback(
+    (id: string) => {
+      openSearch({
+        query,
+        target,
+        fast,
+        params,
+        returnSearch,
+        origin,
+        hash,
+        analysisId: id,
+      })
+    },
+    [fast, hash, openSearch, origin, params, query, returnSearch, target]
+  )
 
   const checkConversationStatus = useCallback(async (queryHash: string) => {
     try {
@@ -175,12 +342,15 @@ export function useResultsController(search: ResultsSearch) {
     }
   }, [])
 
+  // Reading a stored result touches no database, so neither the parameter
+  // prompt nor the auto-run applies while one is open.
   useEffect(() => {
     if (
       passwordLock.isResolved &&
       !passwordLock.isLocked &&
       queryHasParams &&
-      !paramDialogShown
+      !paramDialogShown &&
+      !stored.isActive
     ) {
       setShowParamDialog(true)
       setParamDialogShown(true)
@@ -190,6 +360,7 @@ export function useResultsController(search: ResultsSearch) {
     passwordLock.isLocked,
     passwordLock.isResolved,
     queryHasParams,
+    stored.isActive,
   ])
 
   useEffect(() => {
@@ -202,7 +373,8 @@ export function useResultsController(search: ResultsSearch) {
       query &&
       passwordLock.isResolved &&
       !queryHasParams &&
-      !passwordLock.isLocked
+      !passwordLock.isLocked &&
+      !stored.isActive
     ) {
       requestAnalysis()
     }
@@ -213,6 +385,7 @@ export function useResultsController(search: ResultsSearch) {
     query,
     queryHasParams,
     requestAnalysis,
+    stored.isActive,
   ])
 
   useEffect(() => {
@@ -224,24 +397,18 @@ export function useResultsController(search: ResultsSearch) {
   const submitParameters = useCallback(
     (substitutedQuery: string) => {
       setShowParamDialog(false)
-      navigate({
-        to: '/results',
-        search: {
-          query: substitutedQuery,
-          target,
-          fast,
-          returnSearch,
-        },
-        replace: true,
-      })
+      openSearch(
+        { query: substitutedQuery, target, fast, returnSearch, origin },
+        { replace: true }
+      )
     },
-    [fast, navigate, returnSearch, target]
+    [fast, openSearch, origin, returnSearch, target]
   )
 
   const cancelParameters = useCallback(() => {
     setShowParamDialog(false)
-    goToQueries()
-  }, [goToQueries])
+    goBack()
+  }, [goBack])
 
   const closeInteractive = useCallback(() => {
     setIsInteractiveOpen(false)
@@ -256,7 +423,20 @@ export function useResultsController(search: ResultsSearch) {
       target,
       fast,
     },
+    origin: resolvedOrigin,
+    backLabel,
     analysis,
+    stored: {
+      isActive: stored.isActive,
+      isLoading: stored.isLoading,
+      hasBody: stored.hasBody,
+      error: stored.error,
+      record: stored.record,
+      history: stored.history,
+      ageBucket: stored.record
+        ? analysisAgeBucket(stored.record.created_at)
+        : null,
+    },
     passwordLock,
     connectivity,
     cache: {
@@ -283,8 +463,11 @@ export function useResultsController(search: ResultsSearch) {
       },
     },
     actions: {
-      goToQueries,
+      goBack,
       runAgain: requestAnalysis,
+      runAgainDeliberately,
+      reRunStored,
+      openStoredAnalysis,
       cacheQuery,
       setUpCaching,
       recover,

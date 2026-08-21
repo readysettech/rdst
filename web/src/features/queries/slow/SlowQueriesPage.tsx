@@ -39,6 +39,8 @@ export function SlowQueriesPage({
         error={run.error}
         onStart={target.canRun ? actions.start : undefined}
         onRetry={target.canRun ? actions.start : undefined}
+        filtersActive={filters.active}
+        onClearFilters={target.canRun ? actions.clearFilters : undefined}
       />
 
       <ParameterDialog

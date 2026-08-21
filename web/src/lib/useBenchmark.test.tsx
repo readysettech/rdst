@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { BenchmarkRequest } from './api'
 import type { BackgroundRunState } from './backgroundRuns'
 
 const mocks = vi.hoisted(() => ({
@@ -18,6 +19,11 @@ vi.mock('./targetSwitchLock', () => ({
   useTargetSwitchLock: vi.fn(),
 }))
 
+vi.mock('./analytics', () => ({
+  trackEvent: vi.fn(),
+}))
+
+import { trackEvent } from './analytics'
 import { useBenchmark } from './sse'
 
 function run(
@@ -104,5 +110,44 @@ describe('useBenchmark run selection', () => {
     expect(cancelled.result.current.status).toBe('cancelled')
     expect(partial.result.current.state).toBe('complete')
     expect(partial.result.current.status).toBe('partial')
+  })
+})
+
+describe('load_test_run analytics (E1)', () => {
+  const request: BenchmarkRequest = {
+    queries: ['Q1'],
+    target: 'demo',
+    mode: 'interval',
+    interval_ms: 100,
+    concurrency: 1,
+    duration_seconds: 30,
+  }
+
+  beforeEach(() => {
+    mocks.runs = []
+    mocks.startLoadTestRun.mockReset()
+    vi.mocked(trackEvent).mockClear()
+  })
+
+  it('tracks load_test_run once the run actually starts', async () => {
+    mocks.startLoadTestRun.mockResolvedValue('new-run-id')
+    const { result } = renderHook(() => useBenchmark())
+
+    await act(async () => {
+      await result.current.start(request)
+    })
+
+    expect(trackEvent).toHaveBeenCalledWith('load_test_run')
+  })
+
+  it('does not track when the run fails to start', async () => {
+    mocks.startLoadTestRun.mockResolvedValue(null)
+    const { result } = renderHook(() => useBenchmark())
+
+    await act(async () => {
+      await result.current.start(request)
+    })
+
+    expect(trackEvent).not.toHaveBeenCalled()
   })
 })

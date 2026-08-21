@@ -5,6 +5,8 @@ interface SavedQueryMenuProps {
   onEditSql: () => void
   onRename: () => void
   onMarkReviewed?: () => void
+  /** Present only once a stored analysis exists, since View then leads the row. */
+  onReRunAnalysis?: () => void
   onDelete: () => void
 }
 
@@ -12,6 +14,7 @@ export function SavedQueryMenu({
   onEditSql,
   onRename,
   onMarkReviewed,
+  onReRunAnalysis,
   onDelete,
 }: SavedQueryMenuProps) {
   return (
@@ -26,6 +29,13 @@ export function SavedQueryMenu({
         />
       </Dropdown.Trigger>
       <Dropdown.Content align="end" className="min-w-52">
+        {onReRunAnalysis ? (
+          <Dropdown.Item
+            leftIcon="play"
+            label="Re-run analysis"
+            onSelect={onReRunAnalysis}
+          />
+        ) : null}
         <Dropdown.Item
           leftIcon="filter-edit"
           label="Edit SQL"

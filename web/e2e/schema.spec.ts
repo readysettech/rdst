@@ -123,9 +123,7 @@ test('initializes, explores, refreshes, and deletes a semantic layer', async ({
   })
 
   await page.goto('/schema')
-  await expect(
-    page.getByRole('heading', { name: 'Semantic Layer' })
-  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Schema' })).toBeVisible()
   await expect(
     page.getByText('Initialize Semantic Layer', { exact: true })
   ).toBeVisible()

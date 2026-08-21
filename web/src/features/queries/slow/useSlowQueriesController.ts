@@ -59,7 +59,9 @@ export function useSlowQueriesController({
   )
 
   const [parameterQuery, setParameterQuery] = useState<string | null>(null)
-  const [parameterQueryHash, setParameterQueryHash] = useState<string | null>(null)
+  const [parameterQueryHash, setParameterQueryHash] = useState<string | null>(
+    null
+  )
   const [parameterValues, setParameterValues] = useState<
     Record<string, unknown> | undefined
   >(undefined)
@@ -120,45 +122,63 @@ export function useSlowQueriesController({
     queryClient,
   ])
 
-  const handleStart = useCallback(() => {
-    if (!target || passwordLock.isLocked || filterPatternError) return
+  // The row filters are applied by the backend, so a filter change only takes
+  // effect on the next run. Taking them as an argument lets "Clear filters"
+  // run with the cleared values in the same tick, instead of racing the state
+  // update it just queued.
+  const runWith = useCallback(
+    (rowFilters: { pattern: string; minFreq: number; minLoadPct: number }) => {
+      if (!target || passwordLock.isLocked || filterPatternError) return
 
-    if (mode === 'realtime') {
-      run.startRealtime(target, {
+      if (mode === 'realtime') {
+        run.startRealtime(target, {
+          limit,
+          duration: duration > 0 ? duration : undefined,
+          auto_save: autoSave,
+          min_freq: rowFilters.minFreq,
+          min_load_pct: rowFilters.minLoadPct,
+        })
+        return
+      }
+
+      run.getTop(target, {
         limit,
-        duration: duration > 0 ? duration : undefined,
+        source: source as 'auto' | 'pg_stat' | 'activity' | 'digest',
+        sort: sort as 'total_time' | 'freq' | 'avg_time' | 'load',
+        filter_pattern: rowFilters.pattern || undefined,
         auto_save: autoSave,
-        min_freq: minFreq,
-        min_load_pct: minLoadPct,
+        min_freq: rowFilters.minFreq,
+        min_load_pct: rowFilters.minLoadPct,
       })
-      return
-    }
-
-    run.getTop(target, {
+    },
+    [
+      target,
+      passwordLock.isLocked,
+      filterPatternError,
+      mode,
+      run.startRealtime,
+      run.getTop,
       limit,
-      source: source as 'auto' | 'pg_stat' | 'activity' | 'digest',
-      sort: sort as 'total_time' | 'freq' | 'avg_time' | 'load',
-      filter_pattern: filterPattern || undefined,
-      auto_save: autoSave,
-      min_freq: minFreq,
-      min_load_pct: minLoadPct,
-    })
-  }, [
-    target,
-    passwordLock.isLocked,
-    filterPatternError,
-    mode,
-    run.startRealtime,
-    run.getTop,
-    limit,
-    duration,
-    autoSave,
-    minFreq,
-    minLoadPct,
-    source,
-    sort,
-    filterPattern,
-  ])
+      duration,
+      autoSave,
+      source,
+      sort,
+    ]
+  )
+
+  const handleStart = useCallback(() => {
+    runWith({ pattern: filterPattern, minFreq, minLoadPct })
+  }, [runWith, filterPattern, minFreq, minLoadPct])
+
+  const filtersActive =
+    filterPattern.trim() !== '' || minFreq > 0 || minLoadPct > 0
+
+  const handleClearFilters = useCallback(() => {
+    setFilterPattern('')
+    setMinFreq(0)
+    setMinLoadPct(0)
+    runWith({ pattern: '', minFreq: 0, minLoadPct: 0 })
+  }, [runWith])
 
   const handleModeChange = useCallback(
     (nextMode: TopMode) => {
@@ -199,6 +219,7 @@ export function useSlowQueriesController({
           query: query.query_text,
           target: target || undefined,
           params: storedParams ? JSON.stringify(storedParams) : undefined,
+          origin: 'slow-queries',
         },
       })
     },
@@ -220,6 +241,7 @@ export function useSlowQueriesController({
         search: {
           query: substitutedQuery,
           target: target || undefined,
+          origin: 'slow-queries',
         },
       })
     },
@@ -256,7 +278,7 @@ export function useSlowQueriesController({
     if (failures.length === 0) {
       toast({
         title: 'Queries saved',
-        description: `${saved} ${saved === 1 ? 'query' : 'queries'} added to Saved.`,
+        description: `${saved} ${saved === 1 ? 'query' : 'queries'} added to your query library.`,
         variant: 'positive',
       })
       return
@@ -303,6 +325,7 @@ export function useSlowQueriesController({
       setMinFreq,
       minLoadPct,
       setMinLoadPct,
+      active: filtersActive,
     },
     run: {
       ...run,
@@ -322,6 +345,7 @@ export function useSlowQueriesController({
     },
     actions: {
       start: handleStart,
+      clearFilters: handleClearFilters,
       stop: run.stopRealtime,
       analyze: handleAnalyze,
       cache: handleCacheQuery,

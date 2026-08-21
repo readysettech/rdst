@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { trackEvent } from '../lib/analytics'
 import {
   __resetAuditSessionForTests,
   beginAuditSession,
@@ -60,6 +61,10 @@ vi.mock('../hooks/useTarget', () => ({
 
 vi.mock('../lib/useSystemStatus', () => ({
   useSystemStatus: () => ({ data: undefined }),
+}))
+
+vi.mock('../lib/analytics', () => ({
+  trackEvent: vi.fn(),
 }))
 
 /** Wrapper with an external trigger so focus-return has a real target. */
@@ -158,11 +163,14 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
     expect(credits.className).toContain('to-surface-info-soft')
     expect(credits.className).toContain('shadow-elevation-1')
     expect(
-      credits.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING
+      credits.compareDocumentPosition(settings) &
+        Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
 
     fireEvent.click(credits)
-    expect(screen.getByRole('dialog', { name: 'Free credits dialog' })).toBeTruthy()
+    expect(
+      screen.getByRole('dialog', { name: 'Free credits dialog' })
+    ).toBeTruthy()
   })
 
   it('shows and clears the Health Check running indicator from audit session state', () => {
@@ -186,5 +194,77 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
     expect(
       screen.queryByRole('status', { name: 'Health check is running' })
     ).toBeNull()
+  })
+})
+
+describe('Sidebar experimental surfaces (team decision: off the nav)', () => {
+  afterEach(cleanup)
+
+  it('does not list Code scan, Agents, Guards, or a group header', () => {
+    render(<Sidebar />)
+    expect(screen.queryByRole('link', { name: /Code scan/ })).toBeNull()
+    expect(screen.queryByRole('link', { name: /Agents/ })).toBeNull()
+    expect(screen.queryByRole('link', { name: /Guards/ })).toBeNull()
+    expect(screen.queryByText('Experimental')).toBeNull()
+    expect(screen.queryByText('Advanced')).toBeNull()
+  })
+
+  it('keeps Schema in the main nav', () => {
+    render(<Sidebar />)
+    expect(screen.getByRole('link', { name: /Schema/ })).toBeTruthy()
+  })
+})
+
+describe('Sidebar nav_item_clicked analytics (E1)', () => {
+  afterEach(cleanup)
+
+  it('tracks the clicked item label', () => {
+    render(<Sidebar />)
+    fireEvent.click(screen.getByRole('link', { name: /Ask/ }))
+    expect(trackEvent).toHaveBeenCalledWith('nav_item_clicked', {
+      label: 'Ask',
+    })
+  })
+
+  it('tracks the Docs item', () => {
+    render(<Sidebar />)
+    fireEvent.click(screen.getByRole('link', { name: 'Docs' }))
+    expect(trackEvent).toHaveBeenCalledWith('nav_item_clicked', {
+      label: 'Docs',
+    })
+  })
+})
+
+describe('Sidebar value proposition (C1 / D-5)', () => {
+  afterEach(cleanup)
+
+  it('shows the one value-proposition line attached to the target selector', () => {
+    render(<Sidebar />)
+    expect(screen.getByText('Find slow queries. Prove the fix.')).toBeTruthy()
+  })
+})
+
+describe('Sidebar Docs affordance (C4)', () => {
+  afterEach(cleanup)
+
+  it('links to the docs site, opened in a new tab', () => {
+    render(<Sidebar />)
+    const docs = screen.getByRole('link', { name: 'Docs' })
+    expect(docs.getAttribute('href')).toBe('https://readyset.io/docs')
+    expect(docs.getAttribute('target')).toBe('_blank')
+    expect(docs.getAttribute('rel')).toBe('noreferrer')
+  })
+
+  it('places Docs near Settings and Give feedback in the footer', () => {
+    render(<Sidebar />)
+    const settings = screen.getByRole('link', { name: /Settings/ })
+    const docs = screen.getByRole('link', { name: 'Docs' })
+    const feedback = screen.getByRole('button', { name: /Give feedback/ })
+    expect(
+      settings.compareDocumentPosition(docs) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      docs.compareDocumentPosition(feedback) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
   })
 })

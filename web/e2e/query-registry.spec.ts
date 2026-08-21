@@ -23,13 +23,14 @@ test('creates, renames, edits, searches, analyzes, and deletes a saved query', a
             query_hash: 'query-registry-e2e',
           },
         ],
+        repeat: true,
       },
     ],
   })
   await clearQueryRegistry(page.request)
   await configureTestTarget(page, { hasPassword: true })
-  // The Analyze handoff lands on /results, which preflights target
-  // reachability before POST /api/analyze.
+  // Analyze measures the query in the drawer over the library, and its full
+  // view preflights target reachability before POST /api/analyze.
   await mockConnectivityOk(page)
   await acceptExplainAnalyzeConsent(page)
 
@@ -44,7 +45,10 @@ test('creates, renames, edits, searches, analyzes, and deletes a saved query', a
 
   await page.getByRole('button', { name: 'Add query' }).click()
   await fillCodeMirror(page.locator('.cm-editor').first(), initialSql)
-  await page.getByRole('button', { name: 'Save query' }).click()
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: 'Add query' })
+    .click()
 
   let queryRow = page.getByTestId('query-registry-row')
   await expect(queryRow).toHaveCount(1)
@@ -106,11 +110,20 @@ test('creates, renames, edits, searches, analyzes, and deletes a saved query', a
   queryRow = page.getByTestId('query-registry-row')
   const analyzeButton = queryRow.getByRole('button', { name: 'Analyze' })
   await expect(analyzeButton).toBeEnabled()
+  // Analyze opens the query's analyze drawer over the library and measures it
+  // there; the full page is one click away and keeps the same analysis.
+  await analyzeButton.click()
+  await expect(page).toHaveURL(/[?&]analyze=[^&]+/)
+  const drawer = page.getByTestId('analyze-drawer')
+  await expect(drawer).toBeVisible()
   await Promise.all([
     page.waitForURL((url) => url.pathname === '/results'),
-    analyzeButton.click(),
+    drawer.getByRole('button', { name: 'Open full view' }).click(),
   ])
   expect(new URL(page.url()).searchParams.get('query')).toBe(updatedSql)
+  // The full page replaces the library and its drawer. Wait for that handover
+  // before asserting on the SQL, which both surfaces render.
+  await expect(drawer).toHaveCount(0)
   await expect(page.getByText(updatedSql, { exact: true })).toBeVisible()
   await expect(
     page.getByRole('button', { name: 'Run analysis again' })

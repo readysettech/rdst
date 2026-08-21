@@ -79,6 +79,7 @@ function start(label, command, args, options = {}) {
     console.error(`[rdst-desktop] ${label} failed to start: ${error.message}`);
     void shutdown(1);
   });
+  const startedAt = Date.now();
   child.once("exit", (code, signal) => {
     children.delete(label);
     if (shuttingDown) return;
@@ -86,6 +87,12 @@ function start(label, command, args, options = {}) {
     if (label !== "electron" || (code !== 0 && signal == null)) {
       console.error(
         `[rdst-desktop] ${label} exited (code=${code}, signal=${signal})`,
+      );
+    } else if (code === 0 && Date.now() - startedAt < 5_000) {
+      console.error(
+        "[rdst-desktop] electron exited immediately with code 0 - another " +
+          "instance may already hold the single-instance lock. Close it (or " +
+          "kill a stale Electron process) and rerun.",
       );
     }
     void shutdown(code ?? (signal ? 0 : 1));

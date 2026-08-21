@@ -440,6 +440,7 @@ describe('AskPanel', () => {
       search: {
         query: 'SELECT name FROM users LIMIT 100',
         target: 'answering-db',
+        origin: 'ask',
       },
     })
   })

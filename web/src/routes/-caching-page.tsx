@@ -32,17 +32,23 @@ export function CachingPage({
   selectedRunId?: string
 }) {
   const navigate = useNavigate()
+  const findQueries = () =>
+    navigate({
+      to: '/queries',
+      search: { view: 'high-impact' },
+      replace: false,
+    })
 
   return (
     <WorkspaceLayout
-      title="Performance tests"
+      title="Benchmarks"
       description="Measure Readyset impact or validate database capacity."
       icon="speedometer"
       views={TEST_VIEWS}
       activeView={view}
       layoutPrefix="performance-tests"
       panelId={PANEL_ID}
-      tabsLabel="Performance test modes"
+      tabsLabel="Benchmark modes"
       fullBleedTabs
       fillViewport
       onViewChange={(nextView) =>
@@ -63,13 +69,7 @@ export function CachingPage({
               replace: false,
             })
           }
-          onFindQueries={() =>
-            navigate({
-              to: '/queries',
-              search: { view: 'high-impact' },
-              replace: false,
-            })
-          }
+          onFindQueries={findQueries}
         />
       )}
       {view === 'load-test' && (
@@ -82,6 +82,7 @@ export function CachingPage({
               replace: true,
             })
           }
+          onFindQueries={findQueries}
         />
       )}
     </WorkspaceLayout>

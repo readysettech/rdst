@@ -1,5 +1,6 @@
 import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card-2'
+import { EmptyState } from '@rs/ui-new/empty-state'
 import { IconButton } from '@rs/ui-new/icon-button'
 import { IconTile } from '@rs/ui-new/icon-tile'
 import { HStack, VStack } from '@rs/ui-new/stack'
@@ -54,6 +55,22 @@ export function CompareHistory({
       </Card.Header>
 
       <Card.Content className="p-0">
+        {controller.historyEntries.length === 0 && (
+          <EmptyState
+            layout="compact"
+            icon="observe"
+            title="No comparisons yet"
+            body="Run a comparison to measure a query's speedup on Readyset — every paired run is saved here for this target."
+            action={{
+              label: 'New comparison',
+              icon: 'add',
+              onClick: () => {
+                controller.clearBatch()
+                controller.setHistoryOpen(false)
+              },
+            }}
+          />
+        )}
         {controller.historyEntries.map(({ batch, snapshot }) => {
           const speedup = average(
             snapshot.results.map(({ result }) => result.speedup_mean)
@@ -133,18 +150,20 @@ export function CompareHistory({
         })}
       </Card.Content>
 
-      <Card.Footer className="justify-end">
-        <Button
-          variant="rising"
-          modifier="solid"
-          label="New comparison"
-          icon="add"
-          onClick={() => {
-            controller.clearBatch()
-            controller.setHistoryOpen(false)
-          }}
-        />
-      </Card.Footer>
+      {controller.historyEntries.length > 0 && (
+        <Card.Footer className="justify-end">
+          <Button
+            variant="rising"
+            modifier="solid"
+            label="New comparison"
+            icon="add"
+            onClick={() => {
+              controller.clearBatch()
+              controller.setHistoryOpen(false)
+            }}
+          />
+        </Card.Footer>
+      )}
     </Card>
   )
 }

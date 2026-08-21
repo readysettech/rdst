@@ -56,7 +56,7 @@ describe('legacy query route redirects', () => {
     expectRedirect(() => beforeLoad({ search }), {
       to: '/queries',
       search: {
-        view: 'saved',
+        starred: true,
         hash: 'query-hash',
         run: 'run-id',
       },

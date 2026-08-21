@@ -153,6 +153,31 @@ describe('useSlowQueriesController', () => {
     expect(mocks.run.startRealtime).not.toHaveBeenCalled()
   })
 
+  it('clears the row filters and re-runs with them cleared', () => {
+    const { result } = renderHook(() => useSlowQueriesController())
+
+    act(() => {
+      result.current.filters.setMinFreq(3)
+      result.current.filters.setFilterPattern('SELECT.*users')
+    })
+    expect(result.current.filters.active).toBe(true)
+
+    act(() => result.current.actions.clearFilters())
+
+    expect(result.current.filters.active).toBe(false)
+    expect(result.current.filters.filterPattern).toBe('')
+    // The filters are applied server-side, so the same tick must re-run with
+    // the cleared values rather than the ones that emptied the list.
+    expect(mocks.run.getTop).toHaveBeenCalledWith(
+      'production',
+      expect.objectContaining({
+        filter_pattern: undefined,
+        min_freq: 0,
+        min_load_pct: 0,
+      })
+    )
+  })
+
   it('starts and stops realtime monitoring through the same controller', () => {
     const { result } = renderHook(() => useSlowQueriesController())
 
@@ -204,6 +229,7 @@ describe('useSlowQueriesController', () => {
       search: {
         query: "select * from users where status = 'active'",
         target: 'production',
+        origin: 'slow-queries',
       },
     })
   })

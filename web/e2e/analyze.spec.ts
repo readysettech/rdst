@@ -3,6 +3,7 @@ import {
   clearQueryRegistry,
   configureTestTarget,
   expect,
+  mainContent,
   mockConnectivityOk,
   setBackendFixtures,
   test,
@@ -313,7 +314,7 @@ test('shows a streamed failure and can retry the analysis', async ({
       .filter({ hasText: /^Analysis couldn't complete$/ })
   ).toBeVisible()
   await expect(
-    page.getByText('The analysis service is temporarily busy')
+    mainContent(page).getByText('The analysis service is temporarily busy')
   ).toBeVisible()
 
   await page.getByRole('button', { name: 'Try again' }).click()
@@ -361,7 +362,7 @@ test('presents an EXPLAIN connection failure as a target problem', async ({
       .filter({ hasText: /^Analysis couldn't complete$/ })
   ).toBeVisible()
   await expect(
-    page.getByText(
+    mainContent(page).getByText(
       'Could not connect to the database. Check that it is running and reachable, then try again.'
     )
   ).toBeVisible()

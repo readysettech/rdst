@@ -158,7 +158,30 @@ export async function fetchParameterSuggestions(
   return data
 }
 
-export type QueryRegistryEntry = apiComponents['schemas']['QueryRegistryEntry']
+/**
+ * The stored outcome of the last origin-vs-Readyset comparison for one query.
+ * It lives on the registry row, so a comparison stays reportable on any
+ * browser. Untyped by the generated client until gen:api runs.
+ */
+export type QueryCompareOutcome = {
+  status?: string | null
+  at?: string | null
+  readyset_ms?: number | null
+  origin_ms?: number | null
+  detail?: string | null
+}
+
+/**
+ * A registry row, plus the read-model fields added since the last gen:api run:
+ * the user's star and the durable compare outcome. Both are optional, so a
+ * server that predates them renders as an unstarred, never-compared query.
+ */
+export type QueryRegistryEntry =
+  apiComponents['schemas']['QueryRegistryEntry'] & {
+    starred?: boolean
+    starred_at?: string | null
+    last_compare?: QueryCompareOutcome | null
+  }
 export type QueryRegistryResponse =
   apiComponents['schemas']['QueryRegistryResponse']
 
@@ -214,6 +237,8 @@ export type QueryRegistryReadModelRequest = {
   activity: string
   impact: string
   sort: string
+  /** The star, an independent boolean that composes with every other filter. */
+  starred?: boolean
   limit: number
   cursor?: string
 }
@@ -245,6 +270,7 @@ export async function fetchQueryRegistryReadModel(
     sort: request.sort,
     limit: String(request.limit),
   })
+  if (request.starred) params.set('starred', '1')
   if (request.target) params.set('target', request.target)
   const search = request.search?.trim()
   if (search) params.set('search', search)
@@ -296,6 +322,67 @@ export async function fetchLatestAnalysis(
   return response.json()
 }
 
+/** One entry in a query's bounded analysis history, newest first. */
+export type AnalysisHistoryEntry = {
+  analysis_id: string
+  created_at: string
+  target: string
+  overall_rating: string
+  efficiency_score: number | null
+}
+
+export type AnalysisHistoryResponse = {
+  hash: string
+  analyses: AnalysisHistoryEntry[]
+}
+
+/**
+ * The finished results view as the analyze run produced it: the same fields
+ * the SSE `complete` event carries into the results presentation. Analyses
+ * stored before the viewer shipped carry an empty payload.
+ */
+export type StoredAnalysisDisplayPayload = Omit<
+  CompleteEvent,
+  'type' | 'success'
+>
+
+/** One stored analysis, whole, for read-only redisplay. */
+export type StoredAnalysis = {
+  hash: string
+  analysis_id: string
+  created_at: string
+  target: string
+  overall_rating: string
+  efficiency_score: number | null
+  analysis: {
+    display_payload?: StoredAnalysisDisplayPayload | null
+    [key: string]: unknown
+  }
+}
+
+/** A query's stored analyses, newest first. Never analyzed yields an empty list. */
+export async function fetchAnalysisHistory(
+  hash: string
+): Promise<AnalysisHistoryResponse> {
+  const response = await fetch(
+    `/api/query-registry/${encodeURIComponent(hash)}/analyses`
+  )
+  await throwIfNotOk(response, 'Failed to fetch the analysis history')
+  return response.json()
+}
+
+/** One stored analysis by id, so it can be reopened without a re-run. */
+export async function fetchStoredAnalysis(
+  hash: string,
+  analysisId: string
+): Promise<StoredAnalysis> {
+  const response = await fetch(
+    `/api/query-registry/${encodeURIComponent(hash)}/analysis/${encodeURIComponent(analysisId)}`
+  )
+  await throwIfNotOk(response, 'Failed to fetch the stored analysis')
+  return response.json()
+}
+
 export async function addQueryToRegistry(
   sql: string,
   target?: string
@@ -336,6 +423,34 @@ export async function markQueryReviewed(
   await throwIfNotOk(response, 'Failed to mark query reviewed')
   if (!data) throw new Error('Missing response body')
   return data
+}
+
+export type StarredQueryResponse = {
+  hash: string
+  target: string
+  starred: boolean
+  starred_at: string | null
+}
+
+/**
+ * Set or clear a query's star. The mark is stored per target, so the target is
+ * part of the request. Untyped by the generated client until gen:api runs.
+ */
+export async function setQueryStarred(
+  hash: string,
+  starred: boolean,
+  target?: string | null
+): Promise<StarredQueryResponse> {
+  const response = await fetch(
+    `/api/query-registry/queries/${encodeURIComponent(hash)}/starred`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(target ? { starred, target } : { starred }),
+    }
+  )
+  await throwIfNotOk(response, 'Failed to update the star')
+  return response.json()
 }
 
 export async function updateQueryTag(

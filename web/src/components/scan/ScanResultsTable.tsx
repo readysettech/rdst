@@ -475,7 +475,11 @@ export function ScanResultsTable({
       if (!query.sql || query.status !== 'sql') return
       navigate({
         to: '/results',
-        search: { query: query.sql, target: target || undefined },
+        search: {
+          query: query.sql,
+          target: target || undefined,
+          origin: 'scan',
+        },
       })
     },
     [navigate, target]

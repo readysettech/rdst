@@ -16,6 +16,7 @@ import {
   dismissBackgroundRun,
   isAuditKind,
   isHealthCheckKind,
+  isQueuedRun,
   reattachBackgroundRuns,
   useBackgroundRuns,
 } from '../lib/backgroundRuns'
@@ -33,6 +34,8 @@ function titleFor(run: BackgroundRunState): string {
   if (run.kind === 'audit_capture') return `Capturing ${run.target}`
   if (run.kind === 'cache_compare')
     return `Comparing ${run.queryLabel || run.queryHash || run.target}`
+  if (run.kind === 'analyze')
+    return `Analyzing ${run.queryLabel || run.queryHash || run.target}`
   return `Annotating ${run.target}`
 }
 
@@ -59,6 +62,7 @@ function terminalLabel(run: BackgroundRunState): string {
     return run.message || 'Background task did not finish'
   if (run.kind === 'cache_compare')
     return run.message || 'Cache comparison complete'
+  if (run.kind === 'analyze') return 'Analysis complete'
   return doneLabel(run)
 }
 
@@ -68,13 +72,9 @@ function isTerminal(run: BackgroundRunState): boolean {
   )
 }
 
-function isQueued(run: BackgroundRunState): boolean {
-  return run.status === 'running' && run.stage === 'queued'
-}
-
 function isActive(run: BackgroundRunState): boolean {
   return (
-    !isQueued(run) &&
+    !isQueuedRun(run) &&
     (run.status === 'running' ||
       run.status === 'reconnecting' ||
       run.status === 'stopping')
@@ -130,6 +130,7 @@ function isOpenable(run: BackgroundRunState): boolean {
     run.kind === 'speed_test' ||
     run.kind === 'load_test' ||
     run.kind === 'cache_compare' ||
+    run.kind === 'analyze' ||
     isHealthCheckKind(run.kind)
   )
 }
@@ -325,7 +326,7 @@ export function BackgroundRuns() {
 
   if (!latestRun || !triggerRun) return null
 
-  const queuedCount = runs.filter(isQueued).length
+  const queuedCount = runs.filter(isQueuedRun).length
   const activeCount = runs.filter(isActive).length
   const pendingCount = activeCount + queuedCount
   const errorCount = runs.filter((run) => severityFor(run) === 'error').length
@@ -377,15 +378,27 @@ export function BackgroundRuns() {
       void navigate({ to: '/cache', search: { view: 'compare' } })
       return
     }
+    // The analyze drawer is URL-owned, so the job's own link reopens it —
+    // attaching to the run whether it is still measuring or already finished.
+    if (run.kind === 'analyze') {
+      if (run.target) setTarget(run.target)
+      void navigate({
+        to: '/queries',
+        search: run.queryHash ? { analyze: run.queryHash } : {},
+      })
+      return
+    }
     if (
       (run.kind !== 'cache_test' && run.kind !== 'speed_test') ||
       !run.queryHash
     )
       return
     setTarget(run.target)
+    // The hash is what reveals the query; a status filter on top of it could
+    // only hide the row the job is pointing at.
     void navigate({
       to: '/queries',
-      search: { view: 'saved', hash: run.queryHash, run: run.runId },
+      search: { hash: run.queryHash, run: run.runId },
     })
   }
 

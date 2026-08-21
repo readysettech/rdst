@@ -1,6 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackgroundRunState } from '../../../lib/backgroundRuns'
-import type { CacheCompareRunResult } from '../../../types/cache'
+import type {
+  CacheCompareRunResult,
+  CacheCompareSample,
+} from '../../../types/cache'
 import {
   type CompareBatch,
   type CompareQueryOutcome,
@@ -85,6 +88,15 @@ function run(
   }
 }
 
+function sample(elapsedSeconds: number): CacheCompareSample {
+  return {
+    elapsed_seconds: elapsedSeconds,
+    concurrency: 2,
+    origin: { ...RESULT.origin },
+    readyset: { ...RESULT.readyset },
+  }
+}
+
 beforeEach(() => {
   localStorage.clear()
 })
@@ -154,6 +166,46 @@ describe('compareBatchSnapshot', () => {
   })
 })
 
+describe('per-query live state', () => {
+  it('separates a query waiting for the sandbox from the one measuring', () => {
+    const snapshot = compareBatchSnapshot(BATCH, [
+      run('run-1', 'running', {
+        stage: 'measuring',
+        current: 60,
+        compareSamples: [sample(18)],
+      }),
+      run('run-2', 'running', {
+        stage: 'queued',
+        current: null,
+        message: 'Queued for the Readyset sandbox',
+      }),
+    ])
+
+    expect(snapshot.queryOutcomes.map(({ status }) => status)).toEqual([
+      'running',
+      'queued',
+    ])
+    expect(snapshot.running).toBe(1)
+    expect(snapshot.queued).toBe(1)
+    expect(snapshot.queryOutcomes[0]).toMatchObject({
+      percent: 60,
+      elapsedSeconds: 18,
+    })
+    expect(snapshot.queryOutcomes[0].timeline).toHaveLength(1)
+  })
+
+  it('does not read as finished while a query is still queued (D1)', () => {
+    const snapshot = compareBatchSnapshot(BATCH, [
+      run('run-1', 'done', { compareResult: RESULT, current: 100 }),
+      run('run-2', 'running', { stage: 'queued', current: 99 }),
+    ])
+
+    // A queued run's stale percent must not be counted as progress.
+    expect(snapshot.percent).toBe(50)
+    expect(snapshot.status).toBe('running')
+  })
+})
+
 describe('compare batch persistence', () => {
   it('keeps the active result separate from target history', () => {
     localStorage.setItem(
@@ -206,13 +258,81 @@ describe('compare batch persistence', () => {
       status: 'failed',
     })
   })
+
+  it('keeps each query its own curve through settlement, capped for storage', () => {
+    localStorage.setItem(
+      'rdst_capacity_compare_batches_v3',
+      JSON.stringify([BATCH])
+    )
+    const long = Array.from({ length: 240 }, (_, index) =>
+      sample(index * 0.125)
+    )
+    const snapshot = compareBatchSnapshot(BATCH, [
+      run('run-1', 'done', {
+        current: 100,
+        compareResult: { ...RESULT, timeline: long },
+      }),
+      run('run-2', 'done', {
+        current: 100,
+        compareResult: { ...RESULT, timeline: [sample(0), sample(30)] },
+      }),
+    ])
+
+    settleCompareBatch(BATCH, snapshot)
+    const restored = compareBatchSnapshot(listCompareBatches('demo')[0], [])
+
+    // Downsampled rather than blanked, and both ends survive so the curve
+    // still spans the run it measured.
+    const retained = restored.queryOutcomes[0].timeline
+    expect(retained).toHaveLength(60)
+    expect(retained[0].elapsed_seconds).toBe(0)
+    expect(retained[retained.length - 1].elapsed_seconds).toBe(
+      long[long.length - 1].elapsed_seconds
+    )
+    // A short curve is kept whole.
+    expect(restored.queryOutcomes[1].timeline).toHaveLength(2)
+  })
+
+  it('keeps every verdict when the retained curves no longer fit storage', () => {
+    localStorage.setItem(
+      'rdst_capacity_compare_batches_v3',
+      JSON.stringify([BATCH])
+    )
+    const snapshot = compareBatchSnapshot(BATCH, [
+      run('run-1', 'done', {
+        current: 100,
+        compareResult: { ...RESULT, timeline: [sample(0), sample(30)] },
+      }),
+      run('run-2', 'failed', { current: null, message: 'Unsupported' }),
+    ])
+    const setItem = vi
+      .spyOn(localStorage, 'setItem')
+      .mockImplementationOnce(() => {
+        throw new DOMException('quota', 'QuotaExceededError')
+      })
+
+    settleCompareBatch(BATCH, snapshot)
+    setItem.mockRestore()
+
+    const restored = compareBatchSnapshot(listCompareBatches('demo')[0], [])
+    expect(restored.status).toBe('partial')
+    expect(restored.queryOutcomes[0].timeline).toEqual([])
+    expect(restored.queryOutcomes[1]).toMatchObject({ status: 'failed' })
+  })
 })
 
 function outcome(
   status: CompareQueryOutcome['status'],
   overrides: Partial<CompareQueryOutcome> = {}
 ): CompareQueryOutcome {
-  return { cacheId: 'one', label: 'One', status, ...overrides }
+  return {
+    cacheId: 'one',
+    label: 'One',
+    status,
+    timeline: [],
+    elapsedSeconds: 0,
+    ...overrides,
+  }
 }
 
 describe('deriveCompareOutcomeReport', () => {

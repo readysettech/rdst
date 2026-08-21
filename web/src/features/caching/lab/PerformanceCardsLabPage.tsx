@@ -1,5 +1,5 @@
 /**
- * Design-lab prototype: the Performance Tests setup layout rendered with the
+ * Design-lab prototype: the Benchmarks setup layout rendered with the
  * canonical selectable QueryCard instead of PerformanceQueryRow. Unselected
  * cards collapse to a one-line SQL preview; selecting a card formats its SQL
  * and, when it has parameters, hosts the input grid inside the card body.
@@ -160,7 +160,7 @@ export function PerformanceCardsLabPage() {
   return (
     <WorkspaceLayout
       title="Performance cards"
-      description="Design prototype: the Performance Tests setup rendered with the canonical selectable QueryCard. Fixture data only — nothing on this page runs against a database."
+      description="Design prototype: the Benchmarks setup rendered with the canonical selectable QueryCard. Fixture data only — nothing on this page runs against a database."
       icon="test-tube"
       panelId="performance-cards-lab"
       titleMeta={
@@ -175,7 +175,7 @@ export function PerformanceCardsLabPage() {
         <Button
           variant="primary"
           modifier="ghost"
-          label="Back to Performance tests"
+          label="Back to Benchmarks"
           icon="arrow-left"
           iconPosition="left"
           onClick={() => void navigate({ to: '/cache' })}

@@ -19,20 +19,29 @@ const mocks = vi.hoisted(() => {
     fetchNextPage: vi.fn(),
     isFetchingNextPage: false,
   }
+  const markReviewed = vi.fn()
   return {
     readModel,
+    markReviewed,
+    navigate: vi.fn(),
     useQueryRegistryReadModel: vi.fn(() => readModel),
     useSavedQueriesController: vi.fn(() => ({
       target: 'demo',
       registry: { queries: readModel.queries, isLoading: false },
       rowState: { hashAliases: {} },
-      rowActions: { isCached: () => false, markAllReviewed: vi.fn() },
+      rowActions: {
+        isCached: () => false,
+        markAllReviewed: vi.fn(),
+        markReviewed,
+      },
       addDialog: { openDialog: vi.fn(), closeDialog: vi.fn() },
     })),
   }
 })
 
-vi.mock('@tanstack/react-router', () => ({ useNavigate: () => vi.fn() }))
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => mocks.navigate,
+}))
 vi.mock('../../../hooks/useTarget', () => ({
   useTarget: () => ({ target: 'demo' }),
 }))
@@ -62,6 +71,7 @@ function entry(hash: string, isNew = false): QueryRegistryEntry {
 }
 
 beforeEach(() => {
+  mocks.navigate.mockClear()
   mocks.useQueryRegistryReadModel.mockClear()
   mocks.useSavedQueriesController.mockClear()
   mocks.readModel.queries = []
@@ -70,6 +80,7 @@ beforeEach(() => {
   mocks.readModel.hasNextPage = false
   mocks.readModel.isPlaceholder = false
   mocks.readModel.fetchNextPage.mockClear()
+  mocks.markReviewed.mockClear()
 })
 
 describe('useQueryLibraryController read model wiring', () => {
@@ -97,6 +108,7 @@ describe('useQueryLibraryController read model wiring', () => {
         activity: '24h',
         impact: '1m',
         sort: 'newest',
+        starred: false,
       },
       'demo'
     )
@@ -114,6 +126,7 @@ describe('useQueryLibraryController read model wiring', () => {
         activity: 'all',
         impact: 'all',
         sort: 'highest-impact',
+        starred: false,
       },
       'demo'
     )
@@ -122,14 +135,14 @@ describe('useQueryLibraryController read model wiring', () => {
   it('uses a transient deep-link hash to fetch a query beyond the loaded page', () => {
     renderHook(() =>
       useQueryLibraryController({
-        search: { q: 'orders', view: 'saved', hash: 'far-page-hash' },
+        search: { q: 'orders', view: 'new', hash: 'far-page-hash' },
       })
     )
 
     expect(mocks.useQueryRegistryReadModel).toHaveBeenCalledWith(
       expect.objectContaining({
         search: 'far-page-hash',
-        view: 'saved',
+        view: 'new',
       }),
       'demo'
     )
@@ -187,7 +200,7 @@ describe('useQueryLibraryController read model wiring', () => {
     const { result, rerender } = renderHook(
       ({ search }: { search: QueryLibrarySearch }) =>
         useQueryLibraryController({ search }),
-      { initialProps: { search: { view: 'saved' } as QueryLibrarySearch } }
+      { initialProps: { search: { view: 'new' } as QueryLibrarySearch } }
     )
     expect(
       result.current.library.visibleQueries.map((query) => query.hash)
@@ -208,7 +221,7 @@ describe('useQueryLibraryController read model wiring', () => {
     const { result, rerender } = renderHook(
       ({ search }: { search: QueryLibrarySearch }) =>
         useQueryLibraryController({ search }),
-      { initialProps: { search: { view: 'saved' } as QueryLibrarySearch } }
+      { initialProps: { search: { view: 'new' } as QueryLibrarySearch } }
     )
 
     // The view changes while the read model still serves the previous key's
@@ -293,5 +306,278 @@ describe('useQueryLibraryController read model wiring', () => {
     expect(result.current.library.hasNextPage).toBe(true)
     result.current.library.loadMore()
     expect(mocks.readModel.fetchNextPage).toHaveBeenCalledOnce()
+  })
+})
+
+describe('Queries Display: default and persistence', () => {
+  it('defaults to Card 2 when no Display preference is saved', () => {
+    const { result } = renderHook(() =>
+      useQueryLibraryController({ search: {} })
+    )
+
+    expect(result.current.library.displayMode).toBe('card-2')
+  })
+
+  it('persists a Display mode change and restores it on the next mount', () => {
+    const { result, unmount } = renderHook(() =>
+      useQueryLibraryController({ search: {} })
+    )
+
+    act(() => result.current.library.setDisplayMode('card-1'))
+    expect(
+      JSON.parse(localStorage.getItem('rdst-queries-display') ?? '{}').mode
+    ).toBe('card-1')
+    unmount()
+
+    const { result: reMounted } = renderHook(() =>
+      useQueryLibraryController({ search: {} })
+    )
+    expect(reMounted.current.library.displayMode).toBe('card-1')
+  })
+
+  it('persists visible-property toggles independently of Filter state', () => {
+    const { result } = renderHook(() =>
+      useQueryLibraryController({ search: {} })
+    )
+
+    act(() => result.current.library.toggleProperty('activity'))
+    const stored = JSON.parse(
+      localStorage.getItem('rdst-queries-display') ?? '{}'
+    )
+    expect(stored.properties).toContain('activity')
+    // Filter selections stay URL-owned; Display persistence must not touch
+    // the URL search state.
+    expect(mocks.navigate).not.toHaveBeenCalled()
+  })
+
+  it('falls back to Card 2 when a saved preference names the hidden rows view', () => {
+    localStorage.setItem(
+      'rdst-queries-display',
+      JSON.stringify({ mode: 'rows', properties: ['source'] })
+    )
+
+    const { result } = renderHook(() =>
+      useQueryLibraryController({ search: {} })
+    )
+
+    expect(result.current.library.displayMode).toBe('card-2')
+  })
+})
+
+describe('analyze drawer state is URL-owned', () => {
+  it('opens over the library instead of navigating away', () => {
+    const { result } = renderHook(() =>
+      useQueryLibraryController({ search: { view: 'new' } })
+    )
+
+    act(() =>
+      result.current.rowActions.analyze('SELECT 1', 'demo', undefined, {
+        hash: 'h1',
+      })
+    )
+
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: '/queries',
+      search: expect.objectContaining({
+        view: 'new',
+        analyze: 'h1',
+        rerun: true,
+      }),
+      replace: false,
+    })
+    expect(result.current.analyzeDrawer.link).toEqual({
+      hash: 'h1',
+      analysisId: undefined,
+      rerun: true,
+      tab: 'analyze',
+    })
+  })
+
+  it('opens a stored analysis read-only', () => {
+    const { result } = renderHook(() =>
+      useQueryLibraryController({ search: {} })
+    )
+
+    act(() =>
+      result.current.rowActions.analyze('SELECT 1', 'demo', undefined, {
+        stored: { hash: 'h1', analysisId: 'a2' },
+      })
+    )
+
+    expect(result.current.analyzeDrawer.link).toEqual({
+      hash: 'h1',
+      analysisId: 'a2',
+      rerun: undefined,
+      tab: 'analyze',
+    })
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        search: expect.objectContaining({ analyze: 'h1', analysisId: 'a2' }),
+      })
+    )
+  })
+
+  it('switches analyses and closes through the same URL', () => {
+    const { result } = renderHook(() =>
+      useQueryLibraryController({ search: { analyze: 'h1' } })
+    )
+
+    act(() =>
+      result.current.analyzeDrawer.open({ hash: 'h1', analysisId: 'a3' })
+    )
+    expect(result.current.analyzeDrawer.link).toEqual({
+      hash: 'h1',
+      analysisId: 'a3',
+      rerun: undefined,
+      tab: 'analyze',
+    })
+
+    act(() => result.current.analyzeDrawer.close())
+    expect(result.current.analyzeDrawer.link).toBeNull()
+    expect(mocks.navigate).toHaveBeenLastCalledWith({
+      to: '/queries',
+      search: expect.objectContaining({
+        analyze: undefined,
+        analysisId: undefined,
+        rerun: undefined,
+      }),
+      replace: false,
+    })
+  })
+
+  it('writes the drawer immediately, dropping the queued filter write', () => {
+    vi.useFakeTimers()
+    try {
+      const { result } = renderHook(() =>
+        useQueryLibraryController({ search: {} })
+      )
+
+      act(() => result.current.library.setSearch('ord'))
+      expect(mocks.navigate).not.toHaveBeenCalled()
+
+      act(() =>
+        result.current.rowActions.analyze('SELECT 1', 'demo', undefined, {
+          hash: 'h1',
+        })
+      )
+      expect(mocks.navigate).toHaveBeenCalledTimes(1)
+
+      act(() => vi.runAllTimers())
+
+      // The debounced search write never lands on top of the drawer; its text
+      // rides along in the one URL the drawer wrote.
+      expect(mocks.navigate).toHaveBeenCalledTimes(1)
+      expect(mocks.navigate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          search: expect.objectContaining({ q: 'ord', analyze: 'h1' }),
+        })
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the full page for queries the registry does not know', () => {
+    const { result } = renderHook(() =>
+      useQueryLibraryController({ search: {} })
+    )
+
+    act(() => result.current.rowActions.analyze('SELECT 1', 'demo'))
+
+    expect(result.current.analyzeDrawer.link).toBeNull()
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: '/results',
+        search: expect.objectContaining({ query: 'SELECT 1' }),
+      })
+    )
+  })
+})
+
+describe('the star is an independent filter', () => {
+  it('asks the read model for the shortlist alongside a status', () => {
+    renderHook(() =>
+      useQueryLibraryController({
+        search: { view: 'needs-analysis', starred: true },
+      })
+    )
+
+    expect(mocks.useQueryRegistryReadModel).toHaveBeenCalledWith(
+      expect.objectContaining({ view: 'needs-analysis', starred: true }),
+      'demo'
+    )
+  })
+
+  it('writes the star into the URL and clears it with the filters', () => {
+    vi.useFakeTimers()
+    try {
+      const { result } = renderHook(() =>
+        useQueryLibraryController({ search: { view: 'new' } })
+      )
+
+      act(() => result.current.library.setStarred(true))
+      act(() => vi.runAllTimers())
+      expect(mocks.navigate).toHaveBeenLastCalledWith({
+        to: '/queries',
+        search: expect.objectContaining({ view: 'new', starred: true }),
+        replace: true,
+      })
+
+      act(() => result.current.library.clearFilters())
+      act(() => vi.runAllTimers())
+      expect(mocks.navigate).toHaveBeenLastCalledWith({
+        to: '/queries',
+        search: expect.objectContaining({
+          view: undefined,
+          starred: undefined,
+        }),
+        replace: true,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('the drawer Overview is the card body entry point', () => {
+  it('opens over the library on the Overview tab', () => {
+    const { result } = renderHook(() =>
+      useQueryLibraryController({ search: {} })
+    )
+
+    act(() => result.current.rowActions.openOverview('h1'))
+
+    expect(result.current.analyzeDrawer.link).toEqual({
+      hash: 'h1',
+      analysisId: undefined,
+      rerun: undefined,
+      tab: 'overview',
+    })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: '/queries',
+      search: expect.objectContaining({ analyze: 'h1', tab: 'overview' }),
+      replace: false,
+    })
+  })
+
+  it('drains the New mark the way expanding the card did', () => {
+    mocks.readModel.queries = [entry('h1', true)]
+
+    const { result } = renderHook(() =>
+      useQueryLibraryController({ search: {} })
+    )
+    expect(mocks.markReviewed).not.toHaveBeenCalled()
+
+    act(() => result.current.rowActions.openOverview('h1'))
+
+    expect(mocks.markReviewed).toHaveBeenCalledWith('h1')
+  })
+
+  it('leaves the New mark alone when the link opens Analyze', () => {
+    mocks.readModel.queries = [entry('h1', true)]
+
+    renderHook(() => useQueryLibraryController({ search: { analyze: 'h1' } }))
+
+    expect(mocks.markReviewed).not.toHaveBeenCalled()
   })
 })

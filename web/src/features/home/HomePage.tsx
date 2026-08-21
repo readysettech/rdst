@@ -6,6 +6,7 @@ import { Skeleton } from '@rs/ui-new/skeleton'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { useNavigate } from '@tanstack/react-router'
+import { VALUE_PROPOSITION } from '../../lib/valueProposition'
 import { DemoCard, JobCard } from './HomeCards'
 import { ActiveHome, ConnectedHome, FirstRunHome } from './HomeStates'
 import { useHomeController } from './useHomeController'
@@ -70,10 +71,10 @@ export function HomePage() {
           </div>
           <VStack className="min-w-0 flex-1 items-start gap-0.5">
             <Page.Title>Home</Page.Title>
-            <Page.Description>
-              Understand your workload, choose the next action, or experience
-              Readyset in the sandbox.
-            </Page.Description>
+            {/* Collapses into the sidebar's one value-proposition line (C1 /
+              D-5) instead of writing its own — a duplicate description here
+              would compete with it. */}
+            <Page.Description>{VALUE_PROPOSITION}</Page.Description>
           </VStack>
           <Show when={controller.target}>
             <Tag

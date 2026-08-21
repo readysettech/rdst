@@ -1,6 +1,7 @@
 import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card'
+import { EmptyState } from '@rs/ui-new/empty-state'
 import { Icon } from '@rs/ui-new/icon'
 import { InteractiveRow } from '@rs/ui-new/interactive-row'
 import { Show } from '@rs/ui-new/show'
@@ -161,18 +162,33 @@ export function RunHistory({
   activeId,
   loadingId,
   onOpen,
+  onStartRun,
 }: {
   entries: HistoryEntry[]
   activeId: string | null
   loadingId: string | null
   onOpen: (entry: HistoryEntry) => void
+  onStartRun?: () => void
 }) {
   const [visible, setVisible] = useState(HISTORY_PAGE_SIZE)
   const shown = useMemo(() => entries.slice(0, visible), [entries, visible])
   const groups = useMemo(() => groupHistoryByDay(shown), [shown])
   const remaining = entries.length - shown.length
 
-  if (entries.length === 0) return null
+  if (entries.length === 0) {
+    return (
+      <EmptyState
+        icon="document-validation"
+        title="No reports yet"
+        body="Reports capture query volume, sizing risks, and cache opportunities from a health check run. Run one to see it here."
+        action={
+          onStartRun
+            ? { label: 'Run a health check', onClick: onStartRun }
+            : undefined
+        }
+      />
+    )
+  }
 
   return (
     <SectionCard icon="folder-file" title={`Reports (${entries.length})`}>

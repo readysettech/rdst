@@ -13,6 +13,7 @@ import { ActivityPulse } from '../components/audit/ActivityPulse'
 // Direct import: the components barrel re-exports the SQL editor stack,
 // which would statically pull CodeMirror into the eager entry chunk.
 import { ConfigWarning } from '../components/ConfigWarning'
+import { SetupGuide } from '../features/setup/SetupGuide'
 import { useTarget } from '../hooks/useTarget'
 import { Header } from '../layout/Header'
 import { Main } from '../layout/Main'
@@ -72,6 +73,9 @@ function AppShell({ children }: { children: ReactNode }) {
         onInstallUpdate={installDesktopUpdate}
       />
       <Main>{children}</Main>
+      {/* Floating, fixed-position, and suppressed on the routes that own the
+          bottom-right corner — it costs the shell no layout. */}
+      <SetupGuide />
     </div>
   )
 }

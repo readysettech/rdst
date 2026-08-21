@@ -306,7 +306,9 @@ describe('getReadysetVerdict', () => {
     )
     expect(view.nextStep.kind).toBe('index')
     if (view.nextStep.kind !== 'index') return
-    expect(view.nextStep.sql).toBe('CREATE INDEX ON orders (customer_id, status)')
+    expect(view.nextStep.sql).toBe(
+      'CREATE INDEX ON orders (customer_id, status)'
+    )
     expect(view.nextStep.evidence).toBe('Planner-verified')
     expect(view.nextStep.plannerVerdict?.cost_reduction_pct).toBe(99.9)
   })

@@ -58,7 +58,7 @@ export function HandRaiser({
     <div
       className={cn(
         'rounded-lg border border-border-layout-1 border-l-4 bg-surface-raised px-4 py-3',
-        accentBorder[tone],
+        accentBorder[tone]
       )}
     >
       <VStack className="gap-1.5 items-start">

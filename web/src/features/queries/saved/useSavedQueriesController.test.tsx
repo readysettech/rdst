@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   useQueryRegistry: vi.fn(),
   navigate: vi.fn(),
   startCacheTestRun: vi.fn(),
+  starQuery: vi.fn(),
 }))
 
 vi.mock('@tanstack/react-router', () => ({
@@ -23,6 +24,7 @@ vi.mock('../../../lib/backgroundRuns', () => ({
 }))
 vi.mock('../../../lib/useQueryRegistry', () => ({
   useQueryRegistry: mocks.useQueryRegistry,
+  useStarQuery: () => ({ mutate: mocks.starQuery }),
 }))
 
 function entry(hash: string): QueryRegistryEntry {

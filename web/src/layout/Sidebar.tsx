@@ -15,11 +15,14 @@ import { ReportDialog } from '../components/ReportDialog'
 import { TargetDropdown } from '../components/TargetDropdown'
 import { TrialBalanceBadge } from '../components/TrialBalanceBadge'
 import { TrialRegistrationDialog } from '../components/TrialRegistrationDialog'
+import { SetupGuideHelpEntry } from '../features/setup/SetupGuideHelpEntry'
 import { useTarget } from '../hooks/useTarget'
+import { trackEvent } from '../lib/analytics'
 import { useAuditSessionActive } from '../lib/auditSession'
 import type { DesktopUpdateState } from '../lib/desktop'
 import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
 import { useSystemStatus } from '../lib/useSystemStatus'
+import { VALUE_PROPOSITION } from '../lib/valueProposition'
 
 // Plain-text acknowledgement of who is signed in; deliberately not a control.
 function SidebarIdentity() {
@@ -121,35 +124,28 @@ interface NavItem {
 const homeItem: NavItem = { label: 'Home', icon: 'dashboard', to: '/' }
 
 // The daily nav is a single flat list, top to bottom: Home, Ask, the Queries
-// workspace, Performance tests, Health Check, then the demo. No group headers here —
-// only Advanced gets one, since it's opt-in rather than daily-driver.
+// workspace, Benchmarks, Health Check, Schema, then the demo.
+// Experimental surfaces (/scan, /agents, /guards) stay off the nav until they
+// ship for real; their routes remain reachable by URL and keep their on-page
+// Experimental banners.
 const primaryItems: NavItem[] = [
   { label: 'Ask', icon: 'sparkles', to: '/ask' },
   { label: 'Queries', icon: 'folder-file', to: '/queries' },
-  { label: 'Performance tests', icon: 'speedometer', to: '/cache' },
+  { label: 'Benchmarks', icon: 'speedometer', to: '/cache' },
   { label: 'Health check', icon: 'document-validation', to: '/audit' },
-  { label: 'Try the demo', icon: 'querypilot', to: '/demo' },
-]
-
-// Code scan is deliberately absent: the /scan route still works by direct
-// URL, but the feature stays out of the nav until it is production-ready.
-const advancedItems: NavItem[] = [
   { label: 'Schema', icon: 'layers', to: '/schema' },
-  { label: 'Agents', icon: 'message-multiple', to: '/agents' },
-  { label: 'Guards', icon: 'user-shield', to: '/guards' },
+  { label: 'Try the demo', icon: 'querypilot', to: '/demo' },
 ]
 
 // Configuration recedes off the daily nav: after first connect the only global
 // config control is the target switcher (top) plus a quiet footer "Settings"
-// utility, never a top-level or Advanced nav item (configure-and-identity
+// utility, never a top-level or Experimental nav item (configure-and-identity
 // step 2 / T17). [USE-030, USE-034]
 const settingsItem: NavItem = {
   label: 'Settings',
   icon: 'settings',
   to: '/configure',
 }
-
-const ADVANCED_STORAGE_KEY = 'rdst-sidebar-advanced'
 
 function NavLink({
   item,
@@ -166,7 +162,10 @@ function NavLink({
     <Link
       to={item.to}
       className={navItemStyles({ active })}
-      onClick={onNavigate}
+      onClick={() => {
+        trackEvent('nav_item_clicked', { label: item.label })
+        onNavigate?.()
+      }}
     >
       <Icon
         name={item.icon}
@@ -209,9 +208,6 @@ export function Sidebar({
   const [reportOpen, setReportOpen] = useState(false)
   const [trialOpen, setTrialOpen] = useState(false)
   const queryClient = useQueryClient()
-  const [advancedOpen, setAdvancedOpen] = useState(
-    () => localStorage.getItem(ADVANCED_STORAGE_KEY) === 'open'
-  )
 
   const { data: status } = useSystemStatus()
 
@@ -313,18 +309,8 @@ export function Sidebar({
     // The Queries workspace owns the analysis result route.
     (item.to === '/queries' && currentPath === '/results') ||
     // `/benchmark` remains as a compatibility route, but its navigation owner
-    // is the unified Performance tests workspace.
+    // is the unified Benchmarks workspace.
     (item.to === '/cache' && currentPath === '/benchmark')
-
-  // Keep the active item visible when landing directly on an advanced route.
-  const advancedActive = advancedItems.some(isActive)
-  const showAdvanced = advancedOpen || advancedActive
-
-  const toggleAdvanced = () => {
-    const next = !advancedOpen
-    setAdvancedOpen(next)
-    localStorage.setItem(ADVANCED_STORAGE_KEY, next ? 'open' : 'closed')
-  }
 
   return (
     <>
@@ -348,18 +334,27 @@ export function Sidebar({
           strip above the target selector. */}
         {isElectronMac && <div className="draggable-region h-8 shrink-0" />}
 
-        {/* Target selector */}
-        <div className="draggable-region h-14 border-b border-border-layout-1">
-          <div className="no-drag h-full">
-            <TargetDropdown
-              selectedTarget={selectedTarget}
-              onSelectTarget={setSelectedTarget}
-            />
+        {/* Target selector, plus the one value-proposition line attached to
+          it (C1 / D-5): the sidebar is the single owner of "what is this
+          app", so every other surface stops re-explaining it (USE-050). */}
+        <div className="border-b border-border-layout-1">
+          <div className="draggable-region h-14">
+            <div className="no-drag h-full">
+              <TargetDropdown
+                selectedTarget={selectedTarget}
+                onSelectTarget={setSelectedTarget}
+              />
+            </div>
+          </div>
+          <div className="no-drag px-3 pb-2">
+            <Text level="caption" className="text-content-layout-3">
+              {VALUE_PROPOSITION}
+            </Text>
           </div>
         </div>
 
-        {/* Navigation — persistent scrollbar so the Advanced group is
-          discoverable/reachable below the fold at 1280×720. [QW2] */}
+        {/* Navigation — persistent scrollbar keeps the full list reachable
+          below the fold at 1280×720. [QW2] */}
         <Scrollable className="flex-1" type="auto">
           {/* gap-2 BETWEEN groups > gap-1 WITHIN a group — spacing carries the
             grouping, one step up on the scale (design-system §1 [VIS-036]). */}
@@ -380,37 +375,9 @@ export function Sidebar({
               ))}
             </div>
 
-            {/* Advanced group toggle — kept as a hand-roll: a quiet caption +
-                chevron disclosure whose panel is the nav items rendered below,
-                not inside a bordered container, so ui-new Disclosure's single
-                trigger+panel box doesn't fit this nav grouping. */}
-            <Pressable
-              type="button"
-              onClick={toggleAdvanced}
-              className="flex items-center gap-1.5 px-3 pt-3 pb-1 cursor-pointer text-content-layout-3 hover:text-content-layout-2 transition-colors"
-            >
-              <Text
-                level="caption"
-                className="uppercase tracking-wider inherit"
-              >
-                Advanced
-              </Text>
-              <Icon
-                name={showAdvanced ? 'chevron-down' : 'chevron-right'}
-                label=""
-                className="w-3 h-3"
-              />
-            </Pressable>
-            {showAdvanced && (
-              <>
-                {advancedItems.map((item) => (
-                  <NavLink key={item.to} item={item} active={isActive(item)} />
-                ))}
-                {/* Dev Settings is no longer a nav entry: its tools merged into
-                    the Settings page (Developer settings section, /configure#dev).
-                    The /dev-settings route now redirects there. [USE-097] */}
-              </>
-            )}
+            {/* Dev Settings is no longer a nav entry: its tools merged into
+                the Settings page (Developer settings section, /configure#dev).
+                The /dev-settings route now redirects there. [USE-097] */}
           </nav>
         </Scrollable>
 
@@ -434,6 +401,33 @@ export function Sidebar({
           />
           {/* Settings recedes here as a quiet utility, out of the daily nav. */}
           <NavLink item={settingsItem} active={isActive(settingsItem)} />
+          {/* Docs — kept as a hand-roll: it reuses navItemStyles so it reads as
+              a sibling of the NavLinks above while opening the docs site in a
+              new tab rather than navigating in-app (C4). No help-center
+              build-out here, just the one reachable link. Icon label is empty
+              (decorative) so the composed accessible name reads just "Docs",
+              not a duplicate of the visible text. */}
+          <a
+            href="https://readyset.io/docs"
+            target="_blank"
+            rel="noreferrer"
+            onClick={() => trackEvent('nav_item_clicked', { label: 'Docs' })}
+            className={navItemStyles({ className: 'cursor-pointer' })}
+          >
+            <Icon
+              name="info"
+              label=""
+              aria-hidden="true"
+              className="w-4 h-4 text-content-layout-3 group-hover:scale-110 transition-transform"
+            />
+            <span>Docs</span>
+          </a>
+          {/* The dismissed setup guide's only way back (D). Absent unless it
+              was dismissed with steps still outstanding, so a finished install
+              never carries a dead utility. */}
+          <SetupGuideHelpEntry
+            className={navItemStyles({ className: 'cursor-pointer' })}
+          />
           {/* Give Feedback — kept as a hand-roll: it reuses navItemStyles so it
               reads as a sibling of the NavLinks above while opening a dialog
               rather than navigating; a ui-new Button would break that shared

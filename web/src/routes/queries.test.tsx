@@ -10,6 +10,14 @@ const controller = {
   },
   navigation: { openBenchmark },
   addDialog: { openDialog: openAddQuery },
+  rowActions: { toggleStar: vi.fn() },
+  analyzeDrawer: {
+    link: null,
+    librarySearch: {},
+    entries: [],
+    open: vi.fn(),
+    close: vi.fn(),
+  },
 }
 
 vi.mock('../features/queries/library/useQueryLibraryController', () => ({

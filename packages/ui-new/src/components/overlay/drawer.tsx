@@ -20,7 +20,16 @@ import { Icon } from '../svg/icon'
 
 const drawerStyles = tv({
   slots: {
-    overlay: ['fixed', 'inset-0', 'z-50', 'backdrop-blur-sm', 'bg-surface-scrim'],
+    overlay: [
+      'fixed',
+      'inset-0',
+      'z-50',
+      'backdrop-blur-sm',
+      'bg-surface-scrim',
+      // Overlays span the window's titlebar drag region in Electron; without
+      // an explicit no-drag the OS swallows clicks that land there.
+      '[-webkit-app-region:no-drag]',
+    ],
     content: [
       'fixed',
       'z-50',
@@ -31,7 +40,8 @@ const drawerStyles = tv({
       'select-auto',
       'gap-0',
       'p-6',
-      'bg-surface-layout-1',
+      '[-webkit-app-region:no-drag]',
+      'bg-surface-layout-2',
       'shadow-large',
       'border-(length:--border-base)',
       'border-border-layout-1',
@@ -83,6 +93,9 @@ const drawerStyles = tv({
       XLarge: {
         content: ['w-full'],
       },
+      XXLarge: {
+        content: ['w-full'],
+      },
     },
     direction: {
       right: {
@@ -126,6 +139,13 @@ const drawerStyles = tv({
       direction: 'right',
       class: {
         content: ['max-w-4xl'],
+      },
+    },
+    {
+      size: 'XXLarge',
+      direction: 'right',
+      class: {
+        content: ['max-w-6xl'],
       },
     },
   ],

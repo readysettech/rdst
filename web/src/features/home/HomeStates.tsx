@@ -180,6 +180,74 @@ export function ActiveHome({
 
   return (
     <VStack className="items-stretch gap-4">
+      {/* Leads with recall, not the portfolio tiles (C2 / plan §1: task 3 for
+        both personas is finding an existing result). */}
+      <Show when={registryState === 'ready' && recents.length > 0}>
+        <Card>
+          <Card.Header>
+            <Card.Title>Continue where you left off</Card.Title>
+            <Card.Description>
+              Resume the exact query and target context from your latest work.
+            </Card.Description>
+          </Card.Header>
+          <Card.Content className="space-y-2">
+            <For each={recents} keyExtractor={(item) => item.hash}>
+              {(item) => (
+                <InteractiveRow
+                  label={`Continue with ${item.nextAction.toLowerCase()} for ${item.label}`}
+                  onClick={() => {
+                    if (item.nextAction === 'Analyze') {
+                      navigate({
+                        to: '/results',
+                        search: {
+                          query: fillCapturedParams(
+                            item.sql,
+                            item.mostRecentParams
+                          ),
+                          target,
+                          origin: 'home',
+                        },
+                      })
+                      return
+                    }
+                    if (item.nextAction === 'Review') {
+                      // The analysis this query already has, reopened in the
+                      // Query Library's drawer. Recall never re-runs (A6).
+                      navigate({
+                        to: '/queries',
+                        search: { analyze: item.hash },
+                      })
+                      return
+                    }
+                    navigate({
+                      to: '/cache',
+                      search: { view: 'compare', hash: item.hash },
+                    })
+                  }}
+                  className="flex items-center gap-3 rounded-xl bg-surface-layout-2/50 px-3 py-3 text-left transition-colors hover:bg-surface-raised"
+                >
+                  <Tag
+                    size="small"
+                    variant={CONTINUE_TAG[item.kind].variant}
+                    modifier="ghost"
+                    label={CONTINUE_TAG[item.kind].label}
+                  />
+                  <Text
+                    level="mono-small"
+                    className="min-w-0 flex-1 truncate text-content-layout-2"
+                  >
+                    {item.label}
+                  </Text>
+                  <Text level="caption" className="text-content-primary-soft">
+                    {item.nextAction} →
+                  </Text>
+                </InteractiveRow>
+              )}
+            </For>
+          </Card.Content>
+        </Card>
+      </Show>
+
       <div className="grid grid-cols-1 gap-4 desktop:grid-cols-12">
         <Show when={registryState === 'loading'}>
           <Card className="desktop:col-span-7">
@@ -281,69 +349,6 @@ export function ActiveHome({
           <DemoCard compact />
         </div>
       </div>
-
-      <Show when={registryState === 'ready' && recents.length > 0}>
-        <Card>
-          <Card.Header>
-            <Card.Title>Continue where you left off</Card.Title>
-            <Card.Description>
-              Resume the exact query and target context from your latest work.
-            </Card.Description>
-          </Card.Header>
-          <Card.Content className="space-y-2">
-            <For each={recents} keyExtractor={(item) => item.hash}>
-              {(item) => (
-                <InteractiveRow
-                  label={`Continue with ${item.nextAction.toLowerCase()} for ${item.label}`}
-                  onClick={() => {
-                    if (item.nextAction === 'Analyze') {
-                      navigate({
-                        to: '/results',
-                        search: {
-                          query: fillCapturedParams(
-                            item.sql,
-                            item.mostRecentParams
-                          ),
-                          target,
-                        },
-                      })
-                      return
-                    }
-                    if (item.nextAction === 'Review') {
-                      navigate({
-                        to: '/queries',
-                        search: { hash: item.hash },
-                      })
-                      return
-                    }
-                    navigate({
-                      to: '/cache',
-                      search: { view: 'compare', hash: item.hash },
-                    })
-                  }}
-                  className="flex items-center gap-3 rounded-xl bg-surface-layout-2/50 px-3 py-3 text-left transition-colors hover:bg-surface-raised"
-                >
-                  <Tag
-                    size="small"
-                    variant={CONTINUE_TAG[item.kind].variant}
-                    modifier="ghost"
-                    label={CONTINUE_TAG[item.kind].label}
-                  />
-                  <Text
-                    level="mono-small"
-                    className="min-w-0 flex-1 truncate text-content-layout-2"
-                  >
-                    {item.label}
-                  </Text>
-                  <Text level="caption" className="text-content-primary-soft">
-                    {item.nextAction} →
-                  </Text>
-                </InteractiveRow>
-              )}
-            </For>
-          </Card.Content>
-        </Card>
-      </Show>
 
       <div className="grid grid-cols-1 gap-4 tablet:grid-cols-2">
         <JobCard

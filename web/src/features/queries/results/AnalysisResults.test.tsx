@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CompleteEvent } from '../../../lib/api'
 import { AnalysisResults } from './AnalysisResults'
@@ -9,6 +9,36 @@ afterEach(() => {
 })
 
 describe('AnalysisResults', () => {
+  it('never leaves an unresolvable stored-analysis link blank', () => {
+    const onBrowseQueries = vi.fn()
+    render(
+      <AnalysisResults
+        state="idle"
+        storedAnalysisMissing
+        storedAnalysisDetail="404: analysis not found"
+        onBrowseQueries={onBrowseQueries}
+      />
+    )
+
+    expect(
+      screen.getByText('This analysis is no longer available')
+    ).toBeTruthy()
+    expect(
+      screen.getByText(
+        'Your saved queries and their newer analyses are untouched.'
+      )
+    ).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to queries' }))
+    expect(onBrowseQueries).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders nothing before a run starts', () => {
+    const { container } = render(<AnalysisResults state="idle" />)
+
+    expect(container.innerHTML).toBe('')
+  })
+
   it('shows honest stage progress without a synthetic percentage', () => {
     vi.useFakeTimers()
     render(

@@ -311,7 +311,17 @@ if (SMOKE_MODE) {
 }
 
 if (app.requestSingleInstanceLock()) {
+  app.on('second-instance', () => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
+  })
   configurePrimaryInstance()
 } else {
+  console.error(
+    'Another RDST Desktop instance already holds the single-instance lock; quitting.',
+  )
   app.quit()
 }

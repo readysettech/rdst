@@ -9,6 +9,7 @@ import type { ReactNode } from 'react'
 import { startBootstrapRun } from '../../lib/backgroundRuns'
 import { useConfigure } from '../../lib/useConfigure'
 import { useOnboarding } from '../../lib/useOnboarding'
+import { VALUE_PROPOSITION } from '../../lib/valueProposition'
 import type { ConfigureFormData } from '../../types/configure'
 import { AnimatedSurfaceBackdrop } from '../AnimatedSurfaceBackdrop'
 import { ConfigureForm } from '../configure'
@@ -193,7 +194,11 @@ export function ConnectPage({
           >
             {fromDemo
               ? 'Use a read-only database user. RDST runs EXPLAIN, schema, index, and performance-statistics queries against PostgreSQL or MySQL.'
-              : 'See Readyset on a prepared workload first, or connect your own database when you are ready.'}
+              : // Collapses into the sidebar's one value-proposition line (C1 /
+                // D-5) instead of re-explaining the two paths below, which the
+                // demo hero card and "Or connect your own database" divider
+                // already carry.
+                VALUE_PROPOSITION}
           </Text>
         </VStack>
 

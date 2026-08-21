@@ -106,7 +106,33 @@ describe('SlowQueryResults', () => {
     )
 
     expect(screen.getByText('No slow queries matched')).toBeTruthy()
+    expect(
+      screen.getByText('Wait for more database traffic, then look again.')
+    ).toBeTruthy()
     expect(screen.getAllByTestId('query-card-skeleton')).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
+  })
+
+  it('offers a way out when filters ruled every row out', () => {
+    const onClearFilters = vi.fn()
+    render(
+      <SlowQueryResults
+        queries={[]}
+        state="complete"
+        isRealtime={false}
+        onAnalyze={vi.fn()}
+        filtersActive
+        onClearFilters={onClearFilters}
+      />
+    )
+
+    expect(screen.getByText('No slow queries matched')).toBeTruthy()
+    expect(
+      screen.getByText('Your filters ruled out every query this run measured.')
+    ).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /Clear filters/ }))
+    expect(onClearFilters).toHaveBeenCalledTimes(1)
   })
 
   it('keeps query cards in a free-standing results section', () => {

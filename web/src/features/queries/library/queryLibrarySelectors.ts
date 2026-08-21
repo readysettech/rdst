@@ -28,7 +28,6 @@ const MANUAL_SOURCES = new Set(['manual', 'web'])
 export const QUERY_LIBRARY_VIEW_LABELS: Record<QueryLibraryView, string> = {
   all: 'All queries',
   new: 'New',
-  saved: 'Saved',
   'high-impact': 'High impact',
   'needs-analysis': 'Needs analysis',
   'ready-to-cache': 'Ready to cache',
@@ -202,15 +201,6 @@ function impactMatches(entry: QueryRegistryEntry) {
   } satisfies Record<QueryLibraryImpactFilter, boolean>
 }
 
-function isLegacySavedEntry(entry: QueryRegistryEntry) {
-  return (
-    entry.saved_at === undefined &&
-    entry.first_observed_at === undefined &&
-    entry.last_analyzed_at === undefined &&
-    entry.last_compared_at === undefined
-  )
-}
-
 export function matchesQueryView(
   entry: QueryRegistryEntry,
   view: QueryLibraryView,
@@ -230,7 +220,6 @@ function viewMatches(
   return {
     all: true,
     new: Boolean(entry.is_new),
-    saved: Boolean(entry.saved_at) || isLegacySavedEntry(entry),
     'high-impact': queryImpactMs(entry) > 0,
     'needs-analysis': !entry.last_analyzed_at,
     'ready-to-cache':
@@ -340,7 +329,7 @@ export function normalizeQueryLibraryFacetCounts(
   }
 }
 
-/** True when any search or facet narrows the library below the full set. */
+/** True when any search, facet, or the star narrows the library. */
 export function isQueryLibraryFiltered({
   searchTerm,
   view,
@@ -348,6 +337,7 @@ export function isQueryLibraryFiltered({
   params,
   activity,
   impact,
+  starred = false,
 }: {
   searchTerm: string
   view: QueryLibraryView
@@ -355,9 +345,11 @@ export function isQueryLibraryFiltered({
   params: QueryLibraryParameterFilter
   activity: QueryLibraryActivityWindow
   impact: QueryLibraryImpactFilter
+  starred?: boolean
 }) {
   return (
     Boolean(searchTerm.trim()) ||
+    starred ||
     view !== 'all' ||
     source !== 'all' ||
     params !== 'all' ||

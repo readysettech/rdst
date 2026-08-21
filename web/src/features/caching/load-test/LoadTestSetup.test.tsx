@@ -261,3 +261,31 @@ describe('LoadTestSetup comparison lane control', () => {
     expect(setComparative).toHaveBeenCalledWith(true)
   })
 })
+
+describe('LoadTestSetup empty state (C3)', () => {
+  it('offers a Find queries action when no queries are available yet', () => {
+    const onFindQueries = vi.fn()
+    render(
+      <LoadTestSetup
+        controller={controller({ queries: [], filteredQueries: [] })}
+        onFindQueries={onFindQueries}
+      />
+    )
+
+    expect(screen.getByText('No queries available yet')).toBeTruthy()
+    const button = screen.getByRole('button', { name: 'Find queries' })
+    button.click()
+    expect(onFindQueries).toHaveBeenCalledTimes(1)
+  })
+
+  it('omits the action when no handler is supplied', () => {
+    render(
+      <LoadTestSetup
+        controller={controller({ queries: [], filteredQueries: [] })}
+      />
+    )
+
+    expect(screen.getByText('No queries available yet')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Find queries' })).toBeNull()
+  })
+})

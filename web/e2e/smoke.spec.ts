@@ -23,9 +23,10 @@ test('serves client-side routes directly', async ({ page }) => {
   setBackendFixtures()
   await configureTestTarget(page, { hasPassword: true })
   await page.goto('/query-registry')
-  // /query-registry redirects into the Queries workspace's Saved view.
+  // /query-registry redirects into the Queries workspace's starred shortlist,
+  // which is what the saved list became.
   await expect(
     page.getByRole('heading', { name: 'Queries', exact: true })
   ).toBeVisible()
-  await expect(page).toHaveURL(/\/queries\?.*view=saved/)
+  await expect(page).toHaveURL(/\/queries\?.*starred=true/)
 })

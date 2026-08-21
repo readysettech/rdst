@@ -684,6 +684,7 @@ function AuditPage() {
             activeId={null}
             loadingId={null}
             onOpen={(entry) => void handleOpenHistory(entry)}
+            onStartRun={() => setView('run')}
           />
         </div>
       )}

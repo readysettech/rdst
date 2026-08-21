@@ -3,6 +3,7 @@ import {
   clearQueryRegistry,
   configureTestTarget,
   expect,
+  mainContent,
   mockConnectivityOk,
   setBackendFixtures,
   test,
@@ -318,7 +319,9 @@ test('scans a project, renders analysis, speed-tests a query, and hands off to A
   expect(resultsUrl.searchParams.get('query')).toBe(query)
   expect(resultsUrl.searchParams.get('target')).toBe('e2e-guard')
   await expect(
-    page.getByText('Analysis skipped in Code Scan E2E', { exact: true })
+    mainContent(page).getByText('Analysis skipped in Code Scan E2E', {
+      exact: true,
+    })
   ).toBeVisible()
 })
 

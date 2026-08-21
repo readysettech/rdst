@@ -85,8 +85,10 @@ function SummaryRow({
 
 export function LoadTestSetup({
   controller,
+  onFindQueries,
 }: {
   controller: LoadTestController
+  onFindQueries?: () => void
 }) {
   const {
     queries,
@@ -419,6 +421,17 @@ export function LoadTestSetup({
                         Add or discover queries in Queries before running a load
                         test.
                       </Text>
+                      {onFindQueries && (
+                        <Button
+                          size="small"
+                          variant="primary"
+                          modifier="outline"
+                          label="Find queries"
+                          icon="search"
+                          onClick={onFindQueries}
+                          className="mt-1"
+                        />
+                      )}
                     </VStack>
                   </div>
                 ) : filterEmpty ? (
