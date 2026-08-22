@@ -32,6 +32,12 @@ _PORT_CONFLICT_MARKERS = (
     "only one usage of each socket address",
 )
 
+# A daemon started with user-namespace remapping rejects host networking at
+# container-create time with this message.
+_HOST_NETWORK_REFUSAL_MARKER = (
+    "network namespace when user namespaces are enabled"
+)
+
 
 def publish_bind() -> str:
     """Host-side interface for `docker run -p`. A local daemon publishes on
@@ -187,6 +193,27 @@ def _is_port_conflict(error: str) -> bool:
     return any(marker in lowered for marker in _PORT_CONFLICT_MARKERS)
 
 
+def _is_host_network_refusal(error: str) -> bool:
+    return _HOST_NETWORK_REFUSAL_MARKER in error.lower()
+
+
+def _network_plans(
+    topology: DockerTopology, db_host: str
+) -> list[ContainerNetworkPlan]:
+    """Return the preferred container network plan, then any fallback.
+
+    Host networking is the only way a container on a native Linux daemon reaches
+    an upstream bound to the client's loopback, but a userns-remapped daemon
+    refuses it. Bridge networking with published listeners and a host-gateway
+    mapping is the next best plan there, so callers retry with it when the
+    daemon rejects the host namespace.
+    """
+    plan = topology.container_network_for(db_host)
+    if not plan.host_network:
+        return [plan]
+    return [plan, topology.bridge_network_for(db_host)]
+
+
 def deploy_local_docker(
     target_name: str,
     variables: Dict[str, str],
@@ -323,20 +350,14 @@ def _create_container(
     docker_memory = variables.get("docker_memory", "4g")
 
     try:
-        network = DockerTopology.from_environment().container_network_for(db_host)
+        plans = _network_plans(DockerTopology.from_environment(), db_host)
     except DockerTopologyError as exc:
         return {"success": False, "error": str(exc)}
-    docker_db_host = network.upstream_host
 
     # Build DATABASE_URL (URL-encode user/password to handle special chars)
     safe_user = urlquote(db_user, safe="")
     safe_password = urlquote(password, safe="")
-    if engine == "mysql":
-        db_type = "mysql"
-        db_url = f"mysql://{safe_user}:{safe_password}@{docker_db_host}:{db_port}/{db_name}"
-    else:
-        db_type = "postgresql"
-        db_url = f"postgresql://{safe_user}:{safe_password}@{docker_db_host}:{db_port}/{db_name}"
+    db_type = "mysql" if engine == "mysql" else "postgresql"
 
     # Check Docker is available
     try:
@@ -365,40 +386,52 @@ def _create_container(
     # together enable LRU eviction at the configured cap. Docker --memory and
     # --cpus enforce host-level resource limits (Tanmay/Gautam: 2c/4GB).
     metrics_port = variables.get("metrics_port", "6034")
-    docker_cmd = [
-        "docker", "run",
-        "-d",
-        "--restart=unless-stopped",
-        "--name", container_name,
-        f"--memory={docker_memory}",
-        f"--cpus={cpus}",
-        *_container_network_args(network, readyset_port, metrics_port),
-        "-e", f"UPSTREAM_DB_URL={db_url}",
-        "-e", f"DATABASE_TYPE={db_type}",
-        "-e", f"LISTEN_ADDRESS={network.listen_host}:{readyset_port}",
-        "-e", f"DEPLOYMENT_MODE=standalone",
-        "-e", f"QUERY_CACHING={query_caching_mode}",
-        "-e", "QUERY_LOG_MODE=enabled",
-        "-e", "PROMETHEUS_METRICS=true",
-        "-e", f"CACHE_MODE=shallow",
-        "-e", f"SHALLOW_MEMORY_PERCENT=100",
-        "-e", f"READYSET_MEMORY_LIMIT={memory_bytes}",
-        "-e", "DEFAULT_TTL_MS=600000",
-        "-e", f"METRICS_ADDRESS={network.listen_host}:{metrics_port}",
-        image,
-    ]
-
-    try:
-        print("Pulling and starting Readyset container (this may take a while)...")
-        result = subprocess.run(
-            docker_cmd,
-            capture_output=True,
-            text=True,
-            timeout=300,
+    print("Pulling and starting Readyset container (this may take a while)...")
+    for network in plans:
+        db_url = (
+            f"{db_type}://{safe_user}:{safe_password}@"
+            f"{network.upstream_host}:{db_port}/{db_name}"
         )
+        docker_cmd = [
+            "docker", "run",
+            "-d",
+            "--restart=unless-stopped",
+            "--name", container_name,
+            f"--memory={docker_memory}",
+            f"--cpus={cpus}",
+            *_container_network_args(network, readyset_port, metrics_port),
+            "-e", f"UPSTREAM_DB_URL={db_url}",
+            "-e", f"DATABASE_TYPE={db_type}",
+            "-e", f"LISTEN_ADDRESS={network.listen_host}:{readyset_port}",
+            "-e", f"DEPLOYMENT_MODE=standalone",
+            "-e", f"QUERY_CACHING={query_caching_mode}",
+            "-e", "QUERY_LOG_MODE=enabled",
+            "-e", "PROMETHEUS_METRICS=true",
+            "-e", f"CACHE_MODE=shallow",
+            "-e", f"SHALLOW_MEMORY_PERCENT=100",
+            "-e", f"READYSET_MEMORY_LIMIT={memory_bytes}",
+            "-e", "DEFAULT_TTL_MS=600000",
+            "-e", f"METRICS_ADDRESS={network.listen_host}:{metrics_port}",
+            image,
+        ]
+
+        try:
+            result = subprocess.run(
+                docker_cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "error": "Container creation timed out (5 min). Check your network connection.",
+            }
 
         if result.returncode != 0:
             error_msg = result.stderr.strip()
+            if network.host_network and _is_host_network_refusal(error_msg):
+                continue
             return {
                 "success": False,
                 "error": _format_docker_error(error_msg),
@@ -413,11 +446,7 @@ def _create_container(
             "db_url": db_url.replace(f":{safe_password}@", ":***@") if password else db_url,
         }
 
-    except subprocess.TimeoutExpired:
-        return {
-            "success": False,
-            "error": "Container creation timed out (5 min). Check your network connection.",
-        }
+    raise AssertionError("container network fallback loop did not return")
 
 
 def deploy_managed_sandbox(
@@ -818,26 +847,20 @@ def _is_missing_container_error(error: str) -> bool:
     return "no such object" in lowered or "no such container" in lowered
 
 
-def _create_container_command(
+def _managed_create_command(
     variables: Dict[str, str],
     password: str,
+    network: ContainerNetworkPlan,
     *,
-    extra_args: list[str] | None = None,
+    extra_args: list[str] | None,
     restart_policy: bool,
-) -> Dict[str, Any]:
-    """Create a Readyset container with an explicit lifecycle policy."""
-    engine = variables["db_engine"]
-    db_host = variables["db_host"]
-    try:
-        network = DockerTopology.from_environment().container_network_for(db_host)
-    except DockerTopologyError as exc:
-        return {"success": False, "error": str(exc)}
-    docker_db_host = network.upstream_host
+) -> list[str]:
+    """Build the `docker create` argv for one container network plan."""
     safe_user = urlquote(variables["db_user"], safe="")
     safe_password = urlquote(password, safe="")
-    db_type = "mysql" if engine == "mysql" else "postgresql"
+    db_type = "mysql" if variables["db_engine"] == "mysql" else "postgresql"
     db_url = (
-        f"{db_type}://{safe_user}:{safe_password}@{docker_db_host}:"
+        f"{db_type}://{safe_user}:{safe_password}@{network.upstream_host}:"
         f"{variables['db_port']}/{variables['db_name']}"
     )
     readyset_port = variables["readyset_port"]
@@ -881,6 +904,24 @@ def _create_container_command(
             variables["readyset_image"],
         ]
     )
+    return command
+
+
+def _create_container_command(
+    variables: Dict[str, str],
+    password: str,
+    *,
+    extra_args: list[str] | None = None,
+    restart_policy: bool,
+) -> Dict[str, Any]:
+    """Create a Readyset container with an explicit lifecycle policy."""
+    try:
+        plans = _network_plans(
+            DockerTopology.from_environment(), variables["db_host"]
+        )
+    except DockerTopologyError as exc:
+        return {"success": False, "error": str(exc)}
+    readyset_port = variables["readyset_port"]
     try:
         docker_check = subprocess.run(
             ["docker", "info"], capture_output=True, timeout=5
@@ -931,22 +972,36 @@ def _create_container_command(
                 "success": False,
                 "error": _format_docker_error(pull_result.stderr.strip()),
             }
-    try:
-        create_result = subprocess.run(
-            command, capture_output=True, text=True, timeout=300
+    for network in plans:
+        command = _managed_create_command(
+            variables,
+            password,
+            network,
+            extra_args=extra_args,
+            restart_policy=restart_policy,
         )
-    except FileNotFoundError:
-        return {"success": False, "error": "Docker CLI was not found on RDST's PATH."}
-    except subprocess.TimeoutExpired:
-        cleanup = _reconcile_ambiguous_managed_create()
-        if not cleanup.get("success"):
-            return cleanup
-        return {"success": False, "error": "Container creation timed out (5 min)."}
-    if create_result.returncode != 0:
-        return {
-            "success": False,
-            "error": _format_docker_error(create_result.stderr.strip()),
-        }
+        try:
+            create_result = subprocess.run(
+                command, capture_output=True, text=True, timeout=300
+            )
+        except FileNotFoundError:
+            return {
+                "success": False,
+                "error": "Docker CLI was not found on RDST's PATH.",
+            }
+        except subprocess.TimeoutExpired:
+            cleanup = _reconcile_ambiguous_managed_create()
+            if not cleanup.get("success"):
+                return cleanup
+            return {"success": False, "error": "Container creation timed out (5 min)."}
+        if create_result.returncode == 0:
+            break
+        error = create_result.stderr.strip()
+        if network.host_network and _is_host_network_refusal(error):
+            continue
+        return {"success": False, "error": _format_docker_error(error)}
+    else:
+        raise AssertionError("container network fallback loop did not return")
     container_id = create_result.stdout.strip()
     if not container_id:
         return {

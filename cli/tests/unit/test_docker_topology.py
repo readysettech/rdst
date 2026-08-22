@@ -40,6 +40,16 @@ def test_local_linux_recognizes_equivalent_loopback_spellings(host):
     assert network.upstream_host == "localhost"
 
 
+def test_bridge_fallback_reaches_loopback_through_the_host_gateway():
+    topology = DockerTopology.from_environment({})
+
+    network = topology.bridge_network_for("127.0.0.1")
+
+    assert network.host_network is False
+    assert network.upstream_host == "host.docker.internal"
+    assert network.listen_host == "0.0.0.0"
+
+
 def test_local_linux_remote_upstream_keeps_bridge_network():
     topology = DockerTopology.from_environment({})
 

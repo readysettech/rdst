@@ -72,8 +72,10 @@ async def test_real_docker_port_recovery_identity_and_crash_cleanup(
             upstream_name,
             "-e",
             "POSTGRES_PASSWORD=sandbox-test-password",
+            # Published on every interface so the sandbox reaches this upstream
+            # under host networking and under the bridge fallback alike.
             "-p",
-            "127.0.0.1::5432",
+            "5432",
             "postgres:17-alpine",
         ).stdout.strip()
         published = _docker("port", upstream_id, "5432/tcp").stdout.strip()
@@ -136,7 +138,9 @@ async def test_real_docker_port_recovery_identity_and_crash_cleanup(
 
         docker_inspect = json.loads(_docker("inspect", sandbox_id).stdout)[0]
         environment = set(docker_inspect["Config"]["Env"])
-        assert "LISTEN_ADDRESS=127.0.0.1:5434" in environment
+        host_networked = docker_inspect["HostConfig"]["NetworkMode"] == "host"
+        listen_host = "127.0.0.1" if host_networked else "0.0.0.0"
+        assert f"LISTEN_ADDRESS={listen_host}:5434" in environment
         assert "PROMETHEUS_METRICS=false" in environment
         assert "SHALLOW_MEMORY_PERCENT=80" in environment
         assert docker_inspect["HostConfig"]["RestartPolicy"]["Name"] == "no"

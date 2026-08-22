@@ -724,6 +724,108 @@ class TestManagedSandboxDocker:
             for value in command
         )
 
+    @patch("shared.deploy.docker_topology.sys.platform", "linux")
+    @patch("shared.deploy.local_docker.subprocess.run")
+    @patch(
+        "shared.deploy.local_docker._inspect_exact_container_checked",
+        return_value=(None, None),
+    )
+    def test_managed_userns_daemon_falls_back_to_bridge_network(
+        self, _inspect, mock_run
+    ):
+        mock_run.side_effect = [
+            MagicMock(returncode=0),
+            MagicMock(returncode=0),
+            MagicMock(
+                returncode=125,
+                stdout="",
+                stderr=(
+                    "Error response from daemon: cannot share the host's "
+                    "network namespace when user namespaces are enabled"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="container-id", stderr=""),
+            MagicMock(returncode=0, stdout="container-id", stderr=""),
+        ]
+
+        result = local_docker.deploy_managed_sandbox(
+            "origin", self.variables(), "secret", "fingerprint"
+        )
+
+        assert result["success"] is True
+        assert "--network=host" in mock_run.call_args_list[2].args[0]
+        retried = mock_run.call_args_list[3].args[0]
+        assert "--network=host" not in retried
+        assert "127.0.0.1:5433:5433" in retried
+        assert "--add-host=host.docker.internal:host-gateway" in retried
+        assert "LISTEN_ADDRESS=0.0.0.0:5433" in retried
+        assert any(
+            value.startswith(
+                "UPSTREAM_DB_URL=postgresql://app:secret@host.docker.internal:5432/"  # trufflehog:ignore
+            )
+            for value in retried
+        )
+
+    @patch("shared.deploy.docker_topology.sys.platform", "linux")
+    @patch("shared.deploy.local_docker.subprocess.run")
+    @patch(
+        "shared.deploy.local_docker._inspect_exact_container_checked",
+        return_value=(None, None),
+    )
+    def test_managed_unrelated_create_failure_keeps_host_network(
+        self, _inspect, mock_run
+    ):
+        mock_run.side_effect = [
+            MagicMock(returncode=0),
+            MagicMock(returncode=0),
+            MagicMock(
+                returncode=125,
+                stdout="",
+                stderr="Error response from daemon: no such image",
+            ),
+        ]
+
+        result = local_docker.deploy_managed_sandbox(
+            "origin", self.variables(), "secret", "fingerprint"
+        )
+
+        assert result["success"] is False
+        assert mock_run.call_count == 3
+
+    @patch("shared.deploy.docker_topology.sys.platform", "linux")
+    @patch("shared.deploy.local_docker.subprocess.run")
+    @patch(
+        "shared.deploy.local_docker._find_existing_container", return_value=None
+    )
+    def test_legacy_deploy_falls_back_to_bridge_network(
+        self, _existing, mock_run
+    ):
+        mock_run.side_effect = [
+            MagicMock(returncode=0),
+            MagicMock(
+                returncode=125,
+                stdout="",
+                stderr=(
+                    "Error response from daemon: cannot share the host's "
+                    "network namespace when user namespaces are enabled"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="container-id", stderr=""),
+        ]
+
+        result = local_docker.deploy_local_docker(
+            "origin", self.variables(), "secret"
+        )
+
+        assert result["success"] is True
+        assert "--network=host" in mock_run.call_args_list[1].args[0]
+        retried = mock_run.call_args_list[2].args[0]
+        assert "--network=host" not in retried
+        assert "127.0.0.1:5433:5433" in retried
+        assert "127.0.0.1:6034:6034" in retried
+        assert "--add-host=host.docker.internal:host-gateway" in retried
+        assert "METRICS_ADDRESS=0.0.0.0:6034" in retried
+
     @patch("shared.deploy.local_docker.subprocess.run")
     @patch(
         "shared.deploy.local_docker._inspect_exact_container_checked",

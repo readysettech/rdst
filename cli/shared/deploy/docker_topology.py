@@ -186,11 +186,7 @@ class DockerTopology:
         """
         platform_name = platform_name or sys.platform
         if self.docker_network:
-            return ContainerNetworkPlan(
-                upstream_host=self.container_host_for(host),
-                host_network=False,
-                docker_network=self.docker_network,
-            )
+            return self.bridge_network_for(host)
         if (
             platform_name.startswith("linux")
             and not self.remote
@@ -202,7 +198,18 @@ class DockerTopology:
                 upstream_host="localhost",
                 host_network=True,
             )
+        return self.bridge_network_for(host)
+
+    def bridge_network_for(self, host: str) -> ContainerNetworkPlan:
+        """Return the bridge plan for an upstream database address.
+
+        Daemons configured with user-namespace remapping refuse to share their
+        network namespace, so a container that would otherwise take the host
+        namespace publishes its own listeners and reaches the client through the
+        host gateway instead.
+        """
         return ContainerNetworkPlan(
             upstream_host=self.container_host_for(host),
             host_network=False,
+            docker_network=self.docker_network,
         )
