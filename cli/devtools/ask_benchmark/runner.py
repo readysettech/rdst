@@ -37,6 +37,10 @@ from features.schema.semantic_layer.manager import SemanticLayerManager
 from .anthropic_adapter import AnthropicSDKAdapter
 from .artifacts import ArtifactStore, make_attempt_key
 from .bird_dataset import DATASET_REVISION
+from .claude_subscription_adapter import (
+    CLAUDE_SUBSCRIPTION_TRANSPORT,
+    ClaudeSubscriptionAdapter,
+)
 from .executor import MySQLExecutor, QueryBounds
 from .models import (
     AttemptRecord,
@@ -206,6 +210,8 @@ class _BudgetedAdapter:
 def _build_adapter(spec: ModelSpec, aliases: dict[str, ModelSpec]):
     if spec.transport == "anthropic":
         return AnthropicSDKAdapter(spec, model_aliases=aliases)
+    if spec.transport == CLAUDE_SUBSCRIPTION_TRANSPORT:
+        return ClaudeSubscriptionAdapter(spec, model_aliases=aliases)
     return PydanticAIAdapter(spec, model_aliases=aliases)
 
 

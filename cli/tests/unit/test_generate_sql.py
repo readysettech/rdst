@@ -484,3 +484,55 @@ def test_generation_system_message_can_be_overridden_for_ablation():
     )
 
     assert result["success"] is True
+
+
+def test_validation_repair_accepts_fenced_json() -> None:
+    from features.ask.sql_generation import repair_sql_after_validation
+
+    class Manager:
+        propagate_query_errors = True
+
+        def generate_response(self, **_kwargs):
+            return {
+                "response": (
+                    "```json\n"
+                    '{"sql":"SELECT id FROM users","explanation":"One statement."}'
+                    "\n```"
+                ),
+                "tokens_used": 12,
+                "model": "fixture",
+            }
+
+    result = repair_sql_after_validation(
+        nl_question="Show users",
+        failed_sql="SELECT id FROM users; SELECT name FROM users",
+        error_message="Only a single statement is allowed",
+        filtered_schema="Table: users(id INT, name TEXT)",
+        database_engine="mysql",
+        llm_manager=Manager(),
+    )
+
+    assert result["success"] is True
+    assert result["sql"] == "SELECT id FROM users"
+
+
+def test_invalid_validation_repair_output_does_not_abort_request() -> None:
+    from features.ask.sql_generation import repair_sql_after_validation
+
+    class Manager:
+        propagate_query_errors = True
+
+        def generate_response(self, **_kwargs):
+            return {"response": "not JSON", "tokens_used": 2, "model": "fixture"}
+
+    result = repair_sql_after_validation(
+        nl_question="Show users",
+        failed_sql="SELECT 1; SELECT 2",
+        error_message="Only a single statement is allowed",
+        filtered_schema="Table: users(id INT)",
+        database_engine="mysql",
+        llm_manager=Manager(),
+    )
+
+    assert result["success"] is False
+    assert "Expecting value" in result["error"]

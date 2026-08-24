@@ -13,7 +13,7 @@ from devtools.ask_benchmark.config import (
 def test_default_model_matrix_has_controlled_routes():
     specs = load_model_specs()
 
-    assert len(specs) == 18
+    assert len(specs) == 19
     assert "kimi-k3-max" in specs
     assert "grok-4.6-xhigh" in specs
     assert specs["mistral-medium-3.5-high"].model == "mistralai/mistral-medium-3-5"
@@ -35,6 +35,11 @@ def test_default_model_matrix_has_controlled_routes():
     assert direct.transport == "anthropic"
     assert direct.max_tokens == 4000
     assert direct.timeout_seconds == 60
+    subscription = specs["claude-sonnet-4.6-subscription-medium"]
+    assert subscription.model == "claude-sonnet-4-6"
+    assert subscription.transport == "claude-subscription"
+    assert subscription.max_tokens == 4000
+    assert subscription.reasoning_effort == "medium"
     default_reasoning_specs = {
         "claude-sonnet-4.6-default-no-cap",
         "claude-sonnet-4.6-anthropic-sdk",

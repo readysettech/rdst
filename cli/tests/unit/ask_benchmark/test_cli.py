@@ -91,10 +91,10 @@ def test_protocol_fingerprint_covers_canonical_schema_loading():
 
 
 def test_frozen_pipeline_receipt_matches_current_protocol():
-    receipt_path = Path(cli.__file__).with_name("frozen_pipeline_v3.json")
+    receipt_path = Path(cli.__file__).with_name("frozen_pipeline_v8.json")
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
 
-    assert receipt["freeze_id"] == "rdst-ask-auto-init-no-evidence-v3"
+    assert receipt["freeze_id"] == "rdst-ask-auto-init-no-evidence-v8"
     assert receipt["benchmark_protocol_sha256"] == cli._benchmark_protocol_sha256()
     assert receipt["holdout_partition"]["opened"] is False
     assert receipt["acceptance"]["required_baseline_repetitions"] == 3
@@ -221,6 +221,25 @@ def test_direct_anthropic_doctor_does_not_require_pydantic_ai(monkeypatch, capsy
     output = capsys.readouterr().out
     assert "PydanticAI: not required" in output
     assert "Anthropic SDK: installed" in output
+
+
+def test_subscription_doctor_requires_oauth_and_claude_cli(monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-only")
+    monkeypatch.setattr(cli, "_module_available", lambda _name: "missing")
+    monkeypatch.setattr(cli.shutil, "which", lambda name: f"/usr/bin/{name}")
+    args = SimpleNamespace(
+        models="claude-sonnet-4.6-subscription-medium",
+        structured=True,
+    )
+
+    result = cli._doctor(args)
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "PydanticAI: not required" in output
+    assert "Anthropic SDK: not required" in output
+    assert "Claude Code CLI: /usr/bin/claude; required-version=" in output
+    assert "CLAUDE_CODE_OAUTH_TOKEN: set" in output
 
 
 def test_llm_enriched_context_must_match_frozen_provenance(tmp_path):

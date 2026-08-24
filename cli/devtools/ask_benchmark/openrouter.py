@@ -9,6 +9,8 @@ import requests
 
 from .models import ModelSpec
 
+CLAUDE_SUBSCRIPTION_TRANSPORT = "claude-subscription"
+
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 _ANTHROPIC_PRICING = {
     "claude-sonnet-4-6": (
@@ -77,6 +79,12 @@ def check_model_route(
             runtime_parameters=runtime_parameters,
             timeout_seconds=timeout_seconds,
         )
+    if spec.transport == CLAUDE_SUBSCRIPTION_TRANSPORT:
+        return _check_claude_subscription_route(
+            spec,
+            structured_output=structured_output,
+            runtime_parameters=runtime_parameters,
+        )
     if spec.transport != "anthropic":
         return RouteCheck(
             model=spec.model,
@@ -137,6 +145,59 @@ def check_model_route(
             else None
             if available
             else f"Unsupported direct Anthropic model: {spec.model}"
+        ),
+    )
+
+
+def _check_claude_subscription_route(
+    spec: ModelSpec,
+    *,
+    structured_output: bool,
+    runtime_parameters: set[str] | None,
+) -> RouteCheck:
+    canonical_pricing = _ANTHROPIC_PRICING.get(spec.model)
+    available = (
+        spec.model == "claude-sonnet-4-6"
+        and spec.reasoning_effort == "medium"
+        and canonical_pricing is not None
+    )
+    pricing_changed = canonical_pricing is not None and canonical_pricing != (
+        spec.pricing.input_usd_per_token,
+        spec.pricing.output_usd_per_token,
+        spec.pricing.cached_input_usd_per_token,
+    )
+    supported = {"max_tokens", "reasoning_effort", "response_format"}
+    required = set(runtime_parameters or ())
+    if spec.reasoning_effort is not None:
+        required.add("reasoning_effort")
+    if structured_output:
+        required.add("response_format")
+    policy_error = None
+    if (
+        spec.provider_data_training is not False
+        or spec.provider_retains_prompts is not True
+    ):
+        policy_error = (
+            "Claude subscription data-policy metadata differs from the pinned policy"
+        )
+    return RouteCheck(
+        model=spec.model,
+        available=available,
+        controlled=available,
+        matched_provider="anthropic-claude-code-subscription",
+        endpoint_model_ids=(spec.model,) if available else (),
+        supported_parameters=tuple(sorted(supported)),
+        missing_parameters=tuple(sorted(required - supported)),
+        pricing_changed=pricing_changed,
+        max_completion_tokens=32000 if available else None,
+        provider_data_training=False,
+        provider_retains_prompts=True,
+        error=(
+            policy_error
+            if policy_error
+            else None
+            if available
+            else "Claude subscription requires claude-sonnet-4-6 at medium effort"
         ),
     )
 

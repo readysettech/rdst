@@ -45,6 +45,15 @@ def _direct_spec():
     )
 
 
+def _subscription_spec():
+    return replace(
+        _direct_spec(),
+        name="sonnet-subscription",
+        transport="claude-subscription",
+        reasoning_effort="medium",
+    )
+
+
 def test_direct_anthropic_route_uses_pinned_sdk_policy_and_pricing():
     check = check_model_route(
         _direct_spec(),
@@ -69,6 +78,20 @@ def test_direct_anthropic_route_fails_closed_on_pricing_drift():
 
     assert check.pricing_changed is True
     assert check.scoreable is False
+
+
+def test_claude_subscription_route_is_pinned_to_sonnet():
+    check = check_model_route(
+        _subscription_spec(),
+        structured_output=True,
+        runtime_parameters={"max_tokens"},
+    )
+
+    assert check.scoreable is True
+    assert check.matched_provider == "anthropic-claude-code-subscription"
+    assert "reasoning_effort" in check.supported_parameters
+    assert check.endpoint_model_ids == ("claude-sonnet-4-6",)
+    assert check.missing_parameters == ()
 
 
 def _response(payload):

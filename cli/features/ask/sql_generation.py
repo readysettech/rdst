@@ -129,6 +129,24 @@ def _schema_size_failure(
     }
 
 
+def _parse_json_object_response(response_text: Any) -> Dict[str, Any]:
+    """Parse a JSON object, tolerating the Markdown fences models sometimes add."""
+    if not isinstance(response_text, str):
+        raise TypeError("LLM response must be a string")
+    response_text = response_text.strip()
+    if response_text.startswith("```"):
+        first_newline = response_text.find("\n")
+        if first_newline != -1:
+            response_text = response_text[first_newline + 1 :]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+    parsed = json.loads(response_text, strict=False)
+    if not isinstance(parsed, dict):
+        raise TypeError("LLM response must be a JSON object")
+    return parsed
+
+
 @dataclass
 class SQLGenerationResult:
     """Result from SQL generation process."""
@@ -318,19 +336,7 @@ def generate_sql_from_nl(
 
         logger.debug(f"LLM response (first 500 chars): {response_text[:500]}")
 
-        # Strip markdown code fences if present (Claude often wraps JSON in ```json...```)
-        response_text = response_text.strip()
-        if response_text.startswith("```"):
-            # Find the first newline after opening fence
-            first_newline = response_text.find("\n")
-            if first_newline != -1:
-                response_text = response_text[first_newline + 1 :]
-            # Remove closing fence
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
-
-        result_data = json.loads(response_text, strict=False)
+        result_data = _parse_json_object_response(response_text)
 
         required_fields = set(SQL_GENERATION_RESPONSE_SCHEMA["required"])
         missing_fields = sorted(required_fields - result_data.keys())
@@ -521,7 +527,13 @@ def repair_sql_after_validation(
                 }
             },
         )
-        response_text = result.get("response", "")
+    except Exception as exc:
+        if getattr(llm_manager, "propagate_query_errors", False):
+            raise
+        return {"success": False, "error": str(exc)}
+
+    response_text = result.get("response", "")
+    try:
         if callback:
             callback(
                 prompt=prompt,
@@ -530,7 +542,7 @@ def repair_sql_after_validation(
                 latency_ms=(time.time() - started) * 1000,
                 model=result.get("model", "unknown"),
             )
-        parsed = json.loads(response_text)
+        parsed = _parse_json_object_response(response_text)
         if set(parsed) != {"sql", "explanation"}:
             raise ValueError("validation repair response has unexpected fields")
         if not all(isinstance(parsed[field], str) for field in parsed):
@@ -539,9 +551,7 @@ def repair_sql_after_validation(
         if not safety["is_read_only"]:
             raise ValueError("validation repair did not return one read-only statement")
         return {"success": True, **parsed, "raw_response": parsed}
-    except Exception as exc:
-        if getattr(llm_manager, "propagate_query_errors", False):
-            raise
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
         return {"success": False, "error": str(exc)}
 
 

@@ -36,34 +36,87 @@ Override them with `BIRD_MYSQL_*` environment variables or CLI arguments. Prepar
 
 ## CI mode
 
-When a pre-merge change touches the RDST Python surface, the existing RDST pipeline
-shows a **Run BIRD Live Qualification** block beside the Relentless Tester block. It
-is placed after Gerrit status and has `blocked_state: passed`, so ignoring it or
-getting a diagnostic failure cannot block the CL. Starting it requires exact paid-run
-and BIRD-license confirmations and permits only the smoke or development-canary
-suites. It runs matched direct and canonical Ask tracks for auto-init, RDST
-AI-enriched, and BIRD-curated schema. All three omit BIRD question evidence. The job
-has no automatic retry, and holdout and full runs are impossible through this mode.
+When a merged change touches the RDST Python surface, the main-branch RDST pipeline
+shows a **Run BIRD Live Qualification** block with no dependency on ordinary pipeline
+steps. It has
+`blocked_state: passed`, so ignoring it does not hold the post-merge build open.
+Starting the manual job constitutes acceptance of the BIRD terms; there is no
+separate form confirmation. The job pins the 50-case development canary, one paired
+repetition, and fixed call, cost, and wall-time ceilings. It runs the auto-init, RDST
+AI-enriched, and BIRD-curated context pairs concurrently. All six tracks use
+subscription Sonnet 4.6 and omit BIRD question evidence. The job has no automatic
+retry, and holdout and full runs are impossible through this mode.
 
-After each context completes, the job updates a single Buildkite annotation with the
-generated paired leaderboard. Completed contexts therefore remain visible inline if
-a later context fails; the full immutable reports and receipts are also uploaded as
-build artifacts.
+`prepare` owns exclusive global and cache locks. Benchmark runs hold shared locks on
+the same files, allowing the three read-only contexts to overlap while preventing a
+concurrent reprovision. This distinction is required: using the preparation lock
+exclusively for the full benchmark serialized one context and made the other two fail
+after the ten-second lock timeout.
+
+The same optional block is temporarily exposed on Python CL builds so the gate,
+subscription secret, artifacts, annotation, and Slack report can
+be tested before merge. Its prompt starts with `Temporary CL test.` and its result
+cannot affect the Gerrit vote. Remove this temporary call to `emit_bird_live_steps`
+after the CI path has been verified; the intended permanent location remains
+post-merge only.
+
+For an isolated CI test, a disposable child CL whose only diff increments
+`.buildkite/bird_live_test_trigger` emits exactly the BIRD block and qualification
+job. That child and marker change must be titled `DO NOT MERGE`; neither is a product
+or permanent pipeline setting.
+
+Each context passes when canonical Ask has official execution accuracy equal to or
+higher than direct Sonnet 4.6 on the same cases. A tie passes. The job completes all
+three contexts before returning its overall verdict, so a failed context does not
+hide the remaining comparisons. This is an optional post-merge qualification, not a
+merge or release gate.
+
+After all three contexts complete, the job updates one Buildkite annotation with the
+three paired leaderboards. The full reports and receipts are also uploaded as build
+artifacts.
+
+After all three contexts finish, the job posts one report to `#builds-rdst` through
+Buildkite's configured Slack notifier. The message states whether Ask finished at or
+above the direct Sonnet 4.6 baseline, lists both scores and the delta for every schema
+context, and links the Buildkite build and its complete artifacts. Ties are labeled
+separately and count as passing for the overall verdict. The report
+step allows dependency failure, so an accuracy failure still reaches Slack.
 
 The deterministic scripted `BenchmarkRunner -> AskService` integration contract
 remains available to the repository's existing Python test workflows; it does not add
 a dedicated Buildkite step or a second benchmark mode.
 
-The block records explicit license acceptance in Buildkite metadata. Local scripted
-runs may instead set `RDST_BIRD_LICENSE_ACCEPTED=1`. Preparation installs the frozen
-Sonnet 4.6 RDST annotation snapshot from the checkout, so CI does not regenerate it
-or need a private schema cache. `RDST_BIRD_CACHE_SOURCE` and
-`RDST_BIRD_CACHE_S3_URI` remain optional download accelerators. The job also requires
-`ANTHROPIC_API_KEY`. Configure credentials only in the Buildkite build or agent
-environment.
+Starting the manual block constitutes acceptance of the BIRD terms. Preparation
+installs the frozen Sonnet 4.6 RDST annotation snapshot from the checkout, so CI does
+not regenerate it or need a private schema cache. `RDST_BIRD_CACHE_SOURCE` and
+`RDST_BIRD_CACHE_S3_URI` remain optional download accelerators. The job uses the
+`claude-sonnet-4.6-subscription-medium` configuration and loads the same one-year
+`CLAUDE_CODE_OAUTH_TOKEN` secret as Relentless Tester. It does not require or expose
+`ANTHROPIC_API_KEY`. Both direct and Ask calls pin `--effort medium` and
+`CLAUDE_CODE_EFFORT_LEVEL=medium`; neither track uses `auto` or `max`. Receipts record
+the actual thinking-token count. The job uses RDST's shared `ensure_node.sh` helper to
+install a checksum-verified Node.js toolchain when the Buildkite image has no `npm`,
+then installs the exact pinned Claude Code version into its temporary directory. A
+checked-in `uv.lock` makes `uv sync --frozen` valid on a clean checkout.
+The runner pins Python 3.10 and creates the ignored development-version and empty
+`web_dist` inputs before the editable install. Release builds still generate the real
+version and frontend bundle.
 
-Each of the six paid track/context runs accepts `--max-provider-calls`,
-`--max-normalized-cost-usd`, and `--max-wall-time-seconds`. Call limits are cumulative
+The complete job received a local cold run after the CI integration was wired. The
+first attempt caught the ignored lockfile and Markdown-fenced validation-repair JSON.
+V6 fixed both failures. The second cold run created a fresh virtual environment,
+downloaded and provisioned BIRD into a fresh cache and MySQL volume, passed official
+scorer conformance, and completed all six live tracks with 16/16 scored attempts each.
+Under the old strict-greater-than rule, it rendered a below-baseline report and exited
+1 because LLM-enriched and BIRD-curated tied their direct controls; auto-init passed
+by one case. The current equal-or-better rule would pass those exact results.
+The first Buildkite attempt then exposed a clean-checkout packaging defect:
+`_version_build.py` and `web_dist/` are generated and ignored, so Hatch could not
+build the editable package. The live runner now creates temporary stubs and removes
+them during cleanup.
+
+Each of the six live track/context runs receives pinned `--max-provider-calls`,
+`--max-normalized-cost-usd`, and `--max-wall-time-seconds` values. Call limits are cumulative
 across artifact resumes and stop before the next provider request. Cost is known only
 after a response, so the final completed call may cross the configured cost boundary;
 no later call is made. Wall time is enforced at case and provider-call boundaries.
@@ -105,6 +158,19 @@ uv run --group eval python -m devtools.ask_benchmark doctor \
 ```
 
 `doctor` checks current model availability, provider routing, reasoning support, supported parameters, credentials, and pricing drift. A changed price remains visible so the run manifest captures the checked-in pricing snapshot. Provider data-policy flags are sent only when independently verified; omitted values remain recorded as unknown rather than inferred from route availability. First-party audit entries, when configured, remain on transport-specific leaderboards.
+
+The benchmark-only `claude-subscription` transport invokes the pinned Claude Code CLI
+with subscription OAuth. It is isolated with safe mode, no tools, no plugins, no
+session persistence, one turn, disabled extended thinking, disabled nonessential
+traffic, and zero CLI retries. Every response must report exactly
+`claude-sonnet-4-6` through the first-party provider; auxiliary model calls fail the
+attempt as an uncontrolled route. Structured response schemas are appended to the
+explicit system prompt because Claude Code's schema flag performs an additional model
+turn. Receipts record the CLI version, Claude session ID, result UUID, model usage,
+response hash, normalized API-equivalent cost, and subscription billing identity.
+Temperature, top-p, and stop sequences are recorded as unsupported by this transport.
+This provider exists only under `devtools.ask_benchmark`; desktop and web Ask continue
+to use production `LLMManager` routing.
 
 ## Runs
 
@@ -161,6 +227,20 @@ uv run --group eval python -m devtools.ask_benchmark run \
   --context auto-init \
   --interaction-mode auto \
   --models claude-sonnet-4.6-anthropic-sdk
+```
+
+Subscription-backed development canary, using the same transport for direct and
+canonical Ask tracks:
+
+```bash
+export CLAUDE_CODE_OAUTH_TOKEN=...
+
+uv run --group eval python -m devtools.ask_benchmark run \
+  --suite canary \
+  --track rdst-ask \
+  --context auto-init \
+  --interaction-mode auto \
+  --models claude-sonnet-4.6-subscription-medium
 ```
 
 `auto-init` identifies schema provenance; it does not control clarification behavior.
@@ -734,7 +814,12 @@ The preregistered 16-case development smoke uses `--suite smoke`. It contains
 qualification cases 11, 26, 28, 45, and 46;
 generation regressions 72, 243, 427, 750, and 1460; validation failures 173 and 872;
 clarification/context diagnostics 239, 349, 440, and 1141. The suite is frozen to
-direct Anthropic Sonnet 4.6, one model, one repetition, and an explicit run ID.
+exact Sonnet 4.6 through either pinned direct SDK or pinned subscription transport,
+one model, one repetition, and an explicit run ID.
+
+The current subscription smoke uses explicit medium effort. Historical OpenRouter
+artifacts labeled `claude-sonnet-4.6-max` remain valid only as max-effort model-only
+experiments and are not the direct baseline for this CI qualification.
 
 ```bash
 uv run --group eval python -m devtools.ask_benchmark run \
@@ -749,7 +834,10 @@ uv run --group eval python -m devtools.ask_benchmark run \
   --run-id sonnet46-rdst-ask-llm-enriched-smoke-16-v1
 ```
 
-OpenRouter model selection uses the v3 frozen pipeline receipt. Generation and the
+OpenRouter model selection uses the v3 frozen pipeline receipt. The disabled-thinking
+subscription configuration is preserved in v4 as historical provenance. The current
+medium-effort subscription configuration starts with v5. V6 adds tolerant fenced-JSON
+parsing for the bounded validation repair without weakening transport failures. Generation and the
 single bounded validation repair allow up to 4,000 completion tokens because provider
 reasoning shares that budget on reasoning-capable routes; the visible response remains
 constrained by the concise seven-field SQL contract. The PydanticAI adapter forwards
@@ -760,8 +848,9 @@ structured.
 
 Freeze receipts are immutable. v1 records the first post-experiment product pipeline;
 v2 supersedes its 800-token completion ceiling; v3 supersedes the generic-dictionary
-OpenRouter adapter. Do not compare artifacts across these protocol hashes as though
-they were the same run. Direct Anthropic Sonnet 4.6 does not execute the PydanticAI
+OpenRouter adapter; v4 starts the subscription-backed Sonnet development baseline.
+Do not compare artifacts across these protocol hashes as though they were the same
+run. Direct Anthropic Sonnet 4.6 does not execute the PydanticAI
 adapter, so its v2 three-repetition baseline remains product-behavior evidence; the v3
 confirmation cohort provides a protocol-compatible model-selection control.
 

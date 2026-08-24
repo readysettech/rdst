@@ -10,7 +10,14 @@ import toml
 from .models import ModelSpec, Pricing
 
 DEFAULT_MODEL_MATRIX = Path(__file__).with_name("model_matrix.toml")
-_SUPPORTED_TRANSPORTS = {"openrouter", "anthropic", "openai", "google", "gemini"}
+_SUPPORTED_TRANSPORTS = {
+    "openrouter",
+    "anthropic",
+    "claude-subscription",
+    "openai",
+    "google",
+    "gemini",
+}
 _REASONING_EFFORTS = {"max", "xhigh", "high", "medium", "low", "minimal", "none"}
 
 

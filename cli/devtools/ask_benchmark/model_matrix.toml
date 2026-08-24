@@ -67,6 +67,19 @@ provider_data_training = false
 provider_retains_prompts = true
 
 [[models]]
+name = "claude-sonnet-4.6-subscription-medium"
+model = "claude-sonnet-4-6"
+transport = "claude-subscription"
+reasoning_effort = "medium"
+max_tokens = 4000
+timeout_seconds = 60
+input_usd_per_token = "0.000003"
+output_usd_per_token = "0.000015"
+cached_input_usd_per_token = "0.0000003"
+provider_data_training = false
+provider_retains_prompts = true
+
+[[models]]
 name = "claude-sonnet-4.6-default-no-cap"
 model = "anthropic/claude-sonnet-4.6"
 transport = "openrouter"

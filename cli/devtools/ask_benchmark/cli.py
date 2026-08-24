@@ -85,6 +85,11 @@ from .clarification_qualification import (
     load_gold_alignment_fixture,
     score_gold_alignment_packet,
 )
+from .claude_subscription_adapter import (
+    CLAUDE_SUBSCRIPTION_MODEL,
+    CLAUDE_SUBSCRIPTION_TRANSPORT,
+    PINNED_CLAUDE_CODE_VERSION,
+)
 from .comparison import compare_runs
 from .config import load_filter_spec, load_model_specs, select_models
 from .dashboard import write_dashboard
@@ -472,6 +477,9 @@ def _doctor(args) -> int:
     selected = select_models(specs, _split_models(args.models))
     requires_pydantic = any(spec.transport == "openrouter" for spec in selected)
     requires_anthropic = any(spec.transport == "anthropic" for spec in selected)
+    requires_claude_subscription = any(
+        spec.transport == CLAUDE_SUBSCRIPTION_TRANSPORT for spec in selected
+    )
     pydantic_state = (
         _module_available("pydantic_ai") if requires_pydantic else "not required"
     )
@@ -479,6 +487,7 @@ def _doctor(args) -> int:
         _module_available("anthropic") if requires_anthropic else "not required"
     )
     docker_path = shutil.which("docker")
+    claude_path = shutil.which("claude") if requires_claude_subscription else None
     credentials = {
         variable: bool(os.getenv(variable))
         for variable in sorted({_credential_env(spec.transport) for spec in selected})
@@ -487,11 +496,17 @@ def _doctor(args) -> int:
         int(pydantic_state == "missing")
         + int(anthropic_state == "missing")
         + int(not docker_path)
+        + int(requires_claude_subscription and not claude_path)
         + sum(not present for present in credentials.values())
     )
     print(f"PydanticAI: {pydantic_state}")
     print(f"Anthropic SDK: {anthropic_state}")
     print(f"Docker: {docker_path or 'missing'}")
+    if requires_claude_subscription:
+        print(
+            "Claude Code CLI: "
+            f"{claude_path or 'missing'}; required-version={PINNED_CLAUDE_CODE_VERSION}"
+        )
     for variable, present in credentials.items():
         print(f"{variable}: {'set' if present else 'missing'}")
     for spec in selected:
@@ -1374,9 +1389,12 @@ def _run(args) -> int:
     if args.suite == "smoke":
         if len(selected) != 1 or args.repetitions != 1:
             raise ValueError("Smoke runs require exactly one model and one repetition")
-        if selected[0].name != "claude-sonnet-4.6-anthropic-sdk":
+        if selected[0].name not in {
+            "claude-sonnet-4.6-anthropic-sdk",
+            "claude-sonnet-4.6-subscription-medium",
+        }:
             raise ValueError(
-                "Pipeline smoke is frozen to claude-sonnet-4.6-anthropic-sdk"
+                "Pipeline smoke is frozen to a pinned claude-sonnet-4-6 transport"
             )
         if not args.run_id:
             raise ValueError("Smoke runs require an explicit --run-id")
@@ -1412,6 +1430,21 @@ def _run(args) -> int:
             transport="anthropic",
             provider_order=(),
             reasoning_effort=None,
+        )
+    elif (
+        track == EvaluationTrack.RDST
+        and selected_transport == CLAUDE_SUBSCRIPTION_TRANSPORT
+    ):
+        filter_spec = replace(
+            filter_spec,
+            name="claude-sonnet-4.6-subscription-medium-filter",
+            model=CLAUDE_SUBSCRIPTION_MODEL,
+            transport=CLAUDE_SUBSCRIPTION_TRANSPORT,
+            provider_order=(),
+            pricing=selected[0].pricing,
+            reasoning_effort=selected[0].reasoning_effort,
+            provider_data_training=selected[0].provider_data_training,
+            provider_retains_prompts=selected[0].provider_retains_prompts,
         )
     elif track == EvaluationTrack.RDST:
         required_transports.add(filter_spec.transport)
@@ -2172,6 +2205,7 @@ def _benchmark_protocol_paths() -> tuple[Path, ...]:
         Path(__file__).with_name("semantic.py"),
         Path(__file__).with_name("value_profiles.py"),
         Path(__file__).with_name("anthropic_adapter.py"),
+        Path(__file__).with_name("claude_subscription_adapter.py"),
         Path(__file__).with_name("bird_interact.py"),
         RDST_ROOT / "features" / "ask" / "ask3.py",
         RDST_ROOT / "features" / "ask" / "events.py",
@@ -2466,6 +2500,7 @@ def _module_available(name: str) -> str:
 def _credential_env(transport: str) -> str:
     variables = {
         "anthropic": "ANTHROPIC_API_KEY",
+        CLAUDE_SUBSCRIPTION_TRANSPORT: "CLAUDE_CODE_OAUTH_TOKEN",
         "google": "GEMINI_API_KEY",
         "gemini": "GEMINI_API_KEY",
         "openai": "OPENAI_API_KEY",
