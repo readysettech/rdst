@@ -36,16 +36,14 @@ Override them with `BIRD_MYSQL_*` environment variables or CLI arguments. Prepar
 
 ## CI mode
 
-When a merged change touches the RDST Python surface, the main-branch RDST pipeline
-shows a **Run BIRD Live Qualification** block with no dependency on ordinary pipeline
-steps. It has
-`blocked_state: passed`, so ignoring it does not hold the post-merge build open.
-Starting the manual job constitutes acceptance of the BIRD terms; there is no
-separate form confirmation. The job pins the 50-case development canary, one paired
-repetition, and fixed call, cost, and wall-time ceilings. It runs the auto-init, RDST
-AI-enriched, and BIRD-curated context pairs concurrently. All six tracks use
-subscription Sonnet 4.6 and omit BIRD question evidence. The job has no automatic
-retry, and holdout and full runs are impossible through this mode.
+Every merged RDST main build starts one informational BIRD qualification step. It has
+no dependency on release work and uses Buildkite `soft_fail`, so a below-baseline
+score, provider failure, or infrastructure failure cannot fail the build or block a
+release. The job pins the 50-case development canary, one paired repetition, and
+fixed call, cost, and wall-time ceilings. It runs the auto-init, RDST AI-enriched,
+and BIRD-curated context pairs concurrently. All six tracks use subscription Sonnet
+4.6 and omit BIRD question evidence. The job has no automatic retry, and holdout and
+full runs are impossible through this mode.
 
 `prepare` owns exclusive global and cache locks. Benchmark runs hold shared locks on
 the same files, allowing the three read-only contexts to overlap while preventing a
@@ -53,22 +51,15 @@ concurrent reprovision. This distinction is required: using the preparation lock
 exclusively for the full benchmark serialized one context and made the other two fail
 after the ten-second lock timeout.
 
-The same optional block is temporarily exposed on Python CL builds so the gate,
-subscription secret, artifacts, annotation, and Slack report can
-be tested before merge. Its prompt starts with `Temporary CL test.` and its result
-cannot affect the Gerrit vote. Remove this temporary call to `emit_bird_live_steps`
-after the CI path has been verified; the intended permanent location remains
-post-merge only.
-
 For an isolated CI test, a disposable child CL whose only diff increments
-`.buildkite/bird_live_test_trigger` emits exactly the BIRD block and qualification
-job. That child and marker change must be titled `DO NOT MERGE`; neither is a product
-or permanent pipeline setting.
+`.buildkite/bird_live_test_trigger` emits exactly the automatic BIRD job. That child
+and marker change must be titled `DO NOT MERGE`; neither is a product or permanent
+pipeline setting.
 
 Each context passes when canonical Ask has official execution accuracy equal to or
 higher than direct Sonnet 4.6 on the same cases. A tie passes. The job completes all
 three contexts before returning its overall verdict, so a failed context does not
-hide the remaining comparisons. This is an optional post-merge qualification, not a
+hide the remaining comparisons. The Buildkite step is informational and is not a
 merge or release gate.
 
 After all three contexts complete, the job updates one Buildkite annotation with the
@@ -86,8 +77,8 @@ The deterministic scripted `BenchmarkRunner -> AskService` integration contract
 remains available to the repository's existing Python test workflows; it does not add
 a dedicated Buildkite step or a second benchmark mode.
 
-Starting the manual block constitutes acceptance of the BIRD terms. Preparation
-installs the frozen Sonnet 4.6 RDST annotation snapshot from the checkout, so CI does
+The CI invocation passes the benchmark's explicit BIRD license-acceptance flag.
+Preparation installs the frozen Sonnet 4.6 RDST annotation snapshot from the checkout, so CI does
 not regenerate it or need a private schema cache. `RDST_BIRD_CACHE_SOURCE` and
 `RDST_BIRD_CACHE_S3_URI` remain optional download accelerators. The job uses the
 `claude-sonnet-4.6-subscription-medium` configuration and loads the same one-year

@@ -63,14 +63,11 @@ def test_marker_only_cl_emits_only_bird_qualification(tmp_path):
     )
 
     steps = pipeline["steps"]
-    assert _step_keys(pipeline) == {
-        "confirm-bird-live",
-        "rdst-bird-live-qualification",
-    }
-    assert len(steps) == 2
+    assert _step_keys(pipeline) == {"rdst-bird-live-qualification"}
+    assert len(steps) == 1
     assert all("group" not in step for step in steps)
-    assert steps[0]["prompt"].startswith("DO NOT MERGE pipeline test.")
-    assert "50-case development canary" in steps[0]["prompt"]
+    assert steps[0]["soft_fail"] is True
+    assert "depends_on" not in steps[0]
 
 
 def test_marker_on_main_retains_normal_rdst_pipeline(tmp_path):
@@ -85,24 +82,13 @@ def test_marker_on_main_retains_normal_rdst_pipeline(tmp_path):
     assert "rdst-cli" in _step_keys(pipeline)
 
 
-def test_python_cl_temporarily_exposes_nonblocking_bird_gate(tmp_path):
+def test_python_cl_does_not_run_post_merge_bird_qualification(tmp_path):
     pipeline = _generated_pipeline(
         tmp_path,
         changed="rdst/features/ask/service.py\n",
         branch="refs/changes/90/14490/5",
     )
-    steps = pipeline["steps"]
-    block = next(step for step in steps if step.get("key") == "confirm-bird-live")
-    qualification = next(
-        step for step in steps if step.get("key") == "rdst-bird-live-qualification"
-    )
-
-    assert block["blocked_state"] == "passed"
-    assert "depends_on" not in block
-    assert block["prompt"].startswith("Temporary CL test.")
-    assert "50-case development canary" in block["prompt"]
-    assert "run in parallel" in block["prompt"]
-    assert qualification["depends_on"] == "confirm-bird-live"
+    assert "rdst-bird-live-qualification" not in _step_keys(pipeline)
 
 
 def test_keyservice_only_cl_does_not_expose_bird_gate(tmp_path):
@@ -112,10 +98,10 @@ def test_keyservice_only_cl_does_not_expose_bird_gate(tmp_path):
         branch="refs/changes/90/14490/5",
     )
 
-    assert "confirm-bird-live" not in _step_keys(pipeline)
+    assert "rdst-bird-live-qualification" not in _step_keys(pipeline)
 
 
-def test_python_main_build_exposes_nonblocking_bird_gate(tmp_path):
+def test_python_main_build_runs_informational_bird_qualification(tmp_path):
     pipeline = _generated_pipeline(
         tmp_path,
         changed="rdst/features/ask/service.py\n",
@@ -123,18 +109,31 @@ def test_python_main_build_exposes_nonblocking_bird_gate(tmp_path):
     )
 
     steps = pipeline["steps"]
-    block = next(step for step in steps if step.get("key") == "confirm-bird-live")
     qualification = next(
         step for step in steps if step.get("key") == "rdst-bird-live-qualification"
     )
+    release = next(step for step in steps if step.get("key") == "release-approval")
 
-    assert block["blocked_state"] == "passed"
-    assert "depends_on" not in block
-    assert qualification["depends_on"] == "confirm-bird-live"
-    assert "subscription Sonnet 4.6" in block["prompt"]
-    assert "meets or exceeds direct" in block["prompt"]
+    assert qualification["soft_fail"] is True
+    assert "depends_on" not in qualification
     assert "run_bird_live_qualification.sh" in qualification["command"]
-    assert "fields" not in block
+    assert "rdst-bird-live-qualification" not in release["depends_on"]
+
+
+def test_keyservice_main_build_also_runs_bird_qualification(tmp_path):
+    pipeline = _generated_pipeline(
+        tmp_path,
+        changed="rdst/keyservice/src/index.py\n",
+        branch="main",
+    )
+
+    qualification = next(
+        step
+        for step in pipeline["steps"]
+        if step.get("key") == "rdst-bird-live-qualification"
+    )
+    assert qualification["soft_fail"] is True
+    assert "depends_on" not in qualification
 
 
 def test_bird_live_runner_uses_pinned_subscription_provider():
