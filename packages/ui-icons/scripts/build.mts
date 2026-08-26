@@ -8,15 +8,19 @@ const inputDir = path.join(cwd, "svg");
 const typeDir = path.join(cwd, "types");
 const outputDir = path.join(cwd, "dist");
 
-// Every app that serves the sprites from its own public directory
-const appIconsDirs = ["cloud", "marketing", "rdst", "tenant-cache"].map((app) =>
-	path.join(cwd, `../../apps/${app}/public/icons`)
-);
+// Every app that serves the sprites from its own public directory. Discovered
+// rather than hardcoded, so a checkout that only has a subset of the apps
+// (e.g. a public mirror) doesn't get phantom `apps/<name>/public/icons`
+// directories created for the apps it lacks.
+const appIconsDirs = await glob("../../apps/*/public/icons", {
+	cwd,
+	absolute: true,
+	onlyDirectories: true,
+});
 
 // Ensure directories exist
 await fsExtra.ensureDir(outputDir);
 await fsExtra.ensureDir(typeDir);
-for (const dir of appIconsDirs) await fsExtra.ensureDir(dir);
 
 const shouldVerboseLog = process.argv.includes("--log=verbose");
 const logVerbose = shouldVerboseLog ? console.log : () => {};

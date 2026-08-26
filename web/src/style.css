@@ -1,21 +1,6 @@
 @import "@rs/ui-new/style.css";
+@import "./fonts.css";
 @source "../src";
-
-@font-face {
-  font-family: "Lufga";
-  src: url("/fonts/LufgaRegular.ttf") format("truetype");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Lufga";
-  src: url("/fonts/LufgaMedium.ttf") format("truetype");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
 
 /* Self-hosted IBM Plex Mono (was a remote Google-Fonts @import that silently
    failed offline / in the desktop shell — code-frontend #14, app-chrome §9).
@@ -37,7 +22,7 @@
 }
 
 @theme {
-  --font-sans: "Lufga", system-ui, sans-serif;
+  --font-sans: var(--font-family-sans), system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", "Courier New", monospace;
 }
 
