@@ -115,9 +115,9 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
 
   it('traps Tab within scrim + drawer while open (background not tabbable)', () => {
     render(<Sidebar mobileOpen onMobileClose={vi.fn()} />)
-    // Last focusable inside the drawer set: the footer "Give feedback" button.
-    const feedback = screen.getByRole('button', { name: /Give feedback/ })
-    feedback.focus()
+    // Last focusable inside the drawer set: the footer Discord link.
+    const discord = screen.getByRole('link', { name: 'Join Discord' })
+    discord.focus()
     fireEvent.keyDown(document, { key: 'Tab' })
     // Wraps to the first element of the trap set — the scrim.
     expect(
@@ -126,7 +126,18 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
 
     // Shift+Tab from the scrim wraps back to the last element.
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
-    expect(document.activeElement).toBe(feedback)
+    expect(document.activeElement).toBe(discord)
+  })
+
+  it('shows the Discord invite directly below Give feedback', () => {
+    render(<Sidebar />)
+
+    const feedback = screen.getByRole('button', { name: /Give feedback/ })
+    const discord = screen.getByRole('link', { name: 'Join Discord' })
+    expect(discord.getAttribute('href')).toBe('https://discord.gg/QkET8JhRwt')
+    expect(discord.getAttribute('target')).toBe('_blank')
+    expect(discord.getAttribute('rel')).toBe('noreferrer')
+    expect(feedback.nextElementSibling).toBe(discord)
   })
 
   it('shows the desktop update action without backend version data', () => {
@@ -179,10 +190,16 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
     render(<Sidebar />)
     const home = screen.getByRole('link', { name: /Home/ })
     const settings = screen.getByRole('link', { name: /Settings/ })
+    const discord = screen.getByRole('link', { name: 'Join Discord' })
     expect(home.className).toContain('h-10')
     expect(home.className).toContain('font-medium')
     expect(settings.className).toContain('h-8')
     expect(settings.className).toContain('font-normal')
+    expect(discord.className).toContain('h-8')
+    expect(discord.className).toContain('font-normal')
+    expect(discord.querySelector('svg')?.classList.contains('min-w-5')).toBe(
+      true
+    )
   })
 
   it('groups the footer into a status block and a utility block (F6)', () => {
@@ -265,6 +282,18 @@ describe('Sidebar nav_item_clicked analytics (E1)', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Docs' }))
     expect(trackEvent).toHaveBeenCalledWith('nav_item_clicked', {
       label: 'Docs',
+    })
+  })
+
+  it('tracks the Discord item', () => {
+    render(<Sidebar />)
+    const discord = screen.getByRole('link', { name: 'Join Discord' })
+    discord.addEventListener('click', (event) => event.preventDefault(), {
+      once: true,
+    })
+    fireEvent.click(discord)
+    expect(trackEvent).toHaveBeenCalledWith('nav_item_clicked', {
+      label: 'Discord',
     })
   })
 })
