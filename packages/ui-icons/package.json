@@ -3,6 +3,7 @@
   "type": "module",
   "scripts": {
     "build:local": "node --experimental-strip-types ./scripts/build.mts",
+    "lint": "node ../../tools/public-mirror/scripts/check-overlay-icons.mjs && node ../../tools/public-mirror/scripts/check-overlay-brand.mjs",
     "clean": "rm -rf node_modules"
   },
   "exports": {

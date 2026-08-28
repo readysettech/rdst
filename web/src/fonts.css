@@ -1,0 +1,39 @@
+/* Public-mirror replacement for apps/rdst/src/fonts.css.
+   Outfit (SIL OFL 1.1) stands in for the licensed UI typeface. The family is
+   exposed through --font-family-sans, which style.css reads, so no other file
+   in the published tree changes.
+
+   The descriptors retarget Outfit onto the metrics the type scale was designed
+   against: size-adjust brings the x-height to parity, and the ascent/descent
+   overrides restore the line box at that adjusted size (each is the target
+   ratio divided by the size-adjust factor). Derivation and the browser
+   measurements are in docs/plans/rdst-open-source-monorepo.md, "Asset
+   substitution plan". */
+
+@font-face {
+  font-family: "Outfit";
+  src: url("/fonts/Outfit-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  size-adjust: 107.32%;
+  ascent-override: 90.4%;
+  descent-override: 31.21%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: "Outfit";
+  src: url("/fonts/Outfit-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  size-adjust: 107.32%;
+  ascent-override: 90.4%;
+  descent-override: 31.21%;
+  line-gap-override: 0%;
+}
+
+:root {
+  --font-family-sans: "Outfit";
+}
