@@ -1,14 +1,15 @@
 import { spawn } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { findSafePython } from '../../../../rdst/scripts/sqlite-runtime.mjs'
+import { pythonScriptUrl, repoLayout } from './repo-layout.mjs'
+
+const { findSafePython } = await import(pythonScriptUrl('sqlite-runtime.mjs'))
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
 const appDir = resolve(__dirname, '..')
-const repoRoot = resolve(appDir, '..', '..', '..')
-const rdstDir = resolve(repoRoot, 'rdst')
+const rdstDir = repoLayout().pythonDir
 const pnpmCommand =
   process.platform === 'win32' ? process.env.ComSpec ?? 'cmd.exe' : 'pnpm'
 const pnpmPrefixArgs =

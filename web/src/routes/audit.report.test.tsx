@@ -342,11 +342,11 @@ describe('AuditReportView', () => {
 
   it('hides internal metadata tags and presents the database role as a badge', () => {
     renderReport({
-      tags: ['aws-account:701495964134', 'role:reader', 'production'],
+      tags: ['aws-account:123456789012', 'role:reader', 'production'],
     })
 
     selectInnerTab('Detailed Analysis')
-    expect(screen.queryByText(/aws-account:701495964134/)).toBeNull()
+    expect(screen.queryByText(/aws-account:123456789012/)).toBeNull()
     expect(screen.queryByText(/role:reader/)).toBeNull()
     expect(screen.getByText('Role: reader', { exact: true })).toBeTruthy()
     expect(screen.getAllByText(/production/).length).toBeGreaterThan(0)

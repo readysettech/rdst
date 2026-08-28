@@ -1,11 +1,11 @@
 import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { repoLayout } from "./repo-layout.mjs";
 
 const appDir = path.resolve(import.meta.dirname, "..");
-const webAppsRoot = path.resolve(appDir, "../..");
-const rdstWebDir = path.resolve(webAppsRoot, "apps/rdst");
-const sourceDist = path.resolve(rdstWebDir, "dist");
+const webAppsRoot = repoLayout().workspaceRoot;
+const sourceDist = path.resolve(repoLayout().webDir, "dist");
 const targetDist = path.resolve(appDir, "out/renderer");
 
 function run(command, args, options = {}) {

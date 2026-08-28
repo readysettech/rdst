@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { findSafePython, walResetFixed } from "../../../../rdst/scripts/sqlite-runtime.mjs";
+import { pythonScriptUrl } from "./repo-layout.mjs";
+
+const { findSafePython, walResetFixed } = await import(
+  pythonScriptUrl("sqlite-runtime.mjs")
+);
 
 describe("SQLite WAL runtime guard", () => {
   it.each([

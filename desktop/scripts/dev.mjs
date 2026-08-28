@@ -4,14 +4,15 @@ import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import electronBinary from "electron";
-import { findSafePython } from "../../../../rdst/scripts/sqlite-runtime.mjs";
+import { pythonScriptUrl, repoLayout } from "./repo-layout.mjs";
+
+const { findSafePython } = await import(pythonScriptUrl("sqlite-runtime.mjs"));
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const appDir = resolve(__dirname, "..");
-const webAppsDir = resolve(appDir, "../..");
-const rendererDir = resolve(webAppsDir, "apps/rdst");
-const rdstDir = resolve(webAppsDir, "../rdst");
+const rendererDir = repoLayout().webDir;
+const rdstDir = repoLayout().pythonDir;
 const READY_TIMEOUT_MS = 30_000;
 const SHUTDOWN_TIMEOUT_MS = 3_000;
 

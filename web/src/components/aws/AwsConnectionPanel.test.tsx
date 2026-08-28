@@ -45,8 +45,8 @@ const SIGNED_IN = {
   has_credentials: true,
   method: 'sso',
   identity_arn:
-    'arn:aws:sts::828804413457:assumed-role/AdministratorAccess/mike',
-  account: '828804413457',
+    'arn:aws:sts::111122223333:assumed-role/AdministratorAccess/mike',
+  account: '111122223333',
   active_profile: 'sso',
   available_profiles: ['sso'],
   region: 'us-east-1',
@@ -120,7 +120,7 @@ describe('AwsConnectionPanel', () => {
     })
     vi.mocked(fetchFleetAwsSsoAccounts).mockResolvedValue({
       accounts: [
-        { account_id: '828804413457', account_name: 'readyset-cloud-prod' },
+        { account_id: '111122223333', account_name: 'readyset-cloud-prod' },
       ],
       error: null,
     })
@@ -148,12 +148,12 @@ describe('AwsConnectionPanel', () => {
         'https://readyset.awsapps.com/start'
       )
     )
-    await pickOption(/readyset-cloud-prod \(828804413457\)/)
+    await pickOption(/readyset-cloud-prod \(111122223333\)/)
 
     await waitFor(() =>
       expect(fetchFleetAwsSsoRoles).toHaveBeenCalledWith(
         'https://readyset.awsapps.com/start',
-        '828804413457'
+        '111122223333'
       )
     )
     await pickOption(/AdministratorAccess/)
@@ -164,10 +164,10 @@ describe('AwsConnectionPanel', () => {
     await waitFor(() =>
       // The profile name is derived from role + account, never typed.
       expect(finalizeFleetAwsSsoProfile).toHaveBeenCalledWith({
-        name: 'AdministratorAccess-828804413457',
+        name: 'AdministratorAccess-111122223333',
         start_url: 'https://readyset.awsapps.com/start',
         region: 'us-east-1',
-        account_id: '828804413457',
+        account_id: '111122223333',
         role_name: 'AdministratorAccess',
       })
     )

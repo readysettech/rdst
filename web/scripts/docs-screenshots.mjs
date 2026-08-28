@@ -8,39 +8,67 @@
 //   OUT=../../apps/docs/public/rdst-desktop \
 //   node scripts/docs-screenshots.mjs
 //
-// ONLY=home,top limits the run to named shots while iterating.
-import { mkdirSync } from 'node:fs'
+// ONLY=home,top limits the run to named shots while iterating, and
+// AUDIT_TARGET names the registered target the health check flows drive.
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { chromium } from '@playwright/test'
 
 const BASE = process.env.RDST_URL ?? 'http://127.0.0.1:8788'
 const OUT = process.env.OUT ?? './screenshots'
 const TARGET = process.env.TARGET ?? 'shopdb'
-// Health check screenshots come from a real RDS instance, so the report can
-// reach a sizing verdict instead of reporting an unknown instance class.
-const AUDIT_TARGET = process.env.AUDIT_TARGET ?? 'rdst-sshtest-pg'
 const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(',')) : null
+
+// Health check screenshots come from a real managed instance, so the report
+// reaches a sizing verdict instead of reporting an unknown instance class.
+// Which instance that is belongs to whichever account the shots are captured
+// from, like the redactions below, so AUDIT_TARGET names it and the flows that
+// need it fail rather than fall back to one.
+function auditTarget() {
+  const target = process.env.AUDIT_TARGET
+  if (!target) {
+    throw new Error(
+      'AUDIT_TARGET is unset: the health check flows need the name of a ' +
+        'registered target in the capture account, as it appears in the ' +
+        'Targets list.'
+    )
+  }
+  return target
+}
 
 // A 16:10 window at 2x reads as a desktop app screenshot on a retina display
 // and stays sharp when the docs page scales it down to its 900px column.
 const VIEWPORT = { width: 1440, height: 900 }
 
 // The capture environment is a real account against real databases, so the
-// rendered pages carry an account id, a work address, and host names that
-// should not ship in public documentation. Rewrite them in the DOM just before
-// the shutter, using addresses reserved for documentation (RFC 5737) and the
-// AWS example account id.
-// Each entry is a [pattern, replacement] pair applied as a global regex.
+// rendered pages carry account ids, addresses and host names that should not
+// ship in public documentation. Rewrite them in the DOM just before the
+// shutter, using addresses reserved for documentation (RFC 5737) and the AWS
+// example account id. Each entry is a [pattern, replacement] pair applied as a
+// global regex.
+//
+// Only the shape-based rules live here. The literal identifiers belong to
+// whichever account the shots are captured from — and writing them down is
+// itself a disclosure — so they come from a JSON file of the same [pattern,
+// replacement] pairs, named by RDST_DOCS_REDACTIONS and kept out of the repo.
+const REDACTION_FILE =
+  process.env.RDST_DOCS_REDACTIONS ?? './scripts/docs-redactions.local.json'
+const accountRedactions = existsSync(REDACTION_FILE)
+  ? JSON.parse(readFileSync(REDACTION_FILE, 'utf8'))
+  : []
+if (accountRedactions.length === 0) {
+  console.warn(
+    `[docs-screenshots] no account redactions loaded from ${REDACTION_FILE}; ` +
+      'shots may carry account ids, addresses and hostnames. Review before publishing.'
+  )
+}
+
 const REDACTIONS = [
-  ['michael\\.v@readyset\\.io', 'you@yourcompany.com'],
-  ['069491470376|701495964134', '123456789012'],
-  ['cfp0qwefgklt', 'abcdefghijkl'],
-  ['18\\.226\\.104\\.100', '203.0.113.10'],
-  ['16\\.59\\.28\\.178', '203.0.113.20'],
   // The capture home is a throwaway directory; show the path a reader would have.
   ['/tmp/[^\\s]*?/docs-home', '/Users/you'],
-  ['/home/mikev', '/Users/you'],
   ['(AWSReservedSSO_[A-Za-z]+)[_a-z0-9]*', '$1'],
   ['vpc-[0-9a-f]{8,}', 'vpc-0a1b2c3d4e5f6a7b8'],
+  ['\\b\\d{12}\\b', '123456789012'],
+  ...accountRedactions,
 ]
 
 /** Rewrites redacted strings in every text node and input value on the page. */
@@ -205,6 +233,7 @@ const flows = {
 
   // Health Check over a single target, then the report it produces.
   'health-check-run': async () => {
+    const target = auditTarget()
     await page.goto(`${BASE}/audit`, { waitUntil: 'networkidle' })
     await page.waitForTimeout(2_500)
 
@@ -212,7 +241,7 @@ const flows = {
     // click to the row inside the Targets list rather than the first match.
     const row = page
       .locator('label, li, tr, div')
-      .filter({ hasText: new RegExp(`^${AUDIT_TARGET}\\s*(postgresql|mysql)$`) })
+      .filter({ hasText: new RegExp(`^${target}\\s*(postgresql|mysql)$`) })
       .last()
     if (await row.count()) {
       await row.click()
@@ -244,6 +273,7 @@ const flows = {
 
   // The tabs of a saved report. Run after health-check-run has produced one.
   'health-check-tabs': async () => {
+    const target = auditTarget()
     await page.goto(`${BASE}/audit`, { waitUntil: 'networkidle' })
     await page.waitForTimeout(2_000)
     await page.getByText('Reports', { exact: true }).first().click()
@@ -251,7 +281,7 @@ const flows = {
     await shoot('health-check-reports-list', null)
 
     await page
-      .getByText(AUDIT_TARGET, { exact: true })
+      .getByText(target, { exact: true })
       .first()
       .click()
     await page.waitForTimeout(4_000)

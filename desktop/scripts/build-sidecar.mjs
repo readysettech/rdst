@@ -15,11 +15,12 @@ import {
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { findSafePython } from "../../../../rdst/scripts/sqlite-runtime.mjs";
+import { pythonScriptUrl, repoLayout } from "./repo-layout.mjs";
+
+const { findSafePython } = await import(pythonScriptUrl("sqlite-runtime.mjs"));
 
 const appDir = path.resolve(import.meta.dirname, "..");
-const repoRoot = path.resolve(appDir, "../../..");
-const rdstDir = path.resolve(process.env.RDST_SOURCE_DIR ?? path.resolve(repoRoot, "rdst"));
+const rdstDir = path.resolve(process.env.RDST_SOURCE_DIR ?? repoLayout().pythonDir);
 const packageOs =
   process.platform === "darwin"
     ? "mac"

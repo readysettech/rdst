@@ -280,7 +280,7 @@ function AwsSsoWizard({
     setFinalizeError(null)
     // The profile name is an internal artifact the user never picks. Derive it
     // deterministically from the chosen role and account, matching AWS's own
-    // convention (e.g. AdministratorAccess-701495964134).
+    // convention (e.g. AdministratorAccess-123456789012).
     const profileName = `${roleName}-${accountId}`
     try {
       const result = await finalizeFleetAwsSsoProfile({

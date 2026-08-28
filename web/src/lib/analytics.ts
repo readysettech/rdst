@@ -1,12 +1,6 @@
 import posthog from 'posthog-js'
 import { isDesktopRuntime } from './desktop'
 
-// PostHog project ingest keys are public, write-only identifiers. Keep the
-// production bundle independent of release-worker IAM while still allowing a
-// different project to be selected explicitly at build time. Local builds
-// remain silent unless VITE_POSTHOG_KEY is set.
-const PRODUCTION_POSTHOG_KEY = 'phc_WPINnbS1CUiADz01QFeDZCr4Wn7jXfNPxe1EK0V2ZzP'
-
 let analyticsEnabled = false
 
 /**
@@ -15,9 +9,10 @@ let analyticsEnabled = false
  * desktop app (Electron loads the same renderer; `window.rdstDesktop`
  * distinguishes them as a super property on every event).
  *
- * The project key is public by design. Production builds use the same
- * write-only ingest key as the CLI unless `VITE_POSTHOG_KEY` overrides it.
- * Local development remains a no-op unless an explicit key is provided.
+ * The project key is supplied at build time through `VITE_POSTHOG_KEY`, which
+ * only Readyset's release build sets. A build from source — a local `vite
+ * build`, or one made from the public mirror — carries no key and reports
+ * nothing, so a fork is silent without having to opt out.
  *
  * Session replay: recording starts only if "Record user sessions" is also
  * enabled in the PostHog project settings. All input fields are masked —
@@ -33,9 +28,7 @@ export function initAnalytics(): void {
   // they disable telemetry via RDST_TELEMETRY, which the Electron preload
   // surfaces here. Renderer-side analytics must honor it too.
   if (window.rdstDesktop?.telemetryDisabled) return
-  const key =
-    import.meta.env.VITE_POSTHOG_KEY ||
-    (import.meta.env.PROD ? PRODUCTION_POSTHOG_KEY : '')
+  const key = import.meta.env.VITE_POSTHOG_KEY
   if (!key) return
 
   posthog.init(key, {

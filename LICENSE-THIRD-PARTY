@@ -1,0 +1,95 @@
+THIRD-PARTY LICENSES
+====================
+
+The RDST source in this repository is MIT licensed (see LICENSE). The fonts and
+icon artwork it ships are third-party works under their own licenses, listed
+here with the exact upstream revision each was taken from.
+
+Python and JavaScript dependencies are not listed here; they are resolved at
+install time from cli/pyproject.toml and pnpm-lock.yaml and carry their own
+licenses.
+
+
+1. Outfit
+---------
+
+    Files:      web/public/fonts/Outfit-Regular.woff2
+                web/public/fonts/Outfit-Medium.woff2
+    License:    SIL Open Font License 1.1
+    Text:       web/public/fonts/OFL.txt
+    Upstream:   https://github.com/google/fonts/tree/main/ofl/outfit
+    Revision:   8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5
+    Source:     Outfit[wght].ttf
+                sha256 fc7287273e66929776e2ba54f144fe699080bec29f61bf649d70d871468aeade
+
+Instanced at weights 400 and 500, subset to the Google Fonts latin range, and
+compressed to WOFF2. Outfit declares no Reserved Font Name, so instancing,
+subsetting and redistribution under the family name are permitted.
+
+Outfit is the UI face in builds from this repository. Readyset's official
+builds use a different, commercially licensed face; the metric descriptors in
+web/src/fonts.css retarget Outfit onto the same line box and x-height, so
+layout does not change between the two.
+
+
+2. IBM Plex Mono
+----------------
+
+    Files:      web/public/fonts/IBMPlexMono-Regular.woff2
+                web/public/fonts/IBMPlexMono-Medium.woff2
+    License:    SIL Open Font License 1.1
+    Text:       web/public/fonts/OFL.txt
+    Copyright:  Copyright (c) 2017 IBM Corp. with Reserved Font Name "Plex"
+    Upstream:   https://github.com/IBM/plex
+
+Shipped unchanged. WOFF2 conversion is not a modification under OFL-FAQ 2.2,
+so the Reserved Font Name imposes no renaming duty. These files are not
+subset — subsetting *is* a modification under OFL-FAQ 2.6 and would oblige a
+rename.
+
+
+3. Hugeicons (free set)
+-----------------------
+
+    Files:      packages/ui-icons/svg/stroke/*.svg
+                packages/ui-icons/svg/bulk/*.svg
+                web/public/icons/sprite-stroke.svg
+                web/public/icons/sprite-bulk.svg
+    License:    MIT
+    Copyright:  Copyright (c) 2025 Hugeicons
+    Text:       packages/ui-icons/svg/ATTRIBUTION.md
+    Upstream:   https://github.com/hugeicons/hugeicons
+    Revision:   b2462ece29de25fff2cc716da4452d6ada210c7e
+    License file: LICENSE.md at that revision,
+                sha256 50714aa0930b7ec52a08c79f608bf360841e9ef2ade5917ccc6551695570057f
+
+The upstream MIT license covers the free icons and the package source code;
+the paid Pro packs are excluded from it and none are used here. Artwork is
+rescaled to a 20-unit grid and recolored to `currentColor`; the sprites are
+generated from the SVGs by packages/ui-icons/scripts/build.mts. The required
+copyright and permission notice travels with the artwork, in
+packages/ui-icons/svg/ATTRIBUTION.md.
+
+`packages/ui-icons/svg/stroke/querypilot.svg` is Readyset's own mark and is
+covered by LICENSE, not by the above.
+
+
+4. Third-party trademarks shown in the product
+----------------------------------------------
+
+    Files:      web/src/components/providers/ProviderLogos.tsx
+
+RDST draws the marks of Amazon Web Services, Supabase, Neon and DigitalOcean to
+identify which provider a connection target belongs to. Each mark is the
+property of its owner and is reproduced here as nominative use — to name the
+service, not to claim endorsement, sponsorship or affiliation.
+
+
+5. Readyset trademarks
+----------------------
+
+MIT licenses the code, not the marks. "Readyset", "RDST", the Readyset logo
+(packages/ui-new/src/components/svg/logo.tsx) and the application icons
+(desktop/resources/icon.*) are trademarks of Readyset, Inc. and are not
+licensed by LICENSE. Forks and derivative distributions must use their own
+name and marks.

@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+out/
+build/
+web/dist/
+desktop/out/
+desktop/release/
+cli/web_dist/
+
+# Caches
+.turbo/
+.vite/
+.tanstack/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Test output
+coverage/
+test-results/
+playwright-report*/
+
+# Local env
+.env
+.env.*
+!.env.example
+
+# Editors and OS
+.DS_Store
+*.pem

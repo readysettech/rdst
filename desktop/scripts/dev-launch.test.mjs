@@ -2,21 +2,34 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { repoLayout } from "./repo-layout.mjs";
 
+const webScripts = resolve(repoLayout().webDir, "scripts");
 const desktopSource = readFileSync(
   resolve(import.meta.dirname, "dev.mjs"),
   "utf8",
 );
-const webSource = readFileSync(
-  resolve(import.meta.dirname, "../../rdst/scripts/dev-full.mjs"),
-  "utf8",
-);
+const webSource = readFileSync(resolve(webScripts, "dev-full.mjs"), "utf8");
+
+describe("cross-tree path resolution", () => {
+  it("keeps both copies of the layout resolver identical", () => {
+    expect(readFileSync(resolve(webScripts, "repo-layout.mjs"), "utf8")).toBe(
+      readFileSync(resolve(import.meta.dirname, "repo-layout.mjs"), "utf8"),
+    );
+  });
+
+  it("reaches the Python tree through the resolver, not a relative climb", () => {
+    expect(desktopSource).toContain('pythonScriptUrl("sqlite-runtime.mjs")');
+    expect(webSource).toContain("pythonScriptUrl('sqlite-runtime.mjs')");
+    for (const source of [desktopSource, webSource]) {
+      expect(source).not.toContain("../../../../rdst/");
+    }
+  });
+});
 
 describe("development child launchers", () => {
   it("launches the desktop renderer directly from the Vite app directory", () => {
-    expect(desktopSource).toContain(
-      'const rendererDir = resolve(webAppsDir, "apps/rdst");',
-    );
+    expect(desktopSource).toContain("const rendererDir = repoLayout().webDir;");
     expect(desktopSource).toContain(
       'resolveBin(rendererDir, "vite", "vite")',
     );

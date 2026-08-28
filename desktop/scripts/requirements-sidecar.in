@@ -1,5 +1,6 @@
 # Build tooling that is not declared by RDST itself. RDST's runtime
-# dependencies are compiled from ../../../rdst/pyproject.toml.
+# dependencies are compiled from the Python tree's pyproject.toml; run
+# `pnpm lock:sidecar`, which locates that tree in either checkout layout.
 editables==0.6
 hatchling==1.31.0
 pip==26.1.2
