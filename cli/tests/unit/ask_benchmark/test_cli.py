@@ -91,10 +91,10 @@ def test_protocol_fingerprint_covers_canonical_schema_loading():
 
 
 def test_frozen_pipeline_receipt_matches_current_protocol():
-    receipt_path = Path(cli.__file__).with_name("frozen_pipeline_v9.json")
+    receipt_path = Path(cli.__file__).with_name("frozen_pipeline_v10.json")
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
 
-    assert receipt["freeze_id"] == "rdst-ask-auto-init-no-evidence-v9"
+    assert receipt["freeze_id"] == "rdst-ask-auto-init-no-evidence-v10"
     assert receipt["benchmark_protocol_sha256"] == cli._benchmark_protocol_sha256()
     assert receipt["holdout_partition"]["opened"] is False
     assert receipt["acceptance"]["required_baseline_repetitions"] == 3

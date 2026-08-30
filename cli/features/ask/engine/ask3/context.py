@@ -85,6 +85,8 @@ class Ask3Context:
     shared_entity_scope_normalization: Dict[str, Any] = field(
         default_factory=dict
     )
+    value_location_normalization: Dict[str, Any] = field(default_factory=dict)
+    db_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
 
     # === Clarification (Phase 2) ===
     interpretations: List[Interpretation] = field(default_factory=list)
@@ -189,6 +191,8 @@ class Ask3Context:
             "shared_entity_scope_normalization": (
                 self.shared_entity_scope_normalization
             ),
+            "value_location_normalization": self.value_location_normalization,
+            "db_probe_diagnostics": self.db_probe_diagnostics,
             # Validation
             "validation_errors": [e.to_dict() for e in self.validation_errors],
             "retry_count": self.retry_count,
@@ -289,6 +293,10 @@ class Ask3Context:
         ctx.shared_entity_scope_normalization = data.get(
             "shared_entity_scope_normalization", {}
         )
+        ctx.value_location_normalization = data.get(
+            "value_location_normalization", {}
+        )
+        ctx.db_probe_diagnostics = data.get("db_probe_diagnostics", {})
 
         # Validation
         ctx.validation_errors = [

@@ -584,6 +584,8 @@ def test_rdst_runner_binds_compact_semantic_formatter(tmp_path: Path):
     ).configuration_fingerprint(_spec())
 
 
+
+
 def test_rdst_runner_scores_unnecessary_clarification_and_abandons_session(
     tmp_path: Path,
 ):

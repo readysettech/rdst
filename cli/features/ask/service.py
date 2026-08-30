@@ -72,6 +72,10 @@ from .ranking_normalization import normalize_context as normalize_ranking_contex
 from .shared_entity_scope_normalization import (
     normalize_context as normalize_shared_entity_scope_context,
 )
+from .value_location_normalization import (
+    normalize_context as normalize_value_location_context,
+)
+from .value_probe import create_value_probe_executor
 
 
 @dataclass
@@ -104,6 +108,7 @@ _CORRECTION_STATE_FIELDS = (
     "extremum_entity_normalization",
     "unbounded_categorical_normalization",
     "shared_entity_scope_normalization",
+    "value_location_normalization",
 )
 _CORRECTION_COPIED_FIELDS = frozenset(
     {
@@ -114,6 +119,7 @@ _CORRECTION_COPIED_FIELDS = frozenset(
         "extremum_entity_normalization",
         "unbounded_categorical_normalization",
         "shared_entity_scope_normalization",
+        "value_location_normalization",
     }
 )
 
@@ -187,6 +193,8 @@ class AskService:
         unbounded_categorical_normalization_fn: Callable[..., Any] | None = None,
         shared_entity_scope_normalization_enabled: bool = True,
         shared_entity_scope_normalization_fn: Callable[..., Any] | None = None,
+        value_location_normalization_enabled: bool = False,
+        value_location_normalization_fn: Callable[..., Any] | None = None,
     ):
         self._llm_manager = llm_manager
         self._semantic_manager = semantic_manager
@@ -268,6 +276,12 @@ class AskService:
         self._shared_entity_scope_normalization_fn = (
             shared_entity_scope_normalization_fn
             or normalize_shared_entity_scope_context
+        )
+        self._value_location_normalization_enabled = bool(
+            value_location_normalization_enabled
+        )
+        self._value_location_normalization_fn = (
+            value_location_normalization_fn or normalize_value_location_context
         )
 
     def _observe(self, phase: AskPhase, ctx: Any) -> None:
@@ -585,6 +599,10 @@ class AskService:
             ctx = await self._apply_correction_intent_routing(ctx)
             self._observe(AskPhase.GENERATE, ctx)
 
+        if self._value_location_normalization_enabled:
+            ctx = await self._apply_value_location_normalization(ctx)
+            self._observe(AskPhase.GENERATE, ctx)
+
         yield AskSqlGeneratedEvent(
             type="sql_generated",
             sql=ctx.sql or "",
@@ -687,6 +705,48 @@ class AskService:
             ctx.target,
             ctx.target_config or {},
         )
+
+    async def _apply_value_location_normalization(self, ctx: Any) -> Any:
+        """Ground one ambiguous sibling-column value with two bounded probes."""
+        original_state = _snapshot_correction_state(ctx)
+        original_sql = str(ctx.sql or "")
+        probe = create_value_probe_executor(ctx, self._db_executor)
+        try:
+            ctx = await asyncio.to_thread(
+                self._value_location_normalization_fn,
+                ctx,
+                probe,
+            )
+        except Exception as exc:
+            _restore_correction_state(ctx, original_state)
+            ctx.value_location_normalization = {
+                "status": "error",
+                "error_kind": type(exc).__name__,
+            }
+            return ctx
+        diagnostics = dict(ctx.value_location_normalization)
+        if diagnostics.get("status") != "normalized":
+            return ctx
+        candidate_state = _snapshot_correction_state(ctx)
+        valid, issues = await self._preflight_correction_candidate(
+            ctx,
+            candidate_state,
+        )
+        candidate_sql = str(candidate_state.get("sql") or "")
+        if valid and candidate_sql and not _sql_candidates_equivalent(
+            candidate_sql,
+            original_sql,
+            ctx.db_type,
+        ):
+            _restore_correction_state(ctx, candidate_state)
+            ctx.value_location_normalization = diagnostics
+            return ctx
+        _restore_correction_state(ctx, original_state)
+        diagnostics["status"] = "reverted"
+        diagnostics["reason"] = "candidate-validation-failed"
+        diagnostics["validation_issue_count"] = len(issues)
+        ctx.value_location_normalization = diagnostics
+        return ctx
 
     async def _apply_selected_generation_normalizers(
         self,
@@ -880,6 +940,21 @@ class AskService:
         issues = [str(error) for error in validation_ctx.validation_errors]
         if issues or not validation_ctx.sql:
             return False, issues or ["validated candidate SQL is unavailable"]
+        from .sql_validation import validate_resolved_columns_against_schema
+
+        strict_resolution = await asyncio.to_thread(
+            validate_resolved_columns_against_schema,
+            validation_ctx.sql,
+            validation_ctx.get_schema_as_dict(),
+            validation_ctx.db_type,
+        )
+        if not strict_resolution.get("is_valid"):
+            return False, [
+                str(
+                    strict_resolution.get("error_message")
+                    or "column resolution failed"
+                )
+            ]
         candidate_state.clear()
         candidate_state.update(_snapshot_correction_state(validation_ctx))
         return True, []

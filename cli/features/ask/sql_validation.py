@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional
 import sqlglot
 import sqlparse
 from sqlglot import exp
+from sqlglot.optimizer.qualify import qualify
+from sqlglot.schema import MappingSchema
 from sqlparse.sql import Parenthesis, Statement, TokenList
 from sqlparse.tokens import DML, Keyword
 
@@ -1021,6 +1023,44 @@ def validate_columns_against_schema(
         "suggestions": {},
         "error_message": None,
     }
+
+
+def validate_resolved_columns_against_schema(
+    sql: str,
+    schema: Dict[str, List[str]],
+    dialect: str,
+) -> Dict[str, Any]:
+    """Resolve every candidate column against the loaded schema."""
+    read_dialect = "postgres" if dialect in {"postgres", "postgresql"} else "mysql"
+    mapping = {
+        table: {column: "UNKNOWN" for column in columns}
+        for table, columns in schema.items()
+    }
+    try:
+        tree = sqlglot.parse_one(sql, read=read_dialect)
+        resolved_schema = MappingSchema(
+            mapping,
+            dialect=read_dialect,
+            normalize=read_dialect != "postgres",
+        )
+        qualify(
+            tree.copy(),
+            dialect=read_dialect,
+            schema=resolved_schema,
+            allow_partial_qualification=False,
+            validate_qualify_columns=True,
+            quote_identifiers=False,
+        )
+    except (
+        sqlglot.errors.ParseError,
+        sqlglot.errors.OptimizeError,
+        ValueError,
+    ) as exc:
+        return {
+            "is_valid": False,
+            "error_message": f"Column resolution failed: {exc}",
+        }
+    return {"is_valid": True, "error_message": None}
 
 
 def validate_tables_against_schema(

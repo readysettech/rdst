@@ -74,7 +74,6 @@ from .value_profiles import (
     ValueMatchResult,
 )
 
-
 class _BenchmarkTargetsConfig:
     def __init__(self, target: str, config: dict[str, Any]):
         self._target = target
