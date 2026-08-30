@@ -16,6 +16,9 @@ import sqlglot
 from sqlglot import exp
 
 from features.ask.ambiguity_detection import NON_INTERACTIVE_CLARIFICATION_POLICY
+from features.ask.correction_intent_routing import (
+    CORRECTION_INTENT_EXPERIMENTAL_SCOPE,
+)
 from features.ask.engine.ask3.phases.schema import (
     ADAPTIVE_SCHEMA_FORMAT_VERSION,
     COMPACT_SCHEMA_FORMAT_VERSION,
@@ -73,6 +76,19 @@ from .value_profiles import (
     ExactValueProfileStore,
     ValueMatchResult,
 )
+
+ASK_ACCURACY_PROFILE_BASELINE = "baseline"
+ASK_ACCURACY_PROFILE_CANDIDATE_V1 = "candidate-v1"
+ASK_ACCURACY_PROFILE_CANDIDATE_V2 = "candidate-v2"
+ASK_ACCURACY_PROFILES = (
+    ASK_ACCURACY_PROFILE_BASELINE,
+    ASK_ACCURACY_PROFILE_CANDIDATE_V1,
+    ASK_ACCURACY_PROFILE_CANDIDATE_V2,
+)
+_ASK_ACCURACY_ROUTED_PROFILES = frozenset(
+    {ASK_ACCURACY_PROFILE_CANDIDATE_V1, ASK_ACCURACY_PROFILE_CANDIDATE_V2}
+)
+
 
 class _BenchmarkTargetsConfig:
     def __init__(self, target: str, config: dict[str, Any]):
@@ -233,6 +249,7 @@ class BenchmarkRunner:
         adapter_factory: Callable[[ModelSpec, dict[str, ModelSpec]], Any] | None = None,
         run_limits: RunLimits | None = None,
         semantic_schema_format: str = ADAPTIVE_SCHEMA_FORMAT_VERSION,
+        ask_accuracy_profile: str = ASK_ACCURACY_PROFILE_BASELINE,
     ):
         self.run_id = run_id
         self.track = track
@@ -288,6 +305,16 @@ class BenchmarkRunner:
         ):
             raise ValueError("Compact schema formatting requires a semantic context")
         self.semantic_schema_format = semantic_schema_format
+        if ask_accuracy_profile not in ASK_ACCURACY_PROFILES:
+            raise ValueError(
+                f"Unsupported Ask accuracy profile: {ask_accuracy_profile}"
+            )
+        if (
+            ask_accuracy_profile != ASK_ACCURACY_PROFILE_BASELINE
+            and track != EvaluationTrack.RDST
+        ):
+            raise ValueError("Ask accuracy profiles apply only to the rdst-ask track")
+        self.ask_accuracy_profile = ask_accuracy_profile
         self.budget_stop_reason: str | None = None
         self._gold_fingerprints: dict[int, str] = {}
         self._gold_results: dict[int, QueryResult] = {}
@@ -584,6 +611,29 @@ class BenchmarkRunner:
                 if self.semantic_schema_format == "verbose-v1"
                 else None
             ),
+            correction_intent_routing_enabled=(
+                self.ask_accuracy_profile in _ASK_ACCURACY_ROUTED_PROFILES
+            ),
+            correction_intent_routing_intent_scope=(
+                CORRECTION_INTENT_EXPERIMENTAL_SCOPE
+                if self.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+                else None
+            ),
+            dual_candidate_selection_enabled=(
+                self.ask_accuracy_profile in _ASK_ACCURACY_ROUTED_PROFILES
+            ),
+            value_location_normalization_enabled=(
+                self.ask_accuracy_profile in _ASK_ACCURACY_ROUTED_PROFILES
+            ),
+            encoded_identifier_storage_enabled=(
+                self.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+            ),
+            temporal_text_storage_enabled=(
+                self.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+            ),
+            month_axis_storage_enabled=(
+                self.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+            ),
         )
         options = AskOptions(
             timeout_seconds=self.executor.bounds.timeout_seconds,
@@ -833,6 +883,25 @@ class BenchmarkRunner:
                     else "none"
                 ),
                 "semantic_schema_format": self.semantic_schema_format,
+                "ask_accuracy_profile": self.ask_accuracy_profile,
+                "correction_intent_routing": (
+                    self.ask_accuracy_profile in _ASK_ACCURACY_ROUTED_PROFILES
+                ),
+                "dual_candidate_selection": (
+                    self.ask_accuracy_profile in _ASK_ACCURACY_ROUTED_PROFILES
+                ),
+                "value_location_normalization": (
+                    self.ask_accuracy_profile in _ASK_ACCURACY_ROUTED_PROFILES
+                ),
+                "encoded_identifier_storage": (
+                    self.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+                ),
+                "temporal_text_storage": (
+                    self.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+                ),
+                "month_axis_storage": (
+                    self.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+                ),
                 "generation_attempts": 1,
                 "max_validation_repair_attempts": 1,
                 "validation_attempts": 2,
@@ -966,6 +1035,19 @@ def _context_diagnostics(ctx, case: BenchmarkCase):
         "ambiguity_response_sha256": getattr(ctx, "ambiguity_response_sha256", ""),
         "limit_added": ctx.limit_added,
         "limit_reduced": ctx.limit_reduced,
+        "correction_intent_routing": dict(
+            getattr(ctx, "correction_intent_routing", {})
+        ),
+        "dual_candidate_selection": dict(getattr(ctx, "dual_candidate_selection", {})),
+        "value_location_normalization": dict(
+            getattr(ctx, "value_location_normalization", {})
+        ),
+        "encoded_identifier_storage": dict(
+            getattr(ctx, "encoded_identifier_storage", {})
+        ),
+        "temporal_text_storage": dict(getattr(ctx, "temporal_text_storage", {})),
+        "month_axis_storage": dict(getattr(ctx, "month_axis_storage", {})),
+        "db_probe_diagnostics": dict(getattr(ctx, "db_probe_diagnostics", {})),
         "gold_table_recall": gold_table_recall,
         **_provided_context_diagnostics(getattr(ctx, "provided_context", "")),
     }

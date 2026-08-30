@@ -19,6 +19,7 @@ _SUPPORTED_TRANSPORTS = {
     "gemini",
 }
 _REASONING_EFFORTS = {"max", "xhigh", "high", "medium", "low", "minimal", "none"}
+_STRUCTURED_OUTPUT_MODES = {"tool", "native", "prompted"}
 
 
 class ConfigurationError(ValueError):
@@ -142,6 +143,18 @@ def _parse_model(entry: dict[str, Any], index: int) -> ModelSpec:
             f"Model {name} has invalid reasoning_effort; expected one of {supported}"
         )
 
+    structured_output_mode = entry.get("structured_output_mode", "tool")
+    if structured_output_mode not in _STRUCTURED_OUTPUT_MODES:
+        supported = ", ".join(sorted(_STRUCTURED_OUTPUT_MODES))
+        raise ConfigurationError(
+            f"Model {name} has invalid structured_output_mode; expected one of "
+            f"{supported}"
+        )
+    if structured_output_mode != "tool" and transport != "openrouter":
+        raise ConfigurationError(
+            f"Direct model {name} cannot configure structured_output_mode"
+        )
+
     provider_data_training = _optional_bool(entry, "provider_data_training", name)
     provider_retains_prompts = _optional_bool(entry, "provider_retains_prompts", name)
     require_parameters = _bool(entry, "require_parameters", name, default=True)
@@ -158,6 +171,7 @@ def _parse_model(entry: dict[str, Any], index: int) -> ModelSpec:
         max_tokens=max_tokens,
         timeout_seconds=float(timeout_seconds),
         reasoning_effort=reasoning_effort,
+        structured_output_mode=structured_output_mode,
         require_parameters=require_parameters,
         allow_fallbacks=allow_fallbacks,
         provider_data_training=provider_data_training,

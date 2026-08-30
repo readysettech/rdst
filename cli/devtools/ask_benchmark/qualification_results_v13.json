@@ -1,0 +1,41 @@
+{
+  "receipt_version": 1,
+  "recorded_at": "2026-09-01",
+  "artifact_root": "rdst/test-results/ask_benchmark",
+  "artifact_retention": "Raw run directories are gitignored local artifacts. The hashes below make retained copies verifiable but do not claim that a remote archive exists.",
+  "runs": [
+    {
+      "run_id": "sonnet46-rdst-ask-auto-init-candidate-v2-fixed50-r2",
+      "official_ex": {"correct": 26, "total": 50},
+      "stable_ex": {"correct": 26, "total": 48},
+      "mean_latency_ms": 11857.37763255369,
+      "files": {
+        "manifest.json": "da895149b775626f320a536052c4e53189cd64f8069ec21bc136abcc84e3193e",
+        "attempts.jsonl": "3a99e1b1a97c8ca834e5173e3c08cf416252a382d967103450c723c0ad6b1137",
+        "calls.jsonl": "a2c4b1bafd998b2c371a682af9f9f4c7d4b83cbf87432c893628588e176bc255",
+        "summary.json": "a9e55e972c6c9f5f777720d622c89385ad2baf8825c4eaaa568e10349825e26b",
+        "summary.md": "a55fba325a371769979c7e53e5c59b82c5a0ae04a5f9fa7b762a320e054437f1"
+      }
+    },
+    {
+      "run_id": "glm53flash-high-rdst-ask-auto-init-candidate-v2-fixed50-r2",
+      "official_ex": {"correct": 25, "total": 50},
+      "stable_ex": {"correct": 25, "total": 48},
+      "mean_latency_ms": 13650.70976271294,
+      "files": {
+        "manifest.json": "b37ebbd1a3b5ba0dea3561e35708b68b0de161bb0159dc8829a71d7fe86126fa",
+        "attempts.jsonl": "c9043369136317b69de450ea21c252dd693f10d01208678b2c611dda1aea5ec4",
+        "calls.jsonl": "cd55b61b319e2e2b0ed337272259ec325d14904923d40f7e9a2565efa83c70f7",
+        "summary.json": "f4b873abcc7d6d3d247f927456c04d3ba8c656feb9d82b0869569ee5d2816934",
+        "summary.md": "793c9d3a4163dcf0ed3cbe97378598d498c94a39df502e5bac7c4263b8e71d2f"
+      }
+    }
+  ],
+  "unretained_observations": [
+    {
+      "description": "Final fresh Sonnet candidate-v2 fixed-50 observation reported as 31/50 official and 30/48 stable",
+      "status": "not_qualification_evidence",
+      "reason": "No matching raw run artifact or scorer receipt remains in the workspace. The observation may be reported as historical context but cannot satisfy a promotion gate."
+    }
+  ]
+}

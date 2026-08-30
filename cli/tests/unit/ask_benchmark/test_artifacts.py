@@ -73,6 +73,29 @@ def test_store_resumes_completed_attempts_and_ignores_partial_tail(tmp_path: Pat
     assert store.completed_keys() == {"a", "b"}
 
 
+def test_store_resume_allows_only_declared_unstable_gold_to_change(tmp_path: Path):
+    store = ArtifactStore(tmp_path / "run")
+    manifest = {
+        "run_id": "run",
+        "gold_result_fingerprints": {"1": "stable", "671": "first"},
+        "unstable_gold_case_ids": [671],
+    }
+    store.initialize(manifest)
+
+    changed_unstable = {
+        **manifest,
+        "gold_result_fingerprints": {"1": "stable", "671": "second"},
+    }
+    store.initialize(changed_unstable)
+
+    changed_stable = {
+        **manifest,
+        "gold_result_fingerprints": {"1": "changed", "671": "second"},
+    }
+    with pytest.raises(ValueError, match="gold_result_fingerprints"):
+        store.initialize(changed_stable)
+
+
 def test_unscored_attempt_is_repaired_without_losing_history(tmp_path: Path):
     store = ArtifactStore(tmp_path / "run")
     store.initialize({"run_id": "run"})

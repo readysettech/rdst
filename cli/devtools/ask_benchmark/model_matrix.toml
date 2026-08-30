@@ -1,5 +1,5 @@
-version = 2
-captured_at = "2026-08-16"
+version = 3
+captured_at = "2026-08-30"
 source = "https://openrouter.ai/api/v1/models"
 
 [filter_model]
@@ -226,6 +226,19 @@ output_usd_per_token = "0.00000198"
 cached_input_usd_per_token = "0.000000022"
 provider_data_training = true
 provider_retains_prompts = true
+
+[[models]]
+name = "glm-5.3-flash-high"
+model = "z-ai/glm-5.3-flash"
+transport = "openrouter"
+provider_order = ["z-ai"]
+reasoning_effort = "high"
+structured_output_mode = "prompted"
+input_usd_per_token = "0.000000075"
+output_usd_per_token = "0.00000025"
+cached_input_usd_per_token = "0.000000015"
+provider_data_training = false
+provider_retains_prompts = false
 
 [[models]]
 name = "qwen3.8-max-xhigh"

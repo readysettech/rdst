@@ -105,8 +105,20 @@ class ArtifactStore:
                 "derived_from",
             )
             for field in resume_fields:
-                if _resume_value(field, existing.get(field)) != _resume_value(
-                    field, manifest.get(field)
+                existing_value = existing.get(field)
+                manifest_value = manifest.get(field)
+                if field == "gold_result_fingerprints":
+                    declared_unstable = set(
+                        existing.get("unstable_gold_case_ids", [])
+                    ) & set(manifest.get("unstable_gold_case_ids", []))
+                    existing_value = _without_fingerprints(
+                        existing_value, declared_unstable
+                    )
+                    manifest_value = _without_fingerprints(
+                        manifest_value, declared_unstable
+                    )
+                if _resume_value(field, existing_value) != _resume_value(
+                    field, manifest_value
                 ):
                     raise ValueError(
                         f"Run {manifest.get('run_id')!r} has different {field} settings"
@@ -222,6 +234,13 @@ def _resume_value(field: str, value: Any) -> Any:
     if field != "route_checks":
         return normalized
     return _strip_endpoint_status(normalized)
+
+
+def _without_fingerprints(value: Any, question_ids: set[Any]) -> Any:
+    if not isinstance(value, dict):
+        return value
+    excluded = {str(question_id) for question_id in question_ids}
+    return {key: item for key, item in value.items() if str(key) not in excluded}
 
 
 def _strip_endpoint_status(value: Any, *, in_endpoint: bool = False) -> Any:

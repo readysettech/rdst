@@ -14,7 +14,13 @@ from typing import Any
 from anthropic import AsyncAnthropic
 from google.genai.types import HttpRetryOptions
 from openai import AsyncOpenAI
-from pydantic_ai import Agent, StructuredDict, ToolOutput
+from pydantic_ai import (
+    Agent,
+    NativeOutput,
+    PromptedOutput,
+    StructuredDict,
+    ToolOutput,
+)
 from pydantic_ai.exceptions import (
     ModelAPIError,
     ModelHTTPError,
@@ -138,7 +144,11 @@ class PydanticAIAdapter:
         spec = self._resolve_spec(model)
         structured = _requests_json(extra)
         stage = purpose or "general"
-        output_type = _structured_output(extra) if structured else str
+        output_type = (
+            _structured_output(extra, mode=spec.structured_output_mode)
+            if structured
+            else str
+        )
         model_instance = self._model(spec)
         model_instance.drain_responses()
         agent = Agent(
@@ -552,6 +562,7 @@ def _effective_settings(
         "transport": spec.transport,
         "provider_order": list(spec.provider_order),
         "reasoning_effort": spec.reasoning_effort,
+        "structured_output_mode": spec.structured_output_mode,
         "allow_fallbacks": spec.allow_fallbacks,
         "require_parameters": spec.require_parameters,
         "provider_data_training": spec.provider_data_training,
@@ -649,11 +660,17 @@ def _requests_json(extra: dict[str, Any] | None) -> bool:
     }
 
 
-def _structured_output(extra: dict[str, Any] | None) -> ToolOutput:
+def _structured_output(
+    extra: dict[str, Any] | None, *, mode: str
+) -> ToolOutput | NativeOutput:
     response_format = (extra or {}).get("response_format")
     if not isinstance(response_format, dict):
         raise ValueError("structured output requires a response_format object")
     if response_format.get("type") == "json_object":
+        if mode == "native":
+            return NativeOutput(dict[str, Any], strict=False)
+        if mode == "prompted":
+            return PromptedOutput(dict[str, Any])
         return ToolOutput(dict[str, Any], max_retries=0)
     schema_config = response_format.get("json_schema")
     if not isinstance(schema_config, dict):
@@ -671,6 +688,10 @@ def _structured_output(extra: dict[str, Any] | None) -> ToolOutput:
     # Copy it because StructuredDict adds a title when a name is provided.
     schema_copy = json.loads(json.dumps(schema))
     output = StructuredDict(schema_copy, name=name)
+    if mode == "native":
+        return NativeOutput(output, name=name, strict=False)
+    if mode == "prompted":
+        return PromptedOutput(output, name=name)
     return ToolOutput(output, name=name, strict=strict, max_retries=0)
 
 

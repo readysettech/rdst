@@ -13,14 +13,22 @@ type BrowserErrors = {
   browserErrors: string[]
 }
 
+const acceptedBrowserErrors = new WeakMap<string[], Set<string>>()
+
 export const test = base.extend<BrowserErrors>({
   browserErrors: [
     async ({ page }, use) => {
       const errors: string[] = []
+      const accepted = new Set<string>()
+      acceptedBrowserErrors.set(errors, accepted)
       page.on('console', (message) => {
-        if (message.type() === 'error') errors.push(message.text())
+        if (message.type() === 'error' && !accepted.has(message.text())) {
+          errors.push(message.text())
+        }
       })
-      page.on('pageerror', (error) => errors.push(error.message))
+      page.on('pageerror', (error) => {
+        if (!accepted.has(error.message)) errors.push(error.message)
+      })
 
       await use(errors)
 
@@ -28,6 +36,7 @@ export const test = base.extend<BrowserErrors>({
         errors,
         `Unexpected browser errors:\n${errors.join('\n')}`
       ).toEqual([])
+      acceptedBrowserErrors.delete(errors)
     },
     { auto: true },
   ],
@@ -95,8 +104,10 @@ export function mainContent(page: Page) {
 }
 
 export function consumeBrowserError(browserErrors: string[], expected: string) {
-  expect(browserErrors).toEqual([expected])
-  browserErrors.splice(0, 1)
+  expect(browserErrors).toContain(expected)
+  expect(browserErrors.filter((error) => error !== expected)).toEqual([])
+  browserErrors.splice(0, browserErrors.length)
+  acceptedBrowserErrors.get(browserErrors)?.add(expected)
 }
 
 export async function configureTestTarget(

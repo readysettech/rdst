@@ -26,7 +26,7 @@ from .pydantic_adapter import (
 CLAUDE_SUBSCRIPTION_TRANSPORT = "claude-subscription"
 CLAUDE_SUBSCRIPTION_MODEL = "claude-sonnet-4-6"
 CLAUDE_SUBSCRIPTION_EFFORT = "medium"
-PINNED_CLAUDE_CODE_VERSION = "2.1.237"
+PINNED_CLAUDE_CODE_VERSION = "2.1.250"
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 

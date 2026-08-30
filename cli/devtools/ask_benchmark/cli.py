@@ -117,7 +117,13 @@ from .provision import (
     verify_mysql_provision,
 )
 from .report import build_summary, render_markdown
-from .runner import BenchmarkRunner
+from .runner import (
+    ASK_ACCURACY_PROFILE_BASELINE,
+    ASK_ACCURACY_PROFILE_CANDIDATE_V1,
+    ASK_ACCURACY_PROFILE_CANDIDATE_V2,
+    ASK_ACCURACY_PROFILES,
+    BenchmarkRunner,
+)
 from .schema import MySQLSchemaLoader, load_semantic_schema
 from .semantic import (
     build_auto_init_layers,
@@ -359,6 +365,18 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Semantic schema serialization. Forced verbose and compact formats are "
             "restricted to internal rdst-ask smoke diagnostics."
+        ),
+    )
+    run.add_argument(
+        "--ask-accuracy-profile",
+        choices=ASK_ACCURACY_PROFILES,
+        default=ASK_ACCURACY_PROFILE_BASELINE,
+        help=(
+            "RDST Ask accuracy treatment. candidate-v1 enables the model intent "
+            "router, bounded alternate selection, and bounded value grounding. "
+            "candidate-v2 additionally enables model-routed, database-proven "
+            "encoded-identifier, empty-result time-storage, and full-month "
+            "axis-storage repairs."
         ),
     )
     run.add_argument("--max-cases", type=_positive_int)
@@ -1406,6 +1424,11 @@ def _run(args) -> int:
         )
     filter_spec, filter_aliases = load_filter_spec()
     track = EvaluationTrack(args.track)
+    if (
+        args.ask_accuracy_profile != ASK_ACCURACY_PROFILE_BASELINE
+        and track != EvaluationTrack.RDST
+    ):
+        raise ValueError("--ask-accuracy-profile applies only to the rdst-ask track")
     interaction_mode = (
         InteractionMode(args.interaction_mode)
         if track == EvaluationTrack.RDST
@@ -1607,6 +1630,7 @@ def _run_database_locked(
             max_wall_time_seconds=args.max_wall_time_seconds,
         ),
         semantic_schema_format=args.schema_format,
+        ask_accuracy_profile=args.ask_accuracy_profile,
     )
     cases, gold_failures = runner.preflight_gold(cases)
     if gold_failures:
@@ -1668,6 +1692,39 @@ def _run_database_locked(
         "context_mode": context_mode.value,
         "interaction_mode": interaction_mode.value,
         "semantic_schema_format": args.schema_format,
+        "ask_accuracy_profile": args.ask_accuracy_profile,
+        "ask_accuracy_features": {
+            "correction_intent_routing": (
+                args.ask_accuracy_profile
+                in {
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V1,
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V2,
+                }
+            ),
+            "dual_candidate_selection": (
+                args.ask_accuracy_profile
+                in {
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V1,
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V2,
+                }
+            ),
+            "value_location_normalization": (
+                args.ask_accuracy_profile
+                in {
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V1,
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V2,
+                }
+            ),
+            "encoded_identifier_storage": (
+                args.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+            ),
+            "temporal_text_storage": (
+                args.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+            ),
+            "month_axis_storage": (
+                args.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+            ),
+        },
         "clarification_policy": (
             NON_INTERACTIVE_CLARIFICATION_POLICY
             if track == EvaluationTrack.RDST
@@ -1985,7 +2042,12 @@ def _ensure_bird_interact_container(
 
 
 def _global_prepare_lock() -> Path:
-    path = Path.home() / ".cache" / "rdst" / "benchmarks" / "prepare.lock"
+    configured = os.getenv("RDST_BENCHMARK_GLOBAL_LOCK")
+    path = (
+        Path(configured).expanduser()
+        if configured
+        else Path.home() / ".cache" / "rdst" / "benchmarks" / "prepare.lock"
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -2159,7 +2221,16 @@ def _rdst_revision() -> str:
             text=True,
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
-        return "unknown"
+        try:
+            return subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=RDST_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            return "unknown"
 
 
 def _rdst_dirty() -> bool:
@@ -2172,7 +2243,16 @@ def _rdst_dirty() -> bool:
             text=True,
         ).stdout
     except (OSError, subprocess.CalledProcessError):
-        return True
+        try:
+            output = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=RDST_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        except (OSError, subprocess.CalledProcessError):
+            return True
     return bool(output.strip())
 
 
@@ -2185,7 +2265,15 @@ def _rdst_diff_sha256() -> str:
             capture_output=True,
         ).stdout
     except (OSError, subprocess.CalledProcessError):
-        return "unknown"
+        try:
+            diff = subprocess.run(
+                ["git", "diff", "HEAD", "--binary", "--no-ext-diff"],
+                cwd=RDST_ROOT,
+                check=True,
+                capture_output=True,
+            ).stdout
+        except (OSError, subprocess.CalledProcessError):
+            return "unknown"
     return hashlib.sha256(diff).hexdigest()
 
 
@@ -2216,6 +2304,20 @@ def _benchmark_protocol_paths() -> tuple[Path, ...]:
         RDST_ROOT / "features" / "ask" / "sql_generation.py",
         RDST_ROOT / "features" / "ask" / "sql_validation.py",
         RDST_ROOT / "features" / "ask" / "ambiguity_detection.py",
+        RDST_ROOT / "features" / "ask" / "correction_intent_state.py",
+        RDST_ROOT / "features" / "ask" / "correction_intent_routing.py",
+        RDST_ROOT / "features" / "ask" / "aggregate_domain_normalization.py",
+        RDST_ROOT / "features" / "ask" / "categorical_normalization.py",
+        RDST_ROOT / "features" / "ask" / "derived_metric_normalization.py",
+        RDST_ROOT / "features" / "ask" / "numeric_normalization.py",
+        RDST_ROOT / "features" / "ask" / "ranking_normalization.py",
+        RDST_ROOT / "features" / "ask" / "shared_entity_scope_normalization.py",
+        RDST_ROOT / "features" / "ask" / "dual_candidate.py",
+        RDST_ROOT / "features" / "ask" / "value_location_normalization.py",
+        RDST_ROOT / "features" / "ask" / "value_probe.py",
+        RDST_ROOT / "features" / "ask" / "encoded_identifier_storage.py",
+        RDST_ROOT / "features" / "ask" / "temporal_text_storage.py",
+        RDST_ROOT / "features" / "ask" / "month_axis_storage.py",
         RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "context.py",
         RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "engine.py",
         RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "types.py",

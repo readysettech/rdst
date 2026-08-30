@@ -185,6 +185,7 @@ def _rdst_runner(
     interaction_mode=InteractionMode.INTERACTIVE_NO_ANSWER,
     context_mode=ContextMode.RAW,
     semantic_schema_format="verbose-v1",
+    ask_accuracy_profile="baseline",
 ):
     store = ArtifactStore(tmp_path / "run")
     store.initialize({"run_id": "run"})
@@ -202,6 +203,7 @@ def _rdst_runner(
         interaction_mode=interaction_mode,
         adapter_factory=lambda model, _aliases: _Adapter(model),
         semantic_schema_format=semantic_schema_format,
+        ask_accuracy_profile=ask_accuracy_profile,
     )
 
 
@@ -584,6 +586,89 @@ def test_rdst_runner_binds_compact_semantic_formatter(tmp_path: Path):
     ).configuration_fingerprint(_spec())
 
 
+def test_rdst_runner_binds_candidate_accuracy_profile(tmp_path: Path):
+    ctx = _rdst_context()
+    configured = {}
+
+    class FakeAskService:
+        def __init__(self, **kwargs):
+            configured.update(kwargs)
+            self.observer = kwargs["phase_observer"]
+
+        async def ask(self, _input, _options):
+            self.observer("generate", ctx)
+            yield AskResultEvent(
+                type="result",
+                success=True,
+                sql="SELECT 1",
+                rows=[(1,)],
+                columns=["value"],
+                row_count=1,
+                execution_time_ms=1.0,
+                llm_calls=1,
+                total_tokens=10,
+            )
+
+        def abandon(self, _session_id):
+            raise AssertionError("Successful runs have no session")
+
+    runner = _rdst_runner(tmp_path, ask_accuracy_profile="candidate-v1")
+    runner.preflight_gold([_case()])
+    with patch("devtools.ask_benchmark.runner.AskService", FakeAskService):
+        result = runner._run_rdst(_case(), _Adapter(_spec()))
+
+    assert result["outcome"] == "correct"
+    assert configured["correction_intent_routing_enabled"] is True
+    assert configured["dual_candidate_selection_enabled"] is True
+    assert configured["value_location_normalization_enabled"] is True
+    assert runner.configuration_fingerprint(_spec()) != _rdst_runner(
+        tmp_path / "baseline"
+    ).configuration_fingerprint(_spec())
+
+
+def test_rdst_runner_binds_candidate_v2_storage_repairs(tmp_path: Path):
+    ctx = _rdst_context()
+    configured = {}
+
+    class FakeAskService:
+        def __init__(self, **kwargs):
+            configured.update(kwargs)
+            self.observer = kwargs["phase_observer"]
+
+        async def ask(self, _input, _options):
+            self.observer("generate", ctx)
+            yield AskResultEvent(
+                type="result",
+                success=True,
+                sql="SELECT 1",
+                rows=[(1,)],
+                columns=["value"],
+                row_count=1,
+                execution_time_ms=1.0,
+                llm_calls=1,
+                total_tokens=10,
+            )
+
+        def abandon(self, _session_id):
+            raise AssertionError("Successful runs have no session")
+
+    runner = _rdst_runner(tmp_path, ask_accuracy_profile="candidate-v2")
+    runner.preflight_gold([_case()])
+    with patch("devtools.ask_benchmark.runner.AskService", FakeAskService):
+        result = runner._run_rdst(_case(), _Adapter(_spec()))
+
+    assert result["outcome"] == "correct"
+    assert configured["correction_intent_routing_enabled"] is True
+    assert configured["dual_candidate_selection_enabled"] is True
+    assert configured["value_location_normalization_enabled"] is True
+    assert configured["encoded_identifier_storage_enabled"] is True
+    assert configured["temporal_text_storage_enabled"] is True
+    assert configured["month_axis_storage_enabled"] is True
+    assert configured["correction_intent_routing_intent_scope"][-3:] == (
+        "encoded_identifier_storage",
+        "temporal_text_storage",
+        "month_axis_storage",
+    )
 
 
 def test_rdst_runner_scores_unnecessary_clarification_and_abandons_session(

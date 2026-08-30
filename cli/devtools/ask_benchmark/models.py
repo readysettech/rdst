@@ -117,6 +117,7 @@ class ModelSpec:
     max_tokens: int | None = None
     timeout_seconds: float = 300.0
     reasoning_effort: str | None = None
+    structured_output_mode: str = "tool"
     require_parameters: bool = True
     allow_fallbacks: bool = False
     provider_data_training: bool | None = None

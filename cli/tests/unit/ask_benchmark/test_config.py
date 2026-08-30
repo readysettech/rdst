@@ -13,7 +13,12 @@ from devtools.ask_benchmark.config import (
 def test_default_model_matrix_has_controlled_routes():
     specs = load_model_specs()
 
-    assert len(specs) == 19
+    assert len(specs) == 20
+    assert specs["glm-5.3-flash-high"].model == "z-ai/glm-5.3-flash"
+    assert specs["glm-5.3-flash-high"].provider_order == ("z-ai",)
+    assert specs["glm-5.3-flash-high"].reasoning_effort == "high"
+    assert specs["glm-5.3-flash-high"].structured_output_mode == "prompted"
+    assert specs["glm-5.3-flash-high"].provider_retains_prompts is False
     assert "kimi-k3-max" in specs
     assert "grok-4.6-xhigh" in specs
     assert specs["mistral-medium-3.5-high"].model == "mistralai/mistral-medium-3-5"

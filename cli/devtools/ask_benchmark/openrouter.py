@@ -277,7 +277,10 @@ def check_openrouter_route(
     if spec.reasoning_effort is not None:
         required.add("reasoning_effort")
     if structured_output:
-        required.update({"tool_choice", "tools"})
+        if spec.structured_output_mode == "native":
+            required.add("response_format")
+        elif spec.structured_output_mode == "tool":
+            required.update({"tool_choice", "tools"})
     required.update(runtime_parameters or set())
 
     try:

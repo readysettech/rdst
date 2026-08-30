@@ -31,6 +31,13 @@ def test_parallel_benchmark_read_locks_share_the_preparation_lock(tmp_path):
         pass
 
 
+def test_global_prepare_lock_supports_an_explicit_writable_path(tmp_path, monkeypatch):
+    expected = tmp_path / "global.lock"
+    monkeypatch.setenv("RDST_BENCHMARK_GLOBAL_LOCK", str(expected))
+
+    assert cli._global_prepare_lock() == expected
+
+
 @pytest.mark.skipif(cli.fcntl is None, reason="shared locks require Unix flock")
 def test_exclusive_preparation_lock_blocks_benchmark_reader(tmp_path):
     lock_path = tmp_path / "prepare.lock"
@@ -63,6 +70,39 @@ def test_run_parser_accepts_positive_paid_run_limits():
     assert args.max_wall_time_seconds == 90.5
     assert args.context == ContextMode.AUTO_INIT.value
     assert args.schema_format == "rdst-adaptive-schema-v2"
+    assert args.ask_accuracy_profile == "baseline"
+
+
+def test_run_parser_accepts_candidate_ask_accuracy_profile():
+    args = cli.build_parser().parse_args(
+        [
+            "run",
+            "--models",
+            "claude-sonnet-4.6-anthropic-sdk",
+            "--track",
+            "rdst-ask",
+            "--ask-accuracy-profile",
+            "candidate-v1",
+        ]
+    )
+
+    assert args.ask_accuracy_profile == "candidate-v1"
+
+
+def test_run_parser_accepts_candidate_v2_ask_accuracy_profile():
+    args = cli.build_parser().parse_args(
+        [
+            "run",
+            "--models",
+            "claude-sonnet-4.6-anthropic-sdk",
+            "--track",
+            "rdst-ask",
+            "--ask-accuracy-profile",
+            "candidate-v2",
+        ]
+    )
+
+    assert args.ask_accuracy_profile == "candidate-v2"
 
 
 def test_run_parser_accepts_compact_v2_schema_format():
@@ -87,16 +127,36 @@ def test_protocol_fingerprint_covers_canonical_schema_loading():
 
     assert "features/ask/engine/ask3/phases/schema.py" in relative_paths
     assert "features/ask/service.py" in relative_paths
+    assert "features/ask/month_axis_storage.py" in relative_paths
     assert "features/analyze/functions/shallow_analysis.py" in relative_paths
 
 
+def test_protocol_fingerprint_covers_every_runtime_sql_normalizer():
+    relative_paths = {
+        path.relative_to(cli.RDST_ROOT).as_posix()
+        for path in cli._benchmark_protocol_paths()
+    }
+    expected = {
+        "features/ask/correction_intent_state.py",
+        "features/ask/aggregate_domain_normalization.py",
+        "features/ask/categorical_normalization.py",
+        "features/ask/derived_metric_normalization.py",
+        "features/ask/numeric_normalization.py",
+        "features/ask/ranking_normalization.py",
+        "features/ask/shared_entity_scope_normalization.py",
+    }
+
+    assert expected <= relative_paths
+
+
 def test_frozen_pipeline_receipt_matches_current_protocol():
-    receipt_path = Path(cli.__file__).with_name("frozen_pipeline_v10.json")
+    receipt_path = Path(cli.__file__).with_name("frozen_pipeline_v13.json")
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
 
-    assert receipt["freeze_id"] == "rdst-ask-auto-init-no-evidence-v10"
+    assert receipt["freeze_id"] == "rdst-ask-auto-init-no-evidence-v13"
     assert receipt["benchmark_protocol_sha256"] == cli._benchmark_protocol_sha256()
-    assert receipt["holdout_partition"]["opened"] is False
+    assert receipt["holdout_partition"]["opened"] is True
+    assert receipt["acceptance"]["future_unseen_evaluation_required"] is True
     assert receipt["acceptance"]["required_baseline_repetitions"] == 3
 
 

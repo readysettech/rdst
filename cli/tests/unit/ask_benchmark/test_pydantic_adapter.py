@@ -165,6 +165,43 @@ def test_json_mode_serializes_structured_output_for_ask3():
     assert adapter.call_records[0].effective_settings["structured_output"] is True
 
 
+def test_prompted_json_schema_parses_text_without_model_profile_support():
+    def respond(_messages, info):
+        assert info.output_tools == []
+        return ModelResponse(parts=[TextPart('{"sql":"SELECT 1"}')])
+
+    adapter = PydanticAIAdapter(
+        replace(_spec("mock"), structured_output_mode="prompted"),
+        model_factory=lambda _spec: FunctionModel(respond),
+        verify_route=False,
+    )
+    with override_allow_model_requests(False):
+        result = adapter.generate_response(
+            "generate",
+            purpose="sql_generation",
+            extra={
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "sql_generation",
+                        "strict": False,
+                        "schema": {
+                            "type": "object",
+                            "properties": {"sql": {"type": "string"}},
+                            "required": ["sql"],
+                        },
+                    },
+                }
+            },
+        )
+
+    assert json.loads(result["response"]) == {"sql": "SELECT 1"}
+    assert (
+        adapter.call_records[0].effective_settings["structured_output_mode"]
+        == "prompted"
+    )
+
+
 def test_json_schema_is_forwarded_to_the_output_tool():
     schema = {
         "type": "object",

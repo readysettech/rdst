@@ -489,12 +489,11 @@ policy.
 `--interaction-mode interactive-no-answer` records clarification events as scored
 no-answer outcomes for a separate cohort.
 
-The 50-case canary is the only development partition. The 450-case complement is
-available only through `--suite holdout`: it rejects partial slices, requires one
-model and one repetition, and requires an explicit run ID, shared campaign ID,
-full gold-replay receipt, and `--confirm-open-holdout`. A durable cache ledger binds
-that campaign to one resumable model-only run and one resumable `rdst-ask` run. Do
-not open it until the pipeline is frozen.
+The 50-case canary is the fixed development partition. The 450-case complement was
+subsequently included in the opened 496-case transfer replay, so it is no longer an
+unseen holdout and cannot support a release claim. The `--suite holdout` safeguards
+remain for reproducibility of the historical partition, not as proof that it is
+unopened. A future release qualification must establish a genuinely unseen set.
 
 The latest latency audit found that model calls consumed 99.6% of the matched
 16-case product task time. Sonnet clarification alone averaged 17.85 seconds and
