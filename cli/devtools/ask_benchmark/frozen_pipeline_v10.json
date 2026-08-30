@@ -3,7 +3,7 @@
   "supersedes": "rdst-ask-auto-init-no-evidence-v9",
   "supersession_reason": "V10 adds optional bounded value-location grounding behind a disabled product default. It allows exactly two validated support probes and keeps only candidates that pass strict schema resolution.",
   "frozen_at": "2026-08-30",
-  "benchmark_protocol_sha256": "ec906416bf5dbf8a42ef226d07848691c9a3ac37068bc76f4f3e64f73318c6ee",
+  "benchmark_protocol_sha256": "6c521300790f3e363dd47bff674e69745b196f593a15d73d8dab917e22ed7747",
   "protocol_path_policy": "devtools.ask_benchmark.cli._benchmark_protocol_paths",
   "track": "rdst-ask",
   "entrypoint": "features.ask.service.AskService",

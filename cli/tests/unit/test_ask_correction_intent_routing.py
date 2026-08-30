@@ -186,15 +186,7 @@ def test_activate_uses_one_strict_bounded_call_and_bound_excerpt():
     assert response_format["schema"]["additionalProperties"] is False
     activation_schema = response_format["schema"]["properties"]["activations"]["items"]
     assert activation_schema["properties"]["source_excerpt"]["maxLength"] == 240
-    assert activation_schema["properties"]["intent"]["enum"] == [
-        "percentage_output",
-        "ratio_output",
-        "scalar_difference_output",
-        "all_rows_population",
-        "entity_at_extremum",
-        "all_matching_categories",
-        "shared_scope_all_answers",
-    ]
+    assert activation_schema["properties"]["intent"]["enum"] == list(CORRECTION_INTENTS)
     assert (
         response_format["schema"]["properties"]["activations"]["maxItems"]
         == CORRECTION_INTENT_ROUTING_MAX_ACTIVATIONS
@@ -1017,6 +1009,35 @@ def test_two_compatible_source_bound_activations_are_accepted_atomically():
     diagnostics["activation_allowed"] = True
     assert selected_correction_intents(diagnostics) == result.selected_intents
     assert selected_correction_intent(diagnostics) is None
+
+
+def test_two_source_backed_storage_repairs_cannot_activate_together():
+    question = "Return rows from September 2013 with the exact time 1:33."
+    response = _multi_provider_response(
+        {
+            "intent": "temporal_text_storage",
+            "source_kind": "effective_question",
+            "source_excerpt": "exact time 1:33",
+        },
+        {
+            "intent": "month_axis_storage",
+            "source_kind": "effective_question",
+            "source_excerpt": "September 2013",
+        },
+    )
+
+    result = _route(
+        _Llm(response),
+        effective_question=question,
+        proposed_sql=(
+            "SELECT q.code FROM qualifying q WHERE q.q3 = '1:33' "
+            "AND q.date >= '2013-09-01' AND q.date < '2013-10-01'"
+        ),
+        allowed_intents={"temporal_text_storage", "month_axis_storage"},
+    )
+
+    assert result.status == "invalid"
+    assert result.selected_intents == ()
 
 
 @pytest.mark.parametrize(

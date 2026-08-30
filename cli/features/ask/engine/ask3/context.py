@@ -74,18 +74,15 @@ class Ask3Context:
     correction_intent_routing: Dict[str, Any] = field(default_factory=dict)
     dual_candidate_selection: Dict[str, Any] = field(default_factory=dict)
     explicit_ratio_normalization: Dict[str, Any] = field(default_factory=dict)
-    scalar_derived_metric_normalization: Dict[str, Any] = field(
-        default_factory=dict
-    )
+    scalar_derived_metric_normalization: Dict[str, Any] = field(default_factory=dict)
     all_rows_aggregate_normalization: Dict[str, Any] = field(default_factory=dict)
     extremum_entity_normalization: Dict[str, Any] = field(default_factory=dict)
-    unbounded_categorical_normalization: Dict[str, Any] = field(
-        default_factory=dict
-    )
-    shared_entity_scope_normalization: Dict[str, Any] = field(
-        default_factory=dict
-    )
+    unbounded_categorical_normalization: Dict[str, Any] = field(default_factory=dict)
+    shared_entity_scope_normalization: Dict[str, Any] = field(default_factory=dict)
     value_location_normalization: Dict[str, Any] = field(default_factory=dict)
+    encoded_identifier_storage: Dict[str, Any] = field(default_factory=dict)
+    temporal_text_storage: Dict[str, Any] = field(default_factory=dict)
+    month_axis_storage: Dict[str, Any] = field(default_factory=dict)
     db_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
 
     # === Clarification (Phase 2) ===
@@ -181,9 +178,7 @@ class Ask3Context:
             "scalar_derived_metric_normalization": (
                 self.scalar_derived_metric_normalization
             ),
-            "all_rows_aggregate_normalization": (
-                self.all_rows_aggregate_normalization
-            ),
+            "all_rows_aggregate_normalization": (self.all_rows_aggregate_normalization),
             "extremum_entity_normalization": self.extremum_entity_normalization,
             "unbounded_categorical_normalization": (
                 self.unbounded_categorical_normalization
@@ -192,6 +187,9 @@ class Ask3Context:
                 self.shared_entity_scope_normalization
             ),
             "value_location_normalization": self.value_location_normalization,
+            "encoded_identifier_storage": self.encoded_identifier_storage,
+            "temporal_text_storage": self.temporal_text_storage,
+            "month_axis_storage": self.month_axis_storage,
             "db_probe_diagnostics": self.db_probe_diagnostics,
             # Validation
             "validation_errors": [e.to_dict() for e in self.validation_errors],
@@ -271,13 +269,9 @@ class Ask3Context:
         ctx.generation_confidence = data.get("generation_confidence")
         ctx.sql = data.get("sql")
         ctx.sql_explanation = data.get("sql_explanation")
-        ctx.correction_intent_routing = data.get(
-            "correction_intent_routing", {}
-        )
+        ctx.correction_intent_routing = data.get("correction_intent_routing", {})
         ctx.dual_candidate_selection = data.get("dual_candidate_selection", {})
-        ctx.explicit_ratio_normalization = data.get(
-            "explicit_ratio_normalization", {}
-        )
+        ctx.explicit_ratio_normalization = data.get("explicit_ratio_normalization", {})
         ctx.scalar_derived_metric_normalization = data.get(
             "scalar_derived_metric_normalization", {}
         )
@@ -293,9 +287,10 @@ class Ask3Context:
         ctx.shared_entity_scope_normalization = data.get(
             "shared_entity_scope_normalization", {}
         )
-        ctx.value_location_normalization = data.get(
-            "value_location_normalization", {}
-        )
+        ctx.value_location_normalization = data.get("value_location_normalization", {})
+        ctx.encoded_identifier_storage = data.get("encoded_identifier_storage", {})
+        ctx.temporal_text_storage = data.get("temporal_text_storage", {})
+        ctx.month_axis_storage = data.get("month_axis_storage", {})
         ctx.db_probe_diagnostics = data.get("db_probe_diagnostics", {})
 
         # Validation

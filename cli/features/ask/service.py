@@ -49,6 +49,9 @@ from .derived_metric_normalization import (
     normalize_context as normalize_scalar_derived_metric_context,
 )
 from .dual_candidate import generate_and_select
+from .encoded_identifier_storage import (
+    normalize_context as normalize_encoded_identifier_storage_context,
+)
 from .engine.ask3.phases.generate import repair_validation_error
 from .engine.ask3.phases.validate import build_error_message
 from .events import (
@@ -67,10 +70,16 @@ from .models import (
     AskOptions,
     AskPhase,
 )
+from .month_axis_storage import (
+    normalize_context as normalize_month_axis_storage_context,
+)
 from .numeric_normalization import normalize_context as normalize_numeric_context
 from .ranking_normalization import normalize_context as normalize_ranking_context
 from .shared_entity_scope_normalization import (
     normalize_context as normalize_shared_entity_scope_context,
+)
+from .temporal_text_storage import (
+    normalize_context as normalize_temporal_text_storage_context,
 )
 from .value_location_normalization import (
     normalize_context as normalize_value_location_context,
@@ -109,6 +118,10 @@ _CORRECTION_STATE_FIELDS = (
     "unbounded_categorical_normalization",
     "shared_entity_scope_normalization",
     "value_location_normalization",
+    "encoded_identifier_storage",
+    "temporal_text_storage",
+    "month_axis_storage",
+    "execution_result",
 )
 _CORRECTION_COPIED_FIELDS = frozenset(
     {
@@ -120,7 +133,14 @@ _CORRECTION_COPIED_FIELDS = frozenset(
         "unbounded_categorical_normalization",
         "shared_entity_scope_normalization",
         "value_location_normalization",
+        "encoded_identifier_storage",
+        "temporal_text_storage",
+        "month_axis_storage",
+        "execution_result",
     }
+)
+_DEFERRED_CORRECTION_INTENTS = frozenset(
+    {"temporal_text_storage", "month_axis_storage"}
 )
 
 
@@ -140,9 +160,7 @@ def _restore_correction_state(ctx: Any, snapshot: dict[str, Any]) -> None:
         setattr(
             ctx,
             name,
-            copy.deepcopy(value)
-            if name in _CORRECTION_COPIED_FIELDS
-            else value,
+            copy.deepcopy(value) if name in _CORRECTION_COPIED_FIELDS else value,
         )
 
 
@@ -195,6 +213,12 @@ class AskService:
         shared_entity_scope_normalization_fn: Callable[..., Any] | None = None,
         value_location_normalization_enabled: bool = False,
         value_location_normalization_fn: Callable[..., Any] | None = None,
+        encoded_identifier_storage_enabled: bool = False,
+        encoded_identifier_storage_fn: Callable[..., Any] | None = None,
+        temporal_text_storage_enabled: bool = False,
+        temporal_text_storage_fn: Callable[..., Any] | None = None,
+        month_axis_storage_enabled: bool = False,
+        month_axis_storage_fn: Callable[..., Any] | None = None,
     ):
         self._llm_manager = llm_manager
         self._semantic_manager = semantic_manager
@@ -208,9 +232,7 @@ class AskService:
         self._correction_intent_routing_enabled = bool(
             correction_intent_routing_enabled or correction_intent_routing_shadow
         )
-        self._correction_intent_routing_shadow = bool(
-            correction_intent_routing_shadow
-        )
+        self._correction_intent_routing_shadow = bool(correction_intent_routing_shadow)
         self._correction_intent_routing_fn = (
             correction_intent_routing_fn or route_correction_intent
         )
@@ -224,17 +246,14 @@ class AskService:
         unknown_intents = set(requested_scope).difference(CORRECTION_INTENTS)
         if unknown_intents:
             raise ValueError(
-                "unknown correction intent scope: "
-                + ", ".join(sorted(unknown_intents))
+                "unknown correction intent scope: " + ", ".join(sorted(unknown_intents))
             )
         if len(set(requested_scope)) != len(requested_scope):
             raise ValueError("correction intent scope must contain unique names")
         self._correction_intent_routing_intent_scope = tuple(
             intent for intent in CORRECTION_INTENTS if intent in requested_scope
         )
-        self._dual_candidate_selection_enabled = bool(
-            dual_candidate_selection_enabled
-        )
+        self._dual_candidate_selection_enabled = bool(dual_candidate_selection_enabled)
         self._dual_candidate_selection_fn = (
             dual_candidate_selection_fn or generate_and_select
         )
@@ -255,8 +274,7 @@ class AskService:
             all_rows_aggregate_normalization_enabled
         )
         self._all_rows_aggregate_normalization_fn = (
-            all_rows_aggregate_normalization_fn
-            or normalize_all_rows_aggregate_context
+            all_rows_aggregate_normalization_fn or normalize_all_rows_aggregate_context
         )
         self._extremum_entity_normalization_enabled = bool(
             extremum_entity_normalization_enabled
@@ -282,6 +300,21 @@ class AskService:
         )
         self._value_location_normalization_fn = (
             value_location_normalization_fn or normalize_value_location_context
+        )
+        self._encoded_identifier_storage_enabled = bool(
+            encoded_identifier_storage_enabled
+        )
+        self._encoded_identifier_storage_fn = (
+            encoded_identifier_storage_fn
+            or normalize_encoded_identifier_storage_context
+        )
+        self._temporal_text_storage_enabled = bool(temporal_text_storage_enabled)
+        self._temporal_text_storage_fn = (
+            temporal_text_storage_fn or normalize_temporal_text_storage_context
+        )
+        self._month_axis_storage_enabled = bool(month_axis_storage_enabled)
+        self._month_axis_storage_fn = (
+            month_axis_storage_fn or normalize_month_axis_storage_context
         )
 
     def _observe(self, phase: AskPhase, ctx: Any) -> None:
@@ -677,6 +710,20 @@ class AskService:
         )
         self._observe(AskPhase.EXECUTE, ctx)
 
+        executed_sql = str(ctx.sql or "")
+        ctx = await self._apply_post_execution_repairs(ctx)
+        if not _sql_candidates_equivalent(
+            executed_sql,
+            str(ctx.sql or ""),
+            ctx.db_type,
+        ):
+            self._observe(AskPhase.EXECUTE, ctx)
+            yield AskSqlGeneratedEvent(
+                type="sql_generated",
+                sql=ctx.sql or "",
+                explanation=ctx.sql_explanation,
+            )
+
         if ctx.execution_result and not ctx.execution_result.error:
             ctx.mark_success()
             qhash, qtag = self._auto_save_query(ctx, persist_query=persist_query)
@@ -706,6 +753,162 @@ class AskService:
             ctx.target_config or {},
         )
 
+    async def _apply_post_execution_repairs(self, ctx: Any) -> Any:
+        """Try selected repairs that require feedback from the primary result."""
+        routing = dict(getattr(ctx, "correction_intent_routing", {}) or {})
+        selected = selected_correction_intents(
+            {
+                **routing,
+                "status": "activate",
+                "verdict": "activate",
+                "activation_allowed": True,
+            }
+        )
+        deferred = set(selected) & _DEFERRED_CORRECTION_INTENTS
+        if self._correction_intent_routing_shadow or not deferred:
+            return ctx
+        if len(deferred) != 1:
+            routing["post_execution_status"] = "ambiguous_deferred_intents"
+            ctx.correction_intent_routing = routing
+            return ctx
+
+        repair_intent = next(iter(deferred))
+        if repair_intent == "temporal_text_storage":
+            if not self._temporal_text_storage_enabled:
+                return ctx
+            repair_fn = self._temporal_text_storage_fn
+            repair_executor = create_value_probe_executor(ctx, self._db_executor)
+        else:
+            if not self._month_axis_storage_enabled:
+                return ctx
+            repair_fn = self._month_axis_storage_fn
+            repair_executor = self._db_executor
+
+        original_state = _snapshot_correction_state(ctx)
+        original_sql = str(ctx.sql or "")
+        primary_result = getattr(ctx, "execution_result", None)
+        if (
+            primary_result is None
+            or primary_result.error
+            or primary_result.truncated
+            or primary_result.row_count != 0
+        ):
+            setattr(
+                ctx,
+                repair_intent,
+                {
+                    "status": "unchanged",
+                    "reason": "primary-result-not-empty-and-complete",
+                    "probe_count": 0,
+                    "candidate_execution_count": 0,
+                },
+            )
+            routing["post_execution_status"] = "not_applicable"
+            ctx.correction_intent_routing = routing
+            return ctx
+
+        try:
+            ctx = await asyncio.to_thread(
+                repair_fn,
+                ctx,
+                repair_executor,
+            )
+        except Exception as exc:
+            _restore_correction_state(ctx, original_state)
+            setattr(
+                ctx,
+                repair_intent,
+                {
+                    "status": "error",
+                    "error_kind": type(exc).__name__,
+                    "probe_count": 0,
+                    "candidate_execution_count": 0,
+                },
+            )
+            routing["post_execution_status"] = "error"
+            ctx.correction_intent_routing = routing
+            return ctx
+
+        diagnostics = dict(getattr(ctx, repair_intent))
+        candidate_state = _snapshot_correction_state(ctx)
+        candidate_sql = str(candidate_state.get("sql") or "")
+        if (
+            diagnostics.get("status") != "normalized"
+            or not candidate_sql
+            or _sql_candidates_equivalent(candidate_sql, original_sql, ctx.db_type)
+        ):
+            _restore_correction_state(ctx, original_state)
+            setattr(ctx, repair_intent, diagnostics)
+            routing["post_execution_status"] = "not_applicable"
+            ctx.correction_intent_routing = routing
+            return ctx
+
+        valid, issues = await self._preflight_correction_candidate(
+            ctx,
+            candidate_state,
+        )
+        if not valid:
+            _restore_correction_state(ctx, original_state)
+            diagnostics.update(
+                {
+                    "status": "reverted",
+                    "reason": "candidate-validation-failed",
+                    "validation_issue_count": len(issues),
+                }
+            )
+            setattr(ctx, repair_intent, diagnostics)
+            routing["post_execution_status"] = "reverted"
+            ctx.correction_intent_routing = routing
+            return ctx
+
+        _restore_correction_state(ctx, candidate_state)
+        ctx.execution_result = None
+        ctx = await asyncio.to_thread(
+            execute_query,
+            ctx,
+            _NullPresenter(),
+            self._db_executor,
+        )
+        candidate_result = ctx.execution_result
+        diagnostics["candidate_execution_count"] = 1
+        if (
+            candidate_result is not None
+            and not candidate_result.error
+            and not candidate_result.truncated
+            and candidate_result.row_count > 0
+        ):
+            diagnostics["status"] = "accepted"
+            diagnostics["primary_row_count"] = primary_result.row_count
+            diagnostics["candidate_row_count"] = candidate_result.row_count
+            setattr(ctx, repair_intent, diagnostics)
+            routing.update(
+                {
+                    "post_execution_status": "accepted",
+                    "selected_sql_applied": True,
+                    "selected_sql_sha256": hashlib.sha256(
+                        str(ctx.sql or "").encode()
+                    ).hexdigest(),
+                }
+            )
+            ctx.correction_intent_routing = routing
+            return ctx
+
+        _restore_correction_state(ctx, original_state)
+        diagnostics.update(
+            {
+                "status": "reverted",
+                "reason": (
+                    "candidate-execution-failed"
+                    if candidate_result is None or candidate_result.error
+                    else "candidate-result-empty-or-truncated"
+                ),
+            }
+        )
+        setattr(ctx, repair_intent, diagnostics)
+        routing["post_execution_status"] = "reverted"
+        ctx.correction_intent_routing = routing
+        return ctx
+
     async def _apply_value_location_normalization(self, ctx: Any) -> Any:
         """Ground one ambiguous sibling-column value with two bounded probes."""
         original_state = _snapshot_correction_state(ctx)
@@ -733,10 +936,14 @@ class AskService:
             candidate_state,
         )
         candidate_sql = str(candidate_state.get("sql") or "")
-        if valid and candidate_sql and not _sql_candidates_equivalent(
-            candidate_sql,
-            original_sql,
-            ctx.db_type,
+        if (
+            valid
+            and candidate_sql
+            and not _sql_candidates_equivalent(
+                candidate_sql,
+                original_sql,
+                ctx.db_type,
+            )
         ):
             _restore_correction_state(ctx, candidate_state)
             ctx.value_location_normalization = diagnostics
@@ -790,6 +997,16 @@ class AskService:
         for routed_intents, enabled, normalizer in normalizers:
             if enabled and selected.intersection(routed_intents):
                 ctx = await asyncio.to_thread(normalizer, ctx)
+        if (
+            self._encoded_identifier_storage_enabled
+            and "encoded_identifier_storage" in selected
+        ):
+            probe = create_value_probe_executor(ctx, self._db_executor)
+            ctx = await asyncio.to_thread(
+                self._encoded_identifier_storage_fn,
+                ctx,
+                probe,
+            )
         return ctx
 
     async def _apply_correction_intent_routing(self, ctx: Any) -> Any:
@@ -828,6 +1045,12 @@ class AskService:
         selected_intents = selected_correction_intents(
             {**routing, "activation_allowed": True}
         )
+        deferred_intents = tuple(
+            intent
+            for intent in selected_intents
+            if intent in _DEFERRED_CORRECTION_INTENTS
+        )
+        routing["deferred_intents"] = list(deferred_intents)
         routing["selected_intent_set_sha256"] = (
             hashlib.sha256(
                 json.dumps(list(selected_intents), separators=(",", ":")).encode()
@@ -875,6 +1098,24 @@ class AskService:
                 original_sql,
                 ctx.db_type,
             ):
+                if deferred_intents:
+                    routing.update(
+                        {
+                            "status": "deferred_until_execution",
+                            "activation_allowed": (
+                                not self._correction_intent_routing_shadow
+                            ),
+                            "application_status": (
+                                "shadow_deferred"
+                                if self._correction_intent_routing_shadow
+                                else "deferred"
+                            ),
+                            "application_issue_count": 0,
+                        }
+                    )
+                    _restore_correction_state(ctx, original_state)
+                    ctx.correction_intent_routing = routing
+                    return ctx
                 routing.update(
                     {
                         "status": "selected_intent_set_not_applicable",
@@ -895,6 +1136,7 @@ class AskService:
                             if self._correction_intent_routing_shadow
                             else candidate_hash
                         ),
+                        "deferred_intents": list(deferred_intents),
                     }
                 )
                 if self._correction_intent_routing_shadow:
@@ -951,8 +1193,7 @@ class AskService:
         if not strict_resolution.get("is_valid"):
             return False, [
                 str(
-                    strict_resolution.get("error_message")
-                    or "column resolution failed"
+                    strict_resolution.get("error_message") or "column resolution failed"
                 )
             ]
         candidate_state.clear()

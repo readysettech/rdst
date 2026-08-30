@@ -23,15 +23,18 @@ from sqlglot import exp
 from .correction_intent_state import (
     selected_correction_intents as _selected_correction_intents,
 )
+from .encoded_identifier_storage import encoded_identifier_shape
+from .month_axis_storage import month_axis_storage_shape
+from .temporal_text_storage import temporal_text_storage_shape
 
-CORRECTION_INTENT_ROUTING_VERSION = "correction-intent-routing-v14"
-CORRECTION_INTENT_ROUTING_PROMPT_VERSION = "correction-intent-routing-prompt-v10"
+CORRECTION_INTENT_ROUTING_VERSION = "correction-intent-routing-v16"
+CORRECTION_INTENT_ROUTING_PROMPT_VERSION = "correction-intent-routing-prompt-v12"
 CORRECTION_INTENT_ROUTING_MAX_TOKENS = 800
 CORRECTION_INTENT_ROUTING_MAX_ACTIVATIONS = 2
 CORRECTION_INTENT_ROUTING_PURPOSE = "correction_intent_routing"
 CORRECTION_INTENT_ACTIONABILITY_VERSION = "correction-intent-application-v1"
 
-CORRECTION_INTENTS = (
+_GENERATION_CORRECTION_INTENTS = (
     "percentage_output",
     "ratio_output",
     "scalar_difference_output",
@@ -40,10 +43,23 @@ CORRECTION_INTENTS = (
     "all_matching_categories",
     "shared_scope_all_answers",
 )
+CORRECTION_INTENTS = (
+    *_GENERATION_CORRECTION_INTENTS,
+    "encoded_identifier_storage",
+    "temporal_text_storage",
+    "month_axis_storage",
+)
 # Routing is opt-in. When enabled, the model must see the whole supported catalog
 # rather than a host-selected subset based on English wording or SQL shape.
-CORRECTION_INTENT_PRODUCT_SCOPE = CORRECTION_INTENTS
+CORRECTION_INTENT_PRODUCT_SCOPE = _GENERATION_CORRECTION_INTENTS
 CORRECTION_INTENT_EXPERIMENTAL_SCOPE = CORRECTION_INTENTS
+_SOURCE_BACKED_STORAGE_INTENTS = frozenset(
+    {
+        "encoded_identifier_storage",
+        "temporal_text_storage",
+        "month_axis_storage",
+    }
+)
 
 _VERDICTS = ("activate", "no_match", "abstain")
 _MAX_SOURCE_EXCERPT_CHARS = 240
@@ -117,6 +133,29 @@ _INTENT_CLAIMS = {
         "not the other; the host will copy that existing scope into the unscoped "
         "branch."
     ),
+    "encoded_identifier_storage": (
+        "The request asks for the number of distinct relationships incident to "
+        "one named endpoint. Select this only when generated_sql counts rows by "
+        "comparing the same endpoint identifier with two sibling endpoint "
+        "columns. The host will probe the database for a global mirrored-edge "
+        "encoding invariant before changing the identifier comparison or count."
+    ),
+    "temporal_text_storage": (
+        "The request identifies rows by one exact elapsed time, duration, lap "
+        "time, or similar clock value at second precision. Select this only when "
+        "generated_sql compares one column with a two-part clock string, an "
+        "optional fractional suffix, or a zero-hour three-part clock string. The "
+        "host will defer the correction until the primary query is "
+        "empty, then prove that the exact form is absent and a shorter stored "
+        "prefix exists before trying one candidate."
+    ),
+    "month_axis_storage": (
+        "The request identifies rows from one exact calendar month. Select this "
+        "only when generated_sql filters one date-like column over exactly one "
+        "full calendar month. The host derives the requested month from those SQL "
+        "boundaries, waits for an empty primary result, then proves a unique "
+        "alternate YYYYMM axis and shared key before trying one candidate."
+    ),
 }
 
 _SYSTEM_PROMPT = """You route one generated SQL statement through a closed set
@@ -137,6 +176,14 @@ Treat observed_shape as authoritative about the listed mechanical mismatch. Do n
 second-guess a nonempty fact because a decimal literal, alias, SQL dialect behavior,
 or another expression looks sufficient. Your job is to match the question's meaning
 to eligible triggers. Local code owns the SQL rewrite and its final validation.
+
+For triggers whose observed_shape says the candidate requires an empty primary
+result and database support, the observed shape is an eligible storage-risk shape,
+not proof that generated_sql is already wrong. Activate when the question clearly
+requests that trigger's meaning and the shape is eligible, even when generated_sql
+looks semantically faithful. The host will do nothing unless the primary result is
+empty and the database proves the alternate representation. Do not require storage
+knowledge that is absent from this routing input.
 
 Select activate only when both conditions hold:
 1. One exact, meaningful excerpt from the effective question directly expresses
@@ -383,6 +430,15 @@ def discover_correction_intent_candidates(
             "one-branch-has-literal-equality-scope",
             "another-branch-lacks-that-scope",
         )
+    encoded_shape = encoded_identifier_shape(sql, dialect)
+    if encoded_shape:
+        shapes["encoded_identifier_storage"] = encoded_shape
+    temporal_shape = temporal_text_storage_shape(sql, dialect)
+    if temporal_shape:
+        shapes["temporal_text_storage"] = temporal_shape
+    month_shape = month_axis_storage_shape(sql, dialect)
+    if month_shape:
+        shapes["month_axis_storage"] = month_shape
 
     return tuple(
         CorrectionIntentCandidate(
@@ -1319,6 +1375,8 @@ def _normalize_selectable_intent_sets(
             raise ValueError("invalid selectable correction intent set")
         canonical = tuple(sorted(value, key=order.__getitem__))
         if {"percentage_output", "ratio_output"}.issubset(canonical):
+            continue
+        if len(set(canonical) & _SOURCE_BACKED_STORAGE_INTENTS) > 1:
             continue
         normalized.add(canonical)
     return tuple(sorted(normalized, key=lambda item: (len(item), item)))
