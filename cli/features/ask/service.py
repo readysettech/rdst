@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
+import json
 import logging
 import uuid
-from collections.abc import AsyncGenerator, Callable, MutableMapping
+from collections.abc import AsyncGenerator, Callable, Collection, MutableMapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -14,6 +16,9 @@ from shared.config.targets import create_targets_config
 from shared.llm_manager import LLMManager
 from shared.query_registry import QueryRegistry, generate_query_name
 
+from .aggregate_domain_normalization import (
+    normalize_context as normalize_all_rows_aggregate_context,
+)
 from .ambiguity_detection import (
     NON_INTERACTIVE_CLARIFICATION_POLICY,
     RANKED_RESOLVER_POLICY,
@@ -29,6 +34,21 @@ from .ask3 import (
     load_schema,
     validate_sql,
 )
+from .categorical_normalization import (
+    normalize_context as normalize_categorical_context,
+)
+from .correction_intent_routing import (
+    CORRECTION_INTENT_ACTIONABILITY_VERSION,
+    CORRECTION_INTENT_PRODUCT_SCOPE,
+    CORRECTION_INTENT_ROUTING_PURPOSE,
+    CORRECTION_INTENTS,
+    route_correction_intent,
+    selected_correction_intents,
+)
+from .derived_metric_normalization import (
+    normalize_context as normalize_scalar_derived_metric_context,
+)
+from .dual_candidate import generate_and_select
 from .engine.ask3.phases.generate import repair_validation_error
 from .engine.ask3.phases.validate import build_error_message
 from .events import (
@@ -47,6 +67,11 @@ from .models import (
     AskOptions,
     AskPhase,
 )
+from .numeric_normalization import normalize_context as normalize_numeric_context
+from .ranking_normalization import normalize_context as normalize_ranking_context
+from .shared_entity_scope_normalization import (
+    normalize_context as normalize_shared_entity_scope_context,
+)
 
 
 @dataclass
@@ -58,6 +83,75 @@ class _PendingAskSession:
 
 
 _sessions: dict[str, _PendingAskSession] = {}
+
+
+_CORRECTION_STATE_FIELDS = (
+    "sql",
+    "generated_sql",
+    "sql_explanation",
+    "generation_confidence",
+    "status",
+    "error_message",
+    "error_code",
+    "error_category",
+    "phase",
+    "validation_errors",
+    "limit_added",
+    "limit_reduced",
+    "explicit_ratio_normalization",
+    "scalar_derived_metric_normalization",
+    "all_rows_aggregate_normalization",
+    "extremum_entity_normalization",
+    "unbounded_categorical_normalization",
+    "shared_entity_scope_normalization",
+)
+_CORRECTION_COPIED_FIELDS = frozenset(
+    {
+        "validation_errors",
+        "explicit_ratio_normalization",
+        "scalar_derived_metric_normalization",
+        "all_rows_aggregate_normalization",
+        "extremum_entity_normalization",
+        "unbounded_categorical_normalization",
+        "shared_entity_scope_normalization",
+    }
+)
+
+
+def _snapshot_correction_state(ctx: Any) -> dict[str, Any]:
+    return {
+        name: (
+            copy.deepcopy(getattr(ctx, name))
+            if name in _CORRECTION_COPIED_FIELDS
+            else getattr(ctx, name)
+        )
+        for name in _CORRECTION_STATE_FIELDS
+    }
+
+
+def _restore_correction_state(ctx: Any, snapshot: dict[str, Any]) -> None:
+    for name, value in snapshot.items():
+        setattr(
+            ctx,
+            name,
+            copy.deepcopy(value)
+            if name in _CORRECTION_COPIED_FIELDS
+            else value,
+        )
+
+
+def _sql_candidates_equivalent(left: str, right: str, dialect: str) -> bool:
+    if left == right:
+        return True
+    try:
+        import sqlglot
+
+        read_dialect = "postgres" if dialect == "postgresql" else dialect or None
+        left_tree = sqlglot.parse_one(left, dialect=read_dialect)
+        right_tree = sqlglot.parse_one(right, dialect=read_dialect)
+        return left_tree == right_tree
+    except Exception:
+        return " ".join(left.split()) == " ".join(right.split())
 
 
 class AskService:
@@ -75,6 +169,24 @@ class AskService:
         persist_queries: bool = True,
         phase_observer: Callable[[str, Any], None] | None = None,
         diagnostic_schema_formatter_fn: Callable[[Any], str] | None = None,
+        correction_intent_routing_enabled: bool = False,
+        correction_intent_routing_shadow: bool = False,
+        correction_intent_routing_fn: Callable[..., Any] | None = None,
+        correction_intent_routing_intent_scope: Collection[str] | None = None,
+        dual_candidate_selection_enabled: bool = False,
+        dual_candidate_selection_fn: Callable[..., Any] | None = None,
+        explicit_ratio_normalization_enabled: bool = True,
+        explicit_ratio_normalization_fn: Callable[..., Any] | None = None,
+        scalar_derived_metric_normalization_enabled: bool = True,
+        scalar_derived_metric_normalization_fn: Callable[..., Any] | None = None,
+        all_rows_aggregate_normalization_enabled: bool = True,
+        all_rows_aggregate_normalization_fn: Callable[..., Any] | None = None,
+        extremum_entity_normalization_enabled: bool = True,
+        extremum_entity_normalization_fn: Callable[..., Any] | None = None,
+        unbounded_categorical_normalization_enabled: bool = True,
+        unbounded_categorical_normalization_fn: Callable[..., Any] | None = None,
+        shared_entity_scope_normalization_enabled: bool = True,
+        shared_entity_scope_normalization_fn: Callable[..., Any] | None = None,
     ):
         self._llm_manager = llm_manager
         self._semantic_manager = semantic_manager
@@ -85,6 +197,78 @@ class AskService:
         self._persist_queries = persist_queries
         self._phase_observer = phase_observer
         self._diagnostic_schema_formatter_fn = diagnostic_schema_formatter_fn
+        self._correction_intent_routing_enabled = bool(
+            correction_intent_routing_enabled or correction_intent_routing_shadow
+        )
+        self._correction_intent_routing_shadow = bool(
+            correction_intent_routing_shadow
+        )
+        self._correction_intent_routing_fn = (
+            correction_intent_routing_fn or route_correction_intent
+        )
+        if isinstance(correction_intent_routing_intent_scope, str):
+            raise TypeError("correction intent scope must be a collection of names")
+        requested_scope = (
+            CORRECTION_INTENT_PRODUCT_SCOPE
+            if correction_intent_routing_intent_scope is None
+            else tuple(correction_intent_routing_intent_scope)
+        )
+        unknown_intents = set(requested_scope).difference(CORRECTION_INTENTS)
+        if unknown_intents:
+            raise ValueError(
+                "unknown correction intent scope: "
+                + ", ".join(sorted(unknown_intents))
+            )
+        if len(set(requested_scope)) != len(requested_scope):
+            raise ValueError("correction intent scope must contain unique names")
+        self._correction_intent_routing_intent_scope = tuple(
+            intent for intent in CORRECTION_INTENTS if intent in requested_scope
+        )
+        self._dual_candidate_selection_enabled = bool(
+            dual_candidate_selection_enabled
+        )
+        self._dual_candidate_selection_fn = (
+            dual_candidate_selection_fn or generate_and_select
+        )
+        self._explicit_ratio_normalization_enabled = bool(
+            explicit_ratio_normalization_enabled
+        )
+        self._explicit_ratio_normalization_fn = (
+            explicit_ratio_normalization_fn or normalize_numeric_context
+        )
+        self._scalar_derived_metric_normalization_enabled = bool(
+            scalar_derived_metric_normalization_enabled
+        )
+        self._scalar_derived_metric_normalization_fn = (
+            scalar_derived_metric_normalization_fn
+            or normalize_scalar_derived_metric_context
+        )
+        self._all_rows_aggregate_normalization_enabled = bool(
+            all_rows_aggregate_normalization_enabled
+        )
+        self._all_rows_aggregate_normalization_fn = (
+            all_rows_aggregate_normalization_fn
+            or normalize_all_rows_aggregate_context
+        )
+        self._extremum_entity_normalization_enabled = bool(
+            extremum_entity_normalization_enabled
+        )
+        self._extremum_entity_normalization_fn = (
+            extremum_entity_normalization_fn or normalize_ranking_context
+        )
+        self._unbounded_categorical_normalization_enabled = bool(
+            unbounded_categorical_normalization_enabled
+        )
+        self._unbounded_categorical_normalization_fn = (
+            unbounded_categorical_normalization_fn or normalize_categorical_context
+        )
+        self._shared_entity_scope_normalization_enabled = bool(
+            shared_entity_scope_normalization_enabled
+        )
+        self._shared_entity_scope_normalization_fn = (
+            shared_entity_scope_normalization_fn
+            or normalize_shared_entity_scope_context
+        )
 
     def _observe(self, phase: AskPhase, ctx: Any) -> None:
         if self._phase_observer is not None:
@@ -389,6 +573,18 @@ class AskService:
             )
             return
 
+        if self._dual_candidate_selection_enabled:
+            ctx = await asyncio.to_thread(
+                self._dual_candidate_selection_fn,
+                ctx,
+                self._llm_manager,
+            )
+            self._observe(AskPhase.GENERATE, ctx)
+
+        if self._correction_intent_routing_enabled:
+            ctx = await self._apply_correction_intent_routing(ctx)
+            self._observe(AskPhase.GENERATE, ctx)
+
         yield AskSqlGeneratedEvent(
             type="sql_generated",
             sql=ctx.sql or "",
@@ -491,6 +687,268 @@ class AskService:
             ctx.target,
             ctx.target_config or {},
         )
+
+    async def _apply_selected_generation_normalizers(
+        self,
+        ctx: Any,
+        selected_intents: Collection[str],
+    ) -> Any:
+        """Apply only the deterministic corrections selected by the router."""
+        selected = frozenset(selected_intents)
+        normalizers = (
+            (
+                {"percentage_output", "ratio_output"},
+                self._explicit_ratio_normalization_enabled,
+                self._explicit_ratio_normalization_fn,
+            ),
+            (
+                {"scalar_difference_output"},
+                self._scalar_derived_metric_normalization_enabled,
+                self._scalar_derived_metric_normalization_fn,
+            ),
+            (
+                {"all_rows_population"},
+                self._all_rows_aggregate_normalization_enabled,
+                self._all_rows_aggregate_normalization_fn,
+            ),
+            (
+                {"entity_at_extremum"},
+                self._extremum_entity_normalization_enabled,
+                self._extremum_entity_normalization_fn,
+            ),
+            (
+                {"all_matching_categories"},
+                self._unbounded_categorical_normalization_enabled,
+                self._unbounded_categorical_normalization_fn,
+            ),
+            (
+                {"shared_scope_all_answers"},
+                self._shared_entity_scope_normalization_enabled,
+                self._shared_entity_scope_normalization_fn,
+            ),
+        )
+        for routed_intents, enabled, normalizer in normalizers:
+            if enabled and selected.intersection(routed_intents):
+                ctx = await asyncio.to_thread(normalizer, ctx)
+        return ctx
+
+    async def _apply_correction_intent_routing(self, ctx: Any) -> Any:
+        """Route once, then apply and validate only the selected corrections."""
+        original_state = _snapshot_correction_state(ctx)
+        original_sql = str(ctx.sql or "")
+        original_hash = hashlib.sha256(original_sql.encode()).hexdigest()
+        base_diagnostics = {
+            "actionability_version": CORRECTION_INTENT_ACTIONABILITY_VERSION,
+            "allowed_intents": list(self._correction_intent_routing_intent_scope),
+            "router_called_before_application": True,
+            "pre_normalizer_sql_sha256": original_hash,
+            "baseline_sql_sha256": original_hash,
+            "selected_sql_sha256": original_hash,
+            "application_status": "not_selected",
+            "selected_sql_applied": False,
+        }
+        if not original_sql.strip():
+            ctx.correction_intent_routing = {
+                **base_diagnostics,
+                "status": "no_generated_sql",
+                "verdict": "abstain",
+                "selected_intent": "none",
+                "selected_intents": [],
+                "activation_allowed": False,
+                "shadow": self._correction_intent_routing_shadow,
+            }
+            return ctx
+
+        ctx = await asyncio.to_thread(
+            self._route_correction_intent,
+            ctx,
+            proposed_sql=original_sql,
+        )
+        routing = {**ctx.correction_intent_routing, **base_diagnostics}
+        selected_intents = selected_correction_intents(
+            {**routing, "activation_allowed": True}
+        )
+        routing["selected_intent_set_sha256"] = (
+            hashlib.sha256(
+                json.dumps(list(selected_intents), separators=(",", ":")).encode()
+            ).hexdigest()
+            if selected_intents
+            else ""
+        )
+        if not selected_intents:
+            _restore_correction_state(ctx, original_state)
+            ctx.correction_intent_routing = routing
+            return ctx
+
+        ctx.correction_intent_routing = {
+            **routing,
+            "status": "activate",
+            "verdict": "activate",
+            "activation_allowed": True,
+            "selected_intent": (
+                selected_intents[0] if len(selected_intents) == 1 else "none"
+            ),
+            "selected_intents": list(selected_intents),
+        }
+        try:
+            candidate_ctx = await self._apply_selected_generation_normalizers(
+                ctx,
+                selected_intents,
+            )
+            candidate_state = _snapshot_correction_state(candidate_ctx)
+            valid, issues = await self._preflight_correction_candidate(
+                candidate_ctx,
+                candidate_state,
+            )
+            candidate_sql = str(candidate_state.get("sql") or "")
+            if not valid or not candidate_sql:
+                routing.update(
+                    {
+                        "status": "selected_intent_set_not_applicable",
+                        "activation_allowed": False,
+                        "application_status": "invalid",
+                        "application_issue_count": len(issues),
+                    }
+                )
+            elif _sql_candidates_equivalent(
+                candidate_sql,
+                original_sql,
+                ctx.db_type,
+            ):
+                routing.update(
+                    {
+                        "status": "selected_intent_set_not_applicable",
+                        "activation_allowed": False,
+                        "application_status": "equivalent",
+                        "application_issue_count": 0,
+                    }
+                )
+            else:
+                candidate_hash = hashlib.sha256(candidate_sql.encode()).hexdigest()
+                routing.update(
+                    {
+                        "application_status": "validated",
+                        "application_issue_count": 0,
+                        "candidate_sql_sha256": candidate_hash,
+                        "selected_sql_sha256": (
+                            original_hash
+                            if self._correction_intent_routing_shadow
+                            else candidate_hash
+                        ),
+                    }
+                )
+                if self._correction_intent_routing_shadow:
+                    routing["activation_allowed"] = False
+                    _restore_correction_state(ctx, original_state)
+                else:
+                    routing["activation_allowed"] = True
+                    routing["selected_sql_applied"] = True
+                    _restore_correction_state(ctx, candidate_state)
+                ctx.correction_intent_routing = routing
+                return ctx
+        except Exception as exc:
+            routing.update(
+                {
+                    "status": "selected_intent_set_not_applicable",
+                    "activation_allowed": False,
+                    "application_status": "error",
+                    "application_error_kind": type(exc).__name__,
+                }
+            )
+
+        _restore_correction_state(ctx, original_state)
+        routing["selected_sql_sha256"] = original_hash
+        ctx.correction_intent_routing = routing
+        return ctx
+
+    async def _preflight_correction_candidate(
+        self,
+        ctx: Any,
+        candidate_state: dict[str, Any],
+    ) -> tuple[bool, list[str]]:
+        """Validate a candidate without repair, execution, or database access."""
+        if not ctx.get_schema_as_dict():
+            return False, ["loaded schema is unavailable"]
+        validation_ctx = copy.copy(ctx)
+        _restore_correction_state(validation_ctx, candidate_state)
+        validation_ctx.enforce_result_limit = False
+        validation_ctx = await asyncio.to_thread(
+            validate_sql,
+            validation_ctx,
+            _NullPresenter(),
+        )
+        issues = [str(error) for error in validation_ctx.validation_errors]
+        if issues or not validation_ctx.sql:
+            return False, issues or ["validated candidate SQL is unavailable"]
+        candidate_state.clear()
+        candidate_state.update(_snapshot_correction_state(validation_ctx))
+        return True, []
+
+    def _route_correction_intent(
+        self,
+        ctx: Any,
+        *,
+        proposed_sql: str | None = None,
+    ) -> Any:
+        """Classify correction intent without allowing the model to write SQL."""
+        if not self._correction_intent_routing_enabled:
+            ctx.correction_intent_routing = {
+                "status": "disabled",
+                "activation_allowed": False,
+                "shadow": False,
+            }
+            return ctx
+        try:
+            llm_manager = self._llm_manager
+            if llm_manager is None:
+                llm_manager = LLMManager()
+                self._llm_manager = llm_manager
+            result = self._correction_intent_routing_fn(
+                effective_question=ctx.refined_question or ctx.question,
+                dialect=ctx.db_type,
+                proposed_sql=(
+                    proposed_sql if proposed_sql is not None else ctx.sql or ""
+                ),
+                llm_manager=llm_manager,
+                callback=lambda **kwargs: ctx.add_llm_call(
+                    phase=CORRECTION_INTENT_ROUTING_PURPOSE,
+                    **kwargs,
+                ),
+                allowed_intents=self._correction_intent_routing_intent_scope,
+                allowed_intent_sets=None,
+            )
+            if hasattr(result, "to_dict"):
+                diagnostics = result.to_dict()
+            elif isinstance(result, dict):
+                diagnostics = dict(result)
+            else:
+                raise TypeError("correction intent router returned an invalid result")
+            diagnostics["shadow"] = self._correction_intent_routing_shadow
+            selected = selected_correction_intents(
+                {**diagnostics, "activation_allowed": True}
+            )
+            selection_is_allowed = bool(selected) and all(
+                intent in self._correction_intent_routing_intent_scope
+                for intent in selected
+            )
+            diagnostics["activation_allowed"] = bool(
+                not self._correction_intent_routing_shadow
+                and diagnostics.get("status") == "activate"
+                and diagnostics.get("verdict") == "activate"
+                and selection_is_allowed
+            )
+            ctx.correction_intent_routing = diagnostics
+        except Exception as exc:
+            ctx.correction_intent_routing = {
+                "status": "error",
+                "verdict": "abstain",
+                "selected_intent": "none",
+                "selected_intents": [],
+                "activation_allowed": False,
+                "shadow": self._correction_intent_routing_shadow,
+                "error_kind": type(exc).__name__,
+            }
+        return ctx
 
     def _auto_save_query(
         self, ctx: Any, *, persist_query: bool = True

@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 # expire before those routes emit any structured output. Keep the response
 # contract concise while allowing the same Ask pipeline to evaluate such models.
 SQL_GENERATION_MAX_TOKENS = 4000
+SQL_GENERATION_RESPONSE_PARSER_VERSION = "last-valid-json-object-v2"
 _SCHEMA_SIZE_ERROR_CODES = {
     "ANTHROPIC_CONTEXT_WINDOW_EXCEEDED",
     "ANTHROPIC_REQUEST_TOO_LARGE",
@@ -130,7 +131,7 @@ def _schema_size_failure(
 
 
 def _parse_json_object_response(response_text: Any) -> Dict[str, Any]:
-    """Parse a JSON object, tolerating the Markdown fences models sometimes add."""
+    """Parse the model's final JSON object, tolerating fences and self-correction."""
     if not isinstance(response_text, str):
         raise TypeError("LLM response must be a string")
     response_text = response_text.strip()
@@ -141,7 +142,30 @@ def _parse_json_object_response(response_text: Any) -> Dict[str, Any]:
         if response_text.endswith("```"):
             response_text = response_text[:-3]
         response_text = response_text.strip()
-    parsed = json.loads(response_text, strict=False)
+    try:
+        parsed = json.loads(response_text, strict=False)
+    except json.JSONDecodeError as initial_error:
+        decoder = json.JSONDecoder(strict=False)
+        candidates: list[Dict[str, Any]] = []
+        cursor = 0
+        while cursor < len(response_text):
+            object_start = response_text.find("{", cursor)
+            if object_start < 0:
+                break
+            try:
+                candidate, object_end = decoder.raw_decode(
+                    response_text,
+                    object_start,
+                )
+            except json.JSONDecodeError:
+                cursor = object_start + 1
+                continue
+            if isinstance(candidate, dict):
+                candidates.append(candidate)
+            cursor = max(object_start + 1, object_end)
+        if not candidates:
+            raise initial_error
+        parsed = candidates[-1]
     if not isinstance(parsed, dict):
         raise TypeError("LLM response must be a JSON object")
     return parsed

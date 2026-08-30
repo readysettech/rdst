@@ -6,6 +6,9 @@ disambiguation detection, and safety validation.
 """
 
 
+SQL_GENERATION_PROMPT_VERSION = "concise-semantic-audit-v1"
+
+
 def format_provided_context_block(provided_context: str | None) -> str:
     """Render caller-provided facts separately from the user's question."""
     value = (provided_context or "").strip()
@@ -54,6 +57,10 @@ Requirements:
   to express the result.
 - Do not add filters, joins, limits, ordering, or assumptions that are not supported by
   the question, supplied clarification, or schema.
+- Before emitting the response, silently audit the SQL for exact use of authoritative
+  mappings and complete literals, the minimum sufficient table set, the requested
+  output columns and cardinality, and dialect-correct non-integer arithmetic. Remove
+  any unsupported join, predicate, limit, exclusion, rounding, or intermediate output.
 - Use only tables and columns present in the schema and the requested database dialect.
 - Keep `explanation` to one short sentence.
 - Put every unavoidable interpretation in `assumptions`; do not encode a hedge as an

@@ -1,0 +1,93 @@
+{
+  "freeze_id": "rdst-ask-auto-init-no-evidence-v9",
+  "supersedes": "rdst-ask-auto-init-no-evidence-v8",
+  "supersession_reason": "V9 records the qualified correction-router and dual-candidate code landing behind disabled product defaults, the concise generation semantic audit, and final-valid-object response parsing. The frozen benchmark behavior keeps both optional accuracy mechanisms disabled until clean qualification completes.",
+  "frozen_at": "2026-08-30",
+  "benchmark_protocol_sha256": "7119c22ae275298cee35edf06ff821882d1ea71108f5af2bcb200f498a288ad1",
+  "protocol_path_policy": "devtools.ask_benchmark.cli._benchmark_protocol_paths",
+  "track": "rdst-ask",
+  "entrypoint": "features.ask.service.AskService",
+  "dataset_revision": "f65faf4ae3b638c1fa6df1d3370c8d92c8366301",
+  "dialect": "mysql",
+  "development_partition": {
+    "revision": "bird-mini-dev-50-holdout-450-v1",
+    "size": 50,
+    "case_ids_sha256": "d4c88b91105f75c7f20b8f9a9d953035b58edd7c68b4e81c690e59345aaf63a4"
+  },
+  "holdout_partition": {
+    "size": 450,
+    "case_ids_sha256": "5089279cd73d3c314243585d72aab9cee1bce7d3f61101ef30a833c73edb0b44",
+    "opened": false
+  },
+  "context": {
+    "mode": "auto-init",
+    "evidence": "none",
+    "schema_scope": "complete",
+    "schema_format_policy": "rdst-adaptive-schema-v2",
+    "context_window_policy": "provider-authoritative-lossless-compact-retry-v2",
+    "token_estimate": "none-provider-authoritative",
+    "request_body_policy": "exact-utf8-json-32-mib-limit",
+    "ai_annotations": false,
+    "value_profile_context": false
+  },
+  "interaction": {
+    "mode": "auto",
+    "policy": "deterministic-intent-stop-v2-no-llm-detector",
+    "positional_auto_selection": false
+  },
+  "generation": {
+    "attempts": 1,
+    "context_overflow_retries": 1,
+    "validation_repair_attempts": 1,
+    "execution_repair_attempts": 0,
+    "completion_max_tokens": 4000,
+    "response_schema_enforcement": "prompt-embedded-json-schema-with-rdst-validation",
+    "enforce_result_limit": false,
+    "correction_intent_routing": "disabled-default",
+    "dual_candidate_selection": "disabled-default",
+    "response_parser": "last-valid-json-object-v2"
+  },
+  "baseline_model": {
+    "configuration": "claude-sonnet-4.6-subscription-medium",
+    "model": "claude-sonnet-4-6",
+    "transport": "claude-subscription",
+    "authentication": "claude-code-subscription-oauth",
+    "claude_code_version": "2.1.237",
+    "temperature": "provider-default",
+    "reasoning_effort": "medium",
+    "reasoning_effort_source": "cli_flag_and_environment",
+    "extended_thinking": true,
+    "effort_auto": false,
+    "cli_retries": 0,
+    "max_turns": 1,
+    "auxiliary_models_allowed": false
+  },
+  "context_hashes": {
+    "california_schools": "987f4e29889c76a5b2e38d5daccf0785c30d4b5d0231e82848f5959b2f432842",
+    "card_games": "a9420516333fe5f08751395af26f9328dd263f1be575ccfd99c61bee577e1ef0",
+    "codebase_community": "7dfbfc6d33a49b2de61dac80b11dea080baf4a0df2bf08df2a02c74105fea0e8",
+    "debit_card_specializing": "db71abe2e162b3a1dfd78f3c848e7e291604958dc831c65857bca713b03fbf82",
+    "european_football_2": "0e0376cae19937740e87ae51251e4f9e8ffa7696e8fae25b8c42488fcf699543",
+    "financial": "b6b2c365d1727b082c577bd576b87ad7e356b4f82f7c8b62a8e89e9c513ed8d4",
+    "formula_1": "0b7339065fa88d1129c3ac9e8dcea5cc79b937b56b19462a7dc67841b164ba02",
+    "student_club": "e6cac2a818926c4c739ee6aad5083ee2de9a389a8ac27e4b7a1c981b315bc5b6",
+    "superhero": "de33ba660754a380727520c6ece1f6f6a11934d8aa7d93e28634e07311a2da80",
+    "thrombosis_prediction": "dab617dbf95a896df27fbcd933a8faac8baabf1a4e6fb698529725c36abe2ddf",
+    "toxicology": "ee2632f15e236506dc7a1da97047099a2ad9f847ef6061acf7ceeeb93e08eb38"
+  },
+  "database_provision": {
+    "archive_sha256": "cc48ba16838204e4e214512030cb572eeb5f7bcdd999bae4b9b6ff12ec13b92f",
+    "mysql_image": "mysql:8.4.0",
+    "mysql_image_id": "sha256:dab7049abafe3a0e12cbe5e49050cf149881c0cd9665c289e5808b9dad39c9e0",
+    "mysql_version": "8.4.0",
+    "database_prefix": "bird_",
+    "runtime_user_prefix": "rdst_bird",
+    "view_count": 75
+  },
+  "acceptance": {
+    "required_baseline_repetitions": 3,
+    "model_selection_after_freeze": true,
+    "holdout_after_model_selection": true,
+    "sdk_confirmation_before_release": true
+  }
+}

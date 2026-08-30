@@ -71,6 +71,20 @@ class Ask3Context:
     schema_prompt_utf8_bytes: int = 0
 
     generation_response: Dict[str, Any] = field(default_factory=dict)
+    correction_intent_routing: Dict[str, Any] = field(default_factory=dict)
+    dual_candidate_selection: Dict[str, Any] = field(default_factory=dict)
+    explicit_ratio_normalization: Dict[str, Any] = field(default_factory=dict)
+    scalar_derived_metric_normalization: Dict[str, Any] = field(
+        default_factory=dict
+    )
+    all_rows_aggregate_normalization: Dict[str, Any] = field(default_factory=dict)
+    extremum_entity_normalization: Dict[str, Any] = field(default_factory=dict)
+    unbounded_categorical_normalization: Dict[str, Any] = field(
+        default_factory=dict
+    )
+    shared_entity_scope_normalization: Dict[str, Any] = field(
+        default_factory=dict
+    )
 
     # === Clarification (Phase 2) ===
     interpretations: List[Interpretation] = field(default_factory=list)
@@ -159,6 +173,22 @@ class Ask3Context:
             "generation_confidence": self.generation_confidence,
             "sql": self.sql,
             "sql_explanation": self.sql_explanation,
+            "correction_intent_routing": self.correction_intent_routing,
+            "dual_candidate_selection": self.dual_candidate_selection,
+            "explicit_ratio_normalization": self.explicit_ratio_normalization,
+            "scalar_derived_metric_normalization": (
+                self.scalar_derived_metric_normalization
+            ),
+            "all_rows_aggregate_normalization": (
+                self.all_rows_aggregate_normalization
+            ),
+            "extremum_entity_normalization": self.extremum_entity_normalization,
+            "unbounded_categorical_normalization": (
+                self.unbounded_categorical_normalization
+            ),
+            "shared_entity_scope_normalization": (
+                self.shared_entity_scope_normalization
+            ),
             # Validation
             "validation_errors": [e.to_dict() for e in self.validation_errors],
             "retry_count": self.retry_count,
@@ -237,6 +267,28 @@ class Ask3Context:
         ctx.generation_confidence = data.get("generation_confidence")
         ctx.sql = data.get("sql")
         ctx.sql_explanation = data.get("sql_explanation")
+        ctx.correction_intent_routing = data.get(
+            "correction_intent_routing", {}
+        )
+        ctx.dual_candidate_selection = data.get("dual_candidate_selection", {})
+        ctx.explicit_ratio_normalization = data.get(
+            "explicit_ratio_normalization", {}
+        )
+        ctx.scalar_derived_metric_normalization = data.get(
+            "scalar_derived_metric_normalization", {}
+        )
+        ctx.all_rows_aggregate_normalization = data.get(
+            "all_rows_aggregate_normalization", {}
+        )
+        ctx.extremum_entity_normalization = data.get(
+            "extremum_entity_normalization", {}
+        )
+        ctx.unbounded_categorical_normalization = data.get(
+            "unbounded_categorical_normalization", {}
+        )
+        ctx.shared_entity_scope_normalization = data.get(
+            "shared_entity_scope_normalization", {}
+        )
 
         # Validation
         ctx.validation_errors = [

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any
 
 CORRECTION_INTENTS = (
@@ -19,8 +19,15 @@ CORRECTION_INTENTS = (
 )
 
 
-def selected_correction_intents(diagnostic: Any) -> tuple[str, ...]:
+def selected_correction_intents(
+    diagnostic: Any,
+    *,
+    allowed_intents: Collection[str] = CORRECTION_INTENTS,
+) -> tuple[str, ...]:
     """Read an active, allowed canonical intent set from router diagnostics."""
+    canonical_intents = tuple(
+        intent for intent in CORRECTION_INTENTS if intent in set(allowed_intents)
+    )
     if isinstance(diagnostic, Mapping):
         values = diagnostic
     elif callable(getattr(diagnostic, "to_dict", None)):
@@ -47,7 +54,7 @@ def selected_correction_intents(diagnostic: Any) -> tuple[str, ...]:
             )
         else:
             legacy = values.get("selected_intent")
-            selected = (legacy,) if legacy in CORRECTION_INTENTS else ()
+            selected = (legacy,) if legacy in canonical_intents else ()
 
     legacy_selected = values.get("selected_intent")
     expected_legacy = selected[0] if len(selected) == 1 else "none"
@@ -57,9 +64,9 @@ def selected_correction_intents(diagnostic: Any) -> tuple[str, ...]:
     if (
         not selected
         or len(set(selected)) != len(selected)
-        or any(intent not in CORRECTION_INTENTS for intent in selected)
+        or any(intent not in canonical_intents for intent in selected)
         or {"percentage_output", "ratio_output"}.issubset(selected)
     ):
         return ()
     selected_set = set(selected)
-    return tuple(intent for intent in CORRECTION_INTENTS if intent in selected_set)
+    return tuple(intent for intent in canonical_intents if intent in selected_set)
