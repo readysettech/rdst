@@ -3,7 +3,7 @@
   "supersedes": "rdst-ask-auto-init-no-evidence-v7",
   "supersession_reason": "V8 removes the conservative byte-as-token admission check. Anthropic now makes the authoritative context-window decision, and Ask retries the complete lossless compact schema exactly once after a classified context or request-body overflow. Unrelated invalid requests are not retried.",
   "frozen_at": "2026-08-25",
-  "benchmark_protocol_sha256": "f51f43ccdaff104941580411c2bbac91738060d84e3c486138c485796c72d412",
+  "benchmark_protocol_sha256": "63de7e8c3bd89fd2e2d066998a15401323e12c641c6cca37654d3832a5775302",
   "protocol_path_policy": "devtools.ask_benchmark.cli._benchmark_protocol_paths",
   "track": "rdst-ask",
   "entrypoint": "features.ask.service.AskService",

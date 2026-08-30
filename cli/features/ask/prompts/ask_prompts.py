@@ -22,6 +22,14 @@ def format_matched_database_values_block(value_context: str | None) -> str:
     return f"\n\nQUESTION-MATCHED DATABASE VALUES:\n{value}"
 
 
+def format_query_grounding_block(query_grounding: str | None) -> str:
+    """Append a rendered grounding block when the caller supplied one."""
+    value = (query_grounding or "").strip()
+    if not value:
+        return ""
+    return f"\n\n{value}"
+
+
 SQL_GENERATION_SYSTEM_PROMPT = (
     "You are an expert text-to-SQL system. Generate exactly one read-only SQL "
     "query using the requested database dialect and only identifiers present in "
