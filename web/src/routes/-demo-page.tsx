@@ -936,10 +936,8 @@ function formatDownloadSize(mb: number | undefined | null): string {
   return `${Math.round(mb)} MB`
 }
 
-// Post-tour invite: once the walkthrough is done, offer free trial credits
-// through the same TrialRegistrationDialog every other surface uses (so an
-// already-registered email re-sends its token link), plus a pointer to run
-// RDST on the user's own database. Dismissible; never shown mid-tour.
+// Post-tour invite: offer Readyset account sign-in plus a pointer to run RDST
+// on the user's own database. Dismissible; never shown mid-tour.
 function DemoTrialInvite() {
   const [dismissed, setDismissed] = useState(false)
   const [showTrial, setShowTrial] = useState(false)
@@ -966,8 +964,8 @@ function DemoTrialInvite() {
         </div>
         <Text level="body-small" className="mt-2 text-content-layout-2">
           You just watched Readyset cache these queries live — the same speedup
-          works on your data. Claim free trial credits to power AI analysis (no
-          credit card), then point RDST at your database.
+          works on your data. Sign in for capped hosted AI inference, then point
+          RDST at your database.
         </Text>
         <div className="mt-4 flex flex-col gap-2">
           <Button
@@ -975,7 +973,7 @@ function DemoTrialInvite() {
             modifier="solid"
             icon="sparkles"
             iconPosition="left"
-            label="Claim free trial credits"
+            label="Sign in to Readyset"
             onClick={() => setShowTrial(true)}
           />
           <Button

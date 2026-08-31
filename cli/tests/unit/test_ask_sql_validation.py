@@ -24,6 +24,7 @@ from features.ask.sql_validation import (
     validate_sql_for_ask,
     validate_tables_against_schema,
 )
+from shared.llm_manager.base import LLMError
 
 Q72_SCHEMA = """Table: frpm
   School Name (text) -- The official name of the school.
@@ -326,6 +327,24 @@ class TestGenerationSafetyGate:
 
         assert result["success"] is True
         assert result["sql"] == "SELECT id FROM users"
+
+    def test_provider_error_code_is_preserved(self):
+        llm = MagicMock()
+        llm.propagate_query_errors = False
+        llm.generate_response.side_effect = LLMError(
+            "Monthly limit reached", code="HOSTED_CAP_REACHED", status=403
+        )
+
+        result = generate_sql_from_nl(
+            nl_question="anything",
+            filtered_schema="",
+            database_engine="postgresql",
+            target_database="testdb",
+            llm_manager=llm,
+        )
+
+        assert result["success"] is False
+        assert result["error_code"] == "HOSTED_CAP_REACHED"
 
 
 class TestExecutionGate:

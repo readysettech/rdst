@@ -12,7 +12,12 @@ from pathlib import Path
 
 import pytest
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 MIGRATIONS_DIR = Path(__file__).parents[2] / "keyservice" / "migrations"
+WRANGLER_CONFIG = MIGRATIONS_DIR.parent / "wrangler.toml"
 
 # The public GitHub mirror publishes the CLI without the keyservice; there is
 # nothing for this drift guard to check in such a checkout.
@@ -39,6 +44,18 @@ def test_migrations_apply_cleanly_in_order():
     assert applied, "no migration files found"
 
 
+def test_local_wrangler_config_binds_the_migrated_database():
+    config = tomllib.loads(WRANGLER_CONFIG.read_text(encoding="utf-8"))
+    local_databases = config.get("d1_databases", [])
+
+    assert any(
+        database.get("binding") == "DB"
+        and database.get("database_name") == "rdst-keyservice-db-local"
+        and database.get("migrations_dir") == "migrations"
+        for database in local_databases
+    )
+
+
 def test_usage_log_insert_matches_migrated_schema():
     db = sqlite3.connect(":memory:")
     for path in sorted(MIGRATIONS_DIR.glob("0*.sql")):
@@ -52,3 +69,45 @@ def test_usage_log_insert_matches_migrated_schema():
         "SELECT duration_ms, max_tokens_requested FROM usage_log"
     ).fetchone()
     assert row == (74000, 6144)
+
+
+def test_account_auth_and_inference_use_only_new_tables():
+    db = sqlite3.connect(":memory:")
+    legacy_migrations = sorted(MIGRATIONS_DIR.glob("000[1-4]_*.sql"))
+    for path in legacy_migrations:
+        db.executescript(path.read_text(encoding="utf-8"))
+
+    legacy_tables = ("users", "registration_attempts", "settings", "usage_log",
+                     "oauth_logins", "oauth_start_attempts")
+    before = {
+        table: db.execute(f"PRAGMA table_info({table})").fetchall()
+        for table in legacy_tables
+    }
+
+    db.executescript(
+        (MIGRATIONS_DIR / "0006_account_auth_and_inference.sql").read_text(
+            encoding="utf-8")
+    )
+
+    after = {
+        table: db.execute(f"PRAGMA table_info({table})").fetchall()
+        for table in legacy_tables
+    }
+    assert after == before
+
+    new_tables = {
+        row[0]
+        for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    assert {
+        "account_auth_logins",
+        "account_auth_attempts",
+        "inference_accounts",
+        "inference_reservations",
+        "inference_usage",
+        "inference_rate_events",
+        "inference_rate_buckets",
+        "inference_settings",
+    } <= new_tables

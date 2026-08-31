@@ -82,8 +82,18 @@ def generate_sql(
 
     if not result.get("success"):
         error = result.get("error", "Unknown error")
-        error_code = result.get("schema_request_failure_code") or None
-        error_category = "model-limit" if error_code else None
+        error_code = (
+            result.get("schema_request_failure_code")
+            or result.get("error_code")
+            or None
+        )
+        error_category = (
+            "model-limit"
+            if result.get("schema_request_failure_code")
+            else "provider"
+            if error_code
+            else None
+        )
         logger.error(f"SQL generation failed: {error}")
         ctx.mark_error(error, code=error_code, category=error_category)
         presenter.error(error)

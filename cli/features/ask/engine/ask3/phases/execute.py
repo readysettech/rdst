@@ -8,6 +8,7 @@ Handles timeouts and execution errors.
 from __future__ import annotations
 
 import logging
+import math
 import time
 import uuid
 from typing import TYPE_CHECKING, Dict, Any, List
@@ -143,6 +144,7 @@ def execute_query(
 
         ctx.execution_result = ExecutionResult(
             error=str(e),
+            error_kind=type(e).__name__,
             execution_time_ms=execution_time_ms
         )
         presenter.execution_error(str(e))
@@ -176,7 +178,10 @@ def _execute_postgres(
             }
 
         # Connect
-        conn = psycopg2.connect(**postgres_connection_kwargs(params))
+        conn = psycopg2.connect(**postgres_connection_kwargs(
+            params,
+            connect_timeout=max(1, math.ceil(timeout_seconds)) if timeout_seconds > 0 else 10,
+        ))
 
         try:
             with conn.cursor() as cursor:
@@ -206,13 +211,23 @@ def _execute_postgres(
         return {
             'success': False,
             'error': 'psycopg2 not installed',
+            'error_kind': 'local_dependency',
             'rows': [],
             'columns': []
         }
     except Exception as e:
+        message = str(e)
+        if getattr(e, "pgcode", None) == "57014" or "statement timeout" in message.lower():
+            error_kind = "query_timeout"
+            message = f"Query exceeded the {timeout_seconds}-second execution limit."
+        elif isinstance(e, psycopg2.OperationalError):
+            error_kind = "connection"
+        else:
+            error_kind = "query_execution"
         return {
             'success': False,
-            'error': str(e),
+            'error': message,
+            'error_kind': error_kind,
             'rows': [],
             'columns': []
         }
@@ -243,7 +258,16 @@ def _execute_mysql(
             }
 
         # Connect
-        conn = create_mysql_connection_from_params(params)
+        timeout_options = (
+            {
+                "connect_timeout": max(1, math.ceil(timeout_seconds)),
+                "read_timeout": timeout_seconds,
+                "write_timeout": timeout_seconds,
+            }
+            if timeout_seconds > 0
+            else {}
+        )
+        conn = create_mysql_connection_from_params(params, **timeout_options)
 
         try:
             with conn.cursor() as cursor:
@@ -277,13 +301,27 @@ def _execute_mysql(
         return {
             'success': False,
             'error': 'pymysql not installed',
+            'error_kind': 'local_dependency',
             'rows': [],
             'columns': []
         }
     except Exception as e:
+        message = str(e)
+        args = getattr(e, "args", ())
+        error_code = args[0] if args and isinstance(args[0], int) else None
+        if error_code == 3024 or "maximum statement execution time" in message.lower():
+            error_kind = "query_timeout"
+            message = f"Query exceeded the {timeout_seconds}-second execution limit."
+        elif isinstance(e, pymysql.OperationalError) and error_code in {
+            2002, 2003, 2006, 2013,
+        }:
+            error_kind = "connection"
+        else:
+            error_kind = "query_execution"
         return {
             'success': False,
-            'error': str(e),
+            'error': message,
+            'error_kind': error_kind,
             'rows': [],
             'columns': []
         }

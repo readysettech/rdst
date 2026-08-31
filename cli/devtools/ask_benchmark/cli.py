@@ -2163,8 +2163,12 @@ _HOLDOUT_IDENTITY_FIELDS = (
     "partition_provenance",
     "holdout_campaign_id",
     "context_mode",
+    "semantic_schema_format",
+    "ask_accuracy_profile",
+    "ask_accuracy_features",
     "case_ids",
     "models",
+    "model_configuration_fingerprints",
     "rdst_revision",
     "rdst_dirty",
     "rdst_diff_sha256",
@@ -2272,8 +2276,37 @@ def _rdst_diff_sha256() -> str:
                 check=True,
                 capture_output=True,
             ).stdout
+            status = subprocess.run(
+                ["git", "status", "--porcelain", "-z"],
+                cwd=RDST_ROOT,
+                check=True,
+                capture_output=True,
+            ).stdout
         except (OSError, subprocess.CalledProcessError):
             return "unknown"
+        digest = hashlib.sha256(diff)
+        digest.update(status)
+        for entry in status.split(b"\0"):
+            if not entry.startswith(b"?? "):
+                continue
+            relative = entry[3:].decode("utf-8", errors="surrogateescape")
+            path = (RDST_ROOT / relative).resolve()
+            try:
+                path.relative_to(RDST_ROOT.resolve())
+            except ValueError:
+                return "unknown"
+            files = sorted(path.rglob("*")) if path.is_dir() else [path]
+            for file_path in files:
+                if not file_path.is_file():
+                    continue
+                digest.update(str(file_path.relative_to(RDST_ROOT)).encode())
+                try:
+                    with file_path.open("rb") as source:
+                        while chunk := source.read(1024 * 1024):
+                            digest.update(chunk)
+                except OSError:
+                    return "unknown"
+        return digest.hexdigest()
     return hashlib.sha256(diff).hexdigest()
 
 

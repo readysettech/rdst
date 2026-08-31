@@ -3,6 +3,7 @@
 from unittest.mock import Mock, patch
 
 from shared.env_requirements_service import EnvRequirementsService
+from shared.account_session import SESSION_SECRET_NAMES
 
 
 class FakeSecretStore:
@@ -80,7 +81,7 @@ def test_anthropic_requirement_satisfied_by_process_env(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
 
-def test_anthropic_requirement_satisfied_by_trial_token(monkeypatch):
+def test_anthropic_requirement_ignores_legacy_trial_env(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("RDST_TRIAL_TOKEN", "in-trial")
 
@@ -89,13 +90,13 @@ def test_anthropic_requirement_satisfied_by_trial_token(monkeypatch):
         requirements = service.get_requirements()
 
     anthropic_req = next(r for r in requirements if r["kind"] == "anthropic_api_key")
-    assert anthropic_req["source"] == "trial"
-    assert anthropic_req["satisfied"] is True
+    assert anthropic_req["source"] == "missing"
+    assert anthropic_req["satisfied"] is False
 
     monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
 
 
-def test_anthropic_requirement_satisfied_by_trial_token_in_keyring(monkeypatch):
+def test_anthropic_requirement_ignores_legacy_trial_keyring_entry(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
 
@@ -106,8 +107,8 @@ def test_anthropic_requirement_satisfied_by_trial_token_in_keyring(monkeypatch):
         requirements = service.get_requirements()
 
     anthropic_req = next(r for r in requirements if r["kind"] == "anthropic_api_key")
-    assert anthropic_req["source"] == "trial"
-    assert anthropic_req["satisfied"] is True
+    assert anthropic_req["source"] == "missing"
+    assert anthropic_req["satisfied"] is False
 
 
 def test_anthropic_requirement_satisfied_by_api_key_in_keyring(monkeypatch):
@@ -125,7 +126,43 @@ def test_anthropic_requirement_satisfied_by_api_key_in_keyring(monkeypatch):
     assert anthropic_req["satisfied"] is True
 
 
-def test_anthropic_requirement_uses_config_backed_active_trial(monkeypatch):
+def test_readyset_account_requires_a_refreshable_session(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    service = EnvRequirementsService(secret_store=FakeSecretStore())
+
+    with (
+        patch.object(service, "_load_config", return_value=_mock_config()),
+        patch("shared.env_requirements_service.access_token", return_value="fresh-token"),
+    ):
+        requirement = next(
+            item
+            for item in service.get_requirements()
+            if item["kind"] == "anthropic_api_key"
+        )
+
+    assert requirement["satisfied"] is True
+    assert requirement["source"] == "readyset_account"
+
+
+def test_expired_unrefreshable_account_does_not_open_gate(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    service = EnvRequirementsService(secret_store=FakeSecretStore())
+
+    with (
+        patch.object(service, "_load_config", return_value=_mock_config()),
+        patch("shared.env_requirements_service.access_token", return_value=None),
+    ):
+        requirement = next(
+            item
+            for item in service.get_requirements()
+            if item["kind"] == "anthropic_api_key"
+        )
+
+    assert requirement["satisfied"] is False
+    assert requirement["source"] == "missing"
+
+
+def test_anthropic_requirement_ignores_config_backed_active_trial(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
 
@@ -137,11 +174,11 @@ def test_anthropic_requirement_uses_config_backed_active_trial(monkeypatch):
         requirements = service.get_requirements()
 
     anthropic_req = next(r for r in requirements if r["kind"] == "anthropic_api_key")
-    assert anthropic_req["source"] == "trial"
-    assert anthropic_req["satisfied"] is True
+    assert anthropic_req["source"] == "missing"
+    assert anthropic_req["satisfied"] is False
 
 
-def test_anthropic_requirement_reports_config_backed_exhausted_trial(monkeypatch):
+def test_anthropic_requirement_ignores_config_backed_exhausted_trial(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
 
@@ -153,7 +190,7 @@ def test_anthropic_requirement_reports_config_backed_exhausted_trial(monkeypatch
         requirements = service.get_requirements()
 
     anthropic_req = next(r for r in requirements if r["kind"] == "anthropic_api_key")
-    assert anthropic_req["source"] == "trial_exhausted"
+    assert anthropic_req["source"] == "missing"
     assert anthropic_req["satisfied"] is False
 
 
@@ -182,8 +219,17 @@ def test_get_allowed_names_includes_targets_and_anthropic():
 
     assert "PROD_DB_PASSWORD" in names
     assert "STAGE_DB_PASSWORD" in names
-    assert "RDST_TRIAL_TOKEN" in names
+    assert "RDST_TRIAL_TOKEN" not in names
     assert "ANTHROPIC_API_KEY" in names
+
+    with patch.object(service, "_load_config", return_value=_mock_config()):
+        clearable_names = service.get_clearable_secret_names()
+    assert "RDST_TRIAL_TOKEN" in clearable_names
+    assert set(SESSION_SECRET_NAMES).issubset(clearable_names)
+
+    with patch.object(service, "_load_config", return_value=_mock_config()):
+        restored_names = service.get_required_names_for_restore()
+    assert set(SESSION_SECRET_NAMES).issubset(restored_names)
 
 
 def test_target_with_direct_password_shows_config_source(monkeypatch):

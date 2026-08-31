@@ -1,53 +1,21 @@
-"""Resolve API key and determine routing (direct vs trial proxy).
+"""Resolve credentials and choose Claude BYOK or Readyset-hosted AI.
 
 RDST routes LLM requests based on key type:
   - Own Anthropic key (env var) -> direct to api.anthropic.com
-  - Trial token (config.toml)  -> route to the keyservice proxy
+  - Readyset account session   -> route to hosted inference
     (defaults to prod; overridable via RDST_KEYSERVICE_URL — see
     shared.keyservice).
-
-Trial requests include HMAC attestation headers to prevent
-trial tokens from being used outside RDST.
 """
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import os
-import time
 from dataclasses import dataclass, field
 
 from shared.keyservice import keyservice_base_url
 from shared.shell import environment_assignment
 
-# Backwards-compatible module-level constants - evaluated at import time,
-# so they reflect the env var at process start. Prefer keyservice_base_url()
-# directly when you need runtime-fresh values.
-TRIAL_PROXY_URL = keyservice_base_url()
-TRIAL_PROXY_BASE = keyservice_base_url()
-# Client attestation value for HMAC signing — the proxy checks that requests
-# come from the RDST CLI, not arbitrary HTTP clients reusing a trial token.
-# This is defense-in-depth, not cryptographic security — the $5 per-user cap
-# is the real protection. The proxy-side value lives in Wrangler secrets
-# (`ATTESTATION_SECRET` per env). Prod's secret MUST equal the constant
-# below so shipped CLIs in the wild keep validating.
-#
-# To test against a non-prod env (staging, per-CL preview, personal dev
-# env), set RDST_ATTESTATION_SECRET to that env's value, paired with
-# RDST_KEYSERVICE_URL pointing at the matching Worker.
-_DEFAULT_CLIENT_ATTESTATION = (
-    "rdst-trial-v1-e913cc8943ce5eca323eb31e6c109b65bf0f39b136f03f566e214269d147f363"
-)
-
-
-def _client_attestation() -> str:
-    """Return the HMAC secret, honoring RDST_ATTESTATION_SECRET override."""
-    return os.getenv("RDST_ATTESTATION_SECRET") or _DEFAULT_CLIENT_ATTESTATION
-
-
-CLIENT_ATTESTATION = _client_attestation()
-
+HOSTED_MODEL = "z-ai/glm-5.3-flash"
 
 @dataclass
 class KeyResolution:
@@ -55,49 +23,22 @@ class KeyResolution:
 
     api_key: str
     is_trial: bool
+    provider: str = "claude"
+    model: str | None = None
     proxy_url: str | None = None
     extra_headers: dict[str, str] = field(default_factory=dict)
 
 
-def _make_attestation_headers(trial_token: str) -> dict[str, str]:
-    """Generate HMAC attestation headers for trial proxy requests.
-
-    The proxy validates these to ensure requests come from RDST,
-    not from arbitrary HTTP clients reusing a trial token.
-    """
-    timestamp = str(int(time.time()))
-    message = f"{timestamp}.{trial_token}"
-    sig = hmac.new(
-        _client_attestation().encode(), message.encode(), hashlib.sha256
-    ).hexdigest()[:32]
-    return {
-        "X-RDST-Client": "rdst",
-        "X-RDST-Signature": f"{timestamp}.{sig}",
-    }
-
-
-def resolve_api_key() -> KeyResolution:
-    """Resolve API key with priority: env > active trial > keyring.
+def resolve_api_key(provider: str = "auto") -> KeyResolution:
+    """Resolve credentials with Claude BYOK ahead of hosted inference.
 
     Resolution order:
       1. ANTHROPIC_API_KEY env var  → direct to Anthropic
-      2. RDST_TRIAL_TOKEN env var   → trial proxy
-      3. Trial token in config.toml → trial proxy (only when *active*)
-      4. ANTHROPIC_API_KEY in OS keyring (set via rdst web) → direct
-      5. RDST_TRIAL_TOKEN in OS keyring → trial proxy
+      2. ANTHROPIC_API_KEY in OS keyring (set via RDST) → direct
+      3. Readyset account session → hosted inference through Keyservice
 
-    Keyring is checked last because it may be slow on systems
-    without a keyring daemon. The backend type is checked first
-    (instant) so dead backends never cause a delay.
-
-    Keyring-precedence rule (T17 / configure-and-identity open-dependency #2):
-    a *present own key in the keyring beats an exhausted trial*. When the
-    config marks the trial ``exhausted`` we probe the keyring for a real
-    ``ANTHROPIC_API_KEY`` **before** raising ``TRIAL_EXHAUSTED`` — a user who
-    saved their own key via the web UI must never be blocked by a stale
-    exhausted marker in ``config.toml``. The common active-trial / no-trial
-    paths still skip the keyring probe, preserving the slow-keyring
-    optimization.
+    The keyring is checked after the environment and before a Readyset account
+    so a user-supplied Anthropic key always wins.
 
     Returns:
         KeyResolution with routing info and attestation headers.
@@ -116,83 +57,45 @@ def resolve_api_key() -> KeyResolution:
         except Exception:  # noqa: BLE001 - optional keyring backends may fail
             return None
 
+    requested_provider = (provider or "auto").lower()
+    if requested_provider not in {"auto", "claude", "readyset"}:
+        raise LLMError(
+            f"Unknown provider '{requested_provider}'.",
+            code="NO_SUCH_PROVIDER",
+        )
+
     # 1. User's own Anthropic API key (env var) — fastest path
     key = os.getenv("ANTHROPIC_API_KEY")
-    if key:
-        return KeyResolution(api_key=key, is_trial=False)
+    if key and requested_provider != "readyset":
+        return KeyResolution(api_key=key, is_trial=False, provider="claude")
 
-    # 2. Trial token (env var) — no config read needed
-    trial_env = os.getenv("RDST_TRIAL_TOKEN")
-    if trial_env:
-        return KeyResolution(
-            api_key=trial_env,
-            is_trial=True,
-            proxy_url=keyservice_base_url(),
-            extra_headers=_make_attestation_headers(trial_env),
-        )
-
-    # 3. Trial token (config.toml)
-    trial_config_token = None
-    trial_status = None
-
-    try:
-        from shared.config.targets import TargetsConfig
-
-        config = TargetsConfig()
-        config.load()
-        trial = config._data.get("trial", {})
-        trial_config_token = trial.get("token")
-        trial_status = trial.get("status")
-    except Exception:  # noqa: BLE001,S110 - config is optional during resolution
-        pass
-
-    if trial_status == "exhausted":
-        # A present own key wins over an exhausted trial — probe the keyring
-        # before honoring the exhausted status so a valid saved key is never
-        # blocked (T17 keyring-precedence fix).
-        own_key = _keyring_secret("ANTHROPIC_API_KEY")
-        if own_key:
-            os.environ["ANTHROPIC_API_KEY"] = own_key
-            return KeyResolution(api_key=own_key, is_trial=False)
-
-        raise LLMError(
-            "Trial credits exhausted.\n\n"
-            "To continue using RDST:\n"
-            "  1. Get your own key: https://console.anthropic.com/\n"
-            f"  2. Set it: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n\n"
-            "Want more trial credits? Email hello@readyset.io",
-            code="TRIAL_EXHAUSTED",
-        )
-
-    if trial_config_token and trial_status == "active":
-        return KeyResolution(
-            api_key=trial_config_token,
-            is_trial=True,
-            proxy_url=keyservice_base_url(),
-            extra_headers=_make_attestation_headers(trial_config_token),
-        )
-
-    # 4. OS keyring (checked last — may be slow on first probe)
-    keyring_key = _keyring_secret("ANTHROPIC_API_KEY")
+    # 2. OS keyring (checked after the environment because some desktop
+    # backends may be slow on their first probe).
+    keyring_key = (
+        _keyring_secret("ANTHROPIC_API_KEY")
+        if requested_provider != "readyset"
+        else None
+    )
     if keyring_key:
         os.environ["ANTHROPIC_API_KEY"] = keyring_key
-        return KeyResolution(api_key=keyring_key, is_trial=False)
+        return KeyResolution(api_key=keyring_key, is_trial=False, provider="claude")
 
-    # 5. Trial token in keyring (for future web UI support)
-    keyring_trial = _keyring_secret("RDST_TRIAL_TOKEN")
-    if keyring_trial:
-        return KeyResolution(
-            api_key=keyring_trial,
-            is_trial=True,
-            proxy_url=keyservice_base_url(),
-            extra_headers=_make_attestation_headers(keyring_trial),
-        )
+    # 3. Readyset account session.
+    if requested_provider != "claude":
+        from shared.account_session import access_token
+
+        account_token = access_token()
+        if account_token:
+            return KeyResolution(
+                api_key=account_token,
+                is_trial=False,
+                provider="readyset",
+                proxy_url=keyservice_base_url(),
+                model=HOSTED_MODEL,
+            )
 
     raise LLMError(
-        "No LLM API key configured.\n\n"
-        "Options:\n"
-        "  1. Run 'rdst init' to sign up for a free trial (up to 925K tokens)\n"
-        f"  2. Set your own key: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n"
-        "     Get one at: https://console.anthropic.com/",
-        code="NO_API_KEY",
+        "Sign in to Readyset to use hosted inference, or set your own Anthropic key:\n"
+        f"  {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}",
+        code="LOGIN_REQUIRED" if requested_provider != "claude" else "NO_API_KEY",
     )

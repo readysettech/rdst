@@ -290,7 +290,7 @@ class ChatAgent:
 
     def _get_api_key(self) -> str:
         """
-        Get API key, checking env vars then trial config.
+        Get the user's Anthropic API key.
 
         Uses the shared key resolution module for consistent behavior
         across LLMManager and ChatAgent.
@@ -303,7 +303,9 @@ class ChatAgent:
         """
         try:
             from shared.llm_manager.key_resolution import resolve_api_key
-            resolution = resolve_api_key()
+            # This path uses Anthropic-native tool calls directly. Never pass a
+            # Readyset account bearer token to the Anthropic SDK.
+            resolution = resolve_api_key("claude")
             self._key_resolution = resolution
             return resolution.api_key
         except Exception as e:
@@ -325,14 +327,7 @@ class ChatAgent:
         # Explicitly pass API key to avoid env conflicts
         api_key = self._get_api_key()
 
-        # Route based on key type (direct vs trial proxy)
-        kwargs = {"api_key": api_key}
-        if hasattr(self, "_key_resolution") and self._key_resolution.is_trial:
-            from shared.llm_manager.key_resolution import _trial_proxy_base
-            kwargs["base_url"] = _trial_proxy_base()
-            kwargs["default_headers"] = self._key_resolution.extra_headers
-
-        client = anthropic.Anthropic(**kwargs)
+        client = anthropic.Anthropic(api_key=api_key)
 
         response = client.messages.create(
             model=self._resolve_model(),

@@ -26,7 +26,7 @@ async def clear_keyring(request: Request) -> ClearKeyringResponse:
     require_local_request(request)
 
     env_service = EnvRequirementsService()
-    names = env_service.get_allowed_secret_names()
+    names = env_service.get_clearable_secret_names()
 
     secret_store = SecretStoreService()
     result = secret_store.clear_required(names)

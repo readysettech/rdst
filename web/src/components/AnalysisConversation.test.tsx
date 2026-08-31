@@ -113,7 +113,7 @@ describe('AnalysisConversation', () => {
     render(<AnalysisConversation conversation={conversation()} />)
 
     expect(
-      screen.getByText(/Free AI credits are used up/).textContent
+      screen.getByText(/Hosted AI access is unavailable/).textContent
     ).toBeTruthy()
   })
 })

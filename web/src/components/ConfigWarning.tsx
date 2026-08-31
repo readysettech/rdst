@@ -71,14 +71,14 @@ function getWarningConfig(
     }
   }
 
-  // Missing key — offer both trial and set key
+  // Missing credentials: offer Readyset sign-in or Claude BYOK.
   if (missingAnthropicRequirements.length > 0) {
     return {
-      title: 'Missing Anthropic API Key',
+      title: 'AI sign-in required',
       description:
-        "AI-powered features require an Anthropic API key. Set your key below, or claim free trial credits if you don't have one.",
+        'Sign in to Readyset for capped hosted inference, or add your own Anthropic API key.',
       severity: 'warning',
-      actionLabel: 'Claim free trial credits',
+      actionLabel: 'Sign in to Readyset',
       actionType: 'open-trial-dialog',
       secondaryActionLabel: 'Set API key',
       secondaryActionType: 'open-env-dialog',

@@ -169,7 +169,7 @@ def _clear_web_required_env_vars() -> tuple[list[str], list[str], list[str]]:
         service_class = _get_env_requirements_service_class()
 
         requirements = service_class()
-        required_names = requirements.get_allowed_secret_names()
+        required_names = requirements.get_clearable_secret_names()
         if not required_names:
             return [], [], []
 
@@ -300,7 +300,16 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
 
     command = args.command
 
-    if command == "configure":
+    if command == "account":
+        subcommand = getattr(args, "account_subcommand", None)
+        if not subcommand:
+            return RdstResult(
+                False,
+                "Account command requires a subcommand: login, status, logout\n"
+                "Try: rdst account --help",
+            )
+        return cli.account(subcommand)
+    elif command == "configure":
         # configure now uses add_subparsers(); subcommand is in configure_subcommand
         configure_subcommand = getattr(args, "configure_subcommand", None)
         if configure_subcommand is not None:
@@ -927,7 +936,7 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
         # Build the commands list from parser_data so descriptions stay in sync.
         # Order matches what --help shows; 'exit' is appended as a menu-only entry.
         _menu_command_names = [
-            "configure", "top", "analyze", "ask", "scan", "agent", "guard",
+            "account", "configure", "top", "analyze", "ask", "scan", "agent", "guard",
             "init", "query", "schema", "tunnel", "fleet", "audit", "demo",
             "version", "update", "report", "help", "claude", "slack", "web",
         ]

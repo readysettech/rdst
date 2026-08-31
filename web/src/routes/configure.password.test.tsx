@@ -178,6 +178,7 @@ describe('Settings row password save', () => {
           },
         ],
       },
+      envRequirementsQuery: {} as never,
       anthropicRequirement: undefined,
       anthropicSource: undefined,
       isTrialSource: false,
@@ -240,17 +241,17 @@ describe('Settings row password save', () => {
     renderWithClient(<SettingsPage search={{}} />)
 
     expect(await screen.findByText('Database connections')).toBeTruthy()
-    expect(screen.queryByText('AI keys')).toBeNull()
+    expect(screen.queryByText('AI access')).toBeNull()
 
     fireEvent.click(screen.getByRole('tab', { name: 'AI' }))
-    expect(await screen.findByText('AI keys')).toBeTruthy()
+    expect(await screen.findByText('AI access')).toBeTruthy()
     expect(screen.queryByText('Database connections')).toBeNull()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Data & privacy' }))
     expect(
       await screen.findByText('Loading local storage details…')
     ).toBeTruthy()
-    expect(screen.queryByText('AI keys')).toBeNull()
+    expect(screen.queryByText('AI access')).toBeNull()
   })
 
   it('opens an edit deep link and clears it when the form is cancelled', async () => {
@@ -320,7 +321,7 @@ describe('Settings row password save', () => {
     )
     renderWithClient(<SettingsPage search={{ section: 'ai' }} />)
 
-    expect(await screen.findByText('AI keys')).toBeTruthy()
+    expect(await screen.findByText('AI access')).toBeTruthy()
     expect(
       (await screen.findAllByText(/Anthropic API Key/)).length
     ).toBeGreaterThan(0)

@@ -125,6 +125,25 @@ def _already_percent_scaled(division: exp.Div) -> bool:
     return False
 
 
+def _fractional_population_ratio(division: exp.Div) -> bool:
+    """Return whether operands structurally describe a subset/whole fraction."""
+    numerator = division.this
+    denominator = division.expression
+    percent_terms = {"percent", "percentage", "pct", "rate"}
+    operand_terms = {
+        term
+        for column in (*numerator.find_all(exp.Column), *denominator.find_all(exp.Column))
+        for term in re.split(r"[^a-z0-9]+", column.name.casefold())
+        if term
+    }
+    if operand_terms.intersection(percent_terms):
+        return False
+    return (
+        numerator.find(exp.AggFunc) is not None
+        and denominator.find(exp.AggFunc) is not None
+    )
+
+
 def normalize_explicit_ratio_sql(
     *,
     question: str,
@@ -185,6 +204,7 @@ def normalize_explicit_ratio_sql(
         (_PERCENT_INTENT.search(question) or "percentage_output" in intent_hints)
         and len(percentage_divisions) == 1
         and not _already_percent_scaled(percentage_divisions[0])
+        and _fractional_population_ratio(percentage_divisions[0])
     ):
         division = percentage_divisions[0]
         division.set(

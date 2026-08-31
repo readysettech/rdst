@@ -37,8 +37,11 @@ def schema():
 
 
 def dominant_sibling_executor(sql, _config):
-    support = 101 if "`types`" in sql or '"types"' in sql else 1
-    return {"success": True, "rows": [[support]], "columns": ["COUNT(*)"]}
+    return {
+        "success": True,
+        "rows": [[1, 101]],
+        "columns": ["current_support", "sibling_support"],
+    }
 
 
 def normalize(sql=Q412_SQL, *, question=None, executor=dominant_sibling_executor):
@@ -63,7 +66,7 @@ def test_relocates_unsupported_contains_to_dominant_exact_sibling():
     assert "c.types = 'Creature'" in sql
     assert "c.type LIKE" not in sql
     assert diagnostics["status"] == "normalized"
-    assert diagnostics["probe_count"] == 2
+    assert diagnostics["probe_count"] == 1
     assert "support" not in diagnostics
     assert diagnostics["execution_feedback"] is False
 
@@ -90,8 +93,7 @@ def test_relocates_product_category_to_dominant_categories_column():
     )
 
     def executor(sql, _config):
-        support = 101 if "`categories`" in sql else 1
-        return {"success": True, "rows": [[support]], "columns": ["COUNT(*)"]}
+        return {"success": True, "rows": [[1, 101]]}
 
     sql, diagnostics = normalize_ambiguous_value_location_sql(
         question="Which active products are in the Hardware category?",
@@ -108,7 +110,7 @@ def test_relocates_product_category_to_dominant_categories_column():
     assert diagnostics["status"] == "normalized"
     assert diagnostics["source_column"] == "products.category"
     assert diagnostics["candidate_column"] == "products.categories"
-    assert diagnostics["probe_count"] == 2
+    assert diagnostics["probe_count"] == 1
 
 
 def test_prefix_pattern_is_unchanged_without_probes():
@@ -145,13 +147,46 @@ def test_explicit_partial_match_intent_is_unchanged_without_probes():
 
 def test_weak_support_is_unchanged():
     def executor(sql, _config):
-        support = 7 if "`types`" in sql else 2
-        return {"success": True, "rows": [[support]]}
+        return {"success": True, "rows": [[2, 7]]}
 
     sql, diagnostics = normalize(executor=executor)
 
     assert sql == Q412_SQL
     assert diagnostics["reason"] == "candidate-support-not-dominant"
+
+
+def test_postgres_canonical_string_columns_are_eligible():
+    canonical = schema()
+    canonical.db_type = "postgresql"
+    canonical.tables["cards"].columns["type"].data_type = "string"
+    canonical.tables["cards"].columns["types"].data_type = "string"
+
+    sql, diagnostics = normalize_ambiguous_value_location_sql(
+        question="Which French card has type Creature?",
+        provided_context="Creature is a card type.",
+        sql=Q412_SQL,
+        dialect="postgresql",
+        schema_info=canonical,
+        db_executor=dominant_sibling_executor,
+        target_config={"engine": "postgresql"},
+    )
+
+    assert diagnostics["status"] == "normalized"
+    assert "c.types = 'Creature'" in sql
+
+
+def test_support_probe_samples_a_bounded_number_of_rows_once():
+    calls = []
+
+    def executor(sql, _config):
+        calls.append(sql)
+        return {"success": True, "rows": [[1, 101]]}
+
+    _, diagnostics = normalize(executor=executor)
+
+    assert diagnostics["probe_count"] == 1
+    assert len(calls) == 1
+    assert "LIMIT 10000" in calls[0]
 
 
 def test_probe_failure_is_fail_open():

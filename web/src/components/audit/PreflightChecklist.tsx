@@ -114,16 +114,18 @@ export function PreflightChecklist({
   const aiReady = aiGate.status === 'ready' || aiGate.status === 'unverified'
   const aiDetail =
     aiGate.status === 'ready'
-      ? 'Valid key or trial is ready'
+      ? 'AI access is ready'
       : aiGate.status === 'unverified'
         ? 'A key is configured; provider verification is temporarily unavailable'
         : aiGate.status === 'checking'
           ? 'Checking the configured key...'
-          : aiGate.reason === 'exhausted'
-            ? TRIAL_EXHAUSTED_MESSAGE
-            : aiGate.reason === 'invalid'
-              ? "The configured key isn't working"
-              : 'A valid key or free trial is required'
+          : aiGate.status === 'error'
+            ? aiGate.message
+            : aiGate.reason === 'exhausted'
+              ? TRIAL_EXHAUSTED_MESSAGE
+              : aiGate.reason === 'invalid'
+                ? "The configured key isn't working"
+                : 'Readyset sign-in or an Anthropic key is required'
   return (
     <div
       className="border-t border-border-layout-1 pt-4"
@@ -232,11 +234,11 @@ export function PreflightChecklist({
                     code: error.code,
                   }}
                   passwordRequired={!!requirement}
-                    onSetPassword={
-                      requirement
-                        ? () => setPasswordTarget(targetName)
-                        : undefined
-                    }
+                  onSetPassword={
+                    requirement
+                      ? () => setPasswordTarget(targetName)
+                      : undefined
+                  }
                   onRetry={async () => {
                     const checked = await onRecheck()
                     return !!checked && !checked.errors[targetName]
@@ -286,7 +288,7 @@ export function PreflightChecklist({
                     variant="primary"
                     modifier="ghost"
                     size="small"
-                    label="Start free trial"
+                    label="Sign in to Readyset"
                     onClick={() => setShowTrialDialog(true)}
                   />
                 )}

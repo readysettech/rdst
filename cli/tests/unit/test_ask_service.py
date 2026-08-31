@@ -51,6 +51,19 @@ class TestAskServiceInit:
         assert hasattr(service, "resume")
         assert hasattr(service, "_load_config")
 
+    def test_query_timeout_is_not_reported_as_a_connection_failure(self):
+        event = AskService._database_error(
+            "Query exceeded the 30-second execution limit.",
+            AskPhase.EXECUTE,
+            "warehouse",
+            {"engine": "postgresql"},
+            "query_timeout",
+        )
+
+        assert event.code == "query_timeout"
+        assert event.category == "query_timeout"
+        assert "connection" not in event.message.casefold()
+
 
 class TestAskServiceAsk:
     """Tests for ask() method."""
@@ -872,11 +885,14 @@ class TestAskServiceDependencyInjection:
         assert ambiguities == []
         assert ctx.ambiguity_report == {
             "error": "truncated response",
+            "error_code": None,
             "fallback": "fail_closed",
         }
         assert ctx.clarification_policy == RANKED_RESOLVER_POLICY
         ctx.mark_error.assert_called_once_with(
-            "Failed to analyze whether the question requires clarification"
+            "Failed to analyze whether the question requires clarification",
+            code=None,
+            category=None,
         )
 
     @pytest.mark.asyncio

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from collections.abc import Callable
 from typing import Any
 
@@ -39,6 +40,7 @@ def create_value_probe_executor(
         "exhausted": False,
     }
     ctx.db_probe_diagnostics = diagnostics
+    deadline = time.monotonic() + VALUE_PROBE_TIMEOUT_SECONDS
 
     def execute(sql: str, target_config: dict[str, Any]) -> dict[str, Any]:
         if diagnostics["calls"] >= VALUE_PROBE_MAX_CALLS:
@@ -49,6 +51,14 @@ def create_value_probe_executor(
                 "probe_budget_exhausted",
             )
         diagnostics["calls"] += 1
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            diagnostics["failed_calls"] += 1
+            diagnostics["exhausted"] = True
+            return _failed_probe(
+                "Ask value probe deadline exceeded",
+                "probe_timeout",
+            )
         validation = validate_sql_for_ask(sql, enforce_result_limit=False)
         if not validation.get("is_valid"):
             diagnostics["failed_calls"] += 1
@@ -60,19 +70,30 @@ def create_value_probe_executor(
         started = time.monotonic()
         try:
             if db_executor is not None:
-                result = db_executor(validated_sql, target_config)
+                pool = ThreadPoolExecutor(max_workers=1)
+                future = pool.submit(db_executor, validated_sql, target_config)
+                try:
+                    result = future.result(timeout=remaining)
+                except FutureTimeoutError:
+                    future.cancel()
+                    result = _failed_probe(
+                        "Ask value probe deadline exceeded",
+                        "probe_timeout",
+                    )
+                finally:
+                    pool.shutdown(wait=False, cancel_futures=True)
             elif "mysql" in str(ctx.db_type).casefold():
                 result = _execute_mysql(
                     validated_sql,
                     target_config,
-                    VALUE_PROBE_TIMEOUT_SECONDS,
+                    max(0.001, remaining),
                     ctx.target,
                 )
             else:
                 result = _execute_postgres(
                     validated_sql,
                     target_config,
-                    VALUE_PROBE_TIMEOUT_SECONDS,
+                    max(0.001, remaining),
                     ctx.target,
                 )
         except Exception as exc:

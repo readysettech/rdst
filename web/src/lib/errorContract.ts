@@ -17,7 +17,7 @@ export interface ApiErrorEnvelope {
 export type { ErrorClass }
 
 export const TRIAL_EXHAUSTED_MESSAGE =
-  'Your free trial credit is used up — add your own Anthropic API key or a new trial token.'
+  'Hosted AI access is unavailable. Check your Readyset account quota or add your own Anthropic API key.'
 
 export function isTrialExhaustedError(
   error: Pick<ApiErrorEnvelope, 'code' | 'message'> | string | undefined
@@ -32,6 +32,7 @@ export function isTrialExhaustedError(
         : (error.message ?? '')
   const value = `${code} ${message}`.toLowerCase()
   return (
+    code.toLowerCase() === 'hosted_cap_reached' ||
     /trial[_\s-]*exhausted/.test(value) ||
     /free[-\s]*trial.*(?:used up|run out|exhausted|no (?:credit|tokens?) left)/.test(
       value
@@ -111,6 +112,8 @@ export function classifyError(envelope: ApiErrorEnvelope): ErrorClass {
   // an Anthropic/API-key failure.
   if (isConnectionFailure(envelope)) return 'database'
 
+  if (code === 'hosted_cap_reached') return 'rdst-service'
+
   if (
     CONTAINS(hay, [
       'missing secret',
@@ -139,6 +142,7 @@ export function classifyError(envelope: ApiErrorEnvelope): ErrorClass {
       'verify your email',
       'rate_limited',
       'program_full',
+      'hosted_cap',
       'token',
     ])
   ) {

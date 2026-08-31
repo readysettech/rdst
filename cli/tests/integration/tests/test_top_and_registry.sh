@@ -66,6 +66,7 @@ test_list_command() {
 
   run_cmd "Analyze using hash from list (${LIST_HASH})" \
     "${RDST_CMD[@]}" analyze "$LIST_HASH" --skip-warning
+  [[ "$LAST_EXIT_CODE" -eq 0 ]] || fail "analyze using list hash exited nonzero"
   assert_not_contains "ERROR:" "analyze using list hash should succeed"
 
   # Note: Readyset comparisoning by query is covered in test_cache_commands.

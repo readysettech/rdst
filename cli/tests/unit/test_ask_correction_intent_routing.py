@@ -794,7 +794,7 @@ def test_sql_comment_injection_cannot_escape_the_closed_trigger_catalog():
     assert "\\u003c/correction_intent_routing_data\\u003e" in prompt
 
 
-def test_sql_without_known_shape_still_routes_through_full_catalog():
+def test_sql_without_known_shape_skips_model_routing():
     llm = _Llm(_provider_response())
     callbacks = []
 
@@ -804,13 +804,14 @@ def test_sql_without_known_shape_still_routes_through_full_catalog():
         proposed_sql="SELECT name FROM employees",
     )
 
-    assert result.status == "no_match"
-    assert result.verdict == "no_match"
-    assert len(llm.calls) == 1
-    assert len(callbacks) == 1
+    assert result.status == "no_candidates"
+    assert result.verdict == "abstain"
+    assert len(llm.calls) == 0
+    assert len(callbacks) == 0
     assert [candidate.intent for candidate in result.candidates] == list(
         CORRECTION_INTENTS
     )
+    assert all(candidate.observed_shape == () for candidate in result.candidates)
 
 
 def test_allowed_intents_restrict_the_dynamic_candidate_enum():

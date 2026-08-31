@@ -173,14 +173,14 @@ describe('BackgroundRuns', () => {
 
     const trigger = screen.getByTestId('jobs-trigger')
     expect(trigger.textContent).toContain(
-      'Add an Anthropic key or start a free trial.'
+      'Sign in to Readyset or add your own Anthropic key.'
     )
     expect(trigger.className).toContain('bg-surface-warning-soft/20')
     expect(screen.getByTestId('job-warning-icon')).toBeTruthy()
     openJobs()
 
     const instructions = screen.getAllByText(
-      'Add an Anthropic key or start a free trial.'
+      'Sign in to Readyset or add your own Anthropic key.'
     )
     expect(instructions).toHaveLength(2)
     expect(instructions[1]?.className).not.toContain('truncate')

@@ -864,7 +864,7 @@ function ChatPanel({ agent }: { agent: AgentSummary | null }) {
               accent="info"
               icon="key"
               title="Chatting uses AI"
-              message="Needs an Anthropic key or an active trial."
+              message="Sign in to Readyset or add an Anthropic API key."
               action={{
                 label: 'Configure',
                 icon: 'arrow-right',

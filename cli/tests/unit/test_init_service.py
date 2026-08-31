@@ -114,13 +114,12 @@ class TestInitServiceGetStatus:
 
         assert status.llm_configured is True
 
-    def test_checks_llm_configured_with_trial_token(self, service, mock_config):
-        """Test get_status accepts RDST_TRIAL_TOKEN."""
+    def test_checks_llm_ignores_legacy_trial_token(self, service, mock_config):
         with patch.object(service, "_load_config", return_value=mock_config):
             with patch.dict(os.environ, {"RDST_TRIAL_TOKEN": "test-token"}, clear=True):
                 status = service.get_status()
 
-        assert status.llm_configured is True
+        assert status.llm_configured is False
 
     def test_llm_not_configured_without_api_key(self, service, mock_config):
         """Test get_status shows LLM not configured without usable credentials."""
@@ -134,15 +133,14 @@ class TestInitServiceGetStatus:
 
         assert status.llm_configured is False
 
-    def test_llm_configured_with_config_backed_active_trial(self, service, mock_config):
-        """Active trial metadata in config should satisfy llm_configured."""
+    def test_llm_ignores_config_backed_active_trial(self, service, mock_config):
         mock_config.get_trial_config.return_value = {"status": "active", "token": "trial-token"}
 
         with patch.object(service, "_load_config", return_value=mock_config):
             with patch.dict(os.environ, {}, clear=True):
                 status = service.get_status()
 
-        assert status.llm_configured is True
+        assert status.llm_configured is False
 
 
     def test_auto_configures_llm_when_provider_missing_and_api_key_set(self, service):
@@ -275,15 +273,17 @@ class TestInitServiceCheckLLM:
         cfg.get_trial_config.return_value = {}
         return cfg
 
-    def test_llm_not_configured(self, service, mock_config):
-        """Test check_llm when LLM provider is not claude."""
+    def test_stale_provider_config_does_not_select_another_model(self, service, mock_config):
+        """A stale provider setting cannot make OpenAI user-selectable."""
         mock_config.get_llm_config.return_value = {"provider": "openai"}
 
-        with patch.object(service, "_load_config", return_value=mock_config):
+        with patch.object(service, "_load_config", return_value=mock_config), patch(
+            "features.init.service.get_anthropic_source", return_value="missing"
+        ), patch("features.init.service.is_signed_in_locally", return_value=False):
             result = service.check_llm()
 
         assert result["success"] is False
-        assert "not configured" in result["error"]
+        assert "Sign in to Readyset" in result["error"]
 
     def test_anthropic_key_missing(self, service, mock_config):
         """Test check_llm when no usable Anthropic credential is set."""
@@ -299,8 +299,7 @@ class TestInitServiceCheckLLM:
         assert result["success"] is False
         assert "ANTHROPIC_API_KEY" in result["error"]
 
-    def test_check_llm_accepts_config_backed_active_trial(self, service, mock_config):
-        """Config-backed active trial should satisfy check_llm."""
+    def test_check_llm_rejects_config_backed_active_trial(self, service, mock_config):
         mock_config.get_trial_config.return_value = {"status": "active", "token": "trial-token"}
         mock_llm = Mock()
         mock_llm.query.return_value = {"text": "pong"}
@@ -309,17 +308,18 @@ class TestInitServiceCheckLLM:
             with patch("features.init.service.create_llm_manager", return_value=mock_llm):
                 result = service.check_llm(mock_config)
 
-        assert result["success"] is True
+        assert result["success"] is False
+        assert "Sign in to Readyset" in result["error"]
+        mock_llm.query.assert_not_called()
 
-    def test_check_llm_reports_exhausted_config_trial(self, service, mock_config):
-        """Exhausted config-backed trial should surface the real failure."""
+    def test_check_llm_ignores_exhausted_config_trial(self, service, mock_config):
         mock_config.get_trial_config.return_value = {"status": "exhausted", "token": "trial-token"}
 
         with patch.dict(os.environ, {}, clear=True):
             result = service.check_llm(mock_config)
 
         assert result["success"] is False
-        assert "Trial credits exhausted" in result["error"]
+        assert "Sign in to Readyset" in result["error"]
 
 
     def test_llm_api_success(self, service, mock_config):
@@ -333,8 +333,7 @@ class TestInitServiceCheckLLM:
 
         assert result["success"] is True
 
-    def test_llm_api_success_with_trial_token(self, service, mock_config):
-        """Test check_llm succeeds when only RDST_TRIAL_TOKEN is set."""
+    def test_check_llm_ignores_legacy_trial_token(self, service, mock_config):
         mock_llm = Mock()
         mock_llm.query.return_value = {"text": "pong"}
 
@@ -342,7 +341,9 @@ class TestInitServiceCheckLLM:
             with patch("features.init.service.create_llm_manager", return_value=mock_llm):
                 result = service.check_llm(mock_config)
 
-        assert result["success"] is True
+        assert result["success"] is False
+        assert "Sign in to Readyset" in result["error"]
+        mock_llm.query.assert_not_called()
 
     def test_llm_api_failure(self, service, mock_config):
         """Test check_llm when API call fails."""

@@ -72,15 +72,16 @@ def _edge_identifier_column(table: Any, endpoints: set[str]) -> Any | None:
 
 def _numeric_suffix(literal: str) -> str | None:
     canonical_literal = re.sub(r"[^a-z0-9]", "", literal.casefold())
-    if canonical_literal.isdigit() and len(canonical_literal) <= 6:
-        return f"_{canonical_literal}"
     literal_tokens = _identifier_tokens(literal)
-    if len(canonical_literal) < 3 or not literal_tokens:
+    if len(canonical_literal) < 3 or len(literal_tokens) < 2:
         return None
     number = literal_tokens[-1]
     if not number.isdigit() or len(number) > 6:
         return None
-    return f"_{number}"
+    namespace = "_".join(literal_tokens[:-1])
+    if not namespace:
+        return None
+    return f"{namespace}_{number}"
 
 
 def _column_literal(predicate: exp.Expression) -> tuple[exp.Column, str] | None:

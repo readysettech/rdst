@@ -813,6 +813,52 @@ class TestAnalyzeTargetValidationBeforePrompt:
         assert "rdst configure add" in result.message
         assert "LLM API key" not in result.message
 
+    def test_analyze_reports_unsafe_sql_before_missing_ai_access(self):
+        from features.analyze.cli.command import AnalyzeCommand, AnalyzeInput
+        from shared.query_registry import hash_sql, normalize_sql
+
+        query = "SELCT * FORM title_basics"
+        cmd = AnalyzeCommand()
+        resolved_input = AnalyzeInput(
+            sql=query,
+            normalized_sql=normalize_sql(query),
+            source="inline",
+            hash=hash_sql(query),
+        )
+
+        with (
+            patch("shared.config.targets.TargetsConfig") as mock_cfg_cls,
+            patch.object(
+                cmd,
+                "_check_api_key_configured",
+                return_value="AI access is not configured",
+            ),
+        ):
+            mock_cfg = MagicMock()
+            mock_cfg.get.return_value = {"engine": "postgresql"}
+            mock_cfg_cls.return_value = mock_cfg
+            result = cmd.execute_analyze(
+                resolved_input,
+                target="configured-target",
+                skip_warning=True,
+            )
+
+        assert result.ok is False
+        assert "must begin with" in result.message
+        assert "AI access" not in result.message
+
+    def test_analyze_recognizes_hash_prefixes_shown_by_query_list(self):
+        from features.analyze.cli.command import AnalyzeCommand
+
+        command = AnalyzeCommand()
+
+        assert command._looks_like_hash("a1b2")
+        assert command._looks_like_hash("a1b2c3d4")
+        assert command._looks_like_hash("a1b2c3d4e5f6")
+        assert not command._looks_like_hash("a1b")
+        assert not command._looks_like_hash("a1b2c3d4e5f60")
+        assert not command._looks_like_hash("select")
+
     def test_analyze_target_validation_before_explain_prompt_in_source(self):
         """
         In execute_analyze(), target existence must be checked before the

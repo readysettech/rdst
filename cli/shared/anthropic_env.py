@@ -7,43 +7,9 @@ import os
 import time
 from typing import Any
 
-from shared.config.targets import TargetsConfig
 from shared.secret_store_service import SecretStoreService
 
-ANTHROPIC_API_KEY_NAMES = ("ANTHROPIC_API_KEY", "RDST_TRIAL_TOKEN")
-def _load_trial_config(cfg: Any | None = None) -> dict[str, Any]:
-    if cfg is None:
-        try:
-            cfg = TargetsConfig()
-            cfg.load()
-        except Exception:
-            return {}
-
-    try:
-        trial_config = cfg.get_trial_config()
-    except Exception:
-        trial_config = None
-
-    return trial_config if isinstance(trial_config, dict) else {}
-
-
-def _mark_trial_active(cfg: Any | None = None) -> None:
-    """Clear a stale local trial 'exhausted' status once the keyservice proves
-    the trial still has credit."""
-    try:
-        config = cfg
-        if config is None:
-            from shared.config.targets import TargetsConfig
-
-            config = TargetsConfig()
-            config.load()
-        trial = config.get_trial_config() or {}
-        if trial.get("status") == "exhausted" and trial.get("token"):
-            trial["status"] = "active"
-            config.set_trial_config(trial)
-            config.save()
-    except Exception:
-        pass
+ANTHROPIC_API_KEY_NAMES = ("ANTHROPIC_API_KEY",)
 
 
 def get_anthropic_source(
@@ -52,16 +18,6 @@ def get_anthropic_source(
 ) -> str:
     if os.environ.get("ANTHROPIC_API_KEY"):
         return "process_env"
-    if os.environ.get("RDST_TRIAL_TOKEN"):
-        return "trial"
-
-    trial_config = _load_trial_config(cfg)
-    trial_token = trial_config.get("token")
-    trial_status = trial_config.get("status")
-    if trial_status == "exhausted" and trial_token:
-        return "trial_exhausted"
-    if trial_status == "active" and trial_token:
-        return "trial"
 
     store = secret_store
     if store is None:
@@ -75,10 +31,6 @@ def get_anthropic_source(
         if direct_key:
             return "secure_store"
 
-        trial_key = store.get_secret("RDST_TRIAL_TOKEN")
-        if trial_key:
-            return "trial"
-
     return "missing"
 
 
@@ -90,15 +42,6 @@ def get_anthropic_api_key(
     if direct_key:
         return direct_key
 
-    trial_env = os.environ.get("RDST_TRIAL_TOKEN")
-    if trial_env:
-        return trial_env
-
-    trial_config = _load_trial_config(cfg)
-    trial_token = trial_config.get("token")
-    if trial_token and trial_config.get("status") == "active":
-        return trial_token
-
     store = secret_store
     if store is None:
         try:
@@ -109,11 +52,10 @@ def get_anthropic_api_key(
     if store is None:
         return None
 
-    for name in ANTHROPIC_API_KEY_NAMES:
-        value = store.get_secret(name)
-        if value:
-            os.environ[name] = value
-            return value
+    value = store.get_secret("ANTHROPIC_API_KEY")
+    if value:
+        os.environ["ANTHROPIC_API_KEY"] = value
+        return value
 
     return None
 
@@ -150,8 +92,7 @@ def validate_anthropic_key(
 
     The ping goes through ``LLMManager``, which resolves the key via
     ``resolve_api_key()`` — so the probe reports on the *same* key the AI
-    features will use, and it cooperates with the keyring-precedence fix
-    (a present own key beating an exhausted trial) rather than masking it.
+    features will use.
 
     Returns ``{"valid": bool, "reason": str, "model": str | None}`` where
     reason is ``ok`` | ``rejected`` | ``no_key`` | ``provider_error``. Blocking
@@ -171,7 +112,6 @@ def validate_anthropic_key(
     from shared.llm_manager.claude_provider import AnthropicModel
 
     source = get_anthropic_source(secret_store=secret_store, cfg=cfg)
-    is_trial = source in ("trial", "trial_exhausted")
     model = AnthropicModel.HAIKU_4_5.value
     try:
         LLMManager().query(
@@ -184,18 +124,11 @@ def validate_anthropic_key(
         result: dict[str, Any] = {
             "valid": True, "reason": "ok", "model": model, "source": source,
         }
-        # A successful trial ping means the keyservice still has credit, so a
-        # stale local "exhausted" status is wrong — heal it so Settings and the
-        # audit page agree.
-        if source == "trial_exhausted":
-            _mark_trial_active(cfg)
-            result["source"] = "trial"
     except LLMError as exc:
-        rejected = exc.code in ("ANTHROPIC_AUTH_INVALID", "TRIAL_AUTH_INVALID")
-        exhausted = exc.code in ("TRIAL_EXHAUSTED", "TRIAL_LIMIT_REACHED")
+        rejected = exc.code == "ANTHROPIC_AUTH_INVALID"
         result = {
             "valid": False,
-            "reason": "exhausted" if exhausted else "rejected" if rejected else "provider_error",
+            "reason": "rejected" if rejected else "provider_error",
             "model": model,
             "source": source,
         }

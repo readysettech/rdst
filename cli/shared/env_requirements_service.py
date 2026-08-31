@@ -6,6 +6,11 @@ import re
 from typing import Any, Dict, List
 
 from shared.anthropic_env import get_anthropic_source
+from shared.account_session import (
+    SESSION_SECRET_NAMES,
+    AccountSessionError,
+    access_token,
+)
 from shared.password_resolver import resolve_password
 from shared.secret_store_service import SecretStoreService
 from shared.config.targets import TargetsConfig
@@ -15,8 +20,8 @@ class EnvRequirementsService:
     """Build readiness model for required env vars."""
 
     ANTHROPIC_API_KEY_NAME = "ANTHROPIC_API_KEY"
-    TRIAL_TOKEN_NAME = "RDST_TRIAL_TOKEN"
-    ANTHROPIC_ACCEPTED_NAMES = [ANTHROPIC_API_KEY_NAME, TRIAL_TOKEN_NAME]
+    LEGACY_SECRET_NAMES = ["RDST_TRIAL_TOKEN"]
+    ANTHROPIC_ACCEPTED_NAMES = [ANTHROPIC_API_KEY_NAME]
 
     def __init__(self, secret_store: SecretStoreService | None = None):
         self.secret_store = secret_store or SecretStoreService()
@@ -84,6 +89,13 @@ class EnvRequirementsService:
     def _resolve_anthropic_source(self, cfg: Any) -> str:
         return get_anthropic_source(secret_store=self.secret_store, cfg=cfg)
 
+    def _account_signed_in(self) -> bool:
+        """Validate or refresh the stored session before opening the AI gate."""
+        try:
+            return access_token(store=self.secret_store) is not None
+        except AccountSessionError:
+            return False
+
     def get_requirements(self) -> List[Dict[str, Any]]:
         cfg = self._load_config()
         requirements: List[Dict[str, Any]] = []
@@ -104,13 +116,17 @@ class EnvRequirementsService:
             )
 
         anthropic_source = self._resolve_anthropic_source(cfg)
+        account_signed_in = self._account_signed_in()
+        anthropic_available = anthropic_source not in ("missing", "trial_exhausted")
         requirements.append(
             {
                 "kind": "anthropic_api_key",
                 "accepted_names": list(self.ANTHROPIC_ACCEPTED_NAMES),
                 "target": None,
-                "satisfied": anthropic_source not in ("missing", "trial_exhausted"),
-                "source": anthropic_source,
+                "satisfied": account_signed_in or anthropic_available,
+                "source": anthropic_source if anthropic_available else (
+                    "readyset_account" if account_signed_in else anthropic_source
+                ),
             }
         )
 
@@ -123,4 +139,14 @@ class EnvRequirementsService:
         return sorted(names)
 
     def get_required_names_for_restore(self) -> List[str]:
-        return self.get_allowed_secret_names()
+        return sorted(set(self.get_allowed_secret_names() + SESSION_SECRET_NAMES))
+
+    def get_clearable_secret_names(self) -> List[str]:
+        """Include retired credentials when explicitly clearing local state."""
+        return sorted(
+            set(
+                self.get_allowed_secret_names()
+                + self.LEGACY_SECRET_NAMES
+                + SESSION_SECRET_NAMES
+            )
+        )

@@ -67,7 +67,7 @@ function AiKeyNotice({
 }) {
   const label =
     gate.reason === 'exhausted'
-      ? 'Free AI credits are used up — add a key to keep asking'
+      ? 'Hosted AI access is unavailable — sign in or add a key to keep asking'
       : gate.reason === 'invalid'
         ? 'This AI key was rejected — update it to keep asking'
         : 'Follow-up questions need an AI key — add one'

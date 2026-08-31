@@ -56,8 +56,8 @@ class TestLLMDefaults:
         """Test default values are set."""
         defaults = LLMDefaults()
 
-        # RDST now uses Claude exclusively (BYOK)
-        assert defaults.provider == "claude"
+        # Automatic routing prefers Claude BYOK and otherwise uses hosted GLM.
+        assert defaults.provider == "auto"
         assert defaults.model is None
         assert defaults.max_tokens == 800
         assert defaults.temperature == 0.2
@@ -288,3 +288,55 @@ class TestStreamingBridge:
             {"role": "assistant", "content": "first answer"},
             {"role": "user", "content": "follow up"},
         ]
+
+
+def test_auto_routing_uses_hosted_model_and_ignores_model_argument(
+    monkeypatch, tmp_rdst_home
+):
+    from shared.llm_manager.key_resolution import KeyResolution
+    from shared.llm_manager.llm_manager import LLMManager
+
+    provider = MagicMock()
+    provider.default_model.return_value = "z-ai/glm-5.3-flash"
+    provider.complete.return_value = ProviderResponse(
+        text="ok", usage={"prompt_tokens": 1, "completion_tokens": 1}
+    )
+    manager = LLMManager()
+    manager.register_provider("readyset", provider)
+    monkeypatch.setattr(
+        manager,
+        "_safe_load_key_for_query",
+        lambda _provider: KeyResolution(
+            api_key="account-token", is_trial=False, provider="readyset"
+        ),
+    )
+
+    result = manager.query(
+        system_message="system",
+        user_query="question",
+        model="user-selected-model",
+    )
+
+    request = provider.complete.call_args.args[0]
+    assert request.model == "z-ai/glm-5.3-flash"
+    assert result["provider"] == "readyset"
+
+
+def test_claude_byok_honors_rdst_anthropic_model(monkeypatch, tmp_rdst_home):
+    from shared.llm_manager.llm_manager import LLMManager
+
+    monkeypatch.setenv("RDST_ANTHROPIC_MODEL", "claude-opus-4-6")
+    provider = MagicMock()
+    provider.default_model.return_value = "claude-sonnet-4-6"
+    provider.complete.return_value = ProviderResponse(text="ok", usage={})
+    manager = LLMManager()
+    manager.register_provider("claude", provider)
+
+    manager.query(
+        system_message="system",
+        user_query="question",
+        api_key="sk-ant-user",
+    )
+
+    request = provider.complete.call_args.args[0]
+    assert request.model == "claude-opus-4-6"

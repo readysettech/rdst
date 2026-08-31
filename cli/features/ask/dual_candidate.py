@@ -179,11 +179,7 @@ def _literal_is_grounded(value: object, context: str) -> bool:
     if not raw:
         return True
     normalized_context = " ".join(context.casefold().split())
-    if raw in normalized_context:
-        return True
-    compact = re.sub(r"[^a-z0-9]", "", raw)
-    compact_context = re.sub(r"[^a-z0-9]", "", normalized_context)
-    if compact and compact in compact_context:
+    if re.search(rf"(?<![a-z0-9]){re.escape(raw)}(?![a-z0-9])", normalized_context):
         return True
     raw_dates = _date_tokens(raw)
     if raw_dates and raw_dates.intersection(_date_tokens(normalized_context)):
@@ -197,15 +193,33 @@ def _literal_is_grounded(value: object, context: str) -> bool:
 
 
 def _ranking_requested(question: str) -> bool:
-    if _words(question) & _RANKING_WORDS:
-        return True
-    return bool(
-        re.search(
-            r"\bat least\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b",
-            question,
-            re.I,
-        )
+    without_thresholds = re.sub(
+        r"\bat\s+(?:least|most)\b",
+        "",
+        question,
+        flags=re.IGNORECASE,
     )
+    return bool(_words(without_thresholds) & _RANKING_WORDS)
+
+
+def _projection_shape_compatible(
+    question: str,
+    provided_context: str,
+    primary_tree: exp.Expression,
+    alternate_tree: exp.Expression,
+) -> bool:
+    primary = _projected_columns(primary_tree)
+    alternate = _projected_columns(alternate_tree)
+    if len(primary) != len(alternate):
+        return False
+    source_words = _words(f"{question}\n{provided_context}")
+    requested_primary = {
+        column.casefold()
+        for column in primary
+        if set(_identifier_parts(column)).intersection(source_words)
+    }
+    alternate_names = {column.casefold() for column in alternate}
+    return requested_primary.issubset(alternate_names)
 
 
 def _projected_columns(tree: exp.Expression) -> tuple[str, ...]:
@@ -464,9 +478,20 @@ def select_candidate(
     aggregation_shape_matches = bool(primary.aggregate_count) == bool(
         alternate.aggregate_count
     )
+    read_dialect = "postgres" if dialect in {"postgres", "postgresql"} else "mysql"
+    projection_shape_matches = _projection_shape_compatible(
+        question,
+        provided_context,
+        sqlglot.parse_one(primary_sql, read=read_dialect),
+        sqlglot.parse_one(alternate_sql, read=read_dialect),
+    )
     selected = (
         "primary"
-        if not aggregation_shape_matches or primary.penalty <= alternate.penalty
+        if (
+            not aggregation_shape_matches
+            or not projection_shape_matches
+            or primary.penalty <= alternate.penalty
+        )
         else "alternate"
     )
     return selected, {
@@ -474,6 +499,7 @@ def select_candidate(
         "status": "selected",
         "selected": selected,
         "aggregation_shape_matches": aggregation_shape_matches,
+        "projection_shape_matches": projection_shape_matches,
         "primary": asdict(primary),
         "alternate": asdict(alternate),
         "primary_sql_sha256": hashlib.sha256(primary_sql.encode()).hexdigest(),

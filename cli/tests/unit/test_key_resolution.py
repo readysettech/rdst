@@ -1,11 +1,4 @@
-"""Unit tests for LLM API-key resolution precedence.
-
-Focus: the T17 keyring-precedence fix — a present own key in the OS keyring
-must beat a stale ``exhausted`` trial marker in config.toml, instead of
-``resolve_api_key()`` raising ``TRIAL_EXHAUSTED`` before it ever checks the
-keyring. The resolution is exercised without a real config file or keyring by
-stubbing ``TargetsConfig`` and ``SecretStoreService``.
-"""
+"""Unit tests for Readyset account and Anthropic BYOK resolution."""
 
 from __future__ import annotations
 
@@ -13,6 +6,7 @@ import pytest
 
 import shared.config.targets as targets_mod
 import shared.secret_store_service as secret_mod
+import shared.account_session as account_session
 from shared.llm_manager import key_resolution
 from shared.llm_manager.base import LLMError
 
@@ -42,6 +36,7 @@ def _clean_env(monkeypatch):
     """No ambient keys leaking in from the developer environment."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
+    monkeypatch.setattr(account_session, "access_token", lambda: None)
 
 
 def _patch_config(monkeypatch, trial: dict | None) -> None:
@@ -67,15 +62,15 @@ def test_exhausted_trial_yields_to_present_keyring_key(monkeypatch):
     assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-own"
 
 
-def test_exhausted_trial_without_own_key_still_raises(monkeypatch):
-    """No saved own key -> the exhausted trial still dead-ends, as before."""
+def test_exhausted_legacy_trial_without_own_key_requires_login(monkeypatch):
+    """Retired trial metadata no longer counts as AI access."""
     _patch_config(monkeypatch, {"token": "trial-tok", "status": "exhausted"})
     _patch_store(monkeypatch, {})
 
     with pytest.raises(LLMError) as exc:
         key_resolution.resolve_api_key()
 
-    assert exc.value.code == "TRIAL_EXHAUSTED"
+    assert exc.value.code == "LOGIN_REQUIRED"
 
 
 def test_env_key_wins_over_everything(monkeypatch):
@@ -90,34 +85,25 @@ def test_env_key_wins_over_everything(monkeypatch):
     assert resolution.is_trial is False
 
 
-def test_active_trial_used_when_no_own_key(monkeypatch):
-    """Order 3 unchanged: an active trial token routes through the proxy."""
+def test_active_legacy_trial_is_ignored(monkeypatch):
     monkeypatch.setenv("RDST_KEYSERVICE_URL", "https://trial.example")
     _patch_config(monkeypatch, {"token": "trial-active", "status": "active"})
     _patch_store(monkeypatch, {})
 
-    resolution = key_resolution.resolve_api_key()
+    with pytest.raises(LLMError) as exc:
+        key_resolution.resolve_api_key()
 
-    assert resolution.api_key == "trial-active"
-    assert resolution.is_trial is True
-    assert resolution.proxy_url == "https://trial.example"
-    assert not resolution.proxy_url.endswith("/v1/messages")
+    assert exc.value.code == "LOGIN_REQUIRED"
 
 
-def test_active_trial_wins_over_keyring_own_key(monkeypatch):
-    """Intentional precedence cell: an *active* trial beats a keyring own key.
-
-    Only the *exhausted* status defers to the keyring (the T17 fix); while the
-    trial is active it is resolved before the keyring is ever probed (order 3
-    before order 4). Pinned so a future change can't silently flip it.
-    """
+def test_keyring_own_key_wins_over_legacy_trial_metadata(monkeypatch):
     _patch_config(monkeypatch, {"token": "trial-active", "status": "active"})
     _patch_store(monkeypatch, {"ANTHROPIC_API_KEY": "sk-ant-own"})
 
     resolution = key_resolution.resolve_api_key()
 
-    assert resolution.api_key == "trial-active"
-    assert resolution.is_trial is True
+    assert resolution.api_key == "sk-ant-own"
+    assert resolution.is_trial is False
 
 
 def test_keyring_own_key_used_when_no_trial(monkeypatch):
@@ -131,12 +117,35 @@ def test_keyring_own_key_used_when_no_trial(monkeypatch):
     assert resolution.is_trial is False
 
 
-def test_no_key_anywhere_raises_no_api_key(monkeypatch):
-    """Nothing configured -> the NO_API_KEY error, not a crash."""
+def test_no_key_or_account_requires_login(monkeypatch):
+    """A fresh install is directed to Readyset sign-in."""
     _patch_config(monkeypatch, None)
     _patch_store(monkeypatch, {})
 
     with pytest.raises(LLMError) as exc:
         key_resolution.resolve_api_key()
+
+    assert exc.value.code == "LOGIN_REQUIRED"
+
+
+def test_account_session_selects_hosted_glm(monkeypatch):
+    _patch_config(monkeypatch, None)
+    _patch_store(monkeypatch, {})
+    monkeypatch.setattr(account_session, "access_token", lambda: "supabase-access")
+
+    resolution = key_resolution.resolve_api_key()
+
+    assert resolution.provider == "readyset"
+    assert resolution.api_key == "supabase-access"
+    assert resolution.model == "z-ai/glm-5.3-flash"
+
+
+def test_explicit_claude_never_uses_readyset_account(monkeypatch):
+    _patch_config(monkeypatch, None)
+    _patch_store(monkeypatch, {})
+    monkeypatch.setattr(account_session, "access_token", lambda: "supabase-access")
+
+    with pytest.raises(LLMError) as exc:
+        key_resolution.resolve_api_key("claude")
 
     assert exc.value.code == "NO_API_KEY"

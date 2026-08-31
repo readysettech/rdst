@@ -5,6 +5,7 @@
 # =============================================================================
 
 LAST_OUTPUT_FILE="${TMP_RUN}/last_output.txt"
+LAST_EXIT_CODE=0
 
 log_section() {
   local title="$1"
@@ -71,6 +72,7 @@ run_cmd() {
   else
     echo "Command exited with code $exit_code after ${elapsed}s (not necessarily a failure)"
   fi
+  LAST_EXIT_CODE=$exit_code
 }
 
 run_expect_fail() {

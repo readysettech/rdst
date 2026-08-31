@@ -86,7 +86,7 @@ describe('useAiGate', () => {
     await waitFor(() => expect(result.current).toEqual({ status: 'ready' }))
   })
 
-  it('unblocks after a trial activation', async () => {
+  it('keeps legacy trial tokens blocked after Readyset sign-out', async () => {
     const server: ServerState = {
       source: 'missing',
       satisfied: false,
@@ -105,6 +105,8 @@ describe('useAiGate', () => {
     server.valid = true
     await invalidateTrialRelatedQueries(client)
 
-    await waitFor(() => expect(result.current).toEqual({ status: 'ready' }))
+    await waitFor(() =>
+      expect(result.current).toEqual({ status: 'blocked', reason: 'missing' })
+    )
   })
 })

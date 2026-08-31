@@ -725,6 +725,101 @@ export async function fetchTrialStatus(): Promise<TrialStatusResponse> {
   return data
 }
 
+export type AccountLoginResponse =
+  apiComponents['schemas']['AccountLoginResponse']
+export type AccountLoginStatusResponse =
+  apiComponents['schemas']['AccountLoginStatusResponse']
+export type AccountBrowserCallbackStatusResponse =
+  apiComponents['schemas']['AccountBrowserCallbackStatusResponse']
+export type AccountStatusResponse =
+  apiComponents['schemas']['AccountStatusResponse']
+
+export async function startAccountLogin(
+  returnUrl: string
+): Promise<AccountLoginResponse> {
+  const { data, error, response } = await typedClient.POST(
+    '/api/account/login',
+    {
+      body: { return_url: returnUrl },
+    }
+  )
+  throwIfApiError(response, error, 'Failed to start Readyset sign-in')
+  if (!data) throw new Error('Missing response body')
+  return data
+}
+
+export async function fetchAccountLoginContext(
+  loginId: string
+): Promise<AccountLoginResponse> {
+  const { data, response } = await typedClient.GET(
+    '/api/account/login/{login_id}/context',
+    { params: { path: { login_id: loginId } } }
+  )
+  await throwIfNotOk(response, 'Failed to load Readyset sign-in')
+  if (!data) throw new Error('Missing response body')
+  return data
+}
+
+export async function completeAccountLogin(
+  loginId: string,
+  state: string,
+  accessToken: string,
+  refreshToken: string,
+  expiresIn: number
+): Promise<AccountLoginStatusResponse> {
+  const { data, response } = await typedClient.POST(
+    '/api/account/login/complete',
+    {
+      body: {
+        login_id: loginId,
+        state,
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        expires_in: expiresIn,
+      },
+    }
+  )
+  await throwIfNotOk(response, 'Failed to complete Readyset sign-in')
+  if (!data) throw new Error('Missing response body')
+  return data
+}
+
+export async function fetchAccountLoginStatus(
+  loginId: string
+): Promise<AccountLoginStatusResponse> {
+  const { data, response } = await typedClient.GET(
+    '/api/account/login/{login_id}',
+    { params: { path: { login_id: loginId } } }
+  )
+  await throwIfNotOk(response, 'Failed to check Readyset sign-in')
+  if (!data) throw new Error('Missing response body')
+  return data
+}
+
+export async function fetchAccountBrowserCallback(
+  loginId: string
+): Promise<AccountBrowserCallbackStatusResponse> {
+  const { data, response } = await typedClient.GET(
+    '/api/account/login/{login_id}/browser-callback',
+    { params: { path: { login_id: loginId } } }
+  )
+  await throwIfNotOk(response, 'Failed to receive Readyset sign-in')
+  if (!data) throw new Error('Missing response body')
+  return data
+}
+
+export async function fetchAccountStatus(): Promise<AccountStatusResponse> {
+  const { data, response } = await typedClient.GET('/api/account/status', {})
+  await throwIfNotOk(response, 'Failed to load Readyset account')
+  if (!data) throw new Error('Missing response body')
+  return data
+}
+
+export async function logoutAccount(): Promise<void> {
+  const { response } = await typedClient.POST('/api/account/logout', {})
+  await throwIfNotOk(response, 'Failed to sign out of Readyset')
+}
+
 // Browse (directory picker)
 
 export type BrowseDirectoryEntry = apiComponents['schemas']['DirectoryEntry']

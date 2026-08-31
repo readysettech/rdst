@@ -36,6 +36,19 @@ def test_parser_accepts_trailing_commentary_after_one_object():
     }
 
 
+def test_parser_ignores_unrelated_trailing_object_when_schema_is_known():
+    response = (
+        '{"sql":"SELECT correct FROM t","explanation":"grounded"}\n'
+        '{"debug":true}'
+    )
+
+    assert _parse_json_object_response(
+        response,
+        required_fields={"sql", "explanation"},
+        allowed_fields={"sql", "explanation"},
+    ) == {"sql": "SELECT correct FROM t", "explanation": "grounded"}
+
+
 def test_parser_rejects_no_json_object():
     with pytest.raises(json.JSONDecodeError):
         _parse_json_object_response("not json")

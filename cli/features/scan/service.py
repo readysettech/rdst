@@ -96,9 +96,7 @@ class ScanService:
 
         # Check API key (unless dry-run)
         if not options.dry_run:
-            has_key = bool(
-                os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("RDST_TRIAL_TOKEN")
-            )
+            has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
             if not has_key:
                 try:
                     from shared.llm.key_resolution import resolve_api_key
@@ -110,7 +108,7 @@ class ScanService:
             if not has_key:
                 yield ScanErrorEvent(
                     type="error",
-                    message="No LLM API key configured. Run 'rdst init' for a free trial or set ANTHROPIC_API_KEY.",
+                    message="AI access is not configured. Run 'rdst account login' or set ANTHROPIC_API_KEY.",
                     phase="config",
                 )
                 return

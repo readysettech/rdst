@@ -341,6 +341,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     register_error_handlers(app)
 
     from features.agent.api import routes as agent
+    from features.account.api import routes as account
     from features.allowlist.api import routes as allowlist
     from features.analyze.api import routes as analyze
     from features.ask.api import routes as ask
@@ -372,6 +373,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
         status,
     )
 
+    app.include_router(account.router, prefix="/api", tags=["account"])
     app.include_router(agent.router, prefix="/api")
     app.include_router(allowlist.router, prefix="/api")
     app.include_router(analyze.router, prefix="/api")

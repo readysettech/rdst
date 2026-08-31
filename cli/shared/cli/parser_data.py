@@ -56,6 +56,22 @@ class CommandDef:
 
 
 COMMANDS: dict[str, CommandDef] = {
+    "account": CommandDef(
+        name="account",
+        short_help="Sign in to Readyset for hosted AI inference",
+        description="Manage the Readyset account used for capped hosted AI inference.",
+        subcommand_dest="account_subcommand",
+        subcommand_defs=[
+            SubcommandDef(name="login", help="Sign in through your browser"),
+            SubcommandDef(name="status", help="Show the signed-in Readyset account"),
+            SubcommandDef(name="logout", help="Sign out on this machine"),
+        ],
+        examples=[
+            ("rdst account login", "Sign in to Readyset"),
+            ("rdst account status", "Show the active account"),
+            ("rdst account logout", "Remove the local Readyset session"),
+        ],
+    ),
     "configure": CommandDef(
         name="configure",
         short_help="Manage database targets and connection profiles",
@@ -216,7 +232,7 @@ Each target has a name, connection details, and an environment variable for the 
             ),
             SubcommandDef(
                 name="llm",
-                help="Configure LLM (trial signup or your own Anthropic key)",
+                help="Configure Readyset-hosted AI or your own Anthropic key",
                 args=[],
             ),
         ],
@@ -227,7 +243,7 @@ Each target has a name, connection details, and an environment variable for the 
             ("remove", "Remove a target"),
             ("default", "Set the default target"),
             ("test", "Test connection to a target"),
-            ("llm", "Configure LLM (trial signup or your own Anthropic key)"),
+            ("llm", "Configure Readyset-hosted AI or your own Anthropic key"),
         ],
         examples=[
             (
@@ -1601,6 +1617,7 @@ Modes:
 }
 
 COMMAND_ORDER = [
+    "account",
     "configure",
     "tunnel",
     "top",
@@ -1626,7 +1643,7 @@ COMMAND_ORDER = [
 
 COMMAND_GROUPS: list[tuple[str, list[str]]] = [
     ("Analysis", ["top", "analyze", "ask", "agent"]),
-    ("Configuration", ["init", "configure", "tunnel", "schema", "query", "guard"]),
+    ("Configuration", ["account", "init", "configure", "tunnel", "schema", "query", "guard"]),
     ("Fleet", ["fleet", "audit"]),
     ("Integrations", ["claude", "slack", "web"]),
     ("Other", ["demo", "scan", "report", "help", "version", "update"]),

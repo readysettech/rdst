@@ -440,6 +440,9 @@ def normalize_shared_entity_scope_sql(
         "execution_feedback": False,
     }
     routed_intent = "shared_scope_all_answers" in intent_hints
+    if re.search(r"\b(?:across\s+all|overall|all\s+(?:accounts|customers|users|entities|rows))\b", question, re.I):
+        diagnostics["reason"] = "explicit-global-scope"
+        return sql, diagnostics
     paired_intent = question.count("?") >= 2 or routed_intent
     if not paired_intent:
         diagnostics["reason"] = "not-a-paired-question"

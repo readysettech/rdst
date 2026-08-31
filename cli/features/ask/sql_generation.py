@@ -130,7 +130,12 @@ def _schema_size_failure(
     }
 
 
-def _parse_json_object_response(response_text: Any) -> Dict[str, Any]:
+def _parse_json_object_response(
+    response_text: Any,
+    *,
+    required_fields: set[str] | None = None,
+    allowed_fields: set[str] | None = None,
+) -> Dict[str, Any]:
     """Parse the model's final JSON object, tolerating fences and self-correction."""
     if not isinstance(response_text, str):
         raise TypeError("LLM response must be a string")
@@ -163,6 +168,16 @@ def _parse_json_object_response(response_text: Any) -> Dict[str, Any]:
             if isinstance(candidate, dict):
                 candidates.append(candidate)
             cursor = max(object_start + 1, object_end)
+        if required_fields is not None:
+            candidates = [
+                candidate
+                for candidate in candidates
+                if required_fields.issubset(candidate)
+                and (
+                    allowed_fields is None
+                    or set(candidate).issubset(allowed_fields)
+                )
+            ]
         if not candidates:
             raise initial_error
         parsed = candidates[-1]
@@ -360,7 +375,11 @@ def generate_sql_from_nl(
 
         logger.debug(f"LLM response (first 500 chars): {response_text[:500]}")
 
-        result_data = _parse_json_object_response(response_text)
+        result_data = _parse_json_object_response(
+            response_text,
+            required_fields=set(SQL_GENERATION_RESPONSE_SCHEMA["required"]),
+            allowed_fields=set(SQL_GENERATION_RESPONSE_SCHEMA["properties"]),
+        )
 
         required_fields = set(SQL_GENERATION_RESPONSE_SCHEMA["required"])
         missing_fields = sorted(required_fields - result_data.keys())
@@ -495,6 +514,18 @@ def generate_sql_from_nl(
             "raw_response": response_text if "response_text" in locals() else "",
         }
 
+    except LLMError as e:
+        if getattr(llm_manager, "propagate_query_errors", False):
+            raise
+        return {
+            "success": False,
+            "sql": "",
+            "explanation": "",
+            "confidence": 0.0,
+            "error": str(e),
+            "error_code": e.code,
+        }
+
     except Exception as e:
         if getattr(llm_manager, "propagate_query_errors", False):
             raise
@@ -566,7 +597,11 @@ def repair_sql_after_validation(
                 latency_ms=(time.time() - started) * 1000,
                 model=result.get("model", "unknown"),
             )
-        parsed = _parse_json_object_response(response_text)
+        parsed = _parse_json_object_response(
+            response_text,
+            required_fields={"sql", "explanation"},
+            allowed_fields={"sql", "explanation"},
+        )
         if set(parsed) != {"sql", "explanation"}:
             raise ValueError("validation repair response has unexpected fields")
         if not all(isinstance(parsed[field], str) for field in parsed):

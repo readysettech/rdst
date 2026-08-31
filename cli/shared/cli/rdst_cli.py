@@ -374,6 +374,41 @@ class RdstCLI:
         except Exception as e:
             return RdstResult(False, f"init failed: {e}")
 
+    def account(self, subcommand: str) -> RdstResult:
+        """Manage the Readyset account used by hosted inference."""
+        from features.account.service import account_service
+
+        if subcommand == "logout":
+            account_service.logout()
+            return RdstResult(True, "Signed out of Readyset on this machine.")
+
+        if subcommand == "status":
+            status = account_service.status(include_quota=False)
+            if not status.get("signed_in"):
+                return RdstResult(False, "Not signed in. Run 'rdst account login'.")
+            return RdstResult(
+                True,
+                f"Signed in as {status.get('email') or status.get('user_id')}.",
+            )
+
+        if subcommand != "login":
+            return RdstResult(False, "Account command requires login, status, or logout.")
+
+        try:
+            from features.account.browser_login import (
+                BrowserLoginError,
+                run_browser_login,
+            )
+
+            run_browser_login(
+                on_ready=lambda url: self.client._console.print(
+                    f"Open this RDST sign-in page:\n{url}"
+                )
+            )
+        except BrowserLoginError as exc:
+            return RdstResult(False, str(exc))
+        return RdstResult(True, "Signed in to Readyset.")
+
     # rdst query - query registry management
     def query(self, subcommand: str, **kwargs) -> RdstResult:
         """

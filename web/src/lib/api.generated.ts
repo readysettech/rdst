@@ -4,6 +4,145 @@
  */
 
 export interface paths {
+    "/api/account/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Account Login */
+        post: operations["start_account_login_api_account_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/login/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete Account Login */
+        post: operations["complete_account_login_api_account_login_complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/login/{login_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Account Login Status */
+        get: operations["account_login_status_api_account_login__login_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/login/{login_id}/browser-callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Account Browser Callback Status */
+        get: operations["account_browser_callback_status_api_account_login__login_id__browser_callback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/login/{login_id}/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Account Login Context */
+        get: operations["account_login_context_api_account_login__login_id__context_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Account Logout */
+        post: operations["account_logout_api_account_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/oauth/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Capture Account Oauth Callback
+         * @description Hand an external-browser OAuth result back to the open RDST process.
+         */
+        get: operations["capture_account_oauth_callback_api_account_oauth_callback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Account Status */
+        get: operations["account_status_api_account_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents": {
         parameters: {
             query?: never;
@@ -2049,17 +2188,24 @@ export interface paths {
          * Get Query Registry
          * @description Get queries from the shared query registry, optionally scoped to a target.
          *
-         *     Passing any Query Library read-model parameter (search, view, source,
-         *     params, activity, impact, sort, cursor) switches the response to
+         *     Passing any Query Library read-model parameter (search, view, starred,
+         *     source, params, activity, impact, sort, cursor) switches the response to
          *     {queries, facet_counts, next_cursor, total, freshness}, computed over the
          *     full target-scoped set with keyset pagination. Without them the legacy
          *     limit/offset contract is unchanged.
+         *
+         *     ``starred`` is a facet of its own rather than a value of ``view``, so a
+         *     shortlist composes with every other filter ("starred and not yet
+         *     analyzed"). ``view=saved`` selects the same rows and keeps working.
          */
         get: operations["get_query_registry_api_query_registry_get"];
         put?: never;
         /**
          * Add Query To Registry
          * @description Add a query to the registry.
+         *
+         *     Typing a query into the Add query dialog is the one place a person
+         *     hands RDST a query to keep, so the new entry arrives starred.
          */
         post: operations["add_query_to_registry_api_query_registry_post"];
         delete?: never;
@@ -2082,6 +2228,10 @@ export interface paths {
          * @description Run benchmark on queries with live progress updates via SSE.
          *
          *     Returns Server-Sent Events with progress updates during execution.
+         *
+         *     This path executes SQL the body carries, so it is restricted to the
+         *     same callers as every other write endpoint: loopback, or the page RDST
+         *     itself served.
          */
         post: operations["run_benchmark_api_query_registry_benchmark_post"];
         delete?: never;
@@ -2145,13 +2295,87 @@ export interface paths {
         put?: never;
         /**
          * Start Benchmark Run
-         * @description Start or attach to the target's detached origin-only benchmark.
+         * @description Start or attach to the target's detached benchmark.
          */
         post: operations["start_load_test_run_api_query_registry_load_test_runs_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/query-registry/queries/{query_hash}/compare-outcome": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Compare Outcome
+         * @description Record what comparing a query against Readyset found.
+         *
+         *     Compare is the measurement the Query Library is for, so its result
+         *     belongs beside the query rather than in one browser: the target's
+         *     lifecycle counts the run, and the latest outcome stays readable for the
+         *     next person who opens the query.
+         */
+        post: operations["record_compare_outcome_api_query_registry_queries__query_hash__compare_outcome_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/query-registry/queries/{query_hash}/parameters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Query Parameters
+         * @description Store values for a query's placeholders and return what was stored.
+         *
+         *     The values land in both parameter fields, so they show as the query's
+         *     most recent values and also substitute into its placeholders when it is
+         *     next run.
+         */
+        patch: operations["update_query_parameters_api_query_registry_queries__query_hash__parameters_patch"];
+        trace?: never;
+    };
+    "/api/query-registry/queries/{query_hash}/starred": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set Query Starred
+         * @description Star or unstar a query for one target.
+         *
+         *     The star is the library's only user-authored mark: nothing RDST does on
+         *     its own sets it, and this is the one place it is cleared. Starring a
+         *     query that already carries a star keeps the moment it was first
+         *     starred, so the toggle is idempotent.
+         */
+        patch: operations["set_query_starred_api_query_registry_queries__query_hash__starred_patch"];
         trace?: never;
     };
     "/api/query-registry/{query_hash}": {
@@ -2174,6 +2398,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/query-registry/{query_hash}/analyses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Query Analyses
+         * @description List a query's stored analyses, newest first.
+         *
+         *     The bounded history behind the results viewer: enough of each run to
+         *     choose one, with the body left to the per-analysis route. A query that
+         *     was never analyzed has an empty history rather than an error.
+         */
+        get: operations["list_query_analyses_api_query_registry__query_hash__analyses_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/query-registry/{query_hash}/analysis/latest": {
         parameters: {
             query?: never;
@@ -2190,6 +2438,30 @@ export interface paths {
          *     outcome on demand.
          */
         get: operations["get_latest_query_analysis_api_query_registry__query_hash__analysis_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/query-registry/{query_hash}/analysis/{analysis_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stored Query Analysis
+         * @description Return one stored analysis whole, so it can be reopened without a re-run.
+         *
+         *     The body is served exactly as it was stored, including any field a
+         *     newer build wrote, and ``display_payload`` carries the finished run in
+         *     the shape the results view already renders.
+         */
+        get: operations["get_stored_query_analysis_api_query_registry__query_hash__analysis__analysis_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2777,6 +3049,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/setup-progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Setup Progress
+         * @description Report how far setup has got for one target.
+         *
+         *     The three library-derived signals share a single connection, so the
+         *     whole answer costs one config read, one file check and one short
+         *     SQLite read.
+         */
+        get: operations["get_setup_progress_api_setup_progress_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/status": {
         parameters: {
             query?: never;
@@ -3119,6 +3415,82 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AccountBrowserCallbackStatusResponse */
+        AccountBrowserCallbackStatusResponse: {
+            /** Code */
+            code?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Error Description */
+            error_description?: string | null;
+            /** State */
+            state: string;
+        };
+        /** AccountLoginCompleteRequest */
+        AccountLoginCompleteRequest: {
+            /** Access Token */
+            access_token: string;
+            /**
+             * Expires In
+             * @default 3600
+             */
+            expires_in?: number;
+            /** Login Id */
+            login_id: string;
+            /** Refresh Token */
+            refresh_token: string;
+            /** State */
+            state: string;
+        };
+        /** AccountLoginRequest */
+        AccountLoginRequest: {
+            /** Return Url */
+            return_url: string;
+        };
+        /** AccountLoginResponse */
+        AccountLoginResponse: {
+            /** Auth Url */
+            auth_url: string;
+            /** Callback Url */
+            callback_url: string;
+            /** Expires In */
+            expires_in: number;
+            /** Login Id */
+            login_id: string;
+            /** Publishable Key */
+            publishable_key: string;
+            /** State */
+            state: string;
+        };
+        /** AccountLoginStatusResponse */
+        AccountLoginStatusResponse: {
+            /** Detail */
+            detail: string;
+            /** State */
+            state: string;
+        };
+        /** AccountLogoutResponse */
+        AccountLogoutResponse: {
+            /** Success */
+            success: boolean;
+        };
+        /** AccountStatusResponse */
+        AccountStatusResponse: {
+            /** Detail */
+            detail?: string | null;
+            /** Email */
+            email?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Quota */
+            quota?: {
+                [key: string]: unknown;
+            } | null;
+            /** Signed In */
+            signed_in: boolean;
+            /** User Id */
+            user_id?: string | null;
+        };
         /** AddColumnRequest */
         AddColumnRequest: {
             /** Column Name */
@@ -3431,6 +3803,35 @@ export interface components {
             /** Signed In */
             signed_in: boolean;
         };
+        /**
+         * AnalysisHistoryEntry
+         * @description One entry in a query's bounded analysis history.
+         */
+        AnalysisHistoryEntry: {
+            /** Analysis Id */
+            analysis_id: string;
+            /** Created At */
+            created_at: string;
+            /** Efficiency Score */
+            efficiency_score?: number | null;
+            /**
+             * Overall Rating
+             * @default
+             */
+            overall_rating?: string;
+            /** Target */
+            target: string;
+        };
+        /**
+         * AnalysisHistoryResponse
+         * @description A query's stored analyses, newest first.
+         */
+        AnalysisHistoryResponse: {
+            /** Analyses */
+            analyses: components["schemas"]["AnalysisHistoryEntry"][];
+            /** Hash */
+            hash: string;
+        };
         /** AnalysisMetadata */
         AnalysisMetadata: {
             /** Analysis Id */
@@ -3522,7 +3923,10 @@ export interface components {
             /** Target */
             target?: string | null;
         };
-        /** AnnotateCompleteEvent */
+        /**
+         * AnnotateCompleteEvent
+         * @description Annotation process completed, possibly with individual table failures.
+         */
         AnnotateCompleteEvent: {
             /** Columns Annotated */
             columns_annotated: number;
@@ -3540,7 +3944,10 @@ export interface components {
              */
             type: "annotate_complete";
         };
-        /** AnnotateErrorEvent */
+        /**
+         * AnnotateErrorEvent
+         * @description Annotation process encountered an error.
+         */
         AnnotateErrorEvent: {
             /** Message */
             message: string;
@@ -3550,7 +3957,10 @@ export interface components {
              */
             type: "annotate_error";
         };
-        /** AnnotateProgressEvent */
+        /**
+         * AnnotateProgressEvent
+         * @description Progress update during annotation.
+         */
         AnnotateProgressEvent: {
             /** Message */
             message: string;
@@ -3578,7 +3988,10 @@ export interface components {
             /** Target */
             target: string;
         };
-        /** AnnotateStartedEvent */
+        /**
+         * AnnotateStartedEvent
+         * @description Annotation process started.
+         */
         AnnotateStartedEvent: {
             /**
              * Completed Tables
@@ -3595,7 +4008,10 @@ export interface components {
              */
             type: "annotate_started";
         };
-        /** AnnotateTableCompleteEvent */
+        /**
+         * AnnotateTableCompleteEvent
+         * @description A table has been annotated.
+         */
         AnnotateTableCompleteEvent: {
             /** Columns Annotated */
             columns_annotated: number;
@@ -3635,7 +4051,10 @@ export interface components {
             /** Valid */
             valid: boolean;
         };
-        /** AskClarificationNeededEvent */
+        /**
+         * AskClarificationNeededEvent
+         * @description Clarification needed from the user.
+         */
         AskClarificationNeededEvent: {
             /** Interpretations */
             interpretations: components["schemas"]["AskInterpretation"][];
@@ -3649,7 +4068,10 @@ export interface components {
              */
             type: "clarification_needed";
         };
-        /** AskClarificationQuestion */
+        /**
+         * AskClarificationQuestion
+         * @description A clarification question for the user.
+         */
         AskClarificationQuestion: {
             /** Id */
             id: string;
@@ -3658,7 +4080,10 @@ export interface components {
             /** Question */
             question: string;
         };
-        /** AskErrorEvent */
+        /**
+         * AskErrorEvent
+         * @description Ask encountered an error.
+         */
         AskErrorEvent: {
             /**
              * Category
@@ -3716,7 +4141,10 @@ export interface components {
             /** Items */
             items: components["schemas"]["AskHistoryItem"][];
         };
-        /** AskInterpretation */
+        /**
+         * AskInterpretation
+         * @description A possible interpretation of the user's question.
+         */
         AskInterpretation: {
             /** Assumptions */
             assumptions: string[];
@@ -3760,7 +4188,10 @@ export interface components {
              */
             timeout?: number;
         };
-        /** AskResultEvent */
+        /**
+         * AskResultEvent
+         * @description Ask completed with results.
+         */
         AskResultEvent: {
             /** Columns */
             columns: string[];
@@ -3799,7 +4230,10 @@ export interface components {
              */
             type: "result";
         };
-        /** AskSchemaLoadedEvent */
+        /**
+         * AskSchemaLoadedEvent
+         * @description Schema has been loaded.
+         */
         AskSchemaLoadedEvent: {
             /** Source */
             source: string;
@@ -3818,7 +4252,10 @@ export interface components {
              */
             type: "schema_loaded";
         };
-        /** AskSqlGeneratedEvent */
+        /**
+         * AskSqlGeneratedEvent
+         * @description SQL has been generated.
+         */
         AskSqlGeneratedEvent: {
             /**
              * Explanation
@@ -3833,7 +4270,10 @@ export interface components {
              */
             type: "sql_generated";
         };
-        /** AskStatusEvent */
+        /**
+         * AskStatusEvent
+         * @description Status update during ask execution.
+         */
         AskStatusEvent: {
             /** Message */
             message: string;
@@ -4238,6 +4678,13 @@ export interface components {
              * @default 100
              */
             interval_ms?: number | null;
+            /**
+             * Lanes
+             * @default [
+             *       "origin"
+             *     ]
+             */
+            lanes?: ("origin" | "readyset")[];
             /** Max Count */
             max_count?: number | null;
             /**
@@ -4246,13 +4693,25 @@ export interface components {
              * @enum {string}
              */
             mode?: "interval" | "concurrency";
+            /** Parameter Sets */
+            parameter_sets?: number | null;
             /** Queries */
             queries: (string | components["schemas"]["BenchmarkQueryInput"])[];
+            /** Statement Timeout Ms */
+            statement_timeout_ms?: number | null;
             /** Target */
             target?: string | null;
+            /** Warmup Executions */
+            warmup_executions?: number | null;
         };
         BootstrapEvent: components["schemas"]["BootstrapStageEvent"] | components["schemas"]["BootstrapNeedsKeyEvent"] | components["schemas"]["ErrorEvent"];
-        /** BootstrapNeedsKeyEvent */
+        /**
+         * BootstrapNeedsKeyEvent
+         * @description The run reached the annotate gate without a usable Anthropic key.
+         *
+         *     The event name doubles as the run registry's gating signal: the run's
+         *     status parks on needs_key until the next event arrives.
+         */
         BootstrapNeedsKeyEvent: {
             /** Message */
             message: string;
@@ -4269,7 +4728,14 @@ export interface components {
             /** Status */
             status: string;
         };
-        /** BootstrapStageEvent */
+        /**
+         * BootstrapStageEvent
+         * @description Progress of one bootstrap stage.
+         *
+         *     status is started | progress | done | failed | skipped. Child-service
+         *     events surface as status="progress" with the child's payload in detail,
+         *     so the stream stays one flat, typed union.
+         */
         BootstrapStageEvent: {
             /**
              * Detail
@@ -4355,7 +4821,10 @@ export interface components {
             /** Target */
             target?: string | null;
         };
-        /** CacheRunCompleteEvent */
+        /**
+         * CacheRunCompleteEvent
+         * @description Performance comparison result (origin vs cache).
+         */
         CacheRunCompleteEvent: {
             /**
              * Cache Iterations
@@ -4546,7 +5015,14 @@ export interface components {
              */
             type: "tool_call";
         };
-        /** ChatToolResultEvent */
+        /**
+         * ChatToolResultEvent
+         * @description Result of one tool execution.
+         *
+         *     For query_database, `data` carries sql/columns/rows/row_count/
+         *     execution_time_ms/truncated/query_hash/query_tag; for get_schema it
+         *     carries tables/source.
+         */
         ChatToolResultEvent: {
             /** Content */
             content: string;
@@ -4594,6 +5070,49 @@ export interface components {
             message: string;
             /** Ok */
             ok: boolean;
+        };
+        /**
+         * CompareOutcomeRequest
+         * @description What one Compare run found for a query on one target.
+         */
+        CompareOutcomeRequest: {
+            /** Detail */
+            detail?: string | null;
+            /** Origin Ms */
+            origin_ms?: number | null;
+            /** Readyset Ms */
+            readyset_ms?: number | null;
+            /** Readyset Supported */
+            readyset_supported?: ("yes" | "no" | "pending") | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "improved" | "regressed" | "equivalent" | "not_comparable" | "error";
+            /**
+             * Target
+             * @default
+             */
+            target?: string;
+            /** Unsupported Reason */
+            unsupported_reason?: string | null;
+        };
+        /** CompareOutcomeResponse */
+        CompareOutcomeResponse: {
+            /** Comparison Count */
+            comparison_count: number;
+            /** Hash */
+            hash: string;
+            /** Last Compare */
+            last_compare: {
+                [key: string]: unknown;
+            };
+            /** Last Compared At */
+            last_compared_at: string;
+            /** Readyset Supported */
+            readyset_supported: string;
+            /** Target */
+            target: string;
         };
         /** CompleteEvent */
         CompleteEvent: {
@@ -4738,7 +5257,7 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "config" | "process_env" | "secure_store" | "trial" | "trial_exhausted" | "missing";
+            source: "config" | "process_env" | "secure_store" | "trial" | "trial_exhausted" | "readyset_account" | "missing";
             /** Target */
             target?: string | null;
         };
@@ -4783,7 +5302,16 @@ export interface components {
             /** Success */
             success: boolean;
         };
-        /** ErrorEvent */
+        /**
+         * ErrorEvent
+         * @description Error event for service workflows.
+         *
+         *     ``code`` and ``detail`` mirror the shared HTTP error envelope
+         *     (``shared.api.app._error_envelope``) so an SSE failure carries the same
+         *     {code, message, detail} shape the client normalizes in ``lib/sse.ts``.
+         *     Both stay optional so existing producers that only set ``message`` keep
+         *     working; the client derives a code when one is absent.
+         */
         ErrorEvent: {
             /**
              * Code
@@ -5817,6 +6345,29 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * LastCompareOutcome
+         * @description What the query's most recent Compare run found, as stored.
+         *
+         *     Written by the compare-outcome endpoint and read back here, so a
+         *     measurement survives the browser that took it. Fields the run did not
+         *     measure come back null.
+         */
+        LastCompareOutcome: {
+            /**
+             * At
+             * @default
+             */
+            at?: string;
+            /** Detail */
+            detail?: string | null;
+            /** Origin Ms */
+            origin_ms?: number | null;
+            /** Readyset Ms */
+            readyset_ms?: number | null;
+            /** Status */
+            status: string;
+        };
+        /**
          * LatestAnalysisResponse
          * @description Latest stored analysis summary for one query hash, when any exists.
          */
@@ -5977,7 +6528,10 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** ProgressEvent */
+        /**
+         * ProgressEvent
+         * @description Progress update during a multi-step operation.
+         */
         ProgressEvent: {
             /** Message */
             message: string;
@@ -6015,14 +6569,33 @@ export interface components {
             /** Target */
             target: string;
         };
-        /** QueryBenchmarkCompleteEvent */
+        /**
+         * QueryBenchmarkCompleteEvent
+         * @description Benchmark finished; carries the final tally.
+         */
         QueryBenchmarkCompleteEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
+            /** Lanes Run */
+            lanes_run?: string[];
             /** Qps */
             qps: number;
             /** Queries */
             queries: components["schemas"]["QueryBenchmarkStats"][];
+            /**
+             * Readyset Setup
+             * @default null
+             */
+            readyset_setup?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Skipped Count
+             * @default 0
+             */
+            skipped_count?: number;
+            /** Skipped Queries */
+            skipped_queries?: components["schemas"]["QuerySkip"][];
             /** Total Executions */
             total_executions: number;
             /** Total Failures */
@@ -6034,8 +6607,22 @@ export interface components {
              * @constant
              */
             type: "complete";
+            /**
+             * Warmup Executions
+             * @default 0
+             */
+            warmup_executions?: number;
         };
-        /** QueryBenchmarkErrorEvent */
+        /**
+         * QueryBenchmarkErrorEvent
+         * @description Benchmark failed (or was rejected by a safety rail) before completion.
+         *
+         *     Carries the shared error envelope ({code, message, detail}, B7/T24) so the
+         *     client normalizes a benchmark failure exactly like every other SSE error.
+         *     ``message`` stays humane and safe to show; ``detail`` holds only the
+         *     exception class name for correlation — never the raw ``str(e)``, which can
+         *     embed host / DSN / SQL material.
+         */
         QueryBenchmarkErrorEvent: {
             /**
              * Code
@@ -6056,14 +6643,39 @@ export interface components {
             type: "error";
         };
         QueryBenchmarkEvent: components["schemas"]["QueryBenchmarkProgressEvent"] | components["schemas"]["QueryBenchmarkCompleteEvent"] | components["schemas"]["QueryBenchmarkErrorEvent"];
-        /** QueryBenchmarkProgressEvent */
+        /**
+         * QueryBenchmarkProgressEvent
+         * @description Benchmark progress tick.
+         */
         QueryBenchmarkProgressEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
+            /**
+             * Phase
+             * @default null
+             */
+            phase?: "preparing" | null;
+            /**
+             * Prepare Total
+             * @default null
+             */
+            prepare_total?: number | null;
+            /**
+             * Prepared Count
+             * @default null
+             */
+            prepared_count?: number | null;
             /** Qps */
             qps: number;
             /** Queries */
             queries: components["schemas"]["QueryBenchmarkStats"][];
+            /**
+             * Skipped Count
+             * @default 0
+             */
+            skipped_count?: number;
+            /** Skipped Queries */
+            skipped_queries?: components["schemas"]["QuerySkip"][];
             /** Total Executions */
             total_executions: number;
             /** Total Failures */
@@ -6075,8 +6687,16 @@ export interface components {
              * @constant
              */
             type: "progress";
+            /**
+             * Warmup Executions
+             * @default 0
+             */
+            warmup_executions?: number;
         };
-        /** QueryBenchmarkStats */
+        /**
+         * QueryBenchmarkStats
+         * @description Statistics for a single benchmarked query.
+         */
         QueryBenchmarkStats: {
             /** Avg Ms */
             avg_ms: number;
@@ -6084,6 +6704,15 @@ export interface components {
             executions: number;
             /** Failures */
             failures: number;
+            /**
+             * Lanes
+             * @default null
+             */
+            lanes?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            } | null;
             /**
              * Last Error
              * @default null
@@ -6105,6 +6734,16 @@ export interface components {
             query_name: string;
             /** Successes */
             successes: number;
+            /**
+             * Timeouts
+             * @default 0
+             */
+            timeouts?: number;
+            /**
+             * Variant Count
+             * @default 1
+             */
+            variant_count?: number;
         };
         /**
          * QueryLibraryFacetCounts
@@ -6213,6 +6852,7 @@ export interface components {
              * @default
              */
             last_cache_target?: string;
+            last_compare?: components["schemas"]["LastCompareOutcome"] | null;
             /**
              * Last Compared At
              * @default
@@ -6281,6 +6921,16 @@ export interface components {
             sources?: string[];
             /** Sql */
             sql: string;
+            /**
+             * Starred
+             * @default false
+             */
+            starred?: boolean;
+            /**
+             * Starred At
+             * @default
+             */
+            starred_at?: string;
             /** Tag */
             tag: string;
             /** Target */
@@ -6301,6 +6951,28 @@ export interface components {
             queries: components["schemas"]["QueryRegistryEntry"][];
             /** Total */
             total: number;
+        };
+        /**
+         * QuerySkip
+         * @description One query left out of a run, and the reason it was left out.
+         *
+         *     A skip with no lanes is out of the whole run. A skip that names lanes is
+         *     missing from those lanes only, and runs in the run's others.
+         */
+        QuerySkip: {
+            /**
+             * Lanes
+             * @default null
+             */
+            lanes?: {
+                [key: string]: string;
+            } | null;
+            /** Query Hash */
+            query_hash: string;
+            /** Query Name */
+            query_name: string;
+            /** Reason */
+            reason: string;
         };
         /** ReadysetCacheability */
         ReadysetCacheability: {
@@ -6596,7 +7268,10 @@ export interface components {
             /** Verified */
             verified: boolean;
         };
-        /** RunEndEvent */
+        /**
+         * RunEndEvent
+         * @description Terminal event appended by the registry after every run.
+         */
         RunEndEvent: {
             /** Status */
             status: string;
@@ -6649,7 +7324,10 @@ export interface components {
             /** Queued Requests */
             queued_requests: number;
         };
-        /** ScanCompleteEvent */
+        /**
+         * ScanCompleteEvent
+         * @description Scan completed.
+         */
         ScanCompleteEvent: {
             /** Success */
             success: boolean;
@@ -6663,7 +7341,10 @@ export interface components {
              */
             type: "complete";
         };
-        /** ScanErrorEvent */
+        /**
+         * ScanErrorEvent
+         * @description Scan error.
+         */
         ScanErrorEvent: {
             /** Message */
             message: string;
@@ -6679,7 +7360,10 @@ export interface components {
             type: "error";
         };
         ScanEvent: components["schemas"]["ScanStatusEvent"] | components["schemas"]["ScanFilesFoundEvent"] | components["schemas"]["ScanProgressEvent"] | components["schemas"]["ScanQueryResultEvent"] | components["schemas"]["ScanRegistryEvent"] | components["schemas"]["ScanCompleteEvent"] | components["schemas"]["ScanErrorEvent"];
-        /** ScanFilesFoundEvent */
+        /**
+         * ScanFilesFoundEvent
+         * @description Files with ORM patterns discovered.
+         */
         ScanFilesFoundEvent: {
             /** Files */
             files: {
@@ -6722,7 +7406,10 @@ export interface components {
          * @enum {string}
          */
         ScanPhase: "config" | "discovery" | "extraction" | "conversion" | "registry" | "analysis";
-        /** ScanProgressEvent */
+        /**
+         * ScanProgressEvent
+         * @description Progress update within a scan phase.
+         */
         ScanProgressEvent: {
             /** Current */
             current: number;
@@ -6738,7 +7425,10 @@ export interface components {
              */
             type: "progress";
         };
-        /** ScanQueryResultEvent */
+        /**
+         * ScanQueryResultEvent
+         * @description Individual query result from scan.
+         */
         ScanQueryResultEvent: {
             /** Query */
             query: {
@@ -6750,7 +7440,10 @@ export interface components {
              */
             type: "query_result";
         };
-        /** ScanRegistryEvent */
+        /**
+         * ScanRegistryEvent
+         * @description Registry save results.
+         */
         ScanRegistryEvent: {
             /** New Queries */
             new_queries: number;
@@ -6820,7 +7513,10 @@ export interface components {
              */
             warn_threshold?: number;
         };
-        /** ScanStatusEvent */
+        /**
+         * ScanStatusEvent
+         * @description Status update during scan.
+         */
         ScanStatusEvent: {
             /** Message */
             message: string;
@@ -7106,10 +7802,72 @@ export interface components {
             /** Name */
             name: string;
         };
+        /**
+         * SetQueryStarredRequest
+         * @description Whether the user wants this query starred on one target.
+         */
+        SetQueryStarredRequest: {
+            /** Starred */
+            starred: boolean;
+            /**
+             * Target
+             * @default
+             */
+            target?: string;
+        };
+        /** SetQueryStarredResponse */
+        SetQueryStarredResponse: {
+            /** Hash */
+            hash: string;
+            /** Starred */
+            starred: boolean;
+            /** Starred At */
+            starred_at: string;
+            /** Target */
+            target: string;
+        };
         /** SettingsBody */
         SettingsBody: {
             /** Cache Budget */
             cache_budget: number;
+        };
+        /**
+         * SetupProgressResponse
+         * @description The five setup signals for one target, all independent.
+         */
+        SetupProgressResponse: {
+            /**
+             * Analyzed
+             * @default false
+             */
+            analyzed?: boolean;
+            /**
+             * Compared
+             * @default false
+             */
+            compared?: boolean;
+            /**
+             * Connected
+             * @default false
+             */
+            connected?: boolean;
+            /** Error */
+            error?: string | null;
+            /**
+             * Queries Found
+             * @default false
+             */
+            queries_found?: boolean;
+            /**
+             * Schema Built
+             * @default false
+             */
+            schema_built?: boolean;
+            /**
+             * Target
+             * @default
+             */
+            target?: string;
         };
         /** SshAuthOptionResponse */
         SshAuthOptionResponse: {
@@ -7187,6 +7945,31 @@ export interface components {
             targets: components["schemas"]["TargetInfo"][];
             /** Version */
             version?: string | null;
+        };
+        /**
+         * StoredAnalysisResponse
+         * @description One stored analysis, whole, for read-only redisplay.
+         */
+        StoredAnalysisResponse: {
+            /** Analysis */
+            analysis: {
+                [key: string]: unknown;
+            };
+            /** Analysis Id */
+            analysis_id: string;
+            /** Created At */
+            created_at: string;
+            /** Efficiency Score */
+            efficiency_score?: number | null;
+            /** Hash */
+            hash: string;
+            /**
+             * Overall Rating
+             * @default
+             */
+            overall_rating?: string;
+            /** Target */
+            target: string;
         };
         /**
          * TargetData
@@ -7405,7 +8188,10 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** TopCompleteEvent */
+        /**
+         * TopCompleteEvent
+         * @description Operation completed.
+         */
         TopCompleteEvent: {
             /** Newly Saved */
             newly_saved: number;
@@ -7421,7 +8207,10 @@ export interface components {
              */
             type: "complete";
         };
-        /** TopConnectedEvent */
+        /**
+         * TopConnectedEvent
+         * @description Database connection established.
+         */
         TopConnectedEvent: {
             /** Db Engine */
             db_engine: string;
@@ -7446,7 +8235,10 @@ export interface components {
             /** Setting Name */
             setting_name: string;
         };
-        /** TopDbLimitWarningEvent */
+        /**
+         * TopDbLimitWarningEvent
+         * @description Database query size limit is below recommended threshold.
+         */
         TopDbLimitWarningEvent: {
             /** Db Engine */
             db_engine: string;
@@ -7462,7 +8254,14 @@ export interface components {
              */
             type: "db_limit_warning";
         };
-        /** TopErrorEvent */
+        /**
+         * TopErrorEvent
+         * @description Error occurred.
+         *
+         *     ``code`` and ``detail`` mirror the shared error envelope (B7/T24):
+         *     ``message`` stays humane, ``detail`` carries the exception class name for
+         *     correlation — never the raw ``str(e)``, which can embed host/DSN material.
+         */
         TopErrorEvent: {
             /**
              * Code
@@ -7516,7 +8315,10 @@ export interface components {
             /** Target */
             target?: string | null;
         };
-        /** TopQueriesEvent */
+        /**
+         * TopQueriesEvent
+         * @description Batch of top queries.
+         */
         TopQueriesEvent: {
             /** Db Engine */
             db_engine: string;
@@ -7542,7 +8344,10 @@ export interface components {
              */
             type: "queries";
         };
-        /** TopQueryData */
+        /**
+         * TopQueryData
+         * @description Individual query data.
+         */
         TopQueryData: {
             /** Avg Time */
             avg_time: string;
@@ -7604,7 +8409,10 @@ export interface components {
             /** Total Time */
             total_time: string;
         };
-        /** TopQuerySavedEvent */
+        /**
+         * TopQuerySavedEvent
+         * @description Query saved to registry.
+         */
         TopQuerySavedEvent: {
             /** Is New */
             is_new: boolean;
@@ -7616,7 +8424,10 @@ export interface components {
              */
             type: "query_saved";
         };
-        /** TopSourceFallbackEvent */
+        /**
+         * TopSourceFallbackEvent
+         * @description Source fallback occurred.
+         */
         TopSourceFallbackEvent: {
             /** From Source */
             from_source: string;
@@ -7630,7 +8441,10 @@ export interface components {
              */
             type: "source_fallback";
         };
-        /** TopStatusEvent */
+        /**
+         * TopStatusEvent
+         * @description Progress status update.
+         */
         TopStatusEvent: {
             /** Message */
             message: string;
@@ -7734,6 +8548,31 @@ export interface components {
             state: string;
             /** Target */
             target: string;
+        };
+        /**
+         * UpdateParametersRequest
+         * @description Concrete values for one query's placeholders, keyed by parameter name.
+         */
+        UpdateParametersRequest: {
+            /**
+             * Source
+             * @default user
+             * @enum {string}
+             */
+            source?: "user" | "suggested";
+            /** Values */
+            values: {
+                [key: string]: string | number;
+            };
+        };
+        /** UpdateParametersResponse */
+        UpdateParametersResponse: {
+            /** Hash */
+            hash: string;
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            };
         };
         /** UpdateSqlRequest */
         UpdateSqlRequest: {
@@ -7980,6 +8819,239 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    start_account_login_api_account_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountLoginResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    complete_account_login_api_account_login_complete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountLoginCompleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountLoginStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    account_login_status_api_account_login__login_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                login_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountLoginStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    account_browser_callback_status_api_account_login__login_id__browser_callback_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                login_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountBrowserCallbackStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    account_login_context_api_account_login__login_id__context_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                login_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountLoginResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    account_logout_api_account_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountLogoutResponse"];
+                };
+            };
+        };
+    };
+    capture_account_oauth_callback_api_account_oauth_callback_get: {
+        parameters: {
+            query?: {
+                login_id?: string;
+                code?: string;
+                error?: string;
+                error_description?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    account_status_api_account_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountStatusResponse"];
+                };
+            };
+        };
+    };
     list_agents_api_agents_get: {
         parameters: {
             query?: never;
@@ -11270,6 +12342,8 @@ export interface operations {
                 target?: string | null;
                 search?: string | null;
                 view?: ("all" | "new" | "saved" | "high-impact" | "needs-analysis" | "ready-to-cache" | "cached") | null;
+                /** @description Restrict to starred queries (1) or unstarred ones (0). Omit for both. */
+                starred?: boolean | null;
                 source?: ("all" | "observed" | "ask" | "manual" | "file" | "scan") | null;
                 params?: ("all" | "without-parameters" | "values-ready" | "values-needed") | null;
                 activity?: ("all" | "1m" | "1h" | "8h" | "24h" | "7d" | "30d") | null;
@@ -11470,6 +12544,111 @@ export interface operations {
             };
         };
     };
+    record_compare_outcome_api_query_registry_queries__query_hash__compare_outcome_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                query_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompareOutcomeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompareOutcomeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_query_parameters_api_query_registry_queries__query_hash__parameters_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                query_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateParametersRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateParametersResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_query_starred_api_query_registry_queries__query_hash__starred_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                query_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetQueryStarredRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetQueryStarredResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     remove_query_from_registry_api_query_registry__query_hash__delete: {
         parameters: {
             query?: never;
@@ -11501,6 +12680,37 @@ export interface operations {
             };
         };
     };
+    list_query_analyses_api_query_registry__query_hash__analyses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                query_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_latest_query_analysis_api_query_registry__query_hash__analysis_latest_get: {
         parameters: {
             query?: never;
@@ -11519,6 +12729,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LatestAnalysisResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_stored_query_analysis_api_query_registry__query_hash__analysis__analysis_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                query_hash: string;
+                analysis_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredAnalysisResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12502,6 +13744,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResetLocalDataResponse"];
+                };
+            };
+        };
+    };
+    get_setup_progress_api_setup_progress_get: {
+        parameters: {
+            query?: {
+                /** @description Target to report on; defaults to the default target */
+                target?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupProgressResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

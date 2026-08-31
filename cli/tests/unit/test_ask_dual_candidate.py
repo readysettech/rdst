@@ -53,6 +53,17 @@ def test_unsupported_predicate_literal_selects_grounded_alternate():
     assert diagnostics["primary"]["unsupported_literals"] == ("2",)
 
 
+def test_short_literal_is_not_grounded_by_a_question_substring():
+    assessment = assess_candidate(
+        question="List customers created in 2012.",
+        provided_context="",
+        sql="SELECT name FROM customer WHERE country_code = 'US' AND tier = 1",
+        dialect="mysql",
+    )
+
+    assert assessment.unsupported_literals == ("US", "1")
+
+
 def test_equivalent_date_spelling_is_grounded():
     assessment = assess_candidate(
         question="How many transactions happened after 2012/1/1?",
@@ -146,6 +157,33 @@ def test_unrequested_limit_selects_complete_alternate():
     )
     assert selected == "alternate"
     assert diagnostics["primary"]["unrequested_limit"] is True
+
+
+def test_threshold_wording_does_not_make_limit_requested():
+    assessment = assess_candidate(
+        question="List customers with at least 10 orders.",
+        provided_context="",
+        sql=(
+            "SELECT customer_id FROM orders GROUP BY customer_id "
+            "HAVING COUNT(*) >= 10 LIMIT 1"
+        ),
+        dialect="mysql",
+    )
+
+    assert assessment.unrequested_limit is True
+
+
+def test_alternate_cannot_drop_a_requested_projection():
+    selected, diagnostics = select_candidate(
+        question="List every person's name and email.",
+        provided_context="",
+        primary_sql="SELECT name, email FROM person LIMIT 1",
+        alternate_sql="SELECT name FROM person",
+        dialect="mysql",
+    )
+
+    assert selected == "primary"
+    assert diagnostics["projection_shape_matches"] is False
 
 
 def test_tie_keeps_primary():

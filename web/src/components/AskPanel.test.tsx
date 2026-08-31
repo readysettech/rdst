@@ -257,11 +257,13 @@ describe('AskPanel', () => {
 
     expect(
       screen.getByText(
-        'Your free trial credit is used up — add your own Anthropic API key or a new trial token.'
+        'Hosted AI access is unavailable. Check your Readyset account quota or add your own Anthropic API key.'
       )
     ).toBeTruthy()
     expect(screen.getByRole('button', { name: /Set key/ })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Start trial' })).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'Sign in to Readyset' })
+    ).toBeTruthy()
     expect(screen.queryByText('TRIAL_EXHAUSTED')).toBeNull()
   })
 

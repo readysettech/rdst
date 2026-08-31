@@ -50,8 +50,35 @@ export function AskErrorState({
   const isAuthenticationError =
     !modelContextLimit &&
     (errorClass === 'provider' || errorClass === 'rdst-service')
-  const trialExhausted = isTrialExhaustedError(error.message)
+  const trialExhausted = isTrialExhaustedError(envelope)
   const phaseLabel = error.phase ? PHASE_LABELS[error.phase] : undefined
+
+  if ((envelope.code || '').toLowerCase() === 'query_timeout') {
+    return (
+      <div className="rounded-xl border border-border-negative-soft bg-surface-negative-soft/50 p-6">
+        <HStack className="gap-4 items-start">
+          <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-surface-negative-soft">
+            <Icon name="alert" label="Timeout" className="size-6 text-content-negative-soft" />
+          </div>
+          <VStack className="gap-3 items-start flex-1">
+            <VStack className="gap-1 items-start">
+              <Text level="headline-4" className="text-content-negative-soft">
+                Query took too long
+              </Text>
+              <Text level="body-small" className="text-content-layout-2 leading-relaxed">
+                {error.message} Try a narrower question or retry the query.
+              </Text>
+            </VStack>
+            {phaseLabel && <FailurePhase label={phaseLabel} />}
+            <HStack className="gap-3 items-center">
+              <Button onClick={onRetry} variant="primary" modifier="outline" size="small" label="Try again" icon="arrow-left" iconPosition="left" />
+              <Button onClick={onNewQuestion} variant="primary" modifier="ghost" size="small" label="Refine question" icon="add" iconPosition="left" />
+            </HStack>
+          </VStack>
+        </HStack>
+      </div>
+    )
+  }
 
   if (envelope.target && isConnectionFailure(envelope)) {
     return (
@@ -82,7 +109,7 @@ export function AskErrorState({
           title="AI service authentication failed"
           message={trialExhausted ? TRIAL_EXHAUSTED_MESSAGE : error.message}
           onRetry={trialExhausted ? onStartTrial : undefined}
-          retryLabel={trialExhausted ? 'Start trial' : undefined}
+          retryLabel={trialExhausted ? 'Sign in to Readyset' : undefined}
           className="w-full"
         />
         {phaseLabel && <FailurePhase label={phaseLabel} />}

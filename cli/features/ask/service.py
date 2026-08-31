@@ -40,6 +40,7 @@ from .categorical_normalization import (
 from .correction_intent_routing import (
     CORRECTION_INTENT_ACTIONABILITY_VERSION,
     CORRECTION_INTENT_PRODUCT_SCOPE,
+    CORRECTION_INTENT_ROUTING_MAX_ACTIVATIONS,
     CORRECTION_INTENT_ROUTING_PURPOSE,
     CORRECTION_INTENTS,
     route_correction_intent,
@@ -327,7 +328,31 @@ class AskService:
         phase: AskPhase,
         target: str,
         target_config: dict[str, Any],
+        error_kind: str | None = None,
     ) -> AskErrorEvent:
+        if error_kind == "query_timeout":
+            return AskErrorEvent(
+                type="error",
+                message=message,
+                phase=phase,
+                code="query_timeout",
+                category="query_timeout",
+                target=target,
+            )
+        if error_kind in {"query_execution", "local_dependency"}:
+            code = (
+                "database_query_failed"
+                if error_kind == "query_execution"
+                else "database_driver_missing"
+            )
+            return AskErrorEvent(
+                type="error",
+                message=message,
+                phase=phase,
+                code=code,
+                category=code,
+                target=target,
+            )
         from shared.api.ssh_errors import connectivity_error_payload
 
         failure = connectivity_error_payload(
@@ -467,6 +492,9 @@ class AskService:
                         type="error",
                         message=ctx.error_message or "Failed to analyze question",
                         phase=AskPhase.CLARIFY,
+                        code=ctx.error_code,
+                        category=ctx.error_category,
+                        target=target_name,
                     )
                     return
                 if ambiguities:
@@ -751,20 +779,19 @@ class AskService:
             AskPhase.EXECUTE,
             ctx.target,
             ctx.target_config or {},
+            ctx.execution_result.error_kind if ctx.execution_result else None,
         )
 
     async def _apply_post_execution_repairs(self, ctx: Any) -> Any:
         """Try selected repairs that require feedback from the primary result."""
         routing = dict(getattr(ctx, "correction_intent_routing", {}) or {})
-        selected = selected_correction_intents(
-            {
-                **routing,
-                "status": "activate",
-                "verdict": "activate",
-                "activation_allowed": True,
-            }
+        selected = tuple(routing.get("deferred_intents") or ())
+        deferred = (
+            set(selected) & _DEFERRED_CORRECTION_INTENTS
+            if routing.get("activation_allowed") is True
+            and routing.get("application_status") == "deferred"
+            else set()
         )
-        deferred = set(selected) & _DEFERRED_CORRECTION_INTENTS
         if self._correction_intent_routing_shadow or not deferred:
             return ctx
         if len(deferred) != 1:
@@ -1042,9 +1069,38 @@ class AskService:
             proposed_sql=original_sql,
         )
         routing = {**ctx.correction_intent_routing, **base_diagnostics}
-        selected_intents = selected_correction_intents(
-            {**routing, "activation_allowed": True}
+        routed_status_active = (
+            routing.get("status") == "activate"
+            and routing.get("verdict") == "activate"
         )
+        raw_selected = routing.get("selected_intents")
+        if isinstance(raw_selected, (list, tuple)):
+            selected_intents = tuple(raw_selected)
+        else:
+            legacy_selected = routing.get("selected_intent")
+            selected_intents = (
+                (legacy_selected,)
+                if isinstance(legacy_selected, str)
+                and legacy_selected in self._correction_intent_routing_intent_scope
+                else ()
+            )
+        selection_allowed = (
+            routed_status_active
+            and (
+                routing.get("activation_allowed") is True
+                or self._correction_intent_routing_shadow
+            )
+            and 0
+            < len(selected_intents)
+            <= CORRECTION_INTENT_ROUTING_MAX_ACTIVATIONS
+            and all(
+                intent in self._correction_intent_routing_intent_scope
+                for intent in selected_intents
+            )
+        )
+        if not selection_allowed:
+            selected_intents = ()
+            routing["activation_allowed"] = False
         deferred_intents = tuple(
             intent
             for intent in selected_intents
@@ -1317,12 +1373,21 @@ class AskService:
             raw_response.encode("utf-8")
         ).hexdigest()
         if not result.get("success"):
+            error_code = result.get("error_code")
             ctx.ambiguity_report = {
                 "error": result.get("error", "unknown"),
+                "error_code": error_code,
                 "fallback": "fail_closed",
             }
+            message = (
+                str(result.get("error"))
+                if error_code
+                else "Failed to analyze whether the question requires clarification"
+            )
             ctx.mark_error(
-                "Failed to analyze whether the question requires clarification"
+                message,
+                code=error_code,
+                category="rdst-service" if error_code else None,
             )
             return ctx, [], []
 

@@ -57,7 +57,7 @@ export function FirstRunHome({ aiKeyState }: { aiKeyState: AiKeyState }) {
           number="02"
           icon="sparkles"
           title="Configure AI"
-          description="Enable schema descriptions, Ask, and analysis guidance. You can use your own key or trial credits."
+          description="Enable schema descriptions, Ask, and analysis guidance. Sign in to Readyset or use your own Anthropic key."
           action={
             <Button
               variant="primary"

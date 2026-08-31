@@ -26,6 +26,7 @@ describe('DevSettingsSection', () => {
     vi.clearAllMocks()
     vi.mocked(useTrialSource).mockReturnValue({
       envRequirements: undefined,
+      envRequirementsQuery: {} as never,
       anthropicRequirement: undefined,
       anthropicSource: undefined,
       isTrialSource: false,
@@ -76,6 +77,7 @@ describe('DevSettingsSection', () => {
   it('shows the trial simulator only for an active trial source', async () => {
     vi.mocked(useTrialSource).mockReturnValue({
       envRequirements: undefined,
+      envRequirementsQuery: {} as never,
       anthropicRequirement: undefined,
       anthropicSource: 'trial',
       isTrialSource: true,

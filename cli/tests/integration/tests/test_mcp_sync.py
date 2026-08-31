@@ -21,6 +21,7 @@ import os
 # ask: Requires interactive TTY for best experience
 # update: Mutates the installer-managed runtime and must be invoked explicitly
 MCP_EXCLUDED_COMMANDS = {
+    "account",  # CLI/UI-only - authenticates the local RDST client
     "claude",  # N/A - meta command for MCP registration itself
     "help",  # N/A - rdst_help handles this differently
     "ask",  # CLI-only - requires interactive TTY for multi-step flow

@@ -28,6 +28,7 @@
     "@lezer/highlight": "^1.2.0",
     "@rs/tailwind-base": "workspace:*",
     "@rs/ui-new": "workspace:*",
+    "@supabase/supabase-js": "^2.90.1",
     "@tanstack/react-query": "catalog:tanstack",
     "@tanstack/react-router": "catalog:tanstack",
     "@uiw/codemirror-themes": "^4.23.0",

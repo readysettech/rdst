@@ -60,7 +60,7 @@ def test_direct_401_is_rejected(monkeypatch):
     assert out["reason"] == "rejected"
 
 
-def test_trial_proxy_401_is_rejected(monkeypatch):
+def test_legacy_trial_error_is_not_an_anthropic_rejection(monkeypatch):
     ae.clear_anthropic_validity_cache()
     _stub_key(monkeypatch)
 
@@ -68,7 +68,7 @@ def test_trial_proxy_401_is_rejected(monkeypatch):
         raise LLMError("no", code="TRIAL_AUTH_INVALID", status=401)
 
     _stub_query(monkeypatch, _raise)
-    assert ae.validate_anthropic_key()["reason"] == "rejected"
+    assert ae.validate_anthropic_key()["reason"] == "provider_error"
 
 
 def test_other_llm_error_is_provider_error(monkeypatch):

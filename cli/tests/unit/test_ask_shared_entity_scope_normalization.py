@@ -77,6 +77,19 @@ def test_propagates_source_grounded_shared_identifier_to_aggregate_branch():
     assert diagnostics["execution_feedback"] is False
 
 
+def test_explicit_global_branch_is_not_narrowed_to_one_entity():
+    sql, diagnostics = normalize(
+        question=(
+            "For account 3, return its statement frequency and the overall debit "
+            "purpose across all accounts whose total is 3539."
+        )
+    )
+
+    assert sql == SQL
+    assert diagnostics["reason"] == "explicit-global-scope"
+    assert diagnostics["propagated_scopes"] == 0
+
+
 def test_propagates_tenant_scope_across_invoice_and_payment_tables():
     billing_schema = SchemaInfo(
         target="billing",

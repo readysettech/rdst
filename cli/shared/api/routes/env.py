@@ -1,6 +1,7 @@
 """API routes for secure environment variable handling."""
 
 from __future__ import annotations
+import asyncio
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Request
@@ -18,6 +19,7 @@ EnvRequirementSource = Literal[
     "secure_store",
     "trial",
     "trial_exhausted",
+    "readyset_account",
     "missing",
 ]
 
@@ -65,7 +67,7 @@ async def get_env_requirements(request: Request) -> EnvRequirementsResponse:
     require_local_request(request)
 
     service = EnvRequirementsService()
-    requirements = service.get_requirements()
+    requirements = await asyncio.to_thread(service.get_requirements)
     return EnvRequirementsResponse(
         keyring_available=service.secret_store.is_available(),
         requirements=[EnvRequirement(**item) for item in requirements],

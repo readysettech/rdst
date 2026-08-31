@@ -93,7 +93,7 @@ def run_menu_with_inputs(inputs):
 
 
 EXPECTED_COMMANDS = [
-    "configure", "top", "analyze", "ask", "scan", "agent", "guard",
+    "account", "configure", "top", "analyze", "ask", "scan", "agent", "guard",
     "init", "query", "schema", "tunnel", "fleet", "audit", "demo",
     "version", "update", "report", "help", "claude", "slack", "web", "exit",
 ]
@@ -523,7 +523,7 @@ class TestMenuItemCapitalization:
         """Verify all expected commands are present in the menu."""
         commands = _get_menu_command_names()
         expected = {
-            "configure", "top", "analyze", "ask", "scan", "agent", "guard",
+            "account", "configure", "top", "analyze", "ask", "scan", "agent", "guard",
             "init", "query", "schema", "tunnel", "version", "update", "report", "help",
             "fleet", "audit", "demo", "claude", "slack", "web",
         }
@@ -542,11 +542,11 @@ class TestMenuCommands:
             f"'{cmd_name}' is missing from the interactive menu"
         )
 
-    def test_menu_has_22_entries_including_exit(self):
-        """Menu should show 21 real commands + exit = 22 entries."""
+    def test_menu_has_23_entries_including_exit(self):
+        """Menu should show 22 real commands + exit = 23 entries."""
         names = _get_menu_command_names_at_runtime()
-        assert len(names) == 22, (
-            f"Expected 22 menu entries (21 commands + exit), got {len(names)}: {names}"
+        assert len(names) == 23, (
+            f"Expected 23 menu entries (22 commands + exit), got {len(names)}: {names}"
         )
 
     @pytest.mark.parametrize("cmd_name", PREVIOUSLY_MISSING)

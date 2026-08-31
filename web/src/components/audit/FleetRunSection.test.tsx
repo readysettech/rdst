@@ -230,7 +230,9 @@ describe('FleetRunSection live activity', () => {
 
     expect(screen.getByText(TRIAL_EXHAUSTED_MESSAGE)).toBeTruthy()
     expect(screen.getByRole('button', { name: /Set key/ })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Start trial/ })).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: /Sign in to Readyset/ })
+    ).toBeTruthy()
     expect(screen.queryByText('Fleet health check failed')).toBeNull()
   })
 })

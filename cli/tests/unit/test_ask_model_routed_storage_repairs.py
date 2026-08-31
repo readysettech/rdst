@@ -123,14 +123,14 @@ def test_encoded_identifier_repair_is_ast_and_database_proven():
     )
 
     assert "COUNT(DISTINCT bond_id)" in repaired
-    assert "RIGHT(atom_id, 3) = '_19'" in repaired
-    assert "RIGHT(atom_id2, 3) = '_19'" in repaired
+    assert "RIGHT(atom_id, 7) = 'atom_19'" in repaired
+    assert "RIGHT(atom_id2, 7) = 'atom_19'" in repaired
     assert diagnostics["status"] == "normalized"
     assert len(calls) == 1
     assert encoded_identifier_shape(EDGE_SQL, "mysql")
 
 
-def test_encoded_identifier_repair_accepts_a_plain_numeric_endpoint():
+def test_encoded_identifier_repair_rejects_a_namespaceless_numeric_endpoint():
     sql = EDGE_SQL.replace("atom19", "19")
     repaired, diagnostics = normalize_encoded_identifier_storage_sql(
         sql=sql,
@@ -143,10 +143,26 @@ def test_encoded_identifier_repair_accepts_a_plain_numeric_endpoint():
         target_config={"engine": "mysql"},
     )
 
-    assert "RIGHT(atom_id, 3) = '_19'" in repaired
-    assert "RIGHT(atom_id2, 3) = '_19'" in repaired
-    assert diagnostics["status"] == "normalized"
-    assert encoded_identifier_shape(sql, "mysql")
+    assert repaired == sql
+    assert diagnostics["reason"] == "no-literal-derived-numeric-suffix"
+    assert not encoded_identifier_shape(sql, "mysql")
+
+
+def test_encoded_identifier_probe_preserves_the_literal_namespace():
+    calls = []
+
+    normalize_encoded_identifier_storage_sql(
+        sql=EDGE_SQL,
+        dialect="mysql",
+        schema_info=_edge_schema(),
+        db_executor=lambda sql, _config: (
+            calls.append(sql) or {"success": True, "rows": [[4, 0, 4, 4, 4]]}
+        ),
+        target_config={"engine": "mysql"},
+    )
+
+    assert "atom_19" in calls[0]
+    assert "'_19'" not in calls[0]
 
 
 @pytest.mark.parametrize("dialect", ["mysql", "postgresql"])
@@ -196,7 +212,8 @@ def test_temporal_repair_accepts_observed_clock_encodings(literal, prefix):
         target_config={"engine": "mysql"},
     )
 
-    assert f"q.q3 = '{prefix}' OR q.q3 LIKE '{prefix}.%'" in repaired
+    assert f"q.q3 = '{prefix}'" in repaired
+    assert f"'{prefix}[.][0-9]+$'" in repaired
     assert diagnostics["status"] == "normalized"
     assert temporal_text_storage_shape(sql, "mysql")
 
@@ -210,8 +227,28 @@ def test_temporal_repair_supports_postgres_text_columns():
         target_config={"engine": "postgresql"},
     )
 
-    assert "q.q3 = '1:33' OR q.q3 LIKE '1:33.%'" in repaired
+    assert "q.q3 = '1:33'" in repaired
+    assert "q.q3 ~ '1:33[.][0-9]+$'" in repaired
     assert diagnostics["status"] == "normalized"
+
+
+def test_temporal_repair_never_uses_a_wildcard_fraction_suffix():
+    calls = []
+
+    repaired, _ = normalize_temporal_text_storage_sql(
+        sql=TIME_SQL,
+        dialect="mysql",
+        schema_info=_time_schema(),
+        db_executor=lambda sql, _config: (
+            calls.append(sql) or {"success": True, "rows": [[0, 1]]}
+        ),
+        target_config={"engine": "mysql"},
+    )
+
+    assert "LIKE '1:33.%'" not in calls[0]
+    assert "[.][0-9]+$" in calls[0]
+    assert "LIKE '1:33.%'" not in repaired
+    assert "[.][0-9]+$" in repaired
 
 
 @pytest.mark.parametrize("dialect", ["mysql", "postgresql"])
@@ -443,7 +480,7 @@ async def test_model_selected_temporal_repair_waits_for_empty_execution():
         calls.append(sql)
         if "EXISTS(" in sql:
             return {"success": True, "rows": [[0, 1]], "columns": ["a", "b"]}
-        if "LIKE '1:33.%'" in sql:
+        if "REGEXP_LIKE(q.q3, '1:33[.][0-9]+$')" in sql:
             return {"success": True, "rows": [["ALO"]], "columns": ["code"]}
         return {"success": True, "rows": [], "columns": ["code"]}
 
@@ -466,7 +503,7 @@ async def test_model_selected_temporal_repair_waits_for_empty_execution():
     ctx.execution_result = ExecutionResult(columns=["code"], rows=[], row_count=0)
     ctx = await service._apply_post_execution_repairs(ctx)
 
-    assert "LIKE '1:33.%'" in ctx.sql
+    assert "REGEXP_LIKE(q.q3, '1:33[.][0-9]+$')" in ctx.sql
     assert ctx.execution_result.rows == [["ALO"]]
     assert ctx.temporal_text_storage["status"] == "accepted"
     assert len(calls) == 2

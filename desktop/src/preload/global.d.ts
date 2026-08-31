@@ -1,7 +1,5 @@
 import type { UpdateStatePayload } from '../main/update-policy.js'
 
-export {}
-
 declare global {
   interface Window {
     rdstDesktop?: {

@@ -1,6 +1,236 @@
 {
   "components": {
     "schemas": {
+      "AccountBrowserCallbackStatusResponse": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "error_description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Description"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "AccountBrowserCallbackStatusResponse",
+        "type": "object"
+      },
+      "AccountLoginCompleteRequest": {
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_in": {
+            "default": 3600,
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "login_id": {
+            "title": "Login Id",
+            "type": "string"
+          },
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "login_id",
+          "state",
+          "access_token",
+          "refresh_token"
+        ],
+        "title": "AccountLoginCompleteRequest",
+        "type": "object"
+      },
+      "AccountLoginRequest": {
+        "properties": {
+          "return_url": {
+            "title": "Return Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "return_url"
+        ],
+        "title": "AccountLoginRequest",
+        "type": "object"
+      },
+      "AccountLoginResponse": {
+        "properties": {
+          "auth_url": {
+            "title": "Auth Url",
+            "type": "string"
+          },
+          "callback_url": {
+            "title": "Callback Url",
+            "type": "string"
+          },
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "login_id": {
+            "title": "Login Id",
+            "type": "string"
+          },
+          "publishable_key": {
+            "title": "Publishable Key",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "login_id",
+          "state",
+          "auth_url",
+          "publishable_key",
+          "callback_url",
+          "expires_in"
+        ],
+        "title": "AccountLoginResponse",
+        "type": "object"
+      },
+      "AccountLoginStatusResponse": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "detail"
+        ],
+        "title": "AccountLoginStatusResponse",
+        "type": "object"
+      },
+      "AccountLogoutResponse": {
+        "properties": {
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "AccountLogoutResponse",
+        "type": "object"
+      },
+      "AccountStatusResponse": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "quota": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quota"
+          },
+          "signed_in": {
+            "title": "Signed In",
+            "type": "boolean"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "signed_in"
+        ],
+        "title": "AccountStatusResponse",
+        "type": "object"
+      },
       "AddColumnRequest": {
         "properties": {
           "column_name": {
@@ -842,6 +1072,68 @@
         "title": "AllowlistContextResponse",
         "type": "object"
       },
+      "AnalysisHistoryEntry": {
+        "description": "One entry in a query's bounded analysis history.",
+        "properties": {
+          "analysis_id": {
+            "title": "Analysis Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "efficiency_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Efficiency Score"
+          },
+          "overall_rating": {
+            "default": "",
+            "title": "Overall Rating",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "analysis_id",
+          "created_at",
+          "target"
+        ],
+        "title": "AnalysisHistoryEntry",
+        "type": "object"
+      },
+      "AnalysisHistoryResponse": {
+        "description": "A query's stored analyses, newest first.",
+        "properties": {
+          "analyses": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisHistoryEntry"
+            },
+            "title": "Analyses",
+            "type": "array"
+          },
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash",
+          "analyses"
+        ],
+        "title": "AnalysisHistoryResponse",
+        "type": "object"
+      },
       "AnalysisMetadata": {
         "additionalProperties": true,
         "properties": {
@@ -1066,6 +1358,7 @@
         "type": "object"
       },
       "AnnotateCompleteEvent": {
+        "description": "Annotation process completed, possibly with individual table failures.",
         "properties": {
           "columns_annotated": {
             "title": "Columns Annotated",
@@ -1105,6 +1398,7 @@
         "type": "object"
       },
       "AnnotateErrorEvent": {
+        "description": "Annotation process encountered an error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -1124,6 +1418,7 @@
         "type": "object"
       },
       "AnnotateProgressEvent": {
+        "description": "Progress update during annotation.",
         "properties": {
           "message": {
             "title": "Message",
@@ -1187,6 +1482,7 @@
         "type": "object"
       },
       "AnnotateStartedEvent": {
+        "description": "Annotation process started.",
         "properties": {
           "completed_tables": {
             "default": 0,
@@ -1216,6 +1512,7 @@
         "type": "object"
       },
       "AnnotateTableCompleteEvent": {
+        "description": "A table has been annotated.",
         "properties": {
           "columns_annotated": {
             "title": "Columns Annotated",
@@ -1315,6 +1612,7 @@
         "type": "object"
       },
       "AskClarificationNeededEvent": {
+        "description": "Clarification needed from the user.",
         "properties": {
           "interpretations": {
             "items": {
@@ -1350,6 +1648,7 @@
         "type": "object"
       },
       "AskClarificationQuestion": {
+        "description": "A clarification question for the user.",
         "properties": {
           "id": {
             "title": "Id",
@@ -1376,6 +1675,7 @@
         "type": "object"
       },
       "AskErrorEvent": {
+        "description": "Ask encountered an error.",
         "properties": {
           "category": {
             "anyOf": [
@@ -1543,6 +1843,7 @@
         "type": "object"
       },
       "AskInterpretation": {
+        "description": "A possible interpretation of the user's question.",
         "properties": {
           "assumptions": {
             "items": {
@@ -1657,6 +1958,7 @@
         "type": "object"
       },
       "AskResultEvent": {
+        "description": "Ask completed with results.",
         "properties": {
           "columns": {
             "items": {
@@ -1730,6 +2032,7 @@
         "type": "object"
       },
       "AskSchemaLoadedEvent": {
+        "description": "Schema has been loaded.",
         "properties": {
           "source": {
             "title": "Source",
@@ -1767,6 +2070,7 @@
         "type": "object"
       },
       "AskSqlGeneratedEvent": {
+        "description": "SQL has been generated.",
         "properties": {
           "explanation": {
             "anyOf": [
@@ -1798,6 +2102,7 @@
         "type": "object"
       },
       "AskStatusEvent": {
+        "description": "Status update during ask execution.",
         "properties": {
           "message": {
             "title": "Message",
@@ -2759,6 +3064,20 @@
             "default": 100,
             "title": "Interval Ms"
           },
+          "lanes": {
+            "default": [
+              "origin"
+            ],
+            "items": {
+              "enum": [
+                "origin",
+                "readyset"
+              ],
+              "type": "string"
+            },
+            "title": "Lanes",
+            "type": "array"
+          },
           "max_count": {
             "anyOf": [
               {
@@ -2779,6 +3098,17 @@
             "title": "Mode",
             "type": "string"
           },
+          "parameter_sets": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parameter Sets"
+          },
           "queries": {
             "items": {
               "anyOf": [
@@ -2793,6 +3123,17 @@
             "title": "Queries",
             "type": "array"
           },
+          "statement_timeout_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Statement Timeout Ms"
+          },
           "target": {
             "anyOf": [
               {
@@ -2803,6 +3144,17 @@
               }
             ],
             "title": "Target"
+          },
+          "warmup_executions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warmup Executions"
           }
         },
         "required": [
@@ -2825,6 +3177,7 @@
         ]
       },
       "BootstrapNeedsKeyEvent": {
+        "description": "The run reached the annotate gate without a usable Anthropic key.\n\nThe event name doubles as the run registry's gating signal: the run's\nstatus parks on needs_key until the next event arrives.",
         "properties": {
           "message": {
             "title": "Message",
@@ -2862,6 +3215,7 @@
         "type": "object"
       },
       "BootstrapStageEvent": {
+        "description": "Progress of one bootstrap stage.\n\nstatus is started | progress | done | failed | skipped. Child-service\nevents surface as status=\"progress\" with the child's payload in detail,\nso the stream stays one flat, typed union.",
         "properties": {
           "detail": {
             "anyOf": [
@@ -3073,6 +3427,7 @@
         "type": "object"
       },
       "CacheRunCompleteEvent": {
+        "description": "Performance comparison result (origin vs cache).",
         "properties": {
           "cache_iterations": {
             "anyOf": [
@@ -3529,6 +3884,7 @@
         "type": "object"
       },
       "ChatToolResultEvent": {
+        "description": "Result of one tool execution.\n\nFor query_database, `data` carries sql/columns/rows/row_count/\nexecution_time_ms/truncated/query_hash/query_tag; for get_schema it\ncarries tables/source.",
         "properties": {
           "content": {
             "title": "Content",
@@ -3652,6 +4008,135 @@
           "message"
         ],
         "title": "CloseTunnelResponse",
+        "type": "object"
+      },
+      "CompareOutcomeRequest": {
+        "description": "What one Compare run found for a query on one target.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "origin_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Ms"
+          },
+          "readyset_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readyset Ms"
+          },
+          "readyset_supported": {
+            "anyOf": [
+              {
+                "enum": [
+                  "yes",
+                  "no",
+                  "pending"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readyset Supported"
+          },
+          "status": {
+            "enum": [
+              "improved",
+              "regressed",
+              "equivalent",
+              "not_comparable",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "default": "",
+            "title": "Target",
+            "type": "string"
+          },
+          "unsupported_reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unsupported Reason"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "CompareOutcomeRequest",
+        "type": "object"
+      },
+      "CompareOutcomeResponse": {
+        "properties": {
+          "comparison_count": {
+            "title": "Comparison Count",
+            "type": "integer"
+          },
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "last_compare": {
+            "additionalProperties": true,
+            "title": "Last Compare",
+            "type": "object"
+          },
+          "last_compared_at": {
+            "title": "Last Compared At",
+            "type": "string"
+          },
+          "readyset_supported": {
+            "title": "Readyset Supported",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash",
+          "target",
+          "comparison_count",
+          "last_compared_at",
+          "last_compare",
+          "readyset_supported"
+        ],
+        "title": "CompareOutcomeResponse",
         "type": "object"
       },
       "CompleteEvent": {
@@ -4039,6 +4524,7 @@
               "secure_store",
               "trial",
               "trial_exhausted",
+              "readyset_account",
               "missing"
             ],
             "title": "Source",
@@ -4151,6 +4637,7 @@
         "type": "object"
       },
       "ErrorEvent": {
+        "description": "Error event for service workflows.\n\n``code`` and ``detail`` mirror the shared HTTP error envelope\n(``shared.api.app._error_envelope``) so an SSE failure carries the same\n{code, message, detail} shape the client normalizes in ``lib/sse.ts``.\nBoth stay optional so existing producers that only set ``message`` keep\nworking; the client derives a code when one is absent.",
         "properties": {
           "code": {
             "anyOf": [
@@ -6747,6 +7234,58 @@
         "title": "LLMAnalysis",
         "type": "object"
       },
+      "LastCompareOutcome": {
+        "description": "What the query's most recent Compare run found, as stored.\n\nWritten by the compare-outcome endpoint and read back here, so a\nmeasurement survives the browser that took it. Fields the run did not\nmeasure come back null.",
+        "properties": {
+          "at": {
+            "default": "",
+            "title": "At",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "origin_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Ms"
+          },
+          "readyset_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readyset Ms"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "LastCompareOutcome",
+        "type": "object"
+      },
       "LatestAnalysisResponse": {
         "description": "Latest stored analysis summary for one query hash, when any exists.",
         "properties": {
@@ -7180,6 +7719,7 @@
         "type": "object"
       },
       "ProgressEvent": {
+        "description": "Progress update during a multi-step operation.",
         "properties": {
           "message": {
             "title": "Message",
@@ -7262,10 +7802,18 @@
         "type": "object"
       },
       "QueryBenchmarkCompleteEvent": {
+        "description": "Benchmark finished; carries the final tally.",
         "properties": {
           "elapsed_seconds": {
             "title": "Elapsed Seconds",
             "type": "number"
+          },
+          "lanes_run": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lanes Run",
+            "type": "array"
           },
           "qps": {
             "title": "Qps",
@@ -7276,6 +7824,33 @@
               "$ref": "#/components/schemas/QueryBenchmarkStats"
             },
             "title": "Queries",
+            "type": "array"
+          },
+          "readyset_setup": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Readyset Setup"
+          },
+          "skipped_count": {
+            "default": 0,
+            "title": "Skipped Count",
+            "type": "integer"
+          },
+          "skipped_queries": {
+            "items": {
+              "$ref": "#/components/schemas/QuerySkip"
+            },
+            "title": "Skipped Queries",
             "type": "array"
           },
           "total_executions": {
@@ -7294,6 +7869,11 @@
             "const": "complete",
             "title": "Type",
             "type": "string"
+          },
+          "warmup_executions": {
+            "default": 0,
+            "title": "Warmup Executions",
+            "type": "integer"
           }
         },
         "required": [
@@ -7309,6 +7889,7 @@
         "type": "object"
       },
       "QueryBenchmarkErrorEvent": {
+        "description": "Benchmark failed (or was rejected by a safety rail) before completion.\n\nCarries the shared error envelope ({code, message, detail}, B7/T24) so the\nclient normalizes a benchmark failure exactly like every other SSE error.\n``message`` stays humane and safe to show; ``detail`` holds only the\nexception class name for correlation \u2014 never the raw ``str(e)``, which can\nembed host / DSN / SQL material.",
         "properties": {
           "code": {
             "anyOf": [
@@ -7365,10 +7946,48 @@
         ]
       },
       "QueryBenchmarkProgressEvent": {
+        "description": "Benchmark progress tick.",
         "properties": {
           "elapsed_seconds": {
             "title": "Elapsed Seconds",
             "type": "number"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "const": "preparing",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phase"
+          },
+          "prepare_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Prepare Total"
+          },
+          "prepared_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Prepared Count"
           },
           "qps": {
             "title": "Qps",
@@ -7379,6 +7998,18 @@
               "$ref": "#/components/schemas/QueryBenchmarkStats"
             },
             "title": "Queries",
+            "type": "array"
+          },
+          "skipped_count": {
+            "default": 0,
+            "title": "Skipped Count",
+            "type": "integer"
+          },
+          "skipped_queries": {
+            "items": {
+              "$ref": "#/components/schemas/QuerySkip"
+            },
+            "title": "Skipped Queries",
             "type": "array"
           },
           "total_executions": {
@@ -7397,6 +8028,11 @@
             "const": "progress",
             "title": "Type",
             "type": "string"
+          },
+          "warmup_executions": {
+            "default": 0,
+            "title": "Warmup Executions",
+            "type": "integer"
           }
         },
         "required": [
@@ -7412,6 +8048,7 @@
         "type": "object"
       },
       "QueryBenchmarkStats": {
+        "description": "Statistics for a single benchmarked query.",
         "properties": {
           "avg_ms": {
             "title": "Avg Ms",
@@ -7424,6 +8061,22 @@
           "failures": {
             "title": "Failures",
             "type": "integer"
+          },
+          "lanes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Lanes"
           },
           "last_error": {
             "anyOf": [
@@ -7467,6 +8120,16 @@
           },
           "successes": {
             "title": "Successes",
+            "type": "integer"
+          },
+          "timeouts": {
+            "default": 0,
+            "title": "Timeouts",
+            "type": "integer"
+          },
+          "variant_count": {
+            "default": 1,
+            "title": "Variant Count",
             "type": "integer"
           }
         },
@@ -7700,6 +8363,16 @@
             "title": "Last Cache Target",
             "type": "string"
           },
+          "last_compare": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LastCompareOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "last_compared_at": {
             "default": "",
             "title": "Last Compared At",
@@ -7776,6 +8449,16 @@
             "title": "Sql",
             "type": "string"
           },
+          "starred": {
+            "default": false,
+            "title": "Starred",
+            "type": "boolean"
+          },
+          "starred_at": {
+            "default": "",
+            "title": "Starred At",
+            "type": "string"
+          },
           "tag": {
             "title": "Tag",
             "type": "string"
@@ -7843,6 +8526,45 @@
           "total"
         ],
         "title": "QueryRegistryResponse",
+        "type": "object"
+      },
+      "QuerySkip": {
+        "description": "One query left out of a run, and the reason it was left out.\n\nA skip with no lanes is out of the whole run. A skip that names lanes is\nmissing from those lanes only, and runs in the run's others.",
+        "properties": {
+          "lanes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Lanes"
+          },
+          "query_hash": {
+            "title": "Query Hash",
+            "type": "string"
+          },
+          "query_name": {
+            "title": "Query Name",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query_hash",
+          "query_name",
+          "reason"
+        ],
+        "title": "QuerySkip",
         "type": "object"
       },
       "ReadysetCacheability": {
@@ -8576,6 +9298,7 @@
         "type": "object"
       },
       "RunEndEvent": {
+        "description": "Terminal event appended by the registry after every run.",
         "properties": {
           "status": {
             "title": "Status",
@@ -8756,6 +9479,7 @@
         "type": "object"
       },
       "ScanCompleteEvent": {
+        "description": "Scan completed.",
         "properties": {
           "success": {
             "title": "Success",
@@ -8781,6 +9505,7 @@
         "type": "object"
       },
       "ScanErrorEvent": {
+        "description": "Scan error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -8840,6 +9565,7 @@
         ]
       },
       "ScanFilesFoundEvent": {
+        "description": "Files with ORM patterns discovered.",
         "properties": {
           "files": {
             "items": {
@@ -8935,6 +9661,7 @@
         "type": "string"
       },
       "ScanProgressEvent": {
+        "description": "Progress update within a scan phase.",
         "properties": {
           "current": {
             "title": "Current",
@@ -8976,6 +9703,7 @@
         "type": "object"
       },
       "ScanQueryResultEvent": {
+        "description": "Individual query result from scan.",
         "properties": {
           "query": {
             "additionalProperties": true,
@@ -8996,6 +9724,7 @@
         "type": "object"
       },
       "ScanRegistryEvent": {
+        "description": "Registry save results.",
         "properties": {
           "new_queries": {
             "title": "New Queries",
@@ -9111,6 +9840,7 @@
         "type": "object"
       },
       "ScanStatusEvent": {
+        "description": "Status update during scan.",
         "properties": {
           "message": {
             "title": "Message",
@@ -10014,6 +10744,53 @@
         "title": "SetDefaultRequest",
         "type": "object"
       },
+      "SetQueryStarredRequest": {
+        "description": "Whether the user wants this query starred on one target.",
+        "properties": {
+          "starred": {
+            "title": "Starred",
+            "type": "boolean"
+          },
+          "target": {
+            "default": "",
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "starred"
+        ],
+        "title": "SetQueryStarredRequest",
+        "type": "object"
+      },
+      "SetQueryStarredResponse": {
+        "properties": {
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "starred": {
+            "title": "Starred",
+            "type": "boolean"
+          },
+          "starred_at": {
+            "title": "Starred At",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash",
+          "target",
+          "starred",
+          "starred_at"
+        ],
+        "title": "SetQueryStarredResponse",
+        "type": "object"
+      },
       "SettingsBody": {
         "properties": {
           "cache_budget": {
@@ -10025,6 +10802,54 @@
           "cache_budget"
         ],
         "title": "SettingsBody",
+        "type": "object"
+      },
+      "SetupProgressResponse": {
+        "description": "The five setup signals for one target, all independent.",
+        "properties": {
+          "analyzed": {
+            "default": false,
+            "title": "Analyzed",
+            "type": "boolean"
+          },
+          "compared": {
+            "default": false,
+            "title": "Compared",
+            "type": "boolean"
+          },
+          "connected": {
+            "default": false,
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "queries_found": {
+            "default": false,
+            "title": "Queries Found",
+            "type": "boolean"
+          },
+          "schema_built": {
+            "default": false,
+            "title": "Schema Built",
+            "type": "boolean"
+          },
+          "target": {
+            "default": "",
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "title": "SetupProgressResponse",
         "type": "object"
       },
       "SshAuthOptionResponse": {
@@ -10294,6 +11119,57 @@
           "targets"
         ],
         "title": "StatusResponse",
+        "type": "object"
+      },
+      "StoredAnalysisResponse": {
+        "description": "One stored analysis, whole, for read-only redisplay.",
+        "properties": {
+          "analysis": {
+            "additionalProperties": true,
+            "title": "Analysis",
+            "type": "object"
+          },
+          "analysis_id": {
+            "title": "Analysis Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "efficiency_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Efficiency Score"
+          },
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "overall_rating": {
+            "default": "",
+            "title": "Overall Rating",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash",
+          "analysis_id",
+          "created_at",
+          "target",
+          "analysis"
+        ],
+        "title": "StoredAnalysisResponse",
         "type": "object"
       },
       "TargetData": {
@@ -10902,6 +11778,7 @@
         "type": "object"
       },
       "TopCompleteEvent": {
+        "description": "Operation completed.",
         "properties": {
           "newly_saved": {
             "title": "Newly Saved",
@@ -10939,6 +11816,7 @@
         "type": "object"
       },
       "TopConnectedEvent": {
+        "description": "Database connection established.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -10996,6 +11874,7 @@
         "type": "object"
       },
       "TopDbLimitWarningEvent": {
+        "description": "Database query size limit is below recommended threshold.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -11030,6 +11909,7 @@
         "type": "object"
       },
       "TopErrorEvent": {
+        "description": "Error occurred.\n\n``code`` and ``detail`` mirror the shared error envelope (B7/T24):\n``message`` stays humane, ``detail`` carries the exception class name for\ncorrelation \u2014 never the raw ``str(e)``, which can embed host/DSN material.",
         "properties": {
           "code": {
             "anyOf": [
@@ -11215,6 +12095,7 @@
         "type": "object"
       },
       "TopQueriesEvent": {
+        "description": "Batch of top queries.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -11276,6 +12157,7 @@
         "type": "object"
       },
       "TopQueryData": {
+        "description": "Individual query data.",
         "properties": {
           "avg_time": {
             "title": "Avg Time",
@@ -11454,6 +12336,7 @@
         "type": "object"
       },
       "TopQuerySavedEvent": {
+        "description": "Query saved to registry.",
         "properties": {
           "is_new": {
             "title": "Is New",
@@ -11478,6 +12361,7 @@
         "type": "object"
       },
       "TopSourceFallbackEvent": {
+        "description": "Source fallback occurred.",
         "properties": {
           "from_source": {
             "title": "From Source",
@@ -11507,6 +12391,7 @@
         "type": "object"
       },
       "TopStatusEvent": {
+        "description": "Progress status update.",
         "properties": {
           "message": {
             "title": "Message",
@@ -11869,6 +12754,62 @@
           "last_used"
         ],
         "title": "TunnelStatusResponse",
+        "type": "object"
+      },
+      "UpdateParametersRequest": {
+        "description": "Concrete values for one query's placeholders, keyed by parameter name.",
+        "properties": {
+          "source": {
+            "default": "user",
+            "enum": [
+              "user",
+              "suggested"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "minProperties": 1,
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "values"
+        ],
+        "title": "UpdateParametersRequest",
+        "type": "object"
+      },
+      "UpdateParametersResponse": {
+        "properties": {
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "title": "Parameters",
+            "type": "object"
+          }
+        },
+        "required": [
+          "hash",
+          "parameters"
+        ],
+        "title": "UpdateParametersResponse",
         "type": "object"
       },
       "UpdateSqlRequest": {
@@ -12415,6 +13356,330 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/account/login": {
+      "post": {
+        "operationId": "start_account_login_api_account_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountLoginResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Account Login",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/account/login/complete": {
+      "post": {
+        "operationId": "complete_account_login_api_account_login_complete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountLoginCompleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountLoginStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Account Login",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/account/login/{login_id}": {
+      "get": {
+        "operationId": "account_login_status_api_account_login__login_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "login_id",
+            "required": true,
+            "schema": {
+              "title": "Login Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountLoginStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Account Login Status",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/account/login/{login_id}/browser-callback": {
+      "get": {
+        "operationId": "account_browser_callback_status_api_account_login__login_id__browser_callback_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "login_id",
+            "required": true,
+            "schema": {
+              "title": "Login Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountBrowserCallbackStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Account Browser Callback Status",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/account/login/{login_id}/context": {
+      "get": {
+        "operationId": "account_login_context_api_account_login__login_id__context_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "login_id",
+            "required": true,
+            "schema": {
+              "title": "Login Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountLoginResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Account Login Context",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/account/logout": {
+      "post": {
+        "operationId": "account_logout_api_account_logout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountLogoutResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Account Logout",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/account/oauth/callback": {
+      "get": {
+        "description": "Hand an external-browser OAuth result back to the open RDST process.",
+        "operationId": "capture_account_oauth_callback_api_account_oauth_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "login_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Login Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Error",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error_description",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Error Description",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Capture Account Oauth Callback",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/account/status": {
+      "get": {
+        "operationId": "account_status_api_account_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Account Status",
+        "tags": [
+          "account"
+        ]
+      }
+    },
     "/api/agents": {
       "get": {
         "description": "List all agents.",
@@ -16911,7 +18176,7 @@
     },
     "/api/query-registry": {
       "get": {
-        "description": "Get queries from the shared query registry, optionally scoped to a target.\n\nPassing any Query Library read-model parameter (search, view, source,\nparams, activity, impact, sort, cursor) switches the response to\n{queries, facet_counts, next_cursor, total, freshness}, computed over the\nfull target-scoped set with keyset pagination. Without them the legacy\nlimit/offset contract is unchanged.",
+        "description": "Get queries from the shared query registry, optionally scoped to a target.\n\nPassing any Query Library read-model parameter (search, view, starred,\nsource, params, activity, impact, sort, cursor) switches the response to\n{queries, facet_counts, next_cursor, total, freshness}, computed over the\nfull target-scoped set with keyset pagination. Without them the legacy\nlimit/offset contract is unchanged.\n\n``starred`` is a facet of its own rather than a value of ``view``, so a\nshortlist composes with every other filter (\"starred and not yet\nanalyzed\"). ``view=saved`` selects the same rows and keeps working.",
         "operationId": "get_query_registry_api_query_registry_get",
         "parameters": [
           {
@@ -16996,6 +18261,24 @@
                 }
               ],
               "title": "View"
+            }
+          },
+          {
+            "description": "Restrict to starred queries (1) or unstarred ones (0). Omit for both.",
+            "in": "query",
+            "name": "starred",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict to starred queries (1) or unstarred ones (0). Omit for both.",
+              "title": "Starred"
             }
           },
           {
@@ -17165,7 +18448,7 @@
         "summary": "Get Query Registry"
       },
       "post": {
-        "description": "Add a query to the registry.",
+        "description": "Add a query to the registry.\n\nTyping a query into the Add query dialog is the one place a person\nhands RDST a query to keep, so the new entry arrives starred.",
         "operationId": "add_query_to_registry_api_query_registry_post",
         "requestBody": {
           "content": {
@@ -17204,7 +18487,7 @@
     },
     "/api/query-registry/benchmark": {
       "post": {
-        "description": "Run benchmark on queries with live progress updates via SSE.\n\nReturns Server-Sent Events with progress updates during execution.",
+        "description": "Run benchmark on queries with live progress updates via SSE.\n\nReturns Server-Sent Events with progress updates during execution.\n\nThis path executes SQL the body carries, so it is restricted to the\nsame callers as every other write endpoint: loopback, or the page RDST\nitself served.",
         "operationId": "run_benchmark_api_query_registry_benchmark_post",
         "requestBody": {
           "content": {
@@ -17344,7 +18627,7 @@
     },
     "/api/query-registry/load-test-runs": {
       "post": {
-        "description": "Start or attach to the target's detached origin-only benchmark.",
+        "description": "Start or attach to the target's detached benchmark.",
         "operationId": "start_load_test_run_api_query_registry_load_test_runs_post",
         "requestBody": {
           "content": {
@@ -17379,6 +18662,156 @@
           }
         },
         "summary": "Start Benchmark Run"
+      }
+    },
+    "/api/query-registry/queries/{query_hash}/compare-outcome": {
+      "post": {
+        "description": "Record what comparing a query against Readyset found.\n\nCompare is the measurement the Query Library is for, so its result\nbelongs beside the query rather than in one browser: the target's\nlifecycle counts the run, and the latest outcome stays readable for the\nnext person who opens the query.",
+        "operationId": "record_compare_outcome_api_query_registry_queries__query_hash__compare_outcome_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "query_hash",
+            "required": true,
+            "schema": {
+              "title": "Query Hash",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompareOutcomeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompareOutcomeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Compare Outcome"
+      }
+    },
+    "/api/query-registry/queries/{query_hash}/parameters": {
+      "patch": {
+        "description": "Store values for a query's placeholders and return what was stored.\n\nThe values land in both parameter fields, so they show as the query's\nmost recent values and also substitute into its placeholders when it is\nnext run.",
+        "operationId": "update_query_parameters_api_query_registry_queries__query_hash__parameters_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "query_hash",
+            "required": true,
+            "schema": {
+              "title": "Query Hash",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateParametersRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateParametersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Query Parameters"
+      }
+    },
+    "/api/query-registry/queries/{query_hash}/starred": {
+      "patch": {
+        "description": "Star or unstar a query for one target.\n\nThe star is the library's only user-authored mark: nothing RDST does on\nits own sets it, and this is the one place it is cleared. Starring a\nquery that already carries a star keeps the moment it was first\nstarred, so the toggle is idempotent.",
+        "operationId": "set_query_starred_api_query_registry_queries__query_hash__starred_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "query_hash",
+            "required": true,
+            "schema": {
+              "title": "Query Hash",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetQueryStarredRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetQueryStarredResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Query Starred"
       }
     },
     "/api/query-registry/{query_hash}": {
@@ -17421,6 +18854,46 @@
         "summary": "Remove Query From Registry"
       }
     },
+    "/api/query-registry/{query_hash}/analyses": {
+      "get": {
+        "description": "List a query's stored analyses, newest first.\n\nThe bounded history behind the results viewer: enough of each run to\nchoose one, with the body left to the per-analysis route. A query that\nwas never analyzed has an empty history rather than an error.",
+        "operationId": "list_query_analyses_api_query_registry__query_hash__analyses_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "query_hash",
+            "required": true,
+            "schema": {
+              "title": "Query Hash",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Query Analyses"
+      }
+    },
     "/api/query-registry/{query_hash}/analysis/latest": {
       "get": {
         "description": "Get the most recent stored analysis summary for a query.\n\nDetail-level companion to the library listing: the list rides only the\nlifecycle timestamps, and the expanded query detail fetches this compact\noutcome on demand.",
@@ -17459,6 +18932,55 @@
           }
         },
         "summary": "Get Latest Query Analysis"
+      }
+    },
+    "/api/query-registry/{query_hash}/analysis/{analysis_id}": {
+      "get": {
+        "description": "Return one stored analysis whole, so it can be reopened without a re-run.\n\nThe body is served exactly as it was stored, including any field a\nnewer build wrote, and ``display_payload`` carries the finished run in\nthe shape the results view already renders.",
+        "operationId": "get_stored_query_analysis_api_query_registry__query_hash__analysis__analysis_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "query_hash",
+            "required": true,
+            "schema": {
+              "title": "Query Hash",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "title": "Analysis Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoredAnalysisResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Stored Query Analysis"
       }
     },
     "/api/query-registry/{query_hash}/reviewed": {
@@ -18785,6 +20307,58 @@
         "summary": "Reset Local Data",
         "tags": [
           "settings"
+        ]
+      }
+    },
+    "/api/setup-progress": {
+      "get": {
+        "description": "Report how far setup has got for one target.\n\nThe three library-derived signals share a single connection, so the\nwhole answer costs one config read, one file check and one short\nSQLite read.",
+        "operationId": "get_setup_progress_api_setup_progress_get",
+        "parameters": [
+          {
+            "description": "Target to report on; defaults to the default target",
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Target to report on; defaults to the default target",
+              "title": "Target"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupProgressResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Setup Progress",
+        "tags": [
+          "status"
         ]
       }
     },

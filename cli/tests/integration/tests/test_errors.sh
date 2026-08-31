@@ -3,12 +3,18 @@
 test_error_handling() {
   log_section "9. Error Handling Scenarios (${DB_ENGINE})"
 
-  # Test early API key validation - unset ANTHROPIC_API_KEY and verify early failure
+  # Test early AI-access validation. Isolate the command from both environment
+  # and keyring credentials so persistent CI agents cannot accidentally satisfy
+  # the preflight with credentials left by another run.
   local saved_api_key="${ANTHROPIC_API_KEY:-}"
   unset ANTHROPIC_API_KEY
   run_expect_fail "Analyze without API key" \
-    "${RDST_CMD[@]}" analyze --target "$TARGET_NAME" --query "SELECT 1" --skip-warning
-  assert_contains "No LLM API key configured" "missing API key should fail early"
+    env -u RDST_ACCOUNT_ACCESS_TOKEN \
+      -u RDST_ACCOUNT_REFRESH_TOKEN \
+      -u RDST_ACCOUNT_EXPIRES_AT \
+      PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring \
+      "${RDST_CMD[@]}" analyze --target "$TARGET_NAME" --query "SELECT 1" --skip-warning
+  assert_contains "AI access is not configured" "missing AI access should fail early"
   # Restore API key
   if [[ -n "$saved_api_key" ]]; then
     export ANTHROPIC_API_KEY="$saved_api_key"
@@ -34,8 +40,10 @@ test_error_handling() {
   run_cmd_pipe "Configure target with wrong password" \
     "echo 'y' | ${RDST_CMD[*]} configure add --target bad-creds --engine postgresql --host $DB_HOST --port $DB_PORT --user $DB_USER --database $DB_NAME --password-env BAD_DB_PASSWORD"
 
-  # Analyze with wrong credentials - succeeds but reports error in output
+  # Supply a non-empty BYOK value so this assertion reaches the database
+  # connection path instead of stopping at the independent AI access gate.
   run_cmd "Analyze with wrong credentials" \
+    env ANTHROPIC_API_KEY=integration-test-placeholder \
     "${RDST_CMD[@]}" analyze --target "bad-creds" --query "SELECT 1" --skip-warning
   assert_regex "FAILED|password|authentication|OperationalError" "wrong credentials should show error in output"
 

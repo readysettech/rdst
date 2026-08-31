@@ -21,7 +21,7 @@ from shared.db_connection import (
     postgres_connection_kwargs,
     resolve_connection_params,
 )
-from shared.llm import AnthropicModel, cents_to_tokens, format_tokens
+from shared.llm import cents_to_tokens, format_tokens
 from shared.shell import environment_assignment
 from shared.password_resolver import derive_password_env
 from shared.ssh_keys import discover_ssh_auth_options
@@ -1350,11 +1350,17 @@ class ConfigurationWizard:
         """Configure LLM settings for RDST."""
         import os
 
-        self._show_step("", "Anthropic Configuration", "")
+        self._show_step("", "AI access", "")
 
-        has_api_key = bool(
-            os.getenv("ANTHROPIC_API_KEY") or os.getenv("RDST_TRIAL_TOKEN")
-        )
+        has_api_key = bool(os.getenv("ANTHROPIC_API_KEY"))
+
+        from shared.account_session import is_signed_in_locally
+
+        if is_signed_in_locally():
+            self._show_success(
+                "Readyset Account", "Readyset-hosted AI is ready to use"
+            )
+            return RdstResult(True, "Readyset account configured")
 
         if has_api_key:
             self._show_success(
@@ -1363,8 +1369,8 @@ class ConfigurationWizard:
 
             cfg._data.setdefault("llm", {})
             cfg._data["llm"]["provider"] = "claude"
-            cfg._data["llm"]["model"] = AnthropicModel.SONNET_4_5.value
-            cfg._data["llm"]["hint"] = "Using Claude Sonnet 4.5"
+            cfg._data["llm"].pop("model", None)
+            cfg._data["llm"]["hint"] = "Using Claude Sonnet 4.6"
 
             cfg.save()
             self._show_success("Configured", cfg._data["llm"]["hint"])
@@ -1372,42 +1378,16 @@ class ConfigurationWizard:
 
         self.console.print(
             MessagePanel(
-                "RDST requires an Anthropic API key for AI-powered query analysis.",
+                "Sign in to Readyset for capped hosted inference, or use your own Anthropic API key.",
                 variant="info",
                 title="LLM Setup",
             )
         )
 
-        if cfg.is_trial_active():
-            trial = cfg.get_trial_config()
-            remaining = trial.get("remaining_cents")
-            limit = trial.get("limit_cents", 500)
-            if remaining is not None:
-                remaining_tok = cents_to_tokens(remaining)
-                limit_tok = cents_to_tokens(limit)
-                used_tok = limit_tok - remaining_tok
-                pct = int((remaining / limit) * 100) if limit > 0 else 0
-                balance_msg = (
-                    f"You have an active RDST trial\n\n"
-                    f"  Balance: {format_tokens(remaining_tok)} of {format_tokens(limit_tok)} tokens remaining ({pct}%)\n"
-                    f"  Used:    {format_tokens(used_tok)} tokens"
-                )
-            else:
-                balance_msg = (
-                    "You have an active RDST trial (balance updates after next LLM call)"
-                )
-            self._show_success("Active Trial", balance_msg)
-            cfg._data.setdefault("llm", {})
-            cfg._data["llm"]["provider"] = "claude"
-            cfg._data["llm"]["model"] = AnthropicModel.SONNET_4_5.value
-            cfg._data["llm"]["hint"] = "Using trial credits"
-            cfg.save()
-            return RdstResult(True, "Trial active")
-
         choice = SelectPrompt.ask(
             "How would you like to set up AI query analysis?",
             options=[
-                "Get free trial credits (no credit card needed)",
+                "Sign in to Readyset for hosted AI",
                 "I have my own Anthropic API key",
                 "Skip for now",
             ],
@@ -1415,23 +1395,41 @@ class ConfigurationWizard:
             return_index=True,
         )
 
-        trial_success = False
+        configured = False
         if choice == 1:
-            trial_success = self._run_trial_registration(cfg)
+            configured = self._run_account_login()
         elif choice == 2:
             self._capture_user_anthropic_key()
+            configured = bool(os.getenv("ANTHROPIC_API_KEY"))
 
         cfg._data.setdefault("llm", {})
-        cfg._data["llm"]["provider"] = "claude"
-        cfg._data["llm"]["model"] = AnthropicModel.SONNET_4_5.value
-        cfg._data["llm"]["hint"] = (
-            "Using trial credits" if trial_success else "Waiting for API key"
-        )
+        cfg._data["llm"].pop("model", None)
+        cfg._data["llm"]["provider"] = "claude" if choice == 2 else "auto"
+        cfg._data["llm"]["hint"] = "AI access configured" if configured else "Waiting for AI access"
         cfg.save()
 
         return RdstResult(
-            trial_success, "LLM configured" if trial_success else "API key needed"
+            configured, "LLM configured" if configured else "AI access needed"
         )
+
+    def _run_account_login(self) -> bool:
+        """Complete Readyset account sign-in in the RDST browser UI."""
+        try:
+            from features.account.browser_login import (
+                BrowserLoginError,
+                run_browser_login,
+            )
+
+            run_browser_login(
+                on_ready=lambda url: self._show_info(
+                    "Readyset Sign-in", f"Open this RDST sign-in page:\n\n{url}"
+                )
+            )
+        except BrowserLoginError as exc:
+            self._show_error("Readyset Sign-in", str(exc))
+            return False
+        self._show_success("Readyset Sign-in", "Signed in to Readyset")
+        return True
 
     def _run_trial_registration(self, cfg: TargetsConfig) -> bool:
         """Run the trial registration flow with email validation retry loop."""

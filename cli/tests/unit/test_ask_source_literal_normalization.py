@@ -15,15 +15,14 @@ def normalize(question, sql, context="", dialect="mysql"):
     )
 
 
-def test_expands_shortened_filter_span_from_exact_question_text():
+def test_question_spelling_alone_does_not_rewrite_stored_literal():
     sql, diagnostics = normalize(
         "Show enrollment for the 2014-2015 academic year.",
         "SELECT enrollment FROM schools WHERE academic_year = '2014-15'",
     )
 
-    assert "academic_year = '2014-2015'" in sql
-    assert diagnostics["status"] == "normalized"
-    assert diagnostics["changes"] == [{"from": "2014-15", "to": "2014-2015"}]
+    assert "academic_year = '2014-15'" in sql
+    assert diagnostics["status"] == "unchanged"
 
 
 def test_accepts_authoritative_context_as_source():
@@ -61,7 +60,7 @@ def test_ambiguous_source_spans_fail_closed():
     )
 
     assert sql == original
-    assert diagnostics["reason"] == "no-lossy-year-span-filter"
+    assert diagnostics["reason"] == "no-explicit-full-year-span"
 
 
 def test_non_filter_literal_is_unchanged():
@@ -69,14 +68,14 @@ def test_non_filter_literal_is_unchanged():
     sql, diagnostics = normalize("Use the label 2014-2015.", original)
 
     assert sql == original
-    assert diagnostics["reason"] == "no-lossy-year-span-filter"
+    assert diagnostics["reason"] == "no-explicit-full-year-span"
 
 
 def test_postgres_and_context_wrapper():
     ctx = SimpleNamespace(
         question="Show the 2014-2015 academic year.",
         refined_question=None,
-        provided_context="",
+        provided_context="Database values use the full span 2014-2015.",
         db_type="postgresql",
         sql="SELECT enrollment FROM schools WHERE academic_year = '2014-15'",
         generated_sql="old",
@@ -158,9 +157,22 @@ def test_year_span_and_date_part_can_normalize_together():
     sql, diagnostics = normalize(
         "Show the 2014-2015 academic year.",
         original,
+        context="Database values use the full span 2014-2015.",
     )
 
     assert "academic_year = '2014-2015'" in sql
     assert "YEAR(opened_at)" in sql
     assert diagnostics["changed_literals"] == 1
     assert diagnostics["translated_date_parts"] == 1
+
+
+def test_short_storage_context_blocks_question_driven_expansion():
+    original = "SELECT * FROM schools WHERE academic_year = '2014-15'"
+    sql, diagnostics = normalize(
+        "Show the 2014-2015 academic year.",
+        original,
+        context="academic_year stores values like '2014-15'.",
+    )
+
+    assert sql == original
+    assert diagnostics["status"] == "unchanged"

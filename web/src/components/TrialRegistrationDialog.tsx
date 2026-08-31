@@ -5,210 +5,186 @@ import { Icon } from '@rs/ui-new/icon'
 import { Modal, ModalContentContainer } from '@rs/ui-new/modal'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
-import { useMutation } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
-import { activateTrial, registerTrial } from '../lib/api'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef, useState } from 'react'
+import {
+  completeAccountRedirect,
+  sendAccountMagicLink,
+  startAccountGithubOAuth,
+  startAccountGoogleOAuth,
+} from '../lib/accountAuth'
+import { fetchAccountBrowserCallback, startAccountLogin } from '../lib/api'
+import { isDesktopRuntime } from '../lib/desktop'
+import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
 import { TaskDialogContent } from './dialog/TaskDialogContent'
-import { RoutableNotice } from './RoutableNotice'
 
-type Step = 'email' | 'verify' | 'success'
-type RegisterMutationData =
-  | {
-      mode: 'registered'
-      limitDisplay: string | null
-      emailTier: string | null
-    }
-  | {
-      mode: 'token-resent'
-      emailTier: string | null
-      limitCents: number | null
-      remainingCents: number | null
-    }
-
-type TrialMutationError = Error & {
-  didYouMean?: string
-  errorCode?: string
-}
-
-interface TrialRegistrationDialogProps {
+interface AccountLoginDialogProps {
   isOpen: boolean
   onClose: () => void
   onSuccess?: () => void
+  callbackLoginId?: string | null
 }
 
-export function TrialRegistrationDialog({
+function GoogleMark() {
+  return (
+    <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="none">
+      <path
+        fill="#4285F4"
+        d="M19.6 10.227c0-.709-.064-1.39-.182-2.045H10v3.868h5.382a4.6 4.6 0 0 1-1.996 3.018v2.51h3.232c1.891-1.742 2.982-4.305 2.982-7.35Z"
+      />
+      <path
+        fill="#34A853"
+        d="M10 20c2.7 0 4.964-.896 6.618-2.423l-3.232-2.509c-.895.6-2.04.955-3.386.955-2.605 0-4.81-1.76-5.595-4.123H1.064v2.59A9.996 9.996 0 0 0 10 20Z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M4.405 11.9A5.994 5.994 0 0 1 4.09 10c0-.66.114-1.3.314-1.9V5.509H1.064A9.996 9.996 0 0 0 0 9.999c0 1.615.386 3.142 1.064 4.492l3.34-2.591Z"
+      />
+      <path
+        fill="#EA4335"
+        d="M10 3.977c1.468 0 2.786.505 3.823 1.496l2.868-2.868C14.959.99 12.695 0 10 0 6.09 0 2.71 2.24 1.064 5.51l3.34 2.59C5.192 5.736 7.396 3.977 10 3.977Z"
+      />
+    </svg>
+  )
+}
+
+function GithubMark() {
+  return (
+    <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.87c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.35 1.09 2.92.83.09-.65.35-1.09.64-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.58 9.58 0 0 1 12 6.82c.85 0 1.69.11 2.48.34 1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.77c0 .27.18.58.69.48A10 10 0 0 0 12 2Z" />
+    </svg>
+  )
+}
+
+function localCallbackUrl(): string {
+  return new URL('/account-login', window.location.origin).toString()
+}
+
+function accountCallbackUrl(): string {
+  return isDesktopRuntime()
+    ? new URL('/api/account/oauth/callback', window.location.origin).toString()
+    : localCallbackUrl()
+}
+
+export function AccountLoginDialog({
   isOpen,
   onClose,
   onSuccess,
-}: TrialRegistrationDialogProps) {
-  const [step, setStep] = useState<Step>('email')
+  callbackLoginId = null,
+}: AccountLoginDialogProps) {
+  const queryClient = useQueryClient()
   const [email, setEmail] = useState('')
-  const [token, setToken] = useState('')
-  const [validationError, setValidationError] = useState<string | null>(null)
+  const [linkSent, setLinkSent] = useState(false)
+  const [complete, setComplete] = useState(false)
+  const [desktopLoginId, setDesktopLoginId] = useState<string | null>(null)
+  const [callbackPollingError, setCallbackPollingError] = useState<
+    string | null
+  >(null)
+  const callbackStarted = useRef(false)
 
-  // Prefill the email captured at the gate so the common case is one click,
-  // but leave it fully editable: a user who gave a wrong or throwaway address
-  // at the gate can correct it here, and verification runs against what they
-  // type. On successful activation the backend promotes the verified address
-  // to the primary identity (see TrialService.activate).
+  const finish = async () => {
+    setComplete(true)
+    await invalidateTrialRelatedQueries(queryClient)
+    onSuccess?.()
+  }
+
+  const magicLinkMutation = useMutation({
+    mutationFn: async () => {
+      const context = await startAccountLogin(accountCallbackUrl())
+      await sendAccountMagicLink(context, email.trim())
+      if (isDesktopRuntime()) setDesktopLoginId(context.login_id)
+    },
+    onSuccess: () => setLinkSent(true),
+  })
+
+  const googleMutation = useMutation({
+    mutationFn: async () => {
+      const context = await startAccountLogin(accountCallbackUrl())
+      await startAccountGoogleOAuth(context)
+      if (isDesktopRuntime()) setDesktopLoginId(context.login_id)
+    },
+  })
+
+  const githubMutation = useMutation({
+    mutationFn: async () => {
+      const context = await startAccountLogin(accountCallbackUrl())
+      await startAccountGithubOAuth(context)
+      if (isDesktopRuntime()) setDesktopLoginId(context.login_id)
+    },
+  })
+
+  const callbackMutation = useMutation({
+    mutationFn: ({
+      loginId,
+      callbackUrl,
+    }: {
+      loginId: string
+      callbackUrl?: string
+    }) => completeAccountRedirect(loginId, callbackUrl),
+    onSuccess: finish,
+  })
+
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen || !callbackLoginId || callbackStarted.current) return
+    callbackStarted.current = true
+    callbackMutation.mutate({ loginId: callbackLoginId })
+  }, [callbackLoginId, callbackMutation, isOpen])
+
+  useEffect(() => {
+    if (!isOpen || !desktopLoginId || callbackStarted.current) return
     let cancelled = false
-    void fetch('/api/settings/email')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        const stored = typeof data?.email === 'string' ? data.email : null
-        if (!cancelled && stored) setEmail((current) => current || stored)
-      })
-      .catch(() => {})
+    let timer: number | undefined
+
+    const poll = async () => {
+      try {
+        const result = await fetchAccountBrowserCallback(desktopLoginId)
+        if (cancelled || callbackStarted.current) return
+        if (result.state === 'pending') {
+          timer = window.setTimeout(poll, 500)
+          return
+        }
+
+        const callbackUrl = new URL(localCallbackUrl())
+        if (result.code) callbackUrl.searchParams.set('code', result.code)
+        if (result.error) callbackUrl.searchParams.set('error', result.error)
+        if (result.error_description) {
+          callbackUrl.searchParams.set(
+            'error_description',
+            result.error_description
+          )
+        }
+        callbackStarted.current = true
+        callbackMutation.mutate({
+          loginId: desktopLoginId,
+          callbackUrl: callbackUrl.toString(),
+        })
+      } catch (error) {
+        if (!cancelled) {
+          setCallbackPollingError(
+            error instanceof Error ? error.message : 'Readyset sign-in failed'
+          )
+        }
+      }
+    }
+
+    timer = window.setTimeout(poll, 0)
     return () => {
       cancelled = true
+      if (timer !== undefined) window.clearTimeout(timer)
     }
-  }, [isOpen])
-  const registerMutation = useMutation({
-    mutationFn: async (
-      registerEmail: string
-    ): Promise<RegisterMutationData> => {
-      const result = await registerTrial(registerEmail)
-      if (result.success) {
-        if (result.token_resent) {
-          // Email already verified (any source): the keyservice emailed a
-          // fresh link to the token page. The token itself never travels in
-          // the API response - the user retrieves it from their inbox.
-          return {
-            mode: 'token-resent',
-            emailTier: result.email_tier ?? null,
-            limitCents: result.limit_cents ?? null,
-            remainingCents: result.remaining_cents ?? null,
-          }
-        }
-        return {
-          mode: 'registered',
-          limitDisplay: result.limit_display ?? null,
-          emailTier: result.email_tier ?? null,
-        }
-      }
-      const error = new Error(
-        result.detail ?? 'Registration failed.'
-      ) as TrialMutationError
-      error.didYouMean = result.did_you_mean ?? undefined
-      // Preserve the machine-readable code so the UI can branch a capacity
-      // limit (PROGRAM_FULL) or a rate limit (RATE_LIMITED) to a real next
-      // move instead of failing the same button again.
-      error.errorCode = result.error_code ?? undefined
-      throw error
-    },
-    onSuccess: () => {
-      setStep('verify')
-    },
-  })
-  const activateMutation = useMutation({
-    mutationFn: ({
-      token,
-      email,
-      emailTier,
-      limitCents,
-      remainingCents,
-    }: {
-      token: string
-      email: string
-      emailTier?: string | null
-      limitCents?: number | null
-      remainingCents?: number | null
-    }) =>
-      activateTrial(token, email, {
-        emailTier: emailTier ?? undefined,
-        limitCents: limitCents ?? undefined,
-        remainingCents: remainingCents ?? undefined,
-      }).then((result) => {
-        if (!result.success) {
-          throw new Error(result.message ?? 'Activation failed.')
-        }
-        return result
-      }),
-    onSuccess: () => {
-      setStep('success')
-      onSuccess?.()
-    },
-  })
-  const loading = registerMutation.isPending || activateMutation.isPending
-  const registerError =
-    registerMutation.error instanceof Error ? registerMutation.error : null
-  const activateError =
-    activateMutation.error instanceof Error ? activateMutation.error : null
-  const trialErrorCode =
-    registerError && 'errorCode' in registerError
-      ? ((registerError as TrialMutationError).errorCode ?? null)
-      : null
-  const isProgramFull = trialErrorCode === 'PROGRAM_FULL'
-  const isRateLimited = trialErrorCode === 'RATE_LIMITED'
-  // Only surface the generic error Alert for failures we don't branch below.
-  const errorMessage =
-    validationError ??
-    activateError?.message ??
-    (isProgramFull || isRateLimited ? null : (registerError?.message ?? null))
-  const rateLimitMessage =
-    isRateLimited && registerError ? registerError.message : null
-  const didYouMean =
-    registerError && 'didYouMean' in registerError
-      ? ((registerError as TrialMutationError).didYouMean ?? null)
-      : null
-  const tokenResent = registerMutation.data?.mode === 'token-resent'
-  const limitDisplay =
-    registerMutation.data?.mode === 'registered'
-      ? registerMutation.data.limitDisplay
-      : null
-  const emailTier = registerMutation.data?.emailTier ?? null
-  const resentBalance =
-    registerMutation.data?.mode === 'token-resent'
-      ? registerMutation.data
-      : null
-  // The verify step has two modes — a fresh verification email vs a re-sent
-  // token link — that differ only in copy. Select one set up front instead of
-  // branching every line.
-  const verifyCopy = tokenResent
-    ? {
-        title: "You're already registered",
-        subtitle: "This email already has a trial — we've re-sent your token.",
-        banner: `Trial token re-sent to ${email}`,
-        heading: 'Your token is on its way:',
-        steps: [
-          '1. Check your inbox for "Your RDST trial token"',
-          '2. Open the link to view your token',
-          '3. Paste the token below',
-        ],
-      }
-    : {
-        title: 'Check your email',
-        subtitle: 'Paste the trial token from the verification email.',
-        banner: `Verification email sent to ${email}`,
-        heading: 'Steps to get your token:',
-        steps: [
-          '1. Check your email (including spam folder)',
-          '2. Click the verification link',
-          '3. Copy the trial token from the page',
-        ],
-      }
-  const dialogTitle =
-    step === 'email'
-      ? 'Start free trial'
-      : step === 'verify'
-        ? verifyCopy.title
-        : 'Trial activated'
-  const dialogDescription =
-    step === 'email'
-      ? 'Get free AI analysis credits — no credit card required.'
-      : step === 'verify'
-        ? verifyCopy.subtitle
-        : 'Your free trial is ready to use.'
+  }, [callbackMutation, desktopLoginId, isOpen])
 
   const reset = () => {
-    setStep('email')
     setEmail('')
-    setToken('')
-    setValidationError(null)
-    registerMutation.reset()
-    activateMutation.reset()
+    setLinkSent(false)
+    setComplete(false)
+    setDesktopLoginId(null)
+    setCallbackPollingError(null)
+    callbackStarted.current = false
+    magicLinkMutation.reset()
+    googleMutation.reset()
+    githubMutation.reset()
+    callbackMutation.reset()
   }
 
   const handleClose = () => {
@@ -216,44 +192,17 @@ export function TrialRegistrationDialog({
     onClose()
   }
 
-  const handleRegister = () => {
-    if (!email || !email.includes('@')) {
-      setValidationError('Please enter a valid email address.')
-      return
-    }
-
-    setValidationError(null)
-    registerMutation.reset()
-    activateMutation.reset()
-    registerMutation.mutate(email)
-  }
-
-  const handleActivate = () => {
-    if (!token || token.trim().length < 10) {
-      setValidationError(
-        'Please paste a valid trial token (at least 10 characters).'
-      )
-      return
-    }
-
-    setValidationError(null)
-    activateMutation.reset()
-    activateMutation.mutate({
-      token: token.trim(),
-      email,
-      emailTier,
-      limitCents: resentBalance?.limitCents ?? null,
-      remainingCents: resentBalance?.remainingCents ?? null,
-    })
-  }
-
-  const handleDidYouMean = () => {
-    if (didYouMean) {
-      setEmail(didYouMean)
-      setValidationError(null)
-      registerMutation.reset()
-    }
-  }
+  const mutationError =
+    magicLinkMutation.error ??
+    googleMutation.error ??
+    githubMutation.error ??
+    callbackMutation.error
+  const error = mutationError instanceof Error ? mutationError.message : null
+  const pending =
+    magicLinkMutation.isPending ||
+    googleMutation.isPending ||
+    githubMutation.isPending ||
+    callbackMutation.isPending
 
   return (
     <Modal open={isOpen} onOpenChange={(open) => !open && handleClose()}>
@@ -261,196 +210,50 @@ export function TrialRegistrationDialog({
         <TaskDialogContent
           size="base"
           icon="sparkles"
-          title={dialogTitle}
-          description={dialogDescription}
+          title={complete ? 'Signed in to Readyset' : 'Sign in to Readyset'}
+          description={
+            complete
+              ? 'Readyset-hosted AI is ready to use.'
+              : 'Create an account or sign in to use Readyset-hosted AI for free.'
+          }
           bodyClassName="space-y-4"
           footer={
             <HStack className="justify-end gap-3 items-center w-full">
-              {step !== 'success' && (
+              {!complete && (
                 <Button
                   variant="primary"
                   modifier="ghost"
                   label="Cancel"
                   onClick={handleClose}
-                  disabled={loading}
+                  disabled={pending}
                 />
               )}
-
-              {step === 'email' && (
+              {!complete && !callbackLoginId && !linkSent && (
                 <Button
                   variant="rising"
-                  label="Start free trial"
+                  label="Send sign-in link"
                   icon="arrow-right"
                   iconPosition="right"
-                  onClick={handleRegister}
-                  loading={loading}
-                  disabled={!email || loading}
+                  onClick={() => magicLinkMutation.mutate()}
+                  loading={magicLinkMutation.isPending}
+                  disabled={!email.trim() || pending}
                 />
               )}
-
-              {step === 'verify' && (
-                <Button
-                  variant="rising"
-                  label="Activate"
-                  icon="tick"
-                  iconPosition="right"
-                  onClick={handleActivate}
-                  loading={loading}
-                  disabled={!token || loading}
-                />
-              )}
-
-              {step === 'success' && (
+              {complete && (
                 <Button variant="primary" label="Done" onClick={handleClose} />
               )}
             </HStack>
           }
         >
-          {errorMessage && (
-            <Alert variant="negative" modifier="outline" label={errorMessage} />
-          )}
-
-          {/* Branched trial dead-ends: a capacity limit routes to own-key
-                entry (a real alternative); a rate limit states the cause
-                without a misleading countdown. (onboarding F8) */}
-          {isProgramFull && (
-            <RoutableNotice
-              kind="key-needed"
-              title="The free trial is full right now"
-              message="Add your own Anthropic API key instead to keep using AI analysis."
-              onBeforeRoute={handleClose}
-            />
-          )}
-          {isRateLimited && (
+          {(error || callbackPollingError) && (
             <Alert
-              variant="warning"
+              variant="negative"
               modifier="outline"
-              label={
-                rateLimitMessage ??
-                "You've signed up for too many accounts recently."
-              }
+              label={error ?? callbackPollingError ?? 'Readyset sign-in failed'}
             />
           )}
 
-          {step === 'email' && (
-            <>
-              <div className="space-y-1">
-                <Text
-                  as="label"
-                  level="label-small"
-                  className="text-content-layout-2 block"
-                >
-                  Email Address
-                </Text>
-                <BaseInputText
-                  type="email"
-                  name="trial-email"
-                  autoComplete="email"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@company.com"
-                  disabled={loading}
-                  onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
-                />
-                <Text level="caption" className="text-content-layout-3">
-                  Business emails get more credits. We only use this for your
-                  trial - the token and an occasional check-in.
-                </Text>
-              </div>
-              {didYouMean && (
-                <Button
-                  variant="primary"
-                  modifier="link"
-                  size="small"
-                  className="px-0"
-                  label={`Did you mean ${didYouMean}?`}
-                  onClick={handleDidYouMean}
-                />
-              )}
-              {/* The own-key path must always be reachable, not only when
-                    the trial is at capacity. */}
-              {!isProgramFull && (
-                <RoutableNotice
-                  kind="key-needed"
-                  title="Already have an Anthropic key?"
-                  message="Add your own key instead — no trial needed."
-                  onBeforeRoute={handleClose}
-                />
-              )}
-            </>
-          )}
-
-          {step === 'verify' && (
-            <>
-              <div className="rounded-lg bg-surface-positive-soft/20 border border-border-positive-soft px-4 py-3">
-                <VStack className="gap-1 items-start">
-                  <Text
-                    level="label-small"
-                    className="text-content-positive-soft"
-                  >
-                    {verifyCopy.banner}
-                  </Text>
-                  {limitDisplay && !tokenResent && (
-                    <Text level="body-small" className="text-content-layout-2">
-                      Your trial credit: {limitDisplay}
-                      {emailTier === 'business'
-                        ? ' (business email)'
-                        : ' (personal email)'}
-                    </Text>
-                  )}
-                </VStack>
-              </div>
-
-              <div className="rounded-lg bg-surface-layout-2/60 border border-border-layout-1 px-4 py-3">
-                <VStack className="gap-1 items-start">
-                  <Text level="label-small" className="text-content-layout-1">
-                    {verifyCopy.heading}
-                  </Text>
-                  {verifyCopy.steps.map((line) => (
-                    <Text
-                      key={line}
-                      level="body-small"
-                      className="text-content-layout-3"
-                    >
-                      {line}
-                    </Text>
-                  ))}
-                </VStack>
-              </div>
-
-              <div className="space-y-1">
-                <Text
-                  as="label"
-                  level="label-small"
-                  className="text-content-layout-2 block"
-                >
-                  Trial Token
-                </Text>
-                <BaseInputText
-                  type="text"
-                  name="trial-token"
-                  autoComplete="off"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  data-1p-ignore="true"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  style={{ WebkitTextSecurity: 'disc' } as React.CSSProperties}
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  placeholder="Paste your trial token here"
-                  disabled={loading}
-                  onKeyDown={(e) => e.key === 'Enter' && handleActivate()}
-                />
-              </div>
-            </>
-          )}
-
-          {step === 'success' && (
+          {complete ? (
             <div className="py-4 flex flex-col items-center text-center gap-3">
               <div className="w-14 h-14 rounded-2xl bg-surface-positive-soft flex items-center justify-center">
                 <Icon
@@ -461,17 +264,89 @@ export function TrialRegistrationDialog({
               </div>
               <VStack className="gap-1 items-center">
                 <Text level="subtitle-2" className="text-content-layout-1">
-                  Trial is active
+                  Readyset account connected
                 </Text>
                 <Text level="body-small" className="text-content-layout-3">
-                  You can now use AI analysis features. Your balance will appear
-                  in the sidebar.
+                  Readyset-hosted AI is ready to use.
                 </Text>
               </VStack>
             </div>
+          ) : callbackLoginId ? (
+            <VStack className="gap-3 items-center py-6">
+              <Text level="body-small" className="text-content-layout-3">
+                Completing your Readyset sign-in…
+              </Text>
+            </VStack>
+          ) : linkSent ? (
+            <VStack className="gap-2 items-stretch py-3">
+              <Text level="subtitle-2" className="text-content-layout-1">
+                Check your email
+              </Text>
+              <Text level="body-small" className="text-content-layout-3">
+                Open the sign-in link sent to {email.trim()}. It returns to this
+                RDST application to finish securely.
+              </Text>
+            </VStack>
+          ) : (
+            <VStack className="gap-4 items-stretch py-1">
+              <Button
+                variant="primary"
+                modifier="solid"
+                size="large"
+                fullWidth
+                label="Continue with Google"
+                onClick={() => googleMutation.mutate()}
+                loading={googleMutation.isPending}
+                disabled={pending}
+              >
+                {!googleMutation.isPending && <GoogleMark />}
+                {!googleMutation.isPending && <span className="w-1" />}
+              </Button>
+              <Button
+                variant="primary"
+                modifier="outline"
+                size="large"
+                fullWidth
+                label="Continue with GitHub"
+                onClick={() => githubMutation.mutate()}
+                loading={githubMutation.isPending}
+                disabled={pending}
+              >
+                {!githubMutation.isPending && <GithubMark />}
+                {!githubMutation.isPending && <span className="w-1" />}
+              </Button>
+              <HStack className="w-full items-center gap-3">
+                <div className="h-px flex-1 bg-border-layout-1" />
+                <Text level="caption" className="text-content-layout-3">
+                  or continue with email
+                </Text>
+                <div className="h-px flex-1 bg-border-layout-1" />
+              </HStack>
+              <VStack className="gap-1 items-stretch">
+                <Text level="label-small" className="text-content-layout-1">
+                  Email address
+                </Text>
+                <BaseInputText
+                  type="email"
+                  aria-label="Email address"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  disabled={pending}
+                  placeholder="you@example.com"
+                />
+                <Text level="caption" className="text-content-layout-3">
+                  We’ll email you a secure sign-in link.
+                </Text>
+              </VStack>
+            </VStack>
           )}
         </TaskDialogContent>
       </ModalContentContainer>
     </Modal>
   )
 }
+
+// Keep the old export while call sites migrate. The UI no longer offers trial
+// registration or trial tokens.
+export const TrialRegistrationDialog = AccountLoginDialog

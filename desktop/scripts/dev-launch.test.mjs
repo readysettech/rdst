@@ -10,6 +10,10 @@ const desktopSource = readFileSync(
   "utf8",
 );
 const webSource = readFileSync(resolve(webScripts, "dev-full.mjs"), "utf8");
+const viteSource = readFileSync(
+  resolve(repoLayout().webDir, "vite.config.ts"),
+  "utf8",
+);
 
 describe("cross-tree path resolution", () => {
   it("keeps both copies of the layout resolver identical", () => {
@@ -34,7 +38,13 @@ describe("development child launchers", () => {
       'resolveBin(rendererDir, "vite", "vite")',
     );
     expect(desktopSource).toContain(
-      'start("renderer", process.execPath, [viteBinary, "dev"]',
+      '[viteBinary, "dev", "--port", String(rendererPort), "--strictPort"]',
+    );
+    expect(desktopSource).toContain(
+      'const rendererPort = Number(process.env.RDST_RENDERER_PORT || "3001");',
+    );
+    expect(desktopSource).toContain(
+      'const rendererUrl = `http://localhost:${rendererPort}`;',
     );
   });
 
@@ -43,6 +53,32 @@ describe("development child launchers", () => {
     expect(desktopSource).toContain('start("electron", electronBinary, ["."]');
     expect(desktopSource).toContain('resolveBin(appDir, "tsup", "tsup")');
     expect(desktopSource).not.toContain("pnpm");
+  });
+
+  it("starts a migrated local Keyservice for desktop development", () => {
+    expect(desktopSource).toContain(
+      'const keyserviceDir = resolve(rdstDir, "keyservice");',
+    );
+    expect(desktopSource).toContain(
+      'const keyserviceUrl = "http://127.0.0.1:8788";',
+    );
+    expect(desktopSource).toContain(
+      'const backendUrl = "http://127.0.0.1:8787";',
+    );
+    expect(desktopSource).toContain('"rdst-keyservice-db-local"');
+    expect(desktopSource).toContain('"--local"');
+    expect(desktopSource).toContain('"DISABLE_SIGNUP_RATE_LIMIT:true"');
+    expect(desktopSource).toContain(
+      'const keyservice = start(\n    "keyservice",\n    "uv"',
+    );
+    expect(desktopSource).toContain(
+      'env: { RDST_KEYSERVICE_URL: keyserviceUrl }',
+    );
+    expect(desktopSource).not.toContain("configuredKeyserviceUrl");
+    expect(desktopSource).toContain(
+      'waitForUrl("Keyservice", `${keyserviceUrl}/health`, keyservice)',
+    );
+    expect(viteSource).toContain("target: 'http://localhost:8787'");
   });
 
   it("kills whole child process trees on shutdown", () => {

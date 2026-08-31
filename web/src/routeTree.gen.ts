@@ -28,6 +28,7 @@ import { Route as AuditRouteImport } from './routes/audit'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as AnalyzeRouteImport } from './routes/analyze'
 import { Route as AgentsRouteImport } from './routes/agents'
+import { Route as AccountLoginRouteImport } from './routes/account-login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LabPerformanceCardsRouteImport } from './routes/lab.performance-cards'
 import { Route as LabQueriesVariantRouteImport } from './routes/lab.queries.$variant'
@@ -128,6 +129,11 @@ const AgentsRoute = AgentsRouteImport.update({
   path: '/agents',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AccountLoginRoute = AccountLoginRouteImport.update({
+  id: '/account-login',
+  path: '/account-login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -151,6 +157,7 @@ const AuditRunsRunIdRoute = AuditRunsRunIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/account-login': typeof AccountLoginRoute
   '/agents': typeof AgentsRoute
   '/analyze': typeof AnalyzeRoute
   '/ask': typeof AskRoute
@@ -176,6 +183,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/account-login': typeof AccountLoginRoute
   '/agents': typeof AgentsRoute
   '/analyze': typeof AnalyzeRoute
   '/ask': typeof AskRoute
@@ -202,6 +210,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/account-login': typeof AccountLoginRoute
   '/agents': typeof AgentsRoute
   '/analyze': typeof AnalyzeRoute
   '/ask': typeof AskRoute
@@ -229,6 +238,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/account-login'
     | '/agents'
     | '/analyze'
     | '/ask'
@@ -254,6 +264,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/account-login'
     | '/agents'
     | '/analyze'
     | '/ask'
@@ -279,6 +290,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/account-login'
     | '/agents'
     | '/analyze'
     | '/ask'
@@ -305,6 +317,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AccountLoginRoute: typeof AccountLoginRoute
   AgentsRoute: typeof AgentsRoute
   AnalyzeRoute: typeof AnalyzeRoute
   AskRoute: typeof AskRoute
@@ -464,6 +477,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/account-login': {
+      id: '/account-login'
+      path: '/account-login'
+      fullPath: '/account-login'
+      preLoaderRoute: typeof AccountLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -497,6 +517,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AccountLoginRoute: AccountLoginRoute,
   AgentsRoute: AgentsRoute,
   AnalyzeRoute: AnalyzeRoute,
   AskRoute: AskRoute,

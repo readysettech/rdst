@@ -96,6 +96,32 @@ def test_store_resume_allows_only_declared_unstable_gold_to_change(tmp_path: Pat
         store.initialize(changed_stable)
 
 
+@pytest.mark.parametrize(
+    "field,changed",
+    [
+        ("semantic_schema_format", "changed-schema"),
+        ("ask_accuracy_profile", "candidate-v1"),
+        ("ask_accuracy_features", {"router": False}),
+        ("model_configuration_fingerprints", {"sonnet": "changed"}),
+    ],
+)
+def test_store_rejects_resume_when_effective_pipeline_changes(
+    tmp_path: Path, field: str, changed: object
+):
+    store = ArtifactStore(tmp_path / "run")
+    manifest = {
+        "run_id": "run",
+        "semantic_schema_format": "canonical-v1",
+        "ask_accuracy_profile": "candidate-v2",
+        "ask_accuracy_features": {"router": True},
+        "model_configuration_fingerprints": {"sonnet": "frozen"},
+    }
+    store.initialize(manifest)
+
+    with pytest.raises(ValueError, match=field):
+        store.initialize({**manifest, field: changed})
+
+
 def test_unscored_attempt_is_repaired_without_losing_history(tmp_path: Path):
     store = ArtifactStore(tmp_path / "run")
     store.initialize({"run_id": "run"})

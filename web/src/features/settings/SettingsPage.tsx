@@ -31,13 +31,15 @@ import { TrialRegistrationDialog } from '../../components/TrialRegistrationDialo
 import {
   type AnthropicKeyValidation,
   type EnvRequirement,
+  fetchAccountStatus,
+  logoutAccount,
   resetLocalData,
 } from '../../lib/api'
 import {
   clearAllBackgroundRuns,
   startBootstrapRun,
 } from '../../lib/backgroundRuns'
-import { classifyError, TRIAL_EXHAUSTED_MESSAGE } from '../../lib/errorContract'
+import { classifyError } from '../../lib/errorContract'
 import { isSshErrorCategory, sshErrorCopy } from '../../lib/sshErrors'
 import { invalidateTargetQueries } from '../../lib/targetQueries'
 import {
@@ -88,23 +90,14 @@ function keyValidationVariant(
 }
 
 function keyValidationLabel(v: AnthropicKeyValidation): string {
-  const isTrial = v.source === 'trial' || v.source === 'trial_exhausted'
-  if (v.valid) {
-    return isTrial ? 'Trial token verified.' : 'API key verified.'
-  }
+  if (v.valid) return 'API key verified.'
   switch (v.reason) {
-    case 'exhausted':
-      return TRIAL_EXHAUSTED_MESSAGE
     case 'rejected':
-      return isTrial
-        ? 'Trial token rejected by the Readyset trial service. Request a new one or add your own key.'
-        : 'Key rejected by Anthropic. Update it with a valid key.'
+      return 'Key rejected by Anthropic. Update it with a valid key.'
     case 'no_key':
-      return 'No Anthropic key or trial token is configured yet.'
+      return 'No Anthropic API key is configured yet.'
     default:
-      return isTrial
-        ? "Couldn't reach the Readyset trial service to verify your token. Check your connection and try again."
-        : "Couldn't reach Anthropic to verify the key. Check your connection and try again."
+      return "Couldn't reach Anthropic to verify the key. Check your connection and try again."
   }
 }
 
@@ -260,58 +253,60 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
   const statusData = statusQuery.data
   const dataDirectory = statusData?.data_directory ?? null
 
-  const {
-    envRequirements,
-    anthropicRequirement,
-    isTrialSource: trialSourceDetected,
-    trialStatus,
-  } = useTrialSource()
-
-  const isTrialExhausted =
-    trialSourceDetected &&
-    (trialStatus?.status === 'exhausted' || trialStatus?.active === false)
+  const { envRequirements, anthropicRequirement } = useTrialSource()
+  const readysetAccountConnected =
+    anthropicRequirement?.source === 'readyset_account'
+  const accountStatusQuery = useQuery({
+    queryKey: ['account-status'],
+    queryFn: fetchAccountStatus,
+    enabled: readysetAccountConnected,
+  })
+  const accountLogoutMutation = useMutation({
+    mutationFn: logoutAccount,
+    onSuccess: async () => {
+      await invalidateTrialRelatedQueries(queryClient)
+      toast({
+        title: 'Signed out of Readyset',
+        description:
+          'Add an Anthropic key or sign in again to use AI features.',
+        variant: 'positive',
+      })
+    },
+  })
   // Presence vs. validity: a saved key can still be stale/rejected. Probe
-  // only when a real Anthropic key is the active source - a trial token is
-  // not an Anthropic key, so testing it against Anthropic would always
-  // "reject" and the verdict would be meaningless.
+  // only when a real Anthropic key is the active source.
   const hasAnthropicKey =
-    Boolean(anthropicRequirement?.satisfied) &&
-    !trialSourceDetected &&
-    !isTrialExhausted
+    Boolean(anthropicRequirement?.satisfied) && !readysetAccountConnected
   const keyValidityQuery = useAnthropicValidity(hasAnthropicKey)
   const keyValidity = keyValidityQuery.data
   const keyChecking =
     hasAnthropicKey && keyValidityQuery.isFetching && !keyValidity
-  // Guarded on hasAnthropicKey so a verdict cached before switching to trial
-  // credits can't keep the rejected state alive.
+  // Guarded on hasAnthropicKey so a cached verdict for a previous provider
+  // cannot keep the rejected state alive.
   const keyRejected =
     hasAnthropicKey &&
     keyValidity?.valid === false &&
     keyValidity.reason === 'rejected'
 
-  const anthropicStatusTitle = isTrialExhausted
-    ? 'Trial Credits Exhausted'
+  const anthropicStatusTitle = readysetAccountConnected
+    ? 'Readyset Account Connected'
     : keyRejected
       ? 'Anthropic Key Rejected'
       : keyChecking
         ? 'Checking Anthropic Key…'
-        : trialSourceDetected
-          ? 'Trial Credits In Use'
-          : anthropicRequirement?.satisfied
-            ? 'Anthropic API Key Configured'
-            : 'Anthropic API Key Missing'
+        : anthropicRequirement?.satisfied
+          ? 'Anthropic API Key Configured'
+          : 'Anthropic API Key Missing'
 
-  const anthropicStatusDescription = isTrialExhausted
-    ? TRIAL_EXHAUSTED_MESSAGE
+  const anthropicStatusDescription = readysetAccountConnected
+    ? 'Readyset-hosted AI is ready to use.'
     : keyRejected
       ? 'Anthropic rejected this key. Update it with a valid key to keep AI analysis working.'
       : keyChecking
         ? 'Verifying the key with Anthropic…'
-        : trialSourceDetected
-          ? 'You can add or update your Anthropic API key here so AI analysis keeps working.'
-          : anthropicRequirement?.satisfied
-            ? 'You can replace your Anthropic API key here.'
-            : 'Set your own Anthropic API key to avoid interruptions and keep using AI analysis.'
+        : anthropicRequirement?.satisfied
+          ? 'You can replace your Anthropic API key here.'
+          : 'Set your own Anthropic API key to avoid interruptions and keep using AI analysis.'
   const anthropicDialogRequirements: EnvRequirement[] = useMemo(() => {
     if (!anthropicRequirement) {
       return []
@@ -323,18 +318,17 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
       return [
         {
           ...anthropicRequirement,
-          accepted_names: ['ANTHROPIC_API_KEY', 'RDST_TRIAL_TOKEN'],
+          accepted_names: ['ANTHROPIC_API_KEY'],
         },
       ]
     }
     return [anthropicRequirement]
   }, [anthropicRequirement])
-  // Trigger copy matches the dialog it opens: "Update key" when a key/trial is
-  // already in play, "Set key" on first setup. (configure-settings Copy #1)
-  const anthropicButtonLabel =
-    isTrialExhausted || trialSourceDetected || anthropicRequirement?.satisfied
-      ? 'Update key'
-      : 'Set key'
+  // Trigger copy matches the dialog it opens: update when a key is already in
+  // use, set on first setup.
+  const anthropicButtonLabel = anthropicRequirement?.satisfied
+    ? 'Update key'
+    : 'Set key'
 
   // Load targets on mount
   useEffect(() => {
@@ -800,8 +794,8 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
         {activePanel === 'ai' ? (
           <SettingsSection
             id="ai"
-            title="AI keys"
-            description="The Anthropic API key that powers Analyze, Ask, and Health Check insights."
+            title="AI access"
+            description="Use Readyset-hosted AI or your own Anthropic key for Analyze, Ask, and Health Check insights."
           >
             <m.div
               initial={{ opacity: 0, y: 10 }}
@@ -833,17 +827,24 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
                       >
                         {anthropicStatusDescription}
                       </Text>
-                      {trialSourceDetected &&
-                      trialStatus?.remaining_tokens_display &&
-                      trialStatus?.limit_tokens_display ? (
+                      {readysetAccountConnected &&
+                      accountStatusQuery.data?.email ? (
                         <Text level="caption" className="text-content-layout-3">
-                          Trial balance: {trialStatus.remaining_tokens_display}{' '}
-                          / {trialStatus.limit_tokens_display}
+                          Signed in as {accountStatusQuery.data.email}
                         </Text>
                       ) : null}
                     </VStack>
                   </HStack>
                   <HStack className="gap-2 items-center">
+                    <Show when={readysetAccountConnected}>
+                      <Button
+                        variant="primary"
+                        modifier="ghost"
+                        label="Sign out"
+                        loading={accountLogoutMutation.isPending}
+                        onClick={() => accountLogoutMutation.mutate()}
+                      />
+                    </Show>
                     <Show when={hasAnthropicKey}>
                       <Button
                         variant="primary"
@@ -855,16 +856,18 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
                         onClick={handleTestKey}
                       />
                     </Show>
-                    <Show when={!trialSourceDetected}>
-                      <Button
-                        variant="primary"
-                        modifier="ghost"
-                        label="Use trial credits"
-                        icon="sparkles"
-                        iconPosition="left"
-                        onClick={() => setShowTrialDialog(true)}
-                      />
-                    </Show>
+                    <Button
+                      variant="primary"
+                      modifier="ghost"
+                      label={
+                        readysetAccountConnected
+                          ? 'Switch Readyset account'
+                          : 'Use Readyset-hosted AI'
+                      }
+                      icon="sparkles"
+                      iconPosition="left"
+                      onClick={() => setShowTrialDialog(true)}
+                    />
                     <Button
                       variant="primary"
                       modifier="outline"
@@ -1018,11 +1021,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
         showManualAnthropicInput
         keyringAvailable={Boolean(envRequirements?.keyring_available)}
         onTrialRegister={() => setShowTrialDialog(true)}
-        trialActionLabel={
-          trialSourceDetected
-            ? 'Email me my trial token'
-            : "Don't have a key? Claim free trial credits"
-        }
+        trialActionLabel="Don't have a key? Sign in to Readyset"
         onSuccess={() => {
           void invalidateTrialRelatedQueries(queryClient)
           // Re-check right away so the status line reflects the new key even

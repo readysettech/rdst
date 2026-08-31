@@ -105,6 +105,13 @@ def _scope_query(
         return None
     predicate, column = matches[0]
     if prefix is not None:
+        regex_operator = "~" if dialect in {"postgres", "postgresql"} else "REGEXP"
+        fractional = sqlglot.parse_one(
+            f"{column.sql(dialect=read_dialect)} {regex_operator} "
+            f"'{re.escape(prefix)}[.][0-9]+$'",
+            read=read_dialect,
+            into=exp.Condition,
+        )
         predicate.replace(
             exp.Paren(
                 this=exp.Or(
@@ -112,10 +119,7 @@ def _scope_query(
                         this=column.copy(),
                         expression=exp.Literal.string(prefix),
                     ),
-                    expression=exp.Like(
-                        this=column.copy(),
-                        expression=exp.Literal.string(f"{prefix}.%"),
-                    ),
+                    expression=fractional,
                 )
             )
         )
@@ -328,9 +332,12 @@ def normalize_temporal_text_storage_sql(
                     this=column.copy(),
                     expression=exp.Literal.string(prefix),
                 ),
-                expression=exp.Like(
-                    this=column.copy(),
-                    expression=exp.Literal.string(f"{prefix}.%"),
+                expression=sqlglot.parse_one(
+                    f"{column.sql(dialect=read_dialect)} "
+                    f"{'~' if normalized_dialect in {'postgres', 'postgresql'} else 'REGEXP'} "
+                    f"'{re.escape(prefix)}[.][0-9]+$'",
+                    read=read_dialect,
+                    into=exp.Condition,
                 ),
             )
         )

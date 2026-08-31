@@ -304,6 +304,20 @@ class TargetsConfig:
     def get_llm_model(self) -> Optional[str]:
         return self._data.get("llm", {}).get("model")
 
+    def get_account_config(self) -> Dict[str, Any]:
+        account = self._data.get("account") or {}
+        return dict(account) if isinstance(account, dict) else {}
+
+    def set_account_config(self, account: Dict[str, Any]) -> None:
+        self._data["account"] = {
+            key: account[key]
+            for key in ("user_id", "email", "status")
+            if account.get(key)
+        }
+
+    def clear_account_config(self) -> None:
+        self._data.pop("account", None)
+
     def set_llm_provider(
         self, provider: str, base_url: Optional[str] = None, model: Optional[str] = None
     ) -> None:

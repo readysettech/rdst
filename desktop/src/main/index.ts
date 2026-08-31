@@ -10,11 +10,22 @@ import { setupAutoUpdates } from './updater.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RENDERER_DIR = path.resolve(__dirname, '../renderer')
+const OAUTH_PROTOCOL = app.isPackaged ? 'rdst' : 'rdst-dev'
 
 // CI smoke mode boots the full shell (sidecar backend, static server,
 // renderer), records SMOKE_OK when requested, and exits.
 const SMOKE_MODE = process.env.RDST_DESKTOP_SMOKE === '1'
 const SMOKE_TIMEOUT_MS = 120_000
+
+// Development and an installed build may run together. Keep Electron's
+// profile and single-instance lock separate, just as their OAuth protocols are
+// separate; RDST's own ~/.rdst configuration remains shared intentionally.
+if (!app.isPackaged && !SMOKE_MODE) {
+  app.setPath(
+    'userData',
+    path.join(app.getPath('appData'), `${app.getName()}-dev`)
+  )
+}
 
 let mainWindow: BrowserWindow | null = null
 let backend: BackendHandle | null = null
@@ -63,9 +74,14 @@ function registerWindowControlHandlers(): void {
     'window:is-maximized',
     (event) => senderWindow(event)?.isMaximized() ?? false
   )
-  ipcMain.handle('oauth:register-protocol', () =>
-    app.setAsDefaultProtocolClient('rdst')
-  )
+  ipcMain.handle('oauth:register-protocol', () => {
+    if (process.defaultApp && process.argv[1]) {
+      return app.setAsDefaultProtocolClient(OAUTH_PROTOCOL, process.execPath, [
+        path.resolve(process.argv[1]),
+      ])
+    }
+    return app.setAsDefaultProtocolClient(OAUTH_PROTOCOL)
+  })
   ipcMain.handle('ssh:select-key', async (event) => {
     const sshDirectory = path.join(os.homedir(), '.ssh')
     const options: Electron.OpenDialogOptions = {
@@ -80,6 +96,15 @@ function registerWindowControlHandlers(): void {
       : await dialog.showOpenDialog(options)
     return result.canceled ? null : (result.filePaths[0] ?? null)
   })
+}
+
+function isLocalRendererUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost'
+  } catch {
+    return false
+  }
 }
 
 async function createWindow(rendererUrl: string): Promise<BrowserWindow> {
@@ -114,12 +139,16 @@ async function createWindow(rendererUrl: string): Promise<BrowserWindow> {
   }
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    const parsed = new URL(url)
-    if (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') {
+    if (isLocalRendererUrl(url)) {
       return { action: 'allow' }
     }
     void shell.openExternal(url)
     return { action: 'deny' }
+  })
+  window.webContents.on('will-navigate', (event, url) => {
+    if (isLocalRendererUrl(url)) return
+    event.preventDefault()
+    void shell.openExternal(url)
   })
 
   window.once('closed', () => {
@@ -186,7 +215,7 @@ function focusMainWindow(): void {
 }
 
 function handleDeepLink(url: string): void {
-  if (!url.startsWith('rdst://')) return
+  if (!url.startsWith(`${OAUTH_PROTOCOL}://`)) return
   if (!mainWindow) deepLinkPending = true
   focusMainWindow()
 }
@@ -281,7 +310,9 @@ function configurePrimaryInstance(): void {
     handleDeepLink(url)
   })
   app.on('second-instance', (_event, argv) => {
-    const deepLink = argv.find((value) => value.startsWith('rdst://'))
+    const deepLink = argv.find((value) =>
+      value.startsWith(`${OAUTH_PROTOCOL}://`)
+    )
     if (deepLink) handleDeepLink(deepLink)
     else focusMainWindow()
   })
@@ -321,7 +352,7 @@ if (app.requestSingleInstanceLock()) {
   configurePrimaryInstance()
 } else {
   console.error(
-    'Another RDST Desktop instance already holds the single-instance lock; quitting.',
+    'Another RDST Desktop instance already holds the single-instance lock; quitting.'
   )
   app.quit()
 }

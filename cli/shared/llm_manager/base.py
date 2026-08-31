@@ -6,7 +6,13 @@ from typing import List, Optional, Protocol, Any, Dict, Sequence, Generator
 class Provider(Protocol):
     def default_model(self) -> str: ...
     def complete(
-        self, request: "ProviderRequest", *, api_key: str, debug: bool = False
+        self,
+        request: "ProviderRequest",
+        *,
+        api_key: str,
+        base_url: str | None = None,
+        extra_headers: dict | None = None,
+        debug: bool = False,
     ) -> "ProviderResponse": ...
 
     def stream(
@@ -55,7 +61,13 @@ class ProviderRequest:
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def as_chat_dicts(self) -> List[Dict[str, str]]:
-        return [{"role": m.role, "content": m.content} for m in self.messages]
+        return [
+            {
+                "role": m["role"] if isinstance(m, dict) else m.role,
+                "content": m["content"] if isinstance(m, dict) else m.content,
+            }
+            for m in self.messages
+        ]
 
 
 @dataclass
@@ -120,8 +132,8 @@ class Conversation:
 
 @dataclass
 class LLMDefaults:
-    # Claude is the only supported provider (BYOK with ANTHROPIC_API_KEY)
-    provider: str = "claude"
+    # Auto prefers Claude BYOK, then Readyset-hosted GLM for signed-in users.
+    provider: str = "auto"
     model: Optional[str] = None
     max_tokens: int = 800
     temperature: float = 0.2

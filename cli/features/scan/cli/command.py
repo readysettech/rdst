@@ -355,7 +355,7 @@ class ScanCommand:
 
         # Run analysis if --analyze flag is set (CLI-specific: progress bars, DB validation)
         if analyze and target:
-            _has_key = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("RDST_TRIAL_TOKEN"))
+            _has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
             if not _has_key:
                 try:
                     from shared.llm.key_resolution import resolve_api_key
@@ -365,9 +365,9 @@ class ScanCommand:
                     pass
             if not _has_key:
                 error_msg = (
-                    "No LLM API key configured. Cannot run analysis.\n\n"
+                    "AI access is not configured. Cannot run analysis.\n\n"
                     "Options:\n"
-                    "  1. Run 'rdst init' to sign up for a free trial (up to 925K tokens)\n"
+                    "  1. Run 'rdst account login' for capped hosted inference\n"
                     f"  2. Set your own key: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n"
                     "     Get one at: https://console.anthropic.com/"
                 )

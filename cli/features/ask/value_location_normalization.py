@@ -13,10 +13,11 @@ from shared.db_connection import quote_identifier
 
 VALUE_LOCATION_NORMALIZER_VERSION = "ambiguous-exact-value-location-v2"
 MAX_SUPPORT = 101
+MAX_SAMPLE_ROWS = 10_000
 MIN_STRONG_SUPPORT = 8
 MIN_SUPPORT_RATIO = 4
 
-_TEXT_TYPES = frozenset({"char", "enum", "json", "text", "varchar"})
+_TEXT_TYPES = frozenset({"char", "enum", "json", "string", "text", "varchar"})
 _PARTIAL_CUES = re.compile(
     r"\b(?:contain(?:s|ing)?|include(?:s|ing)?|partial|substring|pattern|"
     r"starts?\s+with|ends?\s+with|matches?)\b",
@@ -103,16 +104,22 @@ def _equivalent_sibling(table: Any, column_name: str) -> Any | None:
     return siblings[0] if len(siblings) == 1 else None
 
 
-def _support_query(*, table: str, column: str, literal: str, dialect: str) -> str:
+def _support_query(
+    *, table: str, columns: tuple[str, str], literal: str, dialect: str
+) -> str:
     engine = "postgresql" if dialect in {"postgres", "postgresql"} else "mysql"
     read_dialect = "postgres" if engine == "postgresql" else "mysql"
     table_sql = quote_identifier(table, engine)
-    column_sql = quote_identifier(column, engine)
+    current_sql = quote_identifier(columns[0], engine)
+    sibling_sql = quote_identifier(columns[1], engine)
     literal_sql = exp.Literal.string(literal).sql(dialect=read_dialect)
     return (
-        "SELECT COUNT(*) FROM (SELECT 1 FROM "
-        f"{table_sql} WHERE {column_sql} = {literal_sql} LIMIT {MAX_SUPPORT}) "
-        "AS _rdst_value_support"
+        "SELECT COALESCE(SUM(CASE WHEN _current = "
+        f"{literal_sql} THEN 1 ELSE 0 END), 0), "
+        "COALESCE(SUM(CASE WHEN _sibling = "
+        f"{literal_sql} THEN 1 ELSE 0 END), 0) FROM (SELECT "
+        f"{current_sql} AS _current, {sibling_sql} AS _sibling FROM {table_sql} "
+        f"LIMIT {MAX_SAMPLE_ROWS}) AS _rdst_value_sample"
     )
 
 
@@ -121,13 +128,13 @@ def _probe_support(
     target_config: dict[str, Any],
     *,
     table: str,
-    column: str,
+    columns: tuple[str, str],
     literal: str,
     dialect: str,
-) -> tuple[int | None, str]:
+) -> tuple[tuple[int, int] | None, str]:
     query = _support_query(
         table=table,
-        column=column,
+        columns=columns,
         literal=literal,
         dialect=dialect,
     )
@@ -137,7 +144,10 @@ def _probe_support(
         rows = result.get("rows") if isinstance(result, dict) else None
         if not isinstance(result, dict) or not result.get("success") or not rows:
             return None, query_hash
-        return int(rows[0][0]), query_hash
+        return (
+            min(MAX_SUPPORT, int(rows[0][0])),
+            min(MAX_SUPPORT, int(rows[0][1])),
+        ), query_hash
     # Database adapters may raise transport-, driver-, or timeout-specific
     # exceptions.  Grounding is an optional refinement, so every ordinary
     # probe failure must leave the generated SQL untouched.
@@ -219,33 +229,26 @@ def normalize_ambiguous_value_location_sql(
         return sql, diagnostics
 
     predicate, column, literal, table_name, sibling = candidates[0]
-    current_support, current_hash = _probe_support(
+    supports, support_hash = _probe_support(
         db_executor,
         target_config,
         table=table_name,
-        column=column.name,
-        literal=literal,
-        dialect=dialect,
-    )
-    sibling_support, sibling_hash = _probe_support(
-        db_executor,
-        target_config,
-        table=table_name,
-        column=sibling.name,
+        columns=(column.name, sibling.name),
         literal=literal,
         dialect=dialect,
     )
     diagnostics.update(
         {
-            "probe_count": 2,
-            "probe_sha256": [current_hash, sibling_hash],
+            "probe_count": 1,
+            "probe_sha256": [support_hash],
             "source_column": f"{table_name}.{column.name}",
             "candidate_column": f"{table_name}.{sibling.name}",
         }
     )
-    if current_support is None or sibling_support is None:
+    if supports is None:
         diagnostics["reason"] = "database-probe-failed"
         return sql, diagnostics
+    current_support, sibling_support = supports
     if not (
         sibling_support >= MIN_STRONG_SUPPORT
         and sibling_support >= max(1, current_support) * MIN_SUPPORT_RATIO
@@ -291,6 +294,7 @@ def normalize_context(ctx: Any, db_executor: Callable[..., Any] | None) -> Any:
 
 
 __all__ = [
+    "MAX_SAMPLE_ROWS",
     "VALUE_LOCATION_NORMALIZER_VERSION",
     "normalize_ambiguous_value_location_sql",
     "normalize_context",

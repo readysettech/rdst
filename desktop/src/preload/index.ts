@@ -7,9 +7,14 @@ contextBridge.exposeInMainWorld('rdstDesktop', {
   platform: process.platform,
   // Renderer analytics honor the same kill switch as the Python backend,
   // so automated launches (CI smoke tests) never register as users.
-  telemetryDisabled: ['off', 'false', '0', 'no', 'disable', 'disabled'].includes(
-    (process.env.RDST_TELEMETRY ?? '').toLowerCase()
-  ),
+  telemetryDisabled: [
+    'off',
+    'false',
+    '0',
+    'no',
+    'disable',
+    'disabled',
+  ].includes((process.env.RDST_TELEMETRY ?? '').toLowerCase()),
   oauth: {
     registerProtocol: (): Promise<boolean> =>
       ipcRenderer.invoke('oauth:register-protocol'),

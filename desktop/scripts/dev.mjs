@@ -13,6 +13,10 @@ const __dirname = dirname(__filename);
 const appDir = resolve(__dirname, "..");
 const rendererDir = repoLayout().webDir;
 const rdstDir = repoLayout().pythonDir;
+const keyserviceDir = resolve(rdstDir, "keyservice");
+const keyserviceUrl = "http://127.0.0.1:8788";
+const backendUrl = "http://127.0.0.1:8787";
+const rendererPort = Number(process.env.RDST_RENDERER_PORT || "3001");
 const READY_TIMEOUT_MS = 30_000;
 const SHUTDOWN_TIMEOUT_MS = 3_000;
 
@@ -43,6 +47,10 @@ function run(command, args, options = {}) {
     const child = spawn(command, args, {
       stdio: "inherit",
       ...options,
+      env: {
+        ...process.env,
+        ...(options.env ?? {}),
+      },
     });
     child.once("error", reject);
     child.once("exit", (code, signal) => {
@@ -180,6 +188,9 @@ async function shutdown(code) {
 }
 
 async function main() {
+  if (!Number.isInteger(rendererPort) || rendererPort < 1 || rendererPort > 65_535) {
+    throw new Error(`Invalid RDST_RENDERER_PORT: ${process.env.RDST_RENDERER_PORT}`);
+  }
   const safePython = findSafePython();
   const backendArgs = [
     "run",
@@ -203,18 +214,58 @@ async function main() {
   console.log("[rdst-desktop] Building Electron main and preload processes...");
   await run(process.execPath, [tsupBinary], { cwd: appDir });
 
-  const backend = start("backend", "uv", backendArgs, { cwd: rdstDir });
-  const renderer = start("renderer", process.execPath, [viteBinary, "dev"], {
-    cwd: rendererDir,
+  const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
+  console.log("[rdst-desktop] Applying local Keyservice migrations...");
+  await run(
+    npxCommand,
+    [
+      "--yes",
+      "wrangler",
+      "d1",
+      "migrations",
+      "apply",
+      "rdst-keyservice-db-local",
+      "--local",
+    ],
+    { cwd: keyserviceDir },
+  );
+  const keyservice = start(
+    "keyservice",
+    "uv",
+    [
+      "run",
+      "pywrangler",
+      "dev",
+      "--port",
+      "8788",
+      "--show-interactive-dev-session=false",
+      "--var",
+      `SERVICE_URL:${keyserviceUrl}`,
+      "--var",
+      "DISABLE_SIGNUP_RATE_LIMIT:true",
+    ],
+    { cwd: keyserviceDir },
+  );
+
+  const backend = start("backend", "uv", backendArgs, {
+    cwd: rdstDir,
+    env: { RDST_KEYSERVICE_URL: keyserviceUrl },
   });
+  const renderer = start(
+    "renderer",
+    process.execPath,
+    [viteBinary, "dev", "--port", String(rendererPort), "--strictPort"],
+    { cwd: rendererDir },
+  );
   start("electron build watcher", process.execPath, [tsupBinary, "--watch"], {
     cwd: appDir,
   });
 
-  const rendererUrl = "http://localhost:3001";
+  const rendererUrl = `http://localhost:${rendererPort}`;
   await Promise.all([
-    waitForUrl("RDST backend", "http://localhost:8787/api/init/status", backend),
+    waitForUrl("RDST backend", `${backendUrl}/api/init/status`, backend),
     waitForUrl("Vite renderer", rendererUrl, renderer),
+    waitForUrl("Keyservice", `${keyserviceUrl}/health`, keyservice),
   ]);
 
   start("electron", electronBinary, ["."], {

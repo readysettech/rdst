@@ -209,9 +209,15 @@ class TelemetryManager:
             if self._initialized:
                 return
 
-            # Initialize PostHog
-            posthog = _get_posthog()
-            if posthog and self.POSTHOG_API_KEY and self.is_enabled():
+            # Do not import the PostHog SDK when telemetry has no ingest key.
+            # Its module-level client logs a warning for an empty key even
+            # when RDST never attempts to send an event.
+            posthog = (
+                _get_posthog()
+                if self.POSTHOG_API_KEY and self.is_enabled()
+                else None
+            )
+            if posthog:
                 try:
                     posthog.api_key = self.POSTHOG_API_KEY
                     posthog.host = self.POSTHOG_HOST
@@ -490,13 +496,13 @@ class TelemetryManager:
             event: Event name (e.g., "analyze_run", "installation")
             properties: Additional properties to include
         """
-        if not self.is_enabled():
+        if not self.POSTHOG_API_KEY or not self.is_enabled():
             return
 
         self._ensure_initialized()
 
         posthog = _get_posthog()
-        if not posthog or not self.POSTHOG_API_KEY:
+        if not posthog:
             return
 
         try:
@@ -1415,6 +1421,12 @@ class TelemetryManager:
             self._internal_user_lock.release()
 
         self._wait_for_background_threads(deadline)
+        if (
+            not self._initialized
+            or not self.POSTHOG_API_KEY
+            or not self.is_enabled()
+        ):
+            return
         posthog = _get_posthog()
         if posthog:
             try:

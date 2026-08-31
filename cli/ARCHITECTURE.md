@@ -73,6 +73,7 @@ Avoid:
 
 Current feature-owned domains:
 
+- `account`
 - `agent`
 - `allowlist`
 - `analyze`
@@ -103,6 +104,7 @@ Each slice should be readable from its `models.py` and `service.py` first. That 
 ### Feature map
 
 - `agent`: agent runtime and MCP-facing agent behavior
+- `account`: Readyset account login, local session storage, and hosted-AI access
 - `allowlist`: provider IP-allowlist context and explicit one-click write-back (Supabase, Neon, DigitalOcean)
 - `analyze`: query analysis, explain flows, rewrite evaluation, analysis rendering
 - `ask`: natural-language-to-SQL, Ask engine, validation, Ask prompts, Ask debug tooling
@@ -123,7 +125,7 @@ Each slice should be readable from its `models.py` and `service.py` first. That 
 - `schema`: schema inspection, semantic layer management, annotation flows
 - `slack`: Slack bot, Slack formatting, Slack manifest/handler logic
 - `top`: live/top query monitoring, realtime display, top command sets
-- `trial`: trial registration and trial status flows
+- `trial`: legacy compatibility endpoints; not a selectable AI provider
 - `update`: installer-owned version resolution and immutable generation activation
 - `tunnel`: SSH tunnel status, test, and close surfaces over the shared tunnel manager
 

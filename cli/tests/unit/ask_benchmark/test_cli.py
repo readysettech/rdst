@@ -150,10 +150,10 @@ def test_protocol_fingerprint_covers_every_runtime_sql_normalizer():
 
 
 def test_frozen_pipeline_receipt_matches_current_protocol():
-    receipt_path = Path(cli.__file__).with_name("frozen_pipeline_v13.json")
+    receipt_path = Path(cli.__file__).with_name("frozen_pipeline_v14.json")
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
 
-    assert receipt["freeze_id"] == "rdst-ask-auto-init-no-evidence-v13"
+    assert receipt["freeze_id"] == "rdst-ask-auto-init-no-evidence-v14"
     assert receipt["benchmark_protocol_sha256"] == cli._benchmark_protocol_sha256()
     assert receipt["holdout_partition"]["opened"] is True
     assert receipt["acceptance"]["future_unseen_evaluation_required"] is True
@@ -425,8 +425,12 @@ def _holdout_manifest(*, track: str, run_id: str, campaign: str = "frozen-v1"):
         "partition_provenance": {"revision": "partition-v1"},
         "holdout_campaign_id": campaign,
         "context_mode": "llm-enriched",
+        "semantic_schema_format": "canonical-v1",
+        "ask_accuracy_profile": "candidate-v2",
+        "ask_accuracy_features": {"router": True},
         "case_ids": list(range(50, 500)),
         "models": [{"name": "sonnet"}],
+        "model_configuration_fingerprints": {"sonnet": "frozen"},
         "rdst_revision": "revision",
         "rdst_dirty": False,
         "rdst_diff_sha256": "diff",
@@ -463,6 +467,11 @@ def test_holdout_access_rejects_new_run_or_changed_pipeline(tmp_path):
     changed["benchmark_protocol_sha256"] = "changed"
     with pytest.raises(ValueError, match="different frozen pipeline"):
         cli._reserve_holdout_access(tmp_path, changed)
+
+    changed_model = _holdout_manifest(track="rdst-ask", run_id="product-v1")
+    changed_model["model_configuration_fingerprints"] = {"sonnet": "changed"}
+    with pytest.raises(ValueError, match="different frozen pipeline"):
+        cli._reserve_holdout_access(tmp_path, changed_model)
 
 
 def test_run_parser_exposes_explicit_holdout_confirmation():

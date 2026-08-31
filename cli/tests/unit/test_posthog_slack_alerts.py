@@ -175,10 +175,13 @@ class TestInstallationTracking:
         tm.POSTHOG_API_KEY = ""
         posthog = MagicMock()
 
-        with patch("shared.telemetry_manager._get_posthog", return_value=posthog):
+        with patch(
+            "shared.telemetry_manager._get_posthog", return_value=posthog
+        ) as get_posthog:
             tm.track("installation", {"source": "cli"})
             tm.flush()
 
+        get_posthog.assert_not_called()
         posthog.capture.assert_not_called()
         posthog.identify.assert_not_called()
 

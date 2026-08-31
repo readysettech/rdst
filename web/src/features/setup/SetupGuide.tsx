@@ -58,7 +58,7 @@ function AiKeyNote({ onNavigate }: { onNavigate: () => void }) {
   if (gate.status !== 'blocked') return null
   const label =
     gate.reason === 'exhausted'
-      ? 'Free AI credits are used up — add a key'
+      ? 'Hosted AI access is unavailable — sign in or add a key'
       : gate.reason === 'invalid'
         ? 'This AI key was rejected — update it'
         : 'Needs an AI key — add one'

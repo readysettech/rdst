@@ -193,8 +193,10 @@ class InitCommand:
         asyncio.run(_run_validation())
 
         if llm_result.get("success"):
-            model = llm_result.get("model", "claude-sonnet-4-20250514")
-            self._print("Anthropic", f"Configured and reachable ({model})")
+            from shared.llm_manager.key_resolution import HOSTED_MODEL
+
+            model = llm_result.get("model", HOSTED_MODEL)
+            self._print("AI", f"Configured and reachable ({model})")
         else:
             error = llm_result.get("error", "Unknown error")
             if error == "ANTHROPIC_API_KEY not set":
@@ -210,9 +212,9 @@ class InitCommand:
                 else:
                     self.console.print(
                         MessagePanel(
-                            "No LLM API key configured.\n\n"
+                            "AI access is not configured.\n\n"
                             "Options:\n"
-                            "  1. Run 'rdst configure llm' to sign up for a free trial (up to 925K tokens)\n"
+                            "  1. Run 'rdst account login' for capped hosted inference\n"
                             f"  2. Set your own key: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}",
                             variant="warning",
                             title="LLM Setup Required",
@@ -220,9 +222,9 @@ class InitCommand:
                         )
                     )
             elif error == "LLM not configured":
-                self._print("Anthropic", "Not configured (run 'rdst configure llm')")
+                self._print("AI", "Not configured (run 'rdst account login')")
             else:
-                self._print("Anthropic", f"Connection test failed: {error}", style=StyleTokens.ERROR)
+                self._print("AI", f"Connection test failed: {error}", style=StyleTokens.ERROR)
 
         return results
 
@@ -255,7 +257,7 @@ class InitCommand:
                 msg = f"{r.name}: {r.message}" if r.message else r.name
                 self._print("Failed", msg)
 
-        has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("RDST_TRIAL_TOKEN"))
+        has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
         if not has_api_key:
             try:
                 resolve_api_key()

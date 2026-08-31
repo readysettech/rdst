@@ -158,6 +158,7 @@ No database handy? `rdst demo setup` starts a local demo database to explore wit
 | `rdst agent` | Manage and run data agents with safety policies |
 | `rdst init` | First-time setup wizard |
 | `rdst configure` | Manage database targets and connection profiles |
+| `rdst account` | Sign in for capped Readyset-hosted AI inference |
 | `rdst tunnel` | List, close, and test SSH tunnels |
 | `rdst schema` | Manage the semantic layer that improves SQL generation |
 | `rdst query` | Manage the saved-query registry |
@@ -176,8 +177,10 @@ No database handy? `rdst demo setup` starts a local demo database to explore wit
 
 Run `rdst <command> --help` for options and examples.
 
-AI-assisted commands (`ask`, `analyze` insights, `schema annotate`) use your
-`ANTHROPIC_API_KEY`, or a free trial you can start with `rdst configure llm`.
+AI-assisted commands (`ask`, `analyze` insights, `schema annotate`) use capped
+Readyset-hosted GLM 5.3 Flash after `rdst account login`. If you set
+`ANTHROPIC_API_KEY`, RDST uses Claude Sonnet 4.6 directly without requiring a
+Readyset account. `RDST_ANTHROPIC_MODEL` can override the Claude BYOK model.
 
 ## Requirements
 

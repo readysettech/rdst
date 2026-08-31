@@ -5,10 +5,13 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, AsyncGenerator
 import datetime
+import os
 
 from shared.anthropic_env import get_anthropic_source, has_anthropic_api_key
+from shared.account_session import is_signed_in_locally
 from shared.config.targets import TargetsConfig
 from shared.llm import AnthropicModel, create_llm_manager
+from shared.llm_manager.key_resolution import HOSTED_MODEL
 from shared.password_resolver import resolve_password, resolve_password_value
 from shared.shell import environment_assignment
 
@@ -26,7 +29,7 @@ from .models import InitStatus, InitValidationResult
 class InitService:
     """Stateless service for init workflow."""
 
-    _DEFAULT_CLAUDE_MODEL = AnthropicModel.SONNET_4_5.value
+    _DEFAULT_CLAUDE_MODEL = AnthropicModel.SONNET_4_6.value
 
     def _load_config(self) -> TargetsConfig:
         cfg = TargetsConfig()
@@ -34,6 +37,11 @@ class InitService:
         return cfg
 
     def _is_llm_configured(self, cfg: Any) -> bool:
+        # Match runtime resolution: an explicit Anthropic key is BYOK even if
+        # a Readyset account session also exists.
+        source = get_anthropic_source(cfg=cfg)
+        if source in {"missing", "trial", "trial_exhausted"} and is_signed_in_locally():
+            return True
         self._ensure_llm_provider_for_anthropic(cfg)
         llm = cfg.get_llm_config() or {}
         provider = llm.get("provider")
@@ -51,7 +59,6 @@ class InitService:
         cfg.set_llm_config(
             {
                 "provider": "claude",
-                "model": self._DEFAULT_CLAUDE_MODEL,
                 "hint": "Using Claude Sonnet 4.6",
             }
         )
@@ -127,26 +134,31 @@ class InitService:
         provider = llm.get("provider")
         source = get_anthropic_source(cfg=cfg)
 
-        if provider != "claude":
-            return {"success": False, "error": "LLM not configured"}
+        if is_signed_in_locally():
+            from features.account.service import account_service
 
-        if source == "trial_exhausted":
+            status = account_service.status(include_quota=False)
+            if status.get("signed_in"):
+                return {
+                    "success": True,
+                    "model": HOSTED_MODEL,
+                }
             return {
                 "success": False,
-                "error": (
-                    "Trial credits exhausted.\n\n"
-                    "To continue using RDST:\n"
-                    "  1. Get your own key: https://console.anthropic.com/\n"
-                    f"  2. Set it: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n\n"
-                    "Want more trial credits? Email hello@readyset.io"
-                ),
+                "error": status.get("detail") or "Readyset sign-in is unavailable",
             }
 
-        if source == "missing":
+        if provider != "claude" and source == "missing":
+            return {
+                "success": False,
+                "error": "Sign in to Readyset or set ANTHROPIC_API_KEY.",
+            }
+
+        if source in {"missing", "trial", "trial_exhausted"}:
             return {
                 "success": False,
                 "error": (
-                    "Anthropic API key not set (ANTHROPIC_API_KEY or RDST_TRIAL_TOKEN). "
+                    "Sign in to Readyset or set ANTHROPIC_API_KEY. "
                     "Run 'rdst init' to configure."
                 ),
             }
@@ -160,7 +172,7 @@ class InitService:
                 max_tokens=8,
                 temperature=0.0,
             )
-            model = llm.get("model", "claude-sonnet-4-20250514")
+            model = os.environ.get("RDST_ANTHROPIC_MODEL") or self._DEFAULT_CLAUDE_MODEL
             return {"success": True, "model": model}
         except Exception as exc:
             return {"success": False, "error": str(exc)}

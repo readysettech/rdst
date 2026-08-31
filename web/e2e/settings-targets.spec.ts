@@ -614,7 +614,20 @@ test('CSV picker posts browser file content instead of a server path', async ({
   await configureTestTarget(page, { hasPassword: true })
   await mockTargets(page)
   await page.route('**/api/env/requirements', (route) =>
-    route.fulfill({ json: { keyring_available: true, requirements: [] } })
+    route.fulfill({
+      json: {
+        keyring_available: true,
+        requirements: [
+          {
+            kind: 'anthropic_api_key',
+            satisfied: true,
+            source: 'process_env',
+            target: null,
+            accepted_names: ['ANTHROPIC_API_KEY'],
+          },
+        ],
+      },
+    })
   )
   let importBody: Record<string, unknown> | undefined
   await page.route('**/api/fleet/import', (route) => {

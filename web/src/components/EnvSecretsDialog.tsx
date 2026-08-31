@@ -24,17 +24,10 @@ interface EnvSecretsDialogProps {
   keyringAvailable: boolean
   onSuccess?: () => void
   onTrialRegister?: () => void
-  // Label for the trial pivot action; callers vary it by trial state (e.g.
-  // "Email me my trial token" when a trial is already the active source).
+  // Label for the Readyset account pivot action.
   trialActionLabel?: string
   showManualAnthropicInput?: boolean
 }
-
-// Trial tokens are UUIDs; Anthropic keys are sk-ant-... strings. The one key
-// input accepts both and files each under the right name so users never deal
-// with environment variable names themselves.
-const TRIAL_TOKEN_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 interface MissingEntry {
   key: string
@@ -55,7 +48,7 @@ function toMissingEntries(requirements: EnvRequirement[]): MissingEntry[] {
     const hint =
       item.kind === 'target_password'
         ? `Enter the password${item.target ? ` for ${item.target}` : ''}.`
-        : 'Paste your Anthropic API key or your Readyset trial token.'
+        : 'Paste your Anthropic API key.'
     return {
       key: `${item.kind}:${envName}:${item.target || 'global'}`,
       envName,
@@ -85,7 +78,7 @@ export function EnvSecretsDialog({
         key: 'anthropic_api_key:ANTHROPIC_API_KEY:global',
         envName: 'ANTHROPIC_API_KEY',
         label: 'Anthropic API Key',
-        hint: 'Paste your Anthropic API key or your Readyset trial token.',
+        hint: 'Paste your Anthropic API key.',
       },
     ]
   }, [requirements, showManualAnthropicInput])
@@ -166,11 +159,7 @@ export function EnvSecretsDialog({
     const payloads = entries
       .map((entry) => {
         const value = (values[entry.envName] || '').trim()
-        const name =
-          entry.envName === 'ANTHROPIC_API_KEY' && TRIAL_TOKEN_RE.test(value)
-            ? 'RDST_TRIAL_TOKEN'
-            : entry.envName
-        return { name, value, persist }
+        return { name: entry.envName, value, persist }
       })
       .filter((item) => item.value.length > 0)
 
@@ -302,7 +291,7 @@ export function EnvSecretsDialog({
                     iconPosition="left"
                     label={
                       trialActionLabel ??
-                      "Don't have a key? Claim free trial credits"
+                      "Don't have a key? Sign in to Readyset"
                     }
                     onClick={() => {
                       onClose()

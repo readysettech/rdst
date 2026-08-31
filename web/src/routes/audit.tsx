@@ -561,7 +561,7 @@ function AuditPage() {
             kind="trial-exhausted"
             message={TRIAL_EXHAUSTED_MESSAGE}
             onRetry={() => setShowRunTrialDialog(true)}
-            retryLabel="Start trial"
+            retryLabel="Sign in to Readyset"
           />
         ) : (
           <InlineNotice
@@ -612,7 +612,7 @@ function AuditPage() {
             kind="trial-exhausted"
             message={TRIAL_EXHAUSTED_MESSAGE}
             onRetry={() => setShowRunTrialDialog(true)}
-            retryLabel="Start trial"
+            retryLabel="Sign in to Readyset"
           />
         ) : (
           <ErrorState

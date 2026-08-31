@@ -14,6 +14,7 @@ from features.ask.ambiguity_detection import (
     detect_missing_intent_ambiguities,
     resolve_ranked_ambiguity,
 )
+from shared.llm_manager.base import LLMError
 
 
 class RecordingLLMManager:
@@ -39,6 +40,33 @@ class RecordingLLMManager:
             "usage": {"total_tokens": 1},
             "model": "test-model",
         }
+
+
+def test_detector_preserves_provider_error_code() -> None:
+    manager = RecordingLLMManager()
+
+    def fail(**_kwargs):
+        raise LLMError(
+            "Readyset-hosted AI is temporarily busy. Try again.",
+            code="HOSTED_UPSTREAM_BUSY",
+            status=429,
+        )
+
+    manager.generate_response = fail
+    result = detect_ambiguities(
+        nl_question="Show monthly revenue",
+        filtered_schema="sales(amount, sold_at)",
+        database_engine="postgresql",
+        llm_manager=manager,
+    )
+
+    assert result == {
+        "success": False,
+        "error": "Readyset-hosted AI is temporarily busy. Try again.",
+        "error_code": "HOSTED_UPSTREAM_BUSY",
+        "error_status": 429,
+        "raw_response": "",
+    }
 
 
 def _ambiguity_response(

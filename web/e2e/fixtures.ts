@@ -13,9 +13,26 @@ type BrowserErrors = {
   browserErrors: string[]
 }
 
+type AiAccess = {
+  aiAccess: boolean
+}
+
 const acceptedBrowserErrors = new WeakMap<string[], Set<string>>()
 
-export const test = base.extend<BrowserErrors>({
+export const test = base.extend<BrowserErrors & AiAccess>({
+  aiAccess: [
+    async ({ page }, use, testInfo) => {
+      // Product browser suites exercise their own workflows, not account
+      // enrollment. Make the provider prerequisite explicit for those runs.
+      // The dedicated live suite must see the real first-run gate so it can
+      // prove Supabase sign-in and hosted inference end to end.
+      if (testInfo.project.name !== 'chromium-web-e2e') {
+        await mockAiKeyReady(page)
+      }
+      await use(true)
+    },
+    { auto: true },
+  ],
   browserErrors: [
     async ({ page }, use) => {
       const errors: string[] = []
@@ -107,6 +124,10 @@ export function consumeBrowserError(browserErrors: string[], expected: string) {
   expect(browserErrors).toContain(expected)
   expect(browserErrors.filter((error) => error !== expected)).toEqual([])
   browserErrors.splice(0, browserErrors.length)
+  acceptedBrowserErrors.get(browserErrors)?.add(expected)
+}
+
+export function acceptBrowserError(browserErrors: string[], expected: string) {
   acceptedBrowserErrors.get(browserErrors)?.add(expected)
 }
 

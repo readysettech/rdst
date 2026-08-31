@@ -56,7 +56,6 @@ _ENV_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _PASSWORD_ASSIGNMENT = environment_assignment("PASSWORD_ENV_NAME", "actual-password")
 _PROD_PASSWORD_ASSIGNMENT = environment_assignment("PROD_DB_PASSWORD", "secret123")
 _ANTHROPIC_ASSIGNMENT = environment_assignment("ANTHROPIC_API_KEY", "sk-ant-...")
-_OPENAI_ASSIGNMENT = environment_assignment("OPENAI_API_KEY", "sk-...")
 
 
 def _installation_guidance(*, windows: bool | None = None):
@@ -161,22 +160,20 @@ If a command fails with authentication error, check:
 3. Can the host/port be reached?
 
 ### LLM Setup (CRITICAL)
-RDST requires an LLM provider for query analysis. Two options:
+RDST requires AI access for query analysis. Two options:
 
-**Option 1: RDST Free Trial (Recommended for new users)**
-- Run `rdst configure llm` in terminal (INTERACTIVE - cannot be done via MCP)
-- Select "Sign up for free RDST trial"
-- Enter email → receive verification code → enter code
-- Business emails get $5.00 in credits, personal emails get $1.50
-- No API key needed after setup - RDST uses a trial proxy
-- Check balance anytime: `rdst configure llm`
+**Option 1: Readyset-hosted inference**
+- Run `rdst account login` in a terminal and finish sign-in in the RDST browser UI
+- Readyset-hosted AI is available after sign-in
+- Check sign-in status with `rdst account status`
 
 **Option 2: Your Own Anthropic API Key**
 - Set in the current shell: `{_ANTHROPIC_ASSIGNMENT}`
-- No credit limits, direct API access
+- RDST uses Claude Sonnet 4.6 directly and does not require Readyset login
+- `RDST_ANTHROPIC_MODEL` may override the Claude model
 
-If a user has no ANTHROPIC_API_KEY and hasn't set up a trial, tell them to run
-`rdst configure llm` in their terminal to set up free trial credits.
+If a user has no ANTHROPIC_API_KEY and is not signed in, tell them to run
+`rdst account login` in their terminal.
 
 ### Common CLI Workflows
 
@@ -445,58 +442,25 @@ Use --confirm to skip the interactive confirmation prompt.
         },
         {
             "name": "rdst_configure_llm",
-            "description": f"""Configure the LLM (AI) provider for RDST analysis.
+            "description": f"""Configure AI access for RDST analysis.
 
 RDST uses AI to analyze query execution plans and provide recommendations.
-By default, it uses Claude (Anthropic). This command configures the AI provider.
+New users sign in to Readyset for hosted inference. Browser sign-in is interactive and must be started with
+`rdst account login` in the user's terminal; the browser page is served by RDST.
 
-SUPPORTED PROVIDERS:
-- claude: Anthropic's Claude (default, requires ANTHROPIC_API_KEY env var)
-- openai: OpenAI's GPT models (requires OPENAI_API_KEY env var)
-- lmstudio: Local LM Studio server (no API key needed)
-- trial: RDST free trial credits (no API key needed)
+Claude BYOK remains available without Readyset login. Set:
+  {_ANTHROPIC_ASSIGNMENT}
 
-TRIAL SIGNUP (INTERACTIVE - must be done in user's terminal):
-Users who don't have an ANTHROPIC_API_KEY can sign up for free RDST trial credits.
-The trial signup is INTERACTIVE and cannot be done via MCP. Tell the user:
-  "Run `rdst configure llm` in your terminal and select the free trial option"
-
-The trial flow:
-1. User runs `rdst configure llm` in their terminal
-2. Selects "Sign up for free RDST trial"
-3. Enters their email address
-4. Gets a verification code sent to their email
-5. Enters the code
-6. Gets free credits ($5.00 for business emails, $1.50 for personal emails)
-7. No ANTHROPIC_API_KEY needed after this - RDST uses a trial proxy
-
-EXAMPLES:
-  rdst configure llm --provider claude --model claude-sonnet-4-6
-  rdst configure llm --provider openai --model gpt-4
-  rdst configure llm --provider lmstudio --base-url http://localhost:1234
-  rdst configure llm  (interactive - includes trial signup option)
-
-REQUIRED ENV VARS:
-- For Claude: {_ANTHROPIC_ASSIGNMENT}
-- For OpenAI: {_OPENAI_ASSIGNMENT}
-- For LM Studio: No API key needed, just base_url
-- For Trial: No env var needed - credits are managed by RDST
+Claude defaults to Sonnet 4.6. The model is not selected through this tool;
+advanced users can set RDST_ANTHROPIC_MODEL in the environment.
 """,
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "provider": {
                         "type": "string",
-                        "enum": ["claude", "openai", "lmstudio", "trial"],
-                        "description": "LLM provider to use. Use 'trial' for free RDST trial credits (but trial signup is INTERACTIVE - tell user to run `rdst configure llm` in their terminal instead)"
-                    },
-                    "model": {
-                        "type": "string",
-                        "description": "Model name (e.g., claude-sonnet-4-6, gpt-4)"
-                    },
-                    "base_url": {
-                        "type": "string",
-                        "description": "Base URL for API (required for lmstudio, optional for others)"
+                        "enum": ["readyset", "claude"],
+                        "description": "Use readyset for RDST browser sign-in instructions or claude for an existing ANTHROPIC_API_KEY"
                     }
                 },
                 "required": ["provider"]
@@ -1031,13 +995,12 @@ Call rdst_report(reason="Index recommendation was incorrect - suggested index al
             "description": """Run the RDST first-time setup wizard.
 
 This interactive wizard helps new users configure RDST by:
-1. Setting up the LLM provider (Claude, OpenAI, LM Studio, or free RDST trial)
+1. Signing in to Readyset for hosted AI, or configuring Claude BYOK
 2. Adding their first database target
 3. Testing the connection
 
-The init wizard includes the trial signup option - users without an
-ANTHROPIC_API_KEY can sign up for free RDST trial credits during init.
-Trial credits: $5.00 for business emails, $1.50 for personal emails.
+Users without an ANTHROPIC_API_KEY can sign in to a Readyset account for
+capped hosted inference. Claude BYOK does not require a Readyset account.
 
 Use this when:
 - User is setting up RDST for the first time
@@ -1864,25 +1827,25 @@ Then they can run:
         return run_rdst_command(args)
 
     elif name == "rdst_configure_llm":
-        args = ["configure", "llm", "--provider", arguments["provider"]]
-        if "model" in arguments:
-            args.extend(["--model", arguments["model"]])
-        if "base_url" in arguments:
-            args.extend(["--base-url", arguments["base_url"]])
-        result = run_rdst_command(args)
-        if result["success"]:
-            provider = arguments["provider"]
-            api_key_info = {
-                "claude": "ANTHROPIC_API_KEY",
-                "openai": "OPENAI_API_KEY",
-                "lmstudio": "(no API key needed)",
-                "trial": "(no API key needed - using RDST trial credits)"
+        provider = arguments["provider"]
+        if provider == "readyset":
+            return {
+                "success": False,
+                "error": "Readyset browser sign-in must be started in the user's terminal.",
+                "next_steps": "Run `rdst account login`, then check `rdst account status`.",
             }
-            result["next_steps"] = f"""
-LLM provider configured to: {provider}
-
-Required environment variable: {api_key_info.get(provider, 'Check provider docs')}
-"""
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            return {
+                "success": False,
+                "error": "ANTHROPIC_API_KEY is not set in the RDST process.",
+                "next_steps": f"Set the key with: {_ANTHROPIC_ASSIGNMENT}",
+            }
+        result = run_rdst_command(["configure", "llm"])
+        if result["success"]:
+            result["next_steps"] = (
+                "Claude BYOK is configured. Sonnet 4.6 is the default; "
+                "RDST_ANTHROPIC_MODEL may override it."
+            )
         return result
 
     elif name == "rdst_configure_default":

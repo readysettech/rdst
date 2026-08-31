@@ -241,7 +241,12 @@ def flatten_steps(steps):
     return flattened
 
 
-def generate_pipeline(tmp_path: Path, *, branch: str, changed: tuple[str, ...] = ()):
+def generate_pipeline(
+    tmp_path: Path,
+    *,
+    branch: str,
+    changed: tuple[str, ...] = (),
+):
     """Run the pipeline generator against a synthetic diff."""
     fake_bin = tmp_path / f"bin-{branch.replace('/', '-')}-{len(changed)}"
     fake_bin.mkdir(parents=True, exist_ok=True)
@@ -289,6 +294,25 @@ def test_every_step_dependency_is_emitted(tmp_path: Path, branch, changed):
         for dependency in dependencies:
             name = dependency["step"] if isinstance(dependency, dict) else dependency
             assert name in keys, f"{step.get('key')} depends on missing {name}"
+
+
+def test_live_hosted_inference_e2e_is_not_emitted(tmp_path: Path):
+    pipeline = generate_pipeline(
+        tmp_path,
+        branch="cl/hosted-inference",
+        changed=("rdst/keyservice/src/account_auth.py",),
+    )
+    steps = {
+        step.get("key"): step
+        for step in flatten_steps(pipeline["steps"])
+        if "key" in step
+    }
+    assert "keyservice-preview-deploy" in steps
+    assert "rdst-web-e2e" not in steps
+    assert "annotate-rdst-web-e2e" not in steps
+    assert steps["keyservice-preview-teardown"]["depends_on"] == [
+        "keyservice-preview-deploy"
+    ]
 
 
 def test_publish_installer_downloads_every_platform_archive(tmp_path: Path):

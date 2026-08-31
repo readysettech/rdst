@@ -55,7 +55,10 @@ def normalize_explicit_year_span_sql(
         "translated_date_parts": 0,
     }
     source_text = f"{question}\n{provided_context}"
-    has_full_span = _FULL_YEAR_SPAN.search(source_text) is not None
+    # A spelling in the question is not evidence of how the database stores
+    # the value. Only supplied database context may authorize a literal rewrite.
+    literal_evidence = provided_context
+    has_full_span = _FULL_YEAR_SPAN.search(literal_evidence) is not None
     has_strftime_call = _STRFTIME_CALL.search(sql) is not None
     if not has_full_span and not has_strftime_call:
         diagnostics["reason"] = "no-explicit-full-year-span"
@@ -73,7 +76,7 @@ def normalize_explicit_year_span_sql(
         for literal in tuple(tree.find_all(exp.Literal)):
             if not literal.is_string or not _in_filter(literal):
                 continue
-            replacement = _full_span_for(str(literal.this), source_text)
+            replacement = _full_span_for(str(literal.this), literal_evidence)
             if replacement is None or replacement == literal.this:
                 continue
             literal_changes.append({"from": str(literal.this), "to": replacement})

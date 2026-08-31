@@ -7,8 +7,10 @@ import {
   type ErrorComponentProps,
   Outlet,
   useNavigate,
+  useRouterState,
 } from '@tanstack/react-router'
 import { type ReactNode, useState } from 'react'
+import { AiProviderGate } from '../components/AiProviderGate'
 import { ActivityPulse } from '../components/audit/ActivityPulse'
 // Direct import: the components barrel re-exports the SQL editor stack,
 // which would statically pull CodeMirror into the eager entry chunk.
@@ -25,6 +27,7 @@ import {
   useAuditSession,
 } from '../lib/auditSession'
 import { isDesktopFrameless, isDesktopMac } from '../lib/desktop'
+import { useAiGate } from '../lib/useAiGate'
 import { useDesktopUpdates } from '../lib/useDesktopUpdates'
 import { useQueryDiscoveryTransport } from '../lib/useQueryDiscovery'
 
@@ -81,6 +84,27 @@ function AppShell({ children }: { children: ReactNode }) {
 }
 
 function RootComponent() {
+  return (
+    <AiAccessBoundary>
+      <ReadyRoot />
+    </AiAccessBoundary>
+  )
+}
+
+function AiAccessBoundary({ children }: { children: ReactNode }) {
+  const path = useRouterState({ select: (state) => state.location.pathname })
+  const gate = useAiGate()
+
+  // The CLI browser flow owns this route and must be able to exchange its
+  // callback before the newly created account session can satisfy the gate.
+  if (path === '/account-login') return children
+  if (gate.status === 'checking' || gate.status === 'blocked') {
+    return <AiProviderGate gate={gate} />
+  }
+  return children
+}
+
+function ReadyRoot() {
   const { target } = useTarget()
   useQueryDiscoveryTransport(target)
 

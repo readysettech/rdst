@@ -289,7 +289,7 @@ function TargetRow({
               kind="trial-exhausted"
               message={TRIAL_EXHAUSTED_MESSAGE}
               onRetry={onTrialExhausted}
-              retryLabel="Start trial"
+              retryLabel="Sign in to Readyset"
             />
           ) : (
             <InlineNotice
@@ -547,7 +547,7 @@ export function FleetRunSection({
               kind="trial-exhausted"
               message={TRIAL_EXHAUSTED_MESSAGE}
               onRetry={() => setShowTrialDialog(true)}
-              retryLabel="Start trial"
+              retryLabel="Sign in to Readyset"
             />
           ) : (
             <ErrorState

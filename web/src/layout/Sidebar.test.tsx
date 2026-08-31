@@ -46,15 +46,6 @@ vi.mock('../components/TrialBalanceBadge', () => ({
   TrialBalanceBadge: () => null,
 }))
 
-vi.mock('../components/TrialRegistrationDialog', () => ({
-  TrialRegistrationDialog: ({ isOpen }: { isOpen: boolean }) =>
-    isOpen ? (
-      <div role="dialog" aria-label="Free credits dialog">
-        Free credits dialog
-      </div>
-    ) : null,
-}))
-
 vi.mock('../hooks/useTarget', () => ({
   useTarget: () => ({ target: 'demo', setTarget: vi.fn() }),
 }))
@@ -162,28 +153,13 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
     expect(install).toHaveBeenCalledTimes(1)
   })
 
-  it('renders free credits as a quiet footer control, above Settings, and opens the trial dialog', () => {
+  it('keeps account setup out of the sidebar after the startup gate', () => {
     render(<Sidebar />)
 
-    const credits = screen.getByRole('button', {
-      name: /Get free AI credits/,
-    })
-    const settings = screen.getByRole('link', { name: /Settings/ })
-    // F2: no gradient, colored border, or elevation shadow left to outshine
-    // the nav — just the quiet footer-utility treatment.
-    expect(credits.className).not.toContain('bg-gradient-to-r')
-    expect(credits.className).not.toContain('shadow-elevation')
-    expect(credits.className).toContain('border-0')
-    expect(credits.className).toContain('h-8')
     expect(
-      credits.compareDocumentPosition(settings) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-
-    fireEvent.click(credits)
-    expect(
-      screen.getByRole('dialog', { name: 'Free credits dialog' })
-    ).toBeTruthy()
+      screen.queryByRole('button', { name: /Use Readyset-hosted AI/ })
+    ).toBeNull()
+    expect(screen.getByRole('link', { name: /Settings/ })).toBeTruthy()
   })
 
   it('sizes footer utilities below the daily nav (F5)', () => {
@@ -206,10 +182,8 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
     render(<Sidebar />)
     const status = screen.getByTestId('sidebar-footer-status')
     const utilities = screen.getByTestId('sidebar-footer-utilities')
-    const credits = screen.getByRole('button', {
-      name: /Get free AI credits/,
-    })
-    expect(utilities.contains(credits)).toBe(true)
+    const settings = screen.getByRole('link', { name: /Settings/ })
+    expect(utilities.contains(settings)).toBe(true)
     expect(
       status.compareDocumentPosition(utilities) &
         Node.DOCUMENT_POSITION_FOLLOWING

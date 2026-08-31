@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, Dict, List
 
+from shared.llm_manager.base import LLMError
 from shared.ui import (
     MessagePanel,
     Prompt,
@@ -696,6 +697,17 @@ def detect_ambiguities(
             "success": False,
             "error": f"Invalid ambiguity response: {exc}",
             "raw_response": locals().get("raw_text", ""),
+        }
+    except LLMError as exc:
+        if getattr(llm_manager, "propagate_query_errors", False):
+            raise
+        logger.error("Ambiguity detection provider error: %s", exc, exc_info=True)
+        return {
+            "success": False,
+            "error": str(exc),
+            "error_code": exc.code,
+            "error_status": exc.status,
+            "raw_response": "",
         }
     except Exception as exc:
         if getattr(llm_manager, "propagate_query_errors", False):

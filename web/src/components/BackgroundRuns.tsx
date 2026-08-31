@@ -104,7 +104,7 @@ const SEVERITY_PRIORITY: Record<RunSeverity, number> = {
 }
 
 function needsKeyDetail(): string {
-  return 'Add an Anthropic key or start a free trial.'
+  return 'Sign in to Readyset or add your own Anthropic key.'
 }
 
 function detailFor(run: BackgroundRunState): string {

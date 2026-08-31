@@ -85,7 +85,7 @@ def test_who_wording_without_router_selection_keeps_a_singleton_limit(
         "Whcih employes have teh higest salary?",
     ],
 )
-def test_extremum_hint_removes_singleton_limit_without_english_plural_gate(
+def test_directionless_extremum_hint_abstains(
     dialect,
     question,
 ):
@@ -98,10 +98,9 @@ def test_extremum_hint_removes_singleton_limit_without_english_plural_gate(
         intent_hints=("entity_at_extremum",),
     )
 
-    assert diagnostics["status"] == "normalized"
-    assert diagnostics["removed_unrequested_singleton_limit"] is True
-    assert "LIMIT" not in sql
-    assert "MAX(salary)" in sql
+    assert sql == original
+    assert diagnostics["status"] == "unchanged"
+    assert diagnostics["reason"] == "order-direction-conflicts-with-question"
 
 
 @pytest.mark.parametrize("dialect", ["mysql", "postgresql"])
@@ -143,6 +142,14 @@ def test_non_entity_question_is_unchanged():
     sql, diagnostics = normalize("List schools by highest enrollment.", original)
     assert sql == original
     assert diagnostics["reason"] == "no-entity-superlative-intent"
+
+
+def test_conflicting_order_direction_does_not_reverse_the_question():
+    original = "SELECT name FROM school ORDER BY enrollment ASC"
+    sql, diagnostics = normalize("Which school has the highest enrollment?", original)
+
+    assert sql == original
+    assert diagnostics["reason"] == "order-direction-conflicts-with-question"
 
 
 def test_grouped_ranking_is_unchanged():

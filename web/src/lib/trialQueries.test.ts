@@ -1,68 +1,84 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest'
 
-import { createTestQueryClient } from '@/test-utils';
+import { createTestQueryClient } from '@/test-utils'
 
 import {
   invalidateAiGateQueries,
   invalidateTrialRelatedQueries,
-} from './trialQueries';
+} from './trialQueries'
 
 describe('invalidateAiGateQueries', () => {
   it('drops the cached key verdict along with the requirements', async () => {
-    const queryClient = createTestQueryClient();
+    const queryClient = createTestQueryClient()
     const invalidateSpy = vi
       .spyOn(queryClient, 'invalidateQueries')
-      .mockResolvedValue(undefined);
+      .mockResolvedValue(undefined)
 
-    await invalidateAiGateQueries(queryClient);
+    await invalidateAiGateQueries(queryClient)
 
-    expect(invalidateSpy).toHaveBeenCalledTimes(3);
+    expect(invalidateSpy).toHaveBeenCalledTimes(4)
     for (const queryKey of [
       ['env-requirements'],
       ['anthropic-validity'],
       ['trial-status'],
+      ['account-status'],
     ]) {
       expect(invalidateSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ queryKey, refetchType: 'all' }),
-      );
+        expect.objectContaining({ queryKey, refetchType: 'all' })
+      )
     }
-  });
-});
+  })
+})
 
 describe('invalidateTrialRelatedQueries', () => {
   it('invalidates all trial-related cache entries with full refresh', async () => {
-    const queryClient = createTestQueryClient();
+    const queryClient = createTestQueryClient()
     const invalidateSpy = vi
       .spyOn(queryClient, 'invalidateQueries')
-      .mockResolvedValue(undefined);
+      .mockResolvedValue(undefined)
 
-    await invalidateTrialRelatedQueries(queryClient);
+    await invalidateTrialRelatedQueries(queryClient)
 
-    expect(invalidateSpy).toHaveBeenCalledTimes(6);
+    expect(invalidateSpy).toHaveBeenCalledTimes(7)
     expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: ['status'], refetchType: 'all' }),
-    );
+      expect.objectContaining({ queryKey: ['status'], refetchType: 'all' })
+    )
     expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: ['init-status'], refetchType: 'all' }),
-    );
+      expect.objectContaining({ queryKey: ['init-status'], refetchType: 'all' })
+    )
     expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: ['env-requirements'], refetchType: 'all' }),
-    );
+      expect.objectContaining({
+        queryKey: ['env-requirements'],
+        refetchType: 'all',
+      })
+    )
     expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: ['trial-status'], refetchType: 'all' }),
-    );
+      expect.objectContaining({
+        queryKey: ['trial-status'],
+        refetchType: 'all',
+      })
+    )
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        queryKey: ['account-status'],
+        refetchType: 'all',
+      })
+    )
     // A saved key or token makes any cached verdict about the previous one
     // meaningless; the gate must re-probe instead of reading the stale answer.
     expect(invalidateSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         queryKey: ['anthropic-validity'],
         refetchType: 'all',
-      }),
-    );
+      })
+    )
     // Trial activation promotes its email to the machine identity, so the
     // sidebar identity query is refreshed too.
     expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: ['settings', 'email'], refetchType: 'all' }),
-    );
-  });
-});
+      expect.objectContaining({
+        queryKey: ['settings', 'email'],
+        refetchType: 'all',
+      })
+    )
+  })
+})

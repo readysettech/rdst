@@ -12,6 +12,7 @@ from .claude_provider import (
     ClaudeProvider,
     normalize_anthropic_model,
 )
+from .hosted_glm_provider import HostedGLMProvider
 
 if TYPE_CHECKING:
     from .key_resolution import KeyResolution
@@ -21,16 +22,16 @@ class LLMManager:
     """
     Unified LLM facade for RDST.
 
-    RDST uses Claude (Anthropic) exclusively for AI-powered query analysis.
-    Users must provide their own API key via the ANTHROPIC_API_KEY environment variable.
+    RDST uses Readyset-hosted GLM by default after account sign-in. A user who
+    supplies ANTHROPIC_API_KEY uses Claude directly without a Readyset account.
 
-    Default Model: Claude Sonnet 4 (fast, cost-effective)
-    Optional: Claude Opus 4 (more sophisticated analysis via RDST_ANTHROPIC_MODEL env var)
+    Hosted model: GLM 5.3 Flash with server-enforced high reasoning
+    Claude BYOK default: Sonnet 4.6, overridable with RDST_ANTHROPIC_MODEL
 
     Environment Variables
     --------------------
-    ANTHROPIC_API_KEY: Your Anthropic API key (required)
-    RDST_ANTHROPIC_MODEL: Override default model (optional, e.g., "claude-opus-4-20250514")
+    ANTHROPIC_API_KEY: Optional user-owned Anthropic API key
+    RDST_ANTHROPIC_MODEL: Override the Claude BYOK model
 
     Public API
     ----------
@@ -50,12 +51,6 @@ class LLMManager:
 
             config = TargetsConfig()
             config.load()
-            llm_config = config.get_llm_config()
-
-            # Only model can be overridden from config (provider is always Claude)
-            if llm_config.get("model"):
-                d.model = llm_config["model"]
-
             self._config = config
         except Exception:
             self._config = None
@@ -65,26 +60,25 @@ class LLMManager:
         if env_model:
             d.model = env_model
 
-        # Provider is always Claude (BYOK)
-        d.provider = "claude"
-
         self.defaults = d
         self.logger = logger or logging.getLogger("llm_manager")
         self.logger.addHandler(logging.NullHandler())
 
-        # Claude is the only provider
         self._providers: Dict[str, Provider] = {}
         self.register_provider("claude", ClaudeProvider())
+        self.register_provider("readyset", HostedGLMProvider())
 
     # Provider registry
     def register_provider(self, name: str, provider: Provider) -> None:
         self._providers[name.lower()] = provider
 
     def provider(self, name: Optional[str] = None) -> Provider:
-        p = (name or self.defaults.provider or "claude").lower()
+        p = (name or self.defaults.provider or "auto").lower()
+        if p == "auto":
+            p = "readyset"
         if p not in self._providers:
             raise LLMError(
-                f"Unknown provider '{p}'. RDST only supports Claude.",
+                f"Unknown provider '{p}'. RDST supports Readyset-hosted GLM and Claude BYOK.",
                 code="NO_SUCH_PROVIDER",
             )
         return self._providers[p]
@@ -117,13 +111,28 @@ class LLMManager:
         {
           "text": "<llm response>",
           "usage": {"prompt_tokens": int|None, "completion_tokens": int|None, "total_tokens": int|None},
-          "provider": "openai" | "claude",
+          "provider": "readyset" | "claude",
           "model": "<resolved model>",
           "raw": {...}  # present if debug=True
         }
         """
-        name = (provider or self.defaults.provider).lower()
+        requested_provider = (provider or self.defaults.provider or "auto").lower()
+        from .key_resolution import KeyResolution
+
+        if api_key:
+            name = requested_provider if requested_provider != "auto" else "claude"
+            resolution = KeyResolution(api_key=api_key, is_trial=False, provider=name)
+        else:
+            resolution = self._safe_load_key_for_query(requested_provider)
+            name = resolution.provider
         prov = self.provider(name)
+
+        if name == "claude":
+            resolved_model = normalize_anthropic_model(
+                model or self.defaults.model or prov.default_model()
+            )
+        else:
+            resolved_model = prov.default_model()
 
         resolved = {
             "max_tokens": int(
@@ -136,9 +145,7 @@ class LLMManager:
             "stop_sequences": list(
                 stop_sequences or self.defaults.stop_sequences or []
             ),
-            "model": normalize_anthropic_model(
-                model or self.defaults.model or prov.default_model()
-            ),
+            "model": resolved_model,
             "debug": bool(self.defaults.debug if debug is None else debug),
         }
 
@@ -152,14 +159,6 @@ class LLMManager:
             resolved["top_p"],
             len(resolved["stop_sequences"]),
         )
-
-        # Resolve API key and routing (direct vs trial proxy)
-        from .key_resolution import KeyResolution
-
-        if api_key:
-            resolution = KeyResolution(api_key=api_key, is_trial=False)
-        else:
-            resolution = self._safe_load_key_for_query(name)
 
         # normalize into a ProviderRequest
         messages = _assemble_messages(
@@ -275,24 +274,33 @@ class LLMManager:
         Wraps the sync provider.stream() generator using a queue bridge to convert
         to async generator. Yields tokens as they arrive from the provider.
         """
-        name = (provider or self.defaults.provider).lower()
-        prov = self.provider(name)
+        requested_provider = (provider or self.defaults.provider or "auto").lower()
 
-        # Build request using existing _assemble_messages
         from .key_resolution import KeyResolution
 
         if api_key:
-            resolution = KeyResolution(api_key=api_key, is_trial=False)
+            name = requested_provider if requested_provider != "auto" else "claude"
+            resolution = KeyResolution(api_key=api_key, is_trial=False, provider=name)
         else:
-            resolution = self._safe_load_key_for_query(name)
+            resolution = self._safe_load_key_for_query(requested_provider)
+            name = resolution.provider
+        prov = self.provider(name)
+
+        # Build request using existing _assemble_messages
         messages = _assemble_messages(
             system_message, user_query, context, history=history
         )
 
-        request = ProviderRequest(
-            model=normalize_anthropic_model(
+        resolved_model = (
+            normalize_anthropic_model(
                 model or self.defaults.model or prov.default_model()
-            ),
+            )
+            if name == "claude"
+            else prov.default_model()
+        )
+
+        request = ProviderRequest(
+            model=resolved_model,
             messages=messages,
             max_tokens=max_tokens or self.defaults.max_tokens,
             temperature=temperature
@@ -433,7 +441,7 @@ class LLMManager:
         """
         from .key_resolution import resolve_api_key
 
-        return resolve_api_key()
+        return resolve_api_key(provider)
 
 
 def _assemble_messages(

@@ -21,8 +21,6 @@ class AnthropicModel(str, Enum):
     """Supported Anthropic models for RDST.
 
     RDST uses Claude Sonnet 4.6 as the default model for query analysis.
-    Same pricing as Sonnet 4.5, better performance.
-
     https://docs.anthropic.com/en/docs/about-claude/models/overview
     """
 

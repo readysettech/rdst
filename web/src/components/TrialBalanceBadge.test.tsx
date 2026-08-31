@@ -29,7 +29,7 @@ describe('TrialBalanceBadge', () => {
     cleanup();
   });
 
-  it('shows the badge when the current source is an active trial', async () => {
+  it('does not show the removed trial UI for an active legacy token', async () => {
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
       requirements: [
@@ -54,11 +54,11 @@ describe('TrialBalanceBadge', () => {
 
     renderBadge(queryClient);
 
-    expect(await screen.findByText(/free trial/i)).toBeTruthy();
-    expect(screen.getByText('60/100')).toBeTruthy();
+    expect(screen.queryByText(/free trial/i)).toBeNull();
+    expect(screen.queryByText('60/100')).toBeNull();
   });
 
-  it('shows the badge when the current source is an exhausted trial', async () => {
+  it('does not show the removed trial UI for an exhausted legacy token', async () => {
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
       requirements: [
@@ -83,7 +83,7 @@ describe('TrialBalanceBadge', () => {
 
     renderBadge(queryClient);
 
-    expect(await screen.findByText(/trial exhausted/i)).toBeTruthy();
+    expect(screen.queryByText(/trial exhausted/i)).toBeNull();
   });
 
   it('hides stale trial UI when source is no longer trial', () => {
@@ -122,4 +122,3 @@ describe('TrialBalanceBadge', () => {
     expect(screen.queryByText(/free trial/i)).toBeNull();
   });
 });
-

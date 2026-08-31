@@ -1,9 +1,10 @@
 /**
  * Reads the CI mailbox over HTTP.
  *
- * The trial and report flows are only meaningfully covered if the email really
- * leaves the keyservice and really arrives somewhere, so these tests wait on a
- * live inbox rather than asserting against the send call's return value.
+ * The account sign-in and report flows are only meaningfully covered if the
+ * email really leaves the keyservice and really arrives somewhere, so these
+ * tests wait on a live inbox rather than asserting against the send call's
+ * return value.
  *
  * Nothing here drives a browser. The message is fetched over the API and the
  * link is pulled out of the HTML; the browser is only ever handed the resulting
@@ -124,7 +125,7 @@ export async function waitForEmail(
       `${newerThan ? `after ${newerThan.toISOString()} ` : ''}` +
       `within ${timeoutMs}ms (${lastSeen} messages in the recent window). ` +
       `Either the keyservice did not send it, or delivery to ${MAILBOX_DOMAIN} ` +
-      `is broken.`
+      'is broken.'
   )
 }
 
@@ -143,7 +144,7 @@ export function reportPasswordFrom(email: ReceivedEmailBody): string {
   if (!match) {
     throw new Error(
       `No report password in "${email.subject}". The email template may have ` +
-        `changed, or the report was sent without password protection.`
+        'changed, or the report was sent without password protection.'
     )
   }
   return match[1]

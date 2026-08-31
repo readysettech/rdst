@@ -16,11 +16,11 @@ EXTREMUM_ENTITY_NORMALIZER_VERSION = "unbounded-extremum-entity-v5"
 
 _ENTITY_QUESTION = re.compile(r"^\s*(?:which|who)\b", re.IGNORECASE)
 _SUPERLATIVE = re.compile(
-    r"\b(?:highest|lowest|most|least|heaviest|lightest|fastest|slowest|latest|earliest)\b",
+    r"\b(?:highest|lowest|most|least|heaviest|lightest|fastest|slowest|latest|earliest|top)\b",
     re.IGNORECASE,
 )
 _MAXIMUM_SUPERLATIVE = re.compile(
-    r"\b(?:highest|most|heaviest|fastest|latest)\b",
+    r"\b(?:highest|most|heaviest|fastest|latest|top)\b",
     re.IGNORECASE,
 )
 _MINIMUM_SUPERLATIVE = re.compile(
@@ -285,6 +285,11 @@ def normalize_extremum_entity_sql(
     if not isinstance(order_expression, exp.Column):
         diagnostics["reason"] = "non-column-order-expression"
         return sql, diagnostics
+    expected_kind = _question_extremum_kind(question)
+    ordered_kind = "maximum" if ordered.args.get("desc") else "minimum"
+    if expected_kind is None or expected_kind != ordered_kind:
+        diagnostics["reason"] = "order-direction-conflicts-with-question"
+        return sql, diagnostics
 
     projections = list(tree.expressions)
     remaining = [
@@ -298,7 +303,7 @@ def normalize_extremum_entity_sql(
         return sql, diagnostics
 
     extremum = tree.copy()
-    aggregate = exp.Max if ordered.args.get("desc") else exp.Min
+    aggregate = exp.Max if expected_kind == "maximum" else exp.Min
     extremum.set("expressions", [aggregate(this=order_expression.copy())])
     extremum.set("order", None)
     extremum.set("limit", None)
@@ -322,7 +327,7 @@ def normalize_extremum_entity_sql(
     diagnostics.update(
         {
             "status": "normalized",
-            "extremum": "maximum" if ordered.args.get("desc") else "minimum",
+            "extremum": expected_kind,
             "removed_order_metric_projections": removed_projections,
             "removed_unrequested_singleton_limit": removable_singleton,
             "tie_policy": "return-all-extremum-ties-v1",

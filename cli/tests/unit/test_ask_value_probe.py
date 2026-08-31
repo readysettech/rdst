@@ -46,8 +46,12 @@ def test_value_probe_rejects_writes_before_executor():
 @pytest.mark.asyncio
 async def test_service_keeps_a_valid_dominant_sibling_rewrite():
     def database(sql, _config):
-        support = 20 if "categories" in sql else 0
-        return {"success": True, "rows": [[support]], "columns": ["count"]}
+        assert "LIMIT 10000" in sql
+        return {
+            "success": True,
+            "rows": [[0, 20]],
+            "columns": ["current_support", "sibling_support"],
+        }
 
     ctx = Ask3Context(
         question="Return products in the Hardware category",
@@ -83,7 +87,7 @@ async def test_service_keeps_a_valid_dominant_sibling_rewrite():
 
     assert "categories = 'Hardware'" in ctx.sql
     assert ctx.value_location_normalization["status"] == "normalized"
-    assert ctx.db_probe_diagnostics["calls"] == 2
+    assert ctx.db_probe_diagnostics["calls"] == 1
 
 
 @pytest.mark.asyncio

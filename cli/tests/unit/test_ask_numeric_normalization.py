@@ -111,6 +111,14 @@ def test_existing_double_cast_can_receive_missing_percentage_scale():
     assert diagnostics["scaled_percentages"] == 1
 
 
+def test_percentage_point_column_is_not_scaled_again():
+    original = "SELECT SUM(discount_percent) / COUNT(*) FROM orders"
+    sql, diagnostics = normalize("What is the average discount percentage?", original)
+
+    assert "100" not in sql
+    assert diagnostics["scaled_percentages"] == 0
+
+
 def test_existing_double_cast_ratio_is_unchanged():
     original = "SELECT CAST(SUM(active) AS DOUBLE) / COUNT(*) FROM users"
     sql, diagnostics = normalize("What is the ratio of active users?", original)

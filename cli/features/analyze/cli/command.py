@@ -407,7 +407,10 @@ class AnalyzeCommand:
     def _looks_like_hash(self, text: str) -> bool:
         import re
 
-        return bool(re.match(r"^[0-9a-f]{12}$", text.lower()))
+        # QueryRegistry accepts unambiguous prefixes from four characters, and
+        # `rdst query list` deliberately displays eight. Positional analyze
+        # input must recognize the same values the product tells users to copy.
+        return bool(re.fullmatch(r"[0-9a-f]{4,12}", text.lower()))
 
     def _browse_saved_queries(self, save_as: str) -> AnalyzeInput:
         """Browse and select from saved queries."""
@@ -632,6 +635,23 @@ class AnalyzeCommand:
                     return RdstResult(
                         False,
                         f"Target '{target}' not found. Run 'rdst configure add' to set one up.",
+                    )
+
+                # Input safety is independent of AI access. Reject malformed or
+                # non-read-only SQL before asking a logged-out user to sign in;
+                # otherwise the same invalid query reports different errors
+                # depending on whether credentials happen to be configured.
+                from shared.query_safety import validate_query_safety
+
+                safety = validate_query_safety(resolved_input.sql)
+                if not safety.get("safe"):
+                    issues = (
+                        "; ".join(safety.get("issues") or [])
+                        or "failed safety validation"
+                    )
+                    return RdstResult(
+                        False,
+                        f"Refusing to analyze this query: {issues}",
                     )
 
             # Check for API key BEFORE any LLM operations (interactive mode, review, or analysis)
@@ -1038,8 +1058,7 @@ class AnalyzeCommand:
             Error message if no API key configured, None if OK
         """
         try:
-            # Check env vars first, then trial token from config
-            key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("RDST_TRIAL_TOKEN")
+            key = os.environ.get("ANTHROPIC_API_KEY")
             if key:
                 return None
 
@@ -1056,9 +1075,9 @@ class AnalyzeCommand:
                 pass
 
             return (
-                "No LLM API key configured.\n\n"
+                "AI access is not configured.\n\n"
                 "Options:\n"
-                "  1. Run 'rdst init' to sign up for a free trial (up to 925K tokens)\n"
+                "  1. Run 'rdst account login' for capped hosted inference\n"
                 f"  2. Set your own key: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n"
                 "     Get one at: https://console.anthropic.com/"
             )

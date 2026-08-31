@@ -3,13 +3,14 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig, devices } from '@playwright/test'
 
 /**
- * Browser coverage of the trial lifecycle against a live keyservice Worker.
+ * Browser coverage of account login and hosted inference against a live
+ * keyservice Worker.
  *
- * Unlike the other two projects, nothing here is faked and nothing is local:
- * the app talks to the CL's own preview Worker, which talks to Anthropic, and
- * the verification email travels through Resend to a real inbox. This is the
- * only suite that proves attestation, token validation, usage accounting and
- * email delivery actually work together.
+ * Unlike the other two projects, external auth, mail, and inference are not
+ * faked. CI talks to the CL's own preview Worker; an explicitly opted-in local
+ * run may use the loopback Worker on port 8788. The magic-link email still
+ * travels through a real inbox in both cases. This proves authentication,
+ * token pickup, quota admission, and inference work together.
  */
 
 const appDir = dirname(fileURLToPath(import.meta.url))
@@ -22,7 +23,7 @@ const isCI = Boolean(process.env.CI)
 const keyserviceUrl = process.env.RDST_KEYSERVICE_URL
 if (!keyserviceUrl) {
   throw new Error(
-    'RDST_KEYSERVICE_URL must point at this build\'s preview Worker. Without ' +
+    "RDST_KEYSERVICE_URL must point at this build's preview Worker. Without " +
       'it the suite would sign up against production.'
   )
 }
@@ -67,6 +68,9 @@ export default defineConfig({
       RDST_KEYSERVICE_URL: keyserviceUrl,
       RDST_E2E_DB_PASSWORD:
         process.env.RDST_E2E_DB_PASSWORD ?? 'rdst_e2e_password',
+      // The live test must begin at the account-or-BYOK gate even when the
+      // developer running it has an Anthropic key exported in their shell.
+      ANTHROPIC_API_KEY: '',
       PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
     },
     url: `${baseURL}/health`,

@@ -28,6 +28,16 @@ describe('classifyError', () => {
       false
     )
   })
+
+  it('recognizes the hosted monthly cap code', () => {
+    const error = {
+      code: 'HOSTED_CAP_REACHED',
+      message: 'Readyset-hosted inference limit reached for this month',
+    }
+    expect(isTrialExhaustedError(error)).toBe(true)
+    expect(classifyError(error)).toBe('rdst-service')
+  })
+
   it('maps missing-credential failures to user-config', () => {
     expect(
       classifyError({

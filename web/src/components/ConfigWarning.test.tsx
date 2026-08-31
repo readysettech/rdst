@@ -134,12 +134,12 @@ describe('ConfigWarning env secret flow', () => {
     cleanup();
   });
 
-  it('shows trial and key actions when Anthropic requirement is missing', async () => {
+  it('shows Readyset sign-in and key actions when AI access is missing', async () => {
     const queryClient = createTestQueryClient();
 
     renderWarning(queryClient);
 
-    expect(await screen.findByRole('button', { name: /Claim free trial credits/i })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /Sign in to Readyset/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Set API Key/i })).toBeTruthy();
     // Env-var plumbing stays out of the UI: no export command, no raw names.
     expect(screen.queryByText(/ANTHROPIC_API_KEY/)).toBeNull();
@@ -152,7 +152,7 @@ describe('ConfigWarning env secret flow', () => {
     renderWarning(queryClient);
 
     await waitFor(() => expect(vi.mocked(fetchEnvRequirements)).toHaveBeenCalled());
-    expect(screen.queryByRole('button', { name: /Claim free trial credits/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Sign in to Readyset/i })).toBeNull();
     expect(screen.queryByText(/Missing Anthropic API Key/i)).toBeNull();
   });
 
@@ -163,7 +163,7 @@ describe('ConfigWarning env secret flow', () => {
     renderWarning(queryClient);
 
     await waitFor(() => expect(vi.mocked(fetchEnvRequirements)).toHaveBeenCalled());
-    expect(screen.queryByRole('button', { name: /Claim free trial credits/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Sign in to Readyset/i })).toBeNull();
     expect(screen.queryByText(/Missing Anthropic API Key/i)).toBeNull();
   });
 
@@ -300,7 +300,7 @@ describe('ConfigWarning env secret flow', () => {
     renderWarning(queryClient);
 
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Claim free trial credits/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Sign in to Readyset/i })).toBeNull();
     });
   });
 
@@ -361,7 +361,7 @@ describe('ConfigWarning env secret flow', () => {
     });
   });
 
-  it('always shows Anthropic API key input for exhausted-trial banner even with no missing requirement entries', async () => {
+  it('does not revive the removed trial flow from legacy local state', async () => {
     vi.mocked(fetchTrialStatus).mockResolvedValue({
       active: false,
       status: 'exhausted',
@@ -386,10 +386,10 @@ describe('ConfigWarning env secret flow', () => {
 
     renderWarning(queryClient);
 
-    fireEvent.click(await screen.findByRole('button', { name: /Set API Key/i }));
-    const keyInput = await screen.findByLabelText(/secret anthropic_api_key/i);
-    fireEvent.change(keyInput, { target: { value: 'sk-ant-manual-token' } });
-    expect((keyInput as HTMLInputElement).value).toBe('sk-ant-manual-token');
+    await waitFor(() => {
+      expect(fetchTrialStatus).not.toHaveBeenCalled()
+      expect(screen.queryByText(/Trial Credits Exhausted/i)).toBeNull()
+    })
   });
 
   it('does not show a trial warning when source is no longer trial even if trial status cache is exhausted', async () => {

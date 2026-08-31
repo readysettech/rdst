@@ -221,7 +221,7 @@ async def reset_local_data(request: Request) -> ResetLocalDataResponse:
 
     # A wiped install must not resurrect any keyring-persisted secret (keys
     # and target passwords) from the process env or the keyring on restart.
-    names = EnvRequirementsService().get_allowed_secret_names()
+    names = EnvRequirementsService().get_clearable_secret_names()
     for name in names:
         os.environ.pop(name, None)
     try:

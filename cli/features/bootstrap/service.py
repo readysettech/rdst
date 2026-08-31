@@ -236,8 +236,8 @@ class TargetBootstrapService:
             yield BootstrapNeedsKeyEvent(
                 type="needs_key",
                 message=(
-                    "An Anthropic key unlocks AI schema descriptions. Add a key "
-                    "or start a free trial to continue."
+                    "Sign in to Readyset for hosted AI schema descriptions, or "
+                    "add your own Anthropic key."
                 ),
             )
             validity = await self._await_key(options, key_wakeup)

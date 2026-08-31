@@ -534,6 +534,30 @@ def route_correction_intent(
         )
 
     candidate_intents = tuple(candidate.intent for candidate in candidates)
+    if not any(candidate.observed_shape for candidate in candidates):
+        input_sha256 = _canonical_hash(
+            {
+                "router_version": CORRECTION_INTENT_ROUTING_VERSION,
+                "dialect": normalized_dialect,
+                "proposed_sql_sha256": full_generated_sql_sha256,
+                "candidates": [candidate.to_dict() for candidate in candidates],
+                "reason": "no-actionable-sql-shapes",
+            }
+        )
+        return _result(
+            status="no_candidates",
+            candidates=candidates,
+            input_sha256=input_sha256,
+            full_generated_sql_sha256=full_generated_sql_sha256,
+            trigger_catalog_sha256=trigger_catalog_sha256,
+            selectable_trigger_sets_sha256=_canonical_hash([]),
+            effective_question_sha256=effective_question_sha256,
+            routing_trace=(
+                "model-first-full-catalog",
+                "host-sql-ast-facts",
+                "no-actionable-sql-shapes",
+            ),
+        )
     selectable_intent_sets = _normalize_selectable_intent_sets(
         allowed_intent_sets,
         candidate_intents=candidate_intents,

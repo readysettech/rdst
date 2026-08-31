@@ -1,11 +1,10 @@
 import { tv } from '@rs/tailwind-base'
 import type { IconStrokeName } from '@rs/ui-icons/icon-name'
-import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
 import { Pressable } from '@rs/ui-new/pressable'
 import { Scrollable } from '@rs/ui-new/scrollable'
 import { Text } from '@rs/ui-new/text'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { ActivityPulse } from '../components/audit/ActivityPulse'
@@ -13,14 +12,11 @@ import { BackgroundRuns } from '../components/BackgroundRuns'
 import { DesktopUpdateControl } from '../components/DesktopUpdateControl'
 import { ReportDialog } from '../components/ReportDialog'
 import { TargetDropdown } from '../components/TargetDropdown'
-import { TrialBalanceBadge } from '../components/TrialBalanceBadge'
-import { TrialRegistrationDialog } from '../components/TrialRegistrationDialog'
 import { SetupGuideHelpEntry } from '../features/setup/SetupGuideHelpEntry'
 import { useTarget } from '../hooks/useTarget'
 import { trackEvent } from '../lib/analytics'
 import { useAuditSessionActive } from '../lib/auditSession'
 import type { DesktopUpdateState } from '../lib/desktop'
-import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
 import { useSystemStatus } from '../lib/useSystemStatus'
 import { VALUE_PROPOSITION } from '../lib/valueProposition'
 
@@ -236,8 +232,6 @@ export function Sidebar({
   const { target: selectedTarget, setTarget: setSelectedTarget } = useTarget()
   const auditRunning = useAuditSessionActive()
   const [reportOpen, setReportOpen] = useState(false)
-  const [trialOpen, setTrialOpen] = useState(false)
-  const queryClient = useQueryClient()
 
   const { data: status } = useSystemStatus()
 
@@ -412,14 +406,13 @@ export function Sidebar({
           </nav>
         </Scrollable>
 
-        {/* Footer — status (who's signed in, what's running, trial credits,
+        {/* Footer — status (who's signed in, what's running,
           app update) and utilities (upsell + links) are separate groups: the
           gap between groups exceeds the gap within either one (F6, VIS-036). */}
         <div className="p-2 border-t border-border-layout-1">
           <div data-testid="sidebar-footer-status" className="space-y-1">
             <SidebarIdentity />
             <BackgroundRuns />
-            <TrialBalanceBadge />
             {desktopUpdateState && (
               <div className="flex justify-end px-3 py-2">
                 <DesktopUpdateControl
@@ -434,24 +427,6 @@ export function Sidebar({
             data-testid="sidebar-footer-utilities"
             className="mt-4 space-y-1"
           >
-            {/* Quiet secondary control, not a competing focal point: no
-              gradient/border/elevation, sized and weighted like the other
-              footer utilities, with just the icon carrying a small accent
-              color (F2, VIS-011/022/121). */}
-            <Button
-              type="button"
-              label="Get free AI credits"
-              icon="sparkles"
-              iconPosition="left"
-              modifier="outline"
-              fullWidth
-              onClick={() => setTrialOpen(true)}
-              classMerge={navItemStyles({
-                size: 'footer',
-                className:
-                  'cursor-pointer border-0 [&_svg]:text-content-primary-soft',
-              })}
-            />
             {/* Settings recedes here as a quiet utility, out of the daily nav. */}
             <NavLink
               item={settingsItem}
@@ -544,14 +519,6 @@ export function Sidebar({
         <ReportDialog
           isOpen={reportOpen}
           onClose={() => setReportOpen(false)}
-        />
-        <TrialRegistrationDialog
-          isOpen={trialOpen}
-          onClose={() => setTrialOpen(false)}
-          onSuccess={() => {
-            void invalidateTrialRelatedQueries(queryClient)
-            setTrialOpen(false)
-          }}
         />
       </aside>
     </>

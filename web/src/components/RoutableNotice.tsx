@@ -1,6 +1,6 @@
-import { useNavigate } from '@tanstack/react-router';
-import { InlineNotice } from '@rs/ui-new/error-state';
-import { TRIAL_EXHAUSTED_MESSAGE } from '../lib/errorContract';
+import { InlineNotice } from '@rs/ui-new/error-state'
+import { useNavigate } from '@tanstack/react-router'
+import { TRIAL_EXHAUSTED_MESSAGE } from '../lib/errorContract'
 
 /**
  * The routable-error primitive for the return-trip half of the identity flow
@@ -18,27 +18,27 @@ import { TRIAL_EXHAUSTED_MESSAGE } from '../lib/errorContract';
 export type RoutableNoticeKind =
   | 'password-needed'
   | 'key-needed'
-  | 'trial-exhausted';
+  | 'trial-exhausted'
 
 interface RoutableNoticeProps {
-  kind: RoutableNoticeKind;
+  kind: RoutableNoticeKind
   /** The offending connection name (password case) — named in the notice. */
-  target?: string | null;
+  target?: string | null
   /** Where to send the user after the fix; defaults to the current location. */
-  returnTo?: string;
+  returnTo?: string
   /** Override the default title copy. */
-  title?: string;
+  title?: string
   /** Override the default message copy. */
-  message?: string;
+  message?: string
   /** Secondary in-place action (e.g. "Set here"), rendered beside the route. */
-  onRetry?: () => void;
-  retryLabel?: string;
+  onRetry?: () => void
+  retryLabel?: string
   /** Replace the routed primary action with an in-place recovery flow. */
-  onPrimaryAction?: () => void;
-  primaryActionLabel?: string;
+  onPrimaryAction?: () => void
+  primaryActionLabel?: string
   /** Runs just before routing (e.g. close a parent dialog). */
-  onBeforeRoute?: () => void;
-  className?: string;
+  onBeforeRoute?: () => void
+  className?: string
 }
 
 export function RoutableNotice({
@@ -54,14 +54,14 @@ export function RoutableNotice({
   onBeforeRoute,
   className,
 }: RoutableNoticeProps) {
-  const navigate = useNavigate();
+  const navigate = useNavigate()
   const currentReturn =
     returnTo ??
     (typeof window !== 'undefined'
       ? `${window.location.pathname}${window.location.search}`
-      : undefined);
+      : undefined)
 
-  const name = target ?? 'This connection';
+  const name = target ?? 'This connection'
   const kindDefaults = {
     'password-needed': {
       errorClass: 'database' as const,
@@ -74,7 +74,7 @@ export function RoutableNotice({
     'trial-exhausted': {
       errorClass: 'rdst-service' as const,
       icon: 'sparkles' as const,
-      title: 'Free trial used up',
+      title: 'Hosted inference unavailable',
       message: TRIAL_EXHAUSTED_MESSAGE,
       actionLabel: 'Set key',
       search: { section: 'ai' as const, returnTo: currentReturn },
@@ -82,13 +82,13 @@ export function RoutableNotice({
     'key-needed': {
       errorClass: 'provider' as const,
       icon: 'key' as const,
-      title: 'This needs an AI key',
+      title: 'This needs AI access',
       message:
-        'Add an Anthropic key, or claim free trial credits, to use this AI feature.',
-      actionLabel: 'Add AI key',
+        'Sign in to Readyset for hosted inference, or add your own Anthropic key.',
+      actionLabel: 'Configure AI',
       search: { section: 'ai' as const, returnTo: currentReturn },
     },
-  }[kind];
+  }[kind]
 
   return (
     <InlineNotice
@@ -105,13 +105,13 @@ export function RoutableNotice({
             onPrimaryAction()
             return
           }
-          onBeforeRoute?.();
-          navigate({ to: '/configure', search: kindDefaults.search });
+          onBeforeRoute?.()
+          navigate({ to: '/configure', search: kindDefaults.search })
         },
       }}
       onRetry={onRetry}
       retryLabel={retryLabel}
       className={className}
     />
-  );
+  )
 }

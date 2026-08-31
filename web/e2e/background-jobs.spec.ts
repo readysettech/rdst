@@ -88,10 +88,9 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
   await page.getByRole('button', { name: 'Add connection' }).last().click()
 
   const jobsTrigger = page.getByTestId('jobs-trigger')
+  const missingAiAccess = 'Sign in to Readyset or add your own Anthropic key.'
   await expect(jobsTrigger).toContainText('Setting up needs-key-db')
-  await expect(jobsTrigger).toContainText(
-    'Add an Anthropic key or start a free trial.'
-  )
+  await expect(jobsTrigger).toContainText(missingAiAccess)
   await expect(page.getByTestId('job-warning-icon')).toBeVisible()
   await jobsTrigger.click()
 
@@ -100,15 +99,14 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
   )
   await expect(parkedJob).toHaveCount(1)
   await expect(page.getByText('1 job needs attention')).toBeVisible()
-  await expect(parkedJob).toContainText(
-    'Add an Anthropic key or start a free trial.'
-  )
+  await expect(parkedJob).toContainText(missingAiAccess)
   await parkedJob.click()
 
   await expect(
-    page.getByRole('heading', { name: 'Start free trial' })
+    page.getByRole('heading', { name: 'Sign in to Readyset' })
   ).toBeVisible()
-  await page.getByRole('button', { name: 'Add AI key' }).click()
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await page.goto('/configure?section=ai')
 
   await expect(
     page.getByRole('heading', { name: 'Update Anthropic API key' })
