@@ -125,21 +125,22 @@ PYEOF
   if [[ "$DB_ENGINE" == "postgresql" ]]; then
     cat > "$REPLAY_CSV" << 'EOF'
 query
-SELECT primarytitle, startyear FROM title_basics WHERE startyear > 2000 LIMIT 10
-SELECT averagerating, numvotes FROM title_ratings WHERE averagerating > 7.0 LIMIT 10
-SELECT tb.primarytitle, tr.averagerating FROM title_basics tb JOIN title_ratings tr ON tb.tconst = tr.tconst LIMIT 10
+"SELECT primarytitle, startyear FROM title_basics WHERE startyear > 2000 LIMIT 10"
+"SELECT averagerating, numvotes FROM title_ratings WHERE averagerating > 7.0 LIMIT 10"
+"SELECT tb.primarytitle, tr.averagerating FROM title_basics tb JOIN title_ratings tr ON tb.tconst = tr.tconst LIMIT 10"
 EOF
   else
     cat > "$REPLAY_CSV" << 'EOF'
 query
-SELECT primaryTitle, startYear FROM title_basics WHERE startYear > 2000 LIMIT 10
-SELECT averageRating, numVotes FROM title_ratings WHERE averageRating > 7.0 LIMIT 10
-SELECT tb.primaryTitle, tr.averageRating FROM title_basics tb JOIN title_ratings tr ON tb.tconst = tr.tconst LIMIT 10
+"SELECT primaryTitle, startYear FROM title_basics WHERE startYear > 2000 LIMIT 10"
+"SELECT averageRating, numVotes FROM title_ratings WHERE averageRating > 7.0 LIMIT 10"
+"SELECT tb.primaryTitle, tr.averageRating FROM title_basics tb JOIN title_ratings tr ON tb.tconst = tr.tconst LIMIT 10"
 EOF
   fi
 
   run_cmd "Query run: --file CSV" "${RDST_CMD[@]}" query run \
     --file "$REPLAY_CSV" --target "${AUDIT_TARGET}" --count 5
+  assert_contains "0.00%" "query replay has no execution errors"
   echo "PASS: Query run --file CSV"
 
   # ============================================================================

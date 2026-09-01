@@ -641,6 +641,15 @@ def test_model_payload_keeps_full_catalog_while_ast_facts_mark_extremum_shape():
     assert catalog["percentage_output"]["observed_shape"] == []
 
 
+def test_aggregate_only_ordered_query_has_no_entity_extremum_shape():
+    candidates = discover_correction_intent_candidates(
+        "SELECT COUNT(*) FROM employees ORDER BY salary DESC LIMIT 1",
+        "mysql",
+    )
+
+    assert all(candidate.intent != "entity_at_extremum" for candidate in candidates)
+
+
 def test_percentage_shape_marks_existing_scaling_with_missing_float_cast():
     candidates = discover_correction_intent_candidates(
         "SELECT SUM(completed) * 100.0 / COUNT(*) FROM orders",

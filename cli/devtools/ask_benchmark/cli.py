@@ -121,6 +121,7 @@ from .runner import (
     ASK_ACCURACY_PROFILE_BASELINE,
     ASK_ACCURACY_PROFILE_CANDIDATE_V1,
     ASK_ACCURACY_PROFILE_CANDIDATE_V2,
+    ASK_ACCURACY_PROFILE_CANDIDATE_V3,
     ASK_ACCURACY_PROFILES,
     BenchmarkRunner,
 )
@@ -376,7 +377,8 @@ def build_parser() -> argparse.ArgumentParser:
             "router, bounded alternate selection, and bounded value grounding. "
             "candidate-v2 additionally enables model-routed, database-proven "
             "encoded-identifier, empty-result time-storage, and full-month "
-            "axis-storage repairs."
+            "axis-storage repairs. candidate-v3 records the hardened selector, "
+            "scope, value-location, and probe semantics."
         ),
     )
     run.add_argument("--max-cases", type=_positive_int)
@@ -1699,6 +1701,7 @@ def _run_database_locked(
                 in {
                     ASK_ACCURACY_PROFILE_CANDIDATE_V1,
                     ASK_ACCURACY_PROFILE_CANDIDATE_V2,
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V3,
                 }
             ),
             "dual_candidate_selection": (
@@ -1706,6 +1709,7 @@ def _run_database_locked(
                 in {
                     ASK_ACCURACY_PROFILE_CANDIDATE_V1,
                     ASK_ACCURACY_PROFILE_CANDIDATE_V2,
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V3,
                 }
             ),
             "value_location_normalization": (
@@ -1713,16 +1717,29 @@ def _run_database_locked(
                 in {
                     ASK_ACCURACY_PROFILE_CANDIDATE_V1,
                     ASK_ACCURACY_PROFILE_CANDIDATE_V2,
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V3,
                 }
             ),
             "encoded_identifier_storage": (
-                args.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+                args.ask_accuracy_profile
+                in {
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V2,
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V3,
+                }
             ),
             "temporal_text_storage": (
-                args.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+                args.ask_accuracy_profile
+                in {
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V2,
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V3,
+                }
             ),
             "month_axis_storage": (
-                args.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+                args.ask_accuracy_profile
+                in {
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V2,
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V3,
+                }
             ),
         },
         "clarification_policy": (

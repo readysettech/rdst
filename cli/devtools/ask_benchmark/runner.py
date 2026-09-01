@@ -80,13 +80,22 @@ from .value_profiles import (
 ASK_ACCURACY_PROFILE_BASELINE = "baseline"
 ASK_ACCURACY_PROFILE_CANDIDATE_V1 = "candidate-v1"
 ASK_ACCURACY_PROFILE_CANDIDATE_V2 = "candidate-v2"
+ASK_ACCURACY_PROFILE_CANDIDATE_V3 = "candidate-v3"
 ASK_ACCURACY_PROFILES = (
     ASK_ACCURACY_PROFILE_BASELINE,
     ASK_ACCURACY_PROFILE_CANDIDATE_V1,
     ASK_ACCURACY_PROFILE_CANDIDATE_V2,
+    ASK_ACCURACY_PROFILE_CANDIDATE_V3,
 )
 _ASK_ACCURACY_ROUTED_PROFILES = frozenset(
-    {ASK_ACCURACY_PROFILE_CANDIDATE_V1, ASK_ACCURACY_PROFILE_CANDIDATE_V2}
+    {
+        ASK_ACCURACY_PROFILE_CANDIDATE_V1,
+        ASK_ACCURACY_PROFILE_CANDIDATE_V2,
+        ASK_ACCURACY_PROFILE_CANDIDATE_V3,
+    }
+)
+_ASK_ACCURACY_STORAGE_PROFILES = frozenset(
+    {ASK_ACCURACY_PROFILE_CANDIDATE_V2, ASK_ACCURACY_PROFILE_CANDIDATE_V3}
 )
 
 
@@ -318,6 +327,7 @@ class BenchmarkRunner:
         self.budget_stop_reason: str | None = None
         self._gold_fingerprints: dict[int, str] = {}
         self._gold_results: dict[int, QueryResult] = {}
+        self._rdst_event_loop: asyncio.AbstractEventLoop | None = None
 
     def preflight_gold(
         self, cases: list[BenchmarkCase]
@@ -345,6 +355,30 @@ class BenchmarkRunner:
         model_specs: list[ModelSpec],
         *,
         repetitions: int = 1,
+    ) -> list[dict[str, Any]]:
+        if self._rdst_event_loop is not None:
+            raise RuntimeError("Benchmark runner is already active")
+        event_loop = (
+            asyncio.new_event_loop()
+            if self.track == EvaluationTrack.RDST
+            else None
+        )
+        self._rdst_event_loop = event_loop
+        try:
+            return self._run_cases(cases, model_specs, repetitions=repetitions)
+        finally:
+            self._rdst_event_loop = None
+            if event_loop is not None:
+                event_loop.run_until_complete(event_loop.shutdown_asyncgens())
+                event_loop.run_until_complete(event_loop.shutdown_default_executor())
+                event_loop.close()
+
+    def _run_cases(
+        self,
+        cases: list[BenchmarkCase],
+        model_specs: list[ModelSpec],
+        *,
+        repetitions: int,
     ) -> list[dict[str, Any]]:
         completed = self.artifact_store.completed_keys()
         budget = _RunBudget(
@@ -616,7 +650,7 @@ class BenchmarkRunner:
             ),
             correction_intent_routing_intent_scope=(
                 CORRECTION_INTENT_EXPERIMENTAL_SCOPE
-                if self.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+                if self.ask_accuracy_profile in _ASK_ACCURACY_STORAGE_PROFILES
                 else None
             ),
             dual_candidate_selection_enabled=(
@@ -626,13 +660,13 @@ class BenchmarkRunner:
                 self.ask_accuracy_profile in _ASK_ACCURACY_ROUTED_PROFILES
             ),
             encoded_identifier_storage_enabled=(
-                self.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+                self.ask_accuracy_profile in _ASK_ACCURACY_STORAGE_PROFILES
             ),
             temporal_text_storage_enabled=(
-                self.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+                self.ask_accuracy_profile in _ASK_ACCURACY_STORAGE_PROFILES
             ),
             month_axis_storage_enabled=(
-                self.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+                self.ask_accuracy_profile in _ASK_ACCURACY_STORAGE_PROFILES
             ),
         )
         options = AskOptions(
@@ -661,7 +695,10 @@ class BenchmarkRunner:
                 )
             ]
 
-        events = asyncio.run(collect_events())
+        if self._rdst_event_loop is None:
+            events = asyncio.run(collect_events())
+        else:
+            events = self._rdst_event_loop.run_until_complete(collect_events())
         ctx = observed["context"]
         diagnostics = {
             "ask_service_phases": observed["phases"],
@@ -894,13 +931,13 @@ class BenchmarkRunner:
                     self.ask_accuracy_profile in _ASK_ACCURACY_ROUTED_PROFILES
                 ),
                 "encoded_identifier_storage": (
-                    self.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+                    self.ask_accuracy_profile in _ASK_ACCURACY_STORAGE_PROFILES
                 ),
                 "temporal_text_storage": (
-                    self.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+                    self.ask_accuracy_profile in _ASK_ACCURACY_STORAGE_PROFILES
                 ),
                 "month_axis_storage": (
-                    self.ask_accuracy_profile == ASK_ACCURACY_PROFILE_CANDIDATE_V2
+                    self.ask_accuracy_profile in _ASK_ACCURACY_STORAGE_PROFILES
                 ),
                 "generation_attempts": 1,
                 "max_validation_repair_attempts": 1,

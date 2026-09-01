@@ -1,0 +1,77 @@
+{
+  "receipt_version": 1,
+  "recorded_at": "2026-09-01",
+  "freeze_id": "rdst-ask-auto-init-no-evidence-v15",
+  "artifact_root": "rdst/test-results/ask_benchmark",
+  "artifact_retention": "Raw run directories are gitignored local artifacts. The hashes below make retained copies verifiable but do not claim that a remote archive exists.",
+  "comparison": {
+    "model": "z-ai/glm-5.3-flash",
+    "transport": "openrouter",
+    "provider": "deepinfra",
+    "reasoning_effort": "high",
+    "questions": "same fixed opened 50-case development set",
+    "context": "same current auto-init schemas without evidence",
+    "database": "same BIRD Mini-Dev MySQL 8.4 databases",
+    "scorer": "same official execution scorer",
+    "result": "candidate-v3 did not satisfy the candidate-v2 no-regression gate",
+    "default_accuracy_profile": "baseline"
+  },
+  "runs": [
+    {
+      "run_id": "glm53-deepinfra-candidate-v2-pre-hardening-fixed50-r3",
+      "accuracy_profile": "candidate-v2",
+      "rdst_revision": "52ef49aedb121fbbfcb965c472461e132cb56027",
+      "benchmark_protocol_sha256": "4e072a739a782a9131a8408b8b378449f4d6875fc62688629a2c2a1277aa4ba6",
+      "official_ex": {"correct": 28, "total": 50},
+      "stable_ex": {"correct": 27, "total": 48},
+      "mean_latency_ms": 20714.44430754025,
+      "scored_actual_cost_usd": "0.016218275",
+      "historical_unscored_invocation_count": 0,
+      "files": {
+        "manifest.json": "87517fed58e8e2a955c2a718f679f2ab00bb2758454a297bf9a3dd3e72a6e47b",
+        "attempts.jsonl": "825880e01027740f5054912d516eb6065e6c3bbb45d7081aa275847102521b51",
+        "calls.jsonl": "f3f8fbd712484b970c54959bca90b7e5949e0812f87008fedfd9e9da3530c3db",
+        "summary.json": "1d08f68b9707676c040e7957701a4aa5cc89276cccd1f316afe437fd985304bf",
+        "summary.md": "528d47a4f54269a2cf26cb5b7e8c6d5cd72e22d4669cd4cae759be37c359b029"
+      }
+    },
+    {
+      "run_id": "glm53-deepinfra-candidate-v3-hardening-fixed50-r3",
+      "accuracy_profile": "candidate-v3",
+      "rdst_revision": "44aa5205c7b779f143075c56d72acb1f34da8025",
+      "benchmark_protocol_sha256": "dbbd6f79726fdd79e640002313f8858738ca448d931bb8784f495ec8629a7ce5",
+      "official_ex": {"correct": 26, "total": 50},
+      "stable_ex": {"correct": 25, "total": 48},
+      "mean_latency_ms": 20306.17400514078,
+      "scored_actual_cost_usd": "0.015067975",
+      "historical_unscored_invocation_count": 9,
+      "transport_repair": {
+        "error_kind": "rate_limit",
+        "provider_error_code": "engine_overloaded",
+        "provider": "DeepInfra",
+        "scoring_policy": "Unscored invocations were retried under the same run ID until all 50 logical cases were scored."
+      },
+      "files": {
+        "manifest.json": "07f829d41fc04797ca8e5b49d3dfa4a4e3c95c4a2e36ac5be1995929d780a770",
+        "attempts.jsonl": "1692c0ee83f191c155441169f76f5ed7cc650d901b9898febc50172e8b514785",
+        "calls.jsonl": "4b423d119d5391aa3a53f7a07bf97d4459df1d11817af06380287630b29075cc",
+        "summary.json": "c78cc5c010141faa6067c8263eb5ff538a57cc6996ba09fb3ef6d3026fd24e95",
+        "summary.md": "223e46316679104dacbb6b99755e9937822c250ffd5657545390351ffda56d17"
+      }
+    }
+  ],
+  "case_delta": {
+    "candidate_v3_gains": [92],
+    "candidate_v3_losses": [72, 866, 904],
+    "unchanged_cases": 46,
+    "audited_attribution": "All four score changes came with different fresh primary generations. None is attributed to the hardened host mechanisms. Candidate-v3 blocked additional alternate selections without an observed score loss, but this run proves safety behavior rather than an accuracy gain."
+  },
+  "mechanism_observations": {
+    "candidate_v2_alternate_selected_case_ids": [440, 477, 1144, 1460],
+    "candidate_v3_alternate_selected_case_ids": [1144],
+    "candidate_v2_accepted_storage_repairs": [1501],
+    "candidate_v3_accepted_storage_repairs": [866, 1501],
+    "proven_hardening_gains": 0,
+    "proven_hardening_losses": 0
+  }
+}

@@ -13,10 +13,22 @@ from sqlglot import exp
 
 from features.ask.correction_intent_state import selected_correction_intents
 
-SHARED_ENTITY_SCOPE_NORMALIZER_VERSION = "shared-entity-scope-v5"
+SHARED_ENTITY_SCOPE_NORMALIZER_VERSION = "shared-entity-scope-v6-relationship-proof"
 
 _IDENTIFIER_TOKEN = re.compile(r"[A-Za-z0-9]+")
 _GENERIC_TERMS = frozenset({"id", "ids", "identifier", "key", "number", "num"})
+_SQL_IDENTIFIER = r'(?P<{name}>"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_$]*)'
+_RELATIONSHIP_EQUALITY = re.compile(
+    r"^\s*"
+    + _SQL_IDENTIFIER.format(name="left_table")
+    + r"\."
+    + _SQL_IDENTIFIER.format(name="left_column")
+    + r"\s*=\s*"
+    + _SQL_IDENTIFIER.format(name="right_table")
+    + r"\."
+    + _SQL_IDENTIFIER.format(name="right_column")
+    + r"\s*$"
+)
 
 
 @dataclass(frozen=True)
@@ -350,6 +362,47 @@ def _schema_column(schema_info: Any, table_name: str, column_name: str) -> Any |
     return None
 
 
+def _unquote_identifier(value: str) -> str:
+    return value[1:-1].replace('""', '"') if value.startswith('"') else value
+
+
+def _relationship_proves_shared_column(
+    schema_info: Any,
+    source_table: str,
+    target_table: str,
+    column_name: str,
+) -> bool:
+    tables = getattr(schema_info, "tables", {}) or {}
+    expected_tables = {source_table.casefold(), target_table.casefold()}
+    for table_key, table in tables.items():
+        owner = str(getattr(table, "name", "") or table_key)
+        if owner.casefold() not in expected_tables:
+            continue
+        for relationship in getattr(table, "relationships", ()) or ():
+            if isinstance(relationship, dict):
+                target = str(relationship.get("target") or "")
+                join_pattern = str(relationship.get("join") or "")
+            else:
+                target = str(getattr(relationship, "target_table", "") or "")
+                join_pattern = str(getattr(relationship, "join_pattern", "") or "")
+            if target.casefold() not in expected_tables - {owner.casefold()}:
+                continue
+            match = _RELATIONSHIP_EQUALITY.fullmatch(join_pattern)
+            if match is None:
+                continue
+            left_table = _unquote_identifier(match.group("left_table")).casefold()
+            right_table = _unquote_identifier(match.group("right_table")).casefold()
+            left_column = _unquote_identifier(match.group("left_column")).casefold()
+            right_column = _unquote_identifier(match.group("right_column")).casefold()
+            if (
+                {left_table, right_table} == expected_tables
+                and left_column == column_name.casefold()
+                and right_column == column_name.casefold()
+            ):
+                return True
+    return False
+
+
 def _compatible_shared_column(
     schema_info: Any,
     source_table: str,
@@ -366,7 +419,16 @@ def _compatible_shared_column(
     target_type = (
         str(getattr(target, "data_type", "") or "").casefold().split("(", 1)[0]
     )
-    return bool(source_type and source_type == target_type)
+    return bool(
+        source_type
+        and source_type == target_type
+        and _relationship_proves_shared_column(
+            schema_info,
+            source_table,
+            target_table,
+            column_name,
+        )
+    )
 
 
 def _candidate(

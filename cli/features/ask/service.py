@@ -86,7 +86,7 @@ from .temporal_text_storage import (
 from .value_location_normalization import (
     normalize_context as normalize_value_location_context,
 )
-from .value_probe import create_value_probe_executor
+from .value_probe import create_month_axis_probe_executor, create_value_probe_executor
 
 
 @dataclass
@@ -800,7 +800,12 @@ class AskService:
         deferred = (
             set(selected) & _DEFERRED_CORRECTION_INTENTS
             if routing.get("activation_allowed") is True
-            and routing.get("application_status") == "deferred"
+            and routing.get("application_status")
+            in {
+                "deferred",
+                "validated_with_deferred",
+                "validated_partial_with_deferred",
+            }
             else set()
         )
         if self._correction_intent_routing_shadow or not deferred:
@@ -820,7 +825,7 @@ class AskService:
             if not self._month_axis_storage_enabled:
                 return ctx
             repair_fn = self._month_axis_storage_fn
-            repair_executor = self._db_executor
+            repair_executor = create_month_axis_probe_executor(ctx, self._db_executor)
 
         original_state = _snapshot_correction_state(ctx)
         original_sql = str(ctx.sql or "")
@@ -923,6 +928,10 @@ class AskService:
                 {
                     "post_execution_status": "accepted",
                     "selected_sql_applied": True,
+                    "applied_intents": [
+                        *routing.get("applied_intents", []),
+                        repair_intent,
+                    ],
                     "selected_sql_sha256": hashlib.sha256(
                         str(ctx.sql or "").encode()
                     ).hexdigest(),
@@ -997,9 +1006,10 @@ class AskService:
         self,
         ctx: Any,
         selected_intents: Collection[str],
-    ) -> Any:
+    ) -> tuple[Any, tuple[str, ...]]:
         """Apply only the deterministic corrections selected by the router."""
         selected = frozenset(selected_intents)
+        applied: list[str] = []
         normalizers = (
             (
                 {"percentage_output", "ratio_output"},
@@ -1034,18 +1044,26 @@ class AskService:
         )
         for routed_intents, enabled, normalizer in normalizers:
             if enabled and selected.intersection(routed_intents):
+                before = str(ctx.sql or "")
                 ctx = await asyncio.to_thread(normalizer, ctx)
+                if not _sql_candidates_equivalent(
+                    str(ctx.sql or ""), before, ctx.db_type
+                ):
+                    applied.extend(sorted(selected.intersection(routed_intents)))
         if (
             self._encoded_identifier_storage_enabled
             and "encoded_identifier_storage" in selected
         ):
+            before = str(ctx.sql or "")
             probe = create_value_probe_executor(ctx, self._db_executor)
             ctx = await asyncio.to_thread(
                 self._encoded_identifier_storage_fn,
                 ctx,
                 probe,
             )
-        return ctx
+            if not _sql_candidates_equivalent(str(ctx.sql or ""), before, ctx.db_type):
+                applied.append("encoded_identifier_storage")
+        return ctx, tuple(applied)
 
     async def _apply_correction_intent_routing(self, ctx: Any) -> Any:
         """Route once, then apply and validate only the selected corrections."""
@@ -1141,9 +1159,24 @@ class AskService:
             "selected_intents": list(selected_intents),
         }
         try:
-            candidate_ctx = await self._apply_selected_generation_normalizers(
+            (
+                candidate_ctx,
+                applied_intents,
+            ) = await self._apply_selected_generation_normalizers(
                 ctx,
                 selected_intents,
+            )
+            generation_intents = tuple(
+                intent for intent in selected_intents if intent not in deferred_intents
+            )
+            unapplied_intents = tuple(
+                intent for intent in generation_intents if intent not in applied_intents
+            )
+            routing.update(
+                {
+                    "applied_intents": list(applied_intents),
+                    "unapplied_intents": list(unapplied_intents),
+                }
             )
             candidate_state = _snapshot_correction_state(candidate_ctx)
             valid, issues = await self._preflight_correction_candidate(
@@ -1195,7 +1228,15 @@ class AskService:
                 candidate_hash = hashlib.sha256(candidate_sql.encode()).hexdigest()
                 routing.update(
                     {
-                        "application_status": "validated",
+                        "application_status": (
+                            "validated_partial_with_deferred"
+                            if unapplied_intents and deferred_intents
+                            else "validated_with_deferred"
+                            if deferred_intents
+                            else "validated_partial"
+                            if unapplied_intents
+                            else "validated"
+                        ),
                         "application_issue_count": 0,
                         "candidate_sql_sha256": candidate_hash,
                         "selected_sql_sha256": (

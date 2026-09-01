@@ -519,7 +519,6 @@ def _collect_mysql_schema(
         connection = create_mysql_connection_from_params(
             params,
             connect_timeout=5,
-            database=database,
         )
 
         schema_parts = []

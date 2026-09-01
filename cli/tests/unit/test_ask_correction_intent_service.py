@@ -4,7 +4,10 @@ from dataclasses import dataclass
 
 import pytest
 
-from features.ask.correction_intent_routing import CORRECTION_INTENT_PRODUCT_SCOPE
+from features.ask.correction_intent_routing import (
+    CORRECTION_INTENT_EXPERIMENTAL_SCOPE,
+    CORRECTION_INTENT_PRODUCT_SCOPE,
+)
 from features.ask.engine.ask3.context import Ask3Context
 from features.ask.engine.ask3.types import ColumnInfo, SchemaInfo, TableInfo
 from features.ask.service import AskService
@@ -100,6 +103,71 @@ async def test_selected_ratio_correction_handles_typo_without_question_regex():
     assert "CAST(SUM(completed) AS DOUBLE)" in ctx.sql
     assert ctx.correction_intent_routing["selected_sql_applied"] is True
     assert ctx.correction_intent_routing["application_status"] == "validated"
+
+
+@pytest.mark.asyncio
+async def test_multi_trigger_diagnostics_report_partial_application():
+    class TwoIntents:
+        def to_dict(self):
+            return {
+                "status": "activate",
+                "verdict": "activate",
+                "selected_intent": "none",
+                "selected_intents": [
+                    "ratio_output",
+                    "all_matching_categories",
+                ],
+            }
+
+    service = AskService(
+        llm_manager=object(),
+        correction_intent_routing_enabled=True,
+        correction_intent_routing_fn=lambda **_kwargs: TwoIntents(),
+    )
+
+    ctx = await service._apply_correction_intent_routing(_context())
+
+    routing = ctx.correction_intent_routing
+    assert routing["application_status"] == "validated_partial"
+    assert routing["applied_intents"] == ["ratio_output"]
+    assert routing["unapplied_intents"] == ["all_matching_categories"]
+    assert routing["selected_sql_applied"] is True
+
+
+@pytest.mark.asyncio
+async def test_generation_change_preserves_a_selected_deferred_repair():
+    class GenerationAndStorage:
+        def to_dict(self):
+            return {
+                "status": "activate",
+                "verdict": "activate",
+                "selected_intent": "none",
+                "selected_intents": ["ratio_output", "temporal_text_storage"],
+            }
+
+    ctx = _context()
+    ctx.sql += " WHERE duration = '1:23'"
+    ctx.generated_sql = ctx.sql
+    ctx.schema_info.tables["orders"].columns["duration"] = ColumnInfo(
+        name="duration", data_type="text"
+    )
+    service = AskService(
+        llm_manager=object(),
+        correction_intent_routing_enabled=True,
+        correction_intent_routing_intent_scope=CORRECTION_INTENT_EXPERIMENTAL_SCOPE,
+        correction_intent_routing_fn=lambda **_kwargs: GenerationAndStorage(),
+        temporal_text_storage_enabled=True,
+    )
+
+    ctx = await service._apply_correction_intent_routing(ctx)
+
+    assert ctx.correction_intent_routing["application_status"] == (
+        "validated_with_deferred"
+    )
+    assert ctx.correction_intent_routing["applied_intents"] == ["ratio_output"]
+    assert ctx.correction_intent_routing["deferred_intents"] == [
+        "temporal_text_storage"
+    ]
 
 
 @pytest.mark.asyncio

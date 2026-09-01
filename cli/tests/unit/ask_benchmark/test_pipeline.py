@@ -1,3 +1,5 @@
+import asyncio
+import threading
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -460,6 +462,59 @@ def test_rdst_runner_consumes_ask_service_result_events(tmp_path: Path):
     ]
 
 
+def test_rdst_runner_keeps_one_worker_pool_for_all_cases(tmp_path: Path):
+    ctx = _rdst_context()
+    worker_state = threading.local()
+    worker_markers = []
+
+    def current_worker_marker():
+        if not hasattr(worker_state, "marker"):
+            worker_state.marker = object()
+        return worker_state.marker
+
+    class FakeAskService:
+        def __init__(self, **kwargs):
+            self.observer = kwargs["phase_observer"]
+
+        async def ask(self, _input, _options):
+            worker_markers.append(await asyncio.to_thread(current_worker_marker))
+            self.observer("schema", ctx)
+            self.observer("generate", ctx)
+            yield AskResultEvent(
+                type="result",
+                success=True,
+                sql="SELECT 1",
+                rows=[(1,)],
+                columns=["value"],
+                row_count=1,
+                execution_time_ms=1.0,
+                llm_calls=1,
+                total_tokens=10,
+            )
+
+        def abandon(self, _session_id):
+            raise AssertionError("Successful runs have no session")
+
+    second = BenchmarkCase(
+        question_id=2,
+        db_id="fixture",
+        question="Return one again",
+        evidence="",
+        gold_sql="SELECT 1",
+        difficulty="simple",
+        dialect="mysql",
+    )
+    runner = _rdst_runner(tmp_path)
+    cases, failures = runner.preflight_gold([_case(), second])
+
+    with patch("devtools.ask_benchmark.runner.AskService", FakeAskService):
+        attempts = runner.run(cases, [_spec()])
+
+    assert failures == {}
+    assert len(attempts) == 2
+    assert worker_markers[0] is worker_markers[1]
+
+
 def test_rdst_evidence_uses_same_first_class_context_as_direct(
     tmp_path: Path,
 ):
@@ -626,7 +681,8 @@ def test_rdst_runner_binds_candidate_accuracy_profile(tmp_path: Path):
     ).configuration_fingerprint(_spec())
 
 
-def test_rdst_runner_binds_candidate_v2_storage_repairs(tmp_path: Path):
+@pytest.mark.parametrize("profile", ["candidate-v2", "candidate-v3"])
+def test_rdst_runner_binds_candidate_storage_repairs(tmp_path: Path, profile: str):
     ctx = _rdst_context()
     configured = {}
 
@@ -652,7 +708,7 @@ def test_rdst_runner_binds_candidate_v2_storage_repairs(tmp_path: Path):
         def abandon(self, _session_id):
             raise AssertionError("Successful runs have no session")
 
-    runner = _rdst_runner(tmp_path, ask_accuracy_profile="candidate-v2")
+    runner = _rdst_runner(tmp_path, ask_accuracy_profile=profile)
     runner.preflight_gold([_case()])
     with patch("devtools.ask_benchmark.runner.AskService", FakeAskService):
         result = runner._run_rdst(_case(), _Adapter(_spec()))

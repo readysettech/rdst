@@ -1,0 +1,180 @@
+{
+  "freeze_id": "rdst-ask-auto-init-no-evidence-v15",
+  "supersedes": "rdst-ask-auto-init-no-evidence-v14",
+  "supersession_reason": "V15 adds candidate-v3 without changing the baseline default. Candidate-v3 retains candidate-v2 storage repairs while hardening alternate selection, entity-at-extremum projection checks, relationship-proven shared scope, multi-trigger reporting, value-location support proofs, and month-axis probe deadlines. GLM 5.3 Flash remains high reasoning and is pinned to DeepInfra through OpenRouter for the paired fixed-50 comparison.",
+  "frozen_at": "2026-09-01",
+  "benchmark_protocol_sha256": "dbbd6f79726fdd79e640002313f8858738ca448d931bb8784f495ec8629a7ce5",
+  "protocol_path_policy": "devtools.ask_benchmark.cli._benchmark_protocol_paths",
+  "track": "rdst-ask",
+  "entrypoint": "features.ask.service.AskService",
+  "dataset_revision": "f65faf4ae3b638c1fa6df1d3370c8d92c8366301",
+  "dialect": "mysql",
+  "development_partition": {
+    "revision": "bird-mini-dev-50-holdout-450-v1",
+    "size": 50,
+    "case_ids_sha256": "d4c88b91105f75c7f20b8f9a9d953035b58edd7c68b4e81c690e59345aaf63a4"
+  },
+  "holdout_partition": {
+    "size": 450,
+    "case_ids_sha256": "5089279cd73d3c314243585d72aab9cee1bce7d3f61101ef30a833c73edb0b44",
+    "opened": true,
+    "opened_by": "bird-mini-dev-opened-496-transfer-v1",
+    "eligible_for_release_holdout": false,
+    "reason": "These cases were included in the opened 496-case transfer replay. A future release qualification requires a genuinely unseen evaluation set."
+  },
+  "context": {
+    "mode": "auto-init",
+    "evidence": "none",
+    "schema_scope": "complete",
+    "schema_format_policy": "rdst-adaptive-schema-v2",
+    "context_window_policy": "provider-authoritative-lossless-compact-retry-v2",
+    "token_estimate": "none-provider-authoritative",
+    "request_body_policy": "exact-utf8-json-32-mib-limit",
+    "ai_annotations": false,
+    "value_profile_context": false
+  },
+  "interaction": {
+    "mode": "auto",
+    "policy": "deterministic-intent-stop-v2-no-llm-detector",
+    "positional_auto_selection": false
+  },
+  "generation": {
+    "attempts": 1,
+    "context_overflow_retries": 1,
+    "validation_repair_attempts": 1,
+    "completion_max_tokens": 4000,
+    "response_schema_enforcement": "prompt-embedded-json-schema-with-rdst-validation",
+    "enforce_result_limit": false,
+    "response_parser": "last-schema-matching-json-object-v3",
+    "default_accuracy_profile": "baseline",
+    "accuracy_profiles": {
+      "baseline": {
+        "correction_intent_routing": false,
+        "dual_candidate_selection": false,
+        "value_location_normalization": false,
+        "encoded_identifier_storage": false,
+        "temporal_text_storage": false,
+        "month_axis_storage": false
+      },
+      "candidate-v1": {
+        "correction_intent_routing": true,
+        "dual_candidate_selection": true,
+        "value_location_normalization": true,
+        "encoded_identifier_storage": false,
+        "temporal_text_storage": false,
+        "month_axis_storage": false
+      },
+      "candidate-v2": {
+        "correction_intent_routing": true,
+        "dual_candidate_selection": true,
+        "value_location_normalization": true,
+        "encoded_identifier_storage": true,
+        "temporal_text_storage": true,
+        "month_axis_storage": true
+      },
+      "candidate-v3": {
+        "correction_intent_routing": true,
+        "dual_candidate_selection": true,
+        "value_location_normalization": true,
+        "encoded_identifier_storage": true,
+        "temporal_text_storage": true,
+        "month_axis_storage": true,
+        "semantic_hardening": true
+      }
+    },
+    "candidate_v2_bounds": {
+      "routing_model_calls": 1,
+      "storage_repair_model_calls": 0,
+      "encoded_identifier_probe_calls": 1,
+      "temporal_probe_calls": 1,
+      "temporal_candidate_executions": 1,
+      "temporal_requires_primary_execution_success": true,
+      "temporal_requires_primary_row_count": 0,
+      "temporal_candidate_requires_nonempty_result": true,
+      "month_axis_probe_calls": 4,
+      "month_axis_candidate_executions": 1,
+      "month_axis_requires_primary_execution_success": true,
+      "month_axis_requires_primary_row_count": 0,
+      "month_axis_candidate_requires_nonempty_result": true,
+      "max_source_backed_storage_repairs_per_attempt": 1
+    },
+    "value_probe_budget": {
+      "max_calls_per_check": 2,
+      "timeout_seconds": 2,
+      "read_only": true
+    },
+    "candidate_v3_bounds": {
+      "alternate_candidates": 1,
+      "alternate_requires_same_aggregate_signature": true,
+      "alternate_requires_same_join_shape": true,
+      "alternate_requires_strict_schema_resolution": true,
+      "shared_scope_requires_relationship_on_propagated_column": true,
+      "value_location_original_predicate_support_max": 0,
+      "value_location_candidate_exact_support_min": 8,
+      "value_location_probe_timeout_seconds": 2,
+      "month_axis_probe_calls": 4,
+      "month_axis_probe_timeout_seconds": 4,
+      "max_router_activations": 2,
+      "partial_trigger_application_reported": true
+    }
+  },
+  "product_model_policy": {
+    "default_without_byok": "z-ai/glm-5.3-flash",
+    "hosted_transport": "readyset-keyservice-openrouter",
+    "hosted_reasoning_effort": "high",
+    "hosted_model_client_selectable": false,
+    "byok_provider": "anthropic",
+    "byok_default_model": "claude-sonnet-4-6",
+    "byok_model_override": "RDST_ANTHROPIC_MODEL",
+    "readyset_login_required_for_byok": false,
+    "account_ui_owner": "rdst-client",
+    "account_auth_transport": "keyservice-json-api",
+    "account_auth_method": "supabase-google-github-oauth-or-email-magic-link"
+  },
+  "baseline_model": {
+    "configuration": "claude-sonnet-4.6-subscription-medium",
+    "model": "claude-sonnet-4-6",
+    "transport": "claude-subscription",
+    "authentication": "claude-code-subscription-oauth",
+    "claude_code_version": "2.1.250",
+    "temperature": "provider-default",
+    "reasoning_effort": "medium",
+    "reasoning_effort_source": "cli_flag_and_environment",
+    "extended_thinking": true,
+    "effort_auto": false,
+    "cli_retries": 0,
+    "max_turns": 1,
+    "auxiliary_models_allowed": false
+  },
+  "context_hashes": {
+    "california_schools": "1d48bfc472ac65ebfd0eb88b807a15712aa07e666980ed37967d162ca80f8803",
+    "card_games": "a9420516333fe5f08751395af26f9328dd263f1be575ccfd99c61bee577e1ef0",
+    "codebase_community": "378e06866d571f00ace52b008d5fd6bbfe5d6d9a76ada17932e5c054ca99eda5",
+    "debit_card_specializing": "1a175c9f60a59869989e89703c8b501884c3a3e2656af586a31f8bddb51b9492",
+    "european_football_2": "ad7f8300bec61f5ff38c643da61b2ae34130ab756b194ba905361433bd4874f4",
+    "financial": "295261f33647534c9982ef52a9520df9eafab1c91f6adc11b59049c92292ac55",
+    "formula_1": "588e2d50264e12604022f2dd1ef30a8ff5a49f951e3a75c94e31edfcf70c99aa",
+    "student_club": "c95780edde2f2c31ab61bb25278a9f5dc4c3be6068abc3bd887c851662044abc",
+    "superhero": "ff909547b2ed7a8a00429e59c95c283e57dda3544efd43edae2ecd213242e0cc",
+    "thrombosis_prediction": "dfdeb82e42f58294cfeae229627a3f5abc2b3e04d4b081c890dbfeaa5176bd8b",
+    "toxicology": "c5377e8bfeb40c9660be0b27acfa1440006a76df17faadda2b0f929bc94b3e2b"
+  },
+  "database_provision": {
+    "archive_sha256": "cc48ba16838204e4e214512030cb572eeb5f7bcdd999bae4b9b6ff12ec13b92f",
+    "mysql_image": "mysql:8.4.0",
+    "mysql_image_id": "sha256:dab7049abafe3a0e12cbe5e49050cf149881c0cd9665c289e5808b9dad39c9e0",
+    "mysql_version": "8.4.0",
+    "database_prefix": "bird_",
+    "runtime_user_prefix": "rdst_bird",
+    "view_count": 75
+  },
+  "acceptance": {
+    "required_baseline_repetitions": 3,
+    "model_selection_after_freeze": true,
+    "holdout_after_model_selection": false,
+    "future_unseen_evaluation_required": true,
+    "sdk_confirmation_before_release": true,
+    "candidate_v2_must_not_regress_candidate_v1": true,
+    "candidate_v3_must_not_regress_candidate_v2": true
+  }
+}

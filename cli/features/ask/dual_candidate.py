@@ -18,14 +18,16 @@ from features.ask.prompts.ask_prompts import (
     format_provided_context_block,
     format_query_grounding_block,
 )
-from features.ask.sql_validation import validate_sql_for_ask
+from features.ask.sql_validation import (
+    validate_resolved_columns_against_schema,
+    validate_sql_for_ask,
+)
 
-DUAL_CANDIDATE_SELECTOR_VERSION = "source-faithfulness-v6-canonical-literals"
-SELECTIVE_ALTERNATE_GATE_VERSION = "selective-alternate-specific-risk-v4"
+DUAL_CANDIDATE_SELECTOR_VERSION = "source-faithfulness-v7-semantic-compatibility"
+SELECTIVE_ALTERNATE_GATE_VERSION = "selective-alternate-specific-risk-v5"
 LITERAL_GROUNDING_VERSION = "canonical-equivalent-literals-v2"
 SELECTIVE_WEAK_PREDICATE_MAX_PENALTY = 0.5
 SELECTIVE_WEAK_COMPLEX_AGGREGATE_MIN_COUNT = 2
-SELECTIVE_COLOCATED_MIN_PENALTY = 0.0
 ALTERNATE_GENERATION_MAX_TOKENS = 4000
 ALTERNATE_GENERATION_PURPOSE = "sql_generation_alternate"
 ALTERNATE_SYSTEM_PROMPT = (
@@ -48,23 +50,6 @@ _POSITIVE_PERCENT_ADJUSTMENT = re.compile(
 _NEGATIVE_PERCENT_ADJUSTMENT = re.compile(
     r"\b(?:lower|decrease(?:d)?|less|below)\b", re.IGNORECASE
 )
-_RANKING_WORDS = {
-    "top",
-    "highest",
-    "lowest",
-    "most",
-    "least",
-    "fastest",
-    "slowest",
-    "heaviest",
-    "lightest",
-    "latest",
-    "earliest",
-    "first",
-    "last",
-    "maximum",
-    "minimum",
-}
 
 
 @dataclass(frozen=True)
@@ -192,16 +177,6 @@ def _literal_is_grounded(value: object, context: str) -> bool:
     return _percent_adjustment_is_grounded(raw, normalized_context)
 
 
-def _ranking_requested(question: str) -> bool:
-    without_thresholds = re.sub(
-        r"\bat\s+(?:least|most)\b",
-        "",
-        question,
-        flags=re.IGNORECASE,
-    )
-    return bool(_words(without_thresholds) & _RANKING_WORDS)
-
-
 def _projection_shape_compatible(
     question: str,
     provided_context: str,
@@ -258,18 +233,24 @@ def _filter_predicates(tree: exp.Expression):
         parent = node.parent
         nested = False
         in_filter = False
+        in_join = False
         while parent is not None:
             if isinstance(parent, kinds):
                 nested = True
                 break
-            if isinstance(parent, (exp.Where, exp.Having)):
+            if isinstance(parent, (exp.Where, exp.Having, exp.Join)):
                 in_filter = True
+            if isinstance(parent, exp.Join):
+                in_join = True
             parent = parent.parent
         if nested or not in_filter:
             continue
+        literals = tuple(literal.this for literal in node.find_all(exp.Literal))
+        if in_join and not literals:
+            continue
         yield (
             tuple(column.name for column in node.find_all(exp.Column)),
-            tuple(literal.this for literal in node.find_all(exp.Literal)),
+            literals,
         )
 
 
@@ -278,12 +259,20 @@ def assess_candidate(
     provided_context: str,
     sql: str,
     dialect: str,
+    *,
+    matched_database_values: Any = (),
+    query_grounding_block: str = "",
 ) -> CandidateAssessment:
     read_dialect = "postgres" if dialect in {"postgres", "postgresql"} else "mysql"
     tree = sqlglot.parse_one(sql, read=read_dialect)
-    context = f"{question}\n{provided_context}"
+    context = (
+        f"{question}\n{provided_context}"
+        f"{format_query_grounding_block(query_grounding_block)}"
+        f"{format_matched_database_values_block(matched_database_values)}"
+    )
     context_words = _words(context)
-    preferred = _preferred_identifiers(provided_context)
+    provenance = f"{provided_context}\n{query_grounding_block}\n{matched_database_values or ''}"
+    preferred = _preferred_identifiers(provenance)
     unsupported_literals: list[str] = []
     weak_columns: list[str] = []
     for columns, literals in _filter_predicates(tree):
@@ -311,14 +300,16 @@ def assess_candidate(
         match.group(1).casefold().rstrip("s")
         for match in re.finditer(
             r"\b([A-Za-z][A-Za-z0-9_]*)\.[A-Za-z][A-Za-z0-9_]*",
-            provided_context,
+            provenance,
         )
     }
     table_matches = tuple(
         table for table in tables if table.casefold().rstrip("s") in dotted_table_hints
     )
-    unrequested_limit = tree.find(exp.Limit) is not None and not _ranking_requested(
-        question
+    # An unordered LIMIT can discard otherwise matching answers. An ordered LIMIT
+    # is a ranking SQL fact and must not depend on recognizing English wording.
+    unrequested_limit = (
+        tree.find(exp.Limit) is not None and tree.find(exp.Order) is None
     )
     set_operations = sum(
         isinstance(node, (exp.Union, exp.Intersect, exp.Except)) for node in tree.walk()
@@ -360,7 +351,7 @@ def _schema_table_columns(schema_info: Any) -> dict[str, set[str]]:
         table_name = str(getattr(table, "name", None) or table_key).casefold()
         columns = getattr(table, "columns", None)
         if not isinstance(columns, dict):
-            raise ValueError(f"Schema columns are unavailable for {table_name}")
+            raise TypeError(f"Schema columns are unavailable for {table_name}")
         result[table_name] = {
             str(getattr(column, "name", None) or column_key).casefold()
             for column_key, column in columns.items()
@@ -368,61 +359,21 @@ def _schema_table_columns(schema_info: Any) -> dict[str, set[str]]:
     return result
 
 
-def _columns_in_clause(clause: exp.Expression | None) -> set[str]:
-    if clause is None:
-        return set()
-    return {column.name.casefold() for column in clause.find_all(exp.Column)}
-
-
-def _co_located_join_opportunity(
-    schema_info: Any,
-    sql: str,
-    dialect: str,
-) -> bool:
-    """Detect a direct join whose answer columns all live on one source table."""
-    read_dialect = "postgres" if dialect in {"postgres", "postgresql"} else "mysql"
-    tree = sqlglot.parse_one(sql, read=read_dialect)
-    selects = list(tree.find_all(exp.Select))
-    if len(selects) != 1 or tree.find(exp.Subquery) is not None:
-        return False
-
-    select = selects[0]
-    joins = list(select.args.get("joins") or ())
-    if not joins or any(not isinstance(join.this, exp.Table) for join in joins):
-        return False
-
-    referenced_tables = [table.name.casefold() for table in tree.find_all(exp.Table)]
-    if len(referenced_tables) < 2:
-        return False
-
-    schema_columns = _schema_table_columns(schema_info)
-    referenced_schema_columns: list[set[str]] = []
-    for table_name in referenced_tables:
-        if table_name not in schema_columns:
-            raise ValueError(f"Referenced table {table_name} is absent from schema")
-        referenced_schema_columns.append(schema_columns[table_name])
-
-    projected_columns: set[str] = set()
-    for projection in select.expressions:
-        projected_columns.update(_columns_in_clause(projection))
-    if not projected_columns:
-        return False
-
-    answer_columns = set(projected_columns)
-    for clause_name in ("where", "having", "group", "order"):
-        answer_columns.update(_columns_in_clause(select.args.get(clause_name)))
-    for join in joins:
-        on_clause = join.args.get("on")
-        if on_clause is None:
-            continue
-        for predicate in on_clause.walk():
-            if isinstance(predicate, exp.Predicate) and predicate.find(exp.Literal):
-                answer_columns.update(_columns_in_clause(predicate))
-
-    matching_tables = sum(
-        answer_columns.issubset(columns) for columns in referenced_schema_columns
-    )
-    return matching_tables == 1
+def _schema_dict(schema_info: Any) -> dict[str, list[str]]:
+    tables = getattr(schema_info, "tables", None)
+    if not isinstance(tables, dict) or not tables:
+        raise ValueError("Schema information is unavailable")
+    result: dict[str, list[str]] = {}
+    for table_key, table in tables.items():
+        table_name = str(getattr(table, "name", None) or table_key)
+        columns = getattr(table, "columns", None)
+        if not isinstance(columns, dict):
+            raise TypeError(f"Schema columns are unavailable for {table_name}")
+        result[table_name] = [
+            str(getattr(column, "name", None) or column_key)
+            for column_key, column in columns.items()
+        ]
+    return result
 
 
 def alternate_generation_reasons(
@@ -432,6 +383,8 @@ def alternate_generation_reasons(
     primary_sql: str,
     dialect: str,
     schema_info: Any,
+    matched_database_values: Any = (),
+    query_grounding_block: str = "",
 ) -> tuple[str, ...]:
     """Return deterministic reasons to spend the one alternate-generation call.
 
@@ -439,7 +392,14 @@ def alternate_generation_reasons(
     safer than silently removing a candidate on a parser or schema edge case.
     """
     try:
-        primary = assess_candidate(question, provided_context, primary_sql, dialect)
+        primary = assess_candidate(
+            question,
+            provided_context,
+            primary_sql,
+            dialect,
+            matched_database_values=matched_database_values,
+            query_grounding_block=query_grounding_block,
+        )
     except Exception:
         return ("assessment-error",)
 
@@ -455,14 +415,41 @@ def alternate_generation_reasons(
         reasons.append("unrequested-limit")
     try:
         _schema_table_columns(schema_info)
-        if (
-            primary.penalty >= SELECTIVE_COLOCATED_MIN_PENALTY
-            and _co_located_join_opportunity(schema_info, primary_sql, dialect)
-        ):
-            reasons.append("co-located-join-opportunity")
     except Exception:
         reasons.append("schema-assessment-error")
     return tuple(reasons)
+
+
+def _aggregate_projection_signature(
+    tree: exp.Expression,
+) -> tuple[tuple[str, ...], ...]:
+    select = tree.find(exp.Select)
+    if select is None:
+        return ()
+    result: list[tuple[str, ...]] = []
+    for projection in select.expressions:
+        aggregates: list[str] = []
+        for aggregate in projection.find_all(exp.AggFunc):
+            argument = aggregate.this
+            distinct = isinstance(argument, exp.Distinct)
+            star = isinstance(argument, exp.Star) or (
+                isinstance(argument, exp.Distinct)
+                and any(isinstance(item, exp.Star) for item in argument.expressions)
+            )
+            aggregates.append(f"{aggregate.key.casefold()}:{int(distinct)}:{int(star)}")
+        result.append(tuple(aggregates))
+    return tuple(result)
+
+
+def _join_shape(tree: exp.Expression) -> tuple[tuple[str, str, str], ...]:
+    return tuple(
+        (
+            str(join.args.get("side") or "").casefold(),
+            str(join.args.get("kind") or "inner").casefold(),
+            str(join.args.get("method") or "").casefold(),
+        )
+        for join in tree.find_all(exp.Join)
+    )
 
 
 def select_candidate(
@@ -472,23 +459,43 @@ def select_candidate(
     primary_sql: str,
     alternate_sql: str,
     dialect: str,
+    matched_database_values: Any = (),
+    query_grounding_block: str = "",
 ) -> tuple[str, dict[str, Any]]:
-    primary = assess_candidate(question, provided_context, primary_sql, dialect)
-    alternate = assess_candidate(question, provided_context, alternate_sql, dialect)
-    aggregation_shape_matches = bool(primary.aggregate_count) == bool(
-        alternate.aggregate_count
+    primary = assess_candidate(
+        question,
+        provided_context,
+        primary_sql,
+        dialect,
+        matched_database_values=matched_database_values,
+        query_grounding_block=query_grounding_block,
+    )
+    alternate = assess_candidate(
+        question,
+        provided_context,
+        alternate_sql,
+        dialect,
+        matched_database_values=matched_database_values,
+        query_grounding_block=query_grounding_block,
     )
     read_dialect = "postgres" if dialect in {"postgres", "postgresql"} else "mysql"
+    primary_tree = sqlglot.parse_one(primary_sql, read=read_dialect)
+    alternate_tree = sqlglot.parse_one(alternate_sql, read=read_dialect)
+    aggregation_shape_matches = _aggregate_projection_signature(
+        primary_tree
+    ) == _aggregate_projection_signature(alternate_tree)
+    join_shape_matches = _join_shape(primary_tree) == _join_shape(alternate_tree)
     projection_shape_matches = _projection_shape_compatible(
         question,
         provided_context,
-        sqlglot.parse_one(primary_sql, read=read_dialect),
-        sqlglot.parse_one(alternate_sql, read=read_dialect),
+        primary_tree,
+        alternate_tree,
     )
     selected = (
         "primary"
         if (
             not aggregation_shape_matches
+            or not join_shape_matches
             or not projection_shape_matches
             or primary.penalty <= alternate.penalty
         )
@@ -499,6 +506,7 @@ def select_candidate(
         "status": "selected",
         "selected": selected,
         "aggregation_shape_matches": aggregation_shape_matches,
+        "join_shape_matches": join_shape_matches,
         "projection_shape_matches": projection_shape_matches,
         "primary": asdict(primary),
         "alternate": asdict(alternate),
@@ -560,6 +568,8 @@ def generate_and_select(ctx: Any, llm_manager: Any) -> Any:
         primary_sql=primary_sql,
         dialect=ctx.db_type,
         schema_info=getattr(ctx, "schema_info", None),
+        matched_database_values=getattr(ctx, "matched_database_values", ()),
+        query_grounding_block=getattr(ctx, "query_grounding_block", ""),
     )
     gate_diagnostics: dict[str, Any] = {
         "alternate_generation_gate_version": SELECTIVE_ALTERNATE_GATE_VERSION,
@@ -570,7 +580,14 @@ def generate_and_select(ctx: Any, llm_manager: Any) -> Any:
     diagnostics.update(gate_diagnostics)
     try:
         diagnostics["primary"] = asdict(
-            assess_candidate(question, ctx.provided_context, primary_sql, ctx.db_type)
+            assess_candidate(
+                question,
+                ctx.provided_context,
+                primary_sql,
+                ctx.db_type,
+                matched_database_values=getattr(ctx, "matched_database_values", ()),
+                query_grounding_block=getattr(ctx, "query_grounding_block", ""),
+            )
         )
     except Exception as exc:
         diagnostics["primary_assessment_error_kind"] = type(exc).__name__
@@ -614,12 +631,27 @@ def generate_and_select(ctx: Any, llm_manager: Any) -> Any:
             ctx.dual_candidate_selection = diagnostics
             return ctx
         alternate_sql = validation.get("validated_sql") or alternate_sql
+        schema = _schema_dict(getattr(ctx, "schema_info", None))
+        resolution = validate_resolved_columns_against_schema(
+            alternate_sql,
+            schema,
+            ctx.db_type,
+        )
+        if not resolution.get("is_valid"):
+            diagnostics["status"] = "alternate_schema_invalid"
+            diagnostics["alternate_schema_error"] = str(
+                resolution.get("error_message") or "column resolution failed"
+            )
+            ctx.dual_candidate_selection = diagnostics
+            return ctx
         selected, diagnostics = select_candidate(
             question=question,
             provided_context=ctx.provided_context,
             primary_sql=primary_sql,
             alternate_sql=alternate_sql,
             dialect=ctx.db_type,
+            matched_database_values=getattr(ctx, "matched_database_values", ()),
+            query_grounding_block=getattr(ctx, "query_grounding_block", ""),
         )
         diagnostics["execution_feedback"] = False
         diagnostics.update(gate_diagnostics)
@@ -645,9 +677,8 @@ __all__ = [
     "DUAL_CANDIDATE_SELECTOR_VERSION",
     "LITERAL_GROUNDING_VERSION",
     "SELECTIVE_ALTERNATE_GATE_VERSION",
-    "SELECTIVE_WEAK_PREDICATE_MAX_PENALTY",
     "SELECTIVE_WEAK_COMPLEX_AGGREGATE_MIN_COUNT",
-    "SELECTIVE_COLOCATED_MIN_PENALTY",
+    "SELECTIVE_WEAK_PREDICATE_MAX_PENALTY",
     "alternate_generation_reasons",
     "assess_candidate",
     "generate_and_select",

@@ -110,6 +110,36 @@ class TestCollectTargetSchema:
         )
         assert "Unsupported" in result
 
+    def test_mysql_schema_connection_does_not_override_resolved_database(self):
+        params = {
+            "host": "localhost",
+            "port": 3306,
+            "user": "testuser",
+            "password": "secret",
+            "database": "testdb",
+        }
+        connection = MagicMock()
+
+        with (
+            patch.object(
+                schema_collector,
+                "resolve_connection_params",
+                return_value=params,
+            ),
+            patch.object(
+                schema_collector,
+                "create_mysql_connection_from_params",
+                return_value=connection,
+            ) as connect,
+        ):
+            result = schema_collector._collect_mysql_schema(
+                set(), {"engine": "mysql"}
+            )
+
+        connect.assert_called_once_with(params, connect_timeout=5)
+        connection.close.assert_called_once_with()
+        assert result == "Schema information: No schema found for referenced tables"
+
 
 class TestReadysetCacheability:
     """Tests for Readyset cacheability checking."""

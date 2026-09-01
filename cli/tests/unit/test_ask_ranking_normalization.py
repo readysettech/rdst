@@ -168,6 +168,20 @@ def test_only_order_metric_projection_is_unchanged():
     assert diagnostics["reason"] == "no-entity-projection-remains"
 
 
+def test_aggregate_only_projection_is_not_rewritten_as_an_entity_query():
+    original = "SELECT COUNT(*) FROM school ORDER BY enrollment DESC LIMIT 1"
+
+    sql, diagnostics = normalize_extremum_entity_sql(
+        question="Which school has the highest enrollment?",
+        sql=original,
+        dialect="mysql",
+        intent_hints=("entity_at_extremum",),
+    )
+
+    assert sql == original
+    assert diagnostics["reason"] == "no-entity-projection-remains"
+
+
 def test_existing_scalar_max_filter_drops_unrequested_metric_projection():
     original = (
         "SELECT s.School, f.`Enrollment (K-12)` FROM schools s JOIN frpm f "

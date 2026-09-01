@@ -15,7 +15,7 @@ def test_default_model_matrix_has_controlled_routes():
 
     assert len(specs) == 20
     assert specs["glm-5.3-flash-high"].model == "z-ai/glm-5.3-flash"
-    assert specs["glm-5.3-flash-high"].provider_order == ("z-ai",)
+    assert specs["glm-5.3-flash-high"].provider_order == ("deepinfra",)
     assert specs["glm-5.3-flash-high"].reasoning_effort == "high"
     assert specs["glm-5.3-flash-high"].structured_output_mode == "prompted"
     assert specs["glm-5.3-flash-high"].provider_retains_prompts is False

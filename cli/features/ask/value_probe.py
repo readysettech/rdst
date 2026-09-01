@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
 
 from features.ask.engine.ask3.phases.execute import _execute_mysql, _execute_postgres
@@ -12,6 +13,8 @@ from features.ask.sql_validation import validate_sql_for_ask
 
 VALUE_PROBE_MAX_CALLS = 2
 VALUE_PROBE_TIMEOUT_SECONDS = 2
+MONTH_AXIS_PROBE_MAX_CALLS = 4
+MONTH_AXIS_PROBE_TIMEOUT_SECONDS = 4
 
 
 def _failed_probe(error: str, error_kind: str) -> dict[str, Any]:
@@ -29,21 +32,55 @@ def create_value_probe_executor(
     db_executor: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
 ) -> Callable[[str, dict[str, Any]], dict[str, Any]]:
     """Create a two-call, read-only executor for one value-location check."""
+    return _create_bounded_probe_executor(
+        ctx,
+        db_executor,
+        max_calls=VALUE_PROBE_MAX_CALLS,
+        timeout_seconds=VALUE_PROBE_TIMEOUT_SECONDS,
+        diagnostic_attribute="db_probe_diagnostics",
+        version="ask-value-probe-budget-v1",
+    )
+
+
+def create_month_axis_probe_executor(
+    ctx: Any,
+    db_executor: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
+) -> Callable[[str, dict[str, Any]], dict[str, Any]]:
+    """Create a four-call executor with one shared month-axis deadline."""
+    return _create_bounded_probe_executor(
+        ctx,
+        db_executor,
+        max_calls=MONTH_AXIS_PROBE_MAX_CALLS,
+        timeout_seconds=MONTH_AXIS_PROBE_TIMEOUT_SECONDS,
+        diagnostic_attribute="month_axis_probe_diagnostics",
+        version="ask-month-axis-probe-budget-v1",
+    )
+
+
+def _create_bounded_probe_executor(
+    ctx: Any,
+    db_executor: Callable[[str, dict[str, Any]], dict[str, Any]] | None,
+    *,
+    max_calls: int,
+    timeout_seconds: float,
+    diagnostic_attribute: str,
+    version: str,
+) -> Callable[[str, dict[str, Any]], dict[str, Any]]:
     diagnostics = {
-        "version": "ask-value-probe-budget-v1",
-        "max_calls": VALUE_PROBE_MAX_CALLS,
-        "timeout_seconds": VALUE_PROBE_TIMEOUT_SECONDS,
+        "version": version,
+        "max_calls": max_calls,
+        "timeout_seconds": timeout_seconds,
         "calls": 0,
         "successful_calls": 0,
         "failed_calls": 0,
         "blocked_calls": 0,
         "exhausted": False,
     }
-    ctx.db_probe_diagnostics = diagnostics
-    deadline = time.monotonic() + VALUE_PROBE_TIMEOUT_SECONDS
+    setattr(ctx, diagnostic_attribute, diagnostics)
+    deadline = time.monotonic() + timeout_seconds
 
     def execute(sql: str, target_config: dict[str, Any]) -> dict[str, Any]:
-        if diagnostics["calls"] >= VALUE_PROBE_MAX_CALLS:
+        if diagnostics["calls"] >= max_calls:
             diagnostics["blocked_calls"] += 1
             diagnostics["exhausted"] = True
             return _failed_probe(
@@ -114,14 +151,17 @@ def create_value_probe_executor(
             diagnostics["successful_calls"] += 1
         else:
             diagnostics["failed_calls"] += 1
-        diagnostics["exhausted"] = diagnostics["calls"] >= VALUE_PROBE_MAX_CALLS
+        diagnostics["exhausted"] = diagnostics["calls"] >= max_calls
         return result
 
     return execute
 
 
 __all__ = [
+    "MONTH_AXIS_PROBE_MAX_CALLS",
+    "MONTH_AXIS_PROBE_TIMEOUT_SECONDS",
     "VALUE_PROBE_MAX_CALLS",
     "VALUE_PROBE_TIMEOUT_SECONDS",
+    "create_month_axis_probe_executor",
     "create_value_probe_executor",
 ]

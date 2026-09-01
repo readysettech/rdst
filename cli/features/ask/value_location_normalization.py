@@ -4,18 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import sqlglot
 from sqlglot import exp
 
 from shared.db_connection import quote_identifier
 
-VALUE_LOCATION_NORMALIZER_VERSION = "ambiguous-exact-value-location-v2"
+VALUE_LOCATION_NORMALIZER_VERSION = "ambiguous-exact-value-location-v3"
 MAX_SUPPORT = 101
-MAX_SAMPLE_ROWS = 10_000
 MIN_STRONG_SUPPORT = 8
-MIN_SUPPORT_RATIO = 4
 
 _TEXT_TYPES = frozenset({"char", "enum", "json", "string", "text", "varchar"})
 _PARTIAL_CUES = re.compile(
@@ -113,13 +112,14 @@ def _support_query(
     current_sql = quote_identifier(columns[0], engine)
     sibling_sql = quote_identifier(columns[1], engine)
     literal_sql = exp.Literal.string(literal).sql(dialect=read_dialect)
+    pattern_sql = exp.Literal.string(f"%{literal}%").sql(dialect=read_dialect)
     return (
-        "SELECT COALESCE(SUM(CASE WHEN _current = "
-        f"{literal_sql} THEN 1 ELSE 0 END), 0), "
-        "COALESCE(SUM(CASE WHEN _sibling = "
-        f"{literal_sql} THEN 1 ELSE 0 END), 0) FROM (SELECT "
-        f"{current_sql} AS _current, {sibling_sql} AS _sibling FROM {table_sql} "
-        f"LIMIT {MAX_SAMPLE_ROWS}) AS _rdst_value_sample"
+        "SELECT (SELECT COUNT(*) FROM (SELECT 1 FROM "
+        f"{table_sql} WHERE {current_sql} LIKE {pattern_sql} LIMIT 1) "
+        "AS _rdst_current_support), "
+        "(SELECT COUNT(*) FROM (SELECT 1 FROM "
+        f"{table_sql} WHERE {sibling_sql} = {literal_sql} LIMIT {MAX_SUPPORT}) "
+        "AS _rdst_sibling_support)"
     )
 
 
@@ -249,10 +249,7 @@ def normalize_ambiguous_value_location_sql(
         diagnostics["reason"] = "database-probe-failed"
         return sql, diagnostics
     current_support, sibling_support = supports
-    if not (
-        sibling_support >= MIN_STRONG_SUPPORT
-        and sibling_support >= max(1, current_support) * MIN_SUPPORT_RATIO
-    ):
+    if current_support != 0 or sibling_support < MIN_STRONG_SUPPORT:
         diagnostics["reason"] = "candidate-support-not-dominant"
         return sql, diagnostics
 
@@ -267,7 +264,7 @@ def normalize_ambiguous_value_location_sql(
     diagnostics.update(
         {
             "status": "normalized",
-            "selection_policy": "equivalent-field-dominant-exact-support-v1",
+            "selection_policy": "original-predicate-absent-and-sibling-exact-v2",
             "input_sql_sha256": hashlib.sha256(sql.encode()).hexdigest(),
             "output_sql_sha256": hashlib.sha256(normalized.encode()).hexdigest(),
         }
@@ -294,7 +291,6 @@ def normalize_context(ctx: Any, db_executor: Callable[..., Any] | None) -> Any:
 
 
 __all__ = [
-    "MAX_SAMPLE_ROWS",
     "VALUE_LOCATION_NORMALIZER_VERSION",
     "normalize_ambiguous_value_location_sql",
     "normalize_context",

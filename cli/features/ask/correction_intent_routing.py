@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from itertools import combinations
 from time import perf_counter
@@ -27,12 +27,12 @@ from .encoded_identifier_storage import encoded_identifier_shape
 from .month_axis_storage import month_axis_storage_shape
 from .temporal_text_storage import temporal_text_storage_shape
 
-CORRECTION_INTENT_ROUTING_VERSION = "correction-intent-routing-v16"
+CORRECTION_INTENT_ROUTING_VERSION = "correction-intent-routing-v17"
 CORRECTION_INTENT_ROUTING_PROMPT_VERSION = "correction-intent-routing-prompt-v12"
 CORRECTION_INTENT_ROUTING_MAX_TOKENS = 800
 CORRECTION_INTENT_ROUTING_MAX_ACTIVATIONS = 2
 CORRECTION_INTENT_ROUTING_PURPOSE = "correction_intent_routing"
-CORRECTION_INTENT_ACTIONABILITY_VERSION = "correction-intent-application-v1"
+CORRECTION_INTENT_ACTIONABILITY_VERSION = "correction-intent-application-v2"
 
 _GENERATION_CORRECTION_INTENTS = (
     "percentage_output",
@@ -1090,10 +1090,26 @@ def _has_all_matching_categories_shape(tree: exp.Select) -> bool:
 
 def _entity_extremum_shape(tree: exp.Select) -> tuple[str, ...] | None:
     order = tree.args.get("order")
+    ordered_column = (
+        _unwrap(order.expressions[0].this)
+        if order is not None and len(order.expressions) == 1
+        else None
+    )
+    has_entity_projection = isinstance(ordered_column, exp.Column) and any(
+        projection.find(exp.AggFunc) is None
+        and any(
+            column.name.casefold() != ordered_column.name.casefold()
+            or (column.table or "").casefold()
+            != (ordered_column.table or "").casefold()
+            for column in projection.find_all(exp.Column)
+        )
+        for projection in tree.expressions
+    )
     if (
         order is not None
         and len(order.expressions) == 1
-        and isinstance(_unwrap(order.expressions[0].this), exp.Column)
+        and isinstance(ordered_column, exp.Column)
+        and has_entity_projection
         and not any(
             tree.args.get(key) is not None
             for key in (

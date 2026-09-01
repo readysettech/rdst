@@ -12,7 +12,7 @@ from sqlglot import exp
 
 from features.ask.correction_intent_state import selected_correction_intents
 
-EXTREMUM_ENTITY_NORMALIZER_VERSION = "unbounded-extremum-entity-v5"
+EXTREMUM_ENTITY_NORMALIZER_VERSION = "unbounded-extremum-entity-v6"
 
 _ENTITY_QUESTION = re.compile(r"^\s*(?:which|who)\b", re.IGNORECASE)
 _SUPERLATIVE = re.compile(
@@ -284,6 +284,18 @@ def normalize_extremum_entity_sql(
     order_expression = ordered.this
     if not isinstance(order_expression, exp.Column):
         diagnostics["reason"] = "non-column-order-expression"
+        return sql, diagnostics
+    if not any(
+        projection.find(exp.AggFunc) is None
+        and any(
+            column.name.casefold() != order_expression.name.casefold()
+            or (column.table or "").casefold()
+            != (order_expression.table or "").casefold()
+            for column in projection.find_all(exp.Column)
+        )
+        for projection in tree.expressions
+    ):
+        diagnostics["reason"] = "no-entity-projection-remains"
         return sql, diagnostics
     expected_kind = _question_extremum_kind(question)
     ordered_kind = "maximum" if ordered.args.get("desc") else "minimum"

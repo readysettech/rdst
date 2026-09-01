@@ -39,7 +39,7 @@ def schema():
 def dominant_sibling_executor(sql, _config):
     return {
         "success": True,
-        "rows": [[1, 101]],
+        "rows": [[0, 101]],
         "columns": ["current_support", "sibling_support"],
     }
 
@@ -93,7 +93,7 @@ def test_relocates_product_category_to_dominant_categories_column():
     )
 
     def executor(sql, _config):
-        return {"success": True, "rows": [[1, 101]]}
+        return {"success": True, "rows": [[0, 101]]}
 
     sql, diagnostics = normalize_ambiguous_value_location_sql(
         question="Which active products are in the Hardware category?",
@@ -175,18 +175,28 @@ def test_postgres_canonical_string_columns_are_eligible():
     assert "c.types = 'Creature'" in sql
 
 
-def test_support_probe_samples_a_bounded_number_of_rows_once():
+def test_support_probe_checks_original_predicate_and_bounds_returned_support():
     calls = []
 
     def executor(sql, _config):
         calls.append(sql)
-        return {"success": True, "rows": [[1, 101]]}
+        return {"success": True, "rows": [[0, 101]]}
 
     _, diagnostics = normalize(executor=executor)
 
     assert diagnostics["probe_count"] == 1
     assert len(calls) == 1
-    assert "LIMIT 10000" in calls[0]
+    assert "LIKE '%Creature%' LIMIT 1" in calls[0]
+    assert "`types` = 'Creature' LIMIT 101" in calls[0]
+
+
+def test_existing_original_like_support_prevents_relocation():
+    sql, diagnostics = normalize(
+        executor=lambda *_: {"success": True, "rows": [[1, 101]]}
+    )
+
+    assert sql == Q412_SQL
+    assert diagnostics["reason"] == "candidate-support-not-dominant"
 
 
 def test_probe_failure_is_fail_open():

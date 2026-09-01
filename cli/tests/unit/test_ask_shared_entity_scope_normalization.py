@@ -7,6 +7,7 @@ from features.ask.shared_entity_scope_normalization import (
     normalize_context,
     normalize_shared_entity_scope_sql,
 )
+from features.schema.semantic_models import Relationship
 
 QUESTION = (
     "How often does account number 3 request an account statement to be "
@@ -41,6 +42,12 @@ def schema(*, target_type="int"):
                     "account_id": ColumnInfo("account_id", "int"),
                     "frequency": ColumnInfo("frequency", "text"),
                 },
+                relationships=[
+                    Relationship(
+                        target_table="order",
+                        join_pattern="account.account_id = order.account_id",
+                    )
+                ],
             ),
             "order": TableInfo(
                 name="order",
@@ -102,6 +109,12 @@ def test_propagates_tenant_scope_across_invoice_and_payment_tables():
                     "tenant_id": ColumnInfo("tenant_id", "int"),
                     "currency": ColumnInfo("currency", "text"),
                 },
+                relationships=[
+                    Relationship(
+                        target_table="payments",
+                        join_pattern="invoices.tenant_id = payments.tenant_id",
+                    )
+                ],
             ),
             "payments": TableInfo(
                 name="payments",
@@ -321,6 +334,56 @@ def test_missing_or_incompatible_shared_schema_column_is_unchanged():
     del missing.tables["order"].columns["account_id"]
     sql, diagnostics = normalize(schema_info=missing)
     assert sql == SQL
+    assert diagnostics["reason"] == "no-eligible-shared-scope"
+
+
+def test_same_named_status_columns_without_relationship_proof_are_unchanged():
+    unrelated_schema = SchemaInfo(
+        target="billing",
+        db_type="mysql",
+        tables={
+            "customers": TableInfo(
+                name="customers",
+                columns={
+                    "status": ColumnInfo("status", "text"),
+                    "name": ColumnInfo("name", "text"),
+                },
+                relationships=[
+                    Relationship(
+                        target_table="payments",
+                        join_pattern="customers.customer_id = payments.customer_id",
+                    )
+                ],
+            ),
+            "payments": TableInfo(
+                name="payments",
+                columns={
+                    "status": ColumnInfo("status", "text"),
+                    "customer_id": ColumnInfo("customer_id", "int"),
+                    "method": ColumnInfo("method", "text"),
+                    "amount": ColumnInfo("amount", "double"),
+                },
+            ),
+        },
+    )
+    original = (
+        "SELECT (SELECT name FROM customers WHERE status = 'active') AS name, "
+        "(SELECT method FROM payments GROUP BY method HAVING SUM(amount) = 900) "
+        "AS method"
+    )
+
+    normalized, diagnostics = normalize_shared_entity_scope_sql(
+        question=(
+            "For active customers, return the customer name and payment method "
+            "whose total is 900."
+        ),
+        sql=original,
+        dialect="mysql",
+        schema_info=unrelated_schema,
+        intent_hints=("shared_scope_all_answers",),
+    )
+
+    assert normalized == original
     assert diagnostics["reason"] == "no-eligible-shared-scope"
 
     sql, diagnostics = normalize(schema_info=schema(target_type="varchar"))

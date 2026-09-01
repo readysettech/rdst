@@ -12,7 +12,7 @@ from sqlglot import exp
 
 from features.ask.correction_intent_state import selected_correction_intents
 
-ALL_ROWS_AGGREGATE_NORMALIZER_VERSION = "all-rows-aggregate-domain-v1"
+ALL_ROWS_AGGREGATE_NORMALIZER_VERSION = "all-rows-aggregate-domain-v2"
 
 _ALL_ROWS = re.compile(r"\ball\b", re.IGNORECASE)
 _DOMAIN_EXCLUSION_INTENT = re.compile(
@@ -47,14 +47,15 @@ def _flatten_and(expression: exp.Expression) -> list[exp.Expression]:
 
 def _is_strict_positive_filter(
     expression: exp.Expression,
-    column_name: str,
+    aggregate_column: exp.Column,
 ) -> bool:
     if not isinstance(expression, exp.GT):
         return False
     left, right = expression.this, expression.expression
     if (
         not isinstance(left, exp.Column)
-        or left.name.casefold() != column_name.casefold()
+        or left.name.casefold() != aggregate_column.name.casefold()
+        or (left.table or "").casefold() != (aggregate_column.table or "").casefold()
     ):
         return False
     return bool(
@@ -130,7 +131,7 @@ def normalize_all_rows_aggregate_sql(
     removable = [
         expression
         for expression in conjuncts
-        if _is_strict_positive_filter(expression, column_name)
+        if _is_strict_positive_filter(expression, projection.this)
     ]
     if len(removable) != 1:
         diagnostics["reason"] = (

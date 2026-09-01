@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from features.ask.engine.ask3.context import Ask3Context
 from features.ask.engine.ask3.types import ColumnInfo, SchemaInfo, TableInfo
 from features.ask.service import AskService
-from features.ask.value_probe import create_value_probe_executor
+from features.ask.value_probe import (
+    create_month_axis_probe_executor,
+    create_value_probe_executor,
+)
 
 
 def test_value_probe_allows_two_read_only_calls_then_stops():
@@ -46,7 +51,7 @@ def test_value_probe_rejects_writes_before_executor():
 @pytest.mark.asyncio
 async def test_service_keeps_a_valid_dominant_sibling_rewrite():
     def database(sql, _config):
-        assert "LIMIT 10000" in sql
+        assert "LIKE '%Hardware%' LIMIT 1" in sql
         return {
             "success": True,
             "rows": [[0, 20]],
@@ -88,6 +93,45 @@ async def test_service_keeps_a_valid_dominant_sibling_rewrite():
     assert "categories = 'Hardware'" in ctx.sql
     assert ctx.value_location_normalization["status"] == "normalized"
     assert ctx.db_probe_diagnostics["calls"] == 1
+
+
+def test_month_axis_probe_allows_four_calls_then_stops():
+    calls = []
+
+    def database(sql, _config):
+        calls.append(sql)
+        return {"success": True, "rows": [[1]], "columns": ["count"]}
+
+    ctx = Ask3Context(question="q", target="test", db_type="mysql")
+    probe = create_month_axis_probe_executor(ctx, database)
+
+    for _ in range(4):
+        assert probe("SELECT COUNT(*) FROM t", {})["success"] is True
+    blocked = probe("SELECT COUNT(*) FROM t", {})
+
+    assert blocked["error_kind"] == "probe_budget_exhausted"
+    assert len(calls) == 4
+    assert ctx.month_axis_probe_diagnostics["blocked_calls"] == 1
+
+
+def test_month_axis_probe_enforces_one_shared_deadline(monkeypatch):
+    monkeypatch.setattr(
+        "features.ask.value_probe.MONTH_AXIS_PROBE_TIMEOUT_SECONDS",
+        0.01,
+    )
+
+    def slow_database(_sql, _config):
+        time.sleep(0.1)
+        return {"success": True, "rows": [[1]], "columns": ["count"]}
+
+    ctx = Ask3Context(question="q", target="test", db_type="mysql")
+    probe = create_month_axis_probe_executor(ctx, slow_database)
+
+    result = probe("SELECT COUNT(*) FROM t", {})
+
+    assert result["success"] is False
+    assert result["error_kind"] == "probe_timeout"
+    assert ctx.month_axis_probe_diagnostics["failed_calls"] == 1
 
 
 @pytest.mark.asyncio

@@ -209,6 +209,61 @@ def test_aggregation_shape_disagreement_keeps_primary():
     assert diagnostics["aggregation_shape_matches"] is False
 
 
+def test_different_aggregate_functions_keep_primary():
+    selected, diagnostics = select_candidate(
+        question="What is the total value?",
+        provided_context="",
+        primary_sql="SELECT SUM(value) FROM measurement LIMIT 1",
+        alternate_sql="SELECT AVG(value) FROM measurement",
+        dialect="mysql",
+    )
+
+    assert selected == "primary"
+    assert diagnostics["aggregation_shape_matches"] is False
+
+
+def test_alternate_cannot_remove_a_join():
+    selected, diagnostics = select_candidate(
+        question="List active customer names.",
+        provided_context="active refers to status = 'active'",
+        primary_sql=(
+            "SELECT c.name FROM customer c JOIN account a ON a.customer_id = c.id "
+            "WHERE a.status = 'active' LIMIT 1"
+        ),
+        alternate_sql="SELECT name FROM customer LIMIT 1",
+        dialect="mysql",
+    )
+
+    assert selected == "primary"
+    assert diagnostics["join_shape_matches"] is False
+
+
+def test_matched_database_values_ground_a_primary_literal():
+    assessment = assess_candidate(
+        question="List active customers.",
+        provided_context="",
+        sql="SELECT name FROM customer WHERE status = 'Active'",
+        dialect="mysql",
+        matched_database_values="- 'Active': customer.status",
+    )
+
+    assert assessment.unsupported_literals == ()
+
+
+def test_ordered_limit_is_language_independent():
+    assessment = assess_candidate(
+        question="Muestra los tres clientes con más pedidos.",
+        provided_context="",
+        sql=(
+            "SELECT customer_id, COUNT(*) AS orders FROM purchase "
+            "GROUP BY customer_id ORDER BY orders DESC LIMIT 3"
+        ),
+        dialect="mysql",
+    )
+
+    assert assessment.unrequested_limit is False
+
+
 def test_generation_selects_alternate_and_records_call():
     ctx = FakeContext(
         sql="SELECT name FROM person LIMIT 1",
@@ -220,6 +275,7 @@ def test_generation_selects_alternate_and_records_call():
         conversation_context="",
         db_type="mysql",
         schema_formatted="Table person: name text\n",
+        schema_info=_schema(person=("name",)),
         query_grounding_block="",
         matched_database_values=(),
         calls=[],
@@ -253,6 +309,30 @@ def test_invalid_alternate_fails_open():
     result = generate_and_select(ctx, FakeManager("DELETE FROM person"))
     assert result.sql == "SELECT name FROM person"
     assert result.dual_candidate_selection["status"] == "alternate_error"
+
+
+def test_schema_invalid_alternate_keeps_valid_primary():
+    ctx = FakeContext(
+        sql="SELECT name FROM person LIMIT 1",
+        generated_sql="SELECT name FROM person LIMIT 1",
+        sql_explanation="primary",
+        question="List names.",
+        refined_question="",
+        provided_context="",
+        conversation_context="",
+        db_type="mysql",
+        schema_formatted="Table person: name text\n",
+        schema_info=_schema(person=("name",)),
+        query_grounding_block="",
+        matched_database_values=(),
+        calls=[],
+        dual_candidate_selection={},
+    )
+
+    result = generate_and_select(ctx, FakeManager("SELECT missing FROM person"))
+
+    assert result.sql == "SELECT name FROM person LIMIT 1"
+    assert result.dual_candidate_selection["status"] == "alternate_schema_invalid"
 
 
 def test_safe_primary_skips_alternate_generation():
@@ -377,7 +457,7 @@ def test_gate_skips_necessary_join_keys_despite_high_penalty():
     assert reasons == ()
 
 
-def test_gate_generates_for_co_located_join_opportunity():
+def test_gate_does_not_generate_solely_to_remove_a_co_located_join():
     reasons = alternate_generation_reasons(
         question="List foreign names and languages.",
         provided_context="",
@@ -391,7 +471,7 @@ def test_gate_generates_for_co_located_join_opportunity():
             foreign_data=("card_id", "name", "language", "set_id"),
         ),
     )
-    assert "co-located-join-opportunity" in reasons
+    assert reasons == ()
 
 
 def test_gate_skips_co_located_join_when_primary_is_strongly_evidence_grounded():
@@ -443,6 +523,20 @@ def test_gate_counts_literal_filters_inside_join_conditions():
         ),
     )
     assert reasons == ()
+
+
+def test_join_condition_literal_uses_the_same_grounding_rules():
+    assessment = assess_candidate(
+        question="List hero names.",
+        provided_context="",
+        sql=(
+            "SELECT s.superhero_name FROM superhero AS s "
+            "JOIN colour AS c ON s.eye_colour_id = c.id AND c.colour = 'Black'"
+        ),
+        dialect="mysql",
+    )
+
+    assert assessment.unsupported_literals == ("Black",)
 
 
 def test_gate_does_not_treat_count_star_as_co_located_projection():

@@ -91,6 +91,18 @@ def test_unrelated_positive_filter_is_preserved():
     assert diagnostics["reason"] == "no-unsupported-positive-domain-filter"
 
 
+def test_same_named_column_on_another_table_is_preserved():
+    original = (
+        "SELECT AVG(s.weight_kg) FROM superhero s JOIN gear g "
+        "ON s.gear_id = g.id WHERE g.weight_kg > 0"
+    )
+
+    sql, diagnostics = normalize(original)
+
+    assert sql == original
+    assert diagnostics["reason"] == "no-unsupported-positive-domain-filter"
+
+
 def test_or_predicate_is_not_treated_as_top_level_conjunct():
     original = SQL.replace(
         "g.gender = 'Female' AND s.weight_kg > 0",

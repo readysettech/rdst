@@ -105,6 +105,22 @@ def test_run_parser_accepts_candidate_v2_ask_accuracy_profile():
     assert args.ask_accuracy_profile == "candidate-v2"
 
 
+def test_run_parser_accepts_candidate_v3_ask_accuracy_profile():
+    args = cli.build_parser().parse_args(
+        [
+            "run",
+            "--models",
+            "glm-5.3-flash-high",
+            "--track",
+            "rdst-ask",
+            "--ask-accuracy-profile",
+            "candidate-v3",
+        ]
+    )
+
+    assert args.ask_accuracy_profile == "candidate-v3"
+
+
 def test_run_parser_accepts_compact_v2_schema_format():
     args = cli.build_parser().parse_args(
         [
@@ -150,10 +166,10 @@ def test_protocol_fingerprint_covers_every_runtime_sql_normalizer():
 
 
 def test_frozen_pipeline_receipt_matches_current_protocol():
-    receipt_path = Path(cli.__file__).with_name("frozen_pipeline_v14.json")
+    receipt_path = Path(cli.__file__).with_name("frozen_pipeline_v15.json")
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
 
-    assert receipt["freeze_id"] == "rdst-ask-auto-init-no-evidence-v14"
+    assert receipt["freeze_id"] == "rdst-ask-auto-init-no-evidence-v15"
     assert receipt["benchmark_protocol_sha256"] == cli._benchmark_protocol_sha256()
     assert receipt["holdout_partition"]["opened"] is True
     assert receipt["acceptance"]["future_unseen_evaluation_required"] is True
