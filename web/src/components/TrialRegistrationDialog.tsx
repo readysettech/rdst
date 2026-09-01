@@ -356,8 +356,8 @@ export function TrialRegistrationDialog({
                   onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
                 />
                 <Text level="caption" className="text-content-layout-3">
-                  Business emails get more credits. We only use this to send the
-                  trial token.
+                  Business emails get more credits. We only use this for your
+                  trial - the token and an occasional check-in.
                 </Text>
               </div>
               {didYouMean && (
