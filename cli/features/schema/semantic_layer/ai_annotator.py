@@ -288,6 +288,7 @@ Focus on business purpose, not technical details."""
                 temperature=0.2,
                 provider=self.provider,
                 model=self.model,
+                purpose="schema_table_annotation",
             )
 
             # Try to parse JSON response
@@ -360,6 +361,7 @@ Focus on business meaning, not technical type."""
                 temperature=0.2,
                 provider=self.provider,
                 model=self.model,
+                purpose="schema_column_annotation",
             )
 
             result = self._parse_json_response(response["text"])
@@ -428,6 +430,7 @@ Be specific about what each value represents in the business domain."""
                 temperature=0.2,
                 provider=self.provider,
                 model=self.model,
+                purpose="schema_enum_annotation",
             )
 
             result = self._parse_json_response(response["text"])

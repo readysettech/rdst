@@ -104,8 +104,9 @@ class LLMManager:
         """
         Provider-agnostic query interface.
 
-        `purpose` labels the call in telemetry (e.g. "audit_health"); it is
-        never forwarded to the provider.
+        `purpose` labels the call in telemetry (e.g. "audit_health"). For
+        Readyset-hosted inference, its cataloged form is sent to Keyservice;
+        it is never sent to the external model provider.
 
         Returns a dict:
         {
@@ -171,8 +172,13 @@ class LLMManager:
             temperature=resolved["temperature"],
             top_p=resolved["top_p"],
             stop_sequences=resolved["stop_sequences"],
-            extra=extra or {},
+            extra=dict(extra or {}),
         )
+        req.extra.pop("_rdst_attribution", None)
+        if name == "readyset":
+            from .inference_attribution import attribution_for
+
+            req.extra["_rdst_attribution"] = attribution_for(purpose)
 
         request_started = time.monotonic()
         try:
@@ -390,12 +396,12 @@ class LLMManager:
                 "purpose",
                 "extra",
                 "history",
-                "purpose",
             }
 
             filtered_kwargs = {
                 k: v for k, v in kwargs.items() if k in valid_query_params
             }
+            filtered_kwargs.setdefault("purpose", "workflow_llm")
 
             result = self.query(
                 system_message=filtered_kwargs.get(

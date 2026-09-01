@@ -120,6 +120,12 @@ def register_error_handlers(app: FastAPI) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Desktop and web installs share this API process. Retire credentials from
+    # the discontinued trial flow before the UI performs its first access check.
+    from shared.config.credential_migrations import retire_legacy_trial_credentials
+
+    retire_legacy_trial_credentials()
+
     # The observation scheduler starts here and only here (research Q5):
     # the module is reachable from no CLI entry point's import graph, and
     # the flag defaults off until the Fleet validation matrix passes.
@@ -325,6 +331,17 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
         description="API server for RDST web client",
         lifespan=lifespan,
     )
+
+    @app.middleware("http")
+    async def _scope_inference_attribution(request: Request, call_next):
+        from shared.llm_manager.inference_attribution import inference_workflow
+
+        default_surface = "desktop" if os.getenv("RDST_DESKTOP") == "1" else "web"
+        surface = request.headers.get("x-rdst-surface", default_surface)
+        if surface not in {"desktop", "web"}:
+            surface = default_surface
+        with inference_workflow("other", surface):
+            return await call_next(request)
 
     # Every legitimate caller is a loopback origin: the desktop app's static
     # server, the Vite dev server, and `rdst serve` (which is same-origin

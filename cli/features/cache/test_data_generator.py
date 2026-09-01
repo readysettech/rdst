@@ -478,7 +478,8 @@ Requirements:
 
         response = llm.query(
             system_message=system_message,
-            user_query=user_query
+            user_query=user_query,
+            purpose="test_data_generation",
         )
 
         if not response.get("text"):

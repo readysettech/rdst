@@ -1833,7 +1833,12 @@ class QueryCommand:
                     )
                     spinner.start()
                     llm = LLMManager()
-                    llm_result = llm.generate_response(prompt, max_tokens=2048, temperature=0.0)
+                    llm_result = llm.generate_response(
+                        prompt,
+                        max_tokens=2048,
+                        temperature=0.0,
+                        purpose="query_registry_analysis",
+                    )
                     spinner.stop()
                     raw_text = llm_result.get("response", "")
                     from shared.ui import StyledPanel

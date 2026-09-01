@@ -62,6 +62,57 @@ def test_calls_only_bounded_keyservice_protocol(monkeypatch):
     assert "reasoning" not in payload
 
 
+def test_saves_analytics_identity_only_for_the_response_session(monkeypatch):
+    body = _response().json.return_value
+    body["analytics_account_id"] = "rdst_account_hash"
+    post = MagicMock(return_value=_response(body=body))
+    save = MagicMock(return_value=True)
+    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    monkeypatch.setattr(
+        "shared.llm_manager.hosted_glm_provider.account_session."
+        "save_account_metadata_for_access_token",
+        save,
+    )
+
+    HostedGLMProvider().complete(
+        _request(),
+        api_key="supabase-access",
+        base_url="https://keyservice.example",
+    )
+
+    save.assert_called_once_with(
+        {"analytics_account_id": "rdst_account_hash"},
+        "supabase-access",
+    )
+
+
+def test_forwards_only_reserved_attribution_metadata(monkeypatch):
+    post = MagicMock(return_value=_response())
+    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    monkeypatch.setenv("RDST_TELEMETRY", "false")
+
+    HostedGLMProvider().complete(
+        _request({
+            "_rdst_attribution": {
+                "feature": "ask",
+                "operation": "sql_generation",
+                "surface": "cli",
+                "workflow_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            },
+            "response_format": {"type": "json_object"},
+        }),
+        api_key="supabase-access",
+        base_url="https://keyservice.example",
+    )
+
+    payload = post.call_args.kwargs["json"]
+    assert payload["attribution"]["feature"] == "ask"
+    assert payload["attribution"]["operation"] == "sql_generation"
+    assert payload["attribution"]["analytics_disabled"] is True
+    assert "_rdst_attribution" not in payload
+    assert "response_format" not in payload["attribution"]
+
+
 def test_json_schema_is_prompted_and_forwarded(monkeypatch):
     post = MagicMock(return_value=_response())
     monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)

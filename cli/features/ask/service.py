@@ -14,6 +14,7 @@ from typing import Any
 
 from shared.config.targets import create_targets_config
 from shared.llm_manager import LLMManager
+from shared.llm_manager.inference_attribution import inference_workflow
 from shared.query_registry import QueryRegistry, generate_query_name
 
 from .aggregate_domain_normalization import (
@@ -92,6 +93,8 @@ from .value_probe import create_value_probe_executor
 class _PendingAskSession:
     context: Any
     persist_query: bool
+    workflow_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    surface: str = "unknown"
     raise_unexpected_errors: bool = False
     clarification_context: dict[str, dict[str, str]] = field(default_factory=dict)
 
@@ -372,6 +375,7 @@ class AskService:
         input: AskInput,
         options: AskOptions,
     ) -> AsyncGenerator[AskEvent, None]:
+        workflow_id = str(uuid.uuid4())
         try:
             yield AskStatusEvent(
                 type="status",
@@ -483,9 +487,10 @@ class AskService:
                     )
                     return
             else:
-                ctx, interpretations, ambiguities = await asyncio.to_thread(
-                    self._detect_ambiguities, ctx
-                )
+                with inference_workflow("ask", input.source, workflow_id):
+                    ctx, interpretations, ambiguities = await asyncio.to_thread(
+                        self._detect_ambiguities, ctx
+                    )
                 self._observe(AskPhase.CLARIFY, ctx)
                 if ctx.status == Status.ERROR:
                     yield AskErrorEvent(
@@ -511,6 +516,8 @@ class AskService:
                     self._session_store[session_id] = _PendingAskSession(
                         context=ctx,
                         persist_query=options.persist_query,
+                        workflow_id=workflow_id,
+                        surface=input.source,
                         raise_unexpected_errors=options.raise_unexpected_errors,
                         clarification_context=clarification_context,
                     )
@@ -530,10 +537,11 @@ class AskService:
                     )
                     return
 
-            async for event in self._run_from_generate(
-                ctx, persist_query=options.persist_query
-            ):
-                yield event
+            with inference_workflow("ask", input.source, workflow_id):
+                async for event in self._run_from_generate(
+                    ctx, persist_query=options.persist_query
+                ):
+                    yield event
 
         except Exception as exc:
             if options.raise_unexpected_errors:
@@ -607,10 +615,13 @@ class AskService:
                 pending.clarification_context,
             )
         try:
-            async for event in self._run_from_generate(
-                ctx, persist_query=pending.persist_query
+            with inference_workflow(
+                "ask", pending.surface, pending.workflow_id
             ):
-                yield event
+                async for event in self._run_from_generate(
+                    ctx, persist_query=pending.persist_query
+                ):
+                    yield event
         except Exception as exc:
             if pending.raise_unexpected_errors:
                 raise

@@ -607,7 +607,12 @@ class AuditService:
 
             prompt = build_fleet_insights_prompt(successful_results)
             llm = LLMManager()
-            result = llm.generate_response(prompt, max_tokens=4096, temperature=0.0)
+            result = llm.generate_response(
+                prompt,
+                max_tokens=4096,
+                temperature=0.0,
+                purpose="fleet_insights",
+            )
             raw = result.get("response", "")
             try:
                 return parse_llm_json(raw) or {"raw": raw}

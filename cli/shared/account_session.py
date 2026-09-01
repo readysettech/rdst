@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import os
 import threading
 import time
@@ -20,6 +21,7 @@ SESSION_SECRET_NAMES = [ACCESS_TOKEN_NAME, REFRESH_TOKEN_NAME, EXPIRES_AT_NAME]
 REFRESH_LEEWAY_SECONDS = 60
 REQUEST_TIMEOUT_SECONDS = 15
 _REFRESH_LOCK = threading.Lock()
+_SESSION_METADATA_LOCK = threading.RLock()
 
 
 class AccountSessionError(RuntimeError):
@@ -87,14 +89,7 @@ def save_session(
         }
 
         if account:
-            config = TargetsConfig()
-            config.load()
-            config.set_account_config({
-                "user_id": str(account.get("user_id") or ""),
-                "email": str(account.get("email") or ""),
-                "status": "active",
-            })
-            config.save()
+            save_account_metadata(account)
     except Exception as exc:
         clear_session(store)
         raise AccountSessionError(
@@ -106,6 +101,45 @@ def save_session(
         "expires_at": expires_at,
         "persistence": persistence,
     }
+
+
+def _save_account_metadata_unlocked(account: dict[str, Any]) -> None:
+    config = TargetsConfig()
+    config.load()
+    existing = config.get_account_config()
+    config.set_account_config({
+        "user_id": str(account.get("user_id") or existing.get("user_id") or ""),
+        "email": str(account.get("email") or existing.get("email") or ""),
+        "analytics_account_id": str(
+            account.get("analytics_account_id")
+            or existing.get("analytics_account_id")
+            or ""
+        ),
+        "status": "active",
+    })
+    config.save()
+
+
+def save_account_metadata(account: dict[str, Any]) -> None:
+    """Persist non-secret account metadata returned by Keyservice."""
+    with _SESSION_METADATA_LOCK:
+        _save_account_metadata_unlocked(account)
+
+
+def save_account_metadata_for_access_token(
+    account: dict[str, Any],
+    access_token: str,
+    store: SecretStoreService | None = None,
+) -> bool:
+    """Persist metadata only while the response's account session is current."""
+    store = store or SecretStoreService()
+    with _SESSION_METADATA_LOCK:
+        session = load_session(store)
+        current_token = str((session or {}).get("access_token") or "")
+        if not current_token or not hmac.compare_digest(current_token, access_token):
+            return False
+        _save_account_metadata_unlocked(account)
+        return True
 
 
 def refresh_session(
@@ -162,14 +196,15 @@ def access_token(
 
 def clear_session(store: SecretStoreService | None = None) -> None:
     store = store or SecretStoreService()
-    store.clear_required(SESSION_SECRET_NAMES)
-    try:
-        config = TargetsConfig()
-        config.load()
-        config.clear_account_config()
-        config.save()
-    except Exception:
-        pass
+    with _SESSION_METADATA_LOCK:
+        store.clear_required(SESSION_SECRET_NAMES)
+        try:
+            config = TargetsConfig()
+            config.load()
+            config.clear_account_config()
+            config.save()
+        except Exception:
+            pass
 
 
 def account_metadata() -> dict[str, Any]:

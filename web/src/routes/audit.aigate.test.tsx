@@ -22,6 +22,7 @@ function serveEnv(state: ServerState) {
       if (url.includes('/api/env/requirements')) {
         return json({
           keyring_available: true,
+          telemetry_enabled: true,
           requirements: [
             {
               kind: 'anthropic_api_key',

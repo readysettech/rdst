@@ -770,6 +770,7 @@ Respond with ONLY this JSON (no markdown code blocks):
                 max_tokens=2000,
                 temperature=0.0,
                 model="claude-haiku-4-5-20251001",
+                purpose="orm_conversion",
             )
 
             result_text = response.get("text", "").strip()

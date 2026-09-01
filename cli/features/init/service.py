@@ -171,6 +171,7 @@ class InitService:
                 context=None,
                 max_tokens=8,
                 temperature=0.0,
+                purpose="init_connectivity_check",
             )
             model = os.environ.get("RDST_ANTHROPIC_MODEL") or self._DEFAULT_CLAUDE_MODEL
             return {"success": True, "model": model}

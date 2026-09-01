@@ -251,10 +251,28 @@ class AccountService:
         if not token:
             return {"signed_in": False, "detail": "Not signed in to Readyset"}
         metadata = account_session.account_metadata()
+        if not metadata.get("analytics_account_id"):
+            try:
+                identity_response = requests.get(
+                    keyservice_url("/account-auth/user"),
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/json",
+                    },
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+                if identity_response.status_code == 200:
+                    identity = identity_response.json()
+                    if isinstance(identity, dict):
+                        account_session.save_account_metadata(identity)
+                        metadata = account_session.account_metadata()
+            except Exception:
+                pass
         result: dict[str, Any] = {
             "signed_in": True,
             "user_id": metadata.get("user_id"),
             "email": metadata.get("email"),
+            "analytics_account_id": metadata.get("analytics_account_id"),
         }
         if not include_quota:
             return result

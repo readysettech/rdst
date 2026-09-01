@@ -164,6 +164,17 @@
       },
       "AccountStatusResponse": {
         "properties": {
+          "analytics_account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analytics Account Id"
+          },
           "detail": {
             "anyOf": [
               {
@@ -4563,10 +4574,15 @@
             },
             "title": "Requirements",
             "type": "array"
+          },
+          "telemetry_enabled": {
+            "title": "Telemetry Enabled",
+            "type": "boolean"
           }
         },
         "required": [
           "keyring_available",
+          "telemetry_enabled",
           "requirements"
         ],
         "title": "EnvRequirementsResponse",

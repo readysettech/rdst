@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { components } from './api.generated'
+import { isDesktopRuntime } from './desktop'
 import { normalizeHttpError, normalizeSseError } from './errorContract'
 import { useTargetSwitchLock } from './targetSwitchLock'
 
@@ -205,7 +206,10 @@ export function useAsk(): UseAskReturn {
       try {
         const response = await fetch('/api/ask', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-RDST-Surface': isDesktopRuntime() ? 'desktop' : 'web',
+          },
           body: JSON.stringify(request),
           signal: controller.signal,
         })

@@ -76,6 +76,7 @@ def _semantic_examples(target: str, layer: Any) -> list[str] | None:
             user_query=prompt,
             max_tokens=300,
             temperature=0.4,
+            purpose="example_questions",
         )
         text = resp.get("text", "")
         start, end = text.find("{"), text.rfind("}")

@@ -1342,6 +1342,7 @@ Include command examples when relevant. If the question isn't covered in the doc
                     user_query=user_query,
                     max_tokens=1000,
                     model=AnthropicModel.HAIKU_4_5.value,
+                    purpose="help_answer",
                 )
 
             # Response format: {"text": "...", "usage": {...}, "provider": "...", "model": "..."}

@@ -2,6 +2,7 @@ import { Button } from '@rs/ui-new/button'
 import { ErrorState } from '@rs/ui-new/error-state'
 import { HStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
+import { useQuery } from '@tanstack/react-query'
 import {
   createRootRoute,
   type ErrorComponentProps,
@@ -9,7 +10,7 @@ import {
   useNavigate,
   useRouterState,
 } from '@tanstack/react-router'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { AiProviderGate } from '../components/AiProviderGate'
 import { ActivityPulse } from '../components/audit/ActivityPulse'
 // Direct import: the components barrel re-exports the SQL editor stack,
@@ -20,6 +21,8 @@ import { useTarget } from '../hooks/useTarget'
 import { Header } from '../layout/Header'
 import { Main } from '../layout/Main'
 import { Sidebar } from '../layout/Sidebar'
+import { setAnalyticsAccountId } from '../lib/analytics'
+import { fetchAccountStatus } from '../lib/api'
 import {
   cancelActiveAudit,
   requestAuditRunView,
@@ -94,6 +97,14 @@ function RootComponent() {
 function AiAccessBoundary({ children }: { children: ReactNode }) {
   const path = useRouterState({ select: (state) => state.location.pathname })
   const gate = useAiGate()
+  const accountStatus = useQuery({
+    queryKey: ['account-status'],
+    queryFn: fetchAccountStatus,
+  })
+
+  useEffect(() => {
+    setAnalyticsAccountId(accountStatus.data?.analytics_account_id)
+  }, [accountStatus.data?.analytics_account_id])
 
   // The CLI browser flow owns this route and must be able to exchange its
   // callback before the newly created account session can satisfy the gate.

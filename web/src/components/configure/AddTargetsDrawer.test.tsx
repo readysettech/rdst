@@ -112,6 +112,7 @@ describe('AddTargetsDrawer', () => {
     vi.clearAllMocks()
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
+      telemetry_enabled: true,
       requirements: [],
     })
     vi.mocked(fetchFleetTargets).mockResolvedValue({

@@ -158,7 +158,9 @@ class TelemetryManager:
     Manages all telemetry for RDST.
 
     Features:
-    - Pseudonymous device ID (stored in ~/.rdst/device_id)
+    - Installation ID (stored in ~/.rdst/device_id)
+    - Keyservice-minted pseudonymous account ID for signed-in events
+    - Rotating, personless process identity while signed out
     - PostHog for usage analytics
     - Sentry for crash reporting
     - Cumulative usage stats per device
@@ -182,6 +184,7 @@ class TelemetryManager:
 
     def __init__(self):
         self._device_id: Optional[str] = None
+        self._anonymous_session_id = f"rdst_anonymous_{uuid.uuid4()}"
         self._enabled: Optional[bool] = None
         self._initialized = False
         self._stats: Optional[Dict[str, int]] = None
@@ -399,29 +402,24 @@ class TelemetryManager:
     def _get_auth_type(self) -> str:
         """Determine how the user is authenticating LLM requests.
 
-        Returns one of: 'own_key', 'trial', 'none'.
+        Returns one of: 'own_key', 'readyset_account', 'none'.
         """
         try:
             if os.getenv("ANTHROPIC_API_KEY"):
                 return "own_key"
-            if os.getenv("RDST_TRIAL_TOKEN"):
-                return "trial"
-            config_file = self._rdst_dir / "config.toml"
-            if config_file.exists():
-                content = config_file.read_text(encoding="utf-8")
-                if "[trial]" in content:
-                    if 'status = "active"' in content:
-                        return "trial"
-                    if 'status = "exhausted"' in content:
-                        return "trial_exhausted"
             # Check keyring (fast path only — don't probe slow backends)
             try:
                 from shared.secret_store_service import SecretStoreService
                 store = SecretStoreService()
                 if store.get_secret("ANTHROPIC_API_KEY"):
                     return "own_key"
-                if store.get_secret("RDST_TRIAL_TOKEN"):
-                    return "trial"
+            except Exception:
+                pass
+            try:
+                from shared.account_session import is_signed_in_locally
+
+                if is_signed_in_locally():
+                    return "readyset_account"
             except Exception:
                 pass
         except Exception:
@@ -430,8 +428,9 @@ class TelemetryManager:
 
     def _get_base_properties(self) -> Dict[str, Any]:
         """Get base properties included with every event."""
-        return {
+        properties = {
             "device_id": self.device_id,
+            "installation_id": self.device_id,
             "rdst_version": self._get_version(),
             "os": platform.system(),
             "os_version": platform.release(),
@@ -439,6 +438,20 @@ class TelemetryManager:
             "auth_type": self._get_auth_type(),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        try:
+            from shared import account_session
+
+            account_id = ""
+            if account_session.is_signed_in_locally():
+                account_id = str(
+                    account_session.account_metadata().get("analytics_account_id")
+                    or ""
+                )
+            if account_id:
+                properties["analytics_account_id"] = account_id
+        except Exception:
+            pass
+        return properties
 
     def _get_stats(self) -> Dict[str, int]:
         """Get cumulative usage stats for this device."""
@@ -509,28 +522,28 @@ class TelemetryManager:
             all_props = self._get_base_properties()
             if properties:
                 all_props.update(properties)
-            self._add_stored_email_properties(all_props)
 
             def send(internal_user: bool):
                 try:
                     all_props["internal_user"] = internal_user
-                    # If email is in properties, identify the user so PostHog
-                    # links this device to the email across sessions/devices.
-                    email = all_props.get("email")
-                    if email and email != "unknown":
-                        try:
-                            person_props = {"email": email}
-                            for key in ("first_name", "last_name"):
-                                if all_props.get(key):
-                                    person_props[key] = all_props[key]
-                            posthog.identify(
-                                distinct_id=self.device_id,
-                                properties=person_props,
-                            )
-                        except Exception:
-                            pass
+                    account_id = str(
+                        all_props.get("analytics_account_id") or ""
+                    )
+                    distinct_id = account_id or self._anonymous_session_id
+                    if account_id:
+                        pii_keys = {
+                            "email",
+                            "email_domain",
+                            "first_name",
+                            "last_name",
+                        }
+                        for key in list(all_props):
+                            if key in pii_keys or key.startswith("provider_email_"):
+                                all_props.pop(key, None)
+                    else:
+                        all_props["$process_person_profile"] = False
                     posthog.capture(
-                        distinct_id=self.device_id,
+                        distinct_id=distinct_id,
                         event=event,
                         properties=all_props
                     )
@@ -543,6 +556,7 @@ class TelemetryManager:
             pass
 
     def _add_stored_email_properties(self, properties: Dict[str, Any]) -> None:
+        """Legacy explicit enrichment helper; normal event capture does not call it."""
         try:
             from shared.config.targets import create_targets_config
 
@@ -564,10 +578,6 @@ class TelemetryManager:
                         f"provider_email_verified_{provider}",
                         provider_identity["email_verified"],
                     )
-            # Identity precedence: the primary [[emails]] entry (set at the gate,
-            # promoted on trial verification) is the human's identity. The
-            # [trial].email is only a fallback for pre-gate installs that
-            # registered a trial before an [[emails]] entry existed.
             identity = cfg.get_identity()
             email = identity.get("email")
             if not email:
@@ -576,7 +586,9 @@ class TelemetryManager:
                 return
             properties.setdefault("email", email)
             if "email_domain" not in properties:
-                properties["email_domain"] = email.split("@")[1] if "@" in email else "unknown"
+                properties["email_domain"] = (
+                    email.split("@")[1] if "@" in email else "unknown"
+                )
             if identity.get("first_name"):
                 properties.setdefault("first_name", identity["first_name"])
             if identity.get("last_name"):
@@ -1069,13 +1081,16 @@ class TelemetryManager:
             extra=dict(extra),
             _detector=terminal_detector,
         )
-        try:
-            yield run
-        except BaseException as e:
-            run.error(e)
-            raise
-        finally:
-            self._finalize_command_run(run)
+        from shared.llm_manager.inference_attribution import inference_workflow
+
+        with inference_workflow(name, source):
+            try:
+                yield run
+            except BaseException as e:
+                run.error(e)
+                raise
+            finally:
+                self._finalize_command_run(run)
 
     @asynccontextmanager
     async def command_run(
@@ -1097,13 +1112,16 @@ class TelemetryManager:
             extra=dict(extra),
             _detector=terminal_detector,
         )
-        try:
-            yield run
-        except BaseException as e:
-            run.error(e)
-            raise
-        finally:
-            self._finalize_command_run(run)
+        from shared.llm_manager.inference_attribution import inference_workflow
+
+        with inference_workflow(name, source):
+            try:
+                yield run
+            except BaseException as e:
+                run.error(e)
+                raise
+            finally:
+                self._finalize_command_run(run)
 
     def track_cache(
         self,

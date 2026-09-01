@@ -1357,7 +1357,12 @@ class FleetCommand:
 
                 prompt = build_fleet_insights_prompt(successful)
                 llm = LLMManager()
-                result = llm.generate_response(prompt, max_tokens=4096, temperature=0.0)
+                result = llm.generate_response(
+                    prompt,
+                    max_tokens=4096,
+                    temperature=0.0,
+                    purpose="fleet_insights",
+                )
                 if fleet_spinner:
                     fleet_spinner.stop()
                 fleet_insights_text = result.get("response", "")

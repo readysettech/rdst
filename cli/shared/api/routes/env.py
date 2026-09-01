@@ -11,6 +11,7 @@ from shared.anthropic_env import ANTHROPIC_API_KEY_NAMES
 from shared.api.guards import require_local_request
 from shared.env_requirements_service import EnvRequirementsService
 from shared.run_registry import run_registry
+from shared.telemetry import telemetry
 
 EnvRequirementKind = Literal["target_password", "anthropic_api_key"]
 EnvRequirementSource = Literal[
@@ -36,6 +37,7 @@ class EnvRequirement(BaseModel):
 
 class EnvRequirementsResponse(BaseModel):
     keyring_available: bool
+    telemetry_enabled: bool
     requirements: List[EnvRequirement]
 
 
@@ -70,6 +72,7 @@ async def get_env_requirements(request: Request) -> EnvRequirementsResponse:
     requirements = await asyncio.to_thread(service.get_requirements)
     return EnvRequirementsResponse(
         keyring_available=service.secret_store.is_available(),
+        telemetry_enabled=telemetry.is_enabled(),
         requirements=[EnvRequirement(**item) for item in requirements],
     )
 

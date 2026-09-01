@@ -32,6 +32,7 @@ describe('TrialBalanceBadge', () => {
   it('does not show the removed trial UI for an active legacy token', async () => {
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
+      telemetry_enabled: true,
       requirements: [
         {
           kind: 'anthropic_api_key',
@@ -61,6 +62,7 @@ describe('TrialBalanceBadge', () => {
   it('does not show the removed trial UI for an exhausted legacy token', async () => {
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
+      telemetry_enabled: true,
       requirements: [
         {
           kind: 'anthropic_api_key',
@@ -98,6 +100,7 @@ describe('TrialBalanceBadge', () => {
 
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
+      telemetry_enabled: true,
       requirements: [
         {
           kind: 'anthropic_api_key',

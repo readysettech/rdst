@@ -747,6 +747,7 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
             max_tokens=2000,
             temperature=0.0,  # Deterministic output for consistent recommendations
             extra=extra_params if extra_params else None,
+            purpose="analyze_query",
         )
 
         if not llm_response or "response" not in llm_response:
@@ -948,6 +949,7 @@ def _get_rewrite_suggestions(
             system_message="You are an expert SQL optimization consultant.",
             max_tokens=1500,
             temperature=0.0,  # Deterministic output for consistent recommendations
+            purpose="analyze_rewrite",
         )
 
         if llm_response and "response" in llm_response:
@@ -998,6 +1000,7 @@ def _get_index_suggestions(
             system_message="You are a database indexing expert.",
             max_tokens=1500,
             temperature=0.0,  # Deterministic output for consistent recommendations
+            purpose="analyze_index",
         )
 
         if llm_response and "response" in llm_response:
@@ -1042,6 +1045,7 @@ def _get_caching_recommendations(
             system_message="You are a Readyset caching optimization expert.",
             max_tokens=1500,
             temperature=0.0,  # Deterministic output for consistent recommendations
+            purpose="analyze_cache",
         )
 
         if llm_response and "response" in llm_response:

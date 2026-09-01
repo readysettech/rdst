@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import uuid
 from collections.abc import Generator
@@ -22,6 +23,23 @@ _HTTP_SESSION = requests.Session()
 # so keep Readyset-hosted requests from one RDST process in a single fair-ish
 # queue. Claude BYOK is unaffected and separate RDST clients remain independent.
 _HOSTED_REQUEST_LOCK = threading.Lock()
+
+
+def _client_version() -> str:
+    override = os.getenv("RDST_VERSION", "").strip()
+    if override:
+        return override
+    try:
+        from _version import __version__
+
+        return str(__version__)
+    except Exception:
+        try:
+            from _version_build import __version__
+
+            return str(__version__)
+        except Exception:
+            return "0.1.0"
 
 
 class HostedGLMProvider(Provider):
@@ -103,6 +121,21 @@ class HostedGLMProvider(Provider):
             "max_tokens": request.max_tokens or 800,
             "temperature": request.temperature,
         }
+        attribution = (request.extra or {}).get("_rdst_attribution")
+        if isinstance(attribution, dict):
+            payload["attribution"] = dict(attribution)
+        try:
+            from shared.telemetry import telemetry
+
+            telemetry_enabled = telemetry.is_enabled()
+            payload.setdefault("attribution", {})["analytics_disabled"] = (
+                not telemetry_enabled
+            )
+            if telemetry_enabled:
+                payload["attribution"]["installation_id"] = telemetry.device_id
+        except Exception:
+            payload.setdefault("attribution", {})["analytics_disabled"] = True
+        payload.setdefault("attribution", {})["client_version"] = _client_version()
         response_format = (request.extra or {}).get("response_format")
         if isinstance(response_format, dict) and response_format.get("type") in {
             "json_object",
@@ -158,6 +191,15 @@ class HostedGLMProvider(Provider):
                 "Readyset-hosted inference returned no text",
                 code="HOSTED_INFERENCE_INVALID_RESPONSE",
             )
+        analytics_account_id = str(body.get("analytics_account_id") or "")
+        if analytics_account_id:
+            try:
+                account_session.save_account_metadata_for_access_token(
+                    {"analytics_account_id": analytics_account_id},
+                    token,
+                )
+            except Exception:
+                pass
         usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
         completion_tokens = int(usage.get("completion_tokens") or 0)

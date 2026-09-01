@@ -203,7 +203,8 @@ def analyze_shallow_with_llm(
             system_message=system_msg,
             max_tokens=2000,
             temperature=0.0,  # Deterministic output
-            extra=extra_params if extra_params else None
+            extra=extra_params if extra_params else None,
+            purpose="analyze_query",
         )
 
         if not llm_response or 'response' not in llm_response:

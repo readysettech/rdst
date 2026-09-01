@@ -238,6 +238,7 @@ class Ask3Agent:
                 max_tokens=1500,
                 temperature=0.0,
                 debug=True,  # Need raw response to get tool_use blocks
+                purpose="sql_generation",
                 extra={
                     "system": system_prompt,  # Anthropic top-level system param
                     "messages": messages,  # Override with full conversation

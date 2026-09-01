@@ -3476,6 +3476,8 @@ export interface components {
         };
         /** AccountStatusResponse */
         AccountStatusResponse: {
+            /** Analytics Account Id */
+            analytics_account_id?: string | null;
             /** Detail */
             detail?: string | null;
             /** Email */
@@ -5267,6 +5269,8 @@ export interface components {
             keyring_available: boolean;
             /** Requirements */
             requirements: components["schemas"]["EnvRequirement"][];
+            /** Telemetry Enabled */
+            telemetry_enabled: boolean;
         };
         /** EnvSetRequest */
         EnvSetRequest: {

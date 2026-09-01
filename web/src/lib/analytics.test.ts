@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const captureMock = vi.hoisted(() => vi.fn())
 const initMock = vi.hoisted(() => vi.fn())
 const registerMock = vi.hoisted(() => vi.fn())
+const unregisterMock = vi.hoisted(() => vi.fn())
 
 vi.mock('posthog-js', () => ({
   default: {
     init: initMock,
     register: registerMock,
+    unregister: unregisterMock,
     capture: captureMock,
   },
 }))
@@ -18,6 +20,7 @@ describe('analytics', () => {
     captureMock.mockClear()
     initMock.mockClear()
     registerMock.mockClear()
+    unregisterMock.mockClear()
   })
 
   afterEach(() => {
@@ -34,6 +37,16 @@ describe('analytics', () => {
     const { initAnalytics, trackEvent } = await import('./analytics')
     initAnalytics()
     trackEvent('load_test_run')
+    expect(initMock).not.toHaveBeenCalled()
+    expect(captureMock).not.toHaveBeenCalled()
+  })
+
+  it('honors the server-side telemetry opt-out', async () => {
+    vi.stubEnv('VITE_POSTHOG_KEY', 'test-key')
+    const { initAnalytics, trackEvent } = await import('./analytics')
+    initAnalytics(false)
+    trackEvent('load_test_run')
+
     expect(initMock).not.toHaveBeenCalled()
     expect(captureMock).not.toHaveBeenCalled()
   })
@@ -88,5 +101,19 @@ describe('analytics', () => {
     expect(registerMock).toHaveBeenCalledWith(
       expect.objectContaining({ app: 'rdst', platform: 'web' })
     )
+  })
+
+  it('attaches and removes the pseudonymous account id without identifying', async () => {
+    vi.stubEnv('VITE_POSTHOG_KEY', 'test-key')
+    const { initAnalytics, setAnalyticsAccountId } = await import('./analytics')
+    initAnalytics()
+
+    setAnalyticsAccountId('rdst_account_hash')
+    expect(registerMock).toHaveBeenCalledWith({
+      analytics_account_id: 'rdst_account_hash',
+    })
+
+    setAnalyticsAccountId(null)
+    expect(unregisterMock).toHaveBeenCalledWith('analytics_account_id')
   })
 })

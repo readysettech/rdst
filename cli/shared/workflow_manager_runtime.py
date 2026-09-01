@@ -89,7 +89,13 @@ def analyze_schema(**kwargs) -> Dict[str, Any]:
 def call_llm(prompt: str, model: str = "gpt-4", **kwargs) -> Dict[str, Any]:
     """Call LLM with given prompt"""
     llm = LLMManager()
-    return llm.generate_response(prompt, model=model, **kwargs)
+    purpose = kwargs.pop("purpose", "workflow_llm")
+    return llm.generate_response(
+        prompt,
+        model=model,
+        purpose=purpose,
+        **kwargs,
+    )
 
 DEFAULT_FUNCTIONS = {
     "get_db_size": get_db_size,

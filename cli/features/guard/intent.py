@@ -170,6 +170,7 @@ def derive_rules_from_intent(
         system_message="You are a database security expert. Output only valid JSON.",
         temperature=0.0,  # Deterministic output
         max_tokens=2000,
+        purpose="guard_rule_derivation",
     )
     response = result["response"]
 

@@ -19,7 +19,8 @@ let analyticsEnabled = false
  * the UI runs against customers' databases, so typed values (credentials,
  * SQL literals) must never reach the recording.
  */
-export function initAnalytics(): void {
+export function initAnalytics(serverEnabled = true): void {
+  if (!serverEnabled) return
   // Automated browsers (Playwright suites in CI and locally) run the
   // production bundle; without this guard every e2e run ships synthetic
   // pageviews and autocapture into the production project as fake users.
@@ -55,6 +56,20 @@ export function initAnalytics(): void {
   })
 
   analyticsEnabled = true
+}
+
+/**
+ * Attach the server-minted pseudonymous account key to product events.
+ * This deliberately does not call identify or alias, so an account is never
+ * merged with a browser profile and no account PII reaches PostHog.
+ */
+export function setAnalyticsAccountId(accountId?: string | null): void {
+  if (!analyticsEnabled) return
+  if (accountId) {
+    posthog.register({ analytics_account_id: accountId })
+  } else {
+    posthog.unregister('analytics_account_id')
+  }
 }
 
 /**

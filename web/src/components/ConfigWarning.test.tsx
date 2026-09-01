@@ -118,6 +118,7 @@ describe('ConfigWarning env secret flow', () => {
     });
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
+      telemetry_enabled: true,
       requirements: [
         {
           kind: 'anthropic_api_key',
@@ -284,6 +285,7 @@ describe('ConfigWarning env secret flow', () => {
   it('does not show top banner for target-password-only requirements', async () => {
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
+      telemetry_enabled: true,
       requirements: [
         {
           kind: 'target_password',
@@ -307,6 +309,7 @@ describe('ConfigWarning env secret flow', () => {
   it('uses Anthropic-only requirements in dialog when both are missing', async () => {
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
+      telemetry_enabled: true,
       requirements: [
         {
           kind: 'anthropic_api_key',
@@ -371,6 +374,7 @@ describe('ConfigWarning env secret flow', () => {
     });
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
+      telemetry_enabled: true,
       requirements: [
         {
           kind: 'anthropic_api_key',
@@ -404,6 +408,7 @@ describe('ConfigWarning env secret flow', () => {
 
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
+      telemetry_enabled: true,
       requirements: [
         {
           kind: 'anthropic_api_key',

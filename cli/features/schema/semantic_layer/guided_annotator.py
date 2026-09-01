@@ -272,6 +272,7 @@ class GuidedAnnotator:
             user_query=prompt,
             max_tokens=4096,
             temperature=0.2,
+            purpose="schema_guided_analysis",
         )
 
         return self._parse_analysis(table_name, response["text"])

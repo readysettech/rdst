@@ -97,6 +97,7 @@ class AccountStatusResponse(BaseModel):
     signed_in: bool
     user_id: str | None = None
     email: str | None = None
+    analytics_account_id: str | None = None
     model: str | None = None
     quota: dict[str, Any] | None = None
     detail: str | None = None

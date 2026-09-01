@@ -1,4 +1,4 @@
-"""Unit tests for telemetry email enrichment + PostHog identify linkage."""
+"""Unit tests for telemetry identity and privacy behavior."""
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ class _FakePosthog:
         self.capture_calls.append((distinct_id, event, properties))
 
 
-def test_track_identifies_device_with_email(tmp_path, monkeypatch):
+def test_track_does_not_identify_or_attach_stored_email(tmp_path, monkeypatch):
     _write_config(
         tmp_path / "config.toml",
         '[[emails]]\nemail = "mike@company.com"\nprimary = true\nverified = false\n',
@@ -94,13 +94,102 @@ def test_track_identifies_device_with_email(tmp_path, monkeypatch):
 
     tm.track("email_captured", {"display_name": "RDST Email Captured", "source": "gate"})
 
-    assert fake.identify_calls, "expected posthog.identify to be called"
-    distinct_id, properties = fake.identify_calls[0]
-    assert distinct_id == "dev-telemetry-123"
-    assert properties == {"email": "mike@company.com"}
+    assert fake.identify_calls == []
     assert fake.capture_calls, "expected posthog.capture to be called"
     cap_distinct, cap_event, cap_props = fake.capture_calls[0]
-    assert cap_distinct == "dev-telemetry-123"
+    assert cap_distinct.startswith("rdst_anonymous_")
     assert cap_event == "email_captured"
-    assert cap_props["email"] == "mike@company.com"
-    assert cap_props["email_domain"] == "company.com"
+    assert "email" not in cap_props
+    assert "email_domain" not in cap_props
+    assert cap_props["installation_id"] == "dev-telemetry-123"
+    assert cap_props["$process_person_profile"] is False
+
+
+def test_track_uses_pseudonymous_account_id_when_signed_in(tmp_path, monkeypatch):
+    fake = _FakePosthog()
+    monkeypatch.setattr(tm_mod, "_get_posthog", lambda: fake)
+    monkeypatch.setattr(tm_mod.threading, "Thread", _ImmediateThread)
+    monkeypatch.setattr(
+        "shared.account_session.account_metadata",
+        lambda: {"analytics_account_id": "rdst_account_hash"},
+    )
+    monkeypatch.setattr(
+        "shared.account_session.is_signed_in_locally", lambda: True
+    )
+
+    tm = TelemetryManager()
+    tm._rdst_dir = tmp_path
+    tm._device_id = "dev-telemetry-123"
+    tm._enabled = True
+    tm._initialized = True
+    tm.POSTHOG_API_KEY = "phc_test_key"
+
+    tm.track("analyze_run", {"email": "person@example.com"})
+
+    assert fake.identify_calls == []
+    distinct_id, _, properties = fake.capture_calls[0]
+    assert distinct_id == "rdst_account_hash"
+    assert properties["analytics_account_id"] == "rdst_account_hash"
+    assert properties["installation_id"] == "dev-telemetry-123"
+    assert "email" not in properties
+    assert "$process_person_profile" not in properties
+
+
+def test_stale_account_metadata_is_not_used_after_session_is_cleared(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "shared.account_session.account_metadata",
+        lambda: {"analytics_account_id": "stale_account_hash"},
+    )
+    monkeypatch.setattr(
+        "shared.account_session.is_signed_in_locally", lambda: False
+    )
+
+    tm = TelemetryManager()
+    tm._rdst_dir = tmp_path
+    tm._device_id = "dev-telemetry-123"
+
+    properties = tm._get_base_properties()
+
+    assert "analytics_account_id" not in properties
+
+
+def test_auth_type_reports_readyset_account(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "shared.secret_store_service.SecretStoreService.get_secret",
+        lambda _self, _name: None,
+    )
+    monkeypatch.setattr(
+        "shared.account_session.is_signed_in_locally",
+        lambda: True,
+    )
+
+    tm = TelemetryManager()
+    tm._rdst_dir = tmp_path
+
+    assert tm._get_auth_type() == "readyset_account"
+
+
+def test_auth_type_ignores_retired_trial_state(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("RDST_TRIAL_TOKEN", "retired-token")
+    monkeypatch.setattr(
+        "shared.secret_store_service.SecretStoreService.get_secret",
+        lambda _self, name: "retired-token" if name == "RDST_TRIAL_TOKEN" else None,
+    )
+    monkeypatch.setattr(
+        "shared.account_session.is_signed_in_locally",
+        lambda: True,
+    )
+    (tmp_path / "config.toml").write_text(
+        '[trial]\ntoken = "retired-token"\nstatus = "active"\n',
+        encoding="utf-8",
+    )
+
+    tm = TelemetryManager()
+    tm._rdst_dir = tmp_path
+
+    assert tm._get_auth_type() == "readyset_account"

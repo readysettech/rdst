@@ -32,6 +32,7 @@ describe('AI provider startup gate', () => {
     vi.mocked(useTrialSource).mockReturnValue({
       envRequirements: {
         keyring_available: true,
+        telemetry_enabled: true,
         requirements: [],
       },
       envRequirementsQuery: {

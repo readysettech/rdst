@@ -1155,6 +1155,12 @@ def main():
         mcp_server.main()
         return
 
+    # New releases never use legacy trial tokens. Remove their local copy at
+    # process startup so upgraded CLI users cannot retain stale credentials.
+    from shared.config.credential_migrations import retire_legacy_trial_credentials
+
+    retire_legacy_trial_credentials()
+
     try:
         if len(sys.argv) == 2 and sys.argv[1] in ("--help", "-h", "help"):
             print_rich_help()

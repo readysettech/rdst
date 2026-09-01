@@ -2693,6 +2693,10 @@ def main():
     """Main entry point for the MCP server."""
     configure_utf8_stdio(force=True, line_buffering=True)
 
+    from shared.config.credential_migrations import retire_legacy_trial_credentials
+
+    retire_legacy_trial_credentials()
+
     while True:
         try:
             message = read_message()

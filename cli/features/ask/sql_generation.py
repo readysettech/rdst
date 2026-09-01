@@ -650,18 +650,14 @@ def refine_sql_with_feedback(
             filtered_schema=filtered_schema,
         )
 
-        # Call with callback if provided
-        llm_kwargs = {
-            "prompt": prompt,
-            "temperature": 0.0,
-            "max_tokens": 2000,  # Refinement responses are typically shorter
-            "purpose": "sql_refinement",
-            "extra": {"response_format": {"type": "json_object"}},
-        }
-        if callback:
-            llm_kwargs["callback"] = callback
-
-        llm_result = llm_manager.generate_response(**llm_kwargs)
+        llm_result = llm_manager.generate_response(
+            prompt=prompt,
+            temperature=0.0,
+            max_tokens=2000,
+            purpose="sql_refinement",
+            extra={"response_format": {"type": "json_object"}},
+            **({"callback": callback} if callback else {}),
+        )
 
         response_text = llm_result.get("response", "")
 

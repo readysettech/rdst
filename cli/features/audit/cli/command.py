@@ -267,7 +267,12 @@ class AuditCommand:
 
                 prompt = build_single_target_insights_prompt(final_result)
                 llm = LLMManager()
-                result = llm.generate_response(prompt, max_tokens=4096, temperature=0.0)
+                result = llm.generate_response(
+                    prompt,
+                    max_tokens=4096,
+                    temperature=0.0,
+                    purpose="audit_single_target_insights",
+                )
                 spinner.stop()
                 insights_text = result.get("response", "")
                 self._render_audit_insights(console, insights_text)

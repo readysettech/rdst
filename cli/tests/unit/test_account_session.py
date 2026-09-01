@@ -1,5 +1,6 @@
 import os
 import time
+from unittest.mock import MagicMock
 
 import pytest
 import requests
@@ -86,3 +87,30 @@ def test_transient_refresh_failure_preserves_session(monkeypatch):
         account_session.access_token(store=store)
 
     assert store.values[account_session.REFRESH_TOKEN_NAME] == "old-refresh"
+
+
+def test_response_metadata_is_saved_only_for_the_current_access_token(monkeypatch):
+    for name in account_session.SESSION_SECRET_NAMES:
+        monkeypatch.delenv(name, raising=False)
+    store = FakeStore({
+        account_session.ACCESS_TOKEN_NAME: "current-access",
+        account_session.REFRESH_TOKEN_NAME: "current-refresh",
+        account_session.EXPIRES_AT_NAME: str(time.time() + 300),
+    })
+    save = MagicMock()
+    monkeypatch.setattr(account_session, "_save_account_metadata_unlocked", save)
+
+    assert account_session.save_account_metadata_for_access_token(
+        {"analytics_account_id": "account-1"}, "current-access", store
+    ) is True
+    save.assert_called_once_with({"analytics_account_id": "account-1"})
+
+    save.reset_mock()
+    assert account_session.save_account_metadata_for_access_token(
+        {"analytics_account_id": "stale-account"}, "old-access", store
+    ) is False
+    account_session.clear_session(store)
+    assert account_session.save_account_metadata_for_access_token(
+        {"analytics_account_id": "logged-out-account"}, "current-access", store
+    ) is False
+    save.assert_not_called()

@@ -120,6 +120,7 @@ def validate_anthropic_key(
             model=model,
             max_tokens=1,
             temperature=0,
+            purpose="anthropic_key_validation",
         )
         result: dict[str, Any] = {
             "valid": True, "reason": "ok", "model": model, "source": source,

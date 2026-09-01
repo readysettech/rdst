@@ -313,6 +313,7 @@ class InteractiveService:
                 max_tokens=2000,
                 temperature=0.1,
                 model=conversation.model,
+                purpose="interactive_answer",
             )
             if response_data and "text" in response_data:
                 return response_data["text"]

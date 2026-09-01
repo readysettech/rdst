@@ -34,6 +34,7 @@ describe('useTargetPasswordLock', () => {
     })
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
+      telemetry_enabled: true,
       requirements: [
         {
           kind: 'target_password',
@@ -68,6 +69,7 @@ describe('useTargetPasswordLock', () => {
     })
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: false,
+      telemetry_enabled: true,
       requirements: [],
     })
 

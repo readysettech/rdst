@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any, AsyncGenerator
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -277,22 +277,33 @@ async def ask_history(
 
 
 @router.post("/ask")
-async def ask(request: AskRequest, guard: TargetGuard = Depends(require_target_body)):
-    if request.session_id:
+async def ask(
+    body: AskRequest,
+    request: Request,
+    guard: TargetGuard = Depends(require_target_body),
+):
+    surface = request.headers.get("x-rdst-surface", "web")
+    if surface not in {"desktop", "web"}:
+        surface = "web"
+    if body.session_id:
         return EventSourceResponse(
             _ask_generator(
                 None,
                 None,
                 target_engine=guard.target_engine,
-                session_id=request.session_id,
-                clarification_answers=request.clarification_answers,
+                session_id=body.session_id,
+                clarification_answers=body.clarification_answers,
             )
         )
 
-    input_data = AskInput(question=request.question, target=guard.target_name, source="web")
+    input_data = AskInput(
+        question=body.question,
+        target=guard.target_name,
+        source=surface,
+    )
     options = AskOptions(
-        dry_run=request.dry_run,
-        timeout_seconds=request.timeout,
+        dry_run=body.dry_run,
+        timeout_seconds=body.timeout,
         verbose=False,
         no_interactive=False,
     )

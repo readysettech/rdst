@@ -7,11 +7,16 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { installAnalysisRunInvalidation } from './features/queries/results/analysisRunInvalidation'
 import { initAnalytics } from './lib/analytics'
+import { fetchEnvRequirements } from './lib/api'
 import { routeTree } from './routeTree.gen'
 
 import './style.css'
 
-initAnalytics()
+void fetchEnvRequirements()
+  .then(({ telemetry_enabled }) => initAnalytics(telemetry_enabled))
+  // Fail closed: if the local preference cannot be read, do not initialize
+  // browser analytics and risk overriding an explicit opt-out.
+  .catch(() => undefined)
 
 const router = createRouter({ routeTree })
 

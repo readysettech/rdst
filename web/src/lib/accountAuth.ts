@@ -97,14 +97,20 @@ export async function completeAccountRedirect(
     session.refresh_token,
     session.expires_in ?? 3600
   )
-  for (let attempt = 0; result.state === 'running' && attempt < 8; attempt += 1) {
+  for (
+    let attempt = 0;
+    result.state === 'running' && attempt < 8;
+    attempt += 1
+  ) {
     await new Promise((resolve) =>
       window.setTimeout(resolve, Math.min(4_000, 500 * 2 ** attempt))
     )
     result = await fetchAccountLoginStatus(loginId)
   }
   if (result.state === 'running') {
-    throw new Error(result.detail || 'Readyset sign-in is still completing. Try again.')
+    throw new Error(
+      result.detail || 'Readyset sign-in is still completing. Try again.'
+    )
   }
   if (result.state !== 'success') {
     clearTemporarySession(loginId)

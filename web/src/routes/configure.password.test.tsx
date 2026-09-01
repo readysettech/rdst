@@ -168,6 +168,7 @@ describe('Settings row password save', () => {
     vi.mocked(useTrialSource).mockReturnValue({
       envRequirements: {
         keyring_available: true,
+        telemetry_enabled: true,
         requirements: [
           {
             kind: 'target_password',

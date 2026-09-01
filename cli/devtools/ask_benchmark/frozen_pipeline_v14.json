@@ -1,9 +1,9 @@
 {
   "freeze_id": "rdst-ask-auto-init-no-evidence-v14",
   "supersedes": "rdst-ask-auto-init-no-evidence-v13",
-  "supersession_reason": "V14 changes product credential routing and records the audited fail-closed safeguards applied to the candidate accuracy mechanisms. Claude BYOK remains direct and defaults to Sonnet 4.6 through RDST_ANTHROPIC_MODEL, while signed-in users without a BYOK key use fixed Readyset-hosted GLM 5.3 Flash high-reasoning inference through OpenRouter. No new benchmark result is claimed by this receipt.",
-  "frozen_at": "2026-08-31",
-  "benchmark_protocol_sha256": "bfa0370c792ae91cdf04f2a6bfbbefa242153e4f90ef28b1fe68fae0e928c335",
+  "supersession_reason": "V14 changes product credential routing and records the audited fail-closed safeguards applied to the candidate accuracy mechanisms. Claude BYOK remains direct and defaults to Sonnet 4.6 through RDST_ANTHROPIC_MODEL, while signed-in users without a BYOK key use fixed Readyset-hosted GLM 5.3 Flash high-reasoning inference through OpenRouter. The 2026-09-01 refresh adds attribution-only workflow contexts and purpose labels without changing prompts, model parameters, SQL handling, database access, or scorer behavior. No new benchmark result is claimed by this receipt.",
+  "frozen_at": "2026-09-01",
+  "benchmark_protocol_sha256": "58224451b532a33a183a80d714fb723c2ef16d8cbf6f5e6d758fd112791fef09",
   "protocol_path_policy": "devtools.ask_benchmark.cli._benchmark_protocol_paths",
   "track": "rdst-ask",
   "entrypoint": "features.ask.service.AskService",
@@ -106,7 +106,7 @@
     "readyset_login_required_for_byok": false,
     "account_ui_owner": "rdst-client",
     "account_auth_transport": "keyservice-json-api",
-    "account_auth_method": "supabase-google-oauth-or-email-magic-link"
+    "account_auth_method": "supabase-google-github-oauth-or-email-magic-link"
   },
   "baseline_model": {
     "configuration": "claude-sonnet-4.6-subscription-medium",
