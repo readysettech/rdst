@@ -84,6 +84,20 @@ class AskCommand:
             return resolved
         question = resolved
 
+        # Ask always needs inference. Check before loading the target or schema
+        # so logged-out users do not wait for unrelated database work.
+        from shared.cli.ai_access import ensure_cli_ai_access
+
+        access = ensure_cli_ai_access(
+            allow_login_prompt=not no_interactive,
+        )
+        if not access.ok:
+            return RdstResult(
+                False,
+                access.message,
+                data={"code": access.code, "state": access.state.value},
+            )
+
         target_engine = "unknown"
         if target:
             try:

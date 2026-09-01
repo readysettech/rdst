@@ -82,6 +82,23 @@ class AgentCommand:
             self._manager = AgentManager()
         return self._manager
 
+    def _require_claude_access(self) -> RdstResult | None:
+        """Return an error for agent modes that need Anthropic tool calls."""
+
+        from shared.cli.ai_access import ensure_cli_ai_access
+
+        access = ensure_cli_ai_access(
+            require_claude=True,
+            console=self._console,
+        )
+        if access.ok:
+            return None
+        return RdstResult(
+            False,
+            access.message,
+            data={"code": access.code, "state": access.state.value},
+        )
+
     def execute(
         self,
         subcommand: str | None,
@@ -328,6 +345,10 @@ Examples:
             manager = self._get_manager()
             agent = manager.get(name)
 
+            access_error = self._require_claude_access()
+            if access_error is not None:
+                return access_error
+
             # Use CLI timeout (overrides agent's saved config for this session)
             agent.safety.timeout_seconds = timeout
 
@@ -532,6 +553,10 @@ Examples:
             manager = self._get_manager()
             agent = manager.get(name)
 
+            access_error = self._require_claude_access()
+            if access_error is not None:
+                return access_error
+
             from features.agent.http_server import AgentHTTPServer
 
             server = AgentHTTPServer(agent)
@@ -586,6 +611,10 @@ Examples:
                     ok=False,
                     message="No Slack credentials found. Run 'rdst slack setup' first.",
                 )
+
+            access_error = self._require_claude_access()
+            if access_error is not None:
+                return access_error
 
             # Use first workspace
             workspace_id = list(credentials.keys())[0]

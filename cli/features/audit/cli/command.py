@@ -6,14 +6,13 @@ import argparse
 import asyncio
 import json
 import logging
-import os
 import signal
 import time
 
 # Suppress noisy sqlglot warnings during query normalization
 logging.getLogger("sqlglot").setLevel(logging.ERROR)
 
-from shared.anthropic_env import has_anthropic_api_key
+from shared.cli.ai_access import ensure_cli_ai_access
 from shared.cli.types import RdstResult
 from shared.json_parse import parse_llm_json
 from shared.persistence import update_json
@@ -58,38 +57,15 @@ class AuditCommand:
             return RdstResult(False, f"Target '{target}' not found")
 
         if insights:
-            if not has_anthropic_api_key():
-                console.print(
-                    "[yellow]No LLM API key configured. The audit report requires AI analysis.[/yellow]\n"
-                    "[dim]Set up your LLM provider now:[/dim]\n"
-                )
-                try:
-                    from features.configure.cli.wizard import ConfigurationWizard
-                    wizard = ConfigurationWizard()
-                    from shared.config.targets import TargetsConfig as _TC
-                    _cfg = _TC(); _cfg.load()
-                    wizard.configure_llm(_cfg, {})
-                    _cfg.save()
-                    # Re-check after configure
-                    if not has_anthropic_api_key():
-                        return RdstResult(False, "LLM key still not set. Run: rdst configure llm")
-                except (EOFError, KeyboardInterrupt):
-                    return RdstResult(False, "LLM setup cancelled. Run: rdst configure llm")
-                except Exception as e:
-                    return RdstResult(
-                        False,
-                        f"Could not launch LLM setup: {e}\n"
-                        "Run manually: rdst configure llm",
-                    )
-            try:
-                from shared.llm_manager import LLMManager
-                llm = LLMManager()
-                llm.generate_response("Say OK", max_tokens=1, temperature=0.0)
-            except Exception as e:
+            access = ensure_cli_ai_access(
+                allow_login_prompt=not output_json,
+                console=console,
+            )
+            if not access.ok:
                 return RdstResult(
                     False,
-                    f"ANTHROPIC_API_KEY is invalid or the API is unreachable: {e}\n"
-                    "Fix the key and re-run.",
+                    access.message,
+                    data={"code": access.code, "state": access.state.value},
                 )
         # Run audit_target directly with a spinner callback for live progress.
         from dataclasses import asdict as _asdict
@@ -129,18 +105,20 @@ class AuditCommand:
         duration_str = getattr(args, "duration", None)
         workload_result = None
         if duration_str and final_result:
-            # Two parallel flows:
-            #   Thread 1 (background): health LLM — uses metrics/health data already collected
-            #   Main thread: duration capture + workload LLM — runs the 30s window
-            # Health LLM overlaps with the capture window for free.
-            import threading
+            # When insights are enabled, overlap the health LLM with the
+            # workload capture window. --no-insights must remain entirely
+            # deterministic and must not invoke an LLM.
             health_llm_result: list = [None]  # mutable container for thread result
+            health_thread = None
 
             def _run_health_llm():
                 health_llm_result[0] = service.run_health_llm(final_result)
 
-            health_thread = threading.Thread(target=_run_health_llm, daemon=True)
-            health_thread.start()
+            if insights:
+                import threading
+
+                health_thread = threading.Thread(target=_run_health_llm, daemon=True)
+                health_thread.start()
 
             workload_result = self._run_workload_capture(
                 console=console,
@@ -155,10 +133,12 @@ class AuditCommand:
                 audit_result=final_result,
             )
 
-            # Wait for health LLM to finish (should be done by now — capture takes 30s)
-            health_thread.join(timeout=30)
-            if health_llm_result[0]:
-                final_result["health_analysis"] = health_llm_result[0]
+            if health_thread is not None:
+                # Capture normally outlasts this request, but never wait
+                # indefinitely for hosted or BYOK inference.
+                health_thread.join(timeout=30)
+                if health_llm_result[0]:
+                    final_result["health_analysis"] = health_llm_result[0]
 
             if workload_result:
                 final_result["workload"] = workload_result
@@ -167,7 +147,7 @@ class AuditCommand:
                     self._merge_audit_into_capture(
                         target, workload_result.get("run_id", ""), final_result
                     )
-        else:
+        elif insights:
             # No duration — run health LLM synchronously
             if not output_json:
                 _on_progress("Analyzing health data...")

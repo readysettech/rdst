@@ -96,19 +96,13 @@ class ScanService:
 
         # Check API key (unless dry-run)
         if not options.dry_run:
-            has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
-            if not has_key:
-                try:
-                    from shared.llm.key_resolution import resolve_api_key
+            from shared.ai_access import check_ai_access
 
-                    resolve_api_key()
-                    has_key = True
-                except Exception:
-                    pass
-            if not has_key:
+            access = check_ai_access()
+            if not access.ok:
                 yield ScanErrorEvent(
                     type="error",
-                    message="AI access is not configured. Run 'rdst account login' or set ANTHROPIC_API_KEY.",
+                    message=access.message,
                     phase="config",
                 )
                 return

@@ -1419,3 +1419,28 @@ class TestQueryRunDuplicateError:
         assert "console.print" in source or "_console.print" in source, (
             "QueryRenderer does not appear to call console.print for errors."
         )
+
+    def test_unsuccessful_complete_event_is_not_printed_twice(self):
+        from features.query_registry.events import QueryCompleteEvent
+        from shared.cli.rdst_cli import RdstCLI
+
+        async def unsuccessful(_self, _input_data):
+            yield QueryCompleteEvent(
+                type="complete",
+                success=False,
+                result={
+                    "ok": False,
+                    "message": "AI access is required.",
+                    "data": {"code": "LOGIN_REQUIRED"},
+                },
+            )
+
+        with patch(
+            "features.query_registry.service.QueryService.execute",
+            new=unsuccessful,
+        ):
+            result = RdstCLI().query(subcommand="run", queries=[])
+
+        assert not result.ok
+        assert result.message == ""
+        assert result.data == {"code": "LOGIN_REQUIRED"}

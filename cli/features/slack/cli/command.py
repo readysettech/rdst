@@ -241,6 +241,18 @@ class SlackCommand:
                 message=f"Credentials not found for workspace. Run 'rdst slack setup'.",
             )
 
+        from shared.cli.ai_access import ensure_cli_ai_access
+
+        # The Slack bot still uses the legacy Ask3 tool-calling loop. Hosted GLM
+        # supports the product Ask pipeline, not this agent protocol.
+        access = ensure_cli_ai_access(console=self._console, require_claude=True)
+        if not access.ok:
+            return RdstResult(
+                False,
+                access.message,
+                data={"code": access.code, "state": access.state.value},
+            )
+
         # Print startup info
         if self._console:
             self._console.print(f"\n[bold]Starting Slack bot '{agent}'[/bold]")

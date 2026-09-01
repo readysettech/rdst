@@ -94,8 +94,11 @@ class InitCommand:
             return RdstResult(False, "No targets configured")
 
         self._print("", "")
-        self._print("Step 2", "Configure Anthropic API")
-        self._print("", "RDST uses Anthropic's Claude for AI-powered query analysis")
+        self._print("Step 2", "Choose AI access")
+        self._print(
+            "",
+            "Sign in for Readyset-hosted AI or use your own Anthropic API key",
+        )
 
         wizard = ConfigurationWizard(console=self.console)
         wizard.configure_llm(cfg, {})
@@ -208,7 +211,7 @@ class InitCommand:
                     pass
 
                 if has_key:
-                    self._print("Anthropic", "Trial token configured")
+                    self._print("AI", "Access configured")
                 else:
                     self.console.print(
                         MessagePanel(

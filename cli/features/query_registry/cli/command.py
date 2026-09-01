@@ -1531,6 +1531,20 @@ class QueryCommand:
         from shared.config.targets import create_targets_config
         from shared.db_connection import create_direct_connection, close_connection
 
+        if analyze:
+            from shared.cli.ai_access import ensure_cli_ai_access
+
+            access = ensure_cli_ai_access(
+                allow_login_prompt=not quiet,
+                console=get_console(),
+            )
+            if not access.ok:
+                return RdstResult(
+                    False,
+                    access.message,
+                    data={"code": access.code, "state": access.state.value},
+                )
+
         # Handle --file: load queries from CSV and register them temporarily
         if file and not queries:
             queries = queries or []
@@ -1778,9 +1792,7 @@ class QueryCommand:
         # LLM analysis of results if requested
         if analyze:
             console = get_console()
-            if not os.environ.get("ANTHROPIC_API_KEY"):
-                console.print("[yellow]--analyze requires ANTHROPIC_API_KEY to be set[/yellow]")
-            elif stats.total_executions == 0:
+            if stats.total_executions == 0:
                 console.print("[dim]No executions to analyze.[/dim]")
             else:
                 console.print("[dim]Generating analysis...[/dim]")

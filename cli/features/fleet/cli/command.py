@@ -9,7 +9,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 
-from shared.anthropic_env import has_anthropic_api_key
+from shared.cli.ai_access import ensure_cli_ai_access
 from shared.cli.types import RdstResult
 from shared.config.targets import TargetsConfig
 from shared.db_connection import close_connection, create_direct_connection
@@ -1046,37 +1046,15 @@ class FleetCommand:
         console = get_console()
 
         if insights:
-            if not has_anthropic_api_key():
-                console.print(
-                    "[yellow]No LLM API key configured. The fleet audit report requires AI analysis.[/yellow]\n"
-                    "[dim]Set up your LLM provider now:[/dim]\n"
-                )
-                try:
-                    from features.configure.cli.wizard import ConfigurationWizard
-                    wizard = ConfigurationWizard()
-                    from shared.config.targets import TargetsConfig as _TC
-                    _cfg = _TC(); _cfg.load()
-                    wizard.configure_llm(_cfg, {})
-                    _cfg.save()
-                    if not has_anthropic_api_key():
-                        return RdstResult(False, "LLM key still not set. Run: rdst configure llm")
-                except (EOFError, KeyboardInterrupt):
-                    return RdstResult(False, "LLM setup cancelled. Run: rdst configure llm")
-                except Exception as e:
-                    return RdstResult(
-                        False,
-                        f"Could not launch LLM setup: {e}\n"
-                        "Run manually: rdst configure llm",
-                    )
-            try:
-                from shared.llm_manager import LLMManager
-                llm = LLMManager()
-                llm.generate_response("Say OK", max_tokens=1, temperature=0.0)
-            except Exception as e:
+            access = ensure_cli_ai_access(
+                allow_login_prompt=not output_json,
+                console=console,
+            )
+            if not access.ok:
                 return RdstResult(
                     False,
-                    f"ANTHROPIC_API_KEY is invalid or the API is unreachable: {e}\n"
-                    "Fix the key and re-run.",
+                    access.message,
+                    data={"code": access.code, "state": access.state.value},
                 )
         all_results: List[dict] = []
 

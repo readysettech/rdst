@@ -41,9 +41,9 @@ from shared.ui import (
 from contextlib import contextmanager
 
 from shared.cli.types import RdstResult
+from shared.cli.ai_access import ensure_cli_ai_access
 from shared.constants import rdst_semantic_layer_dir
 from shared.query_registry import QueryRegistry, hash_sql
-from shared.shell import environment_assignment
 
 
 @contextmanager
@@ -133,6 +133,26 @@ class ScanCommand:
             return self._list_queries(with_issues, file_pattern, output_json)
         if subcommand == "check":
             return self._check_queries(directory, diff, target, output_json)
+
+        # Let local configuration errors win over an authentication prompt.
+        # ScanService repeats the non-interactive access check after these
+        # prerequisites, so this condition only controls whether the CLI can
+        # offer an interactive browser login.
+        scan_path = Path(os.path.abspath(os.path.expanduser(directory)))
+        schema_exists = bool(
+            target and (rdst_semantic_layer_dir() / f"{target}.yaml").exists()
+        )
+        if not dry_run and scan_path.exists() and schema_exists:
+            access = ensure_cli_ai_access(
+                allow_login_prompt=not output_json,
+                console=self.console,
+            )
+            if not access.ok:
+                return RdstResult(
+                    False,
+                    access.message,
+                    data={"code": access.code, "state": access.state.value},
+                )
 
         # Default: scan — wrap with telemetry CM (mirrors features/scan/api/routes.py).
         from shared.telemetry import telemetry
@@ -355,27 +375,6 @@ class ScanCommand:
 
         # Run analysis if --analyze flag is set (CLI-specific: progress bars, DB validation)
         if analyze and target:
-            _has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
-            if not _has_key:
-                try:
-                    from shared.llm.key_resolution import resolve_api_key
-                    resolve_api_key()
-                    _has_key = True
-                except Exception:
-                    pass
-            if not _has_key:
-                error_msg = (
-                    "AI access is not configured. Cannot run analysis.\n\n"
-                    "Options:\n"
-                    "  1. Run 'rdst account login' for capped hosted inference\n"
-                    f"  2. Set your own key: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n"
-                    "     Get one at: https://console.anthropic.com/"
-                )
-                if output_json:
-                    results["analysis"] = {"error": error_msg, "ci_status": "fail", "ci_exit_code": 1}
-                    return RdstResult(False, json.dumps(results, indent=2), data=results)
-                return RdstResult(False, error_msg)
-
             batch_size = 1 if sequential else 3
 
             if shallow:

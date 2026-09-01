@@ -1999,7 +1999,9 @@ class TestAskDryRunMetadataSuppressed:
         with (
             patch("features.ask.service.AskService") as MockAskService,
             patch("features.ask.engine.ask3.renderer.AskRenderer") as MockRenderer,
+            patch("shared.cli.ai_access.ensure_cli_ai_access") as mock_ai_access,
         ):
+            mock_ai_access.return_value.ok = True
             mock_service_instance = MockAskService.return_value
             mock_service_instance.ask = fake_ask_gen
             MockRenderer.return_value.render = MagicMock()

@@ -1109,6 +1109,26 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
         return RdstResult(True, "")
 
 
+def _print_failed_result(result: RdstResult, args: argparse.Namespace) -> None:
+    """Print one command failure, preserving structured JSON when requested."""
+
+    if not result.message:
+        return
+    wants_json = bool(
+        getattr(args, "json", False)
+        or getattr(args, "output_json", False)
+        or getattr(args, "output", None) == "json"
+    )
+    data = result.data or {}
+    if wants_json and data.get("code"):
+        print(
+            json.dumps({"error": result.message, **data}, default=str),
+            file=sys.stderr,
+        )
+        return
+    print(f"Error: {result.message}", file=sys.stderr)
+
+
 def _invoked_as_mcp_server() -> bool:
     """Whether this process was started through the rdst-mcp entrypoint."""
     invoked = sys.argv[0] if sys.argv else ""
@@ -1169,8 +1189,7 @@ def main():
             except Exception:
                 pass  # Don't fail if NPS prompt fails
         else:
-            if result.message:
-                print(f"Error: {result.message}", file=sys.stderr)
+            _print_failed_result(result, args)
             sys.exit(1)
 
     except KeyboardInterrupt:

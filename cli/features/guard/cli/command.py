@@ -238,6 +238,16 @@ Run 'rdst guard create --help' for full options."""
         schema_context: str | None,
     ) -> RdstResult:
         """Create guard from natural language intent using LLM."""
+        from shared.cli.ai_access import ensure_cli_ai_access
+
+        access = ensure_cli_ai_access()
+        if not access.ok:
+            return RdstResult(
+                False,
+                access.message,
+                data={"code": access.code, "state": access.state.value},
+            )
+
         print("Analyzing intent...")
         print()
 

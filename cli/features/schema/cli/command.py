@@ -625,6 +625,19 @@ class SchemaCommand:
                     "message": f"No schema found for '{target}'. Run 'rdst schema init --target {target}' first.",
                 }
 
+            from shared.cli.ai_access import ensure_cli_ai_access
+
+            access = ensure_cli_ai_access(
+                allow_login_prompt=not auto_accept,
+                console=self.console,
+            )
+            if not access.ok:
+                return {
+                    "ok": False,
+                    "message": access.message,
+                    "data": {"code": access.code, "state": access.state.value},
+                }
+
             try:
                 annotator = create_guided_annotator(
                     console=self.console, manager=self.manager
@@ -635,10 +648,13 @@ class SchemaCommand:
                 return {"ok": False, "message": f"Guided annotation failed: {exc}"}
 
         ai_annotator = None
-        try:
-            ai_annotator = create_ai_annotator()
-        except Exception:
-            pass
+        from shared.ai_access import check_ai_access
+
+        if check_ai_access().ok:
+            try:
+                ai_annotator = create_ai_annotator()
+            except Exception:
+                pass
 
         sample_data_fn = None
         if target_config:

@@ -462,9 +462,10 @@ class RdstCLI:
 
             if complete_event:
                 payload = complete_event.result
+                success = bool(payload.get("ok", complete_event.success))
                 return RdstResult(
-                    bool(payload.get("ok", complete_event.success)),
-                    payload.get("message", ""),
+                    success,
+                    payload.get("message", "") if success else "",
                     payload.get("data") or {},
                 )
             if error_event:

@@ -14,7 +14,7 @@ test_error_handling() {
       -u RDST_ACCOUNT_EXPIRES_AT \
       PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring \
       "${RDST_CMD[@]}" analyze --target "$TARGET_NAME" --query "SELECT 1" --skip-warning
-  assert_contains "AI access is not configured" "missing AI access should fail early"
+  assert_contains "AI access is required" "missing AI access should fail early"
   # Restore API key
   if [[ -n "$saved_api_key" ]]; then
     export ANTHROPIC_API_KEY="$saved_api_key"

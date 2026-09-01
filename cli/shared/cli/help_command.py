@@ -136,7 +136,7 @@ rdst query run slow-order-query --target mydb
 ### rdst init
 Interactive setup wizard for first-time configuration.
 - Guides you through adding database targets
-- Configures LLM API key (Anthropic recommended)
+- Configures Readyset-hosted AI or Anthropic BYOK
 - Tests connectivity
 
 ### rdst configure
@@ -386,7 +386,7 @@ rdst scan ./backend --schema mydb --output json
 
 The scan command:
 - Uses AST parsing (Python) and regex extraction (JS/TS) to find ORM patterns (100% deterministic)
-- Converts ORM code to SQL using schema context (Claude Haiku, cached by hash)
+- Converts ORM code to SQL using schema context (cached by hash)
 - Git diff integration for incremental CI checks
 - Two analysis modes: shallow (schema-only) and deep (EXPLAIN ANALYZE + LLM)
 - Assigns risk scores (0-100) for CI pass/fail decisions
@@ -394,7 +394,7 @@ The scan command:
 
 Analysis modes:
 - **Shallow** (`--analyze --shallow`): Schema-only, no DB connection. Fast. Good for CI without DB access.
-- **Deep** (`--analyze`): Runs EXPLAIN ANALYZE against live DB + LLM analysis. Requires `ANTHROPIC_API_KEY` and DB password. Shows execution time, index recommendations, query rewrites.
+- **Deep** (`--analyze`): Runs EXPLAIN ANALYZE against live DB + AI analysis. Requires Readyset sign-in or `ANTHROPIC_API_KEY`, plus the DB password. Shows execution time, index recommendations, query rewrites.
 
 Options:
 - `--diff REF`: Only scan files changed since REF (HEAD, HEAD~1, commit ID, branch)
@@ -1136,8 +1136,9 @@ rdst analyze -q "SELECT * FROM orders WHERE status = 'pending'" --target mysql-p
 rdst top --target mysql-prod --source digest
 ```
 
-## LLM Provider
-- Anthropic Claude - requires ANTHROPIC_API_KEY
+## AI access
+- Readyset-hosted AI after `rdst account login`
+- Anthropic Claude with your own `ANTHROPIC_API_KEY`
 
 ## Semantic Layer (Annotations)
 
@@ -1191,9 +1192,9 @@ Annotations are **optional** but recommended for complex schemas with business l
 - Check firewall rules
 - Ensure database is running
 
-### "No LLM API key configured"
-- Export ANTHROPIC_API_KEY environment variable
-- Or run `rdst init` to configure your API key interactively
+### "AI access is required"
+- Run `rdst account login` for Readyset-hosted AI
+- Or export your own `ANTHROPIC_API_KEY`
 
 ## Docker Requirements (Readyset Performance)
 
@@ -1294,21 +1295,23 @@ class HelpCommand:
         Returns:
             HelpResult with the answer
         """
-        # Check for API key or trial token
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
+        # Help remains available without inference. Use AI when either hosted
+        # access or BYOK is configured, otherwise fall back to local docs.
+        has_ai_access = bool(os.environ.get("ANTHROPIC_API_KEY"))
+        if not has_ai_access:
             try:
                 from ..llm_manager.key_resolution import resolve_api_key
                 resolve_api_key()
-                api_key = True  # Trial token available
+                has_ai_access = True
             except Exception:
                 pass
-        if not api_key:
+        if not has_ai_access:
             # Use keyword-based fallback when no API key available
             result = self._fallback_search(question, "no_api_key")
             result.answer += (
                 "\n\n---\n"
-                "Note: For more detailed AI-powered help, run `rdst init` to get a free API key."
+                "For AI-powered help, run `rdst account login` or set "
+                "`ANTHROPIC_API_KEY`."
             )
             return result
 
@@ -1505,12 +1508,14 @@ rdst init
 
 This wizard will:
 1. Add your database target(s)
-2. Configure LLM API key
+2. Configure Readyset-hosted AI or Anthropic BYOK
 3. Test connectivity
 
 Or manually:
 ```bash
 rdst configure add --target mydb --engine postgresql ...
+rdst account login
+# Or use your own key:
 export ANTHROPIC_API_KEY="your-key"
 ```"""
         else:

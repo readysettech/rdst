@@ -17,10 +17,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
-from dataclasses import dataclass
+
+from shared.ai_access import AIAccessCheck
 from shared.cli.types import RdstResult
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,6 @@ from shared.ui import (
 )
 
 from shared.llm_manager import LLMManager
-from shared.shell import environment_assignment
 from shared.query_registry import (
     ConversationRegistry,
     QueryRegistry,
@@ -654,12 +654,25 @@ class AnalyzeCommand:
                         f"Refusing to analyze this query: {issues}",
                     )
 
-            # Check for API key BEFORE any LLM operations (interactive mode, review, or analysis)
-            api_key_error = self._check_api_key_configured()
-            if api_key_error:
-                from shared.cli.types import RdstResult
-
-                return RdstResult(False, api_key_error)
+            # Reviewing saved history is local. Every other analyze path needs
+            # inference, so check before starting database analysis.
+            if not review:
+                api_key_error = self._check_api_key_configured(
+                    allow_login_prompt=not output_json,
+                )
+                if api_key_error:
+                    if isinstance(api_key_error, str):
+                        # Preserve compatibility for callers that override the
+                        # legacy preflight hook.
+                        return RdstResult(False, api_key_error)
+                    return RdstResult(
+                        False,
+                        api_key_error.message,
+                        data={
+                            "code": api_key_error.code,
+                            "state": api_key_error.state.value,
+                        },
+                    )
 
             # Handle --review flag (show conversation history without analysis)
             if review:
@@ -1049,41 +1062,20 @@ class AnalyzeCommand:
 
         return "\n".join(parts)
 
-    def _check_api_key_configured(self) -> Optional[str]:
-        """Check if an API key is configured for Anthropic (Claude).
+    def _check_api_key_configured(
+        self,
+        *,
+        allow_login_prompt: bool = True,
+    ) -> AIAccessCheck | None:
+        """Return a shared AI-access result, or ``None`` when configured."""
 
-        RDST officially uses Claude/Anthropic for AI analysis.
+        from shared.cli.ai_access import ensure_cli_ai_access
 
-        Returns:
-            Error message if no API key configured, None if OK
-        """
-        try:
-            key = os.environ.get("ANTHROPIC_API_KEY")
-            if key:
-                return None
-
-            # Check for active trial token (or detect exhausted trial)
-            try:
-                from shared.llm.key_resolution import resolve_api_key
-                resolve_api_key()
-                return None
-            except Exception as trial_err:
-                # Check if this is a trial exhaustion (not just missing key)
-                err_code = getattr(trial_err, "code", None)
-                if err_code == "TRIAL_EXHAUSTED":
-                    return str(trial_err)
-                pass
-
-            return (
-                "AI access is not configured.\n\n"
-                "Options:\n"
-                "  1. Run 'rdst account login' for capped hosted inference\n"
-                f"  2. Set your own key: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n"
-                "     Get one at: https://console.anthropic.com/"
-            )
-
-        except Exception as e:
-            return f"Configuration error: {e}"
+        access = ensure_cli_ai_access(
+            allow_login_prompt=allow_login_prompt,
+            console=self._console,
+        )
+        return None if access.ok else access
 
     async def _execute_analyze_async(
         self,
