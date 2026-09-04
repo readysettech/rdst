@@ -28,7 +28,6 @@ env/
 # OS
 .DS_Store
 Thumbs.db
-_version_build.py
 storybook_output.html
 
 # Test artifacts
