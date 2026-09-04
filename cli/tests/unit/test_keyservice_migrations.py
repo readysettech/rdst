@@ -10,7 +10,17 @@ before deploy.
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 MIGRATIONS_DIR = Path(__file__).parents[2] / "keyservice" / "migrations"
+
+# The public GitHub mirror publishes the CLI without the keyservice; there is
+# nothing for this drift guard to check in such a checkout.
+if not MIGRATIONS_DIR.is_dir():
+    pytest.skip(
+        "keyservice sources are not part of this checkout",
+        allow_module_level=True,
+    )
 
 # Mirrors the INSERT in keyservice/src/index.py. Update both together.
 USAGE_LOG_INSERT = (
