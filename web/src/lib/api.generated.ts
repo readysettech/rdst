@@ -1199,6 +1199,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/env/ai-provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Ai Provider */
+        post: operations["set_ai_provider_api_env_ai_provider_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/env/anthropic/validate": {
         parameters: {
             query?: never;
@@ -3766,6 +3783,24 @@ export interface components {
             /** Success */
             success: boolean;
         };
+        /** AiProviderSetRequest */
+        AiProviderSetRequest: {
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "claude" | "readyset";
+        };
+        /** AiProviderSetResponse */
+        AiProviderSetResponse: {
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "claude" | "readyset";
+            /** Success */
+            success: boolean;
+        };
         /** AllowlistAddRequest */
         AllowlistAddRequest: {
             /** Expected Ip */
@@ -5248,13 +5283,19 @@ export interface components {
         EnvRequirement: {
             /** Accepted Names */
             accepted_names: string[];
+            /** Anthropic Key Configured */
+            anthropic_key_configured?: boolean | null;
             /**
              * Kind
              * @enum {string}
              */
             kind: "target_password" | "anthropic_api_key";
+            /** Readyset Account Connected */
+            readyset_account_connected?: boolean | null;
             /** Satisfied */
             satisfied: boolean;
+            /** Selected Provider */
+            selected_provider?: ("claude" | "readyset") | null;
             /**
              * Source
              * @enum {string}
@@ -10801,6 +10842,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClearKeyringResponse"];
+                };
+            };
+        };
+    };
+    set_ai_provider_api_env_ai_provider_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiProviderSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiProviderSetResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

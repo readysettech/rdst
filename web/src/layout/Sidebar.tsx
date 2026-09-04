@@ -15,6 +15,7 @@ import { TargetDropdown } from '../components/TargetDropdown'
 import { SetupGuideHelpEntry } from '../features/setup/SetupGuideHelpEntry'
 import { useTarget } from '../hooks/useTarget'
 import { trackEvent } from '../lib/analytics'
+import { fetchAccountStatus } from '../lib/api'
 import { useAuditSessionActive } from '../lib/auditSession'
 import type { DesktopUpdateState } from '../lib/desktop'
 import { useSystemStatus } from '../lib/useSystemStatus'
@@ -23,24 +24,13 @@ import { VALUE_PROPOSITION } from '../lib/valueProposition'
 // Plain-text acknowledgement of who is signed in; deliberately not a control.
 function SidebarIdentity() {
   const { data } = useQuery({
-    queryKey: ['settings', 'email'],
-    queryFn: async () => {
-      const response = await fetch('/api/settings/email')
-      if (!response.ok) return null
-      // Shared cache key with EmailReportDialog, so the shape carries
-      // `verified` even though this identity line does not render it.
-      return (await response.json()) as {
-        email: string | null
-        first_name: string | null
-        last_name: string | null
-        verified: boolean
-      }
-    },
+    queryKey: ['account-status'],
+    queryFn: fetchAccountStatus,
     staleTime: 60_000,
   })
-  if (!data?.email) return null
+  if (!data?.signed_in || !data.email) return null
   return (
-    <div className="px-3 py-1">
+    <div data-testid="sidebar-account-email" className="px-3 py-1">
       <Text as="div" level="caption" className="truncate text-content-layout-3">
         {data.email}
       </Text>

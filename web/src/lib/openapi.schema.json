@@ -941,6 +941,45 @@
         "title": "AgentWriteResponse",
         "type": "object"
       },
+      "AiProviderSetRequest": {
+        "properties": {
+          "provider": {
+            "enum": [
+              "claude",
+              "readyset"
+            ],
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "AiProviderSetRequest",
+        "type": "object"
+      },
+      "AiProviderSetResponse": {
+        "properties": {
+          "provider": {
+            "enum": [
+              "claude",
+              "readyset"
+            ],
+            "title": "Provider",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "provider"
+        ],
+        "title": "AiProviderSetResponse",
+        "type": "object"
+      },
       "AllowlistAddRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4516,6 +4555,17 @@
             "title": "Accepted Names",
             "type": "array"
           },
+          "anthropic_key_configured": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anthropic Key Configured"
+          },
           "kind": {
             "enum": [
               "target_password",
@@ -4524,9 +4574,35 @@
             "title": "Kind",
             "type": "string"
           },
+          "readyset_account_connected": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readyset Account Connected"
+          },
           "satisfied": {
             "title": "Satisfied",
             "type": "boolean"
+          },
+          "selected_provider": {
+            "anyOf": [
+              {
+                "enum": [
+                  "claude",
+                  "readyset"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Provider"
           },
           "source": {
             "enum": [
@@ -16079,6 +16155,47 @@
         "summary": "Clear Keyring",
         "tags": [
           "dev"
+        ]
+      }
+    },
+    "/api/env/ai-provider": {
+      "post": {
+        "operationId": "set_ai_provider_api_env_ai_provider_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiProviderSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiProviderSetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Ai Provider",
+        "tags": [
+          "env"
         ]
       }
     },

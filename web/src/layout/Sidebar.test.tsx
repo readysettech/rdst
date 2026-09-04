@@ -9,6 +9,13 @@ import {
 } from '../lib/auditSession'
 import { Sidebar } from './Sidebar'
 
+const queryState = vi.hoisted(() => ({
+  accountStatus: null as {
+    signed_in: boolean
+    email?: string | null
+  } | null,
+}))
+
 vi.mock('@tanstack/react-router', () => ({
   useRouterState: () => ({ location: { pathname: '/' } }),
   useNavigate: () => vi.fn(),
@@ -30,7 +37,9 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: () => ({ data: null }),
+  useQuery: ({ queryKey }: { queryKey: string[] }) => ({
+    data: queryKey[0] === 'account-status' ? queryState.accountStatus : null,
+  }),
   useQueryClient: () => ({}),
 }))
 
@@ -74,6 +83,7 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
   afterEach(() => {
     cleanup()
     __resetAuditSessionForTests()
+    queryState.accountStatus = null
   })
 
   it('closes on Escape while open', () => {
@@ -160,6 +170,32 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
       screen.queryByRole('button', { name: /Use Readyset-hosted AI/ })
     ).toBeNull()
     expect(screen.getByRole('link', { name: /Settings/ })).toBeTruthy()
+  })
+
+  it('shows only the signed-in Readyset account email above Settings', () => {
+    queryState.accountStatus = {
+      signed_in: true,
+      email: 'hosted@example.com',
+    }
+    render(<Sidebar />)
+
+    expect(screen.getByText('hosted@example.com')).toBeTruthy()
+
+    cleanup()
+    queryState.accountStatus = {
+      signed_in: false,
+      email: 'stale@example.com',
+    }
+    render(<Sidebar />)
+
+    expect(screen.queryByText('stale@example.com')).toBeNull()
+  })
+
+  it('shows no identity when the Readyset account has no email', () => {
+    queryState.accountStatus = { signed_in: true, email: null }
+    render(<Sidebar />)
+
+    expect(screen.queryByTestId('sidebar-account-email')).toBeNull()
   })
 
   it('sizes footer utilities below the daily nav (F5)', () => {

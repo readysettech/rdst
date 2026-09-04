@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+import shared.account_session as account_session
 import shared.config.targets as targets_mod
 import shared.secret_store_service as secret_mod
-import shared.account_session as account_session
 from shared.llm_manager import key_resolution
 from shared.llm_manager.base import LLMError
 
@@ -14,11 +14,15 @@ from shared.llm_manager.base import LLMError
 class _FakeConfig:
     """Minimal stand-in for TargetsConfig used only for the trial block."""
 
-    def __init__(self, trial: dict | None = None) -> None:
+    def __init__(self, trial: dict | None = None, provider: str | None = None) -> None:
         self._data = {"trial": trial} if trial is not None else {}
+        self._provider = provider
 
     def load(self) -> None:
         return None
+
+    def get_llm_provider(self) -> str | None:
+        return self._provider
 
 
 class _FakeStore:
@@ -39,8 +43,10 @@ def _clean_env(monkeypatch):
     monkeypatch.setattr(account_session, "access_token", lambda: None)
 
 
-def _patch_config(monkeypatch, trial: dict | None) -> None:
-    monkeypatch.setattr(targets_mod, "TargetsConfig", lambda: _FakeConfig(trial))
+def _patch_config(monkeypatch, trial: dict | None, provider: str | None = None) -> None:
+    monkeypatch.setattr(
+        targets_mod, "TargetsConfig", lambda: _FakeConfig(trial, provider)
+    )
 
 
 def _patch_store(monkeypatch, secrets: dict[str, str]) -> None:
@@ -149,3 +155,37 @@ def test_explicit_claude_never_uses_readyset_account(monkeypatch):
         key_resolution.resolve_api_key("claude")
 
     assert exc.value.code == "NO_API_KEY"
+
+
+def test_saved_readyset_provider_wins_over_anthropic_key(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env")
+    _patch_config(monkeypatch, None, provider="readyset")
+    _patch_store(monkeypatch, {"ANTHROPIC_API_KEY": "sk-ant-keyring"})
+    monkeypatch.setattr(account_session, "access_token", lambda: "account-token")
+
+    resolution = key_resolution.resolve_api_key()
+
+    assert resolution.provider == "readyset"
+    assert resolution.api_key == "account-token"
+
+
+def test_saved_claude_provider_wins_over_readyset_account(monkeypatch):
+    _patch_config(monkeypatch, None, provider="claude")
+    _patch_store(monkeypatch, {"ANTHROPIC_API_KEY": "sk-ant-keyring"})
+    monkeypatch.setattr(account_session, "access_token", lambda: "account-token")
+
+    resolution = key_resolution.resolve_api_key()
+
+    assert resolution.provider == "claude"
+    assert resolution.api_key == "sk-ant-keyring"
+
+
+def test_explicit_provider_overrides_saved_preference(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env")
+    _patch_config(monkeypatch, None, provider="readyset")
+    _patch_store(monkeypatch, {})
+
+    resolution = key_resolution.resolve_api_key("claude")
+
+    assert resolution.provider == "claude"
+    assert resolution.api_key == "sk-ant-env"

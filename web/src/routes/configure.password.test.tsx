@@ -9,7 +9,7 @@ import {
   renderWithClient,
 } from '@/test-utils'
 import { SettingsPage } from '../features/settings/SettingsPage'
-import { setEnvSecret } from '../lib/api'
+import { fetchAccountStatus, setAiProvider, setEnvSecret } from '../lib/api'
 import { useTrialSource } from '../lib/trialQueries'
 import { useConfigure } from '../lib/useConfigure'
 import {
@@ -43,6 +43,8 @@ vi.mock('@tanstack/react-router', () =>
 )
 vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/api')>()),
+  fetchAccountStatus: vi.fn(),
+  setAiProvider: vi.fn(),
   setEnvSecret: vi.fn(),
 }))
 vi.mock('../lib/useConfigure', () => ({ useConfigure: vi.fn() }))
@@ -191,6 +193,14 @@ describe('Settings row password save', () => {
       persisted: true,
       session_only: false,
     })
+    vi.mocked(setAiProvider).mockImplementation(async (provider) => ({
+      success: true,
+      provider,
+    }))
+    vi.mocked(fetchAccountStatus).mockResolvedValue({
+      signed_in: true,
+      email: 'demo@example.com',
+    })
   })
 
   afterEach(cleanup)
@@ -253,6 +263,82 @@ describe('Settings row password save', () => {
       await screen.findByText('Loading local storage details…')
     ).toBeTruthy()
     expect(screen.queryByText('AI access')).toBeNull()
+  })
+
+  it('switches from an Anthropic key to an existing Readyset account', async () => {
+    mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    vi.mocked(useTrialSource).mockReturnValue({
+      envRequirements: {
+        keyring_available: true,
+        telemetry_enabled: true,
+        requirements: [],
+      },
+      envRequirementsQuery: {} as never,
+      anthropicRequirement: {
+        kind: 'anthropic_api_key',
+        accepted_names: ['ANTHROPIC_API_KEY'],
+        target: null,
+        satisfied: true,
+        source: 'secure_store',
+        selected_provider: 'claude',
+        anthropic_key_configured: true,
+        readyset_account_connected: true,
+      },
+      anthropicSource: 'secure_store',
+      isTrialSource: false,
+      trialStatus: undefined,
+    })
+
+    renderWithClient(<SettingsPage search={{ panel: 'ai' }} />)
+
+    expect(await screen.findByText('Anthropic API Key Configured')).toBeTruthy()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use Readyset-hosted AI' })
+    )
+
+    await waitFor(() =>
+      expect(vi.mocked(setAiProvider).mock.calls[0]?.[0]).toBe('readyset')
+    )
+  })
+
+  it('switches from Readyset-hosted AI back to a saved Anthropic key', async () => {
+    mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    vi.mocked(useTrialSource).mockReturnValue({
+      envRequirements: {
+        keyring_available: true,
+        telemetry_enabled: true,
+        requirements: [],
+      },
+      envRequirementsQuery: {} as never,
+      anthropicRequirement: {
+        kind: 'anthropic_api_key',
+        accepted_names: ['ANTHROPIC_API_KEY'],
+        target: null,
+        satisfied: true,
+        source: 'readyset_account',
+        selected_provider: 'readyset',
+        anthropic_key_configured: true,
+        readyset_account_connected: true,
+      },
+      anthropicSource: 'readyset_account',
+      isTrialSource: false,
+      trialStatus: undefined,
+    })
+
+    renderWithClient(<SettingsPage search={{ panel: 'ai' }} />)
+
+    expect(await screen.findByText('Using Readyset-hosted AI')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Use Anthropic key' }))
+
+    await waitFor(() =>
+      expect(vi.mocked(setAiProvider).mock.calls[0]?.[0]).toBe('claude')
+    )
   })
 
   it('opens an edit deep link and clears it when the form is cancelled', async () => {

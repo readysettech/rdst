@@ -1,10 +1,11 @@
 """API routes for secure environment variable handling."""
 
 from __future__ import annotations
+
 import asyncio
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, SecretStr
 
 from shared.anthropic_env import ANTHROPIC_API_KEY_NAMES
@@ -33,6 +34,9 @@ class EnvRequirement(BaseModel):
     target: Optional[str] = None
     satisfied: bool
     source: EnvRequirementSource
+    selected_provider: Optional[Literal["claude", "readyset"]] = None
+    anthropic_key_configured: Optional[bool] = None
+    readyset_account_connected: Optional[bool] = None
 
 
 class EnvRequirementsResponse(BaseModel):
@@ -53,6 +57,15 @@ class EnvSetResponse(BaseModel):
     persisted: bool = False
     session_only: bool = True
     message: Optional[str] = None
+
+
+class AiProviderSetRequest(BaseModel):
+    provider: Literal["claude", "readyset"]
+
+
+class AiProviderSetResponse(BaseModel):
+    success: bool
+    provider: Literal["claude", "readyset"]
 
 
 class AnthropicValidateResponse(BaseModel):
@@ -99,6 +112,7 @@ async def set_env_secret(request: Request, body: EnvSetRequest) -> EnvSetRespons
         persist=body.persist,
     )
     if body.name in ANTHROPIC_API_KEY_NAMES:
+        service.set_ai_provider("claude")
         run_registry.wake_needs_key()
 
     return EnvSetResponse(
@@ -108,6 +122,21 @@ async def set_env_secret(request: Request, body: EnvSetRequest) -> EnvSetRespons
         session_only=bool(result.get("session_only", True)),
         message=result.get("message"),
     )
+
+
+@router.post("/env/ai-provider")
+async def set_ai_provider(
+    request: Request, body: AiProviderSetRequest
+) -> AiProviderSetResponse:
+    require_local_request(request)
+
+    service = EnvRequirementsService()
+    try:
+        await asyncio.to_thread(service.set_ai_provider, body.provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    run_registry.wake_needs_key()
+    return AiProviderSetResponse(success=True, provider=body.provider)
 
 
 @router.post("/env/anthropic/validate")

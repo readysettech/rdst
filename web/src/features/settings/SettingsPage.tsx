@@ -34,6 +34,7 @@ import {
   fetchAccountStatus,
   logoutAccount,
   resetLocalData,
+  setAiProvider,
 } from '../../lib/api'
 import {
   clearAllBackgroundRuns,
@@ -254,12 +255,46 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
   const dataDirectory = statusData?.data_directory ?? null
 
   const { envRequirements, anthropicRequirement } = useTrialSource()
-  const readysetAccountConnected =
+  const activeAiProvider =
+    anthropicRequirement?.selected_provider ??
+    (anthropicRequirement?.source === 'readyset_account'
+      ? 'readyset'
+      : anthropicRequirement?.satisfied
+        ? 'claude'
+        : null)
+  const usingReadyset = activeAiProvider === 'readyset'
+  const readysetAccountAvailable =
+    anthropicRequirement?.readyset_account_connected ??
     anthropicRequirement?.source === 'readyset_account'
+  const readysetAccountConnected = usingReadyset && readysetAccountAvailable
+  const anthropicKeyConfigured =
+    anthropicRequirement?.anthropic_key_configured ??
+    (Boolean(anthropicRequirement?.satisfied) && !usingReadyset)
   const accountStatusQuery = useQuery({
     queryKey: ['account-status'],
     queryFn: fetchAccountStatus,
-    enabled: readysetAccountConnected,
+    enabled: readysetAccountAvailable,
+  })
+  const aiProviderMutation = useMutation({
+    mutationFn: setAiProvider,
+    onSuccess: async ({ provider }) => {
+      await invalidateTrialRelatedQueries(queryClient)
+      toast({
+        title:
+          provider === 'readyset'
+            ? 'Using Readyset-hosted AI'
+            : 'Using your Anthropic key',
+        variant: 'positive',
+      })
+    },
+    onError: (error) => {
+      toast({
+        title: 'Could not switch AI provider',
+        description:
+          error instanceof Error ? error.message : 'Please try again.',
+        variant: 'negative',
+      })
+    },
   })
   const accountLogoutMutation = useMutation({
     mutationFn: logoutAccount,
@@ -276,7 +311,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
   // Presence vs. validity: a saved key can still be stale/rejected. Probe
   // only when a real Anthropic key is the active source.
   const hasAnthropicKey =
-    Boolean(anthropicRequirement?.satisfied) && !readysetAccountConnected
+    anthropicKeyConfigured && activeAiProvider === 'claude'
   const keyValidityQuery = useAnthropicValidity(hasAnthropicKey)
   const keyValidity = keyValidityQuery.data
   const keyChecking =
@@ -288,8 +323,10 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
     keyValidity?.valid === false &&
     keyValidity.reason === 'rejected'
 
-  const anthropicStatusTitle = readysetAccountConnected
-    ? 'Readyset Account Connected'
+  const anthropicStatusTitle = usingReadyset
+    ? readysetAccountConnected
+      ? 'Using Readyset-hosted AI'
+      : 'Readyset Sign-in Required'
     : keyRejected
       ? 'Anthropic Key Rejected'
       : keyChecking
@@ -298,8 +335,10 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
           ? 'Anthropic API Key Configured'
           : 'Anthropic API Key Missing'
 
-  const anthropicStatusDescription = readysetAccountConnected
-    ? 'Readyset-hosted AI is ready to use.'
+  const anthropicStatusDescription = usingReadyset
+    ? readysetAccountConnected
+      ? 'Analyze, Ask, and Health Check use your Readyset account.'
+      : 'Sign in again to use Readyset-hosted AI.'
     : keyRejected
       ? 'Anthropic rejected this key. Update it with a valid key to keep AI analysis working.'
       : keyChecking
@@ -326,9 +365,28 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
   }, [anthropicRequirement])
   // Trigger copy matches the dialog it opens: update when a key is already in
   // use, set on first setup.
-  const anthropicButtonLabel = anthropicRequirement?.satisfied
-    ? 'Update key'
-    : 'Set key'
+  const anthropicButtonLabel =
+    usingReadyset && anthropicKeyConfigured
+      ? 'Use Anthropic key'
+      : anthropicKeyConfigured
+        ? 'Update key'
+        : 'Set key'
+
+  const handleUseReadyset = () => {
+    if (readysetAccountAvailable) {
+      aiProviderMutation.mutate('readyset')
+    } else {
+      setShowTrialDialog(true)
+    }
+  }
+
+  const handleAnthropicAction = () => {
+    if (usingReadyset && anthropicKeyConfigured) {
+      aiProviderMutation.mutate('claude')
+    } else {
+      setShowAnthropicDialog(true)
+    }
+  }
 
   // Load targets on mount
   useEffect(() => {
@@ -809,8 +867,10 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
                       className={`w-9 h-9 rounded-xl flex items-center justify-center ${keyRejected ? 'bg-surface-negative-soft' : 'bg-surface-warning-soft'}`}
                     >
                       <Icon
-                        name="key"
-                        label="Anthropic"
+                        name={usingReadyset ? 'sparkles' : 'key'}
+                        label={
+                          usingReadyset ? 'Readyset-hosted AI' : 'Anthropic'
+                        }
                         className={`w-4 h-4 ${keyRejected ? 'text-content-negative-soft' : 'text-content-warning-soft'}`}
                       />
                     </div>
@@ -866,7 +926,15 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
                       }
                       icon="sparkles"
                       iconPosition="left"
-                      onClick={() => setShowTrialDialog(true)}
+                      loading={
+                        aiProviderMutation.isPending &&
+                        aiProviderMutation.variables === 'readyset'
+                      }
+                      onClick={
+                        readysetAccountConnected
+                          ? () => setShowTrialDialog(true)
+                          : handleUseReadyset
+                      }
                     />
                     <Button
                       variant="primary"
@@ -874,7 +942,11 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
                       label={anthropicButtonLabel}
                       icon="key"
                       iconPosition="left"
-                      onClick={() => setShowAnthropicDialog(true)}
+                      loading={
+                        aiProviderMutation.isPending &&
+                        aiProviderMutation.variables === 'claude'
+                      }
+                      onClick={handleAnthropicAction}
                     />
                   </HStack>
                 </HStack>
@@ -1039,7 +1111,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
           if (!returnToFeature()) clearSettingsAction('ai')
         }}
         onSuccess={() => {
-          void invalidateTrialRelatedQueries(queryClient)
+          aiProviderMutation.mutate('readyset')
           if (!returnToFeature()) clearSettingsAction('ai')
         }}
       />

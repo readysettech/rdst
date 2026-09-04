@@ -211,6 +211,64 @@ async def test_set_anthropic_secret_notifies_parked_work(
     assert response.json()["success"] is True
     assert registry.wake_calls == 1
 
+    cfg = TargetsConfig()
+    cfg.load()
+    assert cfg.get_llm_provider() == "claude"
+
+
+async def test_switch_ai_provider_persists_and_updates_requirements(
+    client, tmp_rdst_home, inmemory_keyring, monkeypatch
+):
+    await client.post(
+        "/api/env/set",
+        json={"name": "ANTHROPIC_API_KEY", "value": "sk-ant-test", "persist": True},
+    )
+    monkeypatch.setattr(
+        "shared.env_requirements_service.access_token",
+        lambda store=None: "readyset-account-token",
+    )
+
+    response = await client.post("/api/env/ai-provider", json={"provider": "readyset"})
+
+    assert response.status_code == 200, response.text
+    cfg = TargetsConfig()
+    cfg.load()
+    assert cfg.get_llm_provider() == "readyset"
+
+    requirements = await client.get("/api/env/requirements")
+    ai_requirement = next(
+        item
+        for item in requirements.json()["requirements"]
+        if item["kind"] == "anthropic_api_key"
+    )
+    assert ai_requirement["source"] == "readyset_account"
+    assert ai_requirement["selected_provider"] == "readyset"
+    assert ai_requirement["anthropic_key_configured"] is True
+    assert ai_requirement["readyset_account_connected"] is True
+
+    response = await client.post("/api/env/ai-provider", json={"provider": "claude"})
+
+    assert response.status_code == 200, response.text
+    cfg.load()
+    assert cfg.get_llm_provider() == "claude"
+    requirements = await client.get("/api/env/requirements")
+    ai_requirement = next(
+        item
+        for item in requirements.json()["requirements"]
+        if item["kind"] == "anthropic_api_key"
+    )
+    assert ai_requirement["source"] == "process_env"
+    assert ai_requirement["selected_provider"] == "claude"
+
+
+async def test_switch_ai_provider_rejects_unavailable_provider(
+    client, tmp_rdst_home, inmemory_keyring
+):
+    response = await client.post("/api/env/ai-provider", json={"provider": "readyset"})
+
+    assert response.status_code == 409
+    assert "Sign in to Readyset" in response.json()["detail"]
+
 
 async def test_set_env_secret_rejects_non_allowlisted_name(
     client, tmp_rdst_home, inmemory_keyring

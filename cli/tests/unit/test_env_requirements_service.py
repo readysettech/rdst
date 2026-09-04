@@ -2,8 +2,8 @@
 
 from unittest.mock import Mock, patch
 
-from shared.env_requirements_service import EnvRequirementsService
 from shared.account_session import SESSION_SECRET_NAMES
+from shared.env_requirements_service import EnvRequirementsService
 
 
 class FakeSecretStore:
@@ -26,6 +26,7 @@ def _mock_config():
         "shared": {"password_env": "PROD_DB_PASSWORD"},
     }.get(name, {})
     cfg.get_trial_config.return_value = {}
+    cfg.get_llm_provider.return_value = None
     return cfg
 
 
@@ -48,10 +49,16 @@ def test_get_requirements_resolves_sources(monkeypatch):
         requirements = service.get_requirements()
 
     prod_req = next(
-        r for r in requirements if r["kind"] == "target_password" and r["accepted_names"] == ["PROD_DB_PASSWORD"]
+        r
+        for r in requirements
+        if r["kind"] == "target_password"
+        and r["accepted_names"] == ["PROD_DB_PASSWORD"]
     )
     stage_req = next(
-        r for r in requirements if r["kind"] == "target_password" and r["accepted_names"] == ["STAGE_DB_PASSWORD"]
+        r
+        for r in requirements
+        if r["kind"] == "target_password"
+        and r["accepted_names"] == ["STAGE_DB_PASSWORD"]
     )
     anthropic_req = next(r for r in requirements if r["kind"] == "anthropic_api_key")
 
@@ -132,7 +139,9 @@ def test_readyset_account_requires_a_refreshable_session(monkeypatch):
 
     with (
         patch.object(service, "_load_config", return_value=_mock_config()),
-        patch("shared.env_requirements_service.access_token", return_value="fresh-token"),
+        patch(
+            "shared.env_requirements_service.access_token", return_value="fresh-token"
+        ),
     ):
         requirement = next(
             item
@@ -142,6 +151,53 @@ def test_readyset_account_requires_a_refreshable_session(monkeypatch):
 
     assert requirement["satisfied"] is True
     assert requirement["source"] == "readyset_account"
+    assert requirement["selected_provider"] == "readyset"
+    assert requirement["readyset_account_connected"] is True
+    assert requirement["anthropic_key_configured"] is False
+
+
+def test_saved_readyset_provider_is_active_when_both_credentials_exist(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "in-process")
+    cfg = _mock_config()
+    cfg.get_llm_provider.return_value = "readyset"
+    service = EnvRequirementsService(secret_store=FakeSecretStore())
+
+    with (
+        patch.object(service, "_load_config", return_value=cfg),
+        patch("shared.env_requirements_service.access_token", return_value="token"),
+    ):
+        requirement = next(
+            item
+            for item in service.get_requirements()
+            if item["kind"] == "anthropic_api_key"
+        )
+
+    assert requirement["source"] == "readyset_account"
+    assert requirement["selected_provider"] == "readyset"
+    assert requirement["anthropic_key_configured"] is True
+    assert requirement["readyset_account_connected"] is True
+
+
+def test_saved_claude_provider_is_active_when_both_credentials_exist(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "in-process")
+    cfg = _mock_config()
+    cfg.get_llm_provider.return_value = "claude"
+    service = EnvRequirementsService(secret_store=FakeSecretStore())
+
+    with (
+        patch.object(service, "_load_config", return_value=cfg),
+        patch("shared.env_requirements_service.access_token", return_value="token"),
+    ):
+        requirement = next(
+            item
+            for item in service.get_requirements()
+            if item["kind"] == "anthropic_api_key"
+        )
+
+    assert requirement["source"] == "process_env"
+    assert requirement["selected_provider"] == "claude"
+    assert requirement["anthropic_key_configured"] is True
+    assert requirement["readyset_account_connected"] is True
 
 
 def test_expired_unrefreshable_account_does_not_open_gate(monkeypatch):
@@ -246,9 +302,7 @@ def test_target_with_direct_password_shows_config_source(monkeypatch):
     with patch.object(service, "_load_config", return_value=cfg):
         requirements = service.get_requirements()
 
-    prod_req = next(
-        r for r in requirements if r["kind"] == "target_password"
-    )
+    prod_req = next(r for r in requirements if r["kind"] == "target_password")
     assert prod_req["source"] == "config"
     assert prod_req["satisfied"] is True
 
@@ -269,9 +323,7 @@ def test_target_password_from_keychain(monkeypatch):
     with patch.object(service, "_load_config", return_value=cfg):
         requirements = service.get_requirements()
 
-    prod_req = next(
-        r for r in requirements if r["kind"] == "target_password"
-    )
+    prod_req = next(r for r in requirements if r["kind"] == "target_password")
     assert prod_req["source"] == "secure_store"
     assert prod_req["satisfied"] is True
 

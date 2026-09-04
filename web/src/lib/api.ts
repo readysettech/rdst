@@ -77,6 +77,9 @@ export type EnvRequirementsResponse =
 
 export type SetEnvSecretRequest = apiComponents['schemas']['EnvSetRequest']
 export type SetEnvSecretResponse = apiComponents['schemas']['EnvSetResponse']
+export type AiProvider = 'claude' | 'readyset'
+export type SetAiProviderResponse =
+  apiComponents['schemas']['AiProviderSetResponse']
 
 export async function fetchEnvRequirements(): Promise<EnvRequirementsResponse> {
   const response = await fetch('/api/env/requirements')
@@ -99,6 +102,18 @@ export async function setEnvSecret(
     }),
   })
   await throwIfNotOk(response, 'Failed to save secret')
+  return response.json()
+}
+
+export async function setAiProvider(
+  provider: AiProvider
+): Promise<SetAiProviderResponse> {
+  const response = await fetch('/api/env/ai-provider', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider }),
+  })
+  await throwIfNotOk(response, 'Failed to switch AI provider')
   return response.json()
 }
 

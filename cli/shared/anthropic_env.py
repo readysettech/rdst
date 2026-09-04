@@ -117,13 +117,18 @@ def validate_anthropic_key(
         LLMManager().query(
             system_message="ping",
             user_query="ping",
+            provider="claude",
+            api_key=key,
             model=model,
             max_tokens=1,
             temperature=0,
             purpose="anthropic_key_validation",
         )
         result: dict[str, Any] = {
-            "valid": True, "reason": "ok", "model": model, "source": source,
+            "valid": True,
+            "reason": "ok",
+            "model": model,
+            "source": source,
         }
     except LLMError as exc:
         rejected = exc.code == "ANTHROPIC_AUTH_INVALID"
@@ -134,7 +139,12 @@ def validate_anthropic_key(
             "source": source,
         }
     except Exception:
-        result = {"valid": False, "reason": "provider_error", "model": model, "source": source}
+        result = {
+            "valid": False,
+            "reason": "provider_error",
+            "model": model,
+            "source": source,
+        }
 
     _validity_cache[fingerprint] = (result, now + _VALIDITY_TTL_SECONDS)
     return result

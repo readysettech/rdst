@@ -5,15 +5,15 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-from shared.anthropic_env import get_anthropic_source
 from shared.account_session import (
     SESSION_SECRET_NAMES,
     AccountSessionError,
     access_token,
 )
+from shared.anthropic_env import get_anthropic_source
+from shared.config.targets import TargetsConfig
 from shared.password_resolver import resolve_password
 from shared.secret_store_service import SecretStoreService
-from shared.config.targets import TargetsConfig
 
 
 class EnvRequirementsService:
@@ -45,11 +45,16 @@ class EnvRequirementsService:
             target_data = cfg.get(target) or {}
             password_env = (target_data.get("password_env") or "").strip()
             if not password_env:
-                if target_data.get("password") or target_data.get("password_secret_arn"):
+                if target_data.get("password") or target_data.get(
+                    "password_secret_arn"
+                ):
                     continue
                 base_name = (
                     "RDST_"
-                    + (re.sub(r"[^A-Z0-9]+", "_", target.upper()).strip("_") or "TARGET")
+                    + (
+                        re.sub(r"[^A-Z0-9]+", "_", target.upper()).strip("_")
+                        or "TARGET"
+                    )
                     + "_PASSWORD"
                 )
                 password_env = base_name
@@ -96,6 +101,31 @@ class EnvRequirementsService:
         except AccountSessionError:
             return False
 
+    @staticmethod
+    def _selected_ai_provider(cfg: Any) -> str | None:
+        provider = (cfg.get_llm_provider() or "").lower()
+        if provider in {"anthropic", "claude"}:
+            return "claude"
+        if provider == "readyset":
+            return "readyset"
+        return None
+
+    def set_ai_provider(self, provider: str) -> None:
+        """Persist the active AI provider after verifying its credential exists."""
+        if provider not in {"claude", "readyset"}:
+            raise ValueError(f"Unsupported AI provider: {provider}")
+
+        cfg = self._load_config()
+        if provider == "claude":
+            anthropic_source = self._resolve_anthropic_source(cfg)
+            if anthropic_source in ("missing", "trial_exhausted"):
+                raise ValueError("Set an Anthropic API key before selecting Anthropic.")
+        elif not self._account_signed_in():
+            raise ValueError("Sign in to Readyset before selecting Readyset-hosted AI.")
+
+        cfg.set_llm_provider(provider)
+        cfg.save()
+
     def get_requirements(self) -> List[Dict[str, Any]]:
         cfg = self._load_config()
         requirements: List[Dict[str, Any]] = []
@@ -118,15 +148,34 @@ class EnvRequirementsService:
         anthropic_source = self._resolve_anthropic_source(cfg)
         account_signed_in = self._account_signed_in()
         anthropic_available = anthropic_source not in ("missing", "trial_exhausted")
+        selected_provider = self._selected_ai_provider(cfg)
+        if selected_provider == "readyset":
+            source = "readyset_account" if account_signed_in else "missing"
+            satisfied = account_signed_in
+        elif selected_provider == "claude":
+            source = anthropic_source
+            satisfied = anthropic_available
+        elif anthropic_available:
+            selected_provider = "claude"
+            source = anthropic_source
+            satisfied = True
+        elif account_signed_in:
+            selected_provider = "readyset"
+            source = "readyset_account"
+            satisfied = True
+        else:
+            source = anthropic_source
+            satisfied = False
         requirements.append(
             {
                 "kind": "anthropic_api_key",
                 "accepted_names": list(self.ANTHROPIC_ACCEPTED_NAMES),
                 "target": None,
-                "satisfied": account_signed_in or anthropic_available,
-                "source": anthropic_source if anthropic_available else (
-                    "readyset_account" if account_signed_in else anthropic_source
-                ),
+                "satisfied": satisfied,
+                "source": source,
+                "selected_provider": selected_provider,
+                "anthropic_key_configured": anthropic_available,
+                "readyset_account_connected": account_signed_in,
             }
         )
 

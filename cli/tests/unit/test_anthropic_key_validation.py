@@ -47,6 +47,26 @@ def test_valid_key_returns_ok(monkeypatch):
     assert out["model"]
 
 
+def test_validation_always_checks_the_anthropic_key(monkeypatch):
+    ae.clear_anthropic_validity_cache()
+    _stub_key(monkeypatch, "sk-test-explicit")
+    captured = {}
+
+    import shared.llm_manager as llm
+
+    class _Fake:
+        def query(self, **kwargs):
+            captured.update(kwargs)
+            return {"text": "x"}
+
+    monkeypatch.setattr(llm, "LLMManager", lambda *args, **kwargs: _Fake())
+
+    ae.validate_anthropic_key()
+
+    assert captured["provider"] == "claude"
+    assert captured["api_key"] == "sk-test-explicit"
+
+
 def test_direct_401_is_rejected(monkeypatch):
     ae.clear_anthropic_validity_cache()
     _stub_key(monkeypatch)

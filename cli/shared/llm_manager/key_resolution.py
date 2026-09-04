@@ -17,6 +17,7 @@ from shared.shell import environment_assignment
 
 HOSTED_MODEL = "z-ai/glm-5.3-flash"
 
+
 @dataclass
 class KeyResolution:
     """Result of API key resolution."""
@@ -30,15 +31,16 @@ class KeyResolution:
 
 
 def resolve_api_key(provider: str = "auto") -> KeyResolution:
-    """Resolve credentials with Claude BYOK ahead of hosted inference.
+    """Resolve credentials using the saved provider preference when present.
 
-    Resolution order:
-      1. ANTHROPIC_API_KEY env var  → direct to Anthropic
+    A saved ``llm.provider`` selection restricts resolution to that provider.
+    Otherwise, resolution order is:
+      1. ANTHROPIC_API_KEY env var → direct to Anthropic
       2. ANTHROPIC_API_KEY in OS keyring (set via RDST) → direct
       3. Readyset account session → hosted inference through Keyservice
 
-    The keyring is checked after the environment and before a Readyset account
-    so a user-supplied Anthropic key always wins.
+    Without a saved preference, the keyring is checked after the environment
+    and before a Readyset account for backward compatibility.
 
     Returns:
         KeyResolution with routing info and attestation headers.
@@ -63,6 +65,21 @@ def resolve_api_key(provider: str = "auto") -> KeyResolution:
             f"Unknown provider '{requested_provider}'.",
             code="NO_SUCH_PROVIDER",
         )
+
+    if requested_provider == "auto":
+        try:
+            from shared.config.targets import TargetsConfig
+
+            cfg = TargetsConfig()
+            cfg.load()
+            configured_provider = (cfg.get_llm_provider() or "").lower()
+        except RuntimeError:
+            # A missing or unreadable config preserves the legacy auto order.
+            configured_provider = ""
+        if configured_provider in {"anthropic", "claude"}:
+            requested_provider = "claude"
+        elif configured_provider == "readyset":
+            requested_provider = "readyset"
 
     # 1. User's own Anthropic API key (env var) — fastest path
     key = os.getenv("ANTHROPIC_API_KEY")
