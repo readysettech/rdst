@@ -9,8 +9,10 @@ index, a rewrite, or a [Readyset](https://readyset.io) cache would do about it.
 This repository holds the whole suite — the Python CLI, the web UI it serves,
 the desktop shell that wraps both, and the design system they are built on.
 
-Start with [`cli/README.md`](cli/README.md); it covers the commands, the
-install script, and the MCP integration.
+The quickest way in is the desktop app — grab it at
+[readyset.io/downloads](https://readyset.io/downloads). For the terminal
+side, [`cli/README.md`](cli/README.md) covers the commands, the install
+script, and the MCP integration.
 
 ## Layout
 
@@ -21,24 +23,42 @@ install script, and the MCP integration.
 | `desktop/` | the Electron shell that ships the CLI as a local sidecar |
 | `packages/` | the shared design system: `ui-new`, `ui-icons`, `tailwind-base`, `typescript-config` |
 
-## Install
+## Get started
 
-The CLI on macOS or Linux, with no sudo, pip, or preinstalled Python:
+### The desktop app — the easiest way in
+
+Download the prebuilt app for macOS, Windows or Linux at
+[readyset.io/downloads](https://readyset.io/downloads), open it, and connect
+your database. Everything ships inside it — the CLI runs as a bundled
+sidecar, so there is nothing else to install.
+
+### The CLI
+
+Prefer the terminal? On macOS or Linux, with no sudo, pip, or preinstalled
+Python:
 
 ```bash
 curl -fsSL https://downloads.readyset.io/packages/rdst-cli/install.sh | sh
 ```
 
-From PyPI, or from this repository — the CLI lives in a subdirectory, so pip
-needs to be told which one:
+Then point it at a database and look around:
+
+```bash
+rdst init       # guided setup for your first Postgres or MySQL target
+rdst top        # live view of the slowest queries hitting it
+rdst analyze    # why a query is slow, and what an index or cache would do
+```
+
+Also installable from PyPI, or from this repository — the CLI lives in a
+subdirectory, so pip needs to be told which one:
 
 ```bash
 pip install rdst
 pip install "git+https://github.com/readysettech/rdst.git#subdirectory=cli"
 ```
 
-Prebuilt desktop apps for macOS, Windows and Linux are at
-[readyset.io/downloads](https://readyset.io/downloads).
+Full documentation lives at
+[readyset.io/docs](https://readyset.io/docs/readyset-ai/rdst/cli).
 
 ## Build from source
 

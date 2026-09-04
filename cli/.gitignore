@@ -1,7 +1,8 @@
 # Build artifacts
 build/
 dist/
-web_dist/
+web_dist/*
+!web_dist/.gitkeep
 *.deb
 *.rpm
 *.rpm.al23
