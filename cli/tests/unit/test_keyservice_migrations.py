@@ -19,17 +19,19 @@ except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib
 MIGRATIONS_DIR = Path(__file__).parents[2] / "keyservice" / "migrations"
 WRANGLER_CONFIG = MIGRATIONS_DIR.parent / "wrangler.toml"
-sys.path.insert(0, str(MIGRATIONS_DIR.parent / "src"))
-import hosted_admin_dashboard  # noqa: E402
-import hosted_inference  # noqa: E402
 
 # The public GitHub mirror publishes the CLI without the keyservice; there is
-# nothing for this drift guard to check in such a checkout.
+# nothing for this drift guard to check in such a checkout. This has to come
+# before the keyservice imports below, which cannot resolve there either.
 if not MIGRATIONS_DIR.is_dir():
     pytest.skip(
         "keyservice sources are not part of this checkout",
         allow_module_level=True,
     )
+
+sys.path.insert(0, str(MIGRATIONS_DIR.parent / "src"))
+import hosted_admin_dashboard  # noqa: E402
+import hosted_inference  # noqa: E402
 
 # Mirrors the INSERT in keyservice/src/index.py. Update both together.
 USAGE_LOG_INSERT = (
