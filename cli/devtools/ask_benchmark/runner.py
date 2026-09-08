@@ -33,6 +33,7 @@ from features.ask.events import (
     AskSqlGeneratedEvent,
 )
 from features.ask.models import AskInput, AskOptions
+from features.ask.profiles import CANDIDATE_V4_FLAGS
 from features.ask.service import AskService
 from features.ask.sql_validation import validate_sql_for_ask
 from features.schema.semantic_layer.manager import SemanticLayerManager
@@ -103,58 +104,12 @@ _ASK_ACCURACY_STORAGE_PROFILES = frozenset(
 )
 
 
-# Frozen E163/fullv56 flags. Experimental and unqualified; preserve the
-# known output-preservation caveat. Later declared-count repair stays off.
-_ASK_ACCURACY_CANDIDATE_V4_FLAGS = {
-    "correction_intent_routing_enabled": True,
-    "dual_candidate_selection_enabled": False,
-    "explicit_ratio_normalization_enabled": True,
-    "scalar_derived_metric_normalization_enabled": False,
-    "all_rows_aggregate_normalization_enabled": False,
-    "extremum_entity_normalization_enabled": False,
-    "unbounded_categorical_normalization_enabled": False,
-    "shared_entity_scope_normalization_enabled": False,
-    "value_location_normalization_enabled": False,
-    "encoded_identifier_storage_enabled": False,
-    "temporal_text_storage_enabled": False,
-    "month_axis_storage_enabled": False,
-    "period_literal_enabled": True,
-    "metric_source_enabled": True,
-    "list_membership_enabled": True,
-    "outer_rounding_enabled": True,
-    "integer_mean_precision_enabled": True,
-    "text_mean_precision_enabled": True,
-    "count_name_completion_enabled": False,
-    "identifier_quoting_enabled": True,
-    "percentage_threshold_enabled": True,
-    "projection_contract_enabled": True,
-    "grouped_extremum_enabled": True,
-    "name_format_enabled": True,
-    "fraction_precision_enabled": True,
-    "comparison_ratio_enabled": True,
-    "state_lookup_enabled": True,
-    "month_component_enabled": True,
-    "endpoint_component_enabled": True,
-    "null_extremum_enabled": True,
-    "projection_order_enabled": True,
-    "output_completion_enabled": True,
-    "occurrence_percentage_enabled": True,
-    "scaled_ratio_enabled": True,
-    "matched_percentage_enabled": True,
-    "ranked_union_enabled": True,
-    "calendar_day_enabled": True,
-    "resolved_column_validation_enabled": True,
-    "stable_first_enabled": True,
-    "declared_count_enabled": False,
-}
-
-
 def ask_profile_service_flags(profile: str) -> dict[str, bool]:
     """One source of truth for service construction and experiment receipts."""
     if profile not in ASK_ACCURACY_PROFILES:
         raise ValueError(f"Unsupported Ask accuracy profile: {profile}")
     if profile == ASK_ACCURACY_PROFILE_CANDIDATE_V4:
-        return dict(_ASK_ACCURACY_CANDIDATE_V4_FLAGS)
+        return dict(CANDIDATE_V4_FLAGS)
     glm = profile == ASK_ACCURACY_PROFILE_GLM_DEV_V1
     routed = profile in _ASK_ACCURACY_ROUTED_PROFILES
     storage = profile in _ASK_ACCURACY_STORAGE_PROFILES

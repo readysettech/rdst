@@ -48,7 +48,10 @@ full runs are impossible through this mode.
 CI's Ask track uses the experimental `candidate-v4` profile, imported from the
 `candidate-v4-full500-20260908` source snapshot. Its frozen fullv56 flags retain
 the known output-preservation defect and leave declared-count repair disabled.
-The direct-model track and ordinary product defaults remain unchanged.
+The app and CLI Ask entrypoints use the same candidate-v4 flags and experimental
+correction-intent scope, including advisory enum-overlap validation. Interactive
+clarification and product execution limits remain unchanged. The direct-model
+track remains unchanged.
 
 `prepare` owns exclusive global and cache locks. Benchmark runs hold shared locks on
 the same files, allowing the read-only contexts to overlap while preventing a

@@ -22,6 +22,7 @@ from features.ask.events import (
     AskStatusEvent,
 )
 from features.ask.models import AskInput, AskOptions
+from features.ask.profiles import default_ask_service_options
 from features.ask.service import AskService
 from features.ask.telemetry import ask_terminal_detector
 from shared.api.models import AskRequest
@@ -168,7 +169,7 @@ async def _ask_generator(
         **extra,
     ) as run:
         try:
-            service = AskService()
+            service = AskService(**default_ask_service_options())
             if session_id:
                 async for event in service.resume(
                     session_id=session_id,

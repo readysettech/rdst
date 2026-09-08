@@ -166,6 +166,7 @@ class AskCommand:
                 AskErrorEvent,
             )
             from features.ask.models import AskInput, AskOptions
+            from features.ask.profiles import default_ask_service_options
             from features.ask.service import AskService
         except ImportError as import_err:
             return RdstResult(
@@ -188,7 +189,7 @@ class AskCommand:
                 NonInteractiveInputHandler() if no_interactive else AskInputHandler()
             )
 
-            service = AskService()
+            service = AskService(**default_ask_service_options())
 
             input_data = AskInput(
                 question=question,
