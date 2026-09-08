@@ -66,7 +66,8 @@ class TestStartRoute:
         assert registry.status(run_id) in ("running", "done")
 
     @pytest.mark.asyncio
-    async def test_start_forwards_annotation_option(self, monkeypatch):
+    @pytest.mark.parametrize("annotation_options", [{}, {"annotate": False}, {"annotate": True}])
+    async def test_start_forwards_annotation_option(self, monkeypatch, annotation_options):
         captured = {}
 
         class RecordingService(StubService):
@@ -82,7 +83,7 @@ class TestStartRoute:
             app,
             "POST",
             "/api/bootstrap",
-            {"target": "imdb", "annotate": False},
+            {"target": "imdb", **annotation_options},
         )
 
         assert response.status_code == 200
@@ -91,7 +92,7 @@ class TestStartRoute:
                 break
             await asyncio.sleep(0.005)
         assert captured["target"] == "imdb"
-        assert captured["options"].annotate is False
+        assert captured["options"].annotate is annotation_options.get("annotate", False)
 
 
 class TestStatusRoute:

@@ -50,6 +50,26 @@ from .correction_intent_routing import (
 from .derived_metric_normalization import (
     normalize_context as normalize_scalar_derived_metric_context,
 )
+from .identifier_quoting import (
+    VERSION as IDENTIFIER_QUOTING_VERSION,
+    plan_identifier_quoting,
+    candidate_from_keywords,
+)
+from .declared_count import apply_declared_count as apply_declared_count_correction
+from .count_name_completion import (
+    VERSION as COUNT_NAME_COMPLETION_VERSION,
+    plan_count_name,
+    name_from_domain,
+    candidate_sql as completed_name_sql,
+    count_proof_sql,
+    proved_result as proved_completed_count,
+    accepts_result as accepts_completed_count,
+)
+from .request_entity import (
+    route as route_request_entity,
+    accepts as accepts_request_entity,
+)
+from .name_identity import route as route_name_identity
 from .dual_candidate import generate_and_select
 from .encoded_identifier_storage import (
     normalize_context as normalize_encoded_identifier_storage_context,
@@ -75,6 +95,176 @@ from .models import (
 from .month_axis_storage import (
     normalize_context as normalize_month_axis_storage_context,
 )
+from .endpoint_component import (
+    VERSION as ENDPOINT_COMPONENT_VERSION,
+    plan_endpoint_component,
+    prove_endpoint_component,
+    accepts_endpoint_count,
+    route_endpoint_component,
+    route_endpoint_request_contract,
+    verified_storage_facts,
+)
+from .calendar_component import (
+    VERSION as MONTH_COMPONENT_VERSION,
+    plan_month_component,
+    prove_yearmonth_axis,
+    accepts_month_component,
+    route_month_component,
+)
+from .text_mean_precision import (
+    VERSION as TEXT_MEAN_PRECISION_VERSION,
+    plan_text_mean,
+    safe_text_mean_proof,
+    accepts_text_mean_result,
+    route_text_mean_precision,
+)
+from .percentage_threshold import (
+    VERSION as PERCENTAGE_THRESHOLD_VERSION,
+    plan_percentage_threshold,
+    proven_fraction_witness,
+    accepts_percentage_threshold,
+    route_percentage_threshold,
+)
+from .state_lookup import (
+    VERSION as STATE_LOOKUP_VERSION,
+    plan_state_lookup,
+    proven_state_key,
+    proven_state_count,
+    accepts_state_count,
+    route_state_lookup,
+)
+from .period_literal import (
+    VERSION as PERIOD_LITERAL_VERSION,
+    plan_period_literal,
+    prove_period_storage,
+    accepts_period_result,
+    route_period_literal,
+)
+from .annual_request import route_annual_request, matches_supported_annual_request
+from .metric_source import VERSION as METRIC_SOURCE_VERSION, route_metric_source
+from .metric_source_binding import (
+    plan_annual_binding,
+    proves_dimension_key,
+    proved_annual_winner,
+    accepts_annual_winner,
+)
+from .list_membership import (
+    VERSION as LIST_MEMBERSHIP_VERSION,
+    plan_list_membership,
+    proved_other_count,
+    accepts_other_count,
+    route_list_membership,
+)
+from .outer_rounding import (
+    VERSION as OUTER_ROUNDING_VERSION,
+    plan_outer_rounding,
+    proved_unrounded_value,
+    accepts_unrounded,
+    route_outer_rounding,
+)
+from .comparison_ratio import (
+    VERSION as COMPARISON_RATIO_VERSION,
+    plan_comparison_ratio,
+    proven_comparison_ratio,
+    accepts_comparison_ratio,
+    route_comparison_ratio,
+)
+from .fraction_precision import (
+    VERSION as FRACTION_PRECISION_VERSION,
+    plan_fraction_precision,
+    fraction_candidate,
+    accepts_fraction_precision,
+    route_fraction_precision,
+)
+from .name_format import (
+    VERSION as NAME_FORMAT_VERSION,
+    plan_name_format,
+    accepts_name_format,
+    route_name_format,
+)
+from .grouped_extremum import (
+    VERSION as GROUPED_EXTREMUM_VERSION,
+    plan_grouped_extremum,
+    safe_grouped_extremum_proof,
+    route_grouped_extremum,
+)
+from .null_extremum import (
+    VERSION as NULL_EXTREMUM_VERSION,
+    plan_null_extremum,
+    original_missing_proved,
+    candidate_measured_projection,
+    route_null_extremum,
+)
+from .ranked_union import (
+    VERSION as RANKED_UNION_VERSION,
+    plan_ranked_union,
+    route_ranked_union,
+    accepts_ranked_union,
+)
+from .calendar_day import (
+    VERSION as CALENDAR_DAY_VERSION,
+    plan_calendar_day,
+    route_calendar_day,
+    proves_iso_boundary,
+    accepts_calendar_result,
+)
+from .matched_percentage import (
+    VERSION as MATCHED_PERCENTAGE_VERSION,
+    plan_matched_percentage,
+    route_matched_percentage,
+    prove_matched_percentage,
+    accepts_matched_percentage,
+)
+from .scaled_ratio import (
+    VERSION as SCALED_RATIO_VERSION,
+    plan_scaled_ratio,
+    route_scaled_ratio,
+    prove_scaled_ratio,
+    accepts_scaled_ratio,
+)
+from .occurrence_percentage import (
+    VERSION as OCCURRENCE_PERCENTAGE_VERSION,
+    plan_occurrence_percentage,
+    route_occurrence_percentage,
+    prove_occurrence_percentage,
+    accepts_occurrence_percentage,
+    has_percentage_authorization,
+)
+from .output_completion import (
+    VERSION as OUTPUT_COMPLETION_VERSION,
+    output_shape,
+    plan_output_completion,
+    route_output_completion,
+    accepts_output_completion,
+)
+from .projection_order import (
+    VERSION as PROJECTION_ORDER_VERSION,
+    projection_order_shape,
+    plan_projection_order,
+    route_projection_order,
+)
+from .projection_contract import (
+    VERSION as PROJECTION_CONTRACT_VERSION,
+    projection_shape,
+    plan_projection_subset,
+    accepts_projection_subset,
+    route_projection_contract,
+)
+from .stable_first import (
+    VERSION as STABLE_FIRST_VERSION,
+    plan_stable_first,
+    proven_stable_first_rows,
+    accepts_stable_first_rows,
+)
+from .value_probe import create_stable_first_probe_executor
+from .mean_precision import (
+    VERSION as MEAN_PRECISION_VERSION,
+    accepts_mean_result,
+    accepts_hundred_indicator_result,
+    plan_integer_mean,
+    route_mean_precision,
+    safe_mean_proof,
+)
 from .numeric_normalization import normalize_context as normalize_numeric_context
 from .ranking_normalization import normalize_context as normalize_ranking_context
 from .shared_entity_scope_normalization import (
@@ -86,7 +276,36 @@ from .temporal_text_storage import (
 from .value_location_normalization import (
     normalize_context as normalize_value_location_context,
 )
-from .value_probe import create_month_axis_probe_executor, create_value_probe_executor
+from .value_probe import (
+    create_month_component_probe_executor,
+    create_endpoint_component_probe_executor,
+    create_period_literal_probe_executor,
+    create_metric_source_probe_executor,
+    create_list_membership_probe_executor,
+    create_outer_rounding_probe_executor,
+    create_integer_mean_probe_executor,
+    create_text_mean_probe_executor,
+    create_count_name_domain_executor,
+    create_count_name_candidate_executor,
+    create_identifier_quoting_probe_executor,
+    create_percentage_threshold_probe_executor,
+    create_null_extremum_probe_executor,
+    create_projection_contract_probe_executor,
+    create_projection_order_probe_executor,
+    create_output_completion_probe_executor,
+    create_occurrence_percentage_probe_executor,
+    create_scaled_ratio_probe_executor,
+    create_matched_percentage_probe_executor,
+    create_calendar_day_probe_executor,
+    create_ranked_union_probe_executor,
+    create_grouped_extremum_probe_executor,
+    create_name_format_probe_executor,
+    create_fraction_precision_probe_executor,
+    create_comparison_ratio_probe_executor,
+    create_state_lookup_probe_executor,
+    create_month_axis_probe_executor,
+    create_value_probe_executor,
+)
 
 
 @dataclass
@@ -223,8 +442,66 @@ class AskService:
         temporal_text_storage_fn: Callable[..., Any] | None = None,
         month_axis_storage_enabled: bool = False,
         month_axis_storage_fn: Callable[..., Any] | None = None,
+        period_literal_enabled: bool = False,
+        metric_source_enabled: bool = False,
+        list_membership_enabled: bool = False,
+        outer_rounding_enabled: bool = False,
+        integer_mean_precision_enabled: bool = False,
+        text_mean_precision_enabled: bool = False,
+        count_name_completion_enabled: bool = False,
+        identifier_quoting_enabled: bool = False,
+        percentage_threshold_enabled: bool = False,
+        projection_contract_enabled: bool = False,
+        grouped_extremum_enabled: bool = False,
+        name_format_enabled: bool = False,
+        fraction_precision_enabled: bool = False,
+        comparison_ratio_enabled: bool = False,
+        state_lookup_enabled: bool = False,
+        month_component_enabled: bool = False,
+        endpoint_component_enabled: bool = False,
+        null_extremum_enabled: bool = False,
+        projection_order_enabled: bool = False,
+        output_completion_enabled: bool = False,
+        occurrence_percentage_enabled: bool = False,
+        scaled_ratio_enabled: bool = False,
+        matched_percentage_enabled: bool = False,
+        ranked_union_enabled: bool = False,
+        calendar_day_enabled: bool = False,
+        resolved_column_validation_enabled: bool = False,
+        enum_overlap_advisory: bool = False,
+        stable_first_enabled: bool = False,
+        declared_count_enabled: bool = False,
     ):
         self._llm_manager = llm_manager
+        self._period_literal_enabled = period_literal_enabled
+        self._metric_source_enabled = metric_source_enabled
+        self._list_membership_enabled = list_membership_enabled
+        self._outer_rounding_enabled = outer_rounding_enabled
+        self._integer_mean_precision_enabled = integer_mean_precision_enabled
+        self._text_mean_precision_enabled = text_mean_precision_enabled
+        self._count_name_completion_enabled = count_name_completion_enabled
+        self._identifier_quoting_enabled = identifier_quoting_enabled
+        self._percentage_threshold_enabled = percentage_threshold_enabled
+        self._projection_contract_enabled = projection_contract_enabled
+        self._grouped_extremum_enabled = grouped_extremum_enabled
+        self._name_format_enabled = name_format_enabled
+        self._fraction_precision_enabled = fraction_precision_enabled
+        self._comparison_ratio_enabled = comparison_ratio_enabled
+        self._state_lookup_enabled = state_lookup_enabled
+        self._month_component_enabled = month_component_enabled
+        self._endpoint_component_enabled = endpoint_component_enabled
+        self._null_extremum_enabled = null_extremum_enabled
+        self._projection_order_enabled = projection_order_enabled
+        self._output_completion_enabled = output_completion_enabled
+        self._occurrence_percentage_enabled = occurrence_percentage_enabled
+        self._scaled_ratio_enabled = scaled_ratio_enabled
+        self._matched_percentage_enabled = matched_percentage_enabled
+        self._ranked_union_enabled = ranked_union_enabled
+        self._calendar_day_enabled = calendar_day_enabled
+        self._resolved_column_validation_enabled = resolved_column_validation_enabled
+        self._enum_overlap_advisory = enum_overlap_advisory
+        self._stable_first_enabled = stable_first_enabled
+        self._declared_count_enabled = declared_count_enabled
         self._semantic_manager = semantic_manager
         self._db_executor = db_executor
         self._targets_config_factory = targets_config_factory
@@ -417,6 +694,10 @@ class AskService:
                 no_interactive=options.no_interactive,
                 dry_run=options.dry_run,
                 enforce_result_limit=options.enforce_result_limit,
+            )
+            ctx.enum_overlap_advisory = self._enum_overlap_advisory
+            ctx.resolved_column_validation_enabled = (
+                self._resolved_column_validation_enabled
             )
             Status = get_status_enum()
 
@@ -615,9 +896,7 @@ class AskService:
                 pending.clarification_context,
             )
         try:
-            with inference_workflow(
-                "ask", pending.surface, pending.workflow_id
-            ):
+            with inference_workflow("ask", pending.surface, pending.workflow_id):
                 async for event in self._run_from_generate(
                     ctx, persist_query=pending.persist_query
                 ):
@@ -750,13 +1029,98 @@ class AskService:
         self._observe(AskPhase.EXECUTE, ctx)
 
         executed_sql = str(ctx.sql or "")
+        if self._identifier_quoting_enabled:
+            ctx = await self._apply_identifier_quoting(ctx)
         ctx = await self._apply_post_execution_repairs(ctx)
-        if not _sql_candidates_equivalent(
+        if self._ranked_union_enabled:
+            ctx = await self._apply_ranked_union(ctx)
+        if self._calendar_day_enabled:
+            ctx = await self._apply_calendar_day(ctx)
+        if self._outer_rounding_enabled:
+            ctx = await self._apply_outer_rounding(ctx)
+        if self._integer_mean_precision_enabled:
+            ctx = await self._apply_integer_mean_precision(ctx)
+        if self._text_mean_precision_enabled:
+            ctx = await self._apply_text_mean_precision(ctx)
+        if self._state_lookup_enabled:
+            ctx = await self._apply_state_lookup(ctx)
+        if self._comparison_ratio_enabled:
+            ctx = await self._apply_comparison_ratio(ctx)
+        if self._fraction_precision_enabled:
+            ctx = await self._apply_fraction_precision(ctx)
+        if self._percentage_threshold_enabled:
+            ctx = await self._apply_percentage_threshold(ctx)
+        if self._projection_contract_enabled:
+            ctx = await self._apply_projection_contract(ctx)
+        if self._name_format_enabled:
+            ctx = await self._apply_name_format(ctx)
+        if self._grouped_extremum_enabled:
+            ctx = await self._apply_grouped_extremum(ctx)
+        if self._month_component_enabled:
+            ctx = await self._apply_month_component(ctx)
+        if self._null_extremum_enabled:
+            ctx = await self._apply_null_extremum(ctx)
+        if self._projection_order_enabled:
+            ctx = await self._apply_projection_order(ctx)
+        if self._list_membership_enabled:
+            ctx = await self._apply_list_membership(ctx)
+        if self._period_literal_enabled:
+            ctx = await self._apply_period_literal(ctx)
+        if self._metric_source_enabled:
+            ctx = await self._apply_metric_source(ctx)
+        if self._output_completion_enabled:
+            ctx = await self._apply_output_completion(ctx)
+        if self._matched_percentage_enabled:
+            ctx = await self._apply_matched_percentage(ctx)
+        if self._scaled_ratio_enabled:
+            ctx = await self._apply_scaled_ratio(ctx)
+        if self._occurrence_percentage_enabled:
+            ctx = await self._apply_occurrence_percentage(ctx)
+        if self._endpoint_component_enabled:
+            ctx = await self._apply_endpoint_component(ctx)
+        if self._count_name_completion_enabled:
+            ctx = await self._apply_count_name_completion(ctx)
+        if self._stable_first_enabled:
+            ctx = await self._apply_stable_first(ctx)
+        if self._declared_count_enabled:
+            ctx = await self._apply_declared_count(ctx)
+        sql_changed = not _sql_candidates_equivalent(
             executed_sql,
             str(ctx.sql or ""),
             ctx.db_type,
+        )
+        if (
+            sql_changed
+            or self._period_literal_enabled
+            or self._metric_source_enabled
+            or self._list_membership_enabled
+            or self._outer_rounding_enabled
+            or self._integer_mean_precision_enabled
+            or self._text_mean_precision_enabled
+            or self._count_name_completion_enabled
+            or self._identifier_quoting_enabled
+            or self._percentage_threshold_enabled
+            or self._projection_contract_enabled
+            or self._grouped_extremum_enabled
+            or self._name_format_enabled
+            or self._fraction_precision_enabled
+            or self._comparison_ratio_enabled
+            or self._state_lookup_enabled
+            or self._month_component_enabled
+            or self._endpoint_component_enabled
+            or self._null_extremum_enabled
+            or self._projection_order_enabled
+            or self._output_completion_enabled
+            or self._occurrence_percentage_enabled
+            or self._scaled_ratio_enabled
+            or self._matched_percentage_enabled
+            or self._ranked_union_enabled
+            or self._calendar_day_enabled
+            or self._stable_first_enabled
+            or self._declared_count_enabled
         ):
             self._observe(AskPhase.EXECUTE, ctx)
+        if sql_changed:
             yield AskSqlGeneratedEvent(
                 type="sql_generated",
                 sql=ctx.sql or "",
@@ -792,6 +1156,2081 @@ class AskService:
             ctx.target_config or {},
             ctx.execution_result.error_kind if ctx.execution_result else None,
         )
+
+    async def _apply_declared_count(self, ctx: Any) -> Any:
+        return await apply_declared_count_correction(
+            ctx, self._llm_manager, self._db_executor,
+            snapshot_correction=_snapshot_correction_state,
+            restore_correction=_restore_correction_state,
+        )
+
+    async def _apply_period_literal(self, ctx: Any) -> Any:
+        """Prove compact month storage and independently verify the aggregate."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": PERIOD_LITERAL_VERSION, "status": "unchanged"}
+        ctx.period_literal = diagnostics
+        if result is None or result.error or result.truncated:
+            diagnostics["reason"] = "primary-result-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        plan = plan_period_literal(ctx.sql or "", ctx.db_type, ctx.schema_info)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_period_literal,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="period_literal_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "model-abstained"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_period_literal_probe_executor(ctx, self._db_executor)
+            proof = await asyncio.to_thread(bounded, plan.proof_sql, ctx.target_config)
+            diagnostics["proof_sql"] = plan.proof_sql
+            diagnostics["proof"] = proof
+            if not proof.get("success") or not prove_period_storage(
+                plan, proof.get("rows", [])
+            ):
+                diagnostics["reason"] = "unsafe-or-unavailable-proof"
+                return ctx
+            witness = await asyncio.to_thread(
+                bounded, plan.witness_sql, ctx.target_config
+            )
+            diagnostics["witness_sql"] = plan.witness_sql
+            diagnostics["witness"] = witness
+            if not witness.get("success"):
+                diagnostics["reason"] = "independent-witness-unavailable"
+                return ctx
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_period_result(
+                    result.rows, witness.get("rows", []), after.rows
+                )
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted",
+                    reason="candidate-disagrees-with-formatted-period-witness",
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.period_literal = diagnostics
+        return ctx
+
+    async def _apply_metric_source(self, ctx: Any) -> Any:
+        """Bind an explicitly requested measure after scope and annual-value proofs."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": METRIC_SOURCE_VERSION, "status": "unchanged"}
+        ctx.metric_source = diagnostics
+        if result is None or result.error or result.truncated:
+            diagnostics["reason"] = "primary-result-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        plan = plan_annual_binding(ctx.sql or "", ctx.db_type, ctx.schema_info)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            request = await asyncio.to_thread(
+                route_annual_request,
+                ctx.refined_question or ctx.question,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="annual_request_routing", **kwargs
+                ),
+            )
+            diagnostics["annual_request"] = request
+            if not matches_supported_annual_request(
+                ctx.refined_question or ctx.question,
+                request["contract"],
+                plan.facts()["dimension_filters"],
+            ):
+                diagnostics["reason"] = "unsupported-request-contract"
+                return ctx
+            routing = await asyncio.to_thread(
+                route_metric_source,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                ctx.schema_info.to_dict(),
+                plan.facts(),
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="metric_source_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "model-abstained"
+                return ctx
+            selected = routing["option_id"]
+            sql = plan.candidate_sql(selected)
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not sql or not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            diagnostics["selected_binding"] = next(
+                x for x in plan.options if x["option_id"] == selected
+            )
+            bounded = create_metric_source_probe_executor(ctx, self._db_executor)
+            diagnostics["dimension_proof_sql"] = plan.dimension_proof_sql()
+            dimension = await asyncio.to_thread(
+                bounded, diagnostics["dimension_proof_sql"], ctx.target_config
+            )
+            diagnostics["dimension_proof"] = dimension
+            if not dimension.get("success") or not proves_dimension_key(
+                dimension.get("rows", [])
+            ):
+                diagnostics["reason"] = "dimension-key-not-proved-unique"
+                return ctx
+            diagnostics["period_proof_sql"] = plan.period_proof_sql(selected)
+            periods = await asyncio.to_thread(
+                bounded, diagnostics["period_proof_sql"], ctx.target_config
+            )
+            diagnostics["period_proof"] = periods
+            expected = (
+                proved_annual_winner(periods.get("rows", []))
+                if periods.get("success")
+                else None
+            )
+            if expected is None:
+                diagnostics["reason"] = "calendar-or-unique-winner-not-proved"
+                return ctx
+            diagnostics["expected_year"] = expected
+            diagnostics["candidate_sql"] = sql
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_annual_winner(expected, after.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="candidate-disagrees-with-period-witness"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.metric_source = diagnostics
+        return ctx
+
+    async def _apply_list_membership(self, ctx: Any) -> Any:
+        """Prove complete scoped list storage before changing a membership count."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": LIST_MEMBERSHIP_VERSION, "status": "unchanged"}
+        ctx.list_membership = diagnostics
+        if result is None or result.error or result.truncated:
+            diagnostics["reason"] = "primary-result-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        plan = plan_list_membership(ctx.sql or "", ctx.db_type)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_list_membership,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="list_membership_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "model-abstained"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_list_membership_probe_executor(
+                ctx,
+                self._db_executor,
+                require_complete=plan.predicate_kind == "null_empty_set_absence",
+            )
+            proof = await asyncio.to_thread(bounded, plan.proof_sql, ctx.target_config)
+            diagnostics["proof_sql"] = plan.proof_sql
+            diagnostics["proof"] = proof
+            expected = (
+                proved_other_count(plan, result.rows, proof.get("rows", []))
+                if proof.get("success")
+                else None
+            )
+            if expected is None:
+                diagnostics["reason"] = "unsafe-or-unavailable-proof"
+                return ctx
+            diagnostics["expected_other_count"] = str(expected)
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_other_count(expected, after.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted",
+                    reason="candidate-disagrees-with-token-count-witness",
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.list_membership = diagnostics
+        return ctx
+
+    async def _apply_outer_rounding(self, ctx: Any) -> Any:
+        """Remove only outer rounding after proving both expression values."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": OUTER_ROUNDING_VERSION, "status": "unchanged"}
+        ctx.outer_rounding = diagnostics
+        if result is None or result.error or result.truncated:
+            diagnostics["reason"] = "primary-result-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        plan = plan_outer_rounding(ctx.sql or "", ctx.db_type)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_outer_rounding,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="outer_rounding_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "model-abstained"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_outer_rounding_probe_executor(ctx, self._db_executor)
+            proof = await asyncio.to_thread(bounded, plan.proof_sql, ctx.target_config)
+            diagnostics["proof_sql"] = plan.proof_sql
+            diagnostics["proof"] = proof
+            expected = (
+                proved_unrounded_value(result.rows, proof.get("rows", []))
+                if proof.get("success")
+                else None
+            )
+            if expected is None:
+                diagnostics["reason"] = "unsafe-or-unavailable-proof"
+                return ctx
+            diagnostics["expected_unrounded"] = str(expected)
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_unrounded(expected, after.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted",
+                    reason="candidate-disagrees-with-simultaneous-witness",
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.outer_rounding = diagnostics
+        return ctx
+
+    async def _apply_integer_mean_precision(self, ctx: Any) -> Any:
+        """Try one model-approved mean with a range proof and result agreement."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": MEAN_PRECISION_VERSION, "status": "unchanged"}
+        ctx.integer_mean_precision = diagnostics
+        if result is None or result.error or result.truncated:
+            diagnostics["reason"] = "primary-result-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        plan = plan_integer_mean(ctx.sql or "", ctx.db_type, ctx.schema_info)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_mean_precision,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="integer_mean_precision_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "model-abstained"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_integer_mean_probe_executor(
+                ctx, self._db_executor, require_complete=plan.binary_ceiling == 100
+            )
+            proof = await asyncio.to_thread(bounded, plan.proof_sql, ctx.target_config)
+            diagnostics["proof_sql"] = plan.proof_sql
+            diagnostics["proof"] = proof
+            if not proof.get("success") or not safe_mean_proof(
+                proof.get("rows", []),
+                binary=plan.binary,
+                binary_ceiling=plan.binary_ceiling,
+            ):
+                diagnostics["reason"] = "unsafe-or-unavailable-proof"
+                return ctx
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not (
+                    accepts_hundred_indicator_result(
+                        result.rows,
+                        after.rows,
+                        proof.get("rows", []),
+                        native_fractional_places=plan.native_fractional_places,
+                    )
+                    if plan.binary_ceiling == 100
+                    else accepts_mean_result(result.rows, after.rows, scale=plan.scale)
+                )
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted",
+                    reason="candidate-result-not-equivalent-within-native-precision",
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.integer_mean_precision = diagnostics
+        return ctx
+
+    async def _apply_text_mean_precision(self, ctx: Any) -> Any:
+        """Try one model-approved mean with a range proof and result agreement."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": TEXT_MEAN_PRECISION_VERSION, "status": "unchanged"}
+        ctx.text_mean_precision = diagnostics
+        if result is None or result.error or result.truncated:
+            diagnostics["reason"] = "primary-result-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        plan = plan_text_mean(ctx.sql or "", ctx.db_type, ctx.schema_info)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_text_mean_precision,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="text_mean_precision_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "model-abstained"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_text_mean_probe_executor(ctx, self._db_executor)
+            proof = await asyncio.to_thread(bounded, plan.proof_sql, ctx.target_config)
+            diagnostics["proof_sql"] = plan.proof_sql
+            diagnostics["proof"] = proof
+            if not proof.get("success") or not safe_text_mean_proof(
+                proof.get("rows", []), plan.scale
+            ):
+                diagnostics["reason"] = "unsafe-or-unavailable-proof"
+                return ctx
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_text_mean_result(
+                    result.rows, after.rows, proof.get("rows", []), plan.scale
+                )
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted",
+                    reason="candidate-result-outside-original-quantization",
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.text_mean_precision = diagnostics
+        return ctx
+
+    async def _apply_stable_first(self, ctx: Any) -> Any:
+        """Resolve an existing top-one tie after ranking and identity proofs."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": STABLE_FIRST_VERSION, "status": "unchanged"}
+        ctx.stable_first = diagnostics
+        if result is None or result.error or result.truncated or len(result.rows) != 1:
+            diagnostics["reason"] = "complete-primary-unavailable"
+            return ctx
+        plan = plan_stable_first(ctx.sql or "", ctx.db_type, ctx.schema_info)
+        if plan is None or len(result.rows[0]) != plan.output_columns:
+            diagnostics["reason"] = "unsupported-shape-or-identity"
+            return ctx
+        try:
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_stable_first_probe_executor(ctx, self._db_executor)
+            baseline = await asyncio.to_thread(
+                bounded, plan.baseline_rank_sql, ctx.target_config
+            )
+            diagnostics.update(baseline_rank_sql=plan.baseline_rank_sql, baseline=baseline)
+            if not baseline.get("success") or baseline.get("truncated"):
+                diagnostics["reason"] = "incomplete-ranking-proof"
+                return ctx
+            proof = await asyncio.to_thread(
+                bounded, plan.candidate_rank_sql, ctx.target_config
+            )
+            diagnostics.update(candidate_rank_sql=plan.candidate_rank_sql, proof=proof)
+            expected = (
+                proven_stable_first_rows(plan, baseline.get("rows", []), proof.get("rows", []))
+                if proof.get("success") and not proof.get("truncated")
+                else None
+            )
+            if expected is None:
+                diagnostics["reason"] = "rank-or-identity-not-proven"
+                return ctx
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.candidate_sql
+            if after is None or after.error or after.truncated or not accepts_stable_first_rows(expected, after.rows):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(status="reverted", reason="candidate-disagrees-with-proof")
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(status="reverted", reason="proof-failed", error_kind=type(exc).__name__)
+        ctx.stable_first = diagnostics
+        return ctx
+
+    async def _apply_state_lookup(self, ctx: Any) -> Any:
+        """Ground an explicit state using a unique lookup and a scoped subset proof."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": STATE_LOOKUP_VERSION, "status": "unchanged"}
+        ctx.state_lookup = diagnostics
+        if result is None or result.error or result.truncated or len(result.rows) != 1:
+            diagnostics["reason"] = "primary-result-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        plan = plan_state_lookup(ctx.sql or "", ctx.db_type, ctx.schema_info)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        diagnostics["structural_facts"] = plan.structural_facts()
+        try:
+            routing = await asyncio.to_thread(
+                route_state_lookup,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="state_lookup_routing", **kwargs
+                ),
+                structural_facts=diagnostics["structural_facts"],
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "model-abstained"
+                return ctx
+            bounded = create_state_lookup_probe_executor(
+                ctx, self._db_executor, require_complete=True
+            )
+            state = routing["classification"]["state_excerpt"]
+            lookup_sql = plan.lookup_sql(state)
+            if lookup_sql is None:
+                diagnostics["reason"] = "state-label-unavailable"
+                return ctx
+            lookup = await asyncio.to_thread(bounded, lookup_sql, ctx.target_config)
+            diagnostics.update(lookup_sql=lookup_sql, lookup=lookup)
+            key = (
+                proven_state_key(lookup.get("rows", []), state)
+                if lookup.get("success")
+                else None
+            )
+            if key is None:
+                diagnostics["reason"] = "state-label-or-key-not-unique"
+                return ctx
+            candidate_sql = plan.candidate_sql(key)
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            proof_sql = plan.scope_proof_sql(key)
+            proof = await asyncio.to_thread(bounded, proof_sql, ctx.target_config)
+            diagnostics.update(scope_proof_sql=proof_sql, scope_proof=proof)
+            expected = (
+                proven_state_count(proof.get("rows", []), result.rows)
+                if proof.get("success")
+                else None
+            )
+            if expected is None:
+                diagnostics["reason"] = "state-subset-not-proven"
+                return ctx
+            diagnostics["expected_count"] = expected
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_state_count(expected, after.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="candidate-state-count-disagrees"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.state_lookup = diagnostics
+        return ctx
+
+    async def _apply_comparison_ratio(self, ctx: Any) -> Any:
+        """Return a requested multiplicative factor after proving a single pair."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": COMPARISON_RATIO_VERSION, "status": "unchanged"}
+        ctx.comparison_ratio = diagnostics
+        if result is None or result.error or result.truncated or len(result.rows) != 1:
+            diagnostics["reason"] = "primary-result-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        plan = plan_comparison_ratio(ctx.sql or "", ctx.db_type, ctx.schema_info)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_comparison_ratio,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="comparison_ratio_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "model-abstained"
+                return ctx
+            bounded = create_comparison_ratio_probe_executor(ctx, self._db_executor)
+            proof = await asyncio.to_thread(bounded, plan.proof_sql, ctx.target_config)
+            diagnostics.update(proof_sql=plan.proof_sql, proof=proof)
+            numerator_operand = routing["classification"]["numerator_operand"]
+            expected = (
+                proven_comparison_ratio(
+                    proof.get("rows", []), result.rows, numerator_operand
+                )
+                if proof.get("success")
+                else None
+            )
+            if expected is None:
+                diagnostics["reason"] = "single-comparison-pair-not-proven"
+                return ctx
+            diagnostics["expected_ratio"] = expected
+            candidate_sql = plan.candidate_sql(numerator_operand)
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_comparison_ratio(expected, after.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="candidate-ratio-disagrees"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.comparison_ratio = diagnostics
+        return ctx
+
+    async def _apply_fraction_precision(self, ctx: Any) -> Any:
+        """Recompute an unrounded rate after proving its stored fraction relation."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": FRACTION_PRECISION_VERSION, "status": "unchanged"}
+        ctx.fraction_precision = diagnostics
+        if (
+            result is None
+            or result.error
+            or result.truncated
+            or not 1 <= len(result.rows) <= 10_000
+        ):
+            diagnostics["reason"] = "primary-result-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        plan = plan_fraction_precision(ctx.sql or "", ctx.db_type, ctx.schema_info)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_fraction_precision,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="fraction_precision_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "model-abstained"
+                return ctx
+            bounded = create_fraction_precision_probe_executor(ctx, self._db_executor)
+            proof = await asyncio.to_thread(bounded, plan.proof_sql, ctx.target_config)
+            diagnostics.update(proof_sql=plan.proof_sql, proof=proof)
+            candidate_sql = (
+                fraction_candidate(plan, proof.get("rows", []))
+                if proof.get("success")
+                else None
+            )
+            if candidate_sql is None:
+                diagnostics["reason"] = "fractional-storage-not-uniquely-proven"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_fraction_precision(plan, result.rows, after.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="candidate-fraction-values-disagree"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.fraction_precision = diagnostics
+        return ctx
+
+    async def _apply_count_name_completion(self, ctx: Any) -> Any:
+        """Complete one independently named entity in a proved count comparison."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": COUNT_NAME_COMPLETION_VERSION, "status": "unchanged"}
+        ctx.count_name_completion = diagnostics
+        if result is None or result.error or result.truncated:
+            diagnostics["reason"] = "complete-primary-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        try:
+            plan = plan_count_name(ctx.sql or "", ctx.db_type, ctx.schema_info)
+            if plan is None:
+                diagnostics["reason"] = "unsupported-count-comparison"
+                return ctx
+            domain_executor = create_count_name_domain_executor(ctx, self._db_executor)
+            domain = await asyncio.to_thread(
+                domain_executor, plan.domain_sql, ctx.target_config
+            )
+            diagnostics.update(domain_sql=plan.domain_sql, domain=domain)
+            witness = (
+                name_from_domain(plan, domain.get("rows"))
+                if domain.get("success")
+                else None
+            )
+            if witness is None:
+                diagnostics["reason"] = "unique-missing-name-not-proven"
+                return ctx
+            question = ctx.refined_question or ctx.question
+            request = await asyncio.to_thread(
+                route_request_entity,
+                question,
+                witness.short,
+                self._llm_manager,
+                lambda **kw: ctx.add_llm_call(phase="request_entity_expansion", **kw),
+            )
+            diagnostics["request_entity"] = request
+            if not accepts_request_entity(
+                question, witness.short, witness.full, request["classification"]
+            ):
+                diagnostics["reason"] = "independent-request-name-disagrees"
+                return ctx
+            identity = await asyncio.to_thread(
+                route_name_identity,
+                question,
+                witness.short,
+                witness.full,
+                self._llm_manager,
+                lambda **kw: ctx.add_llm_call(
+                    phase="named_entity_label_completion", **kw
+                ),
+            )
+            diagnostics["name_identity"] = identity
+            if not identity["activate"]:
+                diagnostics["reason"] = "name-identity-not-established"
+                return ctx
+            sql = completed_name_sql(plan, witness)
+            proof_sql = count_proof_sql(plan, witness)
+            if sql is None or proof_sql is None:
+                diagnostics["reason"] = "candidate-unavailable"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid or candidate["sql"] != sql:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_count_name_candidate_executor(ctx, self._db_executor)
+            proof = await asyncio.to_thread(bounded, proof_sql, ctx.target_config)
+            diagnostics.update(
+                count_proof_sql=proof_sql,
+                count_proof=proof,
+                short_name=witness.short,
+                full_name=witness.full,
+                operand_index=witness.index,
+                candidate_sql=sql,
+            )
+            expected = (
+                proved_completed_count(plan, witness, result.rows, proof.get("rows"))
+                if proof.get("success")
+                else None
+            )
+            if expected is None:
+                diagnostics["reason"] = "count-components-not-proven"
+                return ctx
+            diagnostics["expected_result"] = expected
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            if (
+                ctx.sql != sql
+                or after is None
+                or after.error
+                or after.truncated
+                or not accepts_completed_count(expected, after.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="candidate-count-disagrees"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.count_name_completion = diagnostics
+        return ctx
+
+    async def _apply_identifier_quoting(self, ctx: Any) -> Any:
+        """Quote proved reserved table tokens after a native MySQL syntax error."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": IDENTIFIER_QUOTING_VERSION, "status": "unchanged"}
+        ctx.identifier_quoting = diagnostics
+        if result is None or not result.error:
+            diagnostics["reason"] = "no-primary-error"
+            return ctx
+        try:
+            plan = plan_identifier_quoting(
+                ctx.sql or "", ctx.db_type, ctx.schema_info, result.error
+            )
+            if plan is None:
+                diagnostics["reason"] = "unsupported-syntax-error-or-shape"
+                return ctx
+            bounded = create_identifier_quoting_probe_executor(ctx, self._db_executor)
+            proof = await asyncio.to_thread(bounded, plan.proof_sql, ctx.target_config)
+            diagnostics.update(
+                original_sql=ctx.sql, proof_sql=plan.proof_sql, proof=proof
+            )
+            candidate_sql = (
+                candidate_from_keywords(plan, proof.get("rows"))
+                if proof.get("success")
+                else None
+            )
+            if candidate_sql is None:
+                diagnostics["reason"] = "reserved-table-word-not-proven"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid or candidate["sql"] != candidate_sql:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = candidate_sql
+            if (
+                ctx.sql != candidate_sql
+                or after is None
+                or after.error
+                or after.truncated
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="candidate-incomplete-or-failed"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.identifier_quoting = diagnostics
+        return ctx
+
+    async def _apply_percentage_threshold(self, ctx: Any) -> Any:
+        """Scale one explicit percentage threshold after a fractional-unit proof."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": PERCENTAGE_THRESHOLD_VERSION, "status": "unchanged"}
+        ctx.percentage_threshold = diagnostics
+        if result is None or result.error or result.truncated:
+            diagnostics["reason"] = "primary-result-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        plan = plan_percentage_threshold(ctx.sql or "", ctx.db_type, ctx.schema_info)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_percentage_threshold,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="percentage_threshold_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "model-abstained"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_percentage_threshold_probe_executor(
+                ctx, self._db_executor, require_complete=True
+            )
+            proof = await asyncio.to_thread(bounded, plan.proof_sql, ctx.target_config)
+            diagnostics.update(proof_sql=plan.proof_sql, proof=proof)
+            witness = (
+                proven_fraction_witness(plan, proof.get("rows", []))
+                if proof.get("success")
+                else None
+            )
+            if witness is None:
+                diagnostics["reason"] = "fractional-storage-not-uniquely-proven"
+                return ctx
+            diagnostics["witness_columns"] = list(witness)
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_percentage_threshold(plan, result.rows, after.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="candidate-count-not-monotonic"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.percentage_threshold = diagnostics
+        return ctx
+
+    async def _apply_null_extremum(self, ctx):
+        """Replace a proved missing ranking winner with a measured one."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": NULL_EXTREMUM_VERSION, "status": "unchanged"}
+        ctx.null_extremum = diagnostics
+        if result is None or result.error or result.truncated or len(result.rows) != 1:
+            diagnostics["reason"] = "complete-singleton-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        plan = plan_null_extremum(ctx.sql or "", ctx.db_type, ctx.schema_info)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_null_extremum,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="null_extremum_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "model-abstained"
+                return ctx
+            bounded = create_null_extremum_probe_executor(ctx, self._db_executor)
+            proof = await asyncio.to_thread(
+                bounded, plan.original_proof_sql, ctx.target_config
+            )
+            diagnostics.update(
+                original_proof_sql=plan.original_proof_sql, original_proof=proof
+            )
+            if not proof.get("success") or not original_missing_proved(
+                plan, result.rows, proof.get("rows", [])
+            ):
+                diagnostics["reason"] = "original-missing-value-not-proved"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            proof = await asyncio.to_thread(
+                bounded, plan.candidate_proof_sql, ctx.target_config
+            )
+            diagnostics.update(
+                candidate_proof_sql=plan.candidate_proof_sql, candidate_proof=proof
+            )
+            expected = (
+                candidate_measured_projection(plan, proof.get("rows", []))
+                if proof.get("success")
+                else None
+            )
+            if expected is None:
+                diagnostics["reason"] = "measured-candidate-not-proved"
+                return ctx
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or [tuple(row) for row in after.rows] != expected
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="candidate-result-disagrees"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.null_extremum = diagnostics
+        return ctx
+
+    async def _apply_projection_contract(self, ctx: Any) -> Any:
+        """Keep a requested output subset only when complete rows agree exactly."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": PROJECTION_CONTRACT_VERSION, "status": "unchanged"}
+        ctx.projection_contract = diagnostics
+        if (
+            result is None
+            or result.error
+            or result.truncated
+            or not 1 <= len(result.rows) <= 10_000
+        ):
+            diagnostics["reason"] = "complete-nonempty-primary-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        if projection_shape(ctx.sql or "", ctx.db_type) is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_projection_contract,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="projection_contract_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            plan = plan_projection_subset(ctx.sql, ctx.db_type, routing["keep_indices"])
+            if plan is None:
+                diagnostics["reason"] = "no-safe-requested-subset"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_projection_contract_probe_executor(ctx, self._db_executor)
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics.update(
+                candidate_sql=plan.candidate_sql, keep_indices=list(plan.keep_indices)
+            )
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_projection_subset(plan, result.rows, after.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="projected-result-disagrees"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.projection_contract = diagnostics
+        return ctx
+
+    async def _apply_ranked_union(self, ctx: Any) -> Any:
+        original = _snapshot_correction_state(ctx)
+        diagnostics = {"version": RANKED_UNION_VERSION, "status": "unchanged"}
+        ctx.ranked_union = diagnostics
+        if ctx.execution_result is None or not ctx.execution_result.error:
+            diagnostics["reason"] = "original-execution-error-required"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        plan = plan_ranked_union(ctx.sql or "", ctx.db_type)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_ranked_union,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="ranked_union_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "requested-row-positions-not-established"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_ranked_union_probe_executor(ctx, self._db_executor)
+            branches = []
+            for sql in plan.branch_sql:
+                proof = await asyncio.to_thread(bounded, sql, ctx.target_config)
+                if (
+                    not proof.get("success")
+                    or proof.get("truncated")
+                    or len(proof.get("rows", [])) != 1
+                ):
+                    diagnostics["reason"] = "independent-singleton-proof-failed"
+                    return ctx
+                branches.append(proof["rows"])
+            diagnostics.update(
+                candidate_sql=plan.candidate_sql,
+                branch_sql=list(plan.branch_sql),
+                positions=list(plan.positions),
+                branch_rows=branches,
+            )
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            result = ctx.execution_result
+            if (
+                result is None
+                or result.error
+                or result.truncated
+                or not accepts_ranked_union(plan, branches, result.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="combined-row-proof-disagrees"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.ranked_union = diagnostics
+        return ctx
+
+    async def _apply_calendar_day(self, ctx: Any) -> Any:
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": CALENDAR_DAY_VERSION, "status": "unchanged"}
+        ctx.calendar_day = diagnostics
+        if result is None or result.error or result.truncated:
+            diagnostics["reason"] = "complete-primary-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        plan = plan_calendar_day(ctx.sql or "", ctx.db_type, ctx.schema_info)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_calendar_day,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="calendar_day_routing", **kwargs
+                ),
+                structural_facts=plan.facts,
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "calendar-day-intent-not-established"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_calendar_day_probe_executor(ctx, self._db_executor)
+            storage = await asyncio.to_thread(
+                bounded, plan.storage_sql, ctx.target_config
+            )
+            diagnostics.update(storage_sql=plan.storage_sql, storage_proof=storage)
+            if (
+                not storage.get("success")
+                or storage.get("truncated")
+                or not proves_iso_boundary(plan, storage.get("rows", []))
+            ):
+                diagnostics["reason"] = "complete-iso-boundary-not-proved"
+                return ctx
+            expected = await asyncio.to_thread(
+                bounded, plan.date_result_sql, ctx.target_config
+            )
+            diagnostics.update(
+                date_result_sql=plan.date_result_sql, date_result_proof=expected
+            )
+            if (
+                not expected.get("success")
+                or expected.get("truncated")
+                or len(expected.get("rows", [])) > 10000
+            ):
+                diagnostics["reason"] = "date-extraction-result-unavailable"
+                return ctx
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_calendar_result(
+                    plan, expected.get("rows", []), after.rows
+                )
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="calendar-result-disagrees"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.calendar_day = diagnostics
+        return ctx
+
+    async def _apply_matched_percentage(self, ctx: Any) -> Any:
+        """Use a proved matched-entity count for an explicitly requested percent."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": MATCHED_PERCENTAGE_VERSION, "status": "unchanged"}
+        ctx.matched_percentage = diagnostics
+        if result is None or result.error or result.truncated or len(result.rows) != 1:
+            diagnostics["reason"] = "complete-scalar-primary-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        try:
+            plan = plan_matched_percentage(ctx.sql or "", ctx.db_type, ctx.schema_info)
+            if plan is None:
+                diagnostics["reason"] = "unsupported-shape-or-type"
+                return ctx
+            routing = await asyncio.to_thread(
+                route_matched_percentage,
+                ctx.refined_question or ctx.question,
+                plan,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(**kwargs),
+            )
+            diagnostics["routing"] = routing
+            if not routing["apply"]:
+                diagnostics["reason"] = "no-unambiguous-matched-entity-denominator"
+                return ctx
+            candidate = dict(original)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_matched_percentage_probe_executor(ctx, self._db_executor)
+            stats = await asyncio.to_thread(bounded, plan.proof_sql, ctx.target_config)
+            proof = (
+                prove_matched_percentage(result.rows, stats.get("rows", []))
+                if stats.get("success")
+                else None
+            )
+            diagnostics.update(
+                proof_sql=plan.proof_sql, proof_result=stats, proof=proof
+            )
+            if proof is None:
+                diagnostics["reason"] = "unmatched-population-not-proven"
+                return ctx
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_matched_percentage(proof, after.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="matched-percentage-result-disagrees"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.matched_percentage = diagnostics
+        return ctx
+
+    async def _apply_scaled_ratio(self, ctx: Any) -> Any:
+        """Use one rounding step only after exact operand and result proofs."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": SCALED_RATIO_VERSION, "status": "unchanged"}
+        ctx.scaled_ratio = diagnostics
+        if result is None or result.error or result.truncated or len(result.rows) != 1:
+            diagnostics["reason"] = "complete-scalar-primary-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        try:
+            plan = plan_scaled_ratio(ctx.sql or "", ctx.db_type)
+            if plan is None:
+                diagnostics["reason"] = "unsupported-shape-or-type"
+                return ctx
+            routing = await asyncio.to_thread(
+                route_scaled_ratio,
+                ctx.refined_question or ctx.question,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(**kwargs),
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "numeric-presentation-constrained-or-uncertain"
+                return ctx
+            for sql in (plan.proof_sql, plan.candidate_sql):
+                trial = dict(original)
+                trial["sql"] = sql
+                valid, issues = await self._preflight_correction_candidate(ctx, trial)
+                if not valid:
+                    diagnostics.update(
+                        reason="candidate-validation-failed", issues=issues
+                    )
+                    return ctx
+            bounded = create_scaled_ratio_probe_executor(ctx, self._db_executor)
+            stats = await asyncio.to_thread(bounded, plan.proof_sql, ctx.target_config)
+            proof = (
+                prove_scaled_ratio(result.rows, stats.get("rows", []))
+                if stats.get("success")
+                else None
+            )
+            diagnostics.update(
+                proof_sql=plan.proof_sql, proof_result=stats, proof=proof
+            )
+            if proof is None:
+                diagnostics["reason"] = (
+                    "exact-operands-or-strict-precision-gain-not-proven"
+                )
+                return ctx
+            candidate = dict(original)
+            candidate["sql"] = plan.candidate_sql
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_scaled_ratio(proof, after.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="candidate-not-proved-nearest-float"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.scaled_ratio = diagnostics
+        return ctx
+
+    async def _apply_occurrence_percentage(self, ctx: Any) -> Any:
+        """Remove key deduplication only for independently requested linked occurrences."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": OCCURRENCE_PERCENTAGE_VERSION, "status": "unchanged"}
+        ctx.occurrence_percentage = diagnostics
+        if (
+            ctx.schema_info is None
+            or result is None
+            or result.error
+            or result.truncated
+            or len(result.rows) != 1
+        ):
+            diagnostics["reason"] = "complete-scalar-primary-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        if not has_percentage_authorization(
+            ctx.refined_question or ctx.question,
+            ctx.sql or "",
+            ctx.correction_intent_routing,
+        ):
+            diagnostics["reason"] = "prior-percentage-authorization-required"
+            return ctx
+        try:
+            plan = plan_occurrence_percentage(
+                ctx.sql or "", ctx.db_type, ctx.schema_info
+            )
+            if plan is None:
+                diagnostics["reason"] = "unsupported-shape-or-type"
+                return ctx
+            routing = await asyncio.to_thread(
+                route_occurrence_percentage,
+                ctx.refined_question or ctx.question,
+                plan,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(**kwargs),
+            )
+            diagnostics["routing"] = routing
+            if not routing["apply"]:
+                diagnostics["reason"] = "distinct-or-incompatible-request"
+                return ctx
+            for sql in (plan.proof_sql, plan.candidate_sql):
+                trial = dict(original)
+                trial["sql"] = sql
+                valid, issues = await self._preflight_correction_candidate(ctx, trial)
+                if not valid:
+                    diagnostics.update(
+                        reason="candidate-validation-failed", issues=issues
+                    )
+                    return ctx
+            bounded = create_occurrence_percentage_probe_executor(
+                ctx, self._db_executor
+            )
+            stats = await asyncio.to_thread(bounded, plan.proof_sql, ctx.target_config)
+            proof = (
+                prove_occurrence_percentage(result.rows, stats.get("rows", []))
+                if stats.get("success")
+                else None
+            )
+            diagnostics.update(
+                proof_sql=plan.proof_sql, proof_result=stats, proof=proof
+            )
+            if proof is None:
+                diagnostics["reason"] = "distinct-and-occurrence-counts-not-proven"
+                return ctx
+            candidate = dict(original)
+            candidate["sql"] = plan.candidate_sql
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_occurrence_percentage(proof, after.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted",
+                    reason="candidate-disagrees-with-proved-occurrence-counts",
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.occurrence_percentage = diagnostics
+        return ctx
+
+    async def _apply_output_completion(self, ctx: Any) -> Any:
+        """Add one explicit field only when the complete original result survives."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": OUTPUT_COMPLETION_VERSION, "status": "unchanged"}
+        ctx.output_completion = diagnostics
+        if (
+            result is None
+            or result.error
+            or result.truncated
+            or not 1 <= len(result.rows) <= 10000
+        ):
+            diagnostics["reason"] = "complete-nonempty-primary-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        try:
+            shape = output_shape(ctx.sql or "", ctx.db_type, ctx.schema_info)
+            if shape is None:
+                diagnostics["reason"] = "unsupported-shape-or-type"
+                return ctx
+            routing = await asyncio.to_thread(
+                route_output_completion,
+                ctx.refined_question or ctx.question,
+                shape,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(**kwargs),
+            )
+            diagnostics["routing"] = routing
+            plan = plan_output_completion(
+                shape, routing["option_index"], routing["insertion_index"]
+            )
+            if plan is None:
+                diagnostics["reason"] = "no-safe-explicit-missing-field"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_output_completion_probe_executor(ctx, self._db_executor)
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics.update(
+                candidate_sql=plan.candidate_sql,
+                insertion_index=plan.insertion_index,
+                selected_column=shape.options[routing["option_index"]],
+            )
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_output_completion(plan, result.rows, after.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="original-result-disagrees"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.output_completion = diagnostics
+        return ctx
+
+    async def _apply_projection_order(self, ctx: Any) -> Any:
+        """Permute an explicit output list only when complete rows agree exactly."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": PROJECTION_ORDER_VERSION, "status": "unchanged"}
+        ctx.projection_order = diagnostics
+        if (
+            result is None
+            or result.error
+            or result.truncated
+            or not 1 <= len(result.rows) <= 10_000
+        ):
+            diagnostics["reason"] = "complete-nonempty-primary-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        if projection_order_shape(ctx.sql or "", ctx.db_type) is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_projection_order,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="projection_order_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            plan = plan_projection_order(ctx.sql, ctx.db_type, routing["keep_indices"])
+            if plan is None:
+                diagnostics["reason"] = "no-safe-requested-permutation"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_projection_order_probe_executor(ctx, self._db_executor)
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics.update(
+                candidate_sql=plan.candidate_sql, keep_indices=list(plan.keep_indices)
+            )
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_projection_subset(plan, result.rows, after.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="projected-result-disagrees"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.projection_order = diagnostics
+        return ctx
+
+    async def _apply_name_format(self, ctx: Any) -> Any:
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": NAME_FORMAT_VERSION, "status": "unchanged"}
+        ctx.name_format = diagnostics
+        if (
+            result is None
+            or result.error
+            or result.truncated
+            or not 1 <= len(result.rows) <= 10000
+        ):
+            diagnostics["reason"] = "complete-nonempty-primary-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        plan = plan_name_format(ctx.sql or "", ctx.db_type)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_name_format,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="name_format_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "explicit-format-or-unresolved-content"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_name_format_probe_executor(ctx, self._db_executor)
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_name_format(result.rows, after.rows, plan)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted", reason="complete-name-reconstruction-failed"
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.name_format = diagnostics
+        return ctx
+
+    async def _apply_grouped_extremum(self, ctx):
+        import asyncio
+        from collections import Counter
+        from features.ask.engine.ask3.phases.execute import execute_query
+
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": GROUPED_EXTREMUM_VERSION, "status": "unchanged"}
+        ctx.grouped_extremum = diagnostics
+        if (
+            result is None
+            or result.truncated
+            or ctx.provided_context
+            or ctx.conversation_context
+        ):
+            diagnostics["reason"] = "unavailable-result-or-additional-context"
+            return ctx
+        # A reserved identifier may fail only at the MySQL server. Parser-preserving
+        # quoting is allowed with this syntax code, not arbitrary execution failures.
+        if result.error:
+            if ctx.db_type != "mysql" or not str(result.error).startswith("(1064,"):
+                diagnostics["reason"] = "unsupported-primary-error"
+                return ctx
+        elif len(result.rows) != 1 or len(result.rows[0]) != 1:
+            diagnostics["reason"] = "primary-not-one-entity"
+            return ctx
+        plan = plan_grouped_extremum(ctx.sql or "", ctx.db_type)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_grouped_extremum,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="grouped_request_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "model-abstained"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_grouped_extremum_probe_executor(ctx, self._db_executor)
+            proof = await asyncio.to_thread(bounded, plan.proof_sql, ctx.target_config)
+            diagnostics.update(proof_sql=plan.proof_sql, proof=proof)
+            if not proof.get("success") or not safe_grouped_extremum_proof(
+                proof.get("rows", [])
+            ):
+                diagnostics["reason"] = "no-bounded-numeric-tie-proof"
+                return ctx
+            expected = [(row[0],) for row in proof["rows"]]
+            if not result.error and tuple(result.rows[0]) not in expected:
+                diagnostics["reason"] = "primary-not-in-proven-ties"
+                return ctx
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or Counter(map(tuple, after.rows)) != Counter(expected)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(status="reverted", reason="candidate-ties-changed")
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.grouped_extremum = diagnostics
+        return ctx
+
+    async def _apply_endpoint_component(self, ctx: Any) -> Any:
+        """Prove complete mirrored storage before final semantic authorization."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": ENDPOINT_COMPONENT_VERSION, "status": "unchanged"}
+        ctx.endpoint_component = diagnostics
+        if result is None or result.error or result.truncated:
+            diagnostics["reason"] = "primary-result-unavailable"
+            return ctx
+        if (
+            len(result.rows) != 1
+            or len(result.rows[0]) != 1
+            or type(result.rows[0][0]) is not int
+            or result.rows[0][0] != 0
+        ):
+            diagnostics["reason"] = "primary-not-zero-count"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        try:
+            plan = plan_endpoint_component(ctx.sql or "", ctx.db_type, ctx.schema_info)
+            if plan is None:
+                diagnostics["reason"] = "unsupported-shape-or-type"
+                return ctx
+            question = ctx.refined_question or ctx.question
+            preliminary = await asyncio.to_thread(
+                route_endpoint_request_contract,
+                question,
+                plan,
+                self._llm_manager,
+                ctx.add_llm_call,
+            )
+            diagnostics["routing"] = dict(preliminary)
+            if not preliminary["activate"]:
+                diagnostics["reason"] = "model-abstained"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.candidate_sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_endpoint_component_probe_executor(ctx, self._db_executor)
+            stats = await asyncio.to_thread(bounded, plan.proof_sql, ctx.target_config)
+            diagnostics.update(proof_sql=plan.proof_sql, proof_rows=stats)
+            proof = (
+                prove_endpoint_component(plan, result.rows, stats.get("rows", []))
+                if stats.get("success") and not stats.get("truncated")
+                else None
+            )
+            diagnostics["proof"] = proof
+            if proof is None:
+                diagnostics["reason"] = "unsafe-or-unavailable-endpoint-proof"
+                return ctx
+            facts = verified_storage_facts(plan, result.rows, stats["rows"])
+            diagnostics["native_storage_facts"] = facts
+            base = await asyncio.to_thread(
+                route_endpoint_component,
+                question,
+                ctx.sql,
+                ctx.db_type,
+                plan,
+                ctx.schema_info,
+                facts,
+                self._llm_manager,
+                ctx.add_llm_call,
+            )
+            diagnostics["routing"].update(base=base, activate=base["activate"])
+            if not base["activate"]:
+                diagnostics["reason"] = "proven-storage-semantic-abstention"
+                return ctx
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.candidate_sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_endpoint_count(proof, after.rows)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(status="reverted", reason="candidate-count-changed")
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.endpoint_component = diagnostics
+        return ctx
+
+    async def _apply_month_component(self, ctx: Any) -> Any:
+        """Prove one calendar encoding, then preserve the selected period as a month."""
+        original = _snapshot_correction_state(ctx)
+        result = ctx.execution_result
+        diagnostics = {"version": MONTH_COMPONENT_VERSION, "status": "unchanged"}
+        ctx.month_component = diagnostics
+        if result is None or result.error or result.truncated:
+            diagnostics["reason"] = "primary-result-unavailable"
+            return ctx
+        if ctx.provided_context or ctx.conversation_context:
+            diagnostics["reason"] = "additional-context-requires-abstention"
+            return ctx
+        plan = plan_month_component(ctx.sql or "", ctx.db_type, ctx.schema_info)
+        if plan is None:
+            diagnostics["reason"] = "unsupported-shape-or-type"
+            return ctx
+        try:
+            routing = await asyncio.to_thread(
+                route_month_component,
+                ctx.refined_question or ctx.question,
+                ctx.sql,
+                ctx.db_type,
+                self._llm_manager,
+                lambda **kwargs: ctx.add_llm_call(
+                    phase="month_component_routing", **kwargs
+                ),
+            )
+            diagnostics["routing"] = routing
+            if not routing["activate"]:
+                diagnostics["reason"] = "model-abstained"
+                return ctx
+            candidate = _snapshot_correction_state(ctx)
+            candidate["sql"] = plan.sql
+            valid, issues = await self._preflight_correction_candidate(ctx, candidate)
+            if not valid:
+                diagnostics.update(reason="candidate-validation-failed", issues=issues)
+                return ctx
+            bounded = create_month_component_probe_executor(ctx, self._db_executor)
+            proof = await asyncio.to_thread(bounded, plan.proof_sql, ctx.target_config)
+            diagnostics["proof_sql"] = plan.proof_sql
+            diagnostics["proof"] = proof
+            if not proof.get("success") or not prove_yearmonth_axis(
+                proof.get("rows", []), plan.year
+            ):
+                diagnostics["reason"] = "unsafe-or-unavailable-proof"
+                return ctx
+            _restore_correction_state(ctx, candidate)
+            ctx = await asyncio.to_thread(execute_query, ctx, _NullPresenter(), bounded)
+            after = ctx.execution_result
+            diagnostics["candidate_sql"] = plan.sql
+            if (
+                after is None
+                or after.error
+                or after.truncated
+                or not accepts_month_component(result.rows, after.rows, plan.year)
+            ):
+                _restore_correction_state(ctx, original)
+                diagnostics.update(
+                    status="reverted",
+                    reason="candidate-does-not-reconstruct-original-periods",
+                )
+            else:
+                diagnostics["status"] = "normalized"
+        except Exception as exc:
+            _restore_correction_state(ctx, original)
+            diagnostics.update(
+                status="reverted", reason="repair-failed", error_kind=type(exc).__name__
+            )
+        ctx.month_component = diagnostics
+        return ctx
 
     async def _apply_post_execution_repairs(self, ctx: Any) -> Any:
         """Try selected repairs that require feedback from the primary result."""
@@ -1099,8 +3538,7 @@ class AskService:
         )
         routing = {**ctx.correction_intent_routing, **base_diagnostics}
         routed_status_active = (
-            routing.get("status") == "activate"
-            and routing.get("verdict") == "activate"
+            routing.get("status") == "activate" and routing.get("verdict") == "activate"
         )
         raw_selected = routing.get("selected_intents")
         if isinstance(raw_selected, (list, tuple)):
@@ -1119,9 +3557,7 @@ class AskService:
                 routing.get("activation_allowed") is True
                 or self._correction_intent_routing_shadow
             )
-            and 0
-            < len(selected_intents)
-            <= CORRECTION_INTENT_ROUTING_MAX_ACTIVATIONS
+            and 0 < len(selected_intents) <= CORRECTION_INTENT_ROUTING_MAX_ACTIVATIONS
             and all(
                 intent in self._correction_intent_routing_intent_scope
                 for intent in selected_intents

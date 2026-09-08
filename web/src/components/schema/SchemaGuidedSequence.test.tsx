@@ -44,10 +44,8 @@ function renderSequence(s: SchemaStatus) {
       status={s}
       onRefresh={() => {}}
       onProfile={() => {}}
-      onAnnotate={() => {}}
       refreshing={false}
       profiling={false}
-      annotating={false}
     />
   )
 }
@@ -60,7 +58,9 @@ describe('SchemaGuidedSequence profile step', () => {
   it('shows the default caption when nothing is profiled', () => {
     renderSequence(status())
     expect(
-      screen.getByText("Lets Ask reason about what's in a column, not just its name.")
+      screen.getByText(
+        "Lets Ask reason about what's in a column, not just its name."
+      )
     ).toBeTruthy()
   })
 

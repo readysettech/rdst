@@ -57,6 +57,7 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
     # Path: lib/engines/ask3/phases/validate.py -> lib/functions/sql_validation.py
     from features.ask.sql_validation import (
         validate_columns_against_schema,
+        validate_resolved_columns_against_schema,
         validate_filter_literal_provenance,
         validate_sql_for_ask,
         validate_tables_against_schema,
@@ -139,6 +140,34 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
 
             presenter.validation_error(ctx.validation_errors)
 
+        if ctx.resolved_column_validation_enabled and not ctx.validation_errors:
+            resolved = validate_resolved_columns_against_schema(
+                ctx.sql, schema_dict, ctx.db_type
+            )
+            if not resolved["is_valid"]:
+                ctx.validation_resolution = {
+                    "status": "invalid",
+                    "original_sql": ctx.sql,
+                    "error": resolved["error_message"],
+                }
+                ctx.validation_errors.append(
+                    ValidationError(
+                        column="",
+                        table_alias=None,
+                        message=resolved["error_message"],
+                        suggestions=[],
+                    )
+                )
+                presenter.validation_error(ctx.validation_errors)
+            elif ctx.validation_resolution.get("status") == "invalid":
+                ctx.validation_resolution = {
+                    **ctx.validation_resolution,
+                    "status": "repaired",
+                    "candidate_sql": ctx.sql,
+                }
+            else:
+                ctx.validation_resolution = {"status": "validated"}
+
         if not ctx.validation_errors:
             literal_validation = validate_filter_literal_provenance(
                 ctx.sql,
@@ -148,6 +177,7 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
                 matched_database_values=ctx.matched_database_values,
                 clarifications=ctx.clarifications,
                 dialect=ctx.db_type,
+                enum_overlap_advisory=ctx.enum_overlap_advisory,
             )
             if not literal_validation["is_valid"]:
                 for issue in [

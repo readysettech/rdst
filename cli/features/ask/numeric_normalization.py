@@ -12,7 +12,7 @@ from sqlglot import exp
 
 from features.ask.correction_intent_state import selected_correction_intents
 
-EXPLICIT_RATIO_NORMALIZER_VERSION = "explicit-floating-ratio-v6"
+EXPLICIT_RATIO_NORMALIZER_VERSION = "model-routed-floating-ratio-v8"
 
 _RATIO_INTENT = re.compile(
     r"\b(?:percentage|percent|proportion|ratio)\b",
@@ -112,7 +112,33 @@ def _multiplication_scales_by_hundred(expression: exp.Expression) -> bool:
     )
 
 
+def _percentage_weighted_sum(expression: exp.Expression) -> bool:
+    while isinstance(expression, (exp.Cast, exp.TryCast, exp.Paren)):
+        expression = expression.this
+    if not isinstance(expression, exp.Sum):
+        return False
+    conditional = expression.this
+    if isinstance(conditional, exp.Case):
+        values = [branch.args.get("true") for branch in conditional.args.get("ifs", [])]
+        values.append(conditional.args.get("default"))
+    elif isinstance(conditional, exp.If):
+        values = [conditional.args.get("true"), conditional.args.get("false")]
+    else:
+        return False
+    weights = [
+        None
+        if value is None or isinstance(value, exp.Null)
+        else (_numeric_value(value) or "unknown")
+        for value in values
+    ]
+    return "100.0" in weights and all(
+        weight in {None, "0.0", "100.0"} for weight in weights
+    )
+
+
 def _already_percent_scaled(division: exp.Div) -> bool:
+    if _percentage_weighted_sum(division.this):
+        return True
     if _multiplication_scales_by_hundred(division.this):
         return True
     current = division.parent
@@ -132,7 +158,10 @@ def _fractional_population_ratio(division: exp.Div) -> bool:
     percent_terms = {"percent", "percentage", "pct", "rate"}
     operand_terms = {
         term
-        for column in (*numerator.find_all(exp.Column), *denominator.find_all(exp.Column))
+        for column in (
+            *numerator.find_all(exp.Column),
+            *denominator.find_all(exp.Column),
+        )
         for term in re.split(r"[^a-z0-9]+", column.name.casefold())
         if term
     }
@@ -165,7 +194,9 @@ def normalize_explicit_ratio_sql(
     )
     model_ratio_hint = "ratio_output" in intent_hints
     model_percentage_hint = "percentage_output" in intent_hints
-    lexical_ratio_intent = bool(_RATIO_INTENT.search(f"{question}\n{provided_context}"))
+    lexical_ratio_intent = not hinted_ratio and bool(
+        _RATIO_INTENT.search(f"{question}\n{provided_context}")
+    )
     if not hinted_ratio and not lexical_ratio_intent:
         diagnostics["reason"] = "no-explicit-ratio-intent"
         return sql, diagnostics
@@ -201,7 +232,10 @@ def normalize_explicit_ratio_sql(
     scaled = 0
     percentage_divisions = _root_projection_divisions(tree)
     if (
-        (_PERCENT_INTENT.search(question) or "percentage_output" in intent_hints)
+        (
+            model_percentage_hint
+            or (not hinted_ratio and _PERCENT_INTENT.search(question))
+        )
         and len(percentage_divisions) == 1
         and not _already_percent_scaled(percentage_divisions[0])
         and _fractional_population_ratio(percentage_divisions[0])

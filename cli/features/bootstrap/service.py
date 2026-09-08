@@ -1,7 +1,7 @@
 """Add-database bootstrap orchestrator.
 
 Composes existing services into one background run: a connection test, then
-a schema track (structure -> profile -> key gate -> annotate). Readyset is
+a schema track (structure -> profile), with opt-in key gating and annotation. Readyset is
 provisioned lazily by explicit comparisons, never by target creation. Yields
 BootstrapEvent dataclasses shaped for shared.run_registry.RunRegistry: the
 needs_key event parks the run's status while adapters raise their key/trial
@@ -34,7 +34,7 @@ _TRACK_DONE = object()
 
 @dataclass
 class BootstrapOptions:
-    annotate: bool = True
+    annotate: bool = False
     # How often the annotate gate re-validates while its schema track is live.
     key_poll_seconds: float = 5.0
     # A wedged schema/deploy collaborator must settle the background run visibly.

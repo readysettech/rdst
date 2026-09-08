@@ -1,0 +1,20 @@
+{
+  "freeze_id": "rdst-ask-ci-candidate-v4-v16",
+  "supersedes": "rdst-ask-auto-init-no-evidence-v15",
+  "supersession_reason": "Import experimental candidate-v4 fullv56 runtime and run CI with only auto-init and bird-curated contexts. This receipt records configuration, not a new accuracy measurement.",
+  "benchmark_protocol_sha256": "527541b8013a0ced2a8fa1d9124e1fb0b07427c068f502d89674aba9483c9a72",
+  "source_snapshot": "candidate-v4-full500-20260908/source/rdst",
+  "ask_accuracy_profile": "candidate-v4",
+  "enum_overlap_advisory": true,
+  "contexts": ["auto-init", "bird-curated"],
+  "model": "claude-sonnet-4.6-subscription-medium",
+  "suite": "canary",
+  "repetitions": 1,
+  "qualified": false,
+  "known_limitations": ["Projection pruning can remove explicitly requested outputs."],
+  "holdout_partition": {"opened": true},
+  "acceptance": {
+    "future_unseen_evaluation_required": true,
+    "required_baseline_repetitions": 3
+  }
+}

@@ -166,10 +166,10 @@ def test_protocol_fingerprint_covers_every_runtime_sql_normalizer():
 
 
 def test_frozen_pipeline_receipt_matches_current_protocol():
-    receipt_path = Path(cli.__file__).with_name("frozen_pipeline_v15.json")
+    receipt_path = Path(cli.__file__).with_name("frozen_pipeline_v16.json")
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
 
-    assert receipt["freeze_id"] == "rdst-ask-auto-init-no-evidence-v15"
+    assert receipt["freeze_id"] == "rdst-ask-ci-candidate-v4-v16"
     assert receipt["benchmark_protocol_sha256"] == cli._benchmark_protocol_sha256()
     assert receipt["holdout_partition"]["opened"] is True
     assert receipt["acceptance"]["future_unseen_evaluation_required"] is True

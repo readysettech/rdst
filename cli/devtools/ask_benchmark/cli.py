@@ -119,10 +119,8 @@ from .provision import (
 from .report import build_summary, render_markdown
 from .runner import (
     ASK_ACCURACY_PROFILE_BASELINE,
-    ASK_ACCURACY_PROFILE_CANDIDATE_V1,
-    ASK_ACCURACY_PROFILE_CANDIDATE_V2,
-    ASK_ACCURACY_PROFILE_CANDIDATE_V3,
     ASK_ACCURACY_PROFILES,
+    ask_profile_service_flags,
     BenchmarkRunner,
 )
 from .schema import MySQLSchemaLoader, load_semantic_schema
@@ -378,7 +376,7 @@ def build_parser() -> argparse.ArgumentParser:
             "candidate-v2 additionally enables model-routed, database-proven "
             "encoded-identifier, empty-result time-storage, and full-month "
             "axis-storage repairs. candidate-v3 records the hardened selector, "
-            "scope, value-location, and probe semantics."
+            "scope, value-location, and probe semantics. candidate-v4 selects the frozen experimental fullv56 profile."
         ),
     )
     run.add_argument("--max-cases", type=_positive_int)
@@ -1696,51 +1694,8 @@ def _run_database_locked(
         "semantic_schema_format": args.schema_format,
         "ask_accuracy_profile": args.ask_accuracy_profile,
         "ask_accuracy_features": {
-            "correction_intent_routing": (
-                args.ask_accuracy_profile
-                in {
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V1,
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V2,
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V3,
-                }
-            ),
-            "dual_candidate_selection": (
-                args.ask_accuracy_profile
-                in {
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V1,
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V2,
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V3,
-                }
-            ),
-            "value_location_normalization": (
-                args.ask_accuracy_profile
-                in {
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V1,
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V2,
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V3,
-                }
-            ),
-            "encoded_identifier_storage": (
-                args.ask_accuracy_profile
-                in {
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V2,
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V3,
-                }
-            ),
-            "temporal_text_storage": (
-                args.ask_accuracy_profile
-                in {
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V2,
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V3,
-                }
-            ),
-            "month_axis_storage": (
-                args.ask_accuracy_profile
-                in {
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V2,
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V3,
-                }
-            ),
+            key.removesuffix("_enabled"): value
+            for key, value in ask_profile_service_flags(args.ask_accuracy_profile).items()
         },
         "clarification_policy": (
             NON_INTERACTIVE_CLARIFICATION_POLICY
@@ -2368,6 +2323,7 @@ def _benchmark_protocol_paths() -> tuple[Path, ...]:
         RDST_ROOT / "features" / "ask" / "encoded_identifier_storage.py",
         RDST_ROOT / "features" / "ask" / "temporal_text_storage.py",
         RDST_ROOT / "features" / "ask" / "month_axis_storage.py",
+        *sorted((RDST_ROOT / "features" / "ask").glob("*.py")),
         RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "context.py",
         RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "engine.py",
         RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "types.py",

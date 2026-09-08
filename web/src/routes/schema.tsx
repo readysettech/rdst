@@ -19,7 +19,6 @@ import { toast } from '@rs/ui-new/use-toast'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { ConnectionFailureActions } from '../components/ConnectionFailureActions'
-import { RoutableNotice } from '../components/RoutableNotice'
 import {
   SchemaAddMetricDialog,
   SchemaAddRelationshipDialog,
@@ -38,13 +37,8 @@ import {
 import { TargetDropdown } from '../components/TargetDropdown'
 import { TargetLockNotice } from '../components/TargetLockNotice'
 import { useTarget } from '../hooks/useTarget'
-import {
-  startSchemaAnnotationRun,
-  useBackgroundRun,
-} from '../lib/backgroundRuns'
+import { useBackgroundRun } from '../lib/backgroundRuns'
 import { isConnectionFailure } from '../lib/errorContract'
-import { useTrialSource } from '../lib/trialQueries'
-import { useAnthropicValidity } from '../lib/useAnthropicValidity'
 import { useSchema } from '../lib/useSchema'
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
 import type {
@@ -125,27 +119,6 @@ function SchemaPage() {
       ? errorEnvelope
       : null
 
-  // AI Annotate needs a *working* Anthropic key. Presence isn't enough — a
-  // saved key can be stale/rejected — so probe validity when a key is present.
-  // Both a missing key and a rejected one route to /configure up front rather
-  // than run-then-error on the activation path (dma.7 req #3, rdst-0yy.11).
-  const { envRequirements, anthropicRequirement } = useTrialSource()
-  const keyRequirementPending = envRequirements === undefined
-  const needsApiKey = anthropicRequirement
-    ? !anthropicRequirement.satisfied
-    : false
-  // Probe only once requirements have resolved: probing while they load asks
-  // the provider about a key that may not exist, and that "no key" verdict is
-  // cached long enough to keep every AI gate blocked after a key is set.
-  const keyValidity = useAnthropicValidity(
-    !keyRequirementPending && !needsApiKey
-  ).data
-  const keyRejected =
-    keyValidity?.valid === false && keyValidity.reason === 'rejected'
-  // Fail closed while requirements load so a quick click cannot start an AI
-  // request before we know whether a key is available.
-  const annotateKeyBlocked = keyRequirementPending || needsApiKey || keyRejected
-
   // useSchema retains the last successful response while the next request is
   // in flight. Never let that previous target's state drive effects, actions,
   // or rendering beneath the newly selected target name.
@@ -163,13 +136,6 @@ function SchemaPage() {
     bootstrapRun?.status === 'reconnecting' ||
     bootstrapRun?.status === 'needs_key'
   const annotateLoading = annotationActive
-  const annotateProgress = annotationActive
-    ? annotationRun.current !== null &&
-      annotationRun.total !== null &&
-      annotationRun.total > 0
-      ? `${annotationRun.message} (${annotationRun.current}/${annotationRun.total})`
-      : annotationRun.message
-    : null
   const annotationCompletionRef = useRef<string | null>(null)
 
   const [initLoading, setInitLoading] = useState(false)
@@ -329,15 +295,6 @@ function SchemaPage() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-  }
-
-  const handleAnnotateWithLLM = () => {
-    if (passwordLock.isLocked) return
-    if (annotateKeyBlocked) return
-    if (annotationActive || bootstrapActive) return
-    if (!target) return
-    clearError()
-    void startSchemaAnnotationRun(target)
   }
 
   const handleRefresh = async () => {
@@ -657,28 +614,9 @@ function SchemaPage() {
             </VStack>
           </HStack>
 
-          {/* One primary action + one overflow trigger (redesign §A / VIS-022). */}
+          {/* Schema maintenance actions. */}
           <Show when={currentStatus?.exists}>
             <HStack className="gap-2 items-center">
-              <Button
-                variant="rising"
-                modifier="solid"
-                icon="sparkles"
-                iconPosition="left"
-                label={annotateProgress || 'Annotate with AI'}
-                onClick={handleAnnotateWithLLM}
-                loading={annotateLoading}
-                disabled={
-                  passwordLock.isLocked ||
-                  annotateKeyBlocked ||
-                  annotateLoading ||
-                  bootstrapActive ||
-                  refreshLoading ||
-                  profileLoading ||
-                  initLoading ||
-                  loading
-                }
-              />
               <SchemaManageMenu
                 onRefresh={handleRefresh}
                 onProfile={handleProfile}
@@ -705,29 +643,6 @@ function SchemaPage() {
           requirements={passwordLock.missingTargetRequirements}
           keyringAvailable={passwordLock.keyringAvailable}
         />
-      </Show>
-
-      {/* AI Annotate prerequisite: coax to /configure up front rather than
-            letting a missing- or rejected-key run fail after the click, on the
-            compelled activation path (rdst-dma.7, rdst-0yy.11). */}
-      <Show
-        when={
-          currentStatus?.exists &&
-          !keyRequirementPending &&
-          (needsApiKey || keyRejected)
-        }
-      >
-        <div className="mb-6">
-          {keyRejected ? (
-            <RoutableNotice
-              kind="key-needed"
-              title="Anthropic key rejected"
-              message="Anthropic rejected the configured key. Update it with a valid one to run AI Annotate."
-            />
-          ) : (
-            <RoutableNotice kind="key-needed" />
-          )}
-        </div>
       </Show>
 
       {/* Error alert */}
@@ -823,21 +738,8 @@ function SchemaPage() {
               status={currentStatus}
               onRefresh={handleRefresh}
               onProfile={handleProfile}
-              onAnnotate={handleAnnotateWithLLM}
               refreshing={refreshLoading}
               profiling={profileLoading}
-              annotating={annotateLoading}
-              annotateLabel={annotateProgress}
-              annotateBlocked={annotateKeyBlocked || bootstrapActive}
-              annotateBlockedLabel={
-                bootstrapActive
-                  ? 'Setup in progress'
-                  : keyRequirementPending
-                    ? 'Checking AI key'
-                    : keyRejected
-                      ? 'Key rejected'
-                      : 'Needs a key'
-              }
               disabled={
                 passwordLock.isLocked ||
                 annotateLoading ||

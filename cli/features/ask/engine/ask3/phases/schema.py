@@ -156,6 +156,26 @@ def _is_complete(layer) -> bool:
     return tables_with_types > len(layer.tables) / 2
 
 
+def _declared_primary_key_columns(table) -> frozenset[str]:
+    """Return complete primary-index membership without inferring uniqueness."""
+    primary_indexes = [
+        index for index in table.indexes.values() if index.is_primary is True
+    ]
+    if len(primary_indexes) != 1:
+        return frozenset()
+    columns = primary_indexes[0].columns
+    if (
+        not isinstance(columns, list)
+        or not columns
+        or any(
+            not isinstance(name, str) or name not in table.columns for name in columns
+        )
+        or len(set(columns)) != len(columns)
+    ):
+        return frozenset()
+    return frozenset(columns)
+
+
 def _build_schema_info_from_semantic(layer, target: str, db_type: str) -> SchemaInfo:
     """Build SchemaInfo from semantic layer."""
     schema_info = SchemaInfo(
@@ -163,6 +183,7 @@ def _build_schema_info_from_semantic(layer, target: str, db_type: str) -> Schema
     )
 
     for table_name, table in layer.tables.items():
+        primary_key_columns = _declared_primary_key_columns(table)
         table_info = TableInfo(
             name=table_name,
             description=table.description,
@@ -175,7 +196,7 @@ def _build_schema_info_from_semantic(layer, target: str, db_type: str) -> Schema
                 name=col_name,
                 data_type=col.data_type or "unknown",
                 description=col.description,
-                is_primary_key=col_name.lower() == "id",  # Simple heuristic
+                is_primary_key=col_name in primary_key_columns,
             )
 
         schema_info.tables[table_name] = table_info

@@ -3310,7 +3310,7 @@
       "BootstrapStartRequest": {
         "properties": {
           "annotate": {
-            "default": true,
+            "default": false,
             "title": "Annotate",
             "type": "boolean"
           },

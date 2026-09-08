@@ -154,6 +154,46 @@ def test_preserves_keyservice_error_code(monkeypatch):
     assert exc.value.status == 403
 
 
+@pytest.mark.parametrize("status,code", [
+    (429, "HOSTED_UPSTREAM_BUSY"), (504, "HOSTED_DEADLINE_EXCEEDED"),
+    (502, "UPSTREAM_ERROR"), (401, "UPSTREAM_ERROR"),
+])
+def test_does_not_repeat_keyservice_inference_failures(monkeypatch, status, code):
+    post = MagicMock(return_value=_response(status, {"code": code, "detail": "Unavailable"}))
+    refresh = MagicMock()
+    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider.account_session.access_token", refresh)
+    with pytest.raises(LLMError) as exc:
+        HostedGLMProvider().complete(_request(), api_key="token")
+    assert exc.value.code == code
+    post.assert_called_once()
+    refresh.assert_not_called()
+
+
+def test_refreshes_only_account_auth_rejection_using_same_request_id(monkeypatch):
+    post = MagicMock(side_effect=[
+        _response(401, {"code": "UNAUTHORIZED", "detail": "Expired token"}), _response(),
+    ])
+    refresh = MagicMock(return_value="new-token")
+    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider.account_session.access_token", refresh)
+    HostedGLMProvider().complete(_request(), api_key="old-token")
+    assert post.call_count == 2
+    assert post.call_args_list[0].kwargs["json"]["request_id"] == post.call_args_list[1].kwargs["json"]["request_id"]
+    assert post.call_args_list[1].kwargs["headers"]["Authorization"] == "Bearer new-token"
+    refresh.assert_called_once_with(force_refresh=True)
+
+
+def test_does_not_repeat_transport_failure(monkeypatch):
+    import requests
+
+    post = MagicMock(side_effect=requests.Timeout())
+    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    with pytest.raises(LLMError):
+        HostedGLMProvider().complete(_request(), api_key="token")
+    post.assert_called_once()
+
+
 def test_serializes_hosted_requests_from_one_process(monkeypatch):
     guard = threading.Lock()
     active = 0

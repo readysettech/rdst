@@ -30,7 +30,7 @@ _registry = run_registry
 
 class BootstrapStartRequest(BaseModel):
     target: str | None = None
-    annotate: bool = True
+    annotate: bool = False
 
 
 class BootstrapStartResponse(BaseModel):

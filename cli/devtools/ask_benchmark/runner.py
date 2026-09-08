@@ -81,11 +81,15 @@ ASK_ACCURACY_PROFILE_BASELINE = "baseline"
 ASK_ACCURACY_PROFILE_CANDIDATE_V1 = "candidate-v1"
 ASK_ACCURACY_PROFILE_CANDIDATE_V2 = "candidate-v2"
 ASK_ACCURACY_PROFILE_CANDIDATE_V3 = "candidate-v3"
+ASK_ACCURACY_PROFILE_CANDIDATE_V4 = "candidate-v4"
+ASK_ACCURACY_PROFILE_GLM_DEV_V1 = "glm-dev-v1"
 ASK_ACCURACY_PROFILES = (
     ASK_ACCURACY_PROFILE_BASELINE,
+    ASK_ACCURACY_PROFILE_GLM_DEV_V1,
     ASK_ACCURACY_PROFILE_CANDIDATE_V1,
     ASK_ACCURACY_PROFILE_CANDIDATE_V2,
     ASK_ACCURACY_PROFILE_CANDIDATE_V3,
+    ASK_ACCURACY_PROFILE_CANDIDATE_V4,
 )
 _ASK_ACCURACY_ROUTED_PROFILES = frozenset(
     {
@@ -97,6 +101,104 @@ _ASK_ACCURACY_ROUTED_PROFILES = frozenset(
 _ASK_ACCURACY_STORAGE_PROFILES = frozenset(
     {ASK_ACCURACY_PROFILE_CANDIDATE_V2, ASK_ACCURACY_PROFILE_CANDIDATE_V3}
 )
+
+
+# Frozen E163/fullv56 flags. Experimental and unqualified; preserve the
+# known output-preservation caveat. Later declared-count repair stays off.
+_ASK_ACCURACY_CANDIDATE_V4_FLAGS = {
+    "correction_intent_routing_enabled": True,
+    "dual_candidate_selection_enabled": False,
+    "explicit_ratio_normalization_enabled": True,
+    "scalar_derived_metric_normalization_enabled": False,
+    "all_rows_aggregate_normalization_enabled": False,
+    "extremum_entity_normalization_enabled": False,
+    "unbounded_categorical_normalization_enabled": False,
+    "shared_entity_scope_normalization_enabled": False,
+    "value_location_normalization_enabled": False,
+    "encoded_identifier_storage_enabled": False,
+    "temporal_text_storage_enabled": False,
+    "month_axis_storage_enabled": False,
+    "period_literal_enabled": True,
+    "metric_source_enabled": True,
+    "list_membership_enabled": True,
+    "outer_rounding_enabled": True,
+    "integer_mean_precision_enabled": True,
+    "text_mean_precision_enabled": True,
+    "count_name_completion_enabled": False,
+    "identifier_quoting_enabled": True,
+    "percentage_threshold_enabled": True,
+    "projection_contract_enabled": True,
+    "grouped_extremum_enabled": True,
+    "name_format_enabled": True,
+    "fraction_precision_enabled": True,
+    "comparison_ratio_enabled": True,
+    "state_lookup_enabled": True,
+    "month_component_enabled": True,
+    "endpoint_component_enabled": True,
+    "null_extremum_enabled": True,
+    "projection_order_enabled": True,
+    "output_completion_enabled": True,
+    "occurrence_percentage_enabled": True,
+    "scaled_ratio_enabled": True,
+    "matched_percentage_enabled": True,
+    "ranked_union_enabled": True,
+    "calendar_day_enabled": True,
+    "resolved_column_validation_enabled": True,
+    "stable_first_enabled": True,
+    "declared_count_enabled": False,
+}
+
+
+def ask_profile_service_flags(profile: str) -> dict[str, bool]:
+    """One source of truth for service construction and experiment receipts."""
+    if profile not in ASK_ACCURACY_PROFILES:
+        raise ValueError(f"Unsupported Ask accuracy profile: {profile}")
+    if profile == ASK_ACCURACY_PROFILE_CANDIDATE_V4:
+        return dict(_ASK_ACCURACY_CANDIDATE_V4_FLAGS)
+    glm = profile == ASK_ACCURACY_PROFILE_GLM_DEV_V1
+    routed = profile in _ASK_ACCURACY_ROUTED_PROFILES
+    storage = profile in _ASK_ACCURACY_STORAGE_PROFILES
+    return {
+        "correction_intent_routing_enabled": routed or glm,
+        "dual_candidate_selection_enabled": routed,
+        "explicit_ratio_normalization_enabled": True,
+        "scalar_derived_metric_normalization_enabled": not glm,
+        "all_rows_aggregate_normalization_enabled": not glm,
+        "extremum_entity_normalization_enabled": not glm,
+        "unbounded_categorical_normalization_enabled": not glm,
+        "shared_entity_scope_normalization_enabled": not glm,
+        "value_location_normalization_enabled": routed,
+        "encoded_identifier_storage_enabled": storage,
+        "temporal_text_storage_enabled": storage,
+        "month_axis_storage_enabled": storage,
+        "period_literal_enabled": glm,
+        "metric_source_enabled": glm,
+        "list_membership_enabled": glm,
+        "outer_rounding_enabled": glm,
+        "integer_mean_precision_enabled": glm,
+        "text_mean_precision_enabled": glm,
+        "count_name_completion_enabled": False,
+        "identifier_quoting_enabled": glm,
+        "percentage_threshold_enabled": glm,
+        "projection_contract_enabled": glm,
+        "grouped_extremum_enabled": glm,
+        "name_format_enabled": glm,
+        "fraction_precision_enabled": glm,
+        "comparison_ratio_enabled": glm,
+        "state_lookup_enabled": glm,
+        "month_component_enabled": glm,
+        "endpoint_component_enabled": glm,
+        "null_extremum_enabled": glm,
+        "projection_order_enabled": glm,
+        "output_completion_enabled": glm,
+        "occurrence_percentage_enabled": glm,
+        "scaled_ratio_enabled": glm,
+        "matched_percentage_enabled": glm,
+        "ranked_union_enabled": glm,
+        "calendar_day_enabled": glm,
+        "resolved_column_validation_enabled": glm,
+        "stable_first_enabled": glm,
+    }
 
 
 class _BenchmarkTargetsConfig:
@@ -645,28 +747,19 @@ class BenchmarkRunner:
                 if self.semantic_schema_format == "verbose-v1"
                 else None
             ),
-            correction_intent_routing_enabled=(
-                self.ask_accuracy_profile in _ASK_ACCURACY_ROUTED_PROFILES
-            ),
+            **ask_profile_service_flags(self.ask_accuracy_profile),
+            enum_overlap_advisory=self.ask_accuracy_profile in {
+                ASK_ACCURACY_PROFILE_CANDIDATE_V4,
+                ASK_ACCURACY_PROFILE_GLM_DEV_V1,
+            },
             correction_intent_routing_intent_scope=(
                 CORRECTION_INTENT_EXPERIMENTAL_SCOPE
                 if self.ask_accuracy_profile in _ASK_ACCURACY_STORAGE_PROFILES
+                or self.ask_accuracy_profile in {
+                    ASK_ACCURACY_PROFILE_GLM_DEV_V1,
+                    ASK_ACCURACY_PROFILE_CANDIDATE_V4,
+                }
                 else None
-            ),
-            dual_candidate_selection_enabled=(
-                self.ask_accuracy_profile in _ASK_ACCURACY_ROUTED_PROFILES
-            ),
-            value_location_normalization_enabled=(
-                self.ask_accuracy_profile in _ASK_ACCURACY_ROUTED_PROFILES
-            ),
-            encoded_identifier_storage_enabled=(
-                self.ask_accuracy_profile in _ASK_ACCURACY_STORAGE_PROFILES
-            ),
-            temporal_text_storage_enabled=(
-                self.ask_accuracy_profile in _ASK_ACCURACY_STORAGE_PROFILES
-            ),
-            month_axis_storage_enabled=(
-                self.ask_accuracy_profile in _ASK_ACCURACY_STORAGE_PROFILES
             ),
         )
         options = AskOptions(

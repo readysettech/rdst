@@ -240,8 +240,9 @@ def validate_filter_literal_provenance(
     matched_database_values: str = "",
     clarifications: Optional[Dict[str, str]] = None,
     dialect: str = "",
+    enum_overlap_advisory: bool = False,
 ) -> Dict[str, Any]:
-    """Reject unsupported string filters and free-text filters shadowed by enums."""
+    """Report literal provenance without treating enum overlap as a schema error."""
     try:
         tree = sqlglot.parse_one(sql, dialect=dialect or None)
     except Exception:
@@ -323,13 +324,16 @@ def validate_filter_literal_provenance(
             and enum_matches_elsewhere
             and target_type
             and not target_is_enum
-            and not _explicit_free_text_reference(question, column.name, value)
+            and (
+                enum_overlap_advisory
+                or not _explicit_free_text_reference(question, column.name, value)
+            )
         ):
             if issue_key in seen:
                 continue
             seen.add(issue_key)
             suggestions = enum_matches_elsewhere[:3]
-            issues.append(
+            (warnings if enum_overlap_advisory else issues).append(
                 {
                     "column": column.name,
                     "table_alias": column.table or None,
@@ -337,9 +341,9 @@ def validate_filter_literal_provenance(
                     "kind": "enum_shadowed_free_text",
                     "message": (
                         f"Filter literal {value!r} is applied to free-text column "
-                        f"{qualified_column!r}, but the schema lists the same value "
-                        "on an enum column. Use the best supported enum mapping unless "
-                        "the user explicitly requested a name or other free-text field."
+                        f"{qualified_column!r}; related text also occurs in listed enum "
+                        "values. This overlap does not prove that another column "
+                        "represents the requested concept or justify changing the filter."
                     ),
                     "suggestions": suggestions,
                 }

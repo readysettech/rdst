@@ -149,6 +149,9 @@ def test_bird_live_runner_uses_pinned_subscription_provider():
     assert script.index("\n  ensure_node\n") < script.index("npm install")
     assert "&& command -v npm >/dev/null 2>&1" in ensure_node
     assert 'SUITE="canary"' in script
+    assert 'CONTEXTS=(auto-init bird-curated)' in script
+    assert 'llm-enriched' not in script
+    assert '--ask-accuracy-profile candidate-v4' in script
     assert 'REPETITIONS="1"' in script
     assert 'MAX_CALLS="350"' in script
     assert 'MAX_COST="5.00"' in script

@@ -212,7 +212,7 @@ def test_inference_attribution_migration_backfills_existing_reservations():
             "old-request",
             "user-1",
             hosted_inference.MODEL,
-            hosted_inference.UPSTREAM_PROVIDER,
+            "deepinfra",
             100,
             30,
             20,
@@ -413,7 +413,7 @@ def test_admin_account_overview_reports_hosted_usage_caps_and_rejections():
         "reasoning_tokens, cost_microusd, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         ("request-1", "user-1", hosted_inference.MODEL,
-         hosted_inference.UPSTREAM_PROVIDER, 100, 30, 20, 12_500, 15),
+         "deepinfra", 100, 30, 20, 12_500, 15),
     )
     db.execute(
         "INSERT INTO inference_rejections "

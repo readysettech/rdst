@@ -4800,7 +4800,7 @@ export interface components {
         BootstrapStartRequest: {
             /**
              * Annotate
-             * @default true
+             * @default false
              */
             annotate?: boolean;
             /** Target */

@@ -90,7 +90,7 @@ def _service(configure=None, schema=None, annotate=None, validator=None):
 
 
 def _opts(**kwargs):
-    defaults = {"key_poll_seconds": 0.01}
+    defaults = {"annotate": True, "key_poll_seconds": 0.01}
     defaults.update(kwargs)
     return BootstrapOptions(**defaults)
 
@@ -212,6 +212,27 @@ class TestSchemaTrack:
         events = await _run(_service(annotate=annotate), _opts(annotate=False))
         assert _stages(events, "annotate")[-1][0] == "skipped"
         assert annotate.calls == 0
+
+    @pytest.mark.asyncio
+    async def test_default_bootstrap_initializes_without_ai(self):
+        schema = FakeSchema()
+        annotate = FakeAnnotate()
+
+        def unexpected_key_validation():
+            pytest.fail("Automatic bootstrap must not check AI credentials")
+
+        service = _service(
+            schema=schema, annotate=annotate, validator=unexpected_key_validation
+        )
+        events = [
+            event
+            async for event in service.run("imdb", {"engine": "postgresql"})
+        ]
+
+        assert schema.calls == ["init", "profile"]
+        assert _stages(events, "annotate")[-1][0] == "skipped"
+        assert annotate.calls == 0
+        assert not any(isinstance(event, BootstrapNeedsKeyEvent) for event in events)
 
 
 class TestKeyGate:

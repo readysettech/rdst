@@ -40,13 +40,18 @@ Every merged RDST main build starts one informational BIRD qualification step. I
 no dependency on release work and uses Buildkite `soft_fail`, so a below-baseline
 score, provider failure, or infrastructure failure cannot fail the build or block a
 release. The job pins the 50-case development canary, one paired repetition, and
-fixed call, cost, and wall-time ceilings. It runs the auto-init, RDST AI-enriched,
-and BIRD-curated context pairs concurrently. All six tracks use subscription Sonnet
+fixed call, cost, and wall-time ceilings. It runs the auto-init
+and BIRD-curated context pairs concurrently. All four tracks use subscription Sonnet
 4.6 and omit BIRD question evidence. The job has no automatic retry, and holdout and
 full runs are impossible through this mode.
 
+CI's Ask track uses the experimental `candidate-v4` profile, imported from the
+`candidate-v4-full500-20260908` source snapshot. Its frozen fullv56 flags retain
+the known output-preservation defect and leave declared-count repair disabled.
+The direct-model track and ordinary product defaults remain unchanged.
+
 `prepare` owns exclusive global and cache locks. Benchmark runs hold shared locks on
-the same files, allowing the three read-only contexts to overlap while preventing a
+the same files, allowing the read-only contexts to overlap while preventing a
 concurrent reprovision. This distinction is required: using the preparation lock
 exclusively for the full benchmark serialized one context and made the other two fail
 after the ten-second lock timeout.
@@ -58,15 +63,15 @@ pipeline setting.
 
 Each context passes when canonical Ask has official execution accuracy equal to or
 higher than direct Sonnet 4.6 on the same cases. A tie passes. The job completes all
-three contexts before returning its overall verdict, so a failed context does not
+both contexts before returning its overall verdict, so a failed context does not
 hide the remaining comparisons. The Buildkite step is informational and is not a
 merge or release gate.
 
-After all three contexts complete, the job updates one Buildkite annotation with the
-three paired leaderboards. The full reports and receipts are also uploaded as build
+After both contexts complete, the job updates one Buildkite annotation with the
+two paired leaderboards. The full reports and receipts are also uploaded as build
 artifacts.
 
-After all three contexts finish, the job posts one report to `#builds-rdst` through
+After both contexts finish, the job posts one report to `#builds-rdst` through
 Buildkite's configured Slack notifier. The message states whether Ask finished at or
 above the direct Sonnet 4.6 baseline, lists both scores and the delta for every schema
 context, and links the Buildkite build and its complete artifacts. Ties are labeled

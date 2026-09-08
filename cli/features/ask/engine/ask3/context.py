@@ -45,6 +45,9 @@ class Ask3Context:
     no_interactive: bool = False
     dry_run: bool = False
     enforce_result_limit: bool = True
+    resolved_column_validation_enabled: bool = False
+    enum_overlap_advisory: bool = False
+    validation_resolution: Dict[str, Any] = field(default_factory=dict)
     allow_agent_escalation: bool = True
 
     # === Conversation Context (for agent chat mode) ===
@@ -83,6 +86,64 @@ class Ask3Context:
     encoded_identifier_storage: Dict[str, Any] = field(default_factory=dict)
     temporal_text_storage: Dict[str, Any] = field(default_factory=dict)
     month_axis_storage: Dict[str, Any] = field(default_factory=dict)
+    endpoint_component: Dict[str, Any] = field(default_factory=dict)
+    endpoint_component_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    month_component: Dict[str, Any] = field(default_factory=dict)
+    month_component_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    text_mean_precision: Dict[str, Any] = field(default_factory=dict)
+    count_name_completion: Dict[str, Any] = field(default_factory=dict)
+    count_name_domain_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    count_name_candidate_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    identifier_quoting: Dict[str, Any] = field(default_factory=dict)
+    identifier_quoting_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    percentage_threshold: Dict[str, Any] = field(default_factory=dict)
+    projection_contract: Dict[str, Any] = field(default_factory=dict)
+    declared_count: Dict[str, Any] = field(default_factory=dict)
+    count_native: Dict[str, Any] = field(default_factory=dict)
+    count_native_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    ranked_union: Dict[str, Any] = field(default_factory=dict)
+    ranked_union_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    calendar_day: Dict[str, Any] = field(default_factory=dict)
+    stable_first: Dict[str, Any] = field(default_factory=dict)
+    stable_first_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    calendar_day_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    matched_percentage: Dict[str, Any] = field(default_factory=dict)
+    matched_percentage_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    scaled_ratio: Dict[str, Any] = field(default_factory=dict)
+    scaled_ratio_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    occurrence_percentage: Dict[str, Any] = field(default_factory=dict)
+    occurrence_percentage_probe_diagnostics: Dict[str, Any] = field(
+        default_factory=dict
+    )
+    output_completion: Dict[str, Any] = field(default_factory=dict)
+    output_completion_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    projection_order: Dict[str, Any] = field(default_factory=dict)
+    projection_order_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    grouped_extremum: Dict[str, Any] = field(default_factory=dict)
+    null_extremum: Dict[str, Any] = field(default_factory=dict)
+    null_extremum_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    state_lookup: Dict[str, Any] = field(default_factory=dict)
+    state_lookup_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    comparison_ratio: Dict[str, Any] = field(default_factory=dict)
+    comparison_ratio_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    fraction_precision: Dict[str, Any] = field(default_factory=dict)
+    fraction_precision_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    name_format: Dict[str, Any] = field(default_factory=dict)
+    name_format_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    grouped_extremum_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    projection_contract_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    percentage_threshold_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    text_mean_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    period_literal: Dict[str, Any] = field(default_factory=dict)
+    period_literal_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    metric_source: Dict[str, Any] = field(default_factory=dict)
+    metric_source_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    list_membership: Dict[str, Any] = field(default_factory=dict)
+    list_membership_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    outer_rounding: Dict[str, Any] = field(default_factory=dict)
+    outer_rounding_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    integer_mean_precision: Dict[str, Any] = field(default_factory=dict)
+    integer_mean_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
     db_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
 
     # === Clarification (Phase 2) ===
@@ -140,6 +201,9 @@ class Ask3Context:
             "verbose": self.verbose,
             "no_interactive": self.no_interactive,
             "enforce_result_limit": self.enforce_result_limit,
+            "resolved_column_validation_enabled": self.resolved_column_validation_enabled,
+            "enum_overlap_advisory": self.enum_overlap_advisory,
+            "validation_resolution": self.validation_resolution,
             "allow_agent_escalation": self.allow_agent_escalation,
             # Schema
             "schema_source": self.schema_source,
@@ -190,6 +254,63 @@ class Ask3Context:
             "encoded_identifier_storage": self.encoded_identifier_storage,
             "temporal_text_storage": self.temporal_text_storage,
             "month_axis_storage": self.month_axis_storage,
+            "endpoint_component": self.endpoint_component,
+            "endpoint_component_probe_diagnostics": self.endpoint_component_probe_diagnostics,
+            "month_component": self.month_component,
+            "month_component_probe_diagnostics": self.month_component_probe_diagnostics,
+            "text_mean_precision": self.text_mean_precision,
+            "count_name_completion": self.count_name_completion,
+            "count_name_domain_diagnostics": self.count_name_domain_diagnostics,
+            "count_name_candidate_diagnostics": self.count_name_candidate_diagnostics,
+            "identifier_quoting": self.identifier_quoting,
+            "identifier_quoting_probe_diagnostics": self.identifier_quoting_probe_diagnostics,
+            "percentage_threshold": self.percentage_threshold,
+            "projection_contract": self.projection_contract,
+            # Keep flag-off snapshots byte-compatible; include attempted corrections.
+            **({"declared_count": self.declared_count} if self.declared_count else {}),
+            **({"count_native": self.count_native} if self.count_native else {}),
+            **({"count_native_probe_diagnostics": self.count_native_probe_diagnostics} if self.count_native_probe_diagnostics else {}),
+            "ranked_union": self.ranked_union,
+            "ranked_union_probe_diagnostics": self.ranked_union_probe_diagnostics,
+            "calendar_day": self.calendar_day,
+            "stable_first": self.stable_first,
+            "stable_first_probe_diagnostics": self.stable_first_probe_diagnostics,
+            "calendar_day_probe_diagnostics": self.calendar_day_probe_diagnostics,
+            "matched_percentage": self.matched_percentage,
+            "matched_percentage_probe_diagnostics": self.matched_percentage_probe_diagnostics,
+            "scaled_ratio": self.scaled_ratio,
+            "scaled_ratio_probe_diagnostics": self.scaled_ratio_probe_diagnostics,
+            "occurrence_percentage": self.occurrence_percentage,
+            "occurrence_percentage_probe_diagnostics": self.occurrence_percentage_probe_diagnostics,
+            "output_completion": self.output_completion,
+            "output_completion_probe_diagnostics": self.output_completion_probe_diagnostics,
+            "projection_order": self.projection_order,
+            "projection_order_probe_diagnostics": self.projection_order_probe_diagnostics,
+            "grouped_extremum": self.grouped_extremum,
+            "null_extremum": self.null_extremum,
+            "null_extremum_probe_diagnostics": self.null_extremum_probe_diagnostics,
+            "state_lookup": self.state_lookup,
+            "state_lookup_probe_diagnostics": self.state_lookup_probe_diagnostics,
+            "comparison_ratio": self.comparison_ratio,
+            "comparison_ratio_probe_diagnostics": self.comparison_ratio_probe_diagnostics,
+            "fraction_precision": self.fraction_precision,
+            "fraction_precision_probe_diagnostics": self.fraction_precision_probe_diagnostics,
+            "name_format": self.name_format,
+            "name_format_probe_diagnostics": self.name_format_probe_diagnostics,
+            "grouped_extremum_probe_diagnostics": self.grouped_extremum_probe_diagnostics,
+            "projection_contract_probe_diagnostics": self.projection_contract_probe_diagnostics,
+            "percentage_threshold_probe_diagnostics": self.percentage_threshold_probe_diagnostics,
+            "text_mean_probe_diagnostics": self.text_mean_probe_diagnostics,
+            "period_literal": self.period_literal,
+            "period_literal_probe_diagnostics": self.period_literal_probe_diagnostics,
+            "metric_source": self.metric_source,
+            "metric_source_probe_diagnostics": self.metric_source_probe_diagnostics,
+            "list_membership": self.list_membership,
+            "list_membership_probe_diagnostics": self.list_membership_probe_diagnostics,
+            "outer_rounding": self.outer_rounding,
+            "outer_rounding_probe_diagnostics": self.outer_rounding_probe_diagnostics,
+            "integer_mean_precision": self.integer_mean_precision,
+            "integer_mean_probe_diagnostics": self.integer_mean_probe_diagnostics,
             "db_probe_diagnostics": self.db_probe_diagnostics,
             # Validation
             "validation_errors": [e.to_dict() for e in self.validation_errors],
@@ -230,6 +351,11 @@ class Ask3Context:
         ctx.verbose = data.get("verbose", False)
         ctx.no_interactive = data.get("no_interactive", False)
         ctx.enforce_result_limit = data.get("enforce_result_limit", True)
+        ctx.enum_overlap_advisory = data.get("enum_overlap_advisory", False)
+        ctx.resolved_column_validation_enabled = data.get(
+            "resolved_column_validation_enabled", False
+        )
+        ctx.validation_resolution = data.get("validation_resolution", {})
         ctx.allow_agent_escalation = data.get("allow_agent_escalation", True)
 
         # Schema
@@ -291,6 +417,112 @@ class Ask3Context:
         ctx.encoded_identifier_storage = data.get("encoded_identifier_storage", {})
         ctx.temporal_text_storage = data.get("temporal_text_storage", {})
         ctx.month_axis_storage = data.get("month_axis_storage", {})
+        ctx.endpoint_component = data.get("endpoint_component", {})
+        ctx.endpoint_component_probe_diagnostics = data.get(
+            "endpoint_component_probe_diagnostics", {}
+        )
+        ctx.month_component = data.get("month_component", {})
+        ctx.month_component_probe_diagnostics = data.get(
+            "month_component_probe_diagnostics", {}
+        )
+        ctx.text_mean_precision = data.get("text_mean_precision", {})
+        ctx.count_name_completion = data.get("count_name_completion", {})
+        ctx.count_name_domain_diagnostics = data.get(
+            "count_name_domain_diagnostics", {}
+        )
+        ctx.count_name_candidate_diagnostics = data.get(
+            "count_name_candidate_diagnostics", {}
+        )
+        ctx.identifier_quoting = data.get("identifier_quoting", {})
+        ctx.identifier_quoting_probe_diagnostics = data.get(
+            "identifier_quoting_probe_diagnostics", {}
+        )
+        ctx.percentage_threshold = data.get("percentage_threshold", {})
+        ctx.projection_contract = data.get("projection_contract", {})
+        ctx.declared_count = data.get("declared_count", {})
+        ctx.count_native = data.get("count_native", {})
+        ctx.count_native_probe_diagnostics = data.get("count_native_probe_diagnostics", {})
+        ctx.ranked_union = data.get("ranked_union", {})
+        ctx.ranked_union_probe_diagnostics = data.get(
+            "ranked_union_probe_diagnostics", {}
+        )
+        ctx.calendar_day = data.get("calendar_day", {})
+        ctx.stable_first = data.get("stable_first", {})
+        ctx.stable_first_probe_diagnostics = data.get("stable_first_probe_diagnostics", {})
+        ctx.calendar_day_probe_diagnostics = data.get(
+            "calendar_day_probe_diagnostics", {}
+        )
+        ctx.matched_percentage = data.get("matched_percentage", {})
+        ctx.matched_percentage_probe_diagnostics = data.get(
+            "matched_percentage_probe_diagnostics", {}
+        )
+        ctx.scaled_ratio = data.get("scaled_ratio", {})
+        ctx.scaled_ratio_probe_diagnostics = data.get(
+            "scaled_ratio_probe_diagnostics", {}
+        )
+        ctx.occurrence_percentage = data.get("occurrence_percentage", {})
+        ctx.occurrence_percentage_probe_diagnostics = data.get(
+            "occurrence_percentage_probe_diagnostics", {}
+        )
+        ctx.output_completion = data.get("output_completion", {})
+        ctx.output_completion_probe_diagnostics = data.get(
+            "output_completion_probe_diagnostics", {}
+        )
+        ctx.projection_order = data.get("projection_order", {})
+        ctx.projection_order_probe_diagnostics = data.get(
+            "projection_order_probe_diagnostics", {}
+        )
+        ctx.grouped_extremum = data.get("grouped_extremum", {})
+        ctx.null_extremum = data.get("null_extremum", {})
+        ctx.null_extremum_probe_diagnostics = data.get(
+            "null_extremum_probe_diagnostics", {}
+        )
+        ctx.state_lookup = data.get("state_lookup", {})
+        ctx.state_lookup_probe_diagnostics = data.get(
+            "state_lookup_probe_diagnostics", {}
+        )
+        ctx.comparison_ratio = data.get("comparison_ratio", {})
+        ctx.comparison_ratio_probe_diagnostics = data.get(
+            "comparison_ratio_probe_diagnostics", {}
+        )
+        ctx.fraction_precision = data.get("fraction_precision", {})
+        ctx.fraction_precision_probe_diagnostics = data.get(
+            "fraction_precision_probe_diagnostics", {}
+        )
+        ctx.name_format = data.get("name_format", {})
+        ctx.name_format_probe_diagnostics = data.get(
+            "name_format_probe_diagnostics", {}
+        )
+        ctx.grouped_extremum_probe_diagnostics = data.get(
+            "grouped_extremum_probe_diagnostics", {}
+        )
+        ctx.projection_contract_probe_diagnostics = data.get(
+            "projection_contract_probe_diagnostics", {}
+        )
+        ctx.percentage_threshold_probe_diagnostics = data.get(
+            "percentage_threshold_probe_diagnostics", {}
+        )
+        ctx.text_mean_probe_diagnostics = data.get("text_mean_probe_diagnostics", {})
+        ctx.period_literal = data.get("period_literal", {})
+        ctx.period_literal_probe_diagnostics = data.get(
+            "period_literal_probe_diagnostics", {}
+        )
+        ctx.metric_source = data.get("metric_source", {})
+        ctx.metric_source_probe_diagnostics = data.get(
+            "metric_source_probe_diagnostics", {}
+        )
+        ctx.list_membership = data.get("list_membership", {})
+        ctx.list_membership_probe_diagnostics = data.get(
+            "list_membership_probe_diagnostics", {}
+        )
+        ctx.outer_rounding = data.get("outer_rounding", {})
+        ctx.outer_rounding_probe_diagnostics = data.get(
+            "outer_rounding_probe_diagnostics", {}
+        )
+        ctx.integer_mean_precision = data.get("integer_mean_precision", {})
+        ctx.integer_mean_probe_diagnostics = data.get(
+            "integer_mean_probe_diagnostics", {}
+        )
         ctx.db_probe_diagnostics = data.get("db_probe_diagnostics", {})
 
         # Validation

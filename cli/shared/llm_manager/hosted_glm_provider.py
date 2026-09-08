@@ -167,7 +167,15 @@ class HostedGLMProvider(Provider):
                     code="HOSTED_INFERENCE_UNAVAILABLE",
                     cause=exc,
                 ) from exc
+            # Keyservice owns inference retries. Refresh only a rejected login
+            # token, never an upstream provider authentication failure.
             if response.status_code != 401 or attempt == 1:
+                break
+            try:
+                code = response.json().get("code")
+            except (ValueError, AttributeError):
+                break
+            if code != "UNAUTHORIZED":
                 break
             refreshed = account_session.access_token(force_refresh=True)
             if not refreshed:

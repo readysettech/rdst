@@ -5,7 +5,6 @@ import { Icon } from '@rs/ui-new/icon'
 import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card'
 import { Progress } from '@rs/ui-new/progress'
-import { Tag } from '@rs/ui-new/tag'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import type { SchemaDetails, SchemaStatus } from '../../types/schema'
 
@@ -14,24 +13,16 @@ interface SchemaGuidedSequenceProps {
   status: SchemaStatus
   onRefresh: () => void
   onProfile: () => void
-  onAnnotate: () => void
   refreshing?: boolean
   profiling?: boolean
-  annotating?: boolean
-  /** Live "Annotating posts… (4/7)" label while an AI run is in flight. */
-  annotateLabel?: string | null
-  /** No usable Anthropic key (missing or rdst-0yy.7 rejection): the AI stage
-   *  degrades to a warning chip instead of a live action, and the routing CTA
-   *  is carried by the RoutableNotice rendered above this card. */
-  annotateBlocked?: boolean
-  annotateBlockedLabel?: string
   /** Disable actions while any op is in flight or the target is locked. */
   disabled?: boolean
 }
 
 // A table/column counts as "documented" once it carries a non-empty
 // description — derived from the already-loaded schema, not a new data source.
-const hasText = (value?: string | null): boolean => !!value && value.trim().length > 0
+const hasText = (value?: string | null): boolean =>
+  !!value && value.trim().length > 0
 
 // At/above this share of documented tables+columns the discovery job reads as
 // done and the whole sequence collapses to one calm line. Presentational only.
@@ -39,15 +30,21 @@ const WELL_DOCUMENTED_PCT = 80
 
 function coverage(schema: SchemaDetails) {
   const totalTables = schema.tables.length
-  const totalColumns = schema.tables.reduce((sum, t) => sum + t.columns.length, 0)
-  const documentedTables = schema.tables.filter((t) => hasText(t.description)).length
+  const totalColumns = schema.tables.reduce(
+    (sum, t) => sum + t.columns.length,
+    0
+  )
+  const documentedTables = schema.tables.filter((t) =>
+    hasText(t.description)
+  ).length
   const documentedColumns = schema.tables.reduce(
     (sum, t) => sum + t.columns.filter((c) => hasText(c.description)).length,
-    0,
+    0
   )
   const totalUnits = totalTables + totalColumns
   const documentedUnits = documentedTables + documentedColumns
-  const pct = totalUnits > 0 ? Math.round((documentedUnits / totalUnits) * 100) : 0
+  const pct =
+    totalUnits > 0 ? Math.round((documentedUnits / totalUnits) * 100) : 0
   return {
     totalTables,
     totalColumns,
@@ -69,7 +66,15 @@ interface StageRowProps {
 
 // One staged step: a done/numbered marker, what it does, what it costs, its
 // action, and (via children) any stage-specific body — a meter or a caption.
-function StageRow({ index, done, title, what, cost, action, children }: StageRowProps) {
+function StageRow({
+  index,
+  done,
+  title,
+  what,
+  cost,
+  action,
+  children,
+}: StageRowProps) {
   return (
     <HStack className="gap-4 items-start">
       <div
@@ -77,7 +82,7 @@ function StageRow({ index, done, title, what, cost, action, children }: StageRow
           'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-label-small tabular-nums',
           done
             ? 'bg-surface-positive-soft text-content-positive-soft'
-            : 'bg-surface-layout-2 text-content-layout-2',
+            : 'bg-surface-layout-2 text-content-layout-2'
         )}
       >
         {done ? <Icon name="tick" label="Done" className="h-4 w-4" /> : index}
@@ -88,7 +93,10 @@ function StageRow({ index, done, title, what, cost, action, children }: StageRow
             {title}
           </Text>
           <HStack className="gap-3 items-center shrink-0">
-            <Text level="caption" className="hidden text-content-layout-3 tablet:block">
+            <Text
+              level="caption"
+              className="hidden text-content-layout-3 tablet:block"
+            >
               {cost}
             </Text>
             {action}
@@ -115,18 +123,20 @@ export function SchemaGuidedSequence({
   status,
   onRefresh,
   onProfile,
-  onAnnotate,
   refreshing,
   profiling,
-  annotating,
-  annotateLabel,
-  annotateBlocked,
-  annotateBlockedLabel,
   disabled,
 }: SchemaGuidedSequenceProps) {
-  const { totalTables, totalColumns, undocumentedTables, undocumentedColumns, pct } =
-    coverage(schema)
-  const updatedLabel = status.updated_at ? new Date(status.updated_at).toLocaleDateString() : null
+  const {
+    totalTables,
+    totalColumns,
+    undocumentedTables,
+    undocumentedColumns,
+    pct,
+  } = coverage(schema)
+  const updatedLabel = status.updated_at
+    ? new Date(status.updated_at).toLocaleDateString()
+    : null
   const profiledTables = status.profiled_tables ?? 0
   // The > 0 guard covers the empty-schema case, where 0 >= 0 would tick.
   const profileDone = profiledTables > 0 && profiledTables >= status.tables
@@ -137,17 +147,26 @@ export function SchemaGuidedSequence({
   if (pct >= WELL_DOCUMENTED_PCT) {
     return (
       <HStack className="gap-2 items-center px-1 flex-wrap">
-        <Icon name="tick" label="Documented" className="h-4 w-4 text-content-positive-soft" />
+        <Icon
+          name="tick"
+          label="Documented"
+          className="h-4 w-4 text-content-positive-soft"
+        />
         <Text level="body-small" className="text-content-layout-3">
-          AI-documented{updatedLabel ? ` · Updated ${updatedLabel}` : ''} · {totalTables} tables ·{' '}
-          {totalColumns} columns
+          Documented{updatedLabel ? ` · Updated ${updatedLabel}` : ''} ·{' '}
+          {totalTables} tables · {totalColumns} columns
         </Text>
       </HStack>
     )
   }
 
   type IconName = NonNullable<ComponentProps<typeof Button>['icon']>
-  const ghost = (label: string, icon: IconName, onClick: () => void, loading?: boolean) => (
+  const ghost = (
+    label: string,
+    icon: IconName,
+    onClick: () => void,
+    loading?: boolean
+  ) => (
     <Button
       variant="primary"
       modifier="ghost"
@@ -161,22 +180,6 @@ export function SchemaGuidedSequence({
     />
   )
 
-  const annotateAction = annotateBlocked ? (
-    <Tag size="small" variant="warning" label={annotateBlockedLabel || 'Needs a working key'} />
-  ) : (
-    <Button
-      variant="rising"
-      modifier="solid"
-      size="small"
-      icon="sparkles"
-      iconPosition="left"
-      label={annotateLabel || 'Annotate with AI'}
-      onClick={onAnnotate}
-      loading={annotating}
-      disabled={disabled}
-    />
-  )
-
   return (
     <Card className="w-full border-transparent bg-surface-raised shadow-small">
       <Card.Content className="py-5">
@@ -185,7 +188,8 @@ export function SchemaGuidedSequence({
             Make Ask precise about {status.target}
           </Text>
           <Text level="body-small" className="text-content-layout-3">
-            Three staged steps — each sharpens Ask's answers. Run them top to bottom.
+            Review your database structure, profile columns, and document their
+            meanings.
           </Text>
         </VStack>
 
@@ -196,11 +200,16 @@ export function SchemaGuidedSequence({
             title="Structure"
             what="Tables, columns, and types, read from your database."
             cost="Free · seconds"
-            action={ghost('Refresh', 'database-settings', onRefresh, refreshing)}
+            action={ghost(
+              'Refresh',
+              'database-settings',
+              onRefresh,
+              refreshing
+            )}
           >
             <Text level="caption" className="text-content-layout-3">
-              Loaded{updatedLabel ? ` · updated ${updatedLabel}` : ''} · {status.tables} tables ·{' '}
-              {status.columns} columns
+              Loaded{updatedLabel ? ` · updated ${updatedLabel}` : ''} ·{' '}
+              {status.tables} tables · {status.columns} columns
             </Text>
           </StageRow>
 
@@ -225,28 +234,32 @@ export function SchemaGuidedSequence({
 
           <StageRow
             index={3}
-            title="AI descriptions & terminology"
-            what="Descriptions, business context, and terminology, written by AI."
-            cost="~1 min · uses your key"
-            action={annotateAction}
+            title="Descriptions & terminology"
+            what="Document descriptions, business context, and terminology in the tables below."
+            cost=""
+            action={null}
           >
             {/* Label first so the percentage anchors to the left margin, in line
                 with the "still need meanings" copy below it — the bar trails to
                 its right instead of shoving the label into the middle (the
                 off-balance "0% documented" the 240px w-60 track caused). */}
             <HStack className="mt-0.5 gap-3 items-center flex-wrap">
-              <Text level="label-medium" className="text-content-layout-1 tabular-nums">
+              <Text
+                level="label-medium"
+                className="text-content-layout-1 tabular-nums"
+              >
                 {pct}% documented
               </Text>
               <Progress value={pct} max={100} />
             </HStack>
             <Text level="body-small" className="text-content-layout-2">
-              {undocumentedTables} of {totalTables} tables and {undocumentedColumns} of{' '}
-              {totalColumns} columns still need meanings.
+              {undocumentedTables} of {totalTables} tables and{' '}
+              {undocumentedColumns} of {totalColumns} columns still need
+              meanings.
             </Text>
             <Text level="caption" className="text-content-layout-3">
-              The difference between AI that guesses at your tables and AI that asks the right
-              questions back.
+              The difference between AI that guesses at your tables and AI that
+              asks the right questions back.
             </Text>
           </StageRow>
         </VStack>
