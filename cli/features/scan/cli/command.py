@@ -1136,7 +1136,7 @@ class ScanCommand:
         return analysis_results
 
     def _analyze_single_query_shallow(
-        self, q: Dict, schema_info: str, db_engine: str
+        self, q: Dict, schema_info: str, db_engine: str, target: str
     ) -> Dict:
         """
         Analyze a single query using shallow LLM analysis (no DB connection).
@@ -1159,6 +1159,7 @@ class ScanCommand:
                 original_sql=sql,
                 schema_info=schema_info,
                 database_engine=db_engine,
+                target=target,
             )
             _elapsed = _t.time() - _start
 
@@ -1371,7 +1372,7 @@ class ScanCommand:
                         with ThreadPoolExecutor(max_workers=batch_size) as executor:
                             future_to_query = {
                                 executor.submit(
-                                    self._analyze_single_query_shallow, q, schema_info, db_engine
+                                    self._analyze_single_query_shallow, q, schema_info, db_engine, target
                                 ): q
                                 for q in batch
                             }
@@ -1404,7 +1405,7 @@ class ScanCommand:
                 with ThreadPoolExecutor(max_workers=batch_size) as executor:
                     future_to_query = {
                         executor.submit(
-                            self._analyze_single_query_shallow, q, schema_info, db_engine
+                            self._analyze_single_query_shallow, q, schema_info, db_engine, target
                         ): q
                         for q in batch
                     }

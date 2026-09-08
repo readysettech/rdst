@@ -132,8 +132,10 @@ def test_detect_ambiguities_includes_complete_filtered_schema() -> None:
 
     assert result["success"] is True
     assert manager.prompt is not None
-    assert filtered_schema in manager.prompt
-    assert terminal_schema in manager.prompt
+    context = manager.kwargs["system_message"].split("Database context JSON:\n", 1)[1]
+    context = context.split("\nEnd database context.", 1)[0]
+    assert json.loads(context)["schema"] == filtered_schema
+    assert terminal_schema in manager.kwargs["system_message"]
     assert "schema truncated for brevity" not in manager.prompt
     assert manager.kwargs is not None
     assert manager.kwargs["extra"]["response_format"]["type"] == "json_schema"

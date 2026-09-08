@@ -25,6 +25,26 @@ from features.schema.semantic_models import (
 )
 
 
+def test_schema_serialization_ignores_table_and_column_insertion_order():
+    layer = SemanticLayer(
+        target="fixture",
+        tables={
+            name: TableAnnotation(name=name, columns={
+                column: ColumnAnnotation(name=column, data_type="integer")
+                for column in ["second", "first"]
+            })
+            for name in ["zebra", "apple"]
+        },
+    )
+    expected = [_format_semantic_schema(layer), format_semantic_schema_compact(layer)]
+    layer.tables = dict(reversed(list(layer.tables.items())))
+    for table in layer.tables.values():
+        table.columns = dict(reversed(list(table.columns.items())))
+    assert expected == [
+        _format_semantic_schema(layer), format_semantic_schema_compact(layer)
+    ]
+
+
 def test_semantic_schema_includes_every_discovered_enum_value() -> None:
     values = {f"CODE_{index}": f"Meaning {index}" for index in range(6)}
     layer = SemanticLayer(
@@ -303,11 +323,11 @@ def test_adaptive_schema_retains_lossless_compact_context_fallback() -> None:
 
     with (
         patch(
-            "features.ask.engine.ask3.phases.schema._format_semantic_schema",
+            "features.schema.prompt_serialization._format_semantic_schema",
             return_value="verbose" * 100,
         ),
         patch(
-            "features.ask.engine.ask3.phases.schema.format_semantic_schema_compact",
+            "features.schema.prompt_serialization.format_semantic_schema_compact",
             return_value="compact" * 100,
         ),
     ):

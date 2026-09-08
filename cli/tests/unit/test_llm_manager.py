@@ -12,6 +12,27 @@ import pytest
 
 from shared.llm_manager import base
 
+
+def test_generate_response_preserves_cache_usage():
+    from shared.llm_manager.llm_manager import LLMManager
+
+    manager = object.__new__(LLMManager)
+    usage = {
+        "prompt_tokens": 4000,
+        "completion_tokens": 100,
+        "total_tokens": 4100,
+        "cache_read_input_tokens": 3500,
+        "cache_creation_input_tokens": 500,
+    }
+    manager.query = MagicMock(return_value={
+        "text": "SELECT 1", "model": "fixture", "usage": usage,
+    })
+    result = manager.generate_response("question", purpose="sql_generation")
+    assert result["tokens_used"] == 4100
+    assert result["usage"] == usage
+    assert result["usage"] is not usage
+    assert result["response"] == "SELECT 1"
+
 # Import classes
 LLMError = base.LLMError
 LLMDefaults = base.LLMDefaults

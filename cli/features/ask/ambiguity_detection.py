@@ -31,6 +31,9 @@ from .prompts.ask_prompts_v2 import (
     AMBIGUITY_DETECTION_RESPONSE_SCHEMA,
     format_preference_tree_for_prompt,
 )
+from features.schema.inference_context import (
+    SCHEMA_CONTEXT_REFERENCE, schema_context_prefix, schema_cache_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -459,6 +462,7 @@ def detect_ambiguities(
     callback=None,
     provided_context: str = "",
     matched_database_values: str = "",
+    target_database: str = "",
 ) -> Dict[str, Any]:
     try:
         pref_context = format_preference_tree_for_prompt(preference_tree)
@@ -476,7 +480,7 @@ def detect_ambiguities(
         prompt = AMBIGUITY_DETECTION_PROMPT.format(
             nl_question=nl_question,
             database_engine=database_engine,
-            filtered_schema=filtered_schema,
+            filtered_schema=SCHEMA_CONTEXT_REFERENCE,
             preference_tree_summary=pref_context,
             provided_context_block=provided_context_block,
             matched_database_values_block=format_matched_database_values_block(
@@ -488,10 +492,14 @@ def detect_ambiguities(
         started = perf_counter()
         response = llm_manager.generate_response(
             prompt=prompt,
+            system_message=schema_context_prefix(filtered_schema, database_engine),
             temperature=0.0,
             max_tokens=AMBIGUITY_RESPONSE_MAX_TOKENS,
             purpose="clarification",
             extra={
+                "_rdst_schema_cache_key": schema_cache_key(
+                    filtered_schema, database_engine, target_database
+                ),
                 "response_format": {
                     "type": "json_schema",
                     "json_schema": {

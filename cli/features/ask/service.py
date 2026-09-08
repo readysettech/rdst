@@ -3848,6 +3848,7 @@ class AskService:
 
         result = detect_ambiguities(
             nl_question=ctx.question,
+            target_database=ctx.target,
             filtered_schema=ctx.schema_formatted,
             database_engine=ctx.db_type,
             llm_manager=llm_manager,

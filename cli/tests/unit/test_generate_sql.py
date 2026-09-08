@@ -124,9 +124,7 @@ def test_generation_purpose_is_forwarded_to_receipts():
         def generate_response(self, **kwargs):
             assert kwargs["purpose"] == "ablation_full_structured"
             assert kwargs["max_tokens"] == 4000
-            assert kwargs["system_message"].startswith(
-                "You are an expert text-to-SQL system."
-            )
+            assert "You are an expert text-to-SQL system." in kwargs["system_message"]
             return {
                 "response": json.dumps(
                     {
@@ -220,7 +218,7 @@ def test_generation_retries_lossless_compact_schema_after_context_rejection() ->
             self.prompts = []
 
         def generate_response(self, **kwargs):
-            self.prompts.append(kwargs["prompt"])
+            self.prompts.append(kwargs["system_message"] + kwargs["prompt"])
             if len(self.prompts) == 1:
                 raise LLMError(
                     "prompt is too long",
@@ -327,7 +325,7 @@ def test_generation_retries_compact_schema_after_request_body_rejection() -> Non
             self.prompts = []
 
         def generate_response(self, **kwargs):
-            self.prompts.append(kwargs["prompt"])
+            self.prompts.append(kwargs["system_message"] + kwargs["prompt"])
             if len(self.prompts) == 1:
                 raise LLMError(
                     "request body exceeds 32 MB",
@@ -457,7 +455,8 @@ def test_generation_system_message_can_be_overridden_for_ablation():
 
     class Manager:
         def generate_response(self, **kwargs):
-            assert kwargs["system_message"] == "legacy generic system"
+            assert kwargs["system_message"].endswith("legacy generic system")
+            assert "Table: fixture" in kwargs["system_message"]
             return {
                 "response": json.dumps(
                     {

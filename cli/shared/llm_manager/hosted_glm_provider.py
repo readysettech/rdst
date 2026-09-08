@@ -122,6 +122,9 @@ class HostedGLMProvider(Provider):
             "temperature": request.temperature,
         }
         attribution = (request.extra or {}).get("_rdst_attribution")
+        schema_key = (request.extra or {}).get("_rdst_schema_cache_key")
+        if isinstance(schema_key, str):
+            payload["schema_cache_key"] = schema_key
         if isinstance(attribution, dict):
             payload["attribution"] = dict(attribution)
         try:
@@ -216,6 +219,14 @@ class HostedGLMProvider(Provider):
             "completion_tokens": completion_tokens,
             "total_tokens": prompt_tokens + completion_tokens,
         }
+        prompt_details = usage.get("prompt_tokens_details")
+        if isinstance(prompt_details, dict):
+            cached_tokens = prompt_details.get("cached_tokens")
+            if type(cached_tokens) is int and cached_tokens >= 0:
+                normalized_usage["cache_read_input_tokens"] = cached_tokens
+            cache_write_tokens = prompt_details.get("cache_write_tokens")
+            if type(cache_write_tokens) is int and cache_write_tokens >= 0:
+                normalized_usage["cache_creation_input_tokens"] = cache_write_tokens
         raw = body if debug else {"quota": body.get("quota"), "usage": usage}
         return ProviderResponse(text=text, usage=normalized_usage, raw=raw)
 

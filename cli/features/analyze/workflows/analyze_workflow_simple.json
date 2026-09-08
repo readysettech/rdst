@@ -83,6 +83,7 @@
                 "parameterized_sql": "{{llm_parameterization.parameterized_sql}}",
                 "original_sql": "{{query}}",
                 "schema_info": "{{schema_collection.schema_info}}",
+                "target": "{{target}}",
                 "model": "{{llm_model}}"
             },
             "ResultPath": "$.llm_analysis",

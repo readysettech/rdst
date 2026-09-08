@@ -2304,6 +2304,8 @@ def _benchmark_protocol_paths() -> tuple[Path, ...]:
         RDST_ROOT / "features" / "ask" / "events.py",
         RDST_ROOT / "features" / "ask" / "models.py",
         RDST_ROOT / "features" / "ask" / "service.py",
+        RDST_ROOT / "features" / "schema" / "inference_context.py",
+        RDST_ROOT / "features" / "schema" / "prompt_serialization.py",
         RDST_ROOT / "features" / "ask" / "prompts" / "ask_prompts.py",
         RDST_ROOT / "features" / "ask" / "prompts" / "ask_prompts_v2.py",
         RDST_ROOT / "features" / "ask" / "sql_generation.py",

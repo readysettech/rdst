@@ -40,7 +40,7 @@ def test_calls_only_bounded_keyservice_protocol(monkeypatch):
     monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
 
     result = HostedGLMProvider().complete(
-        _request(),
+        _request(extra={"_rdst_schema_cache_key": "a" * 64}),
         api_key="supabase-access",
         base_url="https://keyservice.example",
         debug=True,
@@ -60,6 +60,29 @@ def test_calls_only_bounded_keyservice_protocol(monkeypatch):
     assert "model" not in payload
     assert "provider" not in payload
     assert "reasoning" not in payload
+    assert payload["schema_cache_key"] == "a" * 64
+
+
+def test_preserves_provider_reported_cache_hits(monkeypatch):
+    response = _response(body={
+        "text": "SELECT 1",
+        "usage": {
+            "prompt_tokens": 4000,
+            "completion_tokens": 20,
+            "prompt_tokens_details": {"cached_tokens": 3500, "cache_write_tokens": 500},
+        },
+    })
+    monkeypatch.setattr(
+        "shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post",
+        MagicMock(return_value=response),
+    )
+    result = HostedGLMProvider().complete(
+        _request(), api_key="fixture", base_url="https://keyservice.example",
+    )
+    assert result.usage["cache_read_input_tokens"] == 3500
+    assert result.usage["cache_creation_input_tokens"] == 500
+    assert result.usage["prompt_tokens"] == 4000
+    assert result.usage["total_tokens"] == 4020
 
 
 def test_saves_analytics_identity_only_for_the_response_session(monkeypatch):

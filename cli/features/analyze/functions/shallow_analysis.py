@@ -74,6 +74,10 @@ def analyze_shallow_with_llm(
         - error: error message if failed
     """
     try:
+        from features.schema.inference_context import (
+            SCHEMA_CONTEXT_REFERENCE, schema_context_prefix, schema_cache_key,
+        )
+        cache_schema = schema_info
         if not schema_info:
             schema_info = "Schema information: Not available"
 
@@ -84,7 +88,7 @@ def analyze_shallow_with_llm(
         formatted_prompt = SHALLOW_ANALYSIS_PROMPT.format(
             database_engine=database_engine,
             sql=sql_for_analysis,
-            schema_info=schema_info
+            schema_info=SCHEMA_CONTEXT_REFERENCE if cache_schema else schema_info
         )
 
         # Initialize LLM manager
@@ -194,6 +198,11 @@ def analyze_shallow_with_llm(
 
         # Estimate input tokens
         system_msg = "You are a database performance expert. Analyze the query for potential performance issues based on structure and schema. Respond with valid JSON only."
+        if cache_schema:
+            system_msg = schema_context_prefix(cache_schema, database_engine) + system_msg
+            extra_params["_rdst_schema_cache_key"] = schema_cache_key(
+                cache_schema, database_engine, kwargs.get("target", "")
+            )
         estimated_input_tokens = estimate_tokens(system_msg) + estimate_tokens(formatted_prompt)
 
         # Call LLM

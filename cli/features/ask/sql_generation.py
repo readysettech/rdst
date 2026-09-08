@@ -26,6 +26,9 @@ from .prompts.ask_prompts import (
     format_matched_database_values_block,
     format_provided_context_block,
 )
+from features.schema.inference_context import (
+    SCHEMA_CONTEXT_REFERENCE, schema_context_prefix, schema_cache_key,
+)
 from .sql_validation import check_read_only
 
 logger = logging.getLogger(__name__)
@@ -242,13 +245,17 @@ def generate_sql_from_nl(
     """
     purpose = kwargs.pop("purpose", "sql_generation")
     system_message = kwargs.pop("system_message", SQL_GENERATION_SYSTEM_PROMPT)
+    task_system_message = system_message
+    system_message = (
+        schema_context_prefix(filtered_schema, database_engine) + task_system_message
+    )
     compact_fallback_schema = kwargs.pop("compact_fallback_schema", "")
     compact_fallback_format = kwargs.pop("compact_fallback_format", "")
     schema_format = kwargs.pop("schema_format", "")
     try:
         prompt = _format_generation_prompt(
             nl_question=nl_question,
-            schema=filtered_schema,
+            schema=SCHEMA_CONTEXT_REFERENCE,
             database_engine=database_engine,
             target_database=target_database,
             provided_context=provided_context,
@@ -270,7 +277,12 @@ def generate_sql_from_nl(
                 temperature=0.0,
                 max_tokens=SQL_GENERATION_MAX_TOKENS,
                 purpose=purpose,
-                extra={"response_format": response_format},
+                extra={
+                    "response_format": response_format,
+                    "_rdst_schema_cache_key": schema_cache_key(
+                        filtered_schema, database_engine, target_database
+                    ),
+                },
             )
         except LLMError as first_error:
             if not _is_schema_size_error(first_error):
@@ -280,7 +292,7 @@ def generate_sql_from_nl(
                     "schema_context_fallback_used": False,
                     "schema_context_fallback_reason": "",
                     "schema_format": "",
-                    "prompt_utf8_bytes": len(prompt.encode("utf-8")),
+                    "prompt_utf8_bytes": len((system_message + prompt).encode("utf-8")),
                 }
                 return _schema_size_failure(
                     error=first_error,
@@ -293,13 +305,16 @@ def generate_sql_from_nl(
 
             prompt = _format_generation_prompt(
                 nl_question=nl_question,
-                schema=compact_fallback_schema,
+                schema=SCHEMA_CONTEXT_REFERENCE,
                 database_engine=database_engine,
                 target_database=target_database,
                 provided_context=provided_context,
                 matched_database_values=matched_database_values,
             )
             context_fallback_used = True
+            system_message = schema_context_prefix(
+                compact_fallback_schema, database_engine
+            ) + task_system_message
             context_fallback_reason = (
                 "context_window"
                 if first_error.code == "ANTHROPIC_CONTEXT_WINDOW_EXCEEDED"
@@ -312,7 +327,12 @@ def generate_sql_from_nl(
                     temperature=0.0,
                     max_tokens=SQL_GENERATION_MAX_TOKENS,
                     purpose=purpose,
-                    extra={"response_format": response_format},
+                    extra={
+                        "response_format": response_format,
+                        "_rdst_schema_cache_key": schema_cache_key(
+                            compact_fallback_schema, database_engine, target_database
+                        ),
+                    },
                 )
             except LLMError as compact_error:
                 if not _is_schema_size_error(compact_error):
@@ -321,7 +341,7 @@ def generate_sql_from_nl(
                     "schema_context_fallback_used": True,
                     "schema_context_fallback_reason": context_fallback_reason,
                     "schema_format": compact_fallback_format,
-                    "prompt_utf8_bytes": len(prompt.encode("utf-8")),
+                    "prompt_utf8_bytes": len((system_message + prompt).encode("utf-8")),
                 }
                 return _schema_size_failure(
                     error=compact_error,
@@ -337,7 +357,7 @@ def generate_sql_from_nl(
             "schema_context_fallback_used": context_fallback_used,
             "schema_context_fallback_reason": context_fallback_reason,
             "schema_format": compact_fallback_format if context_fallback_used else "",
-            "prompt_utf8_bytes": len(prompt.encode("utf-8")),
+            "prompt_utf8_bytes": len((system_message + prompt).encode("utf-8")),
         }
 
         # Invoke callback for LLM call tracking

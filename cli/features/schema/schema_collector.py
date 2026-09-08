@@ -525,7 +525,7 @@ def _collect_mysql_schema(
 
         try:
             with connection.cursor() as cursor:
-                for table_name in table_names:
+                for table_name in sorted(table_names):
                     # Validate table name contains only safe characters
                     if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", table_name):
                         continue  # Skip potentially unsafe table names
@@ -638,7 +638,7 @@ def _collect_postgres_schema(
 
         try:
             with connection.cursor() as cursor:
-                for table_name in table_names:
+                for table_name in sorted(table_names):
                     # Get table columns
                     cursor.execute(
                         """

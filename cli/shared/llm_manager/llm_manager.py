@@ -175,6 +175,8 @@ class LLMManager:
             extra=dict(extra or {}),
         )
         req.extra.pop("_rdst_attribution", None)
+        if name != "readyset":
+            req.extra.pop("_rdst_schema_cache_key", None)
         if name == "readyset":
             from .inference_attribution import attribution_for
 
@@ -421,6 +423,7 @@ class LLMManager:
             return {
                 "response": result["text"],
                 "tokens_used": result["usage"].get("total_tokens"),
+                "usage": dict(result["usage"]),
                 "model": result["model"],
             }
         except Exception as e:

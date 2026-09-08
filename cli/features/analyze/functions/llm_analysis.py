@@ -105,6 +105,11 @@ def analyze_with_llm(
         - error: error message if failed
     """
     try:
+        from features.schema.inference_context import (
+            SCHEMA_CONTEXT_REFERENCE, schema_context_prefix, schema_cache_key,
+        )
+
+        cache_schema = schema_info
         # Use provided schema_info or default
         if not schema_info:
             schema_info = "Schema information: Not available"
@@ -291,7 +296,7 @@ PERFORMANCE METRICS:
   Cost Estimate: {explain_results.get("cost_estimate", 0)}
   Scan Efficiency: {scan_efficiency}
 
-{schema_info}
+{SCHEMA_CONTEXT_REFERENCE if cache_schema else schema_info}
 
 Original Query for Rewrites: {sql_for_rewrites}
 
@@ -733,6 +738,12 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
 
         # Estimate input tokens before call (for progress display)
         system_msg = "You are a database performance expert. Respond with valid JSON only. Be proactive in suggesting query rewrites when you see opportunities like: old-style comma JOINs, missing LIMIT on ORDER BY, inefficient subqueries, or non-optimal WHERE clause ordering."
+        if cache_schema:
+            engine = explain_results.get("database_engine", "unknown")
+            system_msg = schema_context_prefix(cache_schema, engine) + system_msg
+            extra_params["_rdst_schema_cache_key"] = schema_cache_key(
+                cache_schema, engine, kwargs.get("target", "")
+            )
         estimated_input_tokens = estimate_tokens(system_msg) + estimate_tokens(
             ANALYZE_PROMPT
         )
@@ -745,7 +756,7 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
             model=model_param,
             system_message=system_msg,
             max_tokens=2000,
-            temperature=0.0,  # Deterministic output for consistent recommendations
+            temperature=0.0,
             extra=extra_params if extra_params else None,
             purpose="analyze_query",
         )
