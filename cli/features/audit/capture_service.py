@@ -388,6 +388,17 @@ class CaptureService:
                     message=f"Replaying {len(replay_queries)} queries with {concurrency} threads",
                 )
 
+            # The health verdict needs only the metrics audit, so it runs while
+            # the capture waits, the same way the CLI audit does it.
+            health_task = None
+            if run_analysis and audit_result and not audit_result.get("error") \
+                    and not audit_result.get("health_analysis"):
+                from .service import AuditService
+
+                health_task = asyncio.create_task(
+                    asyncio.to_thread(AuditService.run_health_llm, audit_result)
+                )
+
             started_at = datetime.datetime.now(datetime.timezone.utc)
             intermediate_snapshots = []
 
@@ -706,6 +717,21 @@ class CaptureService:
                         )
                 except Exception as exc:
                     logger.warning("Failed to save queries to registry: %s", exc)
+
+            if health_task is not None:
+                yield WorkloadStatusEvent(
+                    type="status", phase="health_insights", message="Analyzing health data..."
+                )
+                health_analysis = await health_task
+                if health_analysis:
+                    audit_result["health_analysis"] = health_analysis
+                    audit_payload = self._audit_capture_payload(audit_result)
+                if health_analysis and health_analysis.get("error"):
+                    _phase_done("health_insights", success=False, error_type="llm_error")
+                    if analysis_error is None:
+                        analysis_error = f"Health findings failed: {health_analysis['error']}"
+                else:
+                    _phase_done("health_insights")
 
             path = ""
             if save_capture:
