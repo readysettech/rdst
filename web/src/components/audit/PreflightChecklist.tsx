@@ -125,7 +125,7 @@ export function PreflightChecklist({
               ? TRIAL_EXHAUSTED_MESSAGE
               : aiGate.reason === 'invalid'
                 ? "The configured key isn't working"
-                : 'Readyset sign-in or an Anthropic key is required'
+                : 'Not connected — the check still runs, with the AI analysis skipped'
   return (
     <div
       className="border-t border-border-layout-1 pt-4"
@@ -140,7 +140,7 @@ export function PreflightChecklist({
             variant="primary"
             modifier="ghost"
             size="small"
-            label="Re-check"
+            label="Check again"
             loading={busy}
             onClick={() => void onRecheck()}
           />

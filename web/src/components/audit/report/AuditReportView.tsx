@@ -73,6 +73,11 @@ export function AuditReportView({
   const health = report.health_analysis
   const healthOk =
     !!health && !health.error && health.health_score !== undefined
+  // `null` (the step did not run or failed) is not `[]` (it ran and found
+  // nothing critical); only the second is a result. [E-53]
+  const analysisFailureReason = health?.error || report.analysis_error || null
+  const analysisMissing =
+    !health || !!health.error || health.top_findings === undefined
   const verdict =
     VERDICT_LABELS[sizing.verdict || 'unknown'] || VERDICT_LABELS.unknown
   const topQueries = report.top_queries || []
@@ -116,8 +121,11 @@ export function AuditReportView({
             aiCredentialInvalid={aiCredentialInvalid}
           />
 
-          {health?.executive_summary && (
-            <SectionCard icon="document-validation" title="Executive Summary">
+          {/* The verdict card falls back to the executive summary when there is
+              no separate rationale, so this card would print the same sentence
+              twice 160px below it. [E-10] */}
+          {health?.executive_summary && health.health_score_rationale && (
+            <SectionCard icon="document-validation" title="Executive summary">
               <div className="p-6 max-w-4xl">
                 <Text
                   level="body-small"
@@ -129,10 +137,26 @@ export function AuditReportView({
             </SectionCard>
           )}
 
-          <SectionCard icon="document-validation" title="Top Findings">
+          <SectionCard icon="document-validation" title="Top findings">
             <div className="p-6">
               {(health?.top_findings?.length || 0) > 0 ? (
                 <FindingsList findings={health!.top_findings!} />
+              ) : analysisMissing ? (
+                // A negative result the run never computed reads as a clean
+                // bill of health for a database that was never analysed, so
+                // the card says what happened instead. [E-53]
+                <InlineNotice
+                  errorClass="provider"
+                  accent="warning"
+                  icon="sparkles"
+                  title="AI analysis unavailable"
+                  message={
+                    analysisFailureReason
+                      ? `Findings were not generated for this run: ${analysisFailureReason}`
+                      : 'Findings were not generated for this run, so nothing here says whether this database is healthy.'
+                  }
+                  trustworthy="The captured metrics, queries and sizing on this report are complete."
+                />
               ) : (
                 <Text level="body-small" className="text-content-layout-3">
                   No critical findings were identified.
@@ -143,7 +167,7 @@ export function AuditReportView({
 
           {/* SECONDARY — three supporting scores */}
           <div className="grid grid-cols-1 tablet:grid-cols-3 gap-5">
-            <SupportingCard icon="sparkles" title="Cache Opportunity">
+            <SupportingCard icon="sparkles" title="Cache opportunity">
               <HStack className="gap-2 items-baseline">
                 <Text
                   level="headline-4"
@@ -237,7 +261,7 @@ export function AuditReportView({
               )}
             </SupportingCard>
 
-            <SupportingCard icon="observe" title="Query Activity">
+            <SupportingCard icon="observe" title="Query activity">
               <HStack className="gap-2 items-baseline">
                 <Text
                   level="headline-4"
@@ -275,7 +299,7 @@ export function AuditReportView({
           <div>
             <VStack className="gap-8 items-stretch">
               {/* Overview */}
-              <SectionCard icon="database" title="Database Overview">
+              <SectionCard icon="database" title="Database overview">
                 {(report.host ||
                   report.region ||
                   report.database ||

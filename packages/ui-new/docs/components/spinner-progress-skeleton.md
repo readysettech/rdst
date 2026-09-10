@@ -18,7 +18,7 @@ Imports:
 | --- | --- | --- |
 | `Skeleton` | a data container's shape while it loads | a running action |
 | `Spinner` | an in-flight action (button, small fetch) | a whole container's content |
-| `Progress` / `CircularProgress` | a long op with `value`/`max` | an unknown-length wait (use Spinner) |
+| `Progress` / `CircularProgress` | a long op with `value`/`max` | a short, local wait (use Spinner) |
 
 **Do**
 - Skeleton the layout you're replacing so the page doesn't jump on load.
@@ -28,7 +28,9 @@ Imports:
   responses don't flash it.
 
 **Don't**
-- Use a determinate Progress without a real `value` — a fake bar misleads.
+- Use a determinate Progress without a real `value` — a fake bar misleads. A
+  long wait whose end is unknown gets `Progress` with no `value` (indeterminate),
+  not an invented percentage.
 - Full-screen a spinner for a local wait.
 
 ---
@@ -39,8 +41,12 @@ Imports:
   with `className` to match the content it stands in for.
 - **Spinner** — a rotating ring (`border-t-…`) at `duration`-linear; `size`
   `base` (16px) / `large` (24px); `color` picks the ring tone.
-- **Progress** — a `w-60 h-4` track (`bg-border-layout-1`) with a
-  `content-rising-plain` indicator that transitions on `value`.
+- **Progress** — a `w-full h-4` track (`bg-border-layout-1`) with a
+  `content-rising-plain` indicator that transitions on `value`. It fills the
+  container it is given, so the caller sizes it (`className`) rather than the
+  component. Without a `value` it is indeterminate: a striped track that
+  pulses under `motion-safe` and rests, still visibly unfilled, under
+  `prefers-reduced-motion`.
 - **CircularProgress** — an SVG ring that springs to `value`, showing the
   percentage; the ring turns `content-negative-plain` past 80%.
 
@@ -57,10 +63,12 @@ Imports:
 
 ### Progress
 
-| Prop | Type | Notes |
-| --- | --- | --- |
-| `value` | `number` | Current value (required). |
-| `max` | `number` | Maximum (required). |
+| Prop | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `value` | `number` | — | Current value; omit for an indeterminate wait. |
+| `max` | `number` | `100` | The total `value` counts towards. |
+| `label` | `string` | — | Accessible name, when nothing nearby names the bar. |
+| `className` | `string` | — | Sizes the track (width, height). |
 
 ### CircularProgress
 
@@ -86,6 +94,9 @@ Accepts native `<div>` props; size and shape it via `className`.
 
 // Long op
 <Progress value={done} max={total} />
+
+// Long op with no known end
+<Progress label="Preparing caches" />
 ```
 
 ---

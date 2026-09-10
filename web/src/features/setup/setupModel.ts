@@ -122,17 +122,3 @@ export function hasSetupSignal(
 ): progress is SetupProgress {
   return Boolean(progress) && !progress?.error
 }
-
-/**
- * Routes that own the bottom-right corner or already are the step:
- * `/demo` runs the demo tour bubble in that exact slot, and `/onboarding`
- * IS step 1.
- */
-export function isSetupGuideSuppressed(pathname: string): boolean {
-  return (
-    pathname === '/demo' ||
-    pathname.startsWith('/demo/') ||
-    pathname === '/onboarding' ||
-    pathname.startsWith('/onboarding/')
-  )
-}

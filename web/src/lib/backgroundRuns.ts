@@ -1044,8 +1044,8 @@ function applyFrame(runId: string, event: string, data: unknown): void {
         ...base,
         result,
         message: result
-          ? 'Performance test complete'
-          : 'Performance result is incomplete',
+          ? 'Load test complete'
+          : 'Load test result is incomplete',
         current: 100,
         total: 100,
       })
@@ -1118,8 +1118,13 @@ function applyFrame(runId: string, event: string, data: unknown): void {
 
 export async function cancelBackgroundRun(runId: string): Promise<void> {
   if (runs.get(runId)?.local) {
-    localCancellers.get(runId)?.()
+    const cancel = localCancellers.get(runId)
     localCancellers.delete(runId)
+    cancel?.()
+    // A client-owned job reports its own states, cancellation included: one
+    // that settled itself stays in the list as the outcome it reached, so the
+    // page it belongs to and the sidebar tell the same story.
+    if (isTerminal(runs.get(runId)?.status ?? 'running')) return
     removeRun(runId)
     return
   }
@@ -1140,6 +1145,19 @@ export async function cancelBackgroundRun(runId: string): Promise<void> {
       message: 'Could not cancel this run',
     })
   }
+}
+
+/**
+ * Settle a run whose event stream ended without a terminal frame. The outcome
+ * is unknown, so the job reads as interrupted rather than reconnecting for as
+ * long as the tab stays open, and the sidebar agrees with the page that gave up
+ * on the same stream.
+ */
+export function markRunInterrupted(runId: string, message: string): void {
+  const run = runs.get(runId)
+  if (!run || isTerminal(run.status)) return
+  stopStream(runId)
+  updateRun(runId, { status: 'interrupted', message })
 }
 
 export function dismissBackgroundRun(runId: string): void {

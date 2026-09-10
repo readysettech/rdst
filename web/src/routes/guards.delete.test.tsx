@@ -39,7 +39,7 @@ describe("GuardDeleteDialog (audit HIGH: deleting a guard is a security-boundary
       screen.getAllByText(/masks 3 columns and enforces WHERE required, no SELECT \*/i).length,
     ).toBeGreaterThan(0);
     expect(
-      screen.getAllByText(/Any agent bound to this guard loses that protection/i).length,
+      screen.getAllByText(/Every rdst agent bound to this guard/i).length,
     ).toBeGreaterThan(0);
     expect(screen.getAllByText(/cannot be undone/i).length).toBeGreaterThan(0);
   });
@@ -58,7 +58,7 @@ describe("GuardDeleteDialog (audit HIGH: deleting a guard is a security-boundary
     );
     expect(screen.queryByText(/This guard masks/i)).toBeNull();
     expect(
-      screen.getAllByText(/Any agent bound to this guard loses that protection/i).length,
+      screen.getAllByText(/Every rdst agent bound to this guard/i).length,
     ).toBeGreaterThan(0);
   });
 
@@ -77,6 +77,24 @@ describe("GuardDeleteDialog (audit HIGH: deleting a guard is a security-boundary
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("holds the delete until the guard's own name is typed back", () => {
+    const onConfirm = vi.fn();
+
+    render(
+      <GuardDeleteDialog guard={guard} isOpen onConfirm={onConfirm} onClose={vi.fn()} />,
+    );
+
+    const confirm = screen.getByRole("button", { name: /Delete guard/ });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(confirm);
+    expect(onConfirm).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByPlaceholderText("pii-mask"), {
+      target: { value: "pii-mas" },
+    });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("confirming deletes exactly once", () => {
     const onConfirm = vi.fn();
 
@@ -84,6 +102,9 @@ describe("GuardDeleteDialog (audit HIGH: deleting a guard is a security-boundary
       <GuardDeleteDialog guard={guard} isOpen onConfirm={onConfirm} onClose={vi.fn()} />,
     );
 
+    fireEvent.change(screen.getByPlaceholderText("pii-mask"), {
+      target: { value: "pii-mask" },
+    });
     fireEvent.click(screen.getByRole("button", { name: /Delete guard/ }));
 
     expect(onConfirm).toHaveBeenCalledTimes(1);

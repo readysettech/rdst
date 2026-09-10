@@ -40,6 +40,9 @@ class BrowseResponse(BaseModel):
     parent: Optional[str]
     directories: list[DirectoryEntry]
     files: list[DirectoryEntry] = []
+    # The picker refuses to hand a whole home directory to a scan in one click,
+    # so it needs to know when the listing it shows is that directory.
+    is_home: bool = False
 
 
 def _windows_drive_entries() -> list[DirectoryEntry]:
@@ -57,18 +60,20 @@ async def browse_directory(
     """List subdirectories (and optionally files) of a path for the picker UI.
 
     Args:
-        path: Directory to list. Defaults to home directory if omitted.
+        path: Directory to list. Defaults to the directory RDST was started in,
+            which is the project the user is most likely to mean.
         ext: When given, also list files with this extension (e.g. "csv").
 
     Returns:
-        Current path, parent path, sorted subdirectories, and matching files.
+        Current path, parent path, sorted subdirectories, matching files, and
+        whether the listing is the user's home directory.
     """
     require_local_request(request)
 
     if path:
         resolved = os.path.abspath(os.path.expanduser(path))
     else:
-        resolved = os.path.expanduser("~")
+        resolved = os.path.abspath(os.getcwd())
 
     if not os.path.exists(resolved) or not os.path.isdir(resolved):
         raise HTTPException(
@@ -119,4 +124,5 @@ async def browse_directory(
         parent=parent,
         directories=directories,
         files=files,
+        is_home=resolved == os.path.abspath(os.path.expanduser("~")),
     )

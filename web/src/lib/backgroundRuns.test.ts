@@ -374,7 +374,7 @@ describe('background run store', () => {
       kind: 'speed_test',
       queryHash: 'abc123',
       queryLabel: 'Health check',
-      message: 'Performance test complete',
+      message: 'Load test complete',
       result: { speedup_mean: 20, winner: 'readyset' },
     })
     expect(localStorage.getItem('rdst_background_runs')).toContain(
@@ -732,7 +732,7 @@ describe('background run store', () => {
     await waitFor(() => expect(run('cache_test_imdb_z')?.status).toBe('done'))
     expect(run('cache_test_imdb_z')?.result).toBeUndefined()
     expect(run('cache_test_imdb_z')?.message).toBe(
-      'Performance result is incomplete'
+      'Load test result is incomplete'
     )
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
@@ -791,7 +791,7 @@ describe('background run store', () => {
           target: 'imdb',
           stage: 'complete',
           status: 'done',
-          message: 'Performance test complete',
+          message: 'Load test complete',
           lastSeq: 4,
           current: 100,
           total: 100,
@@ -845,7 +845,7 @@ describe('background run store', () => {
           target: 'imdb',
           stage: 'complete',
           status: 'done',
-          message: 'Performance test complete',
+          message: 'Load test complete',
           lastSeq: 4,
           current: 100,
           total: 100,

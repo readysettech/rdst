@@ -5,11 +5,14 @@ const redirectSpy = vi.hoisted(() =>
     throw options
   })
 )
+const toastSpy = vi.hoisted(() => vi.fn())
 
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (options: unknown) => ({ options }),
   redirect: redirectSpy,
 }))
+
+vi.mock('@rs/ui-new/use-toast', () => ({ toast: toastSpy }))
 
 import { Route as AnalyzeRoute } from './analyze'
 import { Route as QueryRegistryRoute } from './query-registry'
@@ -24,16 +27,28 @@ function expectRedirect(beforeLoad: () => never, expected: unknown) {
 
 beforeEach(() => {
   redirectSpy.mockClear()
+  toastSpy.mockClear()
 })
 
 describe('legacy query route redirects', () => {
-  it('redirects /top to the high-impact Query Library view', () => {
+  it('redirects /top to the Query Library sorted by slowest average', () => {
     const beforeLoad = TopRoute.options.beforeLoad as BeforeLoad
 
     expectRedirect(() => beforeLoad({ search: undefined as never }), {
       to: '/queries',
-      search: { view: 'high-impact' },
+      search: { sort: 'slowest-average' },
     })
+  })
+
+  it('tells a /top bookmark where the view went', () => {
+    const beforeLoad = TopRoute.options.beforeLoad as BeforeLoad
+
+    expect(() => beforeLoad({ search: undefined as never })).toThrow()
+    expect(toastSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Top queries now live in the Query Library',
+      })
+    )
   })
 
   it('redirects /analyze to the unified Queries library', () => {
@@ -44,7 +59,7 @@ describe('legacy query route redirects', () => {
     })
   })
 
-  it('preserves query-registry hash and run deep links in Queries', () => {
+  it('preserves query-registry deep links without adding a filter', () => {
     const validateSearch = QueryRegistryRoute.options.validateSearch as (
       search: Record<string, unknown>
     ) => { hash?: string; run?: string }
@@ -56,7 +71,6 @@ describe('legacy query route redirects', () => {
     expectRedirect(() => beforeLoad({ search }), {
       to: '/queries',
       search: {
-        starred: true,
         hash: 'query-hash',
         run: 'run-id',
       },

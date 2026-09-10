@@ -120,7 +120,7 @@ describe('TargetDropdown lock behavior', () => {
     const onSelectTarget = vi.fn()
     renderDropdown({ selectedTarget: 'deleted-db', onSelectTarget })
 
-    expect(await screen.findByText('No Targets')).toBeTruthy()
+    expect(await screen.findByText('No targets')).toBeTruthy()
     await waitFor(() => {
       expect(onSelectTarget).toHaveBeenCalledWith(null)
     })

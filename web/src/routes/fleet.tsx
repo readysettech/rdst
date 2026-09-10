@@ -2,7 +2,7 @@
  * Fleet — retired standalone route.
  *
  * Target management (groups, AWS discovery, CSV import, connectivity) now lives
- * in the Database connections section of the Settings page. This route survives
+ * in the Targets section of the Settings page. This route survives
  * as a redirect so existing `/fleet` and `/fleet?add=aws` links keep working and
  * land on that section. [USE-097 one nav layout, USE-077 graceful path]
  */
@@ -16,9 +16,15 @@ export const Route = createFileRoute('/fleet')({
     return add ? { add } : {}
   },
   // `throw redirect` is honored in `beforeLoad`, keeping the app shell intact
-  // while forwarding the ?add tab through to the drawer.
-  beforeLoad: () => {
-    throw redirect({ to: '/configure', search: true, hash: 'connections' })
+  // while forwarding the ?add tab through to the drawer. `from` lets Settings
+  // say what happened, the way Ask does for the retired /agents URL, rather
+  // than becoming a different page without comment. [E-51, F-54]
+  beforeLoad: ({ search }) => {
+    throw redirect({
+      to: '/configure',
+      search: { ...search, from: 'fleet' },
+      hash: 'connections',
+    })
   },
   component: () => null,
 })

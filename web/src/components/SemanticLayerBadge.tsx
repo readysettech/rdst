@@ -24,11 +24,14 @@ export function SemanticLayerBadge({ target }: { target?: string | null }) {
   const hasSemanticLayer = schemaStatus?.exists === true
 
   return (
-    <HStack className="gap-2 items-center">
+    <HStack className="gap-2 items-center flex-wrap">
       <Tag
         size="small"
         variant={hasSemanticLayer ? 'positive' : 'warning'}
         modifier="ghost"
+        // The label is a sentence, not a word: it has to grow onto a second
+        // line rather than paint out of a fixed-height chip.
+        className="h-auto min-h-6 text-left"
         label={
           hasSemanticLayer
             ? `Semantic layer · ${schemaStatus?.tables ?? 0} tables`

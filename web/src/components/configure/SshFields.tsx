@@ -458,7 +458,7 @@ export function SshFields({
             </VStack>
             {browserLoading && (
               <Text level="caption" className="text-content-layout-3">
-                Loading files...
+                Loading files…
               </Text>
             )}
             {browserError && (

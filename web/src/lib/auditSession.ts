@@ -95,6 +95,18 @@ export function finishAuditSession(id: number) {
   emit()
 }
 
+/**
+ * Clear whichever session is active, for callers that no longer hold its id.
+ * Cancel has to work even when the follower has already released the session
+ * it was watching, so the launcher can never stay disabled behind a stale one.
+ */
+export function finishActiveAuditSession() {
+  if (!active) return
+  active = null
+  activeCancel = null
+  emit()
+}
+
 export function cancelActiveAudit() {
   activeCancel?.()
 }

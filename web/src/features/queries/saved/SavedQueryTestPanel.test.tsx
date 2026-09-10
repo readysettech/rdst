@@ -13,7 +13,7 @@ function run(overrides: Partial<BackgroundRunState> = {}): BackgroundRunState {
     target: 'imdb',
     stage: 'complete',
     status: 'done',
-    message: 'Performance test complete',
+    message: 'Load test complete',
     lastSeq: 4,
     current: 100,
     total: 100,

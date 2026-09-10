@@ -45,7 +45,7 @@ export function WorkloadAnalysisView({
   return (
     <VStack className="gap-6 items-stretch w-full">
       {content !== 'next-steps' && (
-        <SectionCard icon="document-validation" title="Workload Analysis">
+        <SectionCard icon="document-validation" title="Workload analysis">
           <div className="p-5">
             <div className="grid grid-cols-[auto_1fr] gap-6 items-start">
               {hasScore && (
@@ -98,7 +98,7 @@ export function WorkloadAnalysisView({
       )}
 
       {content !== 'next-steps' && bottlenecks.length > 0 && (
-        <SectionCard icon="alert" title="Top Bottlenecks">
+        <SectionCard icon="alert" title="Top bottlenecks">
           <div className="p-5">
             <BulletList items={bottlenecks} />
           </div>
@@ -106,7 +106,7 @@ export function WorkloadAnalysisView({
       )}
 
       {content !== 'details' && capacityInsights.length > 0 && (
-        <SectionCard icon="database" title="Capacity Insights">
+        <SectionCard icon="database" title="Capacity insights">
           <div className="p-5">
             <BulletList items={capacityInsights} />
           </div>
@@ -114,7 +114,7 @@ export function WorkloadAnalysisView({
       )}
 
       {content !== 'details' && priorities.length > 0 && (
-        <SectionCard icon="observe" title="Optimization Priorities">
+        <SectionCard icon="observe" title="Optimization priorities">
           <div className="p-5">
             <VStack className="gap-3 items-stretch">
               {priorities.map((item, index) => {

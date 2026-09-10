@@ -55,6 +55,8 @@ function controller(overrides: Record<string, unknown> = {}) {
     setTestProfile: vi.fn(),
     comparative: false,
     setComparative: vi.fn(),
+    dockerUnavailable: false,
+    recheckSandbox: vi.fn(),
     intervalMs: 100,
     setIntervalMs: vi.fn(),
     capacityClients: 2,
@@ -195,6 +197,21 @@ describe('LoadTestSetup query rows', () => {
     ).toBeTruthy()
   })
 
+  it('lets the settings column scroll instead of clipping it', () => {
+    render(<LoadTestSetup controller={controller()} />)
+
+    // The column is taller than the card, so the card cannot be the only
+    // scroller: with `overflow-hidden` above and none here, the advanced
+    // settings were unreachable by wheel or scrollbar.
+    const advanced = screen.getByRole('button', {
+      name: /Advanced load settings/,
+    })
+    const column = advanced.closest('.overflow-y-auto')
+
+    expect(column).toBeTruthy()
+    expect(column?.classList.contains('min-h-0')).toBe(true)
+  })
+
   it('omits Suggest values when no selected query has parameters', () => {
     render(<LoadTestSetup controller={controller()} />)
 
@@ -283,5 +300,36 @@ describe('LoadTestSetup empty state (C3)', () => {
 
     expect(screen.getByText('No queries available yet')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Find queries' })).toBeNull()
+  })
+})
+
+describe('LoadTestSetup Readyset lane', () => {
+  it('arms the comparison when the sandbox can exist', () => {
+    render(<LoadTestSetup controller={controller() as LoadTestController} />)
+
+    const toggle = screen.getByRole('switch', {
+      name: 'Compare against Readyset',
+    })
+    expect(toggle.hasAttribute('disabled')).toBe(false)
+    expect(screen.queryByText(/Docker is required/)).toBeNull()
+  })
+
+  it('closes the comparison and says why when Docker is not running', () => {
+    render(
+      <LoadTestSetup
+        controller={
+          controller({ dockerUnavailable: true }) as LoadTestController
+        }
+      />
+    )
+
+    expect(
+      screen.getByText('Docker is required to compare against Readyset')
+    ).toBeTruthy()
+    expect(
+      screen
+        .getByRole('switch', { name: 'Compare against Readyset' })
+        .hasAttribute('disabled')
+    ).toBe(true)
   })
 })

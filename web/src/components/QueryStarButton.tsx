@@ -7,8 +7,8 @@ import { IconButton } from '@rs/ui-new/icon-button'
  *
  * A marked query reads as marked from across the list: the glyph itself fills
  * in (`star-filled`) and takes the primary content colour, so shape carries the
- * state alongside colour, and `aria-pressed` plus the label carry it for
- * assistive tech.
+ * state alongside colour. The name stays the action it performs and
+ * `aria-pressed` carries the state, which is what that attribute is for. [B-20]
  */
 export function QueryStarButton({
   starred,
@@ -25,7 +25,7 @@ export function QueryStarButton({
       size="small"
       variant="primary"
       modifier="ghost"
-      label={starred ? 'Starred' : 'Star this query'}
+      label="Star this query"
       aria-pressed={starred}
       data-testid="query-star-toggle"
       onClick={(event) => {

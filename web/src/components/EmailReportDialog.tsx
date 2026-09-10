@@ -1,6 +1,7 @@
 import { Alert } from '@rs/ui-new/alert'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
+import { Field } from '@rs/ui-new/field'
 import { Icon } from '@rs/ui-new/icon'
 import {
   Modal,
@@ -13,7 +14,7 @@ import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { toast } from '@rs/ui-new/use-toast'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { emailAuditReport, emailFleetReport } from '../lib/api'
 import { isValidEmail, normalizeEmail } from './emailValidation'
 
@@ -44,6 +45,7 @@ export function EmailReportDialog({
   kind = 'audit',
 }: EmailReportDialogProps) {
   const queryClient = useQueryClient()
+  const emailFieldId = useId()
   const [step, setStep] = useState<Step>('loading')
   const [email, setEmail] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
@@ -89,9 +91,12 @@ export function EmailReportDialog({
         setStep('verify')
         return
       }
+      // The server names why the send failed; the generic sentence is only
+      // for a failure it could not describe. [E-26]
       toast({
         title: 'Report service unavailable',
         description:
+          result.reason ||
           'We could not reach the RDST report service. Try again shortly.',
         variant: 'negative',
       })
@@ -155,7 +160,7 @@ export function EmailReportDialog({
       : sendMutation.error instanceof Error
         ? sendMutation.error
         : null
-  const errorMessage = validationError ?? requestError?.message ?? null
+  const requestErrorMessage = requestError?.message ?? null
 
   const handleClose = () => {
     setStep('loading')
@@ -173,10 +178,20 @@ export function EmailReportDialog({
     sendMutation.mutate(undefined)
   }
 
+  const validateEmailField = () => {
+    if (email.trim().length === 0) {
+      setValidationError(null)
+      return true
+    }
+    const valid = isValidEmail(normalizeEmail(email))
+    setValidationError(valid ? null : 'Enter a valid email address.')
+    return valid
+  }
+
   const handleRegister = () => {
     const address = normalizeEmail(email)
     if (!isValidEmail(address)) {
-      setValidationError('Please enter a valid email address.')
+      setValidationError('Enter a valid email address.')
       return
     }
     setValidationError(null)
@@ -189,41 +204,39 @@ export function EmailReportDialog({
     <Modal open={isOpen} onOpenChange={(open) => !open && handleClose()}>
       <ModalContentContainer open={isOpen}>
         <ModalContent size="base" className="p-0 overflow-hidden">
-          <ModalTitle className="sr-only">Email me this report</ModalTitle>
-          <ModalDescription className="sr-only">
-            Send the full report for this run to your email address.
-          </ModalDescription>
-
           <div className="px-6 py-5 border-b border-border-layout-1 bg-surface-layout-2">
             <HStack className="gap-3 items-center">
               <div className="w-10 h-10 rounded-xl bg-surface-primary-soft flex items-center justify-center">
                 <Icon
                   name="document-validation"
-                  label="Report"
+                  label=""
                   className="w-5 h-5 text-content-primary-soft"
                 />
               </div>
               <VStack className="gap-0.5 items-start">
-                <Text level="headline-4" className="text-content-layout-1">
+                {/* The dialog's own title element, rendered where the user can
+                    see it: an sr-only copy beside a visible paragraph made
+                    screen readers announce the same line twice. [E-27] */}
+                <ModalTitle className="h-auto">
                   {step === 'success'
                     ? 'Report on its way'
                     : 'Email me this report'}
-                </Text>
-                <Text level="body-small" className="text-content-layout-3">
+                </ModalTitle>
+                <ModalDescription>
                   {step === 'verify'
                     ? 'Confirm your address to release the report.'
                     : 'We email a link to the full report, protected by a password shown in the email.'}
-                </Text>
+                </ModalDescription>
               </VStack>
             </HStack>
           </div>
 
           <div className="p-6 space-y-4">
-            {errorMessage && (
+            {requestErrorMessage && (
               <Alert
                 variant="negative"
                 modifier="outline"
-                label={errorMessage}
+                label={requestErrorMessage}
               />
             )}
 
@@ -253,32 +266,35 @@ export function EmailReportDialog({
             )}
 
             {step === 'email' && (
-              <div className="space-y-1">
-                <Text
-                  as="label"
-                  level="label-small"
-                  className="text-content-layout-2 block"
-                >
-                  Email Address
-                </Text>
-                <BaseInputText
-                  type="email"
-                  name="report-email"
-                  autoComplete="email"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@company.com"
-                  disabled={loading}
-                  onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
-                />
-                <Text level="caption" className="text-content-layout-3">
-                  First time on this address? We send a one-time confirmation
-                  link before the report.
-                </Text>
-              </div>
+              <Field.Root className="px-0 py-0">
+                <Field.Label htmlFor={emailFieldId}>Email address</Field.Label>
+                <Field.Content>
+                  <BaseInputText
+                    id={emailFieldId}
+                    type="email"
+                    name="report-email"
+                    autoComplete="email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    onBlur={validateEmailField}
+                    placeholder="you@company.com"
+                    disabled={loading}
+                    error={!!validationError}
+                    aria-invalid={validationError ? true : undefined}
+                    aria-describedby={`${emailFieldId}-info`}
+                    onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
+                  />
+                  <div id={`${emailFieldId}-info`}>
+                    <Field.Info
+                      errorMessage={validationError ?? undefined}
+                      infoMessage="First time on this address? We send a one-time confirmation link before the report."
+                    />
+                  </div>
+                </Field.Content>
+              </Field.Root>
             )}
 
             {step === 'verify' && (

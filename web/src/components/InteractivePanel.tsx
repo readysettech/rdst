@@ -10,6 +10,7 @@ import { HStack } from '@rs/ui-new/stack'
 import {
   AnalysisConversation,
   type AnalysisConversationContext,
+  ClearConversationButton,
   useAnalysisConversation,
 } from './AnalysisConversation'
 
@@ -63,15 +64,9 @@ export function InteractivePanel({
               </DrawerTitle>
               <HStack className="gap-1">
                 {conversation.hasPreviousChat ? (
-                  <Button
-                    variant="primary"
-                    label="Clear conversation"
-                    modifier="ghost"
-                    size="small"
-                    icon="trash"
-                    iconPosition="icon"
-                    onClick={() => void conversation.clearConversation()}
-                    disabled={conversation.isLoading}
+                  <ClearConversationButton
+                    conversation={conversation}
+                    iconOnly
                   />
                 ) : null}
                 <Button

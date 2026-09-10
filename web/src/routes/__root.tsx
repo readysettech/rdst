@@ -8,15 +8,12 @@ import {
   type ErrorComponentProps,
   Outlet,
   useNavigate,
-  useRouterState,
 } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useState } from 'react'
-import { AiProviderGate } from '../components/AiProviderGate'
 import { ActivityPulse } from '../components/audit/ActivityPulse'
 // Direct import: the components barrel re-exports the SQL editor stack,
 // which would statically pull CodeMirror into the eager entry chunk.
 import { ConfigWarning } from '../components/ConfigWarning'
-import { SetupGuide } from '../features/setup/SetupGuide'
 import { useTarget } from '../hooks/useTarget'
 import { Header } from '../layout/Header'
 import { Main } from '../layout/Main'
@@ -30,7 +27,6 @@ import {
   useAuditSession,
 } from '../lib/auditSession'
 import { isDesktopFrameless, isDesktopMac } from '../lib/desktop'
-import { useAiGate } from '../lib/useAiGate'
 import { useDesktopUpdates } from '../lib/useDesktopUpdates'
 import { useQueryDiscoveryTransport } from '../lib/useQueryDiscovery'
 
@@ -79,24 +75,23 @@ function AppShell({ children }: { children: ReactNode }) {
         onInstallUpdate={installDesktopUpdate}
       />
       <Main>{children}</Main>
-      {/* Floating, fixed-position, and suppressed on the routes that own the
-          bottom-right corner — it costs the shell no layout. */}
-      <SetupGuide />
     </div>
   )
 }
 
 function RootComponent() {
-  return (
-    <AiAccessBoundary>
-      <ReadyRoot />
-    </AiAccessBoundary>
-  )
+  return <ReadyRoot />
 }
 
-function AiAccessBoundary({ children }: { children: ReactNode }) {
-  const path = useRouterState({ select: (state) => state.location.pathname })
-  const gate = useAiGate()
+/**
+ * The AI credential state belongs to the features that consume it, so it is
+ * asked for by `AiSetupNotice` where those features live rather than gating the
+ * router: connections, benchmarks, health checks, schema and the demo all work
+ * without a provider. [MG-01]
+ */
+function ReadyRoot() {
+  const { target } = useTarget()
+  useQueryDiscoveryTransport(target)
   const accountStatus = useQuery({
     queryKey: ['account-status'],
     queryFn: fetchAccountStatus,
@@ -105,19 +100,6 @@ function AiAccessBoundary({ children }: { children: ReactNode }) {
   useEffect(() => {
     setAnalyticsAccountId(accountStatus.data?.analytics_account_id)
   }, [accountStatus.data?.analytics_account_id])
-
-  // The CLI browser flow owns this route and must be able to exchange its
-  // callback before the newly created account session can satisfy the gate.
-  if (path === '/account-login') return children
-  if (gate.status === 'checking' || gate.status === 'blocked') {
-    return <AiProviderGate gate={gate} />
-  }
-  return children
-}
-
-function ReadyRoot() {
-  const { target } = useTarget()
-  useQueryDiscoveryTransport(target)
 
   return (
     <AppShell>

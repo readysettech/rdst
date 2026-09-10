@@ -673,11 +673,11 @@ export function CaptureSummarySection({
   durationSeconds?: number
 }) {
   return (
-    <SectionCard icon="observe" title="Capture Summary">
+    <SectionCard icon="observe" title="Capture summary">
       <div className="p-6 grid grid-cols-1 tablet:grid-cols-2 desktop:grid-cols-4 gap-5">
         <StatCard label="Duration" value={formatDuration(durationSeconds)} />
         <StatCard
-          label="Unique Queries"
+          label="Unique queries"
           value={`${summary?.unique_queries ?? queries.length}`}
         />
         <StatCard
@@ -690,7 +690,7 @@ export function CaptureSummarySection({
           }
         />
         <StatCard
-          label="Total Query Time"
+          label="Total query time"
           value={formatMs(summary?.total_query_time_ms)}
         />
       </div>

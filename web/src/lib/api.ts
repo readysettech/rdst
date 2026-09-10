@@ -41,7 +41,14 @@ export async function fetchInitStatus(): Promise<InitStatusResponse> {
 
 export type ErrorEvent = apiComponents['schemas']['ErrorEvent']
 
-export type AnalysisState = 'idle' | 'analyzing' | 'complete' | 'error'
+export type AnalysisState =
+  | 'idle'
+  | 'analyzing'
+  | 'complete'
+  | 'error'
+  // A run the user stopped. Terminal like 'complete': the view that was
+  // watching it reports the outcome rather than starting over.
+  | 'cancelled'
 
 export type TargetInfo = apiComponents['schemas']['TargetInfo']
 
@@ -639,14 +646,16 @@ export async function emailAuditReport(
   runId: string,
   email?: string
 ): Promise<RunEmailResponse> {
-  const { data, response } = await typedClient.POST(
+  const { data, error, response } = await typedClient.POST(
     '/api/audit/runs/{run_id}/email',
     {
       params: { path: { run_id: runId } },
       body: { email: email ?? null },
     }
   )
-  await throwIfNotOk(response, 'Failed to email report')
+  // openapi-fetch has already read the body, so the server's reason arrives as
+  // `error`; reaching for the response again would leave only a status. [E-26]
+  throwIfApiError(response, error, 'Failed to email report')
   if (!data) throw new Error('Missing response body')
   return data
 }
@@ -655,14 +664,14 @@ export async function emailFleetReport(
   snapshotId: string,
   email?: string
 ): Promise<RunEmailResponse> {
-  const { data, response } = await typedClient.POST(
+  const { data, error, response } = await typedClient.POST(
     '/api/fleet/snapshots/{snapshot_id}/email',
     {
       params: { path: { snapshot_id: snapshotId } },
       body: { email: email ?? null },
     }
   )
-  await throwIfNotOk(response, 'Failed to email report')
+  throwIfApiError(response, error, 'Failed to email report')
   if (!data) throw new Error('Missing response body')
   return data
 }

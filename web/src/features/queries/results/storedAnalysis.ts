@@ -25,7 +25,8 @@ export function analysisAgeBucket(
 
 /**
  * How long ago something happened, in the words a person would use: "just
- * now", "2 hours ago", or a plain date once relative time stops helping.
+ * now", "2 hours ago", "3 months ago". One scale all the way up, so a list of
+ * ages is read by comparing the same kind of number. [B-13]
  */
 export function relativeAge(isoString: string, nowMs = Date.now()): string {
   const parsed = Date.parse(isoString)
@@ -43,7 +44,14 @@ export function relativeAge(isoString: string, nowMs = Date.now()): string {
   const days = Math.floor(ageMs / DAY_MS)
   if (days < 7) return `${days} ${days === 1 ? 'day' : 'days'} ago`
 
-  return `on ${new Date(parsed).toLocaleDateString()}`
+  const weeks = Math.floor(days / 7)
+  if (days < 30) return `${weeks} ${weeks === 1 ? 'week' : 'weeks'} ago`
+
+  const months = Math.floor(days / 30)
+  if (days < 365) return `${months} ${months === 1 ? 'month' : 'months'} ago`
+
+  const years = Math.floor(days / 365)
+  return `${years} ${years === 1 ? 'year' : 'years'} ago`
 }
 
 /**

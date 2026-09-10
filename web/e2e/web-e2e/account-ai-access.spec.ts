@@ -108,7 +108,7 @@ test('account login unlocks hosted Ask and sign-out restores the AI gate', async
   await expect(
     keyDialog.getByRole('heading', { name: 'Update Anthropic API key' })
   ).toBeVisible()
-  await expect(keyDialog.getByLabel('Anthropic API Key')).toBeVisible()
+  await expect(keyDialog.getByLabel('Anthropic API key')).toBeVisible()
   await keyDialog.getByRole('button', { name: 'Cancel' }).click()
 
   const signedInPage = await signInWithEmail(page, 'account')
@@ -163,7 +163,7 @@ test('account login unlocks hosted Ask and sign-out restores the AI gate', async
     const answer = signedInPage.getByText('Answer', { exact: true })
     const retry = signedInPage.getByRole('button', { name: 'Try again' })
     const upstreamBusy = signedInPage.getByText(
-      'Readyset-hosted AI is temporarily busy. Try again.'
+      'The included AI is temporarily busy. Try again.'
     )
     let answered = false
     for (let attempt = 0; attempt < 3; attempt += 1) {

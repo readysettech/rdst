@@ -26,7 +26,7 @@ export function QueryListEmptyState({
   placeholderCount = 2,
 }: QueryListEmptyStateProps) {
   return (
-    <div className="relative overflow-hidden rounded-[1.25rem]">
+    <div className="relative overflow-hidden rounded-card">
       <div aria-hidden="true" className="opacity-45 [&_#skeleton]:animate-none">
         <QueryListSkeleton count={placeholderCount} />
       </div>

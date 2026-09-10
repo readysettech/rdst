@@ -2,7 +2,10 @@ import { useNavigate } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { hasParameters } from '../../../components/top'
 import { useTarget } from '../../../hooks/useTarget'
-import { analysisRunKey } from '../../../lib/analysisRuns'
+import {
+  analysisRunKey,
+  useAnalysisRunKeyForHash,
+} from '../../../lib/analysisRuns'
 import type { AnalysisRerunReason } from '../../../lib/analytics'
 import { trackEvent } from '../../../lib/analytics'
 import type {
@@ -124,11 +127,15 @@ export function useResultsController(
     () => parseReturnSearch(returnSearch),
     [returnSearch]
   )
-  // Attaching by request identity is what lets a run outlive the view that
-  // started it: closing the analyze drawer leaves the run in flight, and
-  // reopening it — or opening `/results` for the same query — picks it back up.
-  const runKey = query ? analysisRunKey({ query, target, fast }) : null
-  const live = useAnalyze(runKey)
+  // Attaching by identity is what lets a run outlive the view that started it:
+  // closing the analyze drawer leaves the run in flight, and reopening it — or
+  // opening `/results` for the same query — picks it back up. The registry hash
+  // leads, because a reopened view cannot always rebuild the request the run
+  // was started with: parameter values substituted into the SQL belong to the
+  // view that collected them. The request key covers runs with no hash yet.
+  const hashRunKey = useAnalysisRunKeyForHash(hash)
+  const requestRunKey = query ? analysisRunKey({ query, target, fast }) : null
+  const live = useAnalyze(hashRunKey ?? requestRunKey)
   const stored = useStoredAnalysis({ hash, analysisId })
   const storedView: ResultsAnalysisView = {
     state: stored.hasBody ? 'complete' : 'idle',
@@ -147,14 +154,28 @@ export function useResultsController(
   )
   const cache = useCacheAction({ target: target || null })
   const analysisRequestPending = useRef(false)
+  const parameterSubmissionPending = useRef<string | null>(null)
 
   const [isInteractiveOpen, setIsInteractiveOpen] = useState(false)
   const [hasExistingChat, setHasExistingChat] = useState(false)
   const [showParamDialog, setShowParamDialog] = useState(false)
-  const [paramDialogShown, setParamDialogShown] = useState(false)
   const [showAnalyzeConsent, setShowAnalyzeConsent] = useState(false)
   const [skipAnalyzeConsent, setSkipAnalyzeConsent] = useState(false)
-  const queryHasParams = useMemo(() => hasParameters(query), [query])
+  // Consent as this view holds it. The stored flag only records the "don't ask
+  // again" answer, so a consent given for this run alone lives here.
+  const [analyzeConsented, setAnalyzeConsented] = useState(hasAnalyzeConsent)
+  // A pre-run step the user backed out of. Nothing re-opens it until the query
+  // changes or the user asks for the run again.
+  const [preRunDismissed, setPreRunDismissed] = useState(false)
+  // SQL this session produced by filling the parameter form. Its slots are
+  // already concrete, so it is never scanned for placeholders again: a value
+  // is data, and re-reading it as SQL is what used to turn `alice@example.com`
+  // into a parameter named `@example` and dead-end the run.
+  const [substitutedQuery, setSubstitutedQuery] = useState<string | null>(null)
+  const queryHasParams = useMemo(
+    () => query !== substitutedQuery && hasParameters(query),
+    [query, substitutedQuery]
+  )
 
   const openSearch = useCallback(
     (next: ResultsSearch, options?: { replace?: boolean }) => {
@@ -247,14 +268,49 @@ export function useResultsController(
     target,
   ])
 
-  const requestAnalysis = useCallback(() => {
+  /**
+   * The steps left once consent is settled: the values the placeholders need,
+   * then the run itself. One step is on screen at a time, and the last of them
+   * measures without asking again.
+   */
+  const runOnceConsented = useCallback(() => {
     if (!query || !passwordLock.isResolved || passwordLock.isLocked) return
-    if (hasAnalyzeConsent()) {
-      void startAnalysis()
+    setPreRunDismissed(false)
+    setShowAnalyzeConsent(false)
+    if (queryHasParams) {
+      setShowParamDialog(true)
       return
     }
-    setShowAnalyzeConsent(true)
-  }, [passwordLock.isLocked, passwordLock.isResolved, query, startAnalysis])
+    void startAnalysis()
+  }, [
+    passwordLock.isLocked,
+    passwordLock.isResolved,
+    query,
+    queryHasParams,
+    startAnalysis,
+  ])
+
+  /**
+   * Ask for a measurement. Consent for executing the user's query comes first
+   * and replaces the rest of the sequence until it is answered, so a run is
+   * never confirmed twice.
+   */
+  const requestAnalysis = useCallback(() => {
+    if (!query || !passwordLock.isResolved || passwordLock.isLocked) return
+    if (!analyzeConsented) {
+      setPreRunDismissed(false)
+      setShowParamDialog(false)
+      setShowAnalyzeConsent(true)
+      return
+    }
+    runOnceConsented()
+  }, [
+    analyzeConsented,
+    passwordLock.isLocked,
+    passwordLock.isResolved,
+    query,
+    runOnceConsented,
+  ])
 
   const confirmAnalysis = useCallback(() => {
     if (skipAnalyzeConsent) {
@@ -264,21 +320,14 @@ export function useResultsController(
         // Storage may be unavailable; consent still applies to this run.
       }
     }
-    setShowAnalyzeConsent(false)
-    if (query && passwordLock.isResolved && !passwordLock.isLocked) {
-      void startAnalysis()
-    }
-  }, [
-    passwordLock.isLocked,
-    passwordLock.isResolved,
-    query,
-    skipAnalyzeConsent,
-    startAnalysis,
-  ])
+    setAnalyzeConsented(true)
+    runOnceConsented()
+  }, [runOnceConsented, skipAnalyzeConsent])
 
   const cancelAnalysis = useCallback(() => {
     setShowAnalyzeConsent(false)
     setSkipAnalyzeConsent(false)
+    setPreRunDismissed(true)
     goBack()
   }, [goBack])
 
@@ -302,6 +351,23 @@ export function useResultsController(
       })
     },
     [fast, hash, openSearch, origin, params, query, returnSearch, target]
+  )
+
+  /**
+   * Measure a corrected version of the query. The SQL is the subject of this
+   * view, so an edit opens the results on the new query and the run starts
+   * from idle against it. [B-21]
+   */
+  const editQuery = useCallback(
+    (edited: string) => {
+      live.reset()
+      setSubstitutedQuery(null)
+      openSearch(
+        { query: edited, target, fast, returnSearch, origin, hash },
+        { replace: true }
+      )
+    },
+    [fast, hash, live.reset, openSearch, origin, returnSearch, target]
   )
 
   /** The live view's own re-measure, always a deliberate choice by the user. */
@@ -342,51 +408,35 @@ export function useResultsController(
     }
   }, [])
 
-  // Reading a stored result touches no database, so neither the parameter
-  // prompt nor the auto-run applies while one is open.
   useEffect(() => {
-    if (
-      passwordLock.isResolved &&
-      !passwordLock.isLocked &&
-      queryHasParams &&
-      !paramDialogShown &&
-      !stored.isActive
-    ) {
-      setShowParamDialog(true)
-      setParamDialogShown(true)
-    }
-  }, [
-    paramDialogShown,
-    passwordLock.isLocked,
-    passwordLock.isResolved,
-    queryHasParams,
-    stored.isActive,
-  ])
-
-  useEffect(() => {
-    setParamDialogShown(false)
+    setPreRunDismissed(false)
   }, [query])
 
+  // Reading a stored result touches no database, so no pre-run step applies
+  // while one is open. Otherwise landing here asks for a measurement, and the
+  // step machine decides which question that means asking first.
   useEffect(() => {
-    if (
-      analysis.state === 'idle' &&
-      query &&
-      passwordLock.isResolved &&
-      !queryHasParams &&
-      !passwordLock.isLocked &&
-      !stored.isActive
-    ) {
-      requestAnalysis()
-    }
+    if (analysis.state !== 'idle' || stored.isActive) return
+    // Submitting parameter values updates the URL asynchronously. During the
+    // intervening render `query` still contains placeholders, so reopening the
+    // prompt here would strand the submitted query before it can run.
+    if (parameterSubmissionPending.current) return
+    if (showAnalyzeConsent || showParamDialog || preRunDismissed) return
+    requestAnalysis()
   }, [
     analysis.state,
-    passwordLock.isLocked,
-    passwordLock.isResolved,
-    query,
-    queryHasParams,
+    preRunDismissed,
     requestAnalysis,
+    showAnalyzeConsent,
+    showParamDialog,
     stored.isActive,
   ])
+
+  useEffect(() => {
+    if (parameterSubmissionPending.current !== query) return
+    parameterSubmissionPending.current = null
+    void startAnalysis()
+  }, [query, startAnalysis])
 
   useEffect(() => {
     if (analysis.state === 'complete' && analysis.results?.query_hash) {
@@ -395,10 +445,12 @@ export function useResultsController(
   }, [analysis.results?.query_hash, analysis.state, checkConversationStatus])
 
   const submitParameters = useCallback(
-    (substitutedQuery: string) => {
+    (filledQuery: string) => {
+      parameterSubmissionPending.current = filledQuery
       setShowParamDialog(false)
+      setSubstitutedQuery(filledQuery)
       openSearch(
-        { query: substitutedQuery, target, fast, returnSearch, origin },
+        { query: filledQuery, target, fast, returnSearch, origin },
         { replace: true }
       )
     },
@@ -407,8 +459,13 @@ export function useResultsController(
 
   const cancelParameters = useCallback(() => {
     setShowParamDialog(false)
+    setPreRunDismissed(true)
     goBack()
   }, [goBack])
+
+  // Stepping back out of the prompt alone, for Escape: the surface it sits in
+  // stays, and the "Parameter values required" card is the way back in. [B-17]
+  const dismissParameters = useCallback(() => setShowParamDialog(false), [])
 
   const closeInteractive = useCallback(() => {
     setIsInteractiveOpen(false)
@@ -446,6 +503,8 @@ export function useResultsController(
       hasParameters: queryHasParams,
       isOpen: showParamDialog,
       initialValues: storedParams,
+      /** The SQL on screen carries values this session filled in. */
+      isSubstituted: substitutedQuery !== null && substitutedQuery === query,
     },
     consent: {
       isOpen: showAnalyzeConsent,
@@ -466,6 +525,7 @@ export function useResultsController(
       goBack,
       runAgain: requestAnalysis,
       runAgainDeliberately,
+      editQuery,
       reRunStored,
       openStoredAnalysis,
       cacheQuery,
@@ -474,6 +534,7 @@ export function useResultsController(
       openParameters: () => setShowParamDialog(true),
       submitParameters,
       cancelParameters,
+      dismissParameters,
       confirmAnalysis,
       cancelAnalysis,
       setSkipAnalyzeConsent,

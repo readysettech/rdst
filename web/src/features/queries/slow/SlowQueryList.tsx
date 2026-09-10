@@ -72,7 +72,7 @@ export function SlowQueryList({
                 primaryAction={
                   <Button
                     variant="primary"
-                    modifier="ghost"
+                    modifier="solid"
                     size="small"
                     icon="speedometer"
                     iconPosition="left"

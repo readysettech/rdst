@@ -76,27 +76,6 @@ export type BackendFixtures = Record<string, FixtureResponse[]>
 
 const commonBackendFixtures: BackendFixtures = {
   autocomplete_schema: [{ value: {}, repeat: true }],
-  cache_list: [
-    {
-      events: [{ type: 'cache_list', success: true, count: 0, caches: [] }],
-      repeat: true,
-    },
-  ],
-  cache_status: [
-    {
-      events: [
-        {
-          type: 'cache_status',
-          deployed: false,
-          running: false,
-          endpoint: null,
-          cache_target: null,
-          container_name: null,
-        },
-      ],
-      repeat: true,
-    },
-  ],
 }
 
 export function setBackendFixtures(operations: BackendFixtures = {}) {

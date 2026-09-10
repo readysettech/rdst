@@ -72,8 +72,8 @@ export function DemoCard({ compact = false }: { compact?: boolean }) {
       <VStack
         className={
           compact
-            ? 'relative items-start gap-3 p-5'
-            : 'relative items-start gap-5 p-7'
+            ? 'relative h-full items-start gap-3 p-5'
+            : 'relative h-full items-start gap-5 p-7'
         }
       >
         <HStack className="w-full items-center justify-between gap-3">
@@ -100,13 +100,13 @@ export function DemoCard({ compact = false }: { compact?: boolean }) {
           </Text>
           <Text
             level="body-small"
-            className="max-w-xl text-content-rising-solid/80"
+            className="max-w-xl text-content-rising-solid"
           >
             Run the same workload through Postgres and Readyset, then inspect
             the measured speedup. Sandboxed and disposable.
           </Text>
         </VStack>
-        <HStack className="items-center gap-2 text-content-rising-solid">
+        <HStack className="mt-auto items-center gap-2 text-content-rising-solid">
           <Text level="label-medium">Launch the demo</Text>
           <Icon
             name="arrow-right"

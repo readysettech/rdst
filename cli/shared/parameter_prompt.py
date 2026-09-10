@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from shared.query_registry.sql_normalizer import mask_string_literals
 from shared.ui import (
     Confirm,
     DataTable,
@@ -27,7 +28,8 @@ def detect_placeholders(sql: str) -> List[Tuple[str, int]]:
         return []
 
     placeholders = []
-    pg_matches = re.finditer(r"\$(\d+)", sql)
+    # Blank the literals first: a `$1` inside a value is text, not a slot.
+    pg_matches = re.finditer(r"\$(\d+)", mask_string_literals(sql))
     for match in pg_matches:
         param_num = int(match.group(1))
         placeholders.append((match.group(0), param_num - 1))

@@ -1,7 +1,7 @@
 import { BaseInputText } from '@rs/ui-new/base-input-text'
-import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card'
 import { EmptyState } from '@rs/ui-new/empty-state'
+import { InlineNotice } from '@rs/ui-new/error-state'
 import { Icon } from '@rs/ui-new/icon'
 import { Pressable } from '@rs/ui-new/pressable'
 import { Skeleton } from '@rs/ui-new/skeleton'
@@ -48,7 +48,7 @@ export function AskHistory({
           </VStack>
           {items.length > 0 && (
             <Text level="caption" className="text-content-layout-3">
-              {items.length}
+              {items.length} {items.length === 1 ? 'question' : 'questions'}
             </Text>
           )}
         </HStack>
@@ -63,26 +63,12 @@ export function AskHistory({
         )}
 
         {error && (
-          <VStack className="items-start gap-3 rounded-lg bg-surface-negative-soft/20 p-4">
-            <HStack className="items-start gap-2">
-              <Icon
-                name="alert"
-                label="Error"
-                className="mt-0.5 size-4 text-content-negative-soft"
-              />
-              <Text level="body-small" className="text-content-layout-2">
-                Recent questions could not be loaded. Asking a new question
-                still works.
-              </Text>
-            </HStack>
-            <Button
-              variant="primary"
-              modifier="ghost"
-              size="small"
-              label="Try again"
-              onClick={onRetry}
-            />
-          </VStack>
+          <InlineNotice
+            errorClass="rdst-service"
+            title="Recent questions could not be loaded"
+            message="Asking a new question still works."
+            onRetry={onRetry}
+          />
         )}
 
         {!loading && !error && items.length === 0 && (
@@ -132,12 +118,12 @@ export function AskHistory({
                 </Pressable>
               ))}
               {shown.length === 0 && (
-                <Text
-                  level="body-small"
-                  className="py-6 text-center text-content-layout-3"
-                >
-                  No recent question matches “{filter}”.
-                </Text>
+                <EmptyState
+                  layout="compact"
+                  icon="search"
+                  title="No match"
+                  body={`No recent question matches “${filter}”.`}
+                />
               )}
             </VStack>
           </VStack>

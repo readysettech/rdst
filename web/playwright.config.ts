@@ -18,8 +18,9 @@ export default defineConfig({
   // Both excluded suites need infrastructure this project does not stand up:
   // full-stack wants a live Postgres, web-e2e wants that plus a deployed
   // keyservice Worker. They each have their own config, and collecting them
-  // here fails the whole run at import time rather than skipping them.
-  testIgnore: ['**/full-stack/**', '**/web-e2e/**'],
+  // here fails the whole run at import time rather than skipping them. The UX
+  // regression suite has its own config too, and runs on its own schedule.
+  testIgnore: ['**/full-stack/**', '**/web-e2e/**', '**/qa/**'],
   outputDir: './test-results/artifacts',
   // The production test server intentionally uses one isolated RDST home.
   // Keep stateful target and registry flows serial in local runs as well as CI.

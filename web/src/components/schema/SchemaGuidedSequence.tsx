@@ -1,11 +1,11 @@
-import type { ComponentProps, ReactNode } from 'react'
 import { cn } from '@rs/tailwind-base'
-import { Text } from '@rs/ui-new/text'
-import { Icon } from '@rs/ui-new/icon'
 import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card'
+import { Icon } from '@rs/ui-new/icon'
 import { Progress } from '@rs/ui-new/progress'
 import { HStack, VStack } from '@rs/ui-new/stack'
+import { Text } from '@rs/ui-new/text'
+import type { ComponentProps, ReactNode } from 'react'
 import type { SchemaDetails, SchemaStatus } from '../../types/schema'
 
 interface SchemaGuidedSequenceProps {
@@ -240,9 +240,8 @@ export function SchemaGuidedSequence({
             action={null}
           >
             {/* Label first so the percentage anchors to the left margin, in line
-                with the "still need meanings" copy below it — the bar trails to
-                its right instead of shoving the label into the middle (the
-                off-balance "0% documented" the 240px w-60 track caused). */}
+                with the "still need meanings" copy below it; the bar trails to
+                its right across whatever width is left. */}
             <HStack className="mt-0.5 gap-3 items-center flex-wrap">
               <Text
                 level="label-medium"
@@ -250,7 +249,7 @@ export function SchemaGuidedSequence({
               >
                 {pct}% documented
               </Text>
-              <Progress value={pct} max={100} />
+              <Progress value={pct} max={100} className="min-w-40 flex-1" />
             </HStack>
             <Text level="body-small" className="text-content-layout-2">
               {undocumentedTables} of {totalTables} tables and{' '}

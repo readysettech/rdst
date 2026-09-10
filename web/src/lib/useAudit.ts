@@ -4,6 +4,7 @@ import { api } from './client'
 import {
   beginAuditSession,
   completeAuditSession,
+  finishActiveAuditSession,
   finishAuditSession,
   getActiveAuditSession,
   updateAuditSession,
@@ -12,6 +13,7 @@ import {
   cancelBackgroundRun,
   getBackgroundRuns,
   isHealthCheckKind,
+  markRunInterrupted,
   startAuditCaptureRun,
   startAuditRun,
 } from './backgroundRuns'
@@ -241,9 +243,14 @@ function cancelAuditRun() {
     statusMessage: undefined,
     phase: undefined,
   })
-  if (auditRunSessionId !== null) finishAuditSession(auditRunSessionId)
+  finishActiveAuditSession()
   auditRunSessionId = null
 }
+
+// A stream that closes without a terminal frame leaves the outcome unknown.
+// Naming that is the only way back: the session ends, the launcher re-enables,
+// and the page offers a retry.
+const STREAM_LOST_MESSAGE = 'Lost contact with the run before it finished'
 
 async function followAuditRun(runId: string, sessionId: number): Promise<void> {
   const controller = new AbortController()
@@ -331,6 +338,14 @@ async function followAuditRun(runId: string, sessionId: number): Promise<void> {
         }
       }
     })
+    if (!terminal) {
+      auditRunStore.set((current) => ({
+        error: current.error || STREAM_LOST_MESSAGE,
+        state: 'error',
+      }))
+      finishAuditSession(sessionId)
+      markRunInterrupted(runId, STREAM_LOST_MESSAGE)
+    }
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'AbortError') return
     auditRunStore.set({
@@ -493,7 +508,7 @@ function cancelAuditCapture() {
     phase: undefined,
     progress: undefined,
   })
-  if (auditCaptureSessionId !== null) finishAuditSession(auditCaptureSessionId)
+  finishActiveAuditSession()
   auditCaptureSessionId = null
 }
 
@@ -651,6 +666,14 @@ async function followAuditCapture(
         }
       }
     })
+    if (!terminal) {
+      auditCaptureStore.set((current) => ({
+        error: current.error || STREAM_LOST_MESSAGE,
+        state: 'error',
+      }))
+      finishAuditSession(sessionId)
+      markRunInterrupted(runId, STREAM_LOST_MESSAGE)
+    }
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'AbortError') return
     auditCaptureStore.set({

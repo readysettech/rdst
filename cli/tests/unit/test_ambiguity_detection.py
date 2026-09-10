@@ -47,7 +47,7 @@ def test_detector_preserves_provider_error_code() -> None:
 
     def fail(**_kwargs):
         raise LLMError(
-            "Readyset-hosted AI is temporarily busy. Try again.",
+            "The included AI is temporarily busy. Try again.",
             code="HOSTED_UPSTREAM_BUSY",
             status=429,
         )
@@ -62,7 +62,7 @@ def test_detector_preserves_provider_error_code() -> None:
 
     assert result == {
         "success": False,
-        "error": "Readyset-hosted AI is temporarily busy. Try again.",
+        "error": "The included AI is temporarily busy. Try again.",
         "error_code": "HOSTED_UPSTREAM_BUSY",
         "error_status": 429,
         "raw_response": "",

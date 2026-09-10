@@ -5,11 +5,10 @@ import { Text } from '@rs/ui-new/text'
 import { toast } from '@rs/ui-new/use-toast'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useRouter } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import { startBootstrapRun } from '../../lib/backgroundRuns'
 import { useConfigure } from '../../lib/useConfigure'
 import { useOnboarding } from '../../lib/useOnboarding'
-import { VALUE_PROPOSITION } from '../../lib/valueProposition'
 import type { ConfigureFormData } from '../../types/configure'
 import { AnimatedSurfaceBackdrop } from '../AnimatedSurfaceBackdrop'
 import { ConfigureForm } from '../configure'
@@ -88,8 +87,28 @@ export function ConnectPage({
   const navigate = useNavigate()
   const router = useRouter()
   const queryClient = useQueryClient()
-  const { addTarget, setDefaultTarget, cancel, loading } = useConfigure()
+  const {
+    addTarget,
+    setDefaultTarget,
+    testConnection,
+    cancel,
+    connectionTestResult,
+    loading,
+  } = useConfigure()
   const { completeInit } = useOnboarding()
+  const [testing, setTesting] = useState(false)
+
+  // "Test & connect" has to test. Without this the form's submit saved an
+  // unreachable database, promoted it to default with verified:false, and
+  // confirmed it with a positive toast. [A-01]
+  const handleTest = async (data: ConfigureFormData) => {
+    setTesting(true)
+    try {
+      return await testConnection(data.name.trim() || 'form-test', data)
+    } finally {
+      setTesting(false)
+    }
+  }
 
   const leave = () => {
     // Return to where the user was headed when routed here, else Home.
@@ -142,18 +161,9 @@ export function ConnectPage({
     // and personality without a bespoke token, so the raised form card below
     // reads as elevated against it. [VIS-075, VIS-099, VIS-101, VIS-102]
     <div className="w-full bg-gradient-to-b from-surface-primary-soft/10 to-transparent">
-      {/* Utility row: one canonical brand mark + exit */}
-      <HStack className="justify-between items-center py-2">
-        <HStack className="gap-2 items-center">
-          <Icon
-            name="querypilot"
-            label="RDST"
-            className="w-5 h-5 text-content-primary-soft"
-          />
-          <Text level="label-medium" className="text-content-layout-1">
-            RDST
-          </Text>
-        </HStack>
+      {/* Exit, on the content column's own left edge. The shell's breadcrumb
+          is the one brand mark; a second one here read as two identities. */}
+      <HStack className="mx-auto w-full max-w-xl justify-end py-2">
         <Button
           variant="primary"
           modifier="link"
@@ -194,11 +204,7 @@ export function ConnectPage({
           >
             {fromDemo
               ? 'Use a read-only database user. RDST runs EXPLAIN, schema, index, and performance-statistics queries against PostgreSQL or MySQL.'
-              : // Collapses into the sidebar's one value-proposition line (C1 /
-                // D-5) instead of re-explaining the two paths below, which the
-                // demo hero card and "Or connect your own database" divider
-                // already carry.
-                VALUE_PROPOSITION}
+              : 'Connect a database to start finding slow queries.'}
           </Text>
         </VStack>
 
@@ -223,7 +229,7 @@ export function ConnectPage({
                   </Text>
                   <Text
                     level="body-small"
-                    className="text-content-rising-solid/80"
+                    className="text-content-rising-solid"
                   >
                     Run a guided comparison on a prepared workload and inspect
                     the measured Readyset speedup. No database or setup needed.
@@ -277,13 +283,17 @@ export function ConnectPage({
         {/* One raised card on the hero surface: the form, its inline test
             state, and its single primary CTA read as one grouped unit — no dead
             band, no floating second list card. [VIS-036, VIS-111, VIS-022] */}
-        <div className="rounded-[1.25rem] shadow-elevation-1">
+        <div className="rounded-card shadow-elevation-1">
           <ConfigureForm
             onSubmit={handleSubmit}
+            onTest={handleTest}
             onCancel={skip}
             isLoading={loading}
+            isTesting={testing}
+            testResult={connectionTestResult}
             submitLabel="Test & connect"
             submitSize="large"
+            reviewWritePrivilegesOnSubmit
           />
         </div>
 

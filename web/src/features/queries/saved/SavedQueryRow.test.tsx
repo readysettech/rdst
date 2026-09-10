@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderWithClient } from '@/test-utils'
 import {
   __resetAnalysisRunsForTests,
+  resetAnalysisRun,
   startAnalysisRun,
 } from '../../../lib/analysisRuns'
 import {
@@ -100,6 +101,22 @@ function stubLatestAnalysis(
   return fetchMock
 }
 
+/**
+ * Hold the analyze stream open so the card keeps reporting a live run: the
+ * stored-analysis read still answers, the measurement never settles.
+ */
+function stubAnalysisInFlight() {
+  const latest = stubLatestAnalysis(null)
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes('/api/analyze')
+        ? new Promise<Response>(() => {})
+        : latest(input, init)
+    )
+  )
+}
+
 const twoHoursAgo = () => new Date(Date.now() - 2 * 3_600_000).toISOString()
 
 const analyzedEntry = () =>
@@ -111,7 +128,7 @@ const analyzedEntry = () =>
 describe('SavedQueryRow stored analysis (A2/A3)', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('shows the outcome in the card footer without expanding the card', async () => {
+  it('shows the outcome and when it was measured, without hovering (B-11)', async () => {
     stubLatestAnalysis({
       analyzed_at: twoHoursAgo(),
       overall_rating: 'good',
@@ -128,14 +145,14 @@ describe('SavedQueryRow stored analysis (A2/A3)', () => {
     )
 
     expect(await screen.findByText('Good · 82/100')).toBeTruthy()
-    expect(screen.queryByText('Analyzed 2 hours ago')).toBeNull()
+    expect(screen.getByText('Analyzed 2 hours ago')).toBeTruthy()
   })
 
-  it('reveals the relative analyzed time in a tooltip on keyboard focus', async () => {
+  it('carries the outcome tone on the card itself (B-11)', async () => {
     stubLatestAnalysis({
       analyzed_at: twoHoursAgo(),
-      overall_rating: 'good',
-      efficiency_score: 82,
+      overall_rating: 'poor',
+      efficiency_score: 32,
     })
 
     renderWithClient(
@@ -147,16 +164,10 @@ describe('SavedQueryRow stored analysis (A2/A3)', () => {
       />
     )
 
-    const badge = await screen.findByText('Good · 82/100')
-    expect(screen.queryByRole('tooltip')).toBeNull()
-
-    fireEvent.focus(badge)
-    expect((await screen.findByRole('tooltip')).textContent).toBe(
-      'Analyzed 2 hours ago'
+    await screen.findByText('Poor · 32/100')
+    expect(screen.getByTestId('query-registry-row').className).toContain(
+      'border-l-border-negative-soft'
     )
-
-    fireEvent.blur(badge)
-    expect(screen.queryByRole('tooltip')).toBeNull()
   })
 
   it('leaves the footer outcome out entirely when nothing was analyzed', async () => {
@@ -202,6 +213,75 @@ describe('SavedQueryRow stored analysis (A2/A3)', () => {
   })
 })
 
+/** The labels of the filled buttons in a card's action row. */
+function solidActionLabels(): string[] {
+  const footer = screen.getByTestId('query-card-footer-content')
+  return Array.from(footer.querySelectorAll('button'))
+    .filter((button) =>
+      button.className.split(/\s+/).includes('bg-surface-primary-solid')
+    )
+    .map((button) => button.textContent?.trim() ?? '')
+}
+
+describe('SavedQueryRow action hierarchy and names (D-08/D-08b)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('gives the card exactly one solid action, and it is Analyze', async () => {
+    stubLatestAnalysis(null)
+
+    renderWithClient(
+      <SavedQueryRow
+        entry={entry()}
+        state={makeState()}
+        actions={makeActions()}
+        animateEntry={false}
+      />
+    )
+
+    await screen.findByRole('button', { name: 'Analyze' })
+    expect(solidActionLabels()).toEqual(['Analyze'])
+  })
+
+  it('names the comparison by what it compares against', async () => {
+    stubLatestAnalysis(null)
+
+    renderWithClient(
+      <SavedQueryRow
+        entry={entry()}
+        state={makeState()}
+        actions={makeActions()}
+        animateEntry={false}
+      />
+    )
+
+    expect(
+      await screen.findByRole('button', { name: 'Compare against Readyset' })
+    ).toBeTruthy()
+  })
+
+  it('names the benchmark on a cached query Load test', async () => {
+    stubLatestAnalysis(null)
+    const actions = {
+      ...makeActions(),
+      isCached: () => true,
+    } as unknown as SavedQueriesController['rowActions']
+
+    renderWithClient(
+      <SavedQueryRow
+        entry={entry()}
+        state={makeState()}
+        actions={actions}
+        animateEntry={false}
+      />
+    )
+
+    expect(
+      await screen.findByRole('button', { name: 'Load test' })
+    ).toBeTruthy()
+    expect(solidActionLabels()).toEqual(['Analyze'])
+  })
+})
+
 describe('SavedQueryRow evidence provenance', () => {
   it('attaches the provenance note to the observed metrics on the card meta line', () => {
     renderWithClient(
@@ -237,6 +317,24 @@ describe('SavedQueryRow evidence provenance', () => {
     expect(rail).toBeTruthy()
     expect(rail?.textContent).toContain('Avg latency')
   })
+
+  it('states that an un-observed query has no measurement', () => {
+    renderWithClient(
+      <SavedQueryRow
+        entry={entry({ observation_count: 0, avg_duration_ms: 0 })}
+        state={makeState()}
+        actions={makeActions()}
+        displayMode="card-2"
+        animateEntry={false}
+      />
+    )
+
+    expect(screen.getByText('Not yet observed')).toBeTruthy()
+    expect(screen.queryByText('Observed runs')).toBeNull()
+    expect(screen.getByTestId('query-registry-row').textContent).not.toContain(
+      '0ms'
+    )
+  })
 })
 
 describe('SavedQueryRow live analysis', () => {
@@ -247,7 +345,7 @@ describe('SavedQueryRow live analysis', () => {
   })
 
   it('reports a run started elsewhere and reopens it instead of re-running', async () => {
-    stubLatestAnalysis(null)
+    stubAnalysisInFlight()
     const actions = makeActions()
     const row = entry()
     // A run this card did not start — the analyze drawer did, and was closed.
@@ -266,8 +364,12 @@ describe('SavedQueryRow live analysis', () => {
       />
     )
 
-    const action = await screen.findByRole('button', { name: 'Analyzing...' })
-    fireEvent.click(action)
+    // The Analyze action is shut while the run lasts; the card's own
+    // in-progress panel is what reopens it.
+    const shut = await screen.findByRole('button', { name: 'Analyzing' })
+    expect((shut as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'View progress' }))
 
     expect(actions.analyze).toHaveBeenCalledWith(
       row.sql,
@@ -277,6 +379,76 @@ describe('SavedQueryRow live analysis', () => {
         hash: row.hash,
       }
     )
+  })
+
+  it('carries the run on the card: tone, motion and shut actions (B-06)', async () => {
+    stubAnalysisInFlight()
+    const row = entry()
+    startAnalysisRun(
+      { query: row.sql, target: row.target, fast: false },
+      { queryHash: row.hash }
+    )
+
+    renderWithClient(
+      <SavedQueryRow
+        entry={row}
+        target="demo"
+        state={makeState()}
+        actions={makeActions()}
+        animateEntry={false}
+      />
+    )
+
+    const card = await screen.findByTestId('query-registry-row')
+    expect(card.className).toContain('bg-surface-primary-soft/10')
+    expect(card.className).toContain('ring-border-primary-soft')
+    expect(screen.getByLabelText('Analysis in progress')).toBeTruthy()
+    expect(screen.getByText('Analysis in progress')).toBeTruthy()
+
+    // Nothing that would measure this query a second time is reachable.
+    expect(
+      (screen.getByRole('button', { name: 'Analyzing' }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true)
+    expect(
+      (
+        screen.getByRole('button', {
+          name: 'Compare against Readyset',
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(true)
+  })
+
+  it('reopens every action once the run is forgotten', async () => {
+    stubAnalysisInFlight()
+    const row = entry()
+    const key = startAnalysisRun(
+      { query: row.sql, target: row.target, fast: false },
+      { queryHash: row.hash }
+    )
+
+    renderWithClient(
+      <SavedQueryRow
+        entry={row}
+        target="demo"
+        state={makeState()}
+        actions={makeActions()}
+        animateEntry={false}
+      />
+    )
+    await screen.findByRole('button', { name: 'Analyzing' })
+
+    resetAnalysisRun(key)
+
+    await waitFor(() => {
+      expect(
+        (
+          screen.getByRole('button', {
+            name: 'Compare against Readyset',
+          }) as HTMLButtonElement
+        ).disabled
+      ).toBe(false)
+    })
   })
 
   it('goes back to Analyze once no run is in flight', async () => {
@@ -336,7 +508,8 @@ describe('SavedQueryRow star and recall', () => {
 
     const star = await screen.findByTestId('query-star-toggle')
     expect(star.getAttribute('aria-pressed')).toBe('true')
-    expect(star.getAttribute('aria-label')).toBe('Starred')
+    // The name is the action; aria-pressed alone carries the state. [B-20]
+    expect(star.getAttribute('aria-label')).toBe('Star this query')
 
     fireEvent.click(star)
     expect(actions.toggleStar).toHaveBeenCalledWith('abc1234567890', false)
@@ -553,5 +726,35 @@ describe('SavedQueryRow running test', () => {
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: 'Close details' })).toBeNull()
     )
+  })
+})
+
+describe('SavedQueryRow SQL (B-03)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('shows the SQL as written, matching what the meta line counts', async () => {
+    stubLatestAnalysis(null)
+
+    renderWithClient(
+      <SavedQueryRow
+        entry={entry({
+          sql: 'SELECT :p1 FROM revealed_table',
+          original_sql: 'SELECT 1 FROM revealed_table',
+          most_recent_params: { p1: '1' },
+        })}
+        state={makeState()}
+        actions={makeActions()}
+        animateEntry={false}
+      />
+    )
+
+    const row = await screen.findByTestId('query-registry-row')
+    expect(
+      row.querySelector('[title="SELECT 1 FROM revealed_table"]')
+    ).toBeTruthy()
+    expect(
+      row.querySelector('[title="SELECT :p1 FROM revealed_table"]')
+    ).toBeNull()
+    expect(screen.getByText(/no parameters/)).toBeTruthy()
   })
 })

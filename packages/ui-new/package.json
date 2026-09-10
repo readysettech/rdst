@@ -78,6 +78,7 @@
     "./use-motion-timeline": "./src/hooks/use-motion-timeline.ts",
     "./date-fns": "./src/helpers/date-fns.ts",
     "./types": "./src/helpers/types.ts",
+    "./focus": "./src/helpers/focus.ts",
     "./markdown-to-jsx": "./src/helpers/markdown-to-jsx.ts",
     "./format": "./src/helpers/format.ts",
     "./motion": "./src/motion/motion.ts",

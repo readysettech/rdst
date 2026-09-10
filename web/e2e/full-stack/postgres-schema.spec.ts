@@ -21,6 +21,11 @@ test('configures Postgres and bootstraps its schema through the UI', async ({
     .locator('[name="password"]')
     .fill(process.env.RDST_E2E_DB_PASSWORD ?? 'rdst_e2e_password')
   await page.getByRole('button', { name: 'Test & connect' }).click()
+  const writableAccount = page.getByRole('dialog', {
+    name: 'Use this database account?',
+  })
+  await expect(writableAccount).toBeVisible()
+  await writableAccount.getByRole('button', { name: 'Add target' }).click()
 
   await expect(page).toHaveURL('/')
 

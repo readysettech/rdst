@@ -390,7 +390,7 @@ export function ResultsReadysetCard({
       >
         {action && !actionIsPrimary ? (
           <Button
-            variant="rising"
+            variant="primary"
             modifier="outline"
             label={action.label}
             icon={action.icon}

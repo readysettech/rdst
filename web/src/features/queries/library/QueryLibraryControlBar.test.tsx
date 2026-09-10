@@ -172,3 +172,21 @@ describe('Queries Starred filter', () => {
     ).toBe('true')
   })
 })
+
+describe('Queries control bar at narrow widths', () => {
+  it('wraps the control row rather than clipping the sort control', () => {
+    const { container } = renderControlBar()
+
+    const sort = container.querySelector('#test-sort')
+    const row = sort?.closest('div')?.parentElement
+    expect(row?.className).toContain('flex-wrap')
+  })
+
+  it('gives search the whole row until there is room beside the controls', () => {
+    const { container } = renderControlBar()
+
+    const search = container.querySelector('#test-search')?.closest('.ml-auto')
+    expect(search?.className).toContain('w-full')
+    expect(search?.className).toContain('tablet:w-80')
+  })
+})

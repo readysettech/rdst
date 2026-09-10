@@ -6,6 +6,7 @@ import {
   memo,
   type ReactNode,
 } from 'react'
+import { controlTransition, focusRing } from '../../helpers/focus'
 import { Icon } from '../svg/icon'
 import { IconWithSpinner } from '../svg/icon-with-spinner'
 
@@ -19,15 +20,11 @@ const buttonStyles = tv({
       'min-w-max',
       'cursor-pointer',
       'select-none',
-      'transition',
+      controlTransition,
       'duration-fast',
       'ease-base',
       'transform',
-      'focus-visible:outline-none',
-      'focus-visible:ring-2',
-      'focus-visible:ring-border-primary-soft',
-      'focus-visible:ring-offset-2',
-      'focus-visible:ring-offset-surface-layout-1',
+      ...focusRing,
       'active:scale-[0.98]',
       'active:origin-center',
     ],
@@ -305,7 +302,10 @@ const Button = forwardRef<HTMLButtonElement | HTMLAnchorElement, ButtonProps>(
     const isDisabled = Boolean(disabledProp || loading)
     const resolvedVariant = variant ?? 'primary'
     const resolvedModifier = modifier ?? 'solid'
-    const resolvedIconPosition = iconPosition ?? 'none'
+    // An `icon` with no `iconPosition` used to resolve to 'none', which drew
+    // nothing: the prop was accepted and silently dropped. A supplied icon
+    // defaults to the left slot, so a call site can never lose it.
+    const resolvedIconPosition = iconPosition ?? (icon ? 'left' : 'none')
     const styles = buttonStyles({
       size,
       variant: resolvedVariant,

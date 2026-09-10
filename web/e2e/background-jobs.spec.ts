@@ -57,7 +57,7 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
   // Select the page-level trigger explicitly so Playwright strict mode does not
   // confuse it with the hidden form action.
   await page
-    .getByRole('button', { name: 'Add connection', exact: true })
+    .getByRole('button', { name: 'Add target', exact: true })
     .first()
     .click()
   await page.getByRole('tab', { name: 'Manual setup' }).click()
@@ -85,7 +85,7 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
       ].join('\n'),
     })
   )
-  await page.getByRole('button', { name: 'Add connection' }).last().click()
+  await page.getByRole('button', { name: 'Add target' }).last().click()
 
   const jobsTrigger = page.getByTestId('jobs-trigger')
   const missingAiAccess = 'Sign in to Readyset or add your own Anthropic key.'
@@ -112,7 +112,7 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
     page.getByRole('heading', { name: 'Update Anthropic API key' })
   ).toBeVisible()
   await page
-    .getByRole('textbox', { name: 'Anthropic API Key', exact: true })
+    .getByRole('textbox', { name: 'Anthropic API key', exact: true })
     .fill('sk-ant-e2e-test')
   await page.getByRole('button', { name: 'Save secrets' }).click()
 

@@ -1,5 +1,10 @@
 import { cleanup, render, screen } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  ANALYZE_CONSENT_MESSAGE,
+  ANALYZE_CONSENT_TITLE,
+} from './AnalyzeConsent'
 import { ResultsBody } from './ResultsBody'
 import type { ResultsController } from './useResultsController'
 
@@ -25,7 +30,12 @@ vi.mock('./AnalysisResults', () => ({
   AnalysisResults: () => <div data-testid="analysis-results" />,
 }))
 vi.mock('../../../components/QueryCard', () => ({
-  QueryCard: () => <div data-testid="query-card" />,
+  QueryCard: ({ title, meta }: { title?: ReactNode; meta?: ReactNode }) => (
+    <div data-testid="query-card">
+      <div data-testid="query-card-title">{title}</div>
+      <div data-testid="query-card-meta">{meta}</div>
+    </div>
+  ),
 }))
 
 // The chat stack is behind its own chunk; importing this module is what
@@ -114,6 +124,23 @@ describe('pre-run steps in the analyze drawer', () => {
     expect(screen.queryByTestId('analysis-results')).toBeNull()
   })
 
+  it('carries the warning tone the dialog carries, in the same words', () => {
+    render(
+      <ResultsBody
+        controller={controller({ consent: { isOpen: true } })}
+        prompts="inline"
+      />
+    )
+
+    // Mike #3 / B-05: the drawer used to ask in a neutral card.
+    const consent = screen.getByTestId('analyze-consent-inline')
+    expect(consent.className).toContain('bg-surface-warning-soft/50')
+    expect(consent.className).toContain('border-border-warning-soft')
+    expect(consent.className).toContain('shadow-glow-warning')
+    expect(screen.getByText(ANALYZE_CONSENT_TITLE)).toBeTruthy()
+    expect(screen.getByText(ANALYZE_CONSENT_MESSAGE)).toBeTruthy()
+  })
+
   it('asks for parameter values in the body, not in a modal', () => {
     render(
       <ResultsBody
@@ -138,7 +165,8 @@ describe('pre-run steps on the results page', () => {
     )
 
     expect(screen.queryByTestId('analyze-consent-inline')).toBeNull()
-    expect(screen.getByText('Run EXPLAIN ANALYZE?')).toBeTruthy()
+    expect(screen.getByText(ANALYZE_CONSENT_TITLE)).toBeTruthy()
+    expect(screen.getByText(ANALYZE_CONSENT_MESSAGE)).toBeTruthy()
   })
 
   it('keeps the parameter dialog modal', () => {
@@ -152,6 +180,50 @@ describe('pre-run steps on the results page', () => {
 
     expect(screen.getByTestId('parameter-form').dataset.presentation).toBe(
       'modal'
+    )
+  })
+})
+
+describe('one query block on the analyze screen (B-04)', () => {
+  it('calls it the query until a run has been asked for', () => {
+    render(<ResultsBody controller={controller()} prompts="inline" />)
+
+    expect(screen.getByTestId('query-card-title').textContent).toBe('Query')
+    expect(screen.getByTestId('query-card-meta').textContent).not.toContain(
+      'with your values'
+    )
+  })
+
+  it('leaves the query to the parameter form while values are collected', () => {
+    render(
+      <ResultsBody
+        controller={controller({
+          parameters: { hasParameters: true, isOpen: true },
+        })}
+        prompts="inline"
+      />
+    )
+
+    expect(screen.getByTestId('parameter-form')).toBeTruthy()
+    expect(screen.queryByTestId('query-card')).toBeNull()
+  })
+
+  it('names the substituted query once a run exists', () => {
+    render(
+      <ResultsBody
+        controller={controller({
+          analysis: { state: 'complete' },
+          parameters: { hasParameters: false, isSubstituted: true },
+        })}
+        prompts="inline"
+      />
+    )
+
+    expect(screen.getByTestId('query-card-title').textContent).toBe(
+      'Analyzed query'
+    )
+    expect(screen.getByTestId('query-card-meta').textContent).toContain(
+      'with your values'
     )
   })
 })

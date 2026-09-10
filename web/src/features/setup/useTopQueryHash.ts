@@ -31,5 +31,5 @@ export function useTopQueryHash(
     retry: false,
   })
 
-  return data?.queries[0]?.hash
+  return data?.queries?.[0]?.hash
 }

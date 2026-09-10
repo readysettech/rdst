@@ -2,7 +2,15 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  type MenuItemConstructorOptions,
+  shell,
+} from 'electron'
 
 import { type BackendHandle, startBackend, stopBackend } from './backend.js'
 import { type StaticServerHandle, startStaticServer } from './static-server.js'
@@ -107,6 +115,48 @@ function isLocalRendererUrl(url: string): boolean {
   }
 }
 
+// The renderer is laid out for the browser at 100%; the desktop shell shows
+// it two zoom steps smaller so more of a page fits without scrolling. A
+// person's own zoom changes (Cmd/Ctrl +/-) persist per origin on top of this.
+const DEFAULT_ZOOM_FACTOR = 0.8
+
+// Electron's stock View menu resets zoom to 100 percent. This shell's actual
+// size is the default factor above, so Actual Size returns there while Zoom
+// In and Zoom Out keep stepping from wherever the person has taken it.
+function installApplicationMenu(): void {
+  const isMac = process.platform === 'darwin'
+  const view: MenuItemConstructorOptions = {
+    label: 'View',
+    submenu: [
+      { role: 'reload' },
+      { role: 'forceReload' },
+      { role: 'toggleDevTools' },
+      { type: 'separator' },
+      {
+        label: 'Actual Size',
+        accelerator: 'CommandOrControl+0',
+        click: (_item, window) => {
+          const target =
+            window instanceof BrowserWindow ? window : (mainWindow ?? null)
+          target?.webContents.setZoomFactor(DEFAULT_ZOOM_FACTOR)
+        },
+      },
+      { role: 'zoomIn' },
+      { role: 'zoomOut' },
+      { type: 'separator' },
+      { role: 'togglefullscreen' },
+    ],
+  }
+  const template: MenuItemConstructorOptions[] = [
+    ...(isMac ? [{ role: 'appMenu' } as MenuItemConstructorOptions] : []),
+    { role: 'fileMenu' },
+    { role: 'editMenu' },
+    view,
+    { role: 'windowMenu' },
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
 async function createWindow(rendererUrl: string): Promise<BrowserWindow> {
   const isMac = process.platform === 'darwin'
   const window = new BrowserWindow({
@@ -130,6 +180,7 @@ async function createWindow(rendererUrl: string): Promise<BrowserWindow> {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      zoomFactor: DEFAULT_ZOOM_FACTOR,
     },
   })
   mainWindow = window
@@ -255,6 +306,7 @@ async function startApplication(): Promise<void> {
   smokeLog('electron ready')
 
   registerWindowControlHandlers()
+  installApplicationMenu()
 
   // No updater in smoke mode: main-build packages ship with updates
   // enabled, and an update check against the production feed mid-smoke

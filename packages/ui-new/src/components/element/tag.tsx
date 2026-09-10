@@ -10,17 +10,19 @@ const tagStyles = tv({
     'flex',
     'items-center',
     'justify-center',
-    'transition-all',
-    'duration-fast',
-    'ease-base',
     'focus-visible:outline-none',
     'focus-visible:shadow-focus',
   ],
   variants: {
+    // A tag that reports a status changes tone the instant the status changes;
+    // only a clickable tag animates, and then for its own press feedback.
     clickable: {
       true: [
         'cursor-pointer',
         'select-none',
+        'transition-all',
+        'duration-fast',
+        'ease-base',
         'active:scale-[0.98]',
         'active:origin-center',
       ],
@@ -376,6 +378,8 @@ const Tag = forwardRef<HTMLDivElement, TagProps>((props, ref) => {
     class: [className, classMerge],
   })
 
+  // A tag's icon sits beside the tag's own label, so it is decorative there
+  // and only carries the label when it stands alone.
   const hasLeftIcon = icon && resolvedIconPosition.includes('left')
   const hasRightIcon = icon && resolvedIconPosition.includes('right')
   const hasJustIcon = icon && resolvedIconPosition.includes('icon')
@@ -389,7 +393,7 @@ const Tag = forwardRef<HTMLDivElement, TagProps>((props, ref) => {
     >
       {(hasJustIcon || hasLeftIcon) && (
         <>
-          <Icon name={icon} label={label} />
+          <Icon name={icon} label={hasJustIcon ? label : ''} />
           <span className="inline-block h-1 w-1" />
         </>
       )}
@@ -397,7 +401,7 @@ const Tag = forwardRef<HTMLDivElement, TagProps>((props, ref) => {
       {!hasJustIcon && hasRightIcon && (
         <>
           <span className="inline-block h-1 w-1" />
-          <Icon name={icon} label={label} />
+          <Icon name={icon} label="" />
         </>
       )}
     </div>

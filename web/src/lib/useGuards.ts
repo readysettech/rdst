@@ -145,8 +145,12 @@ export function useDeleteGuard() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (name: string) => deleteGuard(name),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: GUARDS_KEY });
+    // The guard is gone, so its detail is dropped rather than invalidated:
+    // GUARDS_KEY is a prefix of every detail key, and a blanket invalidation
+    // sends the open row's read at a name the server no longer has. [F-16]
+    onSuccess: (_data, name) => {
+      queryClient.removeQueries({ queryKey: guardDetailKey(name) });
+      queryClient.invalidateQueries({ queryKey: GUARDS_KEY, exact: true });
     },
   });
 }

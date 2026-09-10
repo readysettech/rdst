@@ -23,8 +23,8 @@ export const INNER_REPORT_TABS: Array<{
   { id: 'queries', label: 'Queries' },
   { id: 'sizing', label: 'Sizing' },
   { id: 'savings', label: 'Savings' },
-  { id: 'detailed-analysis', label: 'Detailed Analysis' },
-  { id: 'next-steps', label: 'Next Steps' },
+  { id: 'detailed-analysis', label: 'Detailed analysis' },
+  { id: 'next-steps', label: 'Next steps' },
 ]
 
 export const INNER_REPORT_TAB_DESCRIPTIONS: Record<InnerReportTab, string> = {
@@ -48,8 +48,8 @@ export const FLEET_REPORT_TABS: Array<{
   id: FleetReportTab
   label: string
 }> = [
-  { id: 'summary', label: 'Fleet Summary' },
-  { id: 'sizing', label: 'Fleet Savings' },
+  { id: 'summary', label: 'Fleet summary' },
+  { id: 'sizing', label: 'Fleet savings' },
 ]
 
 export const FLEET_REPORT_TAB_DESCRIPTIONS: Record<FleetReportTab, string> = {

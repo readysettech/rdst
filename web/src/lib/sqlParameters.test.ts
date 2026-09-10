@@ -4,10 +4,111 @@ import {
   detectParameters,
   fillCapturedParams,
   findResidualPlaceholders,
+  formatValue,
+  hasParameters,
   hasResidualPlaceholders,
   substituteParameters,
   toBackendParams,
 } from './sqlParameters'
+
+describe('detectParameters', () => {
+  const placeholders = (sql: string) =>
+    detectParameters(sql).map((parameter) => parameter.placeholder)
+
+  it('detects each supported placeholder style', () => {
+    expect(placeholders('SELECT * FROM t WHERE a = $1 AND b = $2')).toEqual([
+      '$1',
+      '$2',
+    ])
+    expect(placeholders('SELECT * FROM t WHERE a = ? AND b = ?')).toEqual([
+      '?',
+      '?',
+    ])
+    expect(
+      placeholders('SELECT * FROM t WHERE a = :name AND b = @handle')
+    ).toEqual([':name', '@handle'])
+  })
+
+  it('does not read a :: type cast as a named placeholder', () => {
+    expect(placeholders('SELECT a::text FROM t WHERE b = 1')).toEqual([])
+  })
+
+  it('reads no placeholders inside string literals, quoted names or comments', () => {
+    expect(
+      placeholders("SELECT * FROM t WHERE note = 'ping @bob about $1'")
+    ).toEqual([])
+    expect(placeholders('SELECT "@col" FROM t')).toEqual([])
+    expect(placeholders('SELECT 1 -- todo: ask @bob about $1\nFROM t')).toEqual(
+      []
+    )
+    expect(placeholders('SELECT 1 /* $1 :p1 */ FROM t')).toEqual([])
+    expect(placeholders('SELECT $tag$ $1 :p1 @bob $tag$ FROM t')).toEqual([])
+  })
+
+  it('still reads the real slots around a literal that looks like one', () => {
+    expect(
+      placeholders("SELECT * FROM t WHERE note = 'see $9' AND a = $1")
+    ).toEqual(['$1'])
+  })
+})
+
+// Mike #11 / B-01: the value shapes that used to be re-read as parameters and
+// dead-ended the analyze flow. Every one of them must round trip to SQL that
+// asks for nothing further.
+describe('parameter values survive the substitution round trip', () => {
+  const SQL = 'SELECT id FROM users WHERE email = :p1'
+  const shapes: Array<[string, string]> = [
+    ['email', 'alice@example.com'],
+    ['dollar amount', '$100 refund'],
+    ['colon word', 'note:urgent'],
+    ['at handle', '@handle'],
+    ['question', 'why?'],
+    ['plain word', 'alice'],
+    ['single-quoted', "'alice'"],
+    ['double-quoted', '"alice"'],
+    ['apostrophe', "O'Brien"],
+    ['dollar quoting', '$tag$ alice $tag$'],
+    ['percent wildcard', '%alice%'],
+    ['unicode', 'Unicode unlu cagri 名前'],
+    ['emoji', 'ok 🎉 done'],
+    ['leading-zero number', '00042'],
+    ['plain number', '42'],
+    ['very long', 'a'.repeat(500)],
+    ['whitespace', '   '],
+    ['sql comment', 'a -- $1'],
+    ['every style at once', '$1 :p1 @p1 ?'],
+  ]
+
+  it.each(shapes)('%s', (_name, value) => {
+    const parameters = detectParameters(SQL)
+    const substituted = substituteParameters(SQL, parameters, { ':p1': value })
+    expect(hasParameters(substituted)).toBe(false)
+    expect(findResidualPlaceholders(substituted)).toEqual([])
+  })
+})
+
+describe('formatValue', () => {
+  it('uses bare numbers, NULL, TRUE and FALSE as entered', () => {
+    expect(formatValue('42')).toBe('42')
+    expect(formatValue('-8.5')).toBe('-8.5')
+    expect(formatValue('null')).toBe('NULL')
+    expect(formatValue(' true ')).toBe('TRUE')
+  })
+
+  it('keeps digits with a leading zero as text so they are not truncated', () => {
+    expect(formatValue('00042')).toBe("'00042'")
+  })
+
+  it('treats a double-quoted value as a string, not a column name', () => {
+    expect(formatValue('"alice"')).toBe("'alice'")
+  })
+
+  it('passes a single-quoted value through and escapes a bare apostrophe', () => {
+    expect(formatValue("'alice'")).toBe("'alice'")
+    expect(formatValue("O'Brien")).toBe("'O''Brien'")
+    expect(formatValue("'")).toBe("''''")
+  })
+})
 
 describe('fillCapturedParams', () => {
   it('fills named placeholders from captured values, in any order', () => {

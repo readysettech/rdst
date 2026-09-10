@@ -12,16 +12,14 @@ test('adds, updates, defaults, and deletes a database target', async ({
   await configureTestTarget(page, { hasPassword: true })
 
   await page.goto('/configure')
-  await expect(
-    page.getByRole('heading', { name: 'Database connections' })
-  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Targets' })).toBeVisible()
 
   const seedRow = page
     .getByTestId('target-row')
     .filter({ has: page.getByText('e2e-guard', { exact: true }) })
   await expect(seedRow).toBeVisible()
 
-  await page.getByRole('button', { name: 'Add connection' }).click()
+  await page.getByRole('button', { name: 'Add target' }).click()
   await page.getByRole('tab', { name: 'Manual setup' }).click()
   await expect(
     page.getByRole('button', { name: /Connect via SSH jump host/ })
@@ -90,7 +88,7 @@ test('adds, updates, defaults, and deletes a database target', async ({
     user: 'rdst_e2e',
   })
   await page
-    .getByRole('button', { name: 'Add connection', exact: true })
+    .getByRole('button', { name: 'Add target', exact: true })
     .last()
     .click()
 
@@ -102,7 +100,7 @@ test('adds, updates, defaults, and deletes a database target', async ({
   ).toBeVisible()
   expect(connectionTestBodies).toHaveLength(1)
   await writableAccountDialog
-    .getByRole('button', { name: 'Add connection' })
+    .getByRole('button', { name: 'Add target' })
     .click()
 
   let targetRow = page
@@ -112,7 +110,7 @@ test('adds, updates, defaults, and deletes a database target', async ({
   await expect(targetRow.getByText('Default', { exact: true })).toHaveCount(0)
 
   // Row management actions live in the ⋯ overflow menu now [C-09 configure
-  // migration]: Set as default / Edit connection / Delete….
+  // migration]: Set as default / Edit target / Delete….
   await targetRow.getByRole('button', { name: /More actions/ }).click()
   await page.getByRole('menuitem', { name: 'Set as default' }).click()
   await expect(targetRow.getByText('Default', { exact: true })).toBeVisible()
@@ -135,12 +133,12 @@ test('adds, updates, defaults, and deletes a database target', async ({
     })
 
   await targetRow.getByRole('button', { name: /More actions/ }).click()
-  await page.getByRole('menuitem', { name: 'Edit connection' }).click()
-  await expect(page.getByText('Edit connection', { exact: true })).toBeVisible()
+  await page.getByRole('menuitem', { name: 'Edit target' }).click()
+  await expect(page.getByText('Edit target', { exact: true })).toBeVisible()
   await expect(page.locator('[name="name"]')).toBeDisabled()
   await page.locator('[name="host"]').fill('db-updated.internal')
   await page.locator('[name="database"]').fill('application_v2')
-  await page.getByRole('button', { name: 'Update connection' }).click()
+  await page.getByRole('button', { name: 'Update target' }).click()
 
   targetRow = page
     .getByTestId('target-row')
@@ -163,7 +161,7 @@ test('adds, updates, defaults, and deletes a database target', async ({
   // Native confirm() replaced by the shared styled ConfirmDialog [C-09].
   await targetRow.getByRole('button', { name: /More actions/ }).click()
   await page.getByRole('menuitem', { name: 'Delete…' }).click()
-  await page.getByRole('button', { name: 'Delete connection' }).click()
+  await page.getByRole('button', { name: 'Delete target' }).click()
   await expect(targetRow).toHaveCount(0)
   await expect(seedRow).toBeVisible()
 

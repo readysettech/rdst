@@ -25,7 +25,10 @@ import type {
   RewriteTesting,
   TestedRewrite,
 } from '../../lib/api'
-import { findPlannerResult, plannerVerificationOff } from '../../lib/indexTesting'
+import {
+  findPlannerResult,
+  plannerVerificationOff,
+} from '../../lib/indexTesting'
 import { SQLDisplay } from '../SQLDisplay'
 
 // ---------------------------------------------------------------------------
@@ -280,7 +283,7 @@ export function MetricCard({
         {icon && (
           <Icon
             name={icon}
-            label={label}
+            label=""
             className="w-4 h-4 text-content-layout-3"
           />
         )}
@@ -319,7 +322,7 @@ export function SectionHeader({
         <div className="w-10 h-10 rounded-xl bg-surface-layout-2 flex items-center justify-center">
           <Icon
             name={icon}
-            label={title}
+            label=""
             className="w-5 h-5 text-content-layout-2"
           />
         </div>
@@ -388,7 +391,7 @@ export function PerformanceSummarySection({
             )}
             <VStack className="gap-1 items-start">
               <Text level="headline-3" className="text-content-layout-1">
-                Performance Summary
+                Performance summary
               </Text>
               {perf.overall_rating && (
                 <HStack className="gap-2 items-center">
@@ -420,25 +423,25 @@ export function PerformanceSummarySection({
         {explainResults && (
           <div className="grid grid-cols-2 tablet:grid-cols-4 gap-4 mb-6">
             <MetricCard
-              label="Execution Time"
+              label="Execution time"
               value={`${explainResults.execution_time_ms?.toFixed(2) || '0'}ms`}
               icon="speedometer"
               delay={0.1}
             />
             <MetricCard
-              label="Rows Examined"
+              label="Rows examined"
               value={explainResults.rows_examined?.toLocaleString() || '0'}
               icon="layers"
               delay={0.15}
             />
             <MetricCard
-              label="Rows Returned"
+              label="Rows returned"
               value={explainResults.rows_returned?.toLocaleString() || '0'}
               icon="dashboard"
               delay={0.2}
             />
             <MetricCard
-              label="Cost Estimate"
+              label="Cost estimate"
               value={explainResults.cost_estimate?.toFixed(2) || '0'}
               icon="observe"
               delay={0.25}
@@ -463,7 +466,7 @@ export function PerformanceSummarySection({
                 />
               </div>
               <Text level="label-medium" className="text-content-warning-soft">
-                Performance Concerns
+                Performance concerns
               </Text>
             </HStack>
             <ul className="space-y-2.5">
@@ -520,7 +523,7 @@ export function TestedOptimizationsSection({
             </div>
             <VStack className="gap-1 items-start">
               <Text level="label-medium" className="text-content-warning-soft">
-                Rewrite Testing Skipped
+                Rewrite testing skipped
               </Text>
               <Text level="body-small" className="text-content-layout-2">
                 Query contains parameter placeholders ($1, $2 or ?) without
@@ -558,7 +561,7 @@ export function TestedOptimizationsSection({
         <Card.Content>
           <SectionHeader
             icon="test-tube"
-            title="Tested Optimizations"
+            title="Tested optimizations"
             subtitle="Query rewrite performance comparison"
           />
           <div className="bg-surface-info-soft/50 border border-border-info-soft rounded-xl p-5">
@@ -612,7 +615,7 @@ export function TestedOptimizationsSection({
       )}
       <SectionHeader
         icon="test-tube"
-        title="Tested Optimizations"
+        title="Tested optimizations"
         subtitle={`${rewriteResults.length} rewrite${rewriteResults.length > 1 ? 's' : ''} tested against original`}
       />
       <div className="space-y-3">
@@ -744,7 +747,11 @@ export function PlannerVerdict({ result }: { result: IndexPlannerResult }) {
   if (result.error) {
     return (
       <HStack className="gap-2 items-center px-4 py-2.5 bg-surface-warning-soft/30 border-t border-border-warning-soft">
-        <Icon name="alert" label="Planner check" className="w-3.5 h-3.5 text-content-warning-soft" />
+        <Icon
+          name="alert"
+          label="Planner check"
+          className="w-3.5 h-3.5 text-content-warning-soft"
+        />
         <Text level="body-small" className="text-content-layout-2">
           hypopg check could not test this index: {result.error}
         </Text>
@@ -755,20 +762,28 @@ export function PlannerVerdict({ result }: { result: IndexPlannerResult }) {
     const pct = result.cost_reduction_pct
     return (
       <HStack className="gap-2 items-center px-4 py-2.5 bg-surface-positive-soft/30 border-t border-border-positive-soft">
-        <Icon name="tick" label="Planner check" className="w-3.5 h-3.5 text-content-positive-soft" />
+        <Icon
+          name="tick"
+          label="Planner check"
+          className="w-3.5 h-3.5 text-content-positive-soft"
+        />
         <Text level="body-small" className="text-content-layout-2">
           hypopg check: the planner uses this index ({result.scan_type}).
           Estimated cost {formatCost(result.cost_before)} to{' '}
           {formatCost(result.cost_after)}
-          {pct !== null && pct !== undefined ? ` (${pct}% lower)` : ''}. No index
-          was created.
+          {pct !== null && pct !== undefined ? ` (${pct}% lower)` : ''}. No
+          index was created.
         </Text>
       </HStack>
     )
   }
   return (
     <HStack className="gap-2 items-center px-4 py-2.5 bg-surface-warning-soft/30 border-t border-border-warning-soft">
-      <Icon name="alert" label="Planner check" className="w-3.5 h-3.5 text-content-warning-soft" />
+      <Icon
+        name="alert"
+        label="Planner check"
+        className="w-3.5 h-3.5 text-content-warning-soft"
+      />
       <Text level="body-small" className="text-content-layout-2">
         hypopg check: the planner would not use this index for this query. No
         index was created.
@@ -798,7 +813,7 @@ export function IndexRecommendationsSection({
     >
       <SectionHeader
         icon="search"
-        title="Index Recommendations"
+        title="Index recommendations"
         subtitle={`${recommendations.length} suggested index${recommendations.length > 1 ? 'es' : ''} for optimization`}
       />
       <div className="space-y-3">
@@ -894,13 +909,21 @@ export function IndexRecommendationsSection({
       {hypopgMissing && (
         <div className="rounded-xl border border-border-layout-1 bg-surface-layout-1 p-4">
           <HStack className="gap-2 items-start">
-            <Icon name="info" label="Planner check" className="w-4 h-4 text-content-info-soft mt-0.5" />
+            <Icon
+              name="info"
+              label="Planner check"
+              className="w-4 h-4 text-content-info-soft mt-0.5"
+            />
             <VStack className="gap-2 items-start">
               <Text level="body-small" className="text-content-layout-2">
                 hypopg check unavailable: {indexTesting?.message}
               </Text>
               {indexTesting?.install_sql && (
-                <SQLDisplay sql={indexTesting.install_sql} className="p-2 bg-surface-layout-2 rounded-lg" showCopy />
+                <SQLDisplay
+                  sql={indexTesting.install_sql}
+                  className="p-2 bg-surface-layout-2 rounded-lg"
+                  showCopy
+                />
               )}
             </VStack>
           </HStack>
@@ -1024,7 +1047,7 @@ export function AdditionalRecommendationsSection({
     >
       <SectionHeader
         icon="sparkles"
-        title="Additional Recommendations"
+        title="Additional recommendations"
         subtitle="Other optimization opportunities identified"
       />
       {list}
@@ -1052,10 +1075,10 @@ export function ReadysetCacheabilitySection({
   isCaching?: boolean
 }) {
   const detailId = useId()
-  // A definitive "Not Cacheable / BLOCKED" verdict is only trustworthy when the
+  // A definitive "Not cacheable / BLOCKED" verdict is only trustworthy when the
   // check completed with a confident, clean answer. An errored or low-confidence
   // result (a returned "no: db error" row, Readyset startup/timeout, unknown
-  // status) must read as "Not Verified / UNAVAILABLE", never a false definitive
+  // status) must read as "Not verified / UNAVAILABLE", never a false definitive
   // BLOCKED (P69). A genuine unsupported verdict (confidence "high", no error
   // signal) still renders as BLOCKED.
   const CHECK_ERROR =
@@ -1111,7 +1134,7 @@ export function ReadysetCacheabilitySection({
       ? 'No obvious blockers'
       : 'Potential blockers'
     : !isVerified
-      ? 'Not Verified'
+      ? 'Not verified'
       : isCacheable
         ? 'Readyset compatible'
         : 'Unsupported by Readyset'
@@ -1125,7 +1148,7 @@ export function ReadysetCacheabilitySection({
     >
       <SectionHeader
         icon="layers"
-        title="Readyset Compatibility"
+        title="Readyset compatibility"
         subtitle="Static SQL screening — Docker is only needed for a comparison"
       />
       <div
@@ -1252,7 +1275,7 @@ export function ReadysetCacheabilitySection({
                   level="overline"
                   className="text-content-layout-3 uppercase tracking-wider"
                 >
-                  Blocking Issues
+                  Blocking issues
                 </Text>
               </HStack>
               <ul className="space-y-2">

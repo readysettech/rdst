@@ -1,18 +1,24 @@
+import { ErrorState, InlineNotice } from '@rs/ui-new/error-state'
 import { IconTile } from '@rs/ui-new/icon-tile'
 import { m } from '@rs/ui-new/motion'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
+import { useState } from 'react'
+import { AiSetupNotice, useAiBlocked } from '../components/AiSetupNotice'
 import { AskPanel } from '../components/AskPanel'
 import { SemanticLayerBadge } from '../components/SemanticLayerBadge'
 import { TargetConnectivityNotice } from '../components/TargetConnectivityNotice'
 import { TargetDropdown } from '../components/TargetDropdown'
 import { TargetLockNotice } from '../components/TargetLockNotice'
-import { useTarget } from '../hooks/useTarget'
+import { useTargetResolution } from '../hooks/useTarget'
 import { useTargetConnectivityGate } from '../lib/useTargetConnectivityGate'
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
 
-export function AskPage() {
-  const { target, setTarget } = useTarget()
+export function AskPage({ movedFrom }: { movedFrom?: 'agents' } = {}) {
+  const [movedNoticeOpen, setMovedNoticeOpen] = useState(movedFrom === 'agents')
+  const { target, setTarget, isResolving, isUnavailable, refetch } =
+    useTargetResolution()
+  const aiBlocked = useAiBlocked()
   const passwordLock = useTargetPasswordLock(target)
   const connectivity = useTargetConnectivityGate(
     passwordLock.targetName ?? target
@@ -56,6 +62,21 @@ export function AskPage() {
       </m.header>
 
       <div className="space-y-4 pt-6">
+        {/* A redirect that changes the mental model says so once on arrival,
+            rather than silently swapping the page. [F-01] */}
+        {movedNoticeOpen && (
+          <InlineNotice
+            accent="info"
+            icon="info"
+            title="Agents was retired"
+            message="Ask answers database questions here. Agents themselves now run from the rdst CLI, the MCP server and the Slack bot."
+            action={{
+              label: 'Got it',
+              onClick: () => setMovedNoticeOpen(false),
+            }}
+          />
+        )}
+        <AiSetupNotice feature="Ask" />
         {passwordLock.isLocked && (
           <TargetLockNotice
             message={passwordLock.message}
@@ -71,11 +92,26 @@ export function AskPage() {
             onRetry={() => void connectivity.ensureReachable()}
           />
         )}
-        <AskPanel
-          target={target}
-          disabled={passwordLock.isLocked || connectivity.isChecking}
-          beforeRun={connectivity.ensureReachable}
-        />
+        {/* A failed target list is named as a failure, never left to look
+            like an empty history or a missing selection. [F-20, F-23] */}
+        {isUnavailable ? (
+          <ErrorState
+            errorClass="rdst-service"
+            title="Could not load your database targets"
+            message="RDST could not list the configured targets, so Ask has nothing to run against yet."
+            trustworthy="Nothing was asked or changed."
+            onRetry={() => void refetch()}
+          />
+        ) : (
+          <AskPanel
+            target={target}
+            targetResolving={isResolving}
+            disabled={
+              aiBlocked || passwordLock.isLocked || connectivity.isChecking
+            }
+            beforeRun={connectivity.ensureReachable}
+          />
+        )}
       </div>
     </div>
   )

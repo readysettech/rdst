@@ -1,7 +1,6 @@
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { useCallback, useState } from 'react';
-import type { ChangeEvent } from 'react';
 
 export interface ConversationStatus {
   exists: boolean;
@@ -46,8 +45,8 @@ export function useInteractiveChat(queryHash: string, analysisResults?: any) {
   const isLoading = status === 'submitted' || status === 'streaming';
   
   // Handle input change (managed locally in AI SDK 5.0)
-  const handleInputChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value);
+  const handleInputChange = useCallback((value: string) => {
+    setInput(value);
   }, []);
   
   // Handle submit (no event parameter - called directly by MessageInput)

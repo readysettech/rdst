@@ -4,6 +4,7 @@ import { Pressable } from '@rs/ui-new/pressable';
 import { Skeleton } from '@rs/ui-new/skeleton';
 import { Text } from '@rs/ui-new/text';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@rs/ui-new/tooltip';
+import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { type TargetInfo } from '../lib/api';
 import { useTargetSwitchLockState } from '../lib/targetSwitchLock';
@@ -16,6 +17,7 @@ interface TargetDropdownProps {
 
 export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdownProps) {
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
   const { isLocked, message: lockMessage } = useTargetSwitchLockState();
 
   const { data: status, isLoading, error } = useSystemStatus();
@@ -93,7 +95,7 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
   const trigger = (
     <Pressable
       type="button"
-      aria-label={`Switch database — current: ${currentTarget ?? 'none'}`}
+      aria-label={`Switch target — current: ${currentTarget ?? 'none'}`}
       aria-disabled={isLocked}
       title={isLocked ? lockMessage : undefined}
       className={`flex justify-between items-center text-content-layout-1 p-2 pr-3 h-14 w-full rounded-lg ${
@@ -112,7 +114,7 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
         {currentTargetInfo && !currentTargetInfo.has_password && (
           <Icon name="alert" label="No password" size="small" className="text-content-warning-soft" />
         )}
-        <Icon name="chevron-down" label="Target Dropdown" />
+        <Icon name="chevron-down" label="Target dropdown" />
       </div>
     </Pressable>
   );
@@ -120,9 +122,9 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
   if (targets.length === 0) {
     return (
       <div className="flex p-2 pr-3 h-14 w-full items-center gap-2">
-        <Icon name="alert" label="No targets" className="text-content-warning-soft" />
+        <Icon name="alert" label="" aria-hidden="true" className="text-content-warning-soft" />
         <Text level="label-medium" className="text-content-warning-soft">
-          No Targets
+          No targets
         </Text>
       </div>
     );
@@ -178,6 +180,18 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
             )}
           </Dropdown.ItemWithChildren>
         ))}
+        {/* Switching is only half of what the reader came for: the popover also
+            carries the way on to adding, editing and removing targets, so a
+            single-target install has a next step. [A-25] */}
+        <Dropdown.Separator />
+        <Dropdown.Item
+          label="Manage targets"
+          leftIcon="settings"
+          onClick={() => {
+            setOpen(false);
+            void navigate({ to: '/configure', search: { panel: 'connections' } });
+          }}
+        />
       </Dropdown.Content>
     </Dropdown>
   );

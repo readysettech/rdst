@@ -66,15 +66,18 @@ export function WorkspaceLayout<Value extends string>({
     <div
       className={cn(
         'w-full',
+        // A viewport-height frame only pays for itself once the panes inside
+        // it sit side by side; below desktop the page flows in the main
+        // scroller instead, so nothing is bounded into an overprint.
         fillViewport
-          ? 'flex h-[calc(100dvh-6rem)] min-h-0 flex-col gap-6'
+          ? 'space-y-6 desktop:flex desktop:h-[calc(100dvh-6rem)] desktop:min-h-0 desktop:flex-col desktop:gap-6 desktop:space-y-0'
           : 'space-y-6'
       )}
     >
       {showHeader ? (
         <m.div
           className={cn(
-            fillViewport && 'shrink-0',
+            fillViewport && 'desktop:shrink-0',
             headerDivider && 'border-b border-border-layout-1 pb-6'
           )}
           initial={{ opacity: 0, y: -10 }}
@@ -109,7 +112,7 @@ export function WorkspaceLayout<Value extends string>({
       {hasViews ? (
         <div
           className={cn(
-            fillViewport && 'shrink-0',
+            fillViewport && 'desktop:shrink-0',
             fullBleedTabs && '-mx-6 border-b border-border-layout-1 px-6'
           )}
         >
@@ -138,7 +141,7 @@ export function WorkspaceLayout<Value extends string>({
           role="tabpanel"
           id={panelId}
           aria-labelledby={`${panelId}-tab-${activeView}`}
-          className={cn(fillViewport && 'min-h-0 flex-1')}
+          className={cn(fillViewport && 'desktop:min-h-0 desktop:flex-1')}
         >
           {children}
         </div>

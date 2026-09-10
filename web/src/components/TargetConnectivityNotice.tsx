@@ -7,13 +7,11 @@ export function TargetConnectivityNotice({
   failure,
   isChecking,
   onRetry,
-  retryLabel = 'Check again',
 }: {
   target?: string | null
   failure: TargetConnectivityFailure | null
   isChecking: boolean
   onRetry: () => void
-  retryLabel?: string
 }) {
   const navigate = useNavigate()
 
@@ -22,8 +20,8 @@ export function TargetConnectivityNotice({
       <InlineNotice
         errorClass="database"
         accent="info"
-        title="Checking database connection"
-        message={`Verifying that ${target || 'the selected database'} is reachable before starting.`}
+        title="Checking the target"
+        message={`Verifying that ${target || 'the selected target'} is reachable before starting.`}
       />
     )
   }
@@ -34,9 +32,9 @@ export function TargetConnectivityNotice({
     <InlineNotice
       errorClass="database"
       title={`Can't reach ${failure.target}`}
-      message="RDST stopped before starting this request. Check the database or its connection settings, then try again."
+      message="RDST stopped before starting this request. Check the target or its connection settings, then try again."
       action={{
-        label: 'Open connection settings',
+        label: 'Open target settings',
         icon: 'database-settings',
         onClick: () => {
           const returnTo = `${window.location.pathname}${window.location.search}`
@@ -47,7 +45,6 @@ export function TargetConnectivityNotice({
         },
       }}
       onRetry={onRetry}
-      retryLabel={retryLabel}
       detail={failure.message || undefined}
     />
   )

@@ -96,7 +96,7 @@ describe('AnalysisConversation', () => {
   it('composes a message when the AI dependency is satisfied', () => {
     render(<AnalysisConversation conversation={conversation()} />)
 
-    expect(screen.getByPlaceholderText('Ask a question...')).toBeTruthy()
+    expect(screen.getByPlaceholderText('Ask about this analysis')).toBeTruthy()
     expect(screen.queryByTestId('conversation-ai-key-note')).toBeNull()
   })
 
@@ -105,7 +105,7 @@ describe('AnalysisConversation', () => {
     render(<AnalysisConversation conversation={conversation()} />)
 
     expect(screen.getByTestId('conversation-ai-key-note')).toBeTruthy()
-    expect(screen.queryByPlaceholderText('Ask a question...')).toBeNull()
+    expect(screen.queryByPlaceholderText('Ask about this analysis')).toBeNull()
   })
 
   it('says when the credits, rather than the key, are what ran out', () => {
@@ -113,7 +113,7 @@ describe('AnalysisConversation', () => {
     render(<AnalysisConversation conversation={conversation()} />)
 
     expect(
-      screen.getByText(/Hosted AI access is unavailable/).textContent
+      screen.getByText(/Your included AI is used up/).textContent
     ).toBeTruthy()
   })
 })

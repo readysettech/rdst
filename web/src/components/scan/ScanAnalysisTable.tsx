@@ -188,7 +188,7 @@ function AnalysisDetailModal({
                 onClick={onClose}
               />
               <Button
-                variant="rising"
+                variant="primary"
                 modifier="solid"
                 label="Analyze query"
                 icon="speedometer"
@@ -301,7 +301,7 @@ function AnalysisDetailModal({
 
                     {/* Only render the fallback Issues block when there are no
                           rich sections — otherwise it duplicates the rich
-                          "Performance Concerns" list. [QW12] */}
+                          "Performance concerns" list. [QW12] */}
                     {!hasRenderableRichSections &&
                       (query.issues.length > 0 ? (
                         <div>

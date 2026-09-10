@@ -1,13 +1,14 @@
 import { Icon } from '@rs/ui-new/icon'
 import { Pressable } from '@rs/ui-new/pressable'
+import { trackEvent } from '../../lib/analytics'
 import { requestSetupGuide, useSetupGuideState } from './setupGuideStore'
 import { hasSetupSignal, isSetupComplete } from './setupModel'
 import { useSetupProgress } from './useSetupProgress'
 
 /**
- * The recovery path for a dismissed setup guide (C4): a quiet sidebar utility
- * next to Docs, present only while the guide was dismissed AND steps remain.
- * Dismissal stays permanent — nothing re-surfaces the guide except this click.
+ * The recovery path for a hidden setup guide (C4): a quiet sidebar utility
+ * next to Docs, present only while the guide was hidden AND steps remain.
+ * Hiding stays permanent — nothing brings the checklist back except this click.
  */
 export function SetupGuideHelpEntry({ className }: { className: string }) {
   const { dismissed } = useSetupGuideState()
@@ -18,16 +19,20 @@ export function SetupGuideHelpEntry({ className }: { className: string }) {
   return (
     <Pressable
       type="button"
-      onClick={requestSetupGuide}
+      onClick={() => {
+        requestSetupGuide()
+        trackEvent('setup_guide_opened')
+      }}
       data-testid="setup-guide-help-entry"
       className={className}
     >
       <Icon
         name="road-wayside"
-        label="Setup guide"
+        label=""
+        aria-hidden="true"
         className="w-4 h-4 text-content-layout-3 group-hover:scale-110 transition-transform"
       />
-      <span>Setup guide</span>
+      <span>Show setup guide</span>
     </Pressable>
   )
 }

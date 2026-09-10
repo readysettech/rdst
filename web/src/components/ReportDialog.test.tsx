@@ -46,7 +46,7 @@ describe('ReportDialog', () => {
     expect(
       (
         screen.getByRole('button', {
-          name: 'Send Feedback',
+          name: 'Send feedback',
         }) as HTMLButtonElement
       ).disabled
     ).toBe(true)
@@ -62,7 +62,7 @@ describe('ReportDialog', () => {
     fireEvent.change(screen.getByPlaceholderText('you@example.com'), {
       target: { value: 'not-an-email' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Send Feedback' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }))
 
     expect(submitReport).not.toHaveBeenCalled()
   })
@@ -78,7 +78,7 @@ describe('ReportDialog', () => {
     fireEvent.change(screen.getByPlaceholderText('you@example.com'), {
       target: { value: ' Feedback@Example.COM ' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Send Feedback' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }))
 
     await waitFor(() => {
       expect(submitReport).toHaveBeenCalledWith(
@@ -102,7 +102,7 @@ describe('ReportDialog', () => {
     fireEvent.change(screen.getByPlaceholderText('Share your thoughts...'), {
       target: { value: 'The analysis was useful.' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Send Feedback' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }))
 
     await waitFor(() => {
       expect(submitReport).toHaveBeenCalledWith(
@@ -125,11 +125,11 @@ describe('ReportDialog', () => {
     fireEvent.change(screen.getByPlaceholderText('Share your thoughts...'), {
       target: { value: 'The analysis was useful.' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Send Feedback' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }))
     expect(submitReport).not.toHaveBeenCalled()
 
     fireEvent.change(emailInput, { target: { value: ' Grace@Example.COM ' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Send Feedback' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }))
 
     await waitFor(() => {
       expect(submitReport).toHaveBeenCalledWith(

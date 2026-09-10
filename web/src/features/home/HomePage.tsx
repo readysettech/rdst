@@ -6,7 +6,6 @@ import { Skeleton } from '@rs/ui-new/skeleton'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { useNavigate } from '@tanstack/react-router'
-import { VALUE_PROPOSITION } from '../../lib/valueProposition'
 import { DemoCard, JobCard } from './HomeCards'
 import { ActiveHome, ConnectedHome, FirstRunHome } from './HomeStates'
 import { useHomeController } from './useHomeController'
@@ -70,11 +69,10 @@ export function HomePage() {
             />
           </div>
           <VStack className="min-w-0 flex-1 items-start gap-0.5">
+            {/* The sidebar's value-proposition line (C1 / D-5) is the one
+              place that says what RDST is for; a description here would print
+              the same sentence 300px away. */}
             <Page.Title>Home</Page.Title>
-            {/* Collapses into the sidebar's one value-proposition line (C1 /
-              D-5) instead of writing its own — a duplicate description here
-              would compete with it. */}
-            <Page.Description>{VALUE_PROPOSITION}</Page.Description>
           </VStack>
           <Show when={controller.target}>
             <Tag
@@ -93,8 +91,8 @@ export function HomePage() {
             <ErrorState
               errorClass="database"
               title="Schema readiness could not be confirmed"
-              message="RDST can still open the connected target, Query Library, and demo, but Home cannot safely decide whether discovery is complete."
-              trustworthy="The target connection remains configured."
+              message="RDST can still open the connected target, your queries, and the demo, but Home cannot safely decide whether discovery is complete."
+              trustworthy="The target remains configured."
               onRetry={controller.retryCore}
               detail={controller.errorDetail}
             />
@@ -103,7 +101,7 @@ export function HomePage() {
                 <JobCard
                   to="/queries"
                   icon="observe"
-                  title="Open Query Library"
+                  title="Open queries"
                   description="Continue reviewing the selected target while schema status recovers."
                   chip={{ label: controller.target, variant: 'informative' }}
                 />

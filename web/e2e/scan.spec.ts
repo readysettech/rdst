@@ -142,15 +142,16 @@ async function prepareScanPage(
   await configureTestTarget(page, { hasPassword: true })
   await acceptExplainAnalyzeConsent(page)
   await page.goto('/scan')
-  await expect(page.getByRole('heading', { name: 'Scan' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Code scan' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Start scan' })).toBeDisabled()
 }
 
 async function chooseScanDirectory(
   page: Parameters<typeof configureTestTarget>[0]
 ) {
-  await page.getByRole('button', { name: 'Choose a project folder...' }).click()
-  await page.getByRole('button', { name: 'Select this folder' }).click()
+  // The path is typed or pasted; the folder browser beside it is the second
+  // way in, and it never hands over a home directory in one click. [E-16]
+  await page.getByLabel('Directory path').fill(directory)
   await expect(page.getByRole('button', { name: 'Start scan' })).toBeEnabled()
 }
 
@@ -252,7 +253,9 @@ test('scans a project, renders analysis, speed-tests a query, and hands off to A
     nosave: true,
   })
   await expect(page.getByText(directory, { exact: true })).toBeVisible()
-  await expect(page.getByText('shallow analyze', { exact: true })).toBeVisible()
+  await expect(
+    page.getByText('Analyze performance (shallow)', { exact: true })
+  ).toBeVisible()
   await expect(page.getByText('CI check', { exact: true })).toBeVisible()
   await expect(page.getByText('Scan Summary', { exact: true })).toBeVisible()
   await expect(page.getByText('2 queries found', { exact: true })).toBeVisible()
@@ -299,7 +302,7 @@ test('scans a project, renders analysis, speed-tests a query, and hands off to A
   await expect(
     page.getByText('Comparison started', { exact: true })
   ).toBeVisible()
-  await expect(page.getByText('Performance test complete')).toBeVisible()
+  await expect(page.getByText('Load test complete')).toBeVisible()
   expect(speedTestRequests).toEqual([
     {
       query,
@@ -370,9 +373,14 @@ test('shows a scan failure, retries, and renders the empty result', async ({
   })
 
   await page.getByRole('button', { name: 'Start scan' }).click()
+  // A failed scan is reported through the shared ErrorState: a title, the
+  // reason, and a retry - not a bare red "Error: ..." line. [E-43]
   await expect(
-    page.getByText('Error: Unable to read the selected project directory', {
-      exact: true,
+    page.getByText('The scan stopped', { exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByText('Unable to read the selected project directory', {
+      exact: false,
     })
   ).toBeVisible()
 

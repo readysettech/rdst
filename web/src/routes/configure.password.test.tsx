@@ -235,7 +235,7 @@ describe('Settings row password save', () => {
       await screen.findByPlaceholderText('Enter Password (orders)'),
       { target: { value: 'orders-secret' } }
     )
-    fireEvent.click(screen.getByRole('button', { name: /Save Secrets/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Save secrets/ }))
 
     await waitFor(() =>
       expect(check).toHaveBeenCalledWith(undefined, ['orders'])
@@ -251,18 +251,45 @@ describe('Settings row password save', () => {
     )
     renderWithClient(<SettingsPage search={{}} />)
 
-    expect(await screen.findByText('Database connections')).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Targets' })).toBeTruthy()
     expect(screen.queryByText('AI access')).toBeNull()
 
     fireEvent.click(screen.getByRole('tab', { name: 'AI' }))
     expect(await screen.findByText('AI access')).toBeTruthy()
-    expect(screen.queryByText('Database connections')).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Targets' })).toBeNull()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Data & privacy' }))
     expect(
       await screen.findByText('Loading local storage details…')
     ).toBeTruthy()
     expect(screen.queryByText('AI access')).toBeNull()
+  })
+
+  it('says so when a retired route sent the reader here', async () => {
+    // /fleet redirects into Settings; the arrival explains the move once
+    // instead of silently becoming a different page. [E-51, F-54]
+    mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    renderWithClient(<SettingsPage search={{ from: 'fleet' }} />)
+
+    expect(await screen.findByText('Fleet moved into Settings')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
+    await waitFor(() =>
+      expect(screen.queryByText('Fleet moved into Settings')).toBeNull()
+    )
+  })
+
+  it('carries no arrival notice when Settings was asked for directly', async () => {
+    mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    renderWithClient(<SettingsPage search={{}} />)
+
+    expect(await screen.findByRole('heading', { name: 'Targets' })).toBeTruthy()
+    expect(screen.queryByText('Fleet moved into Settings')).toBeNull()
   })
 
   it('switches from an Anthropic key to an existing Readyset account', async () => {
@@ -294,17 +321,15 @@ describe('Settings row password save', () => {
 
     renderWithClient(<SettingsPage search={{ panel: 'ai' }} />)
 
-    expect(await screen.findByText('Anthropic API Key Configured')).toBeTruthy()
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use Readyset-hosted AI' })
-    )
+    expect(await screen.findByText('Anthropic API key configured')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Use the included AI' }))
 
     await waitFor(() =>
       expect(vi.mocked(setAiProvider).mock.calls[0]?.[0]).toBe('readyset')
     )
   })
 
-  it('switches from Readyset-hosted AI back to a saved Anthropic key', async () => {
+  it('switches from the included AI back to a saved Anthropic key', async () => {
     mockUseConfigure(vi.fn().mockResolvedValue(undefined))
     vi.mocked(useFleetStatus).mockReturnValue(
       fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
@@ -333,7 +358,7 @@ describe('Settings row password save', () => {
 
     renderWithClient(<SettingsPage search={{ panel: 'ai' }} />)
 
-    expect(await screen.findByText('Using Readyset-hosted AI')).toBeTruthy()
+    expect(await screen.findByText('Using the included AI')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Use Anthropic key' }))
 
     await waitFor(() =>
@@ -361,7 +386,7 @@ describe('Settings row password save', () => {
     await waitFor(() =>
       expect(configure.getTarget).toHaveBeenCalledWith('orders')
     )
-    expect(await screen.findByText('Edit connection')).toBeTruthy()
+    expect(await screen.findByText('Edit target')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
     expect(routerSpies.navigate).toHaveBeenCalledWith({
@@ -390,7 +415,7 @@ describe('Settings row password save', () => {
       <SettingsPage search={{ edit: 'orders', returnTo: '/audit' }} />
     )
 
-    expect(await screen.findByText('Edit connection')).toBeTruthy()
+    expect(await screen.findByText('Edit target')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
     expect(routerSpies.push).toHaveBeenCalledWith('/audit')
@@ -410,7 +435,7 @@ describe('Settings row password save', () => {
 
     expect(await screen.findByText('AI access')).toBeTruthy()
     expect(
-      (await screen.findAllByText(/Anthropic API Key/)).length
+      (await screen.findAllByText(/Anthropic API key/)).length
     ).toBeGreaterThan(0)
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 

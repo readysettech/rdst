@@ -1,4 +1,10 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BackgroundRunState } from '../../../lib/backgroundRuns'
 import type {
@@ -188,6 +194,8 @@ function controller(overrides: Record<string, unknown> = {}) {
     pinQuery: vi.fn(),
     cancelComparison: vi.fn(),
     clearBatch: vi.fn(),
+    reRunBatch: vi.fn(),
+    blockedReason: null,
     ...overrides,
   } as unknown as ReturnType<typeof useCompareController>
 }
@@ -243,7 +251,7 @@ describe('ComparePage state matrix', () => {
     renderPage()
 
     expect(screen.getByText('Docker is required for comparisons')).toBeTruthy()
-    screen.getByRole('button', { name: 'Check again' }).click()
+    screen.getByRole('button', { name: 'Try again' }).click()
     expect(refetch).toHaveBeenCalledOnce()
   })
 
@@ -291,7 +299,7 @@ describe('ComparePage state matrix', () => {
     )
     renderPage()
 
-    expect(screen.getByText('Compare cache performance')).toBeTruthy()
+    expect(screen.getByText('Compare against Readyset')).toBeTruthy()
     expect(screen.getByTitle(query.sql)).toBeTruthy()
   })
 
@@ -434,11 +442,38 @@ describe('ComparePage state matrix', () => {
     vi.mocked(useCompareController).mockReturnValue(controller({ queries }))
     renderPage()
 
-    expect(screen.getByText('Compare cache performance')).toBeTruthy()
+    expect(screen.getByText('Compare against Readyset')).toBeTruthy()
     expect(screen.getByText('Top posts')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Run comparison' })).toBeTruthy()
     expect(screen.getByText('Safe · 2 → 4 clients per lane')).toBeTruthy()
     expect(screen.getByText('30 seconds')).toBeTruthy()
+  })
+
+  it('says in the confirmation why a blocked run cannot start', () => {
+    const queries = [
+      { hash: 'one', tag: 'Top posts', sql: 'SELECT * FROM posts' },
+    ]
+    vi.mocked(useCompareController).mockReturnValue(
+      controller({
+        queries,
+        reviewOpen: true,
+        canReview: false,
+        blockedReason: 'Select at least one query.',
+      })
+    )
+    renderPage()
+
+    // A confirm that cannot be pressed says what would make it pressable,
+    // rather than reading as a dialog that opened broken (GUIDELINES §10).
+    const dialog = screen.getByRole('dialog')
+    expect(
+      within(dialog).getAllByText('Select at least one query.').length
+    ).toBeGreaterThan(0)
+    expect(
+      within(dialog)
+        .getByRole('button', { name: 'Start comparison' })
+        .hasAttribute('disabled')
+    ).toBe(true)
   })
 
   it('discloses that a multi-query batch is serialized before the run (USE-065)', () => {
@@ -548,6 +583,12 @@ describe('ComparePage state matrix', () => {
 
     expect(screen.getByText('Preparing comparison')).toBeTruthy()
     expect(screen.getAllByText('Starting').length).toBeGreaterThan(0)
+    // Nothing has been measured yet, so the batch bar claims no percentage.
+    expect(
+      screen
+        .getByRole('progressbar', { name: 'Comparison progress' })
+        .getAttribute('aria-valuenow')
+    ).toBeNull()
     expect(screen.getByRole('button', { name: 'Stop comparison' })).toBeTruthy()
     expect(
       screen.getByText('This comparison continues if you leave the page.')
@@ -744,7 +785,7 @@ describe('Compare query cards', () => {
     expect(screen.getByText('3.2× faster')).toBeTruthy()
     expect(screen.getByText('Compared')).toBeTruthy()
     expect(screen.getByText('Not comparable')).toBeTruthy()
-    expect(screen.getByText('Running · 60% · ~12s left')).toBeTruthy()
+    expect(screen.getByText('18s of 30s · ~12s left')).toBeTruthy()
     expect(screen.getByText('Queued for the Readyset sandbox')).toBeTruthy()
   })
 
@@ -785,10 +826,15 @@ describe('Compare query cards', () => {
     )
     renderPage()
 
-    // The only percentage on screen belongs to the query being measured.
+    // The batch counts what is done; the running query counts its own window.
     expect(screen.queryByText(/100%/)).toBeNull()
-    expect(screen.getByText(/60%/)).toBeTruthy()
+    expect(screen.getByText('18s of 30s · ~12s left')).toBeTruthy()
     expect(screen.getByText(/~42s left/)).toBeTruthy()
+    const batchBar = screen.getByRole('progressbar', {
+      name: 'Comparison progress',
+    })
+    expect(batchBar.getAttribute('aria-valuenow')).toBe('1')
+    expect(batchBar.getAttribute('aria-valuemax')).toBe('3')
   })
 
   it('draws each card its own chart, on a log axis by default', () => {
@@ -932,5 +978,62 @@ describe('Compare query cards', () => {
     expect(screen.getByRole('button', { name: 'Run again' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Adjust' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'History 0' })).toBeTruthy()
+  })
+
+  it('puts the running note and Stop in a footer under the card', () => {
+    const { measuring } = fourQueryBatch()
+    vi.mocked(useCompareController).mockReturnValue(
+      controller({
+        batch: FOUR_QUERY_BATCH,
+        snapshot: snapshot({
+          status: 'running',
+          percent: 20,
+          queryOutcomes: [measuring],
+        }),
+      })
+    )
+    renderPage()
+
+    // Description on the left, Stop on the right, one row below the content —
+    // the same footer shape the Load test card carries.
+    const note = screen.getByText(
+      'This comparison continues if you leave the page.'
+    )
+    const stop = screen.getByRole('button', { name: 'Stop comparison' })
+    const footer = note.parentElement
+    if (!footer) throw new Error('the running note has no row of its own')
+    expect(footer).toBe(stop.closest('div.flex'))
+    expect(footer.className).toContain('justify-between')
+    const headline = screen.getByText('Comparing upstream and Readyset')
+    expect(
+      footer.compareDocumentPosition(headline) &
+        Node.DOCUMENT_POSITION_PRECEDING
+    ).toBeTruthy()
+  })
+
+  it('runs the settled batch again through one action', () => {
+    const { compared, measuring } = fourQueryBatch()
+    const reRunBatch = vi.fn()
+    const setReviewOpen = vi.fn()
+    vi.mocked(useCompareController).mockReturnValue(
+      controller({
+        reRunBatch,
+        setReviewOpen,
+        batch: FOUR_QUERY_BATCH,
+        snapshot: snapshot({
+          status: 'complete',
+          percent: 100,
+          queryOutcomes: [compared, measuring],
+        }),
+      })
+    )
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run again' }))
+
+    // Re-running restores the batch's own selection before opening the
+    // confirmation, rather than clearing the run and asking on an empty one.
+    expect(reRunBatch).toHaveBeenCalledTimes(1)
+    expect(setReviewOpen).not.toHaveBeenCalled()
   })
 })

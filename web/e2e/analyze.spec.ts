@@ -308,10 +308,10 @@ test('shows a streamed failure and can retry the analysis', async ({
   })
   await prepareResultsPage(page)
 
+  // An ErrorState titles a region of the page, so its title is a real heading
+  // in the page outline rather than a paragraph.
   await expect(
-    page
-      .getByRole('paragraph')
-      .filter({ hasText: /^Analysis couldn't complete$/ })
+    page.getByRole('heading', { name: "Analysis couldn't complete" })
   ).toBeVisible()
   await expect(
     mainContent(page).getByText('The analysis service is temporarily busy')
@@ -357,9 +357,7 @@ test('presents an EXPLAIN connection failure as a target problem', async ({
   await prepareResultsPage(page)
 
   await expect(
-    page
-      .getByRole('paragraph')
-      .filter({ hasText: /^Analysis couldn't complete$/ })
+    page.getByRole('heading', { name: "Analysis couldn't complete" })
   ).toBeVisible()
   await expect(
     mainContent(page).getByText(

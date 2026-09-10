@@ -84,7 +84,7 @@ export const ScriptCard = ({
         'max-w-[inherit]',
         'border-(length:--border-base)',
         'border-border-layout-1',
-        'rounded-[1.25rem]',
+        'rounded-card',
       ])}
       initial={{
         height: canExpand ? 64 * 4 : 'auto',

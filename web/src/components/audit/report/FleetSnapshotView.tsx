@@ -1,3 +1,4 @@
+import { InlineNotice } from '@rs/ui-new/error-state'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useEffect } from 'react'
@@ -32,9 +33,13 @@ export function FleetSnapshotView({
   aiCredentialInvalid: boolean
 }) {
   const results = detail.results ?? []
-  const failures =
-    detail.targets_failed ?? results.filter((result) => !!result.error).length
-  const successes = detail.targets_audited - failures
+  // A target that failed is part of what this run covered. Counting only the
+  // survivors turned a partial run into a clean one: "FAILED TARGETS 0" over a
+  // list that silently omitted the target nobody could reach. [E-02]
+  const failedResults = results.filter((result) => !!result.error)
+  const failures = Math.max(detail.targets_failed ?? 0, failedResults.length)
+  const audited = Math.max(detail.targets_audited, results.length)
+  const successes = Math.max(0, audited - failures)
   const insights = detail.fleet_insights || {}
   const findings = (insights.top_findings ||
     insights.fleet_findings ||
@@ -122,7 +127,9 @@ export function FleetSnapshotView({
       : undefined
   const instanceTabs = results.map((result, index) => ({
     id: `target-${index}`,
-    label: result.target_name || result.host || `Target ${index + 1}`,
+    label: `${result.target_name || result.host || `Target ${index + 1}`}${
+      result.error ? ' (failed)' : ''
+    }`,
   }))
   const selectedInstanceTab = selectedOuterTab.startsWith('target-')
     ? selectedOuterTab
@@ -200,7 +207,7 @@ export function FleetSnapshotView({
         </div>
       )}
       {selectedOuterTab === 'summary' && (
-        <SectionCard icon="document-validation" title="Fleet Summary">
+        <SectionCard icon="document-validation" title="Fleet summary">
           <div className="p-6 grid grid-cols-1 tablet:grid-cols-2 desktop:grid-cols-5 gap-5">
             <StatCard
               label="Fleet health"
@@ -211,10 +218,7 @@ export function FleetSnapshotView({
                   : undefined
               }
             />
-            <StatCard
-              label="Targets audited"
-              value={`${detail.targets_audited}`}
-            />
+            <StatCard label="Targets audited" value={`${audited}`} />
             <StatCard label="Successful targets" value={`${successes}`} />
             <StatCard label="Failed targets" value={`${failures}`} />
             <StatCard
@@ -222,6 +226,30 @@ export function FleetSnapshotView({
               value={formatScore(detail.avg_cache_opportunity)}
             />
           </div>
+          {failedResults.length > 0 && (
+            <div className="px-6 pb-6">
+              <Text
+                level="overline"
+                className="text-content-layout-3 uppercase tracking-wider block mb-3"
+              >
+                Targets that failed
+              </Text>
+              <VStack className="gap-3 items-stretch">
+                {failedResults.map((result, index) => (
+                  <InlineNotice
+                    key={result.target_name || result.host || index}
+                    errorClass="database"
+                    title={`${result.target_name || result.host || 'Target'} could not be audited`}
+                    message={
+                      result.error ||
+                      'The target could not be reached during this run.'
+                    }
+                    trustworthy="The results for the other targets in this run are unaffected."
+                  />
+                ))}
+              </VStack>
+            </div>
+          )}
           {typeof insights.executive_summary === 'string' && (
             <div className="px-6 pb-6 max-w-4xl">
               <div className="rounded-xl bg-surface-layout-2/50 border border-border-layout-1 p-4">
@@ -305,7 +333,7 @@ export function FleetSnapshotView({
           <VStack className="gap-6 items-stretch">
             <SectionCard
               icon="adjustment-horizontal"
-              title="Fleet Sizing Summary"
+              title="Fleet sizing summary"
             >
               <div className="p-6 grid grid-cols-1 tablet:grid-cols-2 desktop:grid-cols-4 gap-5">
                 <StatCard
@@ -341,7 +369,7 @@ export function FleetSnapshotView({
                 </Text>
               </div>
             </SectionCard>
-            <SectionCard icon="database" title="Per-Node Sizing Rollup">
+            <SectionCard icon="database" title="Per-node sizing rollup">
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[720px]">
                   <thead>

@@ -39,6 +39,7 @@ import { useQueryRegistry } from '../../../lib/useQueryRegistry'
 import { useSystemStatus } from '../../../lib/useSystemStatus'
 import { useTargetConnectivityGate } from '../../../lib/useTargetConnectivityGate'
 import { useTargetPasswordLock } from '../../../lib/useTargetPasswordLock'
+import { fetchSandboxDiagnostics } from '../sandbox'
 import { type LoadTestLane, readRequestLanes } from './loadTestModel'
 
 export type LoadTestProfile = 'paced' | 'capacity'
@@ -126,11 +127,24 @@ export function useLoadTestController({
   const [searchTerm, setSearchTerm] = useState('')
   const [sourceFilter, setSourceFilter] = useState(target || 'all')
   const [testProfile, setTestProfile] = useState<LoadTestProfile>('paced')
-  // The Readyset lane is opt-in per run: it leases the sandbox and creates a
-  // cache per query first, which on a cold sandbox costs minutes before the
-  // measurement starts. A run says so explicitly rather than paying that by
-  // default.
-  const [comparative, setComparative] = useState(false)
+  // A load test is here to prove the fix, so the Readyset lane is armed by
+  // default and a capacity-only run turns it off. Where no sandbox can exist
+  // the effect below drops it back to origin-only and the switch says why.
+  const [comparative, setComparative] = useState(true)
+  // The Readyset lane leases the same Docker sandbox that Compare hard-blocks
+  // on. Reading it here is what lets the switch say so before the run rather
+  // than after real traffic has already hit the database. [D-11]
+  const sandboxQuery = useQuery({
+    queryKey: ['readyset-sandbox'],
+    queryFn: fetchSandboxDiagnostics,
+    staleTime: 5_000,
+  })
+  const dockerUnavailable =
+    sandboxQuery.data !== undefined &&
+    (!sandboxQuery.data.docker_installed || !sandboxQuery.data.docker_running)
+  useEffect(() => {
+    if (dockerUnavailable) setComparative(false)
+  }, [dockerUnavailable])
   const [intervalMs, setIntervalMs] = useState(100)
   const [capacityClients, setCapacityClients] = useState(2)
   const [durationSeconds, setDurationSeconds] = useState(30)
@@ -643,6 +657,8 @@ export function useLoadTestController({
     setTestProfile,
     comparative,
     setComparative,
+    dockerUnavailable,
+    recheckSandbox: sandboxQuery.refetch,
     intervalMs,
     setIntervalMs,
     capacityClients,

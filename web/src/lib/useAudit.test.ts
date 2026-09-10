@@ -12,7 +12,10 @@ import {
   useAuditCapture,
   useAuditRun,
 } from './useAudit'
-import { __resetBackgroundRunsForTests } from './backgroundRuns'
+import {
+  __resetBackgroundRunsForTests,
+  getBackgroundRuns,
+} from './backgroundRuns'
 import { api } from './client'
 import { __resetTargetSwitchLockForTests } from './targetSwitchLock'
 import {
@@ -140,6 +143,29 @@ describe('useAuditRun', () => {
 
     expect(result.current.state).toBe('error')
     expect(result.current.error).toBe('Audit ended before completing')
+    expect(getActiveAuditSession()).toBeNull()
+  })
+
+  it('settles a run whose stream closes without a terminal frame', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        sseResponse(
+          frames(['status', { phase: 'collect', message: 'Working' }])
+        )
+      )
+    )
+
+    const { result } = renderHook(() => useAuditRun())
+
+    await act(async () => {
+      await result.current.run('prod')
+    })
+
+    expect(result.current.state).toBe('error')
+    expect(result.current.error).toBe(
+      'Lost contact with the run before it finished'
+    )
     expect(getActiveAuditSession()).toBeNull()
   })
 })
@@ -327,6 +353,44 @@ describe('useAuditCapture', () => {
 
     expect(result.current.state).toBe('error')
     expect(result.current.error).toBe('Capture could not start')
+    expect(getActiveAuditSession()).toBeNull()
+  })
+
+  it('recovers a capture whose stream closes without a terminal frame', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        sseResponse(
+          frames([
+            'capture_progress',
+            { elapsed_seconds: 5, total_seconds: 30 },
+          ])
+        )
+      )
+    )
+
+    const { result } = renderHook(() => useAuditCapture())
+
+    await act(async () => {
+      await result.current.run('prod', { duration: 30 })
+    })
+
+    expect(result.current.state).toBe('error')
+    expect(result.current.error).toBe(
+      'Lost contact with the run before it finished'
+    )
+    // The launcher reads the session, and the sidebar chip reads the run: both
+    // have to agree that nothing is in flight any more.
+    expect(getActiveAuditSession()).toBeNull()
+    expect(
+      getBackgroundRuns().find((run) => run.runId === 'audit_capture_prod')
+        ?.status
+    ).toBe('interrupted')
+
+    // Cancel on a settled session is a no-op rather than a second failure.
+    act(() => {
+      result.current.cancel()
+    })
     expect(getActiveAuditSession()).toBeNull()
   })
 })

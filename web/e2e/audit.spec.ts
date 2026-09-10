@@ -52,7 +52,7 @@ async function prepareAuditPage(
   )
   await page.goto('/audit')
   await expect(
-    page.getByRole('heading', { name: 'Health Check' })
+    page.getByRole('heading', { name: 'Health check' })
   ).toBeVisible()
 }
 
@@ -244,22 +244,23 @@ test('docker-unavailable blocks a live-capture run with remediation', async ({
   expect(captureCalls).toBe(0)
 })
 
-test('single-run lock disables Run until Cancel releases it', async ({
+test('single-run lock withdraws Run until Cancel releases it', async ({
   page,
 }) => {
   const release = await startGatedCapture(page)
 
-  const runningInfo = page.getByRole('button', {
-    name: 'A health check is already running',
-  })
-  await expect(runningInfo).toBeVisible()
-  await runningInfo.hover()
-  await expect(page.getByRole('tooltip')).toHaveText(
-    'A health check is already running. Cancel it before starting another.'
-  )
+  // A run in flight leaves one place to watch it and one place to stop it, so
+  // the launcher says so in words instead of keeping a dead primary button
+  // behind a tooltip.
+  await expect(
+    page.getByText(
+      'A health check is running. Its progress and Cancel are in the card below; another can start once it ends.',
+      { exact: true }
+    )
+  ).toBeVisible()
   await expect(
     page.getByRole('button', { name: 'Run health check' })
-  ).toBeDisabled()
+  ).toHaveCount(0)
   await page.getByRole('button', { name: 'Cancel' }).last().click()
   await expect(
     page.getByRole('button', { name: 'Run health check' })
@@ -334,9 +335,8 @@ test('shows the selected target name while a capture is running', async ({
   page,
 }) => {
   const release = await startGatedCapture(page)
-  await expect(
-    page.getByText('Running on e2e-guard', { exact: true })
-  ).toBeVisible()
+  // The progress card names its scope on the same line as the activity.
+  await expect(page.getByText(/^Running on e2e-guard · /)).toBeVisible()
   await page.getByRole('button', { name: 'Cancel' }).last().click()
   release()
 })
@@ -438,7 +438,7 @@ test('opens a saved fleet report through its fleet and instance tab hierarchy', 
     name: 'Fleet report sections',
   })
   await expect(
-    fleetTabs.getByRole('tab', { name: 'Fleet Summary' })
+    fleetTabs.getByRole('tab', { name: 'Fleet summary' })
   ).toBeVisible()
   await expect(
     fleetTabs.getByRole('tab', { name: 'Fleet Savings' })
@@ -463,7 +463,7 @@ test('opens a saved fleet report through its fleet and instance tab hierarchy', 
   await expect(
     page.getByText('$160.00/mo', { exact: true }).first()
   ).toBeVisible()
-  await expect(page.getByText('Per-Node Sizing Rollup')).toBeVisible()
+  await expect(page.getByText('Per-node sizing rollup')).toBeVisible()
 
   await instanceTabs.getByRole('tab', { name: 'aurora-reader' }).click()
   await expect(page).toHaveURL(
@@ -483,14 +483,14 @@ test('opens a saved fleet report through its fleet and instance tab hierarchy', 
     page.getByText('Reader connections have headroom', { exact: true })
   ).toBeVisible()
 
-  await page.getByRole('tab', { name: 'Detailed Analysis' }).click()
+  await page.getByRole('tab', { name: 'Detailed analysis' }).click()
   await expect(
     page.getByText(
       'Inspect database health across configuration, memory and cache, vacuum and bloat, indexes, connections, and replication.',
       { exact: true }
     )
   ).toBeVisible()
-  await expect(page.getByText('Configuration Audit')).toBeVisible()
+  await expect(page.getByText('Configuration audit')).toBeVisible()
   const databaseSettings = page.getByRole('button', {
     name: 'Database settings (1)',
   })

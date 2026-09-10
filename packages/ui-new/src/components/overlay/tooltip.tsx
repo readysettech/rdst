@@ -2,13 +2,13 @@
 
 import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import { tv, type VariantProps } from '@rs/tailwind-base'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import {
   type ComponentPropsWithoutRef,
   type ComponentRef,
   forwardRef,
 } from 'react'
 import { Icon } from '../svg/icon'
-import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { IconWithSpinner } from '../svg/icon-with-spinner'
 
 const tooltipStyles = tv({
@@ -416,30 +416,37 @@ export const TooltipContent = forwardRef<
     const hasRightIcon = Boolean(icon && resolvedIconPosition.includes('right'))
     const hasJustIcon = Boolean(icon && resolvedIconPosition.includes('icon'))
 
+    // Portalled, like every other overlay here. Rendering the content inline
+    // puts it inside whatever dialog or drawer holds the trigger, and a modal
+    // focus scope refocuses itself whenever a node leaves its subtree -- so a
+    // tooltip closing on blur stole the Tab that dismissed it, leaving the
+    // surrounding overlay's controls reachable by mouse only.
     return (
-      <TooltipPrimitive.Content
-        ref={ref}
-        sideOffset={sideOffset}
-        className={styles.content({ class: [className, 'notranslate'] })}
-        translate="no"
-        contentEditable={false}
-        {...restProps}
-      >
-        <IconWithSpinner
-          loading={loading}
-          hasIcon={hasLeftIcon || hasJustIcon}
-          rightGap={!hasJustIcon}
-          icon={icon as IconStrokeName}
-          label={label}
-        />
-        {!hasJustIcon && label}
-        {!hasJustIcon && hasRightIcon && (
-          <>
-            <div className="h-2 w-2" />
-            <Icon name={icon!} label={label} />
-          </>
-        )}
-      </TooltipPrimitive.Content>
+      <TooltipPrimitive.Portal>
+        <TooltipPrimitive.Content
+          ref={ref}
+          sideOffset={sideOffset}
+          className={styles.content({ class: [className, 'notranslate'] })}
+          translate="no"
+          contentEditable={false}
+          {...restProps}
+        >
+          <IconWithSpinner
+            loading={loading}
+            hasIcon={hasLeftIcon || hasJustIcon}
+            rightGap={!hasJustIcon}
+            icon={icon as IconStrokeName}
+            label={label}
+          />
+          {!hasJustIcon && label}
+          {!hasJustIcon && hasRightIcon && (
+            <>
+              <div className="h-2 w-2" />
+              <Icon name={icon!} label={label} />
+            </>
+          )}
+        </TooltipPrimitive.Content>
+      </TooltipPrimitive.Portal>
     )
   }
 )

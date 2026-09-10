@@ -1,6 +1,8 @@
 import re
 from typing import Dict, Any, List
 
+from shared.query_registry.sql_normalizer import mask_string_literals
+
 
 UNCACHEABLE_PATTERNS = {
     # Non-deterministic functions
@@ -208,12 +210,16 @@ def _determine_confidence(issues: List[str], warnings: List[str], normalized_que
 
 
 def _has_parameters(query: str) -> bool:
-    """Check if query contains parameters/placeholders."""
-    # Check for common parameter styles
+    """Check if query contains parameters/placeholders.
+
+    String literals are blanked first: `WHERE note = 'why?'` carries a value,
+    not a placeholder.
+    """
+    scanned = mask_string_literals(query)
     return bool(
-        re.search(r'\$\d+', query) or  # PostgreSQL style: $1, $2
-        re.search(r'\?', query) or      # MySQL/JDBC style: ?
-        re.search(r':\w+', query)       # Named parameters: :param
+        re.search(r'\$\d+', scanned) or  # PostgreSQL style: $1, $2
+        re.search(r'\?', scanned) or      # MySQL/JDBC style: ?
+        re.search(r':\w+', scanned)       # Named parameters: :param
     )
 
 

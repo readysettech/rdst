@@ -3,7 +3,6 @@ import {
   completedSetupSteps,
   hasSetupSignal,
   isSetupComplete,
-  isSetupGuideSuppressed,
   SETUP_STEP_COUNT,
   type SetupProgress,
   setupSteps,
@@ -71,12 +70,5 @@ describe('setupModel', () => {
     expect(hasSetupSignal(undefined)).toBe(false)
     expect(hasSetupSignal(progress({ error: 'no config' }))).toBe(false)
     expect(hasSetupSignal(progress())).toBe(true)
-  })
-
-  it('suppresses itself on the demo tour and on onboarding itself', () => {
-    expect(isSetupGuideSuppressed('/demo')).toBe(true)
-    expect(isSetupGuideSuppressed('/onboarding')).toBe(true)
-    expect(isSetupGuideSuppressed('/')).toBe(false)
-    expect(isSetupGuideSuppressed('/queries')).toBe(false)
   })
 })

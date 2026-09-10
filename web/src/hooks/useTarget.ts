@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useSystemStatus } from '../lib/useSystemStatus'
 
 const TARGET_STORAGE_KEY = 'rdst_selected_target'
 const TARGET_CHANGED_EVENT = 'rdst_target_changed'
@@ -63,4 +64,22 @@ export function useTarget() {
   }, [])
 
   return { target, setTarget }
+}
+
+/**
+ * `useTarget` plus the two facts a page needs before it can claim a target is
+ * missing: the selection is read from localStorage synchronously, so an empty
+ * value means nothing until the status request that supplies the default has
+ * either landed or failed. [F-20, F-25]
+ */
+export function useTargetResolution() {
+  const { target, setTarget } = useTarget()
+  const status = useSystemStatus()
+  return {
+    target,
+    setTarget,
+    isResolving: !target && status.isPending,
+    isUnavailable: !target && status.isError,
+    refetch: status.refetch,
+  }
 }

@@ -16,7 +16,7 @@ export const cardStyles = tv({
     // TODO: check this syntax
     'border-(length:--border-base)',
     'border-border-layout-1',
-    'rounded-[1.25rem]',
+    'rounded-card',
     'shadow-none',
     'relative',
   ],
@@ -97,7 +97,7 @@ const CardDescription = ({
   </Text>
 )
 
-const CardContent = ({ className, ...rest }: WithChildren & WithClassName) => (
+const CardContent = ({ className, ...rest }: ComponentProps<'div'>) => (
   <div className={cn('p-6', className)} {...rest} />
 )
 

@@ -120,7 +120,9 @@ export function StatCard({
       <VStack className={compact ? 'gap-1.5 items-start' : 'gap-3 items-start'}>
         <Text
           level="caption"
-          className="text-content-layout-3 uppercase tracking-wider"
+          className={`text-content-layout-3 uppercase tracking-wider ${
+            compact ? '' : 'block min-h-[2lh]'
+          }`}
         >
           {label}
         </Text>
@@ -171,6 +173,7 @@ export function SectionCard({
               className="w-4 h-4 text-content-layout-3"
             />
             <Text
+              as="h2"
               level="overline"
               className="text-content-layout-3 uppercase tracking-wider"
             >
@@ -205,10 +208,11 @@ export function SupportingCard({
         <HStack className="gap-2 items-center">
           <Icon
             name={icon}
-            label={title}
+            label=""
             className="w-3.5 h-3.5 text-content-layout-3"
           />
           <Text
+            as="h3"
             level="overline"
             className="text-content-layout-3 uppercase tracking-wider"
           >

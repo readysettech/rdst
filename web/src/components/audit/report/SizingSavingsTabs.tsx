@@ -40,7 +40,7 @@ export function SizingTabContent({ report }: { report: AuditReport }) {
     VERDICT_LABELS[sizing?.verdict || 'unknown'] || VERDICT_LABELS.unknown
   return (
     <VStack className="gap-6 items-stretch">
-      <SectionCard icon="adjustment-horizontal" title="Right-Sizing Verdict">
+      <SectionCard icon="adjustment-horizontal" title="Right-sizing verdict">
         <div className="p-5 grid grid-cols-1 tablet:grid-cols-2 desktop:grid-cols-4 gap-4">
           <StatCard
             compact
@@ -113,7 +113,7 @@ export function SavingsTabContent({ report }: { report: AuditReport }) {
     <VStack className="gap-6 items-stretch">
       <SectionCard
         icon="adjustment-horizontal"
-        title="Projected Monthly Savings"
+        title="Projected monthly savings"
       >
         <div className="p-5 grid grid-cols-1 tablet:grid-cols-2 gap-4">
           <StatCard
@@ -146,7 +146,7 @@ export function SavingsTabContent({ report }: { report: AuditReport }) {
           />
         </div>
       </SectionCard>
-      <SectionCard icon="document-validation" title="Cost Breakdown">
+      <SectionCard icon="document-validation" title="Cost breakdown">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>

@@ -125,14 +125,17 @@ test('initializes, explores, refreshes, and deletes a semantic layer', async ({
   await page.goto('/schema')
   await expect(page.getByRole('heading', { name: 'Schema' })).toBeVisible()
   await expect(
-    page.getByText('Initialize Semantic Layer', { exact: true })
+    page.getByRole('heading', { name: 'No semantic layer yet' })
   ).toBeVisible()
 
   await page.getByRole('button', { name: 'Initialize schema' }).click()
 
-  await expect(
-    page.getByText('Customer accounts and contact details')
-  ).toBeVisible()
+  // The explorer lists tables collapsed; a table's own description travels
+  // with the columns and context inside its row.
+  const customerTable = page.getByRole('button', {
+    name: /^Expand customers/,
+  })
+  await expect(customerTable).toBeVisible()
   expect(initRequests).toEqual([
     {
       target: 'e2e-guard',
@@ -142,11 +145,10 @@ test('initializes, explores, refreshes, and deletes a semantic layer', async ({
     },
   ])
 
-  const customerTable = page
-    .getByRole('button')
-    .filter({ hasText: 'customers' })
-  await expect(customerTable).toHaveCount(1)
   await customerTable.click()
+  await expect(
+    page.getByText('Customer accounts and contact details')
+  ).toBeVisible()
   await expect(
     page.getByText('One row per customer account.', { exact: true })
   ).toBeVisible()
@@ -169,7 +171,7 @@ test('initializes, explores, refreshes, and deletes a semantic layer', async ({
   await page.getByRole('menuitem', { name: 'Delete semantic layer' }).click()
   await page.getByRole('button', { name: 'Delete semantic layer' }).click()
   await expect(
-    page.getByText('Initialize Semantic Layer', { exact: true })
+    page.getByRole('heading', { name: 'No semantic layer yet' })
   ).toBeVisible()
   expect(deleteCount).toBe(1)
 })
@@ -198,7 +200,7 @@ test('surfaces a semantic-layer status failure', async ({
     page.getByText('Database introspection is unavailable.', { exact: true })
   ).toBeVisible()
   await expect(
-    page.getByRole('button', { name: 'Open connection settings' })
+    page.getByRole('button', { name: 'Open target settings' })
   ).toBeVisible()
   await expect(page.getByText(/^Error: HTTP 503:/)).toHaveCount(0)
   consumeBrowserError(

@@ -74,7 +74,7 @@ export function RoutableNotice({
     'trial-exhausted': {
       errorClass: 'rdst-service' as const,
       icon: 'sparkles' as const,
-      title: 'Hosted inference unavailable',
+      title: 'Included AI unavailable',
       message: TRIAL_EXHAUSTED_MESSAGE,
       actionLabel: 'Set key',
       search: { section: 'ai' as const, returnTo: currentReturn },
@@ -84,7 +84,7 @@ export function RoutableNotice({
       icon: 'key' as const,
       title: 'This needs AI access',
       message:
-        'Sign in to Readyset for hosted inference, or add your own Anthropic key.',
+        'Sign in to Readyset for the free included AI, or add your own Anthropic key.',
       actionLabel: 'Configure AI',
       search: { section: 'ai' as const, returnTo: currentReturn },
     },

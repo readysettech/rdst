@@ -62,6 +62,16 @@ use `modifier="outline"`/`"ghost"` for the rest (`variant` is the color axis:
 `primary`/`rising`/`negative`). Icon-only actions use `IconButton` (P3-1)
 once it lands, never a bare danger icon.
 
+**Which solid.** A view has exactly one page primary and it is always
+`variant="primary" modifier="solid"`, the cream solid, whatever the page
+does. `variant="rising"` (the purple solid) is reserved for the single brand
+moment: the one control per surface that asks the user to sign in to Readyset
+or take the account offer that unlocks, and nothing else. A purple solid
+therefore never competes with a cream solid for the same role, and a screen
+with two solids is a bug in either case. Emphasis is the `modifier` axis, so
+an action steps down by becoming `outline` or `ghost`, never by changing its
+`variant`.
+
 When a control genuinely needs bespoke anatomy (for example a scrim, option
 card, or operating-system chrome), use `Pressable` rather than a raw
 `<button>`. It carries shared button semantics and focus treatment while the
@@ -95,9 +105,14 @@ Sentence case, no colons after labels, `{verb}+{noun}` action labels. Verbs
 aren't interchangeable: Add ≠ Create, Delete ≠ Remove, Cancel ≠ Close,
 Clear ≠ Reset — pick the one that matches what actually happens.
 
+Re-running something has exactly two verbs. **Try again** re-runs what
+failed — it is `ErrorState`/`InlineNotice`'s own default, so a failed read
+takes `onRetry` and no `retryLabel`. **Check again** re-runs a check that
+completed, to refresh its verdict.
+
 **How to comply**: when writing a `Button` label, `Alert` title, or dialog
-title, check this list before typing a verb. Full copy-vocabulary sweep is
-P3-3 scope; this rule applies to new text now.
+title, check this list before typing a verb, and take the noun from the
+[Copy](#copy--the-words-decided-once) glossary below.
 
 ## 6. One spacing scale, fixed values
 
@@ -107,6 +122,12 @@ picking an arbitrary in-between value.
 **How to comply**: Tailwind's default spacing scale as configured in
 `@rs/tailwind-base` — no arbitrary `[Npx]` spacing utilities outside the
 scale's existing allowlisted exceptions.
+
+**Radius is a role, not a value.** A container's corner comes from what it
+is: `rounded-card` (a page-level card or section), `rounded-panel` (a
+container nested inside one), `rounded-control` (inputs, buttons, code
+shells), `rounded-pill` (chips, tags, avatars). Reach for the role name, not
+`rounded-xl` and never `rounded-[20px]`.
 
 ## 7. Empty states replace the element, with fixed anatomy
 
@@ -124,13 +145,18 @@ Don't write a local empty-state component per screen.
 Skeleton the data container while it loads. Spinner an in-flight action.
 Progress bar a long-running operation with a known/estimable end. Show
 in-flight indicators inline or full-screen depending on scope, after a short
-delay (~100ms) so fast responses don't flash a loading state.
+delay (~100ms) so fast responses don't flash a loading state. An operation
+measured in minutes also says how far along it is and how long it has been
+running, in words the user can act on.
 
 **How to comply**: `Skeleton` (`@rs/ui-new/skeleton`), `Spinner`
 (`@rs/ui-new/spinner`), `Progress`/`CircularProgress`
 (`@rs/ui-new/progress`, `@rs/ui-new/circular-progress`). Apply the ~100ms
 show-delay at the call site (e.g. gate the spinner behind a short timer)
-rather than showing it immediately on every state change.
+rather than showing it immediately on every state change. `Progress` fills
+the container it is given; the call site sizes it. A long phase with no
+countable end takes `Progress` without a `value` (indeterminate) rather than
+an invented percentage.
 
 ## 9. Form contract
 
@@ -145,15 +171,68 @@ alongside it. In dialogs, the primary action sits on the right.
 helper/error-text swapping — use them instead of a raw `<input>` + manual
 error `<p>`.
 
-## 10. Destructive confirmation tiers
+## 10. Confirmation tiers follow blast radius
 
-Reversible actions need no confirmation. Moderate-consequence actions need a
-confirmation naming the consequence. High-consequence, hard-to-reverse
-actions need a typed confirmation (e.g. type the resource name to confirm).
+Blast radius picks the tier, not the screen the action happens to sit on. The
+same destination and the same real work get the same tier everywhere.
 
-**How to comply**: `ConfirmDialog` (`@rs/ui-new/confirm-dialog`) already
-supports the confirm and typed-confirm tiers — pick the tier that matches the
-action's blast radius, don't build a bespoke confirmation modal.
+| Blast radius | Tier | Shape |
+|---|---|---|
+| Cheap and reversible | none | Act on the click. |
+| Costly but reversible — spends real time, money or database traffic, leaves nothing behind | confirm | `ConfirmDialog` naming the cost, `confirmVariant="primary"`, warning notice. Never red, never typed. |
+| Destructive or irreversible — deletes data, changes a security boundary, or runs load against a database the user does not own | destructive confirm | `ConfirmDialog` with the noun in the title (`Delete guard "pii-mask"?`), `accent: 'negative'` notice, `confirmVariant="negative"`. |
+| Destructive *and* not recreatable from the UI, or aims sustained real load at a database the user does not own | typed confirm | The destructive confirm plus `requireTyped={name}`. |
+
+State the consequence once. The title names the thing, the notice names what
+happens to it, and the confirm label repeats the title's verb — a dialog that
+says the same fact three times, or flips Delete into "removed" halfway down,
+is one statement badly spent.
+
+A confirm must never open on a dead button with no way forward. The typed tier
+opens with its input focused, since typing the name is the one thing that makes
+the confirm live. Any other reason the confirm is unavailable is named on screen
+next to it (`confirmDisabledReason`) — and where the caller can simply restore
+what the run needs, it does that instead of opening a dialog the user cannot
+finish.
+
+**How to comply**: `ConfirmDialog` (`@rs/ui-new/confirm-dialog`) carries all
+three dialog tiers, `requireTyped` included — pick the tier that matches the
+blast radius, don't build a bespoke confirmation modal and don't hand-roll the
+typed-confirm input.
+
+---
+
+## Copy — the words, decided once
+
+Rule 5 fixes the shape of a string; this fixes the words in it. One name per
+thing, in the user's vocabulary, everywhere it is rendered — including
+`aria-label`s, toasts, tooltips and empty states.
+
+**Casing.** Sentence case for every rendered string, including page titles,
+tab labels, section headings, table column headers, form labels and tags.
+Only the `overline` token uppercases, and only over a short category word —
+never over a sentence or a database identifier. Names keep their own case:
+Readyset, PostgreSQL, MySQL, Docker, Anthropic, YAML, and SQL keywords
+(`EXPLAIN ANALYZE`, `WHERE`).
+
+**Voice.** Second person, present tense, active. Say what the user gets, not
+how it is built: no "hosted", no "inference", no "capped".
+
+**Glossary.**
+
+| Term | Means | Not |
+|---|---|---|
+| target | a database RDST is configured against | connection, database connection, instance |
+| database | the user's actual database engine or data | target (when you mean the configured entry) |
+| included AI | the free AI that comes with a Readyset account; first mention "the free AI included with a Readyset account" | Readyset-hosted AI, hosted inference, trial credits |
+| Analyze | the single-query EXPLAIN ANALYZE run and its report | analysis run, query analysis |
+| Compare against Readyset | measuring a query on the origin and on Readyset | Compare, Compare & test, benchmark |
+| Load test | running concurrent load against origin and Readyset | benchmark, stress test |
+| Health check | the whole-database audit | audit, health report |
+
+A page title equals the nav label or breadcrumb that led there. Say each
+fact once per screen: a verdict, a summary and a tag repeating the same
+sentence is one statement, not three.
 
 ---
 

@@ -1,10 +1,12 @@
-import { Alert } from '@rs/ui-new/alert'
+import { Button } from '@rs/ui-new/button'
+import { ConfirmDialog } from '@rs/ui-new/confirm-dialog'
+import { InlineNotice } from '@rs/ui-new/error-state'
 import { Icon } from '@rs/ui-new/icon'
 import { Scrollable } from '@rs/ui-new/scrollable'
 import { VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { Link } from '@tanstack/react-router'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { CompleteEvent } from '../lib/api'
 import { useInteractiveChat } from '../lib/chat'
 import { type AiGate, useAiGate } from '../lib/useAiGate'
@@ -67,7 +69,7 @@ function AiKeyNotice({
 }) {
   const label =
     gate.reason === 'exhausted'
-      ? 'Hosted AI access is unavailable — sign in or add a key to keep asking'
+      ? 'Your included AI is used up — sign in again or add a key to keep asking'
       : gate.reason === 'invalid'
         ? 'This AI key was rejected — update it to keep asking'
         : 'Follow-up questions need an AI key — add one'
@@ -83,6 +85,53 @@ function AiKeyNotice({
         {label}
       </Text>
     </Link>
+  )
+}
+
+/**
+ * Clearing a thread is a delete with no undo, and the thread is shared with
+ * `/results`, so both surfaces ask first and both ask the same way (C-09).
+ */
+export function ClearConversationButton({
+  conversation,
+  iconOnly,
+}: {
+  conversation: AnalysisConversationState
+  /** For headers with no room for a label. */
+  iconOnly?: boolean
+}) {
+  const [confirming, setConfirming] = useState(false)
+
+  return (
+    <>
+      <Button
+        variant="primary"
+        modifier="ghost"
+        size="small"
+        icon="trash"
+        iconPosition={iconOnly ? 'icon' : 'left'}
+        label="Clear conversation"
+        disabled={conversation.isLoading}
+        onClick={() => setConfirming(true)}
+      />
+      <ConfirmDialog
+        isOpen={confirming}
+        onClose={() => setConfirming(false)}
+        onConfirm={() => {
+          setConfirming(false)
+          void conversation.clearConversation()
+        }}
+        title="Clear this conversation?"
+        notice={{
+          accent: 'negative',
+          icon: 'trash',
+          message:
+            'This deletes every question and answer about this analysis, here and in the full view. The analysis itself is kept.',
+        }}
+        confirmLabel="Clear conversation"
+        confirmIcon="trash"
+      />
+    </>
   )
 }
 
@@ -109,12 +158,10 @@ export function AnalysisConversation({
   const thread = (
     <>
       {error ? (
-        <Alert
-          variant="negative"
-          modifier="outline"
-          label={`Error: ${error.message}`}
-          icon="alert"
-          iconPosition="left"
+        <InlineNotice
+          errorClass="provider"
+          title="That question could not be answered"
+          message={error.message}
           className="mb-4"
         />
       ) : null}
@@ -141,9 +188,11 @@ export function AnalysisConversation({
         className="flex min-h-0 flex-1 flex-col"
       >
         <Scrollable className="flex-1 p-4">
-          <VStack className="h-full items-stretch">{thread}</VStack>
+          <VStack className="items-stretch">{thread}</VStack>
         </Scrollable>
-        <div className="border-t border-border-layout-1 p-4">{composer}</div>
+        <div className="mt-auto border-t border-border-layout-1 p-4">
+          {composer}
+        </div>
       </div>
     )
   }

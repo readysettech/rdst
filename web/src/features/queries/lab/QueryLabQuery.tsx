@@ -87,12 +87,16 @@ export function QueryLabActions({
       <Show when={!cacheBlocked}>
         <Button
           size="small"
-          variant="rising"
-          modifier={cached ? 'ghost' : 'solid'}
+          variant="primary"
+          modifier={cached ? 'ghost' : 'outline'}
           icon="database-settings"
           iconPosition={compact ? 'icon' : 'left'}
-          label={compact ? '' : cached ? 'Test' : 'Compare & test'}
-          aria-label={cached ? 'Test cached query' : 'Compare and test query'}
+          label={
+            compact ? '' : cached ? 'Load test' : 'Compare against Readyset'
+          }
+          aria-label={
+            cached ? 'Load test this query' : 'Compare against Readyset'
+          }
           onClick={() =>
             cached
               ? controller.rowActions.runTest(

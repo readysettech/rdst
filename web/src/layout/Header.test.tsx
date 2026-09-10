@@ -63,13 +63,13 @@ describe('Header mobile hamburger (T19 drawer a11y)', () => {
 describe('Header breadcrumb names the active Benchmarks tab (B5)', () => {
   afterEach(cleanup)
 
-  it('defaults to Compare when no view is selected', () => {
+  it('defaults to the comparison when no view is selected', () => {
     locationMock.pathname = '/cache'
     locationMock.search = {}
     render(<Header />)
-    expect(screen.getAllByText('Benchmarks - Compare').length).toBeGreaterThan(
-      0
-    )
+    expect(
+      screen.getAllByText('Benchmarks - Compare against Readyset').length
+    ).toBeGreaterThan(0)
   })
 
   it('names Load test when that tab is active', () => {
@@ -85,5 +85,18 @@ describe('Header breadcrumb names the active Benchmarks tab (B5)', () => {
     locationMock.pathname = '/ask'
     render(<Header />)
     expect(screen.getAllByText('Ask').length).toBeGreaterThan(0)
+  })
+})
+
+describe('Header breadcrumb gives Code scan a way back (E-15)', () => {
+  afterEach(cleanup)
+
+  it('names Code scan under Queries, and links the parent crumb', () => {
+    locationMock.pathname = '/scan'
+    render(<Header />)
+
+    expect(screen.getAllByText('Code scan').length).toBeGreaterThan(0)
+    const parent = screen.getByText('Queries').closest('a')
+    expect(parent?.getAttribute('href')).toBe('/queries')
   })
 })

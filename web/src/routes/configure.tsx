@@ -18,6 +18,10 @@ export const Route = createFileRoute('/configure')({
         : undefined,
     returnTo: typeof search.returnTo === 'string' ? search.returnTo : undefined,
     add: parseAddTab(search.add),
+    from:
+      search.from === 'fleet' || search.from === 'dev-settings'
+        ? search.from
+        : undefined,
   }),
   component: ConfigureRoute,
 })

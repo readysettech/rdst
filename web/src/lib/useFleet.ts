@@ -14,10 +14,15 @@ import type {
 import {
   beginAuditSession,
   completeAuditSession,
+  finishActiveAuditSession,
   finishAuditSession,
   updateAuditSession,
 } from './auditSession'
-import { cancelBackgroundRun, startFleetAuditRun } from './backgroundRuns'
+import {
+  cancelBackgroundRun,
+  markRunInterrupted,
+  startFleetAuditRun,
+} from './backgroundRuns'
 import { api } from './client'
 import { throwIfNotOk } from './httpError'
 import { consumeSseResponse } from './sseReader'
@@ -953,9 +958,15 @@ function cancelFleetAudit() {
     phase: undefined,
     statusMessage: undefined,
   })
-  if (fleetAuditSessionId !== null) finishAuditSession(fleetAuditSessionId)
+  finishActiveAuditSession()
   fleetAuditSessionId = null
 }
+
+// A stream that closes without a terminal frame leaves the outcome unknown.
+// Naming that is the only way back: the session ends, the launcher re-enables,
+// and the page offers a retry.
+const FLEET_STREAM_LOST_MESSAGE =
+  'Lost contact with the fleet health check before it finished'
 
 /**
  * Subscribe to a fleet health check's replayable event stream.
@@ -1165,6 +1176,14 @@ async function followFleetAudit(
           break
       }
     })
+    if (!terminal) {
+      setFleetAuditSnapshot((current) => ({
+        error: current.error || FLEET_STREAM_LOST_MESSAGE,
+        state: 'error',
+      }))
+      finishAuditSession(sessionId)
+      markRunInterrupted(runId, FLEET_STREAM_LOST_MESSAGE)
+    }
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'AbortError') return
     setFleetAuditSnapshot({

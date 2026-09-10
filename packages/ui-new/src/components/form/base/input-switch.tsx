@@ -2,6 +2,7 @@ import * as Switch from '@radix-ui/react-switch'
 import { tv } from '@rs/tailwind-base'
 import { type ComponentRef, forwardRef } from 'react'
 import type { WithClassName } from '../../../helpers'
+import { controlTransition } from '../../../helpers/focus'
 
 const switchStyles = tv({
   slots: {
@@ -16,7 +17,7 @@ const switchStyles = tv({
       'border-(length:--border-base)',
       'border-border-layout-1',
       'bg-surface-layout-2',
-      'transition',
+      controlTransition,
       'duration-fast',
       'ease-base',
       'focus-visible:outline-none',
@@ -37,7 +38,7 @@ const switchStyles = tv({
       'rounded-md',
       'bg-content-layout-3',
       'shadow-lg',
-      'transition',
+      controlTransition,
       'duration-fast',
       'ease-base',
       'data-[state=checked]:translate-x-6',

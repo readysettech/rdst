@@ -1,9 +1,5 @@
-import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { ConfirmDialog } from '@rs/ui-new/confirm-dialog'
-import { VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
-import { Text } from '@rs/ui-new/text'
-import { useEffect, useState } from 'react'
 
 interface BenchmarkConfirmDialogProps {
   isOpen: boolean
@@ -33,8 +29,8 @@ interface BenchmarkConfirmDialogProps {
  * The server-side read-only + cap rails hold regardless of this dialog.
  *
  * Folded onto the shared `ConfirmDialog` primitive (T19/C-08): the shell,
- * focus-trap, Escape and titled dialog come from the primitive; the remote
- * typed-confirm input is this site's specific body.
+ * focus-trap, Escape, titled dialog and the typed-confirm tier all come from
+ * the primitive.
  */
 export function BenchmarkConfirmDialog({
   isOpen,
@@ -48,16 +44,6 @@ export function BenchmarkConfirmDialog({
   onConfirm,
   onClose,
 }: BenchmarkConfirmDialogProps) {
-  const [typed, setTyped] = useState('')
-
-  // Clear the typed confirmation each time the dialog closes so a remote run
-  // can never be pre-confirmed from a previous open.
-  useEffect(() => {
-    if (!isOpen) setTyped('')
-  }, [isOpen])
-
-  const remoteConfirmed = !isRemote || typed.trim() === target
-
   // Named only when the run drives it: the second lane makes the run
   // heavier and leaves temporary caches on the sandbox until it ends.
   const readysetNote = includesReadyset
@@ -69,16 +55,11 @@ export function BenchmarkConfirmDialog({
       ? `hard cap ${executionCap.toLocaleString()} requests`
       : `up to ~${estimatedExecutions.toLocaleString()} requests before query latency`
 
-  const handleConfirm = () => {
-    if (!remoteConfirmed) return
-    onConfirm()
-  }
-
   return (
     <ConfirmDialog
       isOpen={isOpen}
       onClose={onClose}
-      onConfirm={handleConfirm}
+      onConfirm={onConfirm}
       title={`Run load test against ${target}?`}
       titleAccessory={
         isRemote ? (
@@ -109,25 +90,7 @@ export function BenchmarkConfirmDialog({
       confirmLabel={isRemote ? 'Run against remote' : 'Run load test'}
       confirmVariant={isRemote ? 'negative' : 'primary'}
       confirmIcon="play"
-      confirmDisabled={!remoteConfirmed}
-    >
-      {isRemote && (
-        <VStack className="gap-2 items-stretch">
-          <Text level="label-small" className="text-content-layout-2">
-            Type{' '}
-            <span className="text-content-layout-1 font-medium">{target}</span>{' '}
-            to confirm
-          </Text>
-          <BaseInputText
-            name="benchmark-remote-confirm"
-            placeholder={target}
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-            error={typed.length > 0 && !remoteConfirmed}
-            autoComplete="off"
-          />
-        </VStack>
-      )}
-    </ConfirmDialog>
+      requireTyped={isRemote ? target : undefined}
+    />
   )
 }

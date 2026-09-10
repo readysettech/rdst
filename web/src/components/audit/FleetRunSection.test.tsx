@@ -6,7 +6,8 @@ import { TRIAL_EXHAUSTED_MESSAGE } from '../../lib/errorContract'
 import type { FleetAuditTargetState } from '../../lib/useFleet'
 import { FleetRunSection } from './FleetRunSection'
 
-vi.mock('@tanstack/react-router', () => ({
+vi.mock('@tanstack/react-router', async () => ({
+  Link: (await import('@/test-utils')).LinkStub,
   useNavigate: () => vi.fn(),
 }))
 
@@ -173,7 +174,9 @@ describe('FleetRunSection live activity', () => {
 
     expect(screen.getAllByText('Capturing', { exact: true })).toHaveLength(2)
     expect(
-      screen.getByText('2 targets capturing active queries in parallel')
+      screen.getByText(
+        '0 of 2 complete · 2 targets capturing active queries in parallel'
+      )
     ).toBeTruthy()
 
     view.rerenderWith({
@@ -190,7 +193,7 @@ describe('FleetRunSection live activity', () => {
     })
 
     expect(
-      screen.getByText('Benchmarking alpha; 1 capture queued')
+      screen.getByText('0 of 2 complete · benchmarking alpha, 1 capture queued')
     ).toBeTruthy()
     expect(screen.getAllByText('Benchmarking', { exact: true })).toHaveLength(1)
     expect(screen.getAllByText('Queued', { exact: true })).toHaveLength(1)
@@ -209,9 +212,7 @@ describe('FleetRunSection live activity', () => {
     })
 
     expect(
-      screen.getByText(
-        'Generating combined insights; the report is still in progress'
-      )
+      screen.getByText(/complete · generating combined insights/)
     ).toBeTruthy()
     const progress = screen.getByRole('progressbar')
     expect(Number(progress.getAttribute('aria-valuenow'))).toBeLessThan(100)
@@ -234,5 +235,59 @@ describe('FleetRunSection live activity', () => {
       screen.getByRole('button', { name: /Sign in to Readyset/ })
     ).toBeTruthy()
     expect(screen.queryByText('Fleet health check failed')).toBeNull()
+  })
+})
+
+describe('FleetRunSection after a failed run', () => {
+  it('resolves un-started rows and drops the reassurance nothing earned', () => {
+    renderSection({
+      state: 'error',
+      scopeLabel: 'Failed on 2 targets: alpha, beta',
+      error: 'No reachable targets in the selection',
+      targets: {
+        alpha: { status: 'pending' },
+        beta: { status: 'pending' },
+      },
+    })
+
+    expect(screen.queryByText('Queued')).toBeNull()
+    expect(screen.getAllByText('Not started').length).toBeGreaterThan(0)
+    expect(
+      screen.queryByText(/Completed target rows above are real results/)
+    ).toBeNull()
+    expect(
+      screen.getByText(/No target completed, so this run saved nothing/)
+    ).toBeTruthy()
+  })
+
+  it('keeps the reassurance when a target did complete', () => {
+    renderSection({
+      state: 'error',
+      error: 'The fleet run ended early',
+      targets: {
+        alpha: { status: 'done' },
+        beta: { status: 'pending' },
+      },
+    })
+
+    expect(
+      screen.getByText(/Completed target rows above are real results/)
+    ).toBeTruthy()
+  })
+
+  it('offers the saved report rather than navigating past an unread failure', () => {
+    renderSection({
+      state: 'complete',
+      summary: { targets_audited: 2, successes: 1, failures: 1 },
+      snapshotId: 'fleet_partial',
+      snapshotHref: 'fleet_partial',
+      targets: {
+        alpha: { status: 'done' },
+        beta: { status: 'error', error: 'connection refused' },
+      },
+    })
+
+    expect(screen.getByText('beta could not be audited')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open the report' })).toBeTruthy()
   })
 })

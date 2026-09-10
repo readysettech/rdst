@@ -1,4 +1,5 @@
 import type { IconStrokeName } from '@rs/ui-icons/icon-name'
+import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card'
 import { ErrorState, InlineNotice } from '@rs/ui-new/error-state'
 import { Icon } from '@rs/ui-new/icon'
@@ -9,7 +10,7 @@ import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { VERDICT_LABELS } from '../../lib/auditReportFormat'
 import { isTargetCapError } from '../../lib/auditScope'
@@ -77,11 +78,13 @@ function targetProgress(
 function SectionCard({
   icon,
   title,
+  subtitle,
   actions,
   children,
 }: {
   icon: IconStrokeName
   title: string
+  subtitle?: string
   actions?: React.ReactNode
   children: React.ReactNode
 }) {
@@ -102,6 +105,14 @@ function SectionCard({
               >
                 {title}
               </Text>
+              {subtitle && (
+                <Text
+                  level="caption"
+                  className="text-content-layout-2 truncate"
+                >
+                  {subtitle}
+                </Text>
+              )}
             </HStack>
             {actions}
           </HStack>
@@ -122,6 +133,7 @@ function TargetRow({
   state,
   captureDuration,
   clock,
+  runEnded,
   onRetryTarget,
   onSetPassword,
   onTrialExhausted,
@@ -130,6 +142,8 @@ function TargetRow({
   state: FleetAuditTargetState
   captureDuration: number
   clock: number
+  /** The run is over, so a still-pending target will never start. */
+  runEnded: boolean
   onRetryTarget: (name: string) => void
   onSetPassword: (name: string) => void
   onTrialExhausted: () => void
@@ -145,7 +159,8 @@ function TargetRow({
   const trialExhausted =
     state.status === 'error' && isTrialExhaustedError(state.error)
   const activityLabel = (() => {
-    if (state.status === 'pending') return 'Waiting for the run to start'
+    if (state.status === 'pending')
+      return runEnded ? 'Not started' : 'Waiting for the run to start'
     if (state.status === 'error') return 'Health check failed'
     if (state.status === 'done') {
       return noQuerySkip
@@ -172,7 +187,10 @@ function TargetRow({
 
   const badge = (() => {
     if (state.status === 'pending')
-      return { label: 'Queued', variant: 'muted' as const }
+      return {
+        label: runEnded ? 'Not started' : 'Queued',
+        variant: 'muted' as const,
+      }
     if (state.status === 'error')
       return { label: 'Failed', variant: 'negative' as const }
     if (state.status === 'done') {
@@ -321,7 +339,6 @@ function TargetRow({
                   : () => navigate({ to: '/configure', hash: 'connections' }),
               }}
               onRetry={() => onRetryTarget(name)}
-              retryLabel="Retry this target"
             />
           )}
         </div>
@@ -442,6 +459,7 @@ export function FleetRunSection({
   onSetPassword,
   onAdjustTargets,
   captureDuration,
+  snapshotHref,
 }: {
   scopeLabel: string
   state: FleetStreamState
@@ -456,11 +474,16 @@ export function FleetRunSection({
   onSetPassword: (name: string) => void
   onAdjustTargets: () => void
   captureDuration: number
+  /** Saved snapshot id, when the run finished but stayed on this view. */
+  snapshotHref?: string
 }) {
   const queryClient = useQueryClient()
   const running = state === 'running'
   const insightsActive = running && phase === 'insights'
   const targetNames = Object.keys(targets)
+  const completedCount = targetNames.filter(
+    (name) => targets[name].status === 'done'
+  ).length
   const capError = isTargetCapError(errorCode)
   const [clock, setClock] = useState(Date.now())
   const [showTrialDialog, setShowTrialDialog] = useState(false)
@@ -496,6 +519,20 @@ export function FleetRunSection({
     (name) =>
       targets[name].phase === 'readyset' && targets[name].status === 'running'
   )
+  // The overall line counts the run; what one target is doing belongs to that
+  // target's own row. [E-33]
+  const overallActivity = insightsActive
+    ? 'generating combined insights'
+    : benchmarkingName
+      ? `benchmarking ${benchmarkingName}, ${queuedCount} capture${queuedCount === 1 ? '' : 's'} queued`
+      : capturingCount > 0
+        ? `${capturingCount} target${capturingCount === 1 ? '' : 's'} capturing active queries in parallel`
+        : analyzingCount > 0
+          ? `${analyzingCount} captured workload${analyzingCount === 1 ? '' : 's'} being analyzed`
+          : preparingCount > 0
+            ? `${preparingCount} target${preparingCount === 1 ? '' : 's'} preparing`
+            : 'preparing sequential Readyset benchmarks'
+  const overallLine = `${completedCount} of ${targetNames.length} complete · ${overallActivity}`
   const sectionStatusMessage =
     phase === 'readyset'
       ? 'Benchmarking against Readyset'
@@ -506,7 +543,8 @@ export function FleetRunSection({
   return (
     <SectionCard
       icon="document-validation"
-      title={`Health check — ${scopeLabel}`}
+      title="Fleet run"
+      subtitle={scopeLabel}
       actions={
         running && sectionStatusMessage ? (
           <HStack className="gap-2 items-center">
@@ -560,7 +598,11 @@ export function FleetRunSection({
                 error,
                 'The fleet health check could not be completed.'
               )}
-              trustworthy="Completed target rows above are real results; earlier reports are unaffected."
+              trustworthy={
+                completedCount > 0
+                  ? 'Completed target rows above are real results; earlier reports are unaffected.'
+                  : 'No target completed, so this run saved nothing; earlier reports are unaffected.'
+              }
             />
           )}
         </div>
@@ -585,17 +627,7 @@ export function FleetRunSection({
                 Overall progress
               </Text>
               <Text level="caption" className="text-content-layout-3">
-                {insightsActive
-                  ? 'Generating combined insights; the report is still in progress'
-                  : benchmarkingName
-                    ? `Benchmarking ${benchmarkingName}; ${queuedCount} capture${queuedCount === 1 ? '' : 's'} queued`
-                    : capturingCount > 0
-                      ? `${capturingCount} target${capturingCount === 1 ? '' : 's'} capturing active queries in parallel`
-                      : analyzingCount > 0
-                        ? `${analyzingCount} captured workload${analyzingCount === 1 ? '' : 's'} being analyzed`
-                        : preparingCount > 0
-                          ? `Preparing ${preparingCount} target${preparingCount === 1 ? '' : 's'}`
-                          : 'Captures complete; preparing sequential Readyset benchmarks'}
+                {overallLine}
               </Text>
             </VStack>
           </HStack>
@@ -612,6 +644,7 @@ export function FleetRunSection({
               state={targets[name]}
               captureDuration={captureDuration}
               clock={clock}
+              runEnded={!running}
               onRetryTarget={onRetryTarget}
               onSetPassword={onSetPassword}
               onTrialExhausted={() => setShowTrialDialog(true)}
@@ -664,6 +697,21 @@ export function FleetRunSection({
                   modifier="ghost"
                   label={`snapshot ${snapshotId}`}
                 />
+              </Show>
+              <Show when={!!snapshotHref}>
+                <Link
+                  to="/audit/runs/$runId"
+                  params={{ runId: snapshotHref ?? '' }}
+                >
+                  <Button
+                    variant="primary"
+                    modifier="ghost"
+                    size="small"
+                    label="Open the report"
+                    icon="chevron-right"
+                    iconPosition="right"
+                  />
+                </Link>
               </Show>
             </HStack>
             {summary && <FleetInsights summary={summary} />}

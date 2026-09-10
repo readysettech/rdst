@@ -37,7 +37,7 @@ function QuerySelector({ controller }: { controller: CompareController }) {
     controller.selectedIds.length >= MAX_COMPARE_QUERIES
 
   return (
-    <VStack className="h-full min-h-0 min-w-0 items-stretch gap-3">
+    <VStack className="min-w-0 items-stretch gap-3 desktop:h-full desktop:min-h-0">
       <HStack className="flex-wrap items-center justify-between gap-4">
         <VStack className="items-start gap-0.5">
           <Text level="label-small" className="text-content-layout-1">
@@ -128,8 +128,12 @@ export function CompareSetup({
     controller.selectedIds.length,
     controller.durationSeconds
   )
-  const ready =
-    controller.parameterCount === 0
+  // Readiness only means something once queries are chosen: with an empty
+  // selection the row reads neutral rather than claiming a green "ready".
+  const nothingSelected = controller.selectedIds.length === 0
+  const ready = nothingSelected
+    ? 'No queries selected'
+    : controller.parameterCount === 0
       ? 'No parameters'
       : controller.missingParameterCount === 0
         ? `${controller.parameterCount} ready`
@@ -150,14 +154,14 @@ export function CompareSetup({
 
   return (
     <>
-      <Card className="h-full min-h-0">
+      <Card className="desktop:h-full desktop:min-h-0">
         <Card.Header className="items-start gap-4 tablet:flex-row tablet:items-center tablet:justify-between">
           <HStack className="min-w-0 items-center gap-3">
             <IconTile icon="play" size="base" accent="primary" />
             <VStack className="min-w-0 items-start gap-0.5">
-              <Card.Title>Compare cache performance</Card.Title>
+              <Card.Title>Compare against Readyset</Card.Title>
               <Card.Description>
-                Apply the same concurrency to upstream and Readyset.
+                See how much faster these queries are with Readyset.
               </Card.Description>
             </VStack>
           </HStack>
@@ -175,13 +179,18 @@ export function CompareSetup({
           </HStack>
         </Card.Header>
 
-        <Card.Content className="min-h-0 flex-1 overflow-hidden">
-          <div className="grid h-full min-h-0 gap-8 tablet:grid-cols-3">
-            <div className="min-h-0 tablet:col-span-2">
+        <Card.Content className="desktop:min-h-0 desktop:flex-1 desktop:overflow-hidden">
+          {/* Two columns only where both stay readable; from desktop the row
+              is bounded so each column scrolls inside the card. */}
+          <div className="grid gap-8 desktop:h-full desktop:min-h-0 desktop:grid-cols-3 desktop:grid-rows-[minmax(0,1fr)]">
+            <div className="min-h-0 min-w-0 desktop:col-span-2">
               <QuerySelector controller={controller} />
             </div>
 
-            <VStack className="items-stretch gap-3">
+            {/* Scrolls on its own, like the query list beside it: the summary
+                grows with the selection and must stay reachable, and its rows
+                keep their height rather than being squashed by the flex column. */}
+            <VStack className="items-stretch gap-3 desktop:min-h-0 desktop:overflow-y-auto desktop:[&>*]:shrink-0">
               <VStack className="items-start gap-0.5">
                 <Text level="label-small" className="text-content-layout-1">
                   Run summary
@@ -211,9 +220,11 @@ export function CompareSetup({
                   label="Parameter readiness"
                   value={ready}
                   tone={
-                    controller.missingParameterCount > 0
-                      ? 'warning'
-                      : 'positive'
+                    nothingSelected
+                      ? 'neutral'
+                      : controller.missingParameterCount > 0
+                        ? 'warning'
+                        : 'positive'
                   }
                 />
               </div>
@@ -240,26 +251,17 @@ export function CompareSetup({
           >
             {controller.residualQueryHash
               ? 'A parameter value did not apply. Re-enter the highlighted value and try again.'
-              : controller.selectedIds.length === 0
-                ? 'Select at least one query.'
-                : controller.missingParameterCount > 0
-                  ? `Add ${controller.missingParameterCount} missing parameter ${
-                      controller.missingParameterCount === 1
-                        ? 'value'
-                        : 'values'
-                    }.`
-                  : batchCost
-                    ? `Ready to compare at ${adaptiveLoadLabel(controller)} clients per lane. ${batchCost}.`
-                    : `Ready to compare ${controller.selectedIds.length} ${
-                        controller.selectedIds.length === 1
-                          ? 'query'
-                          : 'queries'
-                      } at ${adaptiveLoadLabel(controller)} clients per lane for ${
-                        controller.durationSeconds
-                      } seconds.`}
+              : (controller.blockedReason ??
+                (batchCost
+                  ? `Ready to compare at ${adaptiveLoadLabel(controller)} clients per lane. ${batchCost}.`
+                  : `Ready to compare ${controller.selectedIds.length} ${
+                      controller.selectedIds.length === 1 ? 'query' : 'queries'
+                    } at ${adaptiveLoadLabel(controller)} clients per lane for ${
+                      controller.durationSeconds
+                    } seconds.`))}
           </Text>
           <Button
-            variant="rising"
+            variant="primary"
             modifier="solid"
             label="Run comparison"
             icon="play"
@@ -273,7 +275,11 @@ export function CompareSetup({
         isOpen={controller.reviewOpen}
         onClose={() => controller.setReviewOpen(false)}
         onConfirm={() => void controller.startComparison()}
-        title="Start this comparison?"
+        title={
+          controller.targetIsRemote
+            ? `Compare against ${controller.target}?`
+            : 'Start this comparison?'
+        }
         subtitle={
           batchCost
             ? `${batchCost} · ${adaptiveLoadLabel(controller)} clients per lane`
@@ -283,15 +289,33 @@ export function CompareSetup({
                 controller.durationSeconds
               } seconds`
         }
-        notice={{
-          accent: 'warning',
-          icon: 'play',
-          title: 'This executes real read-only queries',
-          message: `RDST will run the selected queries against both ${controller.target} and Readyset, then safely step each lane up to ${MAX_COMPARE_CONCURRENCY} clients. QPS is measured independently, so the faster lane can complete more work. Writes remain blocked by the database safety layer.`,
-        }}
-        confirmLabel="Start comparison"
+        notice={
+          controller.targetIsRemote
+            ? {
+                accent: 'negative',
+                icon: 'alert',
+                title: 'This is a remote database',
+                message: `${controller.target} is not a local target. RDST will run the selected queries against it and against Readyset, stepping each lane up to ${MAX_COMPARE_CONCURRENCY} clients. Writes remain blocked by the database safety layer. Type the target name below to confirm you intend to run this load against it.`,
+              }
+            : {
+                accent: 'warning',
+                icon: 'play',
+                title: 'This executes real read-only queries',
+                message: `RDST will run the selected queries against both ${controller.target} and Readyset, then safely step each lane up to ${MAX_COMPARE_CONCURRENCY} clients. QPS is measured independently, so the faster lane can complete more work. Writes remain blocked by the database safety layer.`,
+              }
+        }
+        confirmLabel={
+          controller.targetIsRemote ? 'Run against remote' : 'Start comparison'
+        }
+        confirmVariant={controller.targetIsRemote ? 'negative' : 'primary'}
         confirmIcon="play"
         confirmDisabled={!controller.canReview}
+        confirmDisabledReason={controller.blockedReason ?? undefined}
+        requireTyped={
+          controller.targetIsRemote
+            ? (controller.target ?? undefined)
+            : undefined
+        }
         loading={controller.starting}
         blockCloseWhileLoading
       />

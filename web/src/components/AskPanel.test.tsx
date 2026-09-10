@@ -221,6 +221,40 @@ describe('AskPanel', () => {
     )
   })
 
+  it('moves focus to the answer and announces it when one arrives', () => {
+    // Sending unmounts the composer; without this the keyboard is left on
+    // <body> and has to Tab from the top of the page. [C-20]
+    vi.mocked(useAsk).mockReturnValue({
+      ...baseUseAskState,
+      state: 'idle',
+      result: undefined,
+    })
+    const view = renderPanel(<AskPanel target="imdb" />)
+
+    vi.mocked(useAsk).mockReturnValue({
+      ...baseUseAskState,
+      state: 'complete',
+      result: {
+        type: 'result',
+        success: true,
+        sql: 'SELECT 1',
+        columns: ['one'],
+        rows: [[1]],
+        row_count: 1,
+        execution_time_ms: 1,
+        llm_calls: 1,
+        total_tokens: 1,
+        query_hash: '',
+        query_tag: '',
+      } satisfies AskResultEvent,
+    })
+    view.rerenderPanel(<AskPanel target="imdb" />)
+
+    const outcome = screen.getByTestId('ask-outcome')
+    expect(document.activeElement).toBe(outcome)
+    expect(outcome.textContent).toContain('Answer ready.')
+  })
+
   it('presents trial authentication failures without internal enum names', () => {
     vi.mocked(useAsk).mockReturnValue({
       ...baseUseAskState,
@@ -236,7 +270,7 @@ describe('AskPanel', () => {
     renderPanel(<AskPanel />)
 
     expect(screen.getByText('AI service authentication failed')).toBeTruthy()
-    expect(screen.getByText('Failed while: Generating SQL')).toBeTruthy()
+    expect(screen.getByText('Failed while generating SQL')).toBeTruthy()
     expect(screen.queryByText(/AskPhase/)).toBeNull()
     expect(screen.queryByText('Something went wrong')).toBeNull()
   })
@@ -257,7 +291,7 @@ describe('AskPanel', () => {
 
     expect(
       screen.getByText(
-        'Hosted AI access is unavailable. Check your Readyset account quota or add your own Anthropic API key.'
+        "You've used this month's included AI. Add your own Anthropic key to keep going."
       )
     ).toBeTruthy()
     expect(screen.getByRole('button', { name: /Set key/ })).toBeTruthy()

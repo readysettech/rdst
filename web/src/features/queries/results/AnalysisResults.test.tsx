@@ -33,6 +33,15 @@ describe('AnalysisResults', () => {
     expect(onBrowseQueries).toHaveBeenCalledTimes(1)
   })
 
+  it('reports a stopped run instead of an endless step 1 of 4 (B-10)', () => {
+    const onRetry = vi.fn()
+    render(<AnalysisResults state="cancelled" onRetry={onRetry} />)
+
+    expect(screen.getByText('Analysis cancelled')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Run analysis again' }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
   it('renders nothing before a run starts', () => {
     const { container } = render(<AnalysisResults state="idle" />)
 

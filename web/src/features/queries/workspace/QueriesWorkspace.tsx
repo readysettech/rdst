@@ -31,11 +31,11 @@ export function QueriesWorkspace({ search }: { search: QueryLibrarySearch }) {
       headerDivider
       titleMeta={<QueryLibraryDiscoveryStatus controller={controller} />}
       headerActions={
-        <HStack className="items-center gap-2 ml-auto">
+        <HStack className="items-center justify-end gap-2 ml-auto flex-wrap">
           <Button
             variant="primary"
             modifier="ghost"
-            label="Run benchmark"
+            label="Compare against Readyset"
             icon="play"
             iconPosition="left"
             onClick={controller.navigation.openBenchmark}

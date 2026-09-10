@@ -177,6 +177,17 @@ describe('friendlySqlError', () => {
     expect(friendlySqlError(undefined)).toMatch(/could not be analyzed/i)
   })
 
+  it('keeps the driver string out of the sentence it writes', () => {
+    const raw = 'PostgreSQL EXPLAIN failed: relation "orders" does not exist'
+    const envelope = normalizeExplainError(raw)
+
+    expect(envelope.code).toBe('invalid_sql')
+    expect(envelope.message).not.toContain('PostgreSQL EXPLAIN failed')
+    expect(envelope.message).toMatch(/table or column/i)
+    // The driver's own wording travels as detail, for the disclosure to hold.
+    expect(envelope.detail).toBe(raw)
+  })
+
   it('keeps connection details out of the primary message', () => {
     const raw =
       'PostgreSQL EXPLAIN failed: connection to server at "127.0.0.1", port 15434 failed: Connection refused'

@@ -39,14 +39,15 @@ const routeConfig: Record<string, RouteConfig> = {
     parent: '/queries',
   },
   '/ask': { label: 'Ask', icon: 'sparkles' },
-  '/scan': { label: 'Code scan', icon: 'search' },
+  // Code scan is off the nav, so its crumb carries the way back: a scan's
+  // output is queries, and the Query Library is where they land. [E-15]
+  '/scan': { label: 'Code scan', icon: 'search', parent: '/queries' },
   '/cache': { label: 'Benchmarks', icon: 'speedometer' },
   '/schema': { label: 'Schema', icon: 'layers' },
   '/audit': { label: 'Health check', icon: 'document-validation' },
   '/guards': { label: 'Guards', icon: 'user-shield' },
   '/configure': { label: 'Settings', icon: 'settings' },
   '/onboarding': { label: 'Get started', icon: 'querypilot' },
-  '/test': { label: 'Test', icon: 'adjustment-horizontal' },
   '/lab/performance-cards': {
     label: 'Performance cards lab',
     icon: 'test-tube',
@@ -72,8 +73,8 @@ export function Header({
   const router = useRouterState()
   const currentPath = router.location.pathname
   // The saved-run detail route is dynamic (/audit/runs/$runId), so it has no
-  // static entry — resolve it by prefix to a Health Check child crumb rather
-  // than falling through to the 404 "Not Found" label.
+  // static entry — resolve it by prefix to a Health check child crumb rather
+  // than falling through to the 404 "Not found" label.
   const auditRunConfig: RouteConfig = {
     label: 'Saved run',
     icon: 'document-validation',
@@ -90,7 +91,9 @@ export function Header({
   const cacheSearch = router.location.search as { view?: string }
   const cacheConfig: RouteConfig = {
     label: `Benchmarks - ${
-      cacheSearch.view === 'load-test' ? 'Load test' : 'Compare'
+      cacheSearch.view === 'load-test'
+        ? 'Load test'
+        : 'Compare against Readyset'
     }`,
     icon: 'speedometer',
   }
@@ -102,7 +105,7 @@ export function Header({
         ? queriesLabConfig
         : undefined)
   // An unknown path is a 404 (the branded notFoundComponent renders below the
-  // breadcrumb). Show "Not Found" rather than a redundant "RDST › RDST" (QW7).
+  // breadcrumb). Show "Not found" rather than a redundant "RDST › RDST" (QW7).
   const currentLabel = config?.label || 'Not found'
   const currentIcon = config?.icon || 'search'
   const parentPath = config?.parent
@@ -117,7 +120,7 @@ export function Header({
           ? 'bg-surface-layout-1 border-b border-border-layout-1'
           : 'bg-surface-layout-1/80 backdrop-blur-md border-b border-border-layout-1',
         // Sidebar offset only at tablet+; below that the sidebar is off-canvas.
-        'tablet:pl-80',
+        'tablet:pl-64 desktop:pl-80',
         'sticky top-0 z-20'
       )}
     >
@@ -136,7 +139,7 @@ export function Header({
             aria-controls="app-sidebar"
             className="no-drag tablet:hidden -ml-1 mr-1 flex h-8 w-8 items-center justify-center rounded-lg text-content-layout-2 hover:bg-surface-layout-2 hover:text-content-layout-1 transition-colors"
           >
-            <Icon name="menu" label="Open navigation" className="w-5 h-5" />
+            <Icon name="menu" label="" className="w-5 h-5" />
           </Pressable>
           <Link
             to="/"
@@ -149,7 +152,7 @@ export function Header({
 
           <Icon
             name="chevron-right"
-            label="separator"
+            label=""
             className="w-3.5 h-3.5 text-content-layout-3"
           />
 
@@ -163,7 +166,7 @@ export function Header({
               </Link>
               <Icon
                 name="chevron-right"
-                label="separator"
+                label=""
                 className="w-3.5 h-3.5 text-content-layout-3"
               />
             </>
@@ -173,7 +176,7 @@ export function Header({
             <div className="w-6 h-6 rounded-md bg-surface-primary-soft flex items-center justify-center">
               <Icon
                 name={currentIcon}
-                label={currentLabel}
+                label=""
                 className="w-3.5 h-3.5 text-content-primary-soft"
               />
             </div>

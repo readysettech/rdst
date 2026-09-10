@@ -46,9 +46,10 @@ export function VerdictCard({
     sizing.explanation
 
   return (
-    <div className="rounded-[1.25rem] bg-surface-raised shadow-elevation-1 p-6">
+    <div className="rounded-card bg-surface-raised shadow-elevation-1 p-6">
       <VStack className="gap-4 items-stretch">
         <Text
+          as="h2"
           level="overline"
           className="text-content-layout-2 uppercase tracking-wider"
         >

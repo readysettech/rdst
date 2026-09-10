@@ -42,8 +42,11 @@ interface ConfigureFormProps {
   /** Size of the primary submit button; first run uses a large hero CTA
    *  [VIS-022, VIS-035]. Defaults to `base` so other callers are unchanged. */
   submitSize?: 'base' | 'large'
-  /** The unified Add connection drawer already owns the page title. */
+  /** The unified Add target drawer already owns the page title. */
   showHeader?: boolean
+  /** Pin the action row to the bottom of the scrolling surface the form sits
+   *  in, so the submit stays in view inside the Add target drawer. */
+  stickyFooter?: boolean
   /** Test unverified add-mode credentials before saving and confirm when the
    * connected role has write privileges. */
   reviewWritePrivilegesOnSubmit?: boolean
@@ -208,6 +211,7 @@ export function ConfigureForm({
   submitLabel,
   submitSize = 'base',
   showHeader = true,
+  stickyFooter = false,
   reviewWritePrivilegesOnSubmit = false,
 }: ConfigureFormProps) {
   const isAddMode = !initialData?.name
@@ -412,7 +416,7 @@ export function ConfigureForm({
                   className="w-4 h-4 text-content-layout-3"
                 />
                 <Text level="label-medium" className="text-content-layout-1">
-                  {initialData?.name ? 'Edit connection' : 'New connection'}
+                  {initialData?.name ? 'Edit target' : 'New target'}
                 </Text>
               </HStack>
             </Card.Header>
@@ -436,7 +440,7 @@ export function ConfigureForm({
                         level="label-small"
                         className="text-content-primary-soft"
                       >
-                        Quick Setup
+                        Quick setup
                       </Text>
                     </label>
                   </HStack>
@@ -486,7 +490,7 @@ export function ConfigureForm({
               {/* Name — always visible; it's the identity you'll pick the
                 connection by. */}
               <div>
-                <FieldLabel htmlFor="cfg-name">Target Name *</FieldLabel>
+                <FieldLabel htmlFor="cfg-name">Target name</FieldLabel>
                 <BaseInputText
                   id="cfg-name"
                   name="name"
@@ -501,7 +505,7 @@ export function ConfigureForm({
                 />
                 <Show when={!isAddMode}>
                   <Text level="caption" className="text-content-layout-3 mt-1">
-                    The name can't be changed after a connection is created.
+                    The name can't be changed after a target is created.
                   </Text>
                 </Show>
               </div>
@@ -516,10 +520,10 @@ export function ConfigureForm({
                 onToggle={setDetailsOpen}
               >
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-4 tablet:grid-cols-2">
                     <div>
                       <FieldLabel htmlFor="cfg-engine">
-                        Database Engine *
+                        Database engine
                       </FieldLabel>
                       <BaseInputSelect
                         id="cfg-engine"
@@ -535,7 +539,7 @@ export function ConfigureForm({
                     </div>
 
                     <div>
-                      <FieldLabel htmlFor="cfg-host">Host *</FieldLabel>
+                      <FieldLabel htmlFor="cfg-host">Host</FieldLabel>
                       <BaseInputText
                         id="cfg-host"
                         name="host"
@@ -552,7 +556,7 @@ export function ConfigureForm({
                     </div>
 
                     <div>
-                      <FieldLabel htmlFor="cfg-port">Port *</FieldLabel>
+                      <FieldLabel htmlFor="cfg-port">Port</FieldLabel>
                       <BaseInputText
                         id="cfg-port"
                         name="port"
@@ -571,7 +575,7 @@ export function ConfigureForm({
                     </div>
 
                     <div>
-                      <FieldLabel htmlFor="cfg-database">Database *</FieldLabel>
+                      <FieldLabel htmlFor="cfg-database">Database</FieldLabel>
                       <BaseInputText
                         id="cfg-database"
                         name="database"
@@ -584,7 +588,7 @@ export function ConfigureForm({
                     </div>
 
                     <div>
-                      <FieldLabel htmlFor="cfg-user">User *</FieldLabel>
+                      <FieldLabel htmlFor="cfg-user">User</FieldLabel>
                       <BaseInputText
                         id="cfg-user"
                         name="user"
@@ -595,34 +599,34 @@ export function ConfigureForm({
                         required
                       />
                     </div>
-                  </div>
 
-                  <div>
-                    <FieldLabel htmlFor="cfg-password">
-                      Database Password {isAddMode ? '*' : ''}
-                    </FieldLabel>
-                    <BaseInputText
-                      id="cfg-password"
-                      name="password"
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder={
-                        isAddMode
-                          ? 'Enter database password'
-                          : 'Leave blank to keep current password'
-                      }
-                      disabled={isLoading}
-                      required={isAddMode}
-                      autoComplete="new-password"
-                    />
-                    <Text
-                      level="caption"
-                      className="text-content-layout-3 mt-1"
-                    >
-                      Stored in your local secret store, never in the target
-                      configuration
-                    </Text>
+                    <div>
+                      <FieldLabel htmlFor="cfg-password">
+                        Database password{isAddMode ? '' : ' (optional)'}
+                      </FieldLabel>
+                      <BaseInputText
+                        id="cfg-password"
+                        name="password"
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder={
+                          isAddMode
+                            ? 'Enter database password'
+                            : 'Leave blank to keep current password'
+                        }
+                        disabled={isLoading}
+                        required={isAddMode}
+                        autoComplete="new-password"
+                      />
+                      <Text
+                        level="caption"
+                        className="text-content-layout-3 mt-1"
+                      >
+                        Stored in your local secret store, never in the target
+                        configuration
+                      </Text>
+                    </div>
                   </div>
                 </div>
               </Disclosure>
@@ -719,14 +723,14 @@ export function ConfigureForm({
                       <Show when={tlsVerify}>
                         <div>
                           <FieldLabel htmlFor="cfg-tls-ca">
-                            TLS CA path
+                            TLS CA path (optional)
                           </FieldLabel>
                           <BaseInputText
                             id="cfg-tls-ca"
                             name="tls_ca"
                             value={tlsCa}
                             onChange={(event) => setTlsCa(event.target.value)}
-                            placeholder="/path/to/ca-certificate.pem (optional)"
+                            placeholder="/path/to/ca-certificate.pem"
                             disabled={isLoading}
                           />
                         </div>
@@ -753,8 +757,14 @@ export function ConfigureForm({
               />
             </div>
           </Show>
-          <Card.Footer>
-            <HStack className="gap-3 justify-end w-full">
+          <Card.Footer
+            className={
+              stickyFooter
+                ? 'sticky bottom-0 z-10 bg-surface-layout-1'
+                : undefined
+            }
+          >
+            <HStack className="flex-wrap gap-3 justify-end w-full">
               <Button
                 variant="primary"
                 modifier="ghost"
@@ -774,13 +784,13 @@ export function ConfigureForm({
                 type="button"
               />
               <Button
-                variant="rising"
+                variant="primary"
                 modifier="solid"
                 size={submitSize}
                 label={
                   initialData?.name
-                    ? 'Update connection'
-                    : (submitLabel ?? 'Add connection')
+                    ? 'Update target'
+                    : (submitLabel ?? 'Add target')
                 }
                 type="submit"
                 loading={isLoading}
@@ -804,7 +814,7 @@ export function ConfigureForm({
             ? `${pendingWritableSubmission.data.name} connected successfully. RDST recommends read-only access, but you can add this account as-is.`
             : undefined
         }
-        confirmLabel="Add connection"
+        confirmLabel="Add target"
         confirmVariant="primary"
         size="large"
       >

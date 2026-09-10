@@ -17,7 +17,43 @@ describe('RunProgress', () => {
         totalElapsedSeconds={12}
       />
     )
-    expect(screen.getByText('12s / 1m 0s')).toBeTruthy()
+    expect(screen.getByText('12s of 1m 0s · ~48s left')).toBeTruthy()
+    const bar = screen.getByRole('progressbar', {
+      name: 'Capturing live database activity progress',
+    })
+    expect(bar.getAttribute('aria-valuenow')).toBe('20')
+  })
+
+  it('carries the run scope inside the card, beside the status', () => {
+    render(
+      <RunProgress
+        phase="capture"
+        scopeLabel="Running on e2e-guard"
+        statusMessage="Capturing queries for 60s..."
+        durationSeconds={60}
+        elapsedSeconds={12}
+        totalElapsedSeconds={12}
+      />
+    )
+    expect(
+      screen.getByText('Running on e2e-guard · Capturing queries for 60s...')
+    ).toBeTruthy()
+  })
+
+  it('keeps an indeterminate track through a phase with no countable end', () => {
+    render(
+      <RunProgress
+        phase="analysis"
+        statusMessage="Running final analysis..."
+        durationSeconds={60}
+        elapsedSeconds={60}
+        totalElapsedSeconds={95}
+      />
+    )
+    const bar = screen.getByRole('progressbar', {
+      name: 'Analyzing captured workload progress',
+    })
+    expect(bar.getAttribute('aria-valuenow')).toBeNull()
   })
 
   it('keeps an elapsed clock visible through the analysis phase', () => {

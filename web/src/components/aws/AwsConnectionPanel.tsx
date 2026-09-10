@@ -416,7 +416,7 @@ function AwsSsoWizard({
             <HStack className="gap-2 items-center">
               <Spinner size="base" />
               <Text level="caption" className="text-content-layout-3">
-                Loading accounts...
+                Loading accounts…
               </Text>
             </HStack>
           ) : accountsError ? (
@@ -483,7 +483,7 @@ function AwsSsoWizard({
             <HStack className="gap-2 items-center">
               <Spinner size="base" />
               <Text level="caption" className="text-content-layout-3">
-                Loading roles...
+                Loading roles…
               </Text>
             </HStack>
           ) : rolesError ? (
@@ -729,7 +729,6 @@ export function AwsConnectionPanel({
         message={error instanceof Error ? error.message : String(error)}
         trustworthy="Your fleet inventory and saved reports are unaffected."
         onRetry={() => void refetch()}
-        retryLabel="Re-check"
       />
     )
   if (!aws) return null

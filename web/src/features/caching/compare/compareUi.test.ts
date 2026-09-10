@@ -4,6 +4,8 @@ import type { CompareQueryOutcome } from './compareRuns'
 import {
   compareBatchDurationEstimate,
   compareQueryOutcomePresentation,
+  compareQueryStatusChip,
+  compareStatusPresentation,
 } from './compareUi'
 
 function outcome(
@@ -60,10 +62,20 @@ describe('compareQueryOutcomePresentation', () => {
     expect(compareQueryOutcomePresentation(outcome('queued'))).toEqual({
       label: 'Queued',
       variant: 'neutral',
+      icon: 'minus',
     })
     expect(compareQueryOutcomePresentation(outcome('running'))).toEqual({
       label: 'Running',
       variant: 'informative',
+      icon: 'play',
+    })
+  })
+
+  it('reads a stopped comparison as neutral rather than as a fault', () => {
+    expect(compareQueryOutcomePresentation(outcome('cancelled'))).toEqual({
+      label: 'Cancelled',
+      variant: 'neutral',
+      icon: 'minus',
     })
   })
 
@@ -75,7 +87,7 @@ describe('compareQueryOutcomePresentation', () => {
           message: 'This query is unsupported by Readyset.',
         })
       )
-    ).toEqual({ label: 'Unsupported', variant: 'warning' })
+    ).toEqual({ label: 'Unsupported', variant: 'warning', icon: 'alert' })
   })
 
   it('presents a result-mismatch pre-flight exclusion as a warning, not an error', () => {
@@ -87,7 +99,7 @@ describe('compareQueryOutcomePresentation', () => {
             'return any matching rows and the two results are not comparable.',
         })
       )
-    ).toEqual({ label: 'Not comparable', variant: 'warning' })
+    ).toEqual({ label: 'Not comparable', variant: 'warning', icon: 'alert' })
   })
 
   it('still presents a genuine failure as negative', () => {
@@ -95,7 +107,64 @@ describe('compareQueryOutcomePresentation', () => {
       compareQueryOutcomePresentation(
         outcome('failed', { message: 'Speed test failed' })
       )
-    ).toEqual({ label: 'Failed', variant: 'negative' })
+    ).toEqual({ label: 'Failed', variant: 'negative', icon: 'close' })
+  })
+})
+
+describe('compareQueryStatusChip', () => {
+  it('classifies a measured query rather than repeating its speedup', () => {
+    expect(compareQueryStatusChip(measured(3.2))).toEqual({
+      label: 'Compared',
+      variant: 'positive',
+      icon: 'tick-double',
+    })
+  })
+
+  it('falls back to the outcome verdict for everything else', () => {
+    expect(
+      compareQueryStatusChip(
+        outcome('failed', { message: 'Speed test failed' })
+      )
+    ).toEqual({ label: 'Failed', variant: 'negative', icon: 'close' })
+  })
+})
+
+describe('compareStatusPresentation', () => {
+  // GUIDELINES section 4: a batch that failed must not read like one that
+  // completed, and every status carries colour + icon + label.
+  it('gives each batch status its own tone and icon', () => {
+    expect(compareStatusPresentation('running')).toEqual({
+      label: 'Comparing',
+      variant: 'informative',
+      icon: 'play',
+    })
+    expect(compareStatusPresentation('complete')).toEqual({
+      label: 'Complete',
+      variant: 'positive',
+      icon: 'tick-double',
+    })
+    expect(compareStatusPresentation('partial')).toEqual({
+      label: 'Completed with errors',
+      variant: 'warning',
+      icon: 'alert',
+    })
+    expect(compareStatusPresentation('failed')).toEqual({
+      label: 'Failed',
+      variant: 'negative',
+      icon: 'close',
+    })
+    expect(compareStatusPresentation('cancelled')).toEqual({
+      label: 'Cancelled',
+      variant: 'neutral',
+      icon: 'minus',
+    })
+  })
+
+  it('never gives two statuses the same tone', () => {
+    const tones = (
+      ['running', 'complete', 'partial', 'failed', 'cancelled'] as const
+    ).map((status) => compareStatusPresentation(status).variant)
+    expect(new Set(tones).size).toBe(tones.length)
   })
 })
 

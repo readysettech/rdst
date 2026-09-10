@@ -6,6 +6,7 @@ import {
   forwardRef,
 } from 'react'
 import { For } from '../../../control-flow/for'
+import { controlTransition } from '../../../helpers/focus'
 import { useDisclosure } from '../../../hooks/use-disclosure'
 import { Icon } from '../../svg/icon'
 
@@ -20,7 +21,7 @@ const selectStyles = tv({
       'border-(length:--border-base)',
       'border-border-layout-1',
       'bg-surface-layout-2',
-      'transition',
+      controlTransition,
       'duration-fast',
       'ease-base',
       'text-content-layout-1',
@@ -71,7 +72,7 @@ const selectStyles = tv({
       'text-body-medium',
       'text-content-layout-1',
       'outline-none',
-      'transition',
+      controlTransition,
       'duration-fast',
       'ease-base',
       'focus:bg-surface-primary-soft',

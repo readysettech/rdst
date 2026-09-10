@@ -277,7 +277,7 @@ function QueryDetailModal({
                   <Button
                     variant="primary"
                     modifier="solid"
-                    label="Analyze Query"
+                    label="Analyze query"
                     icon="speedometer"
                     iconPosition="left"
                     onClick={onAnalyze}

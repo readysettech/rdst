@@ -120,6 +120,19 @@ async function selectFirstQuery(page: Page) {
   ).toHaveAttribute('aria-pressed', 'true')
 }
 
+/**
+ * The e2e target is a remote host, and load against a database the user does
+ * not own sits at the typed-confirmation tier: the target's own name has to be
+ * typed back before the run starts.
+ */
+async function confirmRemoteComparison(page: Page) {
+  await expect(
+    page.getByRole('heading', { name: 'Compare against e2e-guard?' })
+  ).toBeVisible()
+  await page.locator('[name="confirm-typed"]').fill('e2e-guard')
+  await page.getByRole('button', { name: 'Run against remote' }).click()
+}
+
 test('offers unverified registry queries for comparison', async ({ page }) => {
   setBackendFixtures({
     sandbox_diagnostics: [{ value: readySandbox, repeat: true }],
@@ -165,7 +178,7 @@ test('missing Docker blocks comparison without creating a run', async ({
   await expect(
     page.getByRole('heading', { name: 'Docker is required for comparisons' })
   ).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Check again' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible()
   expect(compareRequests).toBe(0)
 })
 
@@ -194,10 +207,7 @@ test('substitutes parameters and starts the current comparison flow', async ({
     .fill('42')
   await page.getByRole('button', { name: 'Run comparison' }).click()
 
-  await expect(
-    page.getByRole('heading', { name: 'Start this comparison?' })
-  ).toBeVisible()
-  await page.getByRole('button', { name: 'Start comparison' }).click()
+  await confirmRemoteComparison(page)
   await expect(page.getByText('4.0× faster with Readyset')).toBeVisible()
   expect(compareRequest).toMatchObject({
     target: 'e2e-guard',
@@ -222,7 +232,7 @@ test('completes a comparison and restores it from history after reload', async (
   await page.goto('/cache')
   await selectFirstQuery(page)
   await page.getByRole('button', { name: 'Run comparison' }).click()
-  await page.getByRole('button', { name: 'Start comparison' }).click()
+  await confirmRemoteComparison(page)
 
   await expect(page.getByText('4.0× faster with Readyset')).toBeVisible()
   await expect(page.getByText('Complete', { exact: true })).toBeVisible()

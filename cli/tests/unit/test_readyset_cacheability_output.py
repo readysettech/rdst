@@ -120,3 +120,22 @@ class TestFormatReadysetCacheabilityFlat:
             f"output_formatter.py:1099 checks readyset_cacheability.get('success') "
             f"but the formatted dict only has 'checked'."
         )
+
+
+class TestQueryParameterizedReadsSlotsNotValues:
+    """`query_parameterized` reports placeholders, not text that looks like one."""
+
+    def _check(self, sql):
+        from features.cache.readyset_cacheability import check_readyset_cacheability
+
+        return check_readyset_cacheability(query=sql)["query_parameterized"]
+
+    def test_literal_containing_placeholder_syntax_is_a_value(self):
+        assert self._check("SELECT id FROM users WHERE email = 'a@b.com'") is False
+        assert self._check("SELECT id FROM orders WHERE note = 'why?'") is False
+        assert self._check("SELECT id FROM orders WHERE note = '$1 refund'") is False
+
+    def test_real_placeholders_are_still_reported(self):
+        assert self._check("SELECT id FROM users WHERE id = $1") is True
+        assert self._check("SELECT id FROM users WHERE id = ?") is True
+        assert self._check("SELECT id FROM users WHERE id = :p1") is True

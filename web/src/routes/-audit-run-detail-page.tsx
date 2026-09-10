@@ -10,6 +10,7 @@
  */
 
 import { Button } from '@rs/ui-new/button'
+import { InlineNotice } from '@rs/ui-new/error-state'
 import { Icon } from '@rs/ui-new/icon'
 import { m } from '@rs/ui-new/motion'
 import { HStack, VStack } from '@rs/ui-new/stack'
@@ -53,12 +54,14 @@ function EmailReportButton({
   emailable: boolean
 }) {
   const [isOpen, setIsOpen] = useState(false)
+  // The trigger wears the report's own glyph, the one the dialog opens with:
+  // an open-in-new arrow would promise a new tab rather than a send. [E-39]
   const button = (
     <Button
       variant="primary"
       modifier="ghost"
-      icon="arrow-up-right"
-      iconPosition="right"
+      icon="document-validation"
+      iconPosition="left"
       label="Email me this report"
       disabled={!emailable}
       onClick={() => setIsOpen(true)}
@@ -161,6 +164,15 @@ export function AuditRunDetailPage({
       : undefined
   const emailable =
     fleet || !workload || !!(payload as WorkloadRun).health_analysis
+  // The run view that carried these notices is unmounted by the navigation to
+  // the report, so a reader would otherwise find a missing section with no
+  // explanation. They travel with the saved run instead. [E-52]
+  const skipped = fleet
+    ? { analysis_error: null, readyset_notice: null }
+    : {
+        analysis_error: (payload as WorkloadRun).analysis_error ?? null,
+        readyset_notice: (payload as WorkloadRun).readyset_notice ?? null,
+      }
 
   return (
     <div className="space-y-6 w-full">
@@ -173,7 +185,7 @@ export function AuditRunDetailPage({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        <HStack className="gap-4 items-center">
+        <HStack className="gap-4 items-center flex-wrap">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center shrink-0">
             <Icon
               name="document-validation"
@@ -224,7 +236,7 @@ export function AuditRunDetailPage({
               </Text>
             </HStack>
           </VStack>
-          <div className="ml-auto shrink-0">
+          <div className="shrink-0 tablet:ml-auto">
             <EmailReportButton
               runId={runId}
               kind={fleet ? 'fleet' : 'audit'}
@@ -233,6 +245,25 @@ export function AuditRunDetailPage({
           </div>
         </HStack>
       </m.div>
+
+      {skipped.analysis_error && (
+        <InlineNotice
+          errorClass="provider"
+          accent="warning"
+          icon="sparkles"
+          title="Analysis skipped"
+          message={skipped.analysis_error}
+          trustworthy="The captured queries and totals in this report are complete and unaffected."
+        />
+      )}
+      {skipped.readyset_notice && (
+        <InlineNotice
+          errorClass="valid-negative"
+          title="Readyset benchmark skipped"
+          message={skipped.readyset_notice}
+          trustworthy="The database capture and saved query data are complete."
+        />
+      )}
 
       {/* Body reuses the canonical full report/workload views. */}
       {fleet ? (

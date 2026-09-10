@@ -27,6 +27,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
+from shared.query_registry.sql_normalizer import mask_string_literals
+
 logger = logging.getLogger(__name__)
 
 ViewName = Literal[
@@ -191,9 +193,15 @@ def _source_matches(entry: Any) -> Dict[str, bool]:
 
 
 def detect_parameters(sql: str) -> List[Tuple[str, int, str]]:
-    """Mirror the client's detectParameters: (placeholder, index, type)."""
+    """Mirror the client's detectParameters: (placeholder, index, type).
+
+    Scans with string literals blanked, so a literal's own text is data
+    rather than a slot: `email = 'a@b.com'` has no parameters, not one
+    named `@b`.
+    """
     params: List[Tuple[str, int, str]] = []
     seen: set = set()
+    sql = mask_string_literals(sql)
 
     for match in _PG_PARAM_RE.finditer(sql):
         placeholder = match.group(0)

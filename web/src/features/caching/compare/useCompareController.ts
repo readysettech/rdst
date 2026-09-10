@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTarget } from '../../../hooks/useTarget'
+import { useTargetIsRemote } from '../../../hooks/useTargetIsRemote'
 import { trackEvent } from '../../../lib/analytics'
 import { reportCompareOutcome, updateQueryParameters } from '../../../lib/api'
 import { useBackgroundRuns } from '../../../lib/backgroundRuns'
@@ -10,6 +11,7 @@ import {
   parameterValueKey,
   suggestionSummaryMessage,
 } from '../../../lib/parameterSuggestions'
+import { queryDisplayName } from '../../../lib/queryIdentity'
 import { byImpact } from '../../../lib/queryImpact'
 import {
   detectParameters,
@@ -60,6 +62,9 @@ function parameterKey(queryHash: string, placeholder: string, index: number) {
 
 export function useCompareController(initialQueryHash?: string) {
   const { target } = useTarget()
+  // A comparison drives the same real traffic as a load test, so the run
+  // confirmation needs the same answer about the destination.
+  const targetIsRemote = useTargetIsRemote(target ?? null)
   const passwordLock = useTargetPasswordLock(target)
   const connectivity = useTargetConnectivityGate(
     passwordLock.targetName ?? target
@@ -114,11 +119,17 @@ export function useCompareController(initialQueryHash?: string) {
     reportedOutcomes.current.clear()
   }, [target])
 
+  // A sandbox check that keeps failing settles on the error state: the poll
+  // stops rather than re-entering "pending" every five seconds and flipping
+  // the page between skeleton and error. [D-05, D-06]
   const statusQuery = useQuery({
     queryKey: ['readyset-sandbox'],
     queryFn: fetchSandboxDiagnostics,
     enabled: !!target && !passwordLock.isLocked,
-    refetchInterval: 5_000,
+    retry: 1,
+    retryDelay: (attempt) => Math.min(5_000, 500 * 2 ** attempt),
+    refetchInterval: (query) =>
+      query.state.status === 'error' ? false : 5_000,
   })
 
   const dockerReady =
@@ -129,7 +140,7 @@ export function useCompareController(initialQueryHash?: string) {
   // a usable target, so it is ready by the time they finish configuring the
   // run instead of only starting once they press "Run comparison". Asked for
   // only once the diagnostics say a sandbox can exist at all, so a machine
-  // without Docker -- where the page offers "Check again" instead of a run --
+  // without Docker -- where the page offers "Try again" instead of a run --
   // stays quiet. Guarded per target so re-renders don't re-queue it; the
   // backend itself replaces an obsolete queued prewarm if the target changes
   // again before it starts.
@@ -498,16 +509,30 @@ export function useCompareController(initialQueryHash?: string) {
     }
   }, [missingParameterCount, paramValues, selectedWithParams, target])
 
-  const canReview =
-    !!target &&
-    dockerReady &&
-    selected.length > 0 &&
-    selected.length <= MAX_COMPARE_QUERIES &&
-    missingParameterCount === 0 &&
-    !passwordLock.isLocked &&
-    !connectivity.isChecking &&
-    !activeBatch &&
-    !starting
+  // Why a comparison cannot be reviewed or started yet, in the words the user
+  // needs to act on. `null` means it can: the run gate and the reason the
+  // review dialog gives for a dead confirm are the same answer (GUIDELINES §10).
+  const blockedReason = !target
+    ? 'Choose a database to compare against.'
+    : passwordLock.isLocked
+      ? 'Unlock this database before comparing against it.'
+      : !dockerReady
+        ? 'Start Docker so RDST can prepare its Readyset sandbox.'
+        : connectivity.isChecking
+          ? 'Checking that the database is reachable.'
+          : selected.length === 0
+            ? 'Select at least one query.'
+            : selected.length > MAX_COMPARE_QUERIES
+              ? `Select at most ${MAX_COMPARE_QUERIES} queries.`
+              : missingParameterCount > 0
+                ? `Add ${missingParameterCount} missing parameter ${
+                    missingParameterCount === 1 ? 'value' : 'values'
+                  }.`
+                : activeBatch
+                  ? 'A comparison is already running.'
+                  : null
+
+  const canReview = blockedReason === null && !starting
 
   const startComparison = async () => {
     if (!target || !canReview) return
@@ -538,8 +563,9 @@ export function useCompareController(initialQueryHash?: string) {
           parameters: item.parameters,
           values,
           cacheId: item.entry.hash,
-          label:
-            item.entry.tag?.trim() || `Query ${item.entry.hash.slice(0, 8)}`,
+          // The run carries the name the setup card showed, so a query keeps
+          // one name from selection through to its result. [D-15]
+          label: queryDisplayName(item.entry),
           queryHash: item.entry.hash,
           sql:
             item.parameters.length > 0
@@ -603,6 +629,20 @@ export function useCompareController(initialQueryHash?: string) {
     steppedBatchId.current = null
   }
 
+  /**
+   * Run the settled comparison again. It re-selects the queries the batch was
+   * made of, so the confirmation opens on a run that is ready rather than on
+   * an empty selection the user has to rebuild behind the dialog.
+   */
+  const reRunBatch = () => {
+    const hashes = (batch?.queries ?? [])
+      .map((query) => query.queryHash)
+      .filter((hash): hash is string => Boolean(hash))
+    if (hashes.length > 0) setSelectedIds(hashes)
+    clearBatch()
+    setReviewOpen(true)
+  }
+
   const deleteHistoryBatch = (batchId: string) => {
     forgetCompareBatch(batchId)
     if (batch?.id === batchId) setBatch(null)
@@ -611,6 +651,7 @@ export function useCompareController(initialQueryHash?: string) {
 
   return {
     target,
+    targetIsRemote,
     passwordLock,
     connectivity,
     statusQuery,
@@ -647,12 +688,14 @@ export function useCompareController(initialQueryHash?: string) {
     },
     deleteHistoryBatch,
     canReview,
+    blockedReason,
     starting,
     startComparison,
     batch,
     snapshot,
     cancelComparison: () => (batch ? cancelCompareBatch(batch) : undefined),
     clearBatch,
+    reRunBatch,
   }
 }
 

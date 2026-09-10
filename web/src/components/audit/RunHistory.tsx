@@ -58,10 +58,11 @@ function SectionCard({
           <HStack className="gap-2 items-center">
             <Icon
               name={icon}
-              label={title}
+              label=""
               className="w-4 h-4 text-content-layout-3"
             />
             <Text
+              as="h2"
               level="overline"
               className="text-content-layout-3 uppercase tracking-wider"
             >
@@ -86,9 +87,12 @@ function HistoryRow({
   loading: boolean
   onOpen: (entry: HistoryEntry) => void
 }) {
+  // Every row on a target shares its scope name, so the timestamp is what
+  // tells two runs apart in a screen reader or a voice command.
+  const kind = entry.kind === 'fleet' ? 'fleet health check' : 'health check'
   return (
     <InteractiveRow
-      label={`Open ${entry.scopeLabel} report`}
+      label={`Open the ${entry.scopeLabel} ${kind} from ${formatAbsoluteTimestamp(entry.startedAt)}`}
       active={active}
       onClick={() => onOpen(entry)}
       className="px-4 py-2 hover:bg-surface-layout-2/50"
@@ -98,7 +102,7 @@ function HistoryRow({
           <HStack className="gap-2 items-center min-w-0 flex-wrap">
             <Tag
               size="small"
-              variant={entry.kind === 'fleet' ? 'primary' : 'informative'}
+              variant="informative"
               modifier="ghost"
               label={entry.kind === 'fleet' ? 'Fleet' : 'Single'}
             />
@@ -144,7 +148,7 @@ function HistoryRow({
           <Icon
             name="chevron-right"
             label="Open run"
-            className="w-4 h-4 text-content-layout-3 opacity-0 group-hover:opacity-100 transition-opacity"
+            className="w-4 h-4 text-content-layout-3 opacity-40 group-hover:opacity-100 transition-opacity"
           />
         </HStack>
       </HStack>
@@ -196,6 +200,7 @@ export function RunHistory({
         <div key={group.day}>
           <div className="px-5 py-1.5 bg-surface-layout-2/30 border-y border-border-layout-1 first:border-t-0">
             <Text
+              as="h3"
               level="caption"
               className="text-content-layout-3 uppercase tracking-wider"
             >

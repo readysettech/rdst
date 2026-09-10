@@ -102,7 +102,7 @@ export function ScanFilters({
               </Show>
               <Show when={!isScanning}>
                 <Button
-                  variant="rising"
+                  variant="primary"
                   modifier="solid"
                   label="Start scan"
                   icon="search"

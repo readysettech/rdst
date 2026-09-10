@@ -1,6 +1,6 @@
 /**
  * Run controls for the Health Check launcher: capture window, requirement
- * checklist slot, and the run/cancel actions.
+ * checklist slot, and the launch action.
  */
 
 import { BaseInputSelect } from '@rs/ui-new/base-input-select'
@@ -11,7 +11,6 @@ import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { formatDuration } from '../../lib/auditReportFormat'
-import { cancelActiveAudit } from '../../lib/auditSession'
 
 const CAPTURE_DURATIONS: Array<{
   label: string
@@ -38,6 +37,8 @@ export function RunLauncher({
   onDurationChange,
   selectedTargets,
   runSolid,
+  targetsPending = false,
+  targetsUnavailable = false,
 }: {
   scopeControl: React.ReactNode
   requirementsNotice: React.ReactNode
@@ -51,6 +52,10 @@ export function RunLauncher({
   onDurationChange: (seconds: number) => void
   selectedTargets: string[]
   runSolid: boolean
+  /** The target inventory is still in flight, so nothing can be selected yet. */
+  targetsPending?: boolean
+  /** The target inventory could not be loaded; the scope slot explains it. */
+  targetsUnavailable?: boolean
 }) {
   const durationOptions = CAPTURE_DURATIONS.map((d) => ({
     value: String(d.seconds),
@@ -80,7 +85,7 @@ export function RunLauncher({
                   <IconButton
                     icon="info"
                     label="About capture duration"
-                    tooltip="Set a capture window during which Health Check monitors the traffic running against your database to discover query patterns, slow queries, and anything affecting performance."
+                    tooltip="Set a capture window during which Health check monitors the traffic running against your database to discover query patterns, slow queries, and anything affecting performance."
                     size="small"
                     modifier="ghost"
                     classMerge="bg-transparent text-content-layout-3 hover:text-content-layout-2"
@@ -100,61 +105,59 @@ export function RunLauncher({
             <Show
               when={selectedCount > 0}
               fallback={
-                <Text level="caption" className="text-content-layout-3">
-                  Select one or more targets to check
-                </Text>
+                // An instruction the user cannot follow is worse than none:
+                // the scope slot above already carries the reason. [F-25]
+                targetsUnavailable ? undefined : (
+                  <Text level="caption" className="text-content-layout-3">
+                    {targetsPending
+                      ? 'Loading your targets…'
+                      : 'Select one or more targets to check'}
+                  </Text>
+                )
               }
             >
               <Text level="body-small" className="text-content-layout-2">
-                {`Health Check connects read-only to ${targetCopy} and snapshots database configuration and vital signs. For ${durationLabel}, it watches real live query traffic to find slow queries, hot spots, and sizing issues, then reports which queries Readyset could cache and accelerate. Nothing is changed on your database.`}
+                {`Health check connects read-only to ${targetCopy} and snapshots database configuration and vital signs. For ${durationLabel}, it watches real live query traffic to find slow queries, hot spots, and sizing issues, then reports which queries Readyset could cache and accelerate. Nothing is changed on your database.`}
               </Text>
             </Show>
-            <HStack className="gap-3 items-center flex-wrap">
-              <div className="min-w-56">
-                <Button
-                  variant="primary"
-                  modifier={runSolid ? 'solid' : 'outline'}
-                  label="Run health check"
-                  icon="play"
-                  iconPosition="left"
-                  onClick={onRun}
-                  disabled={disabled}
-                  fullWidth
-                />
-              </div>
-              <Show
-                when={showRequirementsButton && captureDuration > 0 && !active}
-              >
-                <Button
-                  variant="primary"
-                  modifier="ghost"
-                  size="small"
-                  label="Check requirements"
-                  loading={requirementsBusy}
-                  onClick={onCheckRequirements}
-                  disabled={active}
-                />
-              </Show>
-              <Show when={active}>
-                <Button
-                  variant="negative"
-                  modifier="outline"
-                  size="small"
-                  label="Cancel"
-                  icon="close"
-                  iconPosition="left"
-                  onClick={cancelActiveAudit}
-                />
-                <IconButton
-                  icon="info"
-                  label="A health check is already running"
-                  tooltip="A health check is already running. Cancel it before starting another."
-                  size="small"
-                  modifier="ghost"
-                  classMerge="bg-transparent text-content-layout-3 hover:text-content-layout-2"
-                />
-              </Show>
-            </HStack>
+            {/* A run in flight leaves one place to watch it and one place to
+                stop it: the progress card below. The launcher says so in
+                words rather than keeping a dead primary button and a second
+                Cancel on screen. [E-08] */}
+            <Show
+              when={!active}
+              fallback={
+                <Text level="body-small" className="text-content-layout-2">
+                  A health check is running. Its progress and Cancel are in the
+                  card below; another can start once it ends.
+                </Text>
+              }
+            >
+              <HStack className="gap-3 items-center flex-wrap">
+                <div className="min-w-56">
+                  <Button
+                    variant="primary"
+                    modifier={runSolid ? 'solid' : 'outline'}
+                    label="Run health check"
+                    icon="play"
+                    iconPosition="left"
+                    onClick={onRun}
+                    disabled={disabled}
+                    fullWidth
+                  />
+                </div>
+                <Show when={showRequirementsButton && captureDuration > 0}>
+                  <Button
+                    variant="primary"
+                    modifier="ghost"
+                    size="small"
+                    label="Check requirements"
+                    loading={requirementsBusy}
+                    onClick={onCheckRequirements}
+                  />
+                </Show>
+              </HStack>
+            </Show>
           </VStack>
         </Card.Content>
       </Card>

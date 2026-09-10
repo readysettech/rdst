@@ -51,7 +51,7 @@ describe('ParameterDialog', () => {
       screen.getByText('3 parameters detected. Values apply only to this run.')
     ).toBeTruthy()
     expect(screen.getAllByPlaceholderText('Enter value')).toHaveLength(3)
-    expect(screen.getByText('Original query')).toBeTruthy()
+    expect(screen.getByText('Query')).toBeTruthy()
     expect(screen.getAllByText('Parameters').length).toBeGreaterThanOrEqual(1)
   })
 
@@ -69,7 +69,7 @@ describe('ParameterDialog', () => {
       screen.getByText('10 parameters detected. Values apply only to this run.')
     ).toBeTruthy()
     expect(screen.getAllByPlaceholderText('Enter value')).toHaveLength(10)
-    expect(screen.getByText('Original query')).toBeTruthy()
+    expect(screen.getByText('Query')).toBeTruthy()
     expect(screen.getAllByText('Parameters').length).toBeGreaterThanOrEqual(1)
   })
 
@@ -129,6 +129,76 @@ describe('ParameterDialog', () => {
     expect(submitted).toContain("'Alice'")
     expect(submitted).toContain('25')
     expect(submitted).not.toContain(':p1')
+  })
+
+  // The inline form is a layer the overlay around it knows nothing about, so
+  // it takes the keys that belong to the innermost layer. [B-17]
+  describe('inline form keyboard', () => {
+    const singleParamQuery = 'SELECT * FROM users WHERE id = :p1'
+
+    it('closes itself on Escape, without the overlay ever seeing the key', () => {
+      const overlayEscape = vi.fn()
+      document.addEventListener('keydown', overlayEscape, { capture: true })
+      render(
+        <ParameterDialog
+          presentation="inline"
+          isOpen
+          onClose={onClose}
+          onSubmit={onSubmit}
+          query={singleParamQuery}
+        />
+      )
+
+      fireEvent.keyDown(screen.getByPlaceholderText('Enter value'), {
+        key: 'Escape',
+      })
+
+      expect(onClose).toHaveBeenCalledTimes(1)
+      expect(overlayEscape).not.toHaveBeenCalled()
+      document.removeEventListener('keydown', overlayEscape, { capture: true })
+    })
+
+    it('steps out of the form alone when the surface owns a separate exit', () => {
+      const onEscape = vi.fn()
+      render(
+        <ParameterDialog
+          presentation="inline"
+          isOpen
+          onClose={onClose}
+          onEscape={onEscape}
+          onSubmit={onSubmit}
+          query={singleParamQuery}
+        />
+      )
+
+      fireEvent.keyDown(screen.getByPlaceholderText('Enter value'), {
+        key: 'Escape',
+      })
+
+      expect(onEscape).toHaveBeenCalledTimes(1)
+      expect(onClose).not.toHaveBeenCalled()
+    })
+
+    it('runs the form when Enter is pressed in a filled value field', () => {
+      render(
+        <ParameterDialog
+          presentation="inline"
+          isOpen
+          onClose={onClose}
+          onSubmit={onSubmit}
+          query={singleParamQuery}
+        />
+      )
+
+      const input = screen.getByPlaceholderText('Enter value')
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(onSubmit).not.toHaveBeenCalled()
+
+      fireEvent.change(input, { target: { value: '42' } })
+      fireEvent.keyDown(input, { key: 'Enter' })
+
+      expect(onSubmit).toHaveBeenCalledWith('SELECT * FROM users WHERE id = 42')
+    })
   })
 
   it('pre-fills initial values from stored params', () => {
@@ -274,8 +344,14 @@ describe('ParameterDialog', () => {
           index: 1,
           column: 'orders.status',
           suggestions: [
-            { value: 'shipped', provenance: 'Common value in orders.status (pg_stats)' },
-            { value: 'paid', provenance: 'Common value in orders.status (pg_stats)' },
+            {
+              value: 'shipped',
+              provenance: 'Common value in orders.status (pg_stats)',
+            },
+            {
+              value: 'paid',
+              provenance: 'Common value in orders.status (pg_stats)',
+            },
           ],
         },
       ],
@@ -313,9 +389,15 @@ describe('ParameterDialog', () => {
     fireEvent.click(chip)
     const input = screen.getByPlaceholderText('Enter value') as HTMLInputElement
     expect(input.value).toBe('shipped')
-    expect(screen.getByText('Common value in orders.status (pg_stats)')).toBeTruthy()
+    expect(
+      screen.getByText('Common value in orders.status (pg_stats)')
+    ).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Analyze captured statement' }))
-    expect(onSubmit).toHaveBeenCalledWith("SELECT * FROM orders WHERE status = 'shipped'")
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Analyze captured statement' })
+    )
+    expect(onSubmit).toHaveBeenCalledWith(
+      "SELECT * FROM orders WHERE status = 'shipped'"
+    )
   })
 })

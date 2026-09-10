@@ -5,9 +5,11 @@ import {
   analysisRunKey,
   setAnalysisRunObserver,
   useAnalysisRunForQuery,
+  useAnalysisRunKeyForHash,
 } from './analysisRuns'
 import {
   __resetBackgroundRunsForTests,
+  cancelBackgroundRun,
   getBackgroundRuns,
 } from './backgroundRuns'
 import { useAnalyze } from './sse'
@@ -138,6 +140,30 @@ describe('a run a closed view can still be found by', () => {
     await waitFor(() => expect(card.result.current?.state).toBe('complete'))
   })
 
+  it('hands a reopened results view the run key its request cannot rebuild', async () => {
+    const stream = stubOpenStream()
+
+    // The drawer measured the SQL it substituted values into; the view that
+    // reopens the query only has the placeholder SQL from the registry.
+    const starter = renderHook(() => useAnalyze())
+    await act(async () => {
+      await starter.result.current.analyze(
+        { query: 'SELECT 1 WHERE id = 7', target: 'prod' },
+        { queryHash: 'h1' }
+      )
+    })
+    starter.unmount()
+
+    const reopened = renderHook(() => {
+      const key = useAnalysisRunKeyForHash('h1')
+      return useAnalyze(key ?? analysisRunKey(REQUEST))
+    })
+    expect(reopened.result.current.state).toBe('analyzing')
+
+    await stream.complete()
+    await waitFor(() => expect(reopened.result.current.state).toBe('complete'))
+  })
+
   it('answers by request identity for a run started without a hash', async () => {
     stubOpenStream()
 
@@ -188,6 +214,35 @@ describe('analyze runs in the jobs sidebar', () => {
       expect(job?.status).toBe('done')
     })
     expect(localStorage.getItem('rdst_background_runs')).toBeNull()
+  })
+
+  it('settles the run and the views watching it when the job is stopped', async () => {
+    stubOpenStream()
+
+    const view = renderHook(() => useAnalyze())
+    const card = renderHook(() =>
+      useAnalysisRunForQuery({ hash: 'h1', sql: REQUEST.query, target: 'prod' })
+    )
+    await act(async () => {
+      await view.result.current.analyze(REQUEST, { queryHash: 'h1' })
+    })
+    const [job] = getBackgroundRuns().filter((run) => run.kind === 'analyze')
+
+    await act(async () => {
+      await cancelBackgroundRun(job.runId)
+    })
+
+    // Terminal everywhere: the run reports itself as cancelled rather than
+    // vanishing into an idle state the page would start over from (B-10).
+    expect(view.result.current.state).toBe('cancelled')
+    expect(card.result.current?.state).toBe('cancelled')
+    const [stopped] = getBackgroundRuns().filter(
+      (run) => run.kind === 'analyze'
+    )
+    expect(stopped).toMatchObject({
+      status: 'cancelled',
+      message: 'Analysis cancelled',
+    })
   })
 
   it('replaces the job when the same query is measured again', async () => {

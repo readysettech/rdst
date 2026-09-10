@@ -4,9 +4,10 @@ import { Icon } from '@rs/ui-new/icon'
 import { m } from '@rs/ui-new/motion'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
+import { getTransition } from '@rs/ui-new/transition'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AskClarification } from '../features/ask/AskClarification'
 import { AskComposer } from '../features/ask/AskComposer'
 import { AskErrorState } from '../features/ask/AskErrorState'
@@ -20,6 +21,8 @@ import { TrialRegistrationDialog } from './TrialRegistrationDialog'
 
 interface AskPanelProps {
   target?: string | null
+  /** The default target is still being looked up, so nothing is known yet. */
+  targetResolving?: boolean
   disabled?: boolean
   beforeRun?: () => Promise<boolean>
 }
@@ -30,6 +33,7 @@ function sourceLabel(source: string | undefined): string {
 
 export function AskPanel({
   target,
+  targetResolving = false,
   disabled = false,
   beforeRun,
 }: AskPanelProps) {
@@ -138,6 +142,22 @@ export function AskPanel({
     })
   }, [navigate, result?.query_hash])
 
+  // Sending replaces the composer with the outcome, so the keyboard has to be
+  // told where it went: focus lands on the outcome region and a live region
+  // names it, instead of dropping to <body>. [C-20]
+  const outcomeRef = useRef<HTMLDivElement>(null)
+  const outcome =
+    state === 'complete' && result
+      ? 'Answer ready.'
+      : state === 'clarification_needed' && clarification
+        ? 'One more detail needed before answering.'
+        : state === 'error' && error
+          ? 'The question could not be answered.'
+          : ''
+  useEffect(() => {
+    if (outcome) outcomeRef.current?.focus()
+  }, [outcome])
+
   const isLoading = state === 'loading' || state === 'generating'
   const executedSql = result?.sql ?? sqlGenerated?.sql ?? ''
   const limitAdded =
@@ -148,8 +168,11 @@ export function AskPanel({
         /\blimit\b/i.test(result.sql) &&
         !/\blimit\b/i.test(sqlGenerated.sql)
     )
-  const runsAgainst = target ?? 'demo'
-  const answeredFrom = schemaLoaded?.target || askedTarget || 'demo'
+  // An unresolved target is never silently swapped for another database: the
+  // composer says there is none and the run action stays closed. [F-26]
+  const runsAgainst = target ?? null
+  const answeredFrom =
+    schemaLoaded?.target || askedTarget || target || 'the selected target'
 
   return (
     <VStack className="gap-6 w-full">
@@ -157,16 +180,16 @@ export function AskPanel({
         <m.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35 }}
+          transition={getTransition()}
           className="grid w-full gap-4 laptop:grid-cols-3"
         >
           <div className="min-w-0 laptop:col-span-2">
             <AskComposer
               question={question}
               target={runsAgainst}
-              disabled={disabled}
+              disabled={disabled || !runsAgainst}
               examples={examplesQuery.data?.examples ?? []}
-              examplesLoading={examplesQuery.isLoading}
+              examplesLoading={examplesQuery.isLoading || targetResolving}
               examplesError={examplesQuery.isError}
               onQuestionChange={setQuestion}
               onSubmit={() => void handleSubmit()}
@@ -178,7 +201,7 @@ export function AskPanel({
             <AskHistory
               items={historyQuery.data?.items ?? []}
               disabled={disabled}
-              loading={historyQuery.isLoading}
+              loading={historyQuery.isLoading || targetResolving}
               error={historyQuery.isError}
               onReask={(pastQuestion) => void handleReask(pastQuestion)}
               onRetry={() => void historyQuery.refetch()}
@@ -192,7 +215,7 @@ export function AskPanel({
           className="w-full"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.3 }}
+          transition={getTransition()}
         >
           <AskProgress
             status={status}
@@ -246,54 +269,67 @@ export function AskPanel({
         </Card>
       )}
 
-      {state === 'clarification_needed' && clarification && (
-        <m.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-        >
-          <AskClarification
+      <div
+        ref={outcomeRef}
+        tabIndex={-1}
+        data-testid="ask-outcome"
+        className="w-full outline-none"
+      >
+        <span aria-live="polite" className="sr-only">
+          {outcome}
+        </span>
+        {state === 'clarification_needed' && clarification && (
+          <m.div
+            className="w-full"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={getTransition()}
+          >
+            <AskClarification
+              question={question}
+              questions={clarification.questions}
+              onSubmit={handleClarificationSubmit}
+              onEditQuestion={handleRefine}
+              disabled={disabled}
+            />
+          </m.div>
+        )}
+
+        {state === 'complete' && result && (
+          <AskResult
             question={question}
-            questions={clarification.questions}
-            onSubmit={handleClarificationSubmit}
-            onEditQuestion={handleRefine}
-            disabled={disabled}
-          />
-        </m.div>
-      )}
-
-      {state === 'complete' && result && (
-        <AskResult
-          question={question}
-          result={result}
-          sqlGenerated={sqlGenerated}
-          answeredFrom={answeredFrom}
-          provenanceSource={sourceLabel(schemaLoaded?.source)}
-          savedTag={result.query_tag || ''}
-          executedSql={executedSql}
-          limitAdded={limitAdded}
-          onViewInQueries={handleViewInQueries}
-          onAnalyze={handleAnalyze}
-          onRefine={handleRefine}
-          onNewQuestion={handleNewQuestion}
-        />
-      )}
-
-      {state === 'error' && error && (
-        <m.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.3 }}
-        >
-          <AskErrorState
-            error={error}
-            target={target}
-            onRetry={handleRetry}
+            result={result}
+            sqlGenerated={sqlGenerated}
+            answeredFrom={answeredFrom}
+            provenanceSource={sourceLabel(schemaLoaded?.source)}
+            savedTag={result.query_tag || ''}
+            executedSql={executedSql}
+            limitAdded={limitAdded}
+            onViewInQueries={handleViewInQueries}
+            onAnalyze={handleAnalyze}
+            onRefine={handleRefine}
             onNewQuestion={handleNewQuestion}
-            onStartTrial={() => setShowTrialDialog(true)}
           />
-        </m.div>
-      )}
+        )}
+
+        {state === 'error' && error && (
+          <m.div
+            className="w-full"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={getTransition()}
+          >
+            <AskErrorState
+              error={error}
+              question={question}
+              target={target}
+              onRetry={handleRetry}
+              onRefine={handleRefine}
+              onStartTrial={() => setShowTrialDialog(true)}
+            />
+          </m.div>
+        )}
+      </div>
 
       <TrialRegistrationDialog
         isOpen={showTrialDialog}

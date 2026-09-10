@@ -1,8 +1,10 @@
 import { cn } from '@rs/tailwind-base'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { Card } from '@rs/ui-new/card-2'
 import { Skeleton } from '@rs/ui-new/skeleton'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
+import { type StatusTone, statusToneIcon } from '../shared/statusTone'
 import {
   type CompareBatchSnapshot,
   type CompareBatchStatus,
@@ -23,6 +25,29 @@ export function compareStatusLabel(status: CompareBatchStatus) {
   if (status === 'failed') return 'Failed'
   if (status === 'cancelled') return 'Cancelled'
   return 'Comparing'
+}
+
+/**
+ * A whole batch's tone, shared by the verdict band and the history rows so a
+ * failed batch can never be painted like a complete one. Cancelling is a
+ * choice the user made, not a fault, so it reads neutral.
+ */
+export function compareStatusTone(status: CompareBatchStatus): StatusTone {
+  if (status === 'complete') return 'positive'
+  if (status === 'partial') return 'warning'
+  if (status === 'failed') return 'negative'
+  if (status === 'cancelled') return 'neutral'
+  return 'informative'
+}
+
+/** The label, tone and icon a batch-status Tag needs to satisfy rule 4. */
+export function compareStatusPresentation(status: CompareBatchStatus) {
+  const tone = compareStatusTone(status)
+  return {
+    label: compareStatusLabel(status),
+    variant: tone,
+    icon: statusToneIcon(tone),
+  }
 }
 
 /**
@@ -95,14 +120,20 @@ export function formatQps(value: number | null | undefined) {
 // are close enough that naming a winner would overstate the measurement.
 const COMPARE_TIE_MARGIN = 1.05
 
+interface CompareChip {
+  label: string
+  variant: StatusTone
+  /** Statuses carry one; a measurement readout is a value, not a status. */
+  icon?: IconStrokeName
+}
+
 /**
  * The chip every surface uses for one query's outcome: the verdict, its tone,
  * and (for a measurement) the speedup it produced.
  */
-export function compareQueryOutcomePresentation(outcome: CompareQueryOutcome): {
-  label: string
-  variant: 'positive' | 'warning' | 'negative' | 'informative' | 'neutral'
-} {
+export function compareQueryOutcomePresentation(
+  outcome: CompareQueryOutcome
+): CompareChip {
   if (outcome.status === 'succeeded') {
     const speedup = outcome.result?.speedup_mean
     if (!speedup) return { label: 'Measured', variant: 'positive' }
@@ -117,22 +148,21 @@ export function compareQueryOutcomePresentation(outcome: CompareQueryOutcome): {
     }
     return { label: 'About the same', variant: 'warning' }
   }
-  if (outcome.status === 'queued') {
-    return { label: 'Queued', variant: 'neutral' }
-  }
-  if (outcome.status === 'running') {
-    return { label: 'Running', variant: 'informative' }
-  }
-  if (outcome.status === 'cancelled') {
-    return { label: 'Cancelled', variant: 'warning' }
-  }
+  if (outcome.status === 'queued') return statusChip('Queued', 'neutral')
+  if (outcome.status === 'running') return statusChip('Running', 'informative')
+  // Stopping a comparison is a choice, not a fault.
+  if (outcome.status === 'cancelled') return statusChip('Cancelled', 'neutral')
   if (isUnsupportedCompareOutcome(outcome)) {
-    return { label: 'Unsupported', variant: 'warning' }
+    return statusChip('Unsupported', 'warning')
   }
   if (isNotComparableCompareOutcome(outcome)) {
-    return { label: 'Not comparable', variant: 'warning' }
+    return statusChip('Not comparable', 'warning')
   }
-  return { label: 'Failed', variant: 'negative' }
+  return statusChip('Failed', 'negative')
+}
+
+function statusChip(label: string, variant: StatusTone): CompareChip {
+  return { label, variant, icon: statusToneIcon(variant) }
 }
 
 /**
@@ -142,7 +172,7 @@ export function compareQueryOutcomePresentation(outcome: CompareQueryOutcome): {
  */
 export function compareQueryStatusChip(outcome: CompareQueryOutcome) {
   return outcome.status === 'succeeded'
-    ? { label: 'Compared', variant: 'positive' as const }
+    ? statusChip('Compared', 'positive')
     : compareQueryOutcomePresentation(outcome)
 }
 

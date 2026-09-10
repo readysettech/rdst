@@ -1,10 +1,12 @@
 import { tv } from '@rs/tailwind-base'
 import type { IconStrokeName } from '@rs/ui-icons/icon-name'
+import { focusRing } from '@rs/ui-new/focus'
 import { Icon } from '@rs/ui-new/icon'
+import { IconButton } from '@rs/ui-new/icon-button'
 import { Pressable } from '@rs/ui-new/pressable'
 import { Scrollable } from '@rs/ui-new/scrollable'
+import { HStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
-import { useQuery } from '@tanstack/react-query'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { ActivityPulse } from '../components/audit/ActivityPulse'
@@ -13,34 +15,20 @@ import { DesktopUpdateControl } from '../components/DesktopUpdateControl'
 import { ReportDialog } from '../components/ReportDialog'
 import { TargetDropdown } from '../components/TargetDropdown'
 import { SetupGuideHelpEntry } from '../features/setup/SetupGuideHelpEntry'
+import { SetupSteps } from '../features/setup/SetupSteps'
 import { useTarget } from '../hooks/useTarget'
 import { trackEvent } from '../lib/analytics'
-import { fetchAccountStatus } from '../lib/api'
 import { useAuditSessionActive } from '../lib/auditSession'
 import type { DesktopUpdateState } from '../lib/desktop'
 import { useSystemStatus } from '../lib/useSystemStatus'
 import { VALUE_PROPOSITION } from '../lib/valueProposition'
-
-// Plain-text acknowledgement of who is signed in; deliberately not a control.
-function SidebarIdentity() {
-  const { data } = useQuery({
-    queryKey: ['account-status'],
-    queryFn: fetchAccountStatus,
-    staleTime: 60_000,
-  })
-  if (!data?.signed_in || !data.email) return null
-  return (
-    <div data-testid="sidebar-account-email" className="px-3 py-1">
-      <Text as="div" level="caption" className="truncate text-content-layout-3">
-        {data.email}
-      </Text>
-    </div>
-  )
-}
+import { SidebarAccountMenu } from './SidebarAccountMenu'
 
 const sidebarStyles = tv({
   base: [
-    'w-80',
+    // Full-width drawer below tablet; a narrower rail from tablet up so the
+    // 1024px floor keeps a readable content column, back to 320px at desktop.
+    'w-80 tablet:w-64 desktop:w-80',
     'flex',
     'flex-col',
     'border-r border-border-layout-1',
@@ -80,16 +68,14 @@ const navItemStyles = tv({
     'rounded-lg',
     'text-sm',
     'text-content-layout-2',
-    'transition-all',
+    // box-shadow is left out on purpose: the focus ring must be on screen the
+    // instant the caret arrives, not 150ms later.
+    'transition-[background-color,color]',
     'duration-150',
     'w-full',
     'hover:bg-surface-layout-2',
     'hover:text-content-layout-1',
-    'focus-visible:outline-none',
-    'focus-visible:ring-2',
-    'focus-visible:ring-border-primary-soft',
-    'focus-visible:ring-offset-2',
-    'focus-visible:ring-offset-surface-layout-1',
+    ...focusRing,
     'group',
   ],
   variants: {
@@ -122,8 +108,8 @@ interface NavItem {
 const homeItem: NavItem = { label: 'Home', icon: 'dashboard', to: '/' }
 
 // The daily nav is a single flat list, top to bottom: Home, Ask, the Queries
-// workspace, Benchmarks, Health Check, Schema, then the demo.
-// Experimental surfaces (/scan, /agents, /guards) stay off the nav until they
+// workspace, Benchmarks, Health check, Schema, then the demo.
+// Experimental surfaces (/scan, /guards) stay off the nav until they
 // ship for real; their routes remain reachable by URL and keep their on-page
 // Experimental banners.
 const primaryItems: NavItem[] = [
@@ -177,6 +163,7 @@ function NavLink({
   return (
     <Link
       to={item.to}
+      aria-current={active ? 'page' : undefined}
       className={navItemStyles({ active, size })}
       onClick={() => {
         trackEvent('nav_item_clicked', { label: item.label })
@@ -185,7 +172,7 @@ function NavLink({
     >
       <Icon
         name={item.icon}
-        label={item.label}
+        label=""
         className={`w-4 h-4 transition-transform group-hover:scale-110 ${
           active ? 'text-content-primary-soft' : 'text-content-layout-3'
         }`}
@@ -348,15 +335,30 @@ export function Sidebar({
           strip above the target selector. */}
         {isElectronMac && <div className="draggable-region h-8 shrink-0" />}
 
-        {/* Target selector. */}
+        {/* Target selector, with the drawer's own dismiss beside it: below
+          tablet the scrim is a 70px strip, so touch needs an explicit
+          control [USE-090]. */}
         <div className="border-b border-border-layout-1">
           <div className="draggable-region h-14">
-            <div className="no-drag h-full">
-              <TargetDropdown
-                selectedTarget={selectedTarget}
-                onSelectTarget={setSelectedTarget}
-              />
-            </div>
+            <HStack className="no-drag h-full min-w-0 items-center">
+              <div className="min-w-0 flex-1">
+                <TargetDropdown
+                  selectedTarget={selectedTarget}
+                  onSelectTarget={setSelectedTarget}
+                />
+              </div>
+              <div className="pr-2 tablet:hidden">
+                <IconButton
+                  icon="close"
+                  label="Close navigation"
+                  variant="primary"
+                  modifier="ghost"
+                  size="small"
+                  tooltip={false}
+                  onClick={onMobileClose}
+                />
+              </div>
+            </HStack>
           </div>
         </div>
 
@@ -372,7 +374,7 @@ export function Sidebar({
 
         {/* Navigation — persistent scrollbar keeps the full list reachable
           below the fold at 1280×720. [QW2] */}
-        <Scrollable className="flex-1" type="auto">
+        <Scrollable className="min-h-0 flex-1" type="auto">
           <nav className="flex flex-col gap-2 p-2">
             <div className="flex flex-col gap-1">
               <NavLink
@@ -399,9 +401,9 @@ export function Sidebar({
         {/* Footer — status (who's signed in, what's running,
           app update) and utilities (upsell + links) are separate groups: the
           gap between groups exceeds the gap within either one (F6, VIS-036). */}
-        <div className="p-2 border-t border-border-layout-1">
+        <div className="shrink-0 p-2 border-t border-border-layout-1">
           <div data-testid="sidebar-footer-status" className="space-y-1">
-            <SidebarIdentity />
+            <SidebarAccountMenu onNavigate={onMobileClose} />
             <BackgroundRuns />
             {desktopUpdateState && (
               <div className="flex justify-end px-3 py-2">
@@ -412,6 +414,12 @@ export function Sidebar({
               </div>
             )}
           </div>
+
+          {/* The setup checklist, above the utilities: chrome that sits beside
+              the page rather than an overlay on top of it, in the drawer as
+              much as on the desktop sidebar. It retires itself once every step
+              is done, and the utility below brings it back once hidden. */}
+          <SetupSteps />
 
           <div
             data-testid="sidebar-footer-utilities"
@@ -468,11 +476,11 @@ export function Sidebar({
                 className: 'cursor-pointer',
               })}
             >
-              {/* Distinct feedback glyph — no longer the Agents `message-multiple`
+              {/* Distinct feedback glyph, reserved for this action alone
                 (chrome prescription #9, VIS-008/010). */}
               <Icon
                 name="customer-support"
-                label="Give feedback"
+                label=""
                 className="w-4 h-4 text-content-layout-3 group-hover:scale-110 transition-transform"
               />
               <span>Give feedback</span>

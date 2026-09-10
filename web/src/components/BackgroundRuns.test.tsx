@@ -54,6 +54,12 @@ function openJobs() {
   fireEvent.click(screen.getByTestId('jobs-trigger'))
 }
 
+/** Stopping a job is two deliberate steps: the labelled Stop, then a confirm. */
+function stopJob(title: string) {
+  fireEvent.click(screen.getByTitle(title))
+  fireEvent.click(screen.getByRole('button', { name: 'Stop job' }))
+}
+
 function run(
   partial: Partial<backgroundRuns.BackgroundRunState>
 ): backgroundRuns.BackgroundRunState {
@@ -132,7 +138,7 @@ describe('BackgroundRuns', () => {
     )
     openJobs()
     expect(screen.getByText('1 job running')).toBeTruthy()
-    fireEvent.click(screen.getByLabelText('Cancel Annotating imdb'))
+    stopJob('Stop Annotating imdb')
     expect(backgroundRuns.cancelBackgroundRun).toHaveBeenCalledWith(
       'schema_annotation_imdb_x'
     )
@@ -231,7 +237,7 @@ describe('BackgroundRuns', () => {
     render(<BackgroundRuns />)
 
     const trigger = screen.getByTestId('jobs-trigger')
-    expect(trigger.textContent).toContain('Testing Top customers')
+    expect(trigger.textContent).toContain('Load test · Top customers')
     expect(trigger.textContent).toContain(
       'Connection failed. Check the database credentials.'
     )
@@ -256,7 +262,8 @@ describe('BackgroundRuns', () => {
     render(<BackgroundRuns />)
     openJobs()
 
-    fireEvent.click(screen.getByLabelText('Cancel Annotating imdb'))
+    stopJob('Stop Annotating imdb')
+    openJobs()
     fireEvent.click(screen.getByTitle('Dismiss job'))
 
     expect(backgroundRuns.cancelBackgroundRun).toHaveBeenCalledWith(
@@ -265,6 +272,45 @@ describe('BackgroundRuns', () => {
     expect(backgroundRuns.dismissBackgroundRun).toHaveBeenCalledWith(
       'bootstrap_imdb_done'
     )
+  })
+
+  it('asks before stopping a running job, and keeps it on a refusal (B-10)', () => {
+    useRuns.mockReturnValue([run({})])
+    render(<BackgroundRuns />)
+    openJobs()
+
+    // The stop affordance says what it does, unlike the dismiss X next to it.
+    const stop = screen.getByTitle('Stop Annotating imdb')
+    expect(stop.textContent).toContain('Stop')
+
+    fireEvent.click(stop)
+    expect(screen.getByText('Stop this job?')).toBeTruthy()
+    // The dialog names the job it would stop, next to the action.
+    expect(screen.getAllByText('Annotating imdb').length).toBeGreaterThan(1)
+    expect(backgroundRuns.cancelBackgroundRun).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep running' }))
+    expect(backgroundRuns.cancelBackgroundRun).not.toHaveBeenCalled()
+  })
+
+  it('reports a cancelled analysis rather than dropping it (B-10)', () => {
+    useRuns.mockReturnValue([
+      run({
+        runId: 'analyze_1',
+        kind: 'analyze',
+        target: 'demo',
+        status: 'cancelled',
+        message: 'Analysis cancelled',
+        queryHash: 'h1',
+        queryLabel: 'Orders lookup',
+        local: true,
+      }),
+    ])
+    render(<BackgroundRuns />)
+    openJobs()
+
+    expect(screen.getAllByText('Analysis cancelled').length).toBeGreaterThan(0)
+    expect(screen.getByText('Cancelled')).toBeTruthy()
   })
 
   it('shows the no-op completion message for an already annotated schema', () => {
@@ -292,7 +338,7 @@ describe('BackgroundRuns', () => {
         status: 'done',
         queryHash: 'abc123',
         queryLabel: 'Top customers',
-        message: 'Performance test complete',
+        message: 'Load test complete',
       }),
     ])
 
@@ -349,7 +395,7 @@ describe('BackgroundRuns', () => {
 
     render(<BackgroundRuns />)
     openJobs()
-    fireEvent.click(screen.getByLabelText('Dismiss Testing Top customers'))
+    fireEvent.click(screen.getByLabelText('Dismiss Load test · Top customers'))
 
     expect(backgroundRuns.dismissBackgroundRun).toHaveBeenCalledWith(
       'cache_test_imdb_failed'

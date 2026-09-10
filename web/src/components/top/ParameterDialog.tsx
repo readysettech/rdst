@@ -41,6 +41,11 @@ export { hasParameters }
 interface ParameterDialogProps {
   isOpen: boolean
   onClose: () => void
+  /**
+   * Escape over an inline form, when stepping out of the form is not the same
+   * as leaving the surface around it. Defaults to `onClose`.
+   */
+  onEscape?: () => void
   onSubmit: (substitutedQuery: string) => void
   query: string
   initialValues?: Record<string, unknown>
@@ -67,6 +72,7 @@ function sampledSuggestionKey(suggestion: ParameterSuggestion): string {
 export function ParameterDialog({
   isOpen,
   onClose,
+  onEscape,
   onSubmit,
   query,
   initialValues,
@@ -252,6 +258,24 @@ export function ParameterDialog({
   const allFilled = Object.values(values).every((v) => v.trim() !== '')
   const description = `${parameters.length} parameter${parameters.length === 1 ? '' : 's'} detected. Values apply only to this run.`
 
+  // Escape belongs to the innermost open layer. The inline form is a layer the
+  // overlay it sits in knows nothing about, so it claims the key first — from
+  // `window`, which the capture phase reaches before the document the overlay
+  // listens on — and steps back out of the form alone, keeping the typed
+  // values' surroundings in place. [B-17]
+  useEffect(() => {
+    if (!isInline || !isOpen) return
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.stopPropagation()
+      event.preventDefault()
+      ;(onEscape ?? onClose)()
+    }
+    window.addEventListener('keydown', handleEscape, { capture: true })
+    return () =>
+      window.removeEventListener('keydown', handleEscape, { capture: true })
+  }, [isInline, isOpen, onClose, onEscape])
+
   const footer = (
     <div className="flex items-center justify-end gap-3">
       {residualError ? (
@@ -287,14 +311,16 @@ export function ParameterDialog({
           : 'grid h-[min(65vh,560px)] grid-cols-1 gap-6 p-6 md:grid-cols-2'
       }
     >
-      {/* Left: SQL Query */}
+      {/* Left: SQL Query. The only query block on screen while values are
+          being collected, so it is titled as the query rather than as one half
+          of a pair (B-04). */}
       <div className="flex flex-col min-h-0">
         <Text
           as="label"
           level="label-small"
           className="text-content-layout-3 uppercase tracking-wider mb-2 shrink-0"
         >
-          Original query
+          Query
         </Text>
         <div
           className={`bg-surface-layout-1 rounded-lg p-3 border border-border-layout-1 overflow-auto [&_.cm-scroller]:!overflow-visible ${
@@ -484,6 +510,18 @@ export function ParameterDialog({
         className="rounded-2xl border-(length:--border-base) border-border-layout-1 bg-surface-layout-2"
         aria-label="Enter parameter values"
         data-testid="parameter-form-inline"
+        // A value field is a single-line form field, so Enter runs the form
+        // the way Enter runs every other one. [B-17]
+        onKeyDown={(event) => {
+          if (
+            event.key === 'Enter' &&
+            allFilled &&
+            event.target instanceof HTMLInputElement
+          ) {
+            event.preventDefault()
+            handleSubmit()
+          }
+        }}
       >
         <header className="flex min-w-0 items-start gap-3 border-b-(length:--border-base) border-border-layout-1 px-4 py-3">
           <IconTile icon="edit" size="base" accent="primary" />

@@ -10,6 +10,7 @@ import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card'
 import { ErrorState, InlineNotice } from '@rs/ui-new/error-state'
 import { Icon } from '@rs/ui-new/icon'
+import { IconTile } from '@rs/ui-new/icon-tile'
 import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { TabItemButton, TabList } from '@rs/ui-new/tab'
@@ -61,8 +62,8 @@ import { useAiGate } from '../lib/useAiGate'
 import { fetchAuditRuns, useAuditCapture } from '../lib/useAudit'
 import { useEnvRequirements } from '../lib/useEnvRequirements'
 import {
-  fetchFleetSnapshots,
   fetchFleetAwsStatus,
+  fetchFleetSnapshots,
   fetchFleetTargets,
   useFleetAudit,
   useFleetStatus,
@@ -82,11 +83,13 @@ export const Route = createFileRoute('/audit')({
 function CaptureElapsed({
   session,
   phase,
+  scopeLabel,
   statusMessage,
   progressElapsedSeconds,
 }: {
   session: ActiveAuditSession
   phase: string | undefined
+  scopeLabel?: string
   statusMessage: string | undefined
   progressElapsedSeconds: number | undefined
 }) {
@@ -104,6 +107,7 @@ function CaptureElapsed({
   return (
     <RunProgress
       phase={phase}
+      scopeLabel={scopeLabel}
       statusMessage={statusMessage}
       durationSeconds={session.durationSeconds}
       elapsedSeconds={elapsedSeconds}
@@ -125,8 +129,16 @@ function AuditPage() {
   const activeSession = useAuditSession()
   const auditPresentation = useAuditPresentation()
 
-  // Inventory feeding the always-visible target picker.
-  const { data: inventory } = useQuery({
+  // Inventory feeding the always-visible target picker. A pending or failed
+  // inventory is carried through rather than flattened into "you have none":
+  // an empty picker under "select one or more targets" sends the user looking
+  // for a problem they do not have. [F-20, F-25]
+  const {
+    data: inventory,
+    isPending: inventoryPending,
+    isError: inventoryFailed,
+    refetch: refetchInventory,
+  } = useQuery({
     queryKey: ['fleet-targets'],
     queryFn: () => fetchFleetTargets(),
     staleTime: 30_000,
@@ -188,6 +200,15 @@ function AuditPage() {
   useEffect(() => {
     setPreflight(null)
   }, [selectedTargets.join('\u0000')])
+
+  // A connection failure contradicts the checklist that just said "Database
+  // reachable - Passed", so the run drops it rather than showing both. [E-14]
+  useEffect(() => {
+    if (captureState !== 'error' || !captureError) return
+    if (classifyError({ code: '', message: captureError }) !== 'database')
+      return
+    setPreflight(null)
+  }, [captureState, captureError])
 
   const selectedMembers = useMemo(
     () => members.filter((member) => selectedTargets.includes(member.name)),
@@ -332,12 +353,20 @@ function AuditPage() {
     await navigate({ to: '/audit/runs/$runId', params: { runId: entry.id } })
   }
 
+  // A target that failed is only named on the run view, so navigating straight
+  // to the report on completion is what made a partial run look clean. With an
+  // unacknowledged failure the run view stays put and offers the report. [E-02]
+  const failedFleetTargets = Object.entries(fleetAudit.targets)
+    .filter(([, state]) => state.status === 'error')
+    .map(([name]) => name)
+
   const handledCompletion = useRef<number | null>(null)
   useEffect(() => {
     const completed = auditPresentation.completed
     if (
       view !== 'run' ||
       !completed ||
+      failedFleetTargets.length > 0 ||
       handledCompletion.current === completed.id
     )
       return
@@ -378,9 +407,10 @@ function AuditPage() {
   }, [view])
 
   const showFleetRun =
-    fleetAudit.state === 'running' || fleetAudit.state === 'error'
+    fleetAudit.state === 'running' ||
+    fleetAudit.state === 'error' ||
+    (fleetAudit.state === 'complete' && failedFleetTargets.length > 0)
 
-  const aiBlocked = aiGate.status === 'blocked' || aiGate.status === 'checking'
   // Selecting a target never blocks on a missing password. A locked target is
   // surfaced at preflight (the checklist's inline "Set password"), not on the
   // pick, so choosing targets stays friction-free.
@@ -390,24 +420,45 @@ function AuditPage() {
     isAuditPreflightBlocked(preflight, {
       requireQueryStats: captureDuration > 0,
     })
+  // The health check's own output — metrics, capture, sizing, cache
+  // opportunity — needs no LLM, and the run already degrades to "Analysis
+  // skipped" when one is unavailable. The preflight checklist names the AI
+  // state and offers to fix it; it never holds the run back. [MG-01]
   const launcherDisabled =
-    busy ||
-    requirementsBusy ||
-    aiBlocked ||
-    !selectionReady ||
-    preflightBlocksLaunch
+    busy || requirementsBusy || !selectionReady || preflightBlocksLaunch
   const fleetTargetNames =
     activeSession?.kind === 'fleet' && activeSession.targetNames.length > 0
       ? activeSession.targetNames
       : Object.keys(fleetAudit.targets).length > 0
         ? Object.keys(fleetAudit.targets)
         : selectedTargets
+  // Past tense once the run is over: a finished or failed run kept saying it
+  // was "RUNNING ON 3 TARGETS". [E-13]
+  const fleetVerb =
+    fleetAudit.state === 'running'
+      ? 'Running on'
+      : fleetAudit.state === 'error'
+        ? 'Failed on'
+        : 'Completed on'
   const fleetScopeLabel =
     fleetTargetNames.length === 1
-      ? `Running on ${fleetTargetNames[0]}`
-      : `Running on ${fleetTargetNames.length} targets: ${fleetTargetNames.join(', ')}`
+      ? `${fleetVerb} ${fleetTargetNames[0]}`
+      : `${fleetVerb} ${fleetTargetNames.length} targets: ${fleetTargetNames.join(', ')}`
 
-  const scopeControl = (
+  const scopeControl = inventoryFailed ? (
+    <ErrorState
+      errorClass="rdst-service"
+      title="Could not load your database targets"
+      message="RDST could not list the configured targets, so there is nothing to select yet."
+      trustworthy="No run was started and earlier reports are unaffected."
+      onRetry={() => void refetchInventory()}
+      action={{
+        label: 'Manage targets in Settings',
+        icon: 'chevron-right',
+        onClick: () => void navigate({ to: '/configure', hash: 'connections' }),
+      }}
+    />
+  ) : (
     <VStack className="gap-2 items-stretch">
       <ScopeSelector
         members={members}
@@ -416,8 +467,12 @@ function AuditPage() {
         onSelectionChange={setSelectedTargets}
         disabled={busy}
         collapsed={busy}
+        isPending={inventoryPending}
+        onAddTarget={() =>
+          void navigate({ to: '/configure', hash: 'connections' })
+        }
       />
-      <HStack className="justify-end items-center gap-1">
+      <HStack className="flex-col items-start gap-1 tablet:flex-row tablet:items-center tablet:justify-end">
         <Text level="caption" className="text-content-layout-3">
           Not seeing a target you expected?
         </Text>
@@ -481,6 +536,8 @@ function AuditPage() {
       captureDuration={captureDuration}
       onDurationChange={setCaptureDuration}
       selectedTargets={selectedTargets}
+      targetsPending={inventoryPending}
+      targetsUnavailable={inventoryFailed}
       runSolid={
         !preflight?.aws.required || !!preflight.aws.status?.has_credentials
       }
@@ -515,11 +572,21 @@ function AuditPage() {
 
   return (
     <div className="space-y-6 w-full">
-      <Text as="h1" level="headline-3" className="text-content-layout-1">
-        Health Check
-      </Text>
+      {/* The hero anatomy every other route carries: tile, title, one line of
+          description. */}
+      <HStack className="items-start gap-4 min-w-0">
+        <IconTile icon="document-validation" />
+        <VStack className="gap-1 items-start min-w-0">
+          <Text as="h1" level="headline-3" className="text-content-layout-1">
+            Health check
+          </Text>
+          <Text level="body-small" className="text-content-layout-3">
+            Capture live database activity and report what it costs.
+          </Text>
+        </VStack>
+      </HStack>
 
-      <TabList aria-label="Health Check sections" className="gap-6">
+      <TabList aria-label="Health check sections" className="gap-6">
         {(['run', 'history'] as const).map((tab) => (
           <TabItemButton
             key={tab}
@@ -534,24 +601,17 @@ function AuditPage() {
       {view === 'run' && launcher}
 
       {view === 'run' && activeSession?.kind !== 'fleet' && activeSession && (
-        <VStack className="gap-3 items-stretch">
-          <div
-            className="truncate"
-            title={activeSession.targetNames.join(', ')}
-          >
-            <Text level="label-small" className="text-content-layout-1">
-              {activeSession.targetNames.length === 1
-                ? `Running on ${activeSession.targetNames[0]}`
-                : `Running on ${activeSession.targetNames.length} targets: ${activeSession.targetNames.join(', ')}`}
-            </Text>
-          </div>
-          <CaptureElapsed
-            session={activeSession}
-            phase={activePhase}
-            statusMessage={captureStatus ?? activeSession.statusMessage}
-            progressElapsedSeconds={captureProgress?.elapsedSeconds}
-          />
-        </VStack>
+        <CaptureElapsed
+          session={activeSession}
+          phase={activePhase}
+          scopeLabel={
+            activeSession.targetNames.length === 1
+              ? `Running on ${activeSession.targetNames[0]}`
+              : `Running on ${activeSession.targetNames.length} targets: ${activeSession.targetNames.join(', ')}`
+          }
+          statusMessage={captureStatus ?? activeSession.statusMessage}
+          progressElapsedSeconds={captureProgress?.elapsedSeconds}
+        />
       )}
 
       {/* Capture analysis warning (graceful degradation) */}
@@ -625,7 +685,6 @@ function AuditPage() {
             trustworthy="No capture was saved; earlier reports are unaffected."
             action={recoveryAction(captureErrorClass)}
             onRetry={() => void handleRun()}
-            retryLabel="Retry"
           />
         )}
       </Show>
@@ -635,6 +694,11 @@ function AuditPage() {
         <FleetRunSection
           scopeLabel={fleetScopeLabel}
           state={fleetAudit.state}
+          snapshotHref={
+            fleetAudit.snapshotId && fleetAudit.state === 'complete'
+              ? fleetAudit.snapshotId
+              : undefined
+          }
           phase={fleetAudit.phase}
           targets={fleetAudit.targets}
           statusMessage={fleetAudit.statusMessage}

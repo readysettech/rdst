@@ -16,7 +16,7 @@ const TEST_VIEWS: Array<{
   label: string
   icon: IconStrokeName
 }> = [
-  { value: 'compare', label: 'Compare', icon: 'play' },
+  { value: 'compare', label: 'Compare against Readyset', icon: 'play' },
   { value: 'load-test', label: 'Load test', icon: 'layers' },
 ]
 

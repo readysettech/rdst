@@ -83,10 +83,15 @@ async function selectQueryAndStart(page: Page, queryHash: string) {
   await expect(queryCard).toHaveRole('button')
   await queryCard.click()
   await page.getByRole('button', { name: 'Run comparison' }).click()
+  const review = page.getByRole('dialog', {
+    name: `Compare against ${targetName}?`,
+  })
+  await expect(review).toBeVisible()
+  await review.getByPlaceholder(targetName).fill(targetName)
   await expect(
-    page.getByRole('heading', { name: 'Start this comparison?' })
+    review.getByText('This is a remote database', { exact: true })
   ).toBeVisible()
-  await page.getByRole('button', { name: 'Start comparison' }).click()
+  await review.getByRole('button', { name: 'Run against remote' }).click()
 }
 
 test('pulls and uses the managed Readyset container from the web comparison', async ({

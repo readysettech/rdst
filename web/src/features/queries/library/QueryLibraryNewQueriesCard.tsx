@@ -50,7 +50,7 @@ export function QueryLibraryNewQueriesCard({
         <VStack className="min-w-0 flex-1 items-start gap-1">
           <Text
             level="overline"
-            className="text-content-rising-solid/80 uppercase tracking-wider"
+            className="text-content-rising-solid uppercase tracking-wider"
           >
             Workload update
           </Text>
@@ -63,7 +63,7 @@ export function QueryLibraryNewQueriesCard({
               ? pendingHeadline(pendingNewCount, pendingUpdatedCount)
               : `${reviewCount} new ${queryNoun(reviewCount)} ready to review`}
           </Text>
-          <Text level="body-small" className="text-content-rising-solid/80">
+          <Text level="body-small" className="text-content-rising-solid">
             {hasPending
               ? 'Readyset kept your current list still while these queries arrived.'
               : 'Review the new workload evidence, then clear the update when you are done.'}

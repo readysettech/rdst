@@ -16,6 +16,7 @@ import {
   TooltipTrigger,
 } from '@rs/ui-new/tooltip'
 import type { ReactNode } from 'react'
+import { ActivityPulse } from '../../../components/audit/ActivityPulse'
 import { QueryCacheStatus } from '../../../components/QueryCacheStatus'
 import { QueryCard, type QueryCardProps } from '../../../components/QueryCard'
 import { QueryCardImpact } from '../../../components/QueryCardImpact'
@@ -46,7 +47,7 @@ import type {
   QueryLibraryDisplayMode,
   QueryLibraryDisplayProperty,
 } from '../library/queryLibraryDisplay'
-import { analysisOutcome } from '../results/resultsSelectors'
+import { analysisOutcome, type ResultTone } from '../results/resultsSelectors'
 import { analyzedAgoLabel } from '../results/storedAnalysis'
 import { SavedQueryMenu } from './SavedQueryMenu'
 import { reportsCacheTestRun, SavedQueryTestPanel } from './SavedQueryTestPanel'
@@ -69,6 +70,24 @@ interface SavedQueryRowProps {
 
 function QueryImpactRail({ entry }: { entry: QueryRegistryEntry }) {
   const runs = entry.observation_count ?? entry.frequency ?? 0
+
+  // A query the captured workload has never run has no measurement, and a
+  // zero reads as one. The rail says so instead of quoting figures. [B-18]
+  if (queryImpactMs(entry) <= 0) {
+    return (
+      <VStack className="h-full min-h-44 items-start justify-start gap-1">
+        <Text level="caption" className="text-content-layout-3">
+          Database time
+        </Text>
+        <Text level="headline-3" className="text-content-layout-2">
+          Not yet observed
+        </Text>
+        <Text level="caption" className="text-content-layout-3">
+          Run this query, or capture a workload, to measure its impact.
+        </Text>
+      </VStack>
+    )
+  }
 
   return (
     <VStack
@@ -100,6 +119,15 @@ function QueryImpactRail({ entry }: { entry: QueryRegistryEntry }) {
       </VStack>
     </VStack>
   )
+}
+
+// A card that has been analyzed carries the outcome on its leading edge, so
+// prior work is visible in the list without reading a single label (B-11).
+const OUTCOME_EDGE: Record<ResultTone, string> = {
+  positive: 'border-l-2 border-l-border-positive-soft',
+  informative: 'border-l-2 border-l-border-info-soft',
+  warning: 'border-l-2 border-l-border-warning-soft',
+  negative: 'border-l-2 border-l-border-negative-soft',
 }
 
 function parameterSummary(entry: QueryRegistryEntry) {
@@ -136,6 +164,11 @@ export function SavedQueryRow({
 }: SavedQueryRowProps) {
   const sourceMeta = getSourceMeta(entry.source)
   const displayName = queryDisplayName(entry)
+  // The SQL as it was written or observed. The registry also keeps a
+  // parameterized form for grouping, and showing that instead put `:p1` above
+  // a meta line reading "no parameters" -- the card contradicting itself
+  // about a query the user typed with a literal in it.
+  const displaySql = entry.original_sql || entry.sql
   const isHighlighted = state.highlightedHash === entry.hash
   const isConfirmingDelete = state.confirmingHash === entry.hash
   const isRenaming = state.editingHash === entry.hash
@@ -192,6 +225,33 @@ export function SavedQueryRow({
           },
         })
     : undefined
+  // A run in flight is a state of the whole card, not one word inside a
+  // button (Mike #12): tone and border say it at a glance, the pulse carries
+  // motion for anyone watching, and this panel is the way back to the run. Its
+  // action stays left, clear of the floating setup guide in the page's corner.
+  const analysisPanel =
+    isDefaultState && isAnalyzing ? (
+      <HStack className="flex-wrap items-center justify-start gap-3">
+        <HStack className="items-center gap-2">
+          <ActivityPulse label="Analysis in progress" />
+          <Text level="body-small" className="text-content-primary-soft">
+            Analysis in progress
+          </Text>
+        </HStack>
+        <Button
+          variant="primary"
+          modifier="ghost"
+          size="small"
+          icon="speedometer"
+          iconPosition="left"
+          label="View progress"
+          onClick={openAnalysis}
+        />
+      </HStack>
+    ) : undefined
+  // A cache test the user started keeps the slot: it is the newer answer, and
+  // the header still carries the analysis state.
+  const expansion = testPanel ?? analysisPanel
   const visible = visibleProperties
     ? new Set<QueryLibraryDisplayProperty>(visibleProperties)
     : null
@@ -237,32 +297,32 @@ export function SavedQueryRow({
     `hash ${shortHash(entry.hash)}`,
     entry.target || null,
   ])
-  // The badge itself carries only the outcome; the relative time it was
-  // measured lives in a tooltip so the footer line stays short.
+  // Prior work is readable while scanning: the outcome in its own tone, and
+  // when it was measured as text on the line rather than on hover (B-11).
   const outcomeTag = outcome ? (
-    <TooltipProvider delayDuration={150}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Tag
-            tabIndex={0}
-            size="small"
-            variant={outcome.tone}
-            modifier="ghost"
-            label={outcome.label}
-          />
-        </TooltipTrigger>
-        <TooltipContent label={analyzedAgo ?? ''} />
-      </Tooltip>
-    </TooltipProvider>
-  ) : analyzedAgo ? (
-    <Tag size="small" variant="neutral" modifier="ghost" label={analyzedAgo} />
+    <Tag
+      size="small"
+      variant={outcome.tone}
+      modifier="ghost"
+      label={outcome.label}
+    />
+  ) : null
+  const analyzedMeta = analyzedAgo ? (
+    <Text
+      as="span"
+      level="mono-small"
+      className="shrink-0 text-content-layout-2"
+    >
+      {analyzedAgo}
+    </Text>
   ) : null
   // The outcome leads the meta band so prior work is the first thing read on
   // the line; the identity metadata keeps its place after it.
   const withOutcome = (content: ReactNode) =>
-    outcomeTag ? (
+    outcomeTag || analyzedMeta ? (
       <HStack className="min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         {outcomeTag}
+        {analyzedMeta}
         <span className="min-w-0">{content}</span>
       </HStack>
     ) : (
@@ -363,54 +423,33 @@ export function SavedQueryRow({
       onClick={() => actions.openOverview(entry.hash)}
     />
   ) : null
-  const secondaryActions = isConfirmingDelete ? (
-    <Button
-      variant="primary"
-      modifier="ghost"
-      size="small"
-      label="Cancel"
-      onClick={actions.cancelDelete}
-    />
-  ) : isRenaming ? (
-    <Button
-      variant="primary"
-      modifier="ghost"
-      size="small"
-      label="Cancel"
-      onClick={actions.cancelRename}
-    />
-  ) : isEditingSql ? (
-    <Button
-      variant="primary"
-      modifier="ghost"
-      size="small"
-      label="Cancel"
-      onClick={actions.cancelEditSql}
-    />
-  ) : (
+  // Analyze answers "why is this slow", which is the loop every other action
+  // on the card depends on, so it is the card's one solid button. The
+  // benchmarks beside it are downstream and step down to outline and ghost.
+  const analyzeAction = (
     <TooltipProvider delayDuration={150}>
       <Tooltip>
         <TooltipTrigger asChild>
           <div>
             <Button
               variant="primary"
-              modifier="ghost"
+              modifier="solid"
               size="small"
               icon="speedometer"
               iconPosition="left"
+              // A run in flight owns this query until it finishes: the action
+              // that would measure it again is shut, and the card's own
+              // in-progress panel is the way back to the run (Mike #12).
+              loading={isAnalyzing}
               label={
                 isAnalyzing
-                  ? 'Analyzing...'
+                  ? 'Analyzing'
                   : openStoredAnalysis
                     ? 'View analysis'
                     : 'Analyze'
               }
-              // A run in flight reopens where it is being measured; the drawer
-              // attaches to it rather than measuring the query a second time.
               onClick={
-                isAnalyzing
-                  ? openAnalysis
-                  : (openStoredAnalysis ?? openAnalysis)
+                isAnalyzing ? undefined : (openStoredAnalysis ?? openAnalysis)
               }
             />
           </div>
@@ -418,7 +457,7 @@ export function SavedQueryRow({
         <TooltipContent
           label={
             isAnalyzing
-              ? 'Analysis in progress. Open it.'
+              ? 'Analysis in progress'
               : openStoredAnalysis
                 ? 'Open the analysis you already ran'
                 : 'Analyze this query'
@@ -435,6 +474,73 @@ export function SavedQueryRow({
         })
       }
     : undefined
+  const benchmarkActions = (
+    <>
+      <Show when={!cached && !notCacheable && !isTesting}>
+        <TooltipProvider delayDuration={150}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <Button
+                  variant="primary"
+                  modifier="outline"
+                  size="small"
+                  icon="database-settings"
+                  iconPosition="left"
+                  label="Compare against Readyset"
+                  loading={actions.cachingHash === entry.hash}
+                  disabled={isAnalyzing}
+                  onClick={() => actions.cacheQuery(entry.hash, entry.sql)}
+                />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent
+              label={
+                isAnalyzing
+                  ? 'Wait for the analysis to finish'
+                  : 'Measure this query on your database and on Readyset'
+              }
+            />
+          </Tooltip>
+        </TooltipProvider>
+      </Show>
+      <Show when={cached && !isTesting}>
+        <Button
+          variant="primary"
+          modifier="ghost"
+          size="small"
+          icon="database-settings"
+          iconPosition="left"
+          label={runResult ? 'Run load test again' : 'Load test'}
+          disabled={isAnalyzing}
+          title={isAnalyzing ? 'Wait for the analysis to finish' : undefined}
+          onClick={() =>
+            actions.runTest(
+              entry.hash,
+              entry.sql,
+              entry.most_recent_params ?? {}
+            )
+          }
+        />
+      </Show>
+    </>
+  )
+  const cancelAction = (onClick: () => void) => (
+    <Button
+      variant="primary"
+      modifier="ghost"
+      size="small"
+      label="Cancel"
+      onClick={onClick}
+    />
+  )
+  const secondaryActions = isConfirmingDelete
+    ? cancelAction(actions.cancelDelete)
+    : isRenaming
+      ? cancelAction(actions.cancelRename)
+      : isEditingSql
+        ? cancelAction(actions.cancelEditSql)
+        : benchmarkActions
   const primaryAction = isConfirmingDelete ? (
     <Button
       variant="negative"
@@ -447,7 +553,7 @@ export function SavedQueryRow({
     />
   ) : isRenaming ? (
     <Button
-      variant="rising"
+      variant="primary"
       modifier="solid"
       size="small"
       icon="tick"
@@ -457,7 +563,7 @@ export function SavedQueryRow({
     />
   ) : isEditingSql ? (
     <Button
-      variant="rising"
+      variant="primary"
       modifier="solid"
       size="small"
       label="Save"
@@ -468,46 +574,7 @@ export function SavedQueryRow({
       disabled={!state.sqlDraft.trim()}
     />
   ) : (
-    <>
-      <Show when={!cached && !notCacheable && !isTesting}>
-        <TooltipProvider delayDuration={150}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div>
-                <Button
-                  variant="rising"
-                  modifier="solid"
-                  size="small"
-                  icon="database-settings"
-                  iconPosition="left"
-                  label="Compare & test"
-                  loading={actions.cachingHash === entry.hash}
-                  onClick={() => actions.cacheQuery(entry.hash, entry.sql)}
-                />
-              </div>
-            </TooltipTrigger>
-            <TooltipContent label="Run a short upstream vs Readyset comparison" />
-          </Tooltip>
-        </TooltipProvider>
-      </Show>
-      <Show when={cached && !isTesting}>
-        <Button
-          variant="rising"
-          modifier="ghost"
-          size="small"
-          icon="database-settings"
-          iconPosition="left"
-          label={runResult ? 'Re-test' : 'Test'}
-          onClick={() =>
-            actions.runTest(
-              entry.hash,
-              entry.sql,
-              entry.most_recent_params ?? {}
-            )
-          }
-        />
-      </Show>
-    </>
+    analyzeAction
   )
 
   if (displayMode === 'rows' && isDefaultState) {
@@ -523,6 +590,9 @@ export function SavedQueryRow({
           data-query-hash={entry.hash}
           className={cn(
             'p-0 overflow-hidden',
+            outcome && !isAnalyzing && OUTCOME_EDGE[outcome.tone],
+            isAnalyzing &&
+              'bg-surface-primary-soft/10 ring-1 ring-border-primary-soft',
             isHighlighted &&
               'scroll-mt-28 bg-surface-primary-soft ring-2 ring-border-primary-soft ring-offset-2 ring-offset-surface-layout-1 shadow-elevation-2'
           )}
@@ -536,13 +606,14 @@ export function SavedQueryRow({
 
             <div className="min-w-0 overflow-hidden font-mono text-mono-small text-content-layout-2 [mask-image:linear-gradient(to_right,black_85%,transparent)] [&>code]:truncate [&>code]:whitespace-nowrap">
               <SqlTokens
-                sql={entry.sql.replace(/\s+/g, ' ')}
-                title={entry.sql}
+                sql={displaySql.replace(/\s+/g, ' ')}
+                title={displaySql}
               />
             </div>
 
             <HStack className="min-w-0 items-center gap-2" title={meta}>
               {outcomeTag}
+              {analyzedMeta}
               <Text
                 level="mono-small"
                 className="truncate text-content-layout-3"
@@ -571,8 +642,8 @@ export function SavedQueryRow({
             </HStack>
           </Card.Content>
 
-          {testPanel ? (
-            <Card.Content className="px-4 py-3">{testPanel}</Card.Content>
+          {expansion ? (
+            <Card.Content className="px-4 py-3">{expansion}</Card.Content>
           ) : null}
         </Card>
       </m.div>
@@ -590,7 +661,7 @@ export function SavedQueryRow({
         const cardProps: QueryCardProps = {
           'data-testid': 'query-registry-row',
           'data-query-hash': entry.hash,
-          sql: entry.sql,
+          sql: displaySql,
           leading: starButton,
           title,
           badges,
@@ -599,7 +670,13 @@ export function SavedQueryRow({
           ),
           highlighted: isHighlighted,
           className: cn(
-            isConfirmingDelete && 'ring-1 ring-border-negative-soft'
+            isConfirmingDelete && 'ring-1 ring-border-negative-soft',
+            outcome &&
+              isDefaultState &&
+              !isAnalyzing &&
+              OUTCOME_EDGE[outcome.tone],
+            isAnalyzing &&
+              'bg-surface-primary-soft/10 ring-1 ring-border-primary-soft'
           ),
           editor: isEditingSql ? (
             <SQLInput
@@ -631,7 +708,7 @@ export function SavedQueryRow({
             </>
           ),
           primaryAction,
-          expansion: testPanel,
+          expansion,
         }
 
         if (renderCard) return renderCard(cardProps)

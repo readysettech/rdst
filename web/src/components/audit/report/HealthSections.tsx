@@ -31,7 +31,7 @@ import {
  */
 export function HealthDetailSection({ health }: { health: HealthAnalysis }) {
   return (
-    <SectionCard icon="document-validation" title="AI Analysis">
+    <SectionCard icon="document-validation" title="AI analysis">
       <div className="p-5">
         <VStack className="gap-4 items-start min-w-0">
           {(health.findings?.length || 0) > 0 && (
@@ -44,7 +44,7 @@ export function HealthDetailSection({ health }: { health: HealthAnalysis }) {
               level="overline"
               className="text-content-layout-3 uppercase block mb-3"
             >
-              Query Commentary
+              Query commentary
             </Text>
             <VStack className="gap-2 items-stretch">
               {health.query_commentary!.map((item, index) => (
@@ -136,7 +136,7 @@ export function HealthReportSections({
         </SectionCard>
       )}
       {content !== 'cpu' && vacuum && (
-        <SectionCard icon="database" title="Vacuum & Bloat">
+        <SectionCard icon="database" title="Vacuum & bloat">
           <div className="p-4 grid grid-cols-2 desktop:grid-cols-4 gap-3">
             <StatCard
               compact
@@ -280,7 +280,7 @@ export function HealthReportSections({
         </SectionCard>
       )}
       {content !== 'cpu' && connections && (
-        <SectionCard icon="database" title="Connection Detail">
+        <SectionCard icon="database" title="Connection detail">
           <div className="p-4 grid grid-cols-2 desktop:grid-cols-4 gap-3">
             <StatCard
               compact
@@ -334,7 +334,7 @@ export function HealthReportSections({
         </SectionCard>
       )}
       {content !== 'cpu' && config && (
-        <SectionCard icon="adjustment-horizontal" title="Configuration Audit">
+        <SectionCard icon="adjustment-horizontal" title="Configuration audit">
           {recordValue(config, 'instance_ram_gb') !== '-' && (
             <div className="p-5">
               <Text level="caption" className="text-content-layout-3">

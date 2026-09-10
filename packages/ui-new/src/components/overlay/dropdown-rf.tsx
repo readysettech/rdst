@@ -1,6 +1,6 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { cn, tv, type VariantProps } from '@rs/tailwind-base'
-
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { AnimatePresence, m } from 'motion/react'
 import {
   Children,
@@ -17,7 +17,6 @@ import { getTransition } from '../../motion/transition'
 import { HStack } from '../element/stack'
 import { BaseInputCheckbox } from '../form/base/input-checkbox'
 import { Icon } from '../svg/icon'
-import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 
 // Base content styling recipe
 const dropdownContentStyles = tv({
@@ -194,10 +193,10 @@ const BaseItem = forwardRef<
   return (
     <DropdownMenu.Item ref={ref} className={styles} {...restProps}>
       <HStack>
-        {leftIcon && <Icon name={leftIcon} label={String(children)} />}
+        {leftIcon && <Icon name={leftIcon} label="" />}
         {children}
       </HStack>
-      {rightIcon && <Icon name={rightIcon} label={String(children)} />}
+      {rightIcon && <Icon name={rightIcon} label="" />}
     </DropdownMenu.Item>
   )
 })

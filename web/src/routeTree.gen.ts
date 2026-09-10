@@ -10,7 +10,6 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TopRouteImport } from './routes/top'
-import { Route as TestRouteImport } from './routes/test'
 import { Route as SchemaRouteImport } from './routes/schema'
 import { Route as ScanRouteImport } from './routes/scan'
 import { Route as ResultsRouteImport } from './routes/results'
@@ -37,11 +36,6 @@ import { Route as AuditRunsRunIdRouteImport } from './routes/audit_.runs.$runId'
 const TopRoute = TopRouteImport.update({
   id: '/top',
   path: '/top',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const TestRoute = TestRouteImport.update({
-  id: '/test',
-  path: '/test',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SchemaRoute = SchemaRouteImport.update({
@@ -175,7 +169,6 @@ export interface FileRoutesByFullPath {
   '/results': typeof ResultsRoute
   '/scan': typeof ScanRoute
   '/schema': typeof SchemaRoute
-  '/test': typeof TestRoute
   '/top': typeof TopRoute
   '/lab/performance-cards': typeof LabPerformanceCardsRoute
   '/audit/runs/$runId': typeof AuditRunsRunIdRoute
@@ -201,7 +194,6 @@ export interface FileRoutesByTo {
   '/results': typeof ResultsRoute
   '/scan': typeof ScanRoute
   '/schema': typeof SchemaRoute
-  '/test': typeof TestRoute
   '/top': typeof TopRoute
   '/lab/performance-cards': typeof LabPerformanceCardsRoute
   '/audit/runs/$runId': typeof AuditRunsRunIdRoute
@@ -228,7 +220,6 @@ export interface FileRoutesById {
   '/results': typeof ResultsRoute
   '/scan': typeof ScanRoute
   '/schema': typeof SchemaRoute
-  '/test': typeof TestRoute
   '/top': typeof TopRoute
   '/lab/performance-cards': typeof LabPerformanceCardsRoute
   '/audit_/runs/$runId': typeof AuditRunsRunIdRoute
@@ -256,7 +247,6 @@ export interface FileRouteTypes {
     | '/results'
     | '/scan'
     | '/schema'
-    | '/test'
     | '/top'
     | '/lab/performance-cards'
     | '/audit/runs/$runId'
@@ -282,7 +272,6 @@ export interface FileRouteTypes {
     | '/results'
     | '/scan'
     | '/schema'
-    | '/test'
     | '/top'
     | '/lab/performance-cards'
     | '/audit/runs/$runId'
@@ -308,7 +297,6 @@ export interface FileRouteTypes {
     | '/results'
     | '/scan'
     | '/schema'
-    | '/test'
     | '/top'
     | '/lab/performance-cards'
     | '/audit_/runs/$runId'
@@ -335,7 +323,6 @@ export interface RootRouteChildren {
   ResultsRoute: typeof ResultsRoute
   ScanRoute: typeof ScanRoute
   SchemaRoute: typeof SchemaRoute
-  TestRoute: typeof TestRoute
   TopRoute: typeof TopRoute
   LabPerformanceCardsRoute: typeof LabPerformanceCardsRoute
   AuditRunsRunIdRoute: typeof AuditRunsRunIdRoute
@@ -349,13 +336,6 @@ declare module '@tanstack/react-router' {
       path: '/top'
       fullPath: '/top'
       preLoaderRoute: typeof TopRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/test': {
-      id: '/test'
-      path: '/test'
-      fullPath: '/test'
-      preLoaderRoute: typeof TestRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/schema': {
@@ -535,7 +515,6 @@ const rootRouteChildren: RootRouteChildren = {
   ResultsRoute: ResultsRoute,
   ScanRoute: ScanRoute,
   SchemaRoute: SchemaRoute,
-  TestRoute: TestRoute,
   TopRoute: TopRoute,
   LabPerformanceCardsRoute: LabPerformanceCardsRoute,
   AuditRunsRunIdRoute: AuditRunsRunIdRoute,

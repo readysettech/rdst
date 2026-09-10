@@ -30,10 +30,13 @@ const PageContent = ({ className, ...props }: ComponentProps<'div'>) => (
   <div className={cn(['w-full'], className)} {...props} />
 )
 
+// The page title is the route's level-1 heading: it is the first thing a
+// screen-reader user jumps to, and the only heading a page is guaranteed to
+// have.
 const PageTitle = ({ children, className }: WithChildren & WithClassName) => (
   <Text
     level="headline-3"
-    as="h3"
+    as="h1"
     className={cn('h-10', 'leading-10', className)}
   >
     {children}

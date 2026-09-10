@@ -20,10 +20,12 @@ function renderResult({
   status,
   progress,
   error,
+  targetLocked = false,
 }: {
   status: 'cancelled' | 'partial' | 'done' | 'failed'
   progress?: LoadTestProgress
   error?: string
+  targetLocked?: boolean
 }) {
   const state = status === 'failed' ? 'error' : 'complete'
   const model = deriveLoadTestResultModel({
@@ -44,7 +46,7 @@ function renderResult({
       request={request}
       runMessage={undefined}
       error={error}
-      targetLocked={false}
+      targetLocked={targetLocked}
       onStop={vi.fn()}
       onAdjust={vi.fn()}
       onRunAgain={vi.fn()}
@@ -59,6 +61,16 @@ describe('LoadTestResults terminal states', () => {
     expect(screen.getByText('Load test cancelled')).toBeTruthy()
     expect(screen.getByText('Cancelled')).toBeTruthy()
     expect(screen.queryByText('Load test failed')).toBeNull()
+  })
+
+  it('says why a run cannot be repeated instead of only greying it out', () => {
+    renderResult({ status: 'done', targetLocked: true })
+
+    const runAgain = screen.getByRole('button', { name: 'Run again' })
+    expect(runAgain.hasAttribute('disabled')).toBe(true)
+    expect(
+      screen.getByText('Unlock this database to run the test again.')
+    ).toBeTruthy()
   })
 
   it('keeps partial completion distinct from failure', () => {
@@ -96,6 +108,21 @@ describe('LoadTestResults terminal states', () => {
     expect(
       screen.getByText('Database connection closed unexpectedly.')
     ).toBeTruthy()
+  })
+
+  it('leads a failed run with the reason, not a grid of zeros', () => {
+    renderResult({
+      status: 'failed',
+      error: 'Database connection closed unexpectedly.',
+    })
+
+    // "Error rate 0.0% (0 failed)" and the pacing explainer describe a run that
+    // never happened; only the reason is true of it.
+    expect(screen.queryByText('Error rate')).toBeNull()
+    expect(screen.queryByText('This run is intentionally paced')).toBeNull()
+    expect(
+      screen.getAllByText('Database connection closed unexpectedly.')
+    ).toHaveLength(1)
   })
 })
 
@@ -310,9 +337,32 @@ describe('LoadTestResults cache preparation', () => {
     )
 
     expect(screen.getByText(/Preparing Readyset caches/)).toBeTruthy()
-    expect(screen.getByText(/1 of 3/)).toBeTruthy()
+    // The counts the run already reports drive a real bar, so the wait shows
+    // how far along it is rather than a static glyph. [D-18]
+    const bar = screen.getByRole('progressbar', { name: 'Cache preparation' })
+    expect(bar.getAttribute('aria-valuenow')).toBe('1')
+    expect(bar.getAttribute('aria-valuemax')).toBe('3')
+    expect(screen.getByText('1 of 3 queries cached')).toBeTruthy()
+    expect(screen.getByText('0s elapsed')).toBeTruthy()
+    expect(screen.getByText(/takes a few minutes/)).toBeTruthy()
+    // The wait is cancellable, and the action names the phase it stops.
+    expect(
+      screen.getByRole('button', { name: 'Cancel preparation' })
+    ).toBeTruthy()
     // The measurement has not started, so no metric claims to be one.
     expect(screen.queryByText('Paced QPS')).toBeNull()
+    // The heading already says what is happening; the body does not repeat it.
+    expect(screen.queryByText('No action is required')).toBeNull()
+  })
+
+  it('measures against the run duration once the workload is warm', () => {
+    renderRunning({ ...measuring, elapsed_seconds: 12 }, 'running')
+
+    expect(screen.getByText('Measuring')).toBeTruthy()
+    expect(screen.getByText('12s of 30s · ~18s left')).toBeTruthy()
+    expect(
+      screen.getByRole('progressbar', { name: 'Load test progress' })
+    ).toBeTruthy()
   })
 
   it('renders the measuring view for a tick without the phase', () => {

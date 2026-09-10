@@ -151,6 +151,7 @@ def test_verified_email_sends_immediately(client, tmp_rdst_home, config_path):
         "status": "sent",
         "email": "ada@example.com",
         "verified": True,
+        "reason": None,
     }
     call = _StubEmailService.calls[0]
     assert call["report_token"] == "tok-1"
@@ -171,6 +172,7 @@ def test_unverified_email_registers_with_the_report(client, tmp_rdst_home, confi
         "status": "verification_sent",
         "email": "ada@example.com",
         "verified": False,
+        "reason": None,
     }
     call = _StubEmailService.calls[0]
     assert call["report_token"] is None
@@ -239,7 +241,10 @@ def test_keyservice_failure_reports_unavailable(client, tmp_rdst_home, config_pa
     response = client.post(f"/api/audit/runs/{run_id}/email", json={})
 
     assert response.status_code == 200
-    assert response.json()["status"] == "unavailable"
+    body = response.json()
+    assert body["status"] == "unavailable"
+    # The caller reports why the send failed, not the status alone. [E-26]
+    assert body["reason"] == "boom"
 
 
 @pytest.mark.parametrize(

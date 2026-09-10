@@ -1,6 +1,7 @@
 import { Button } from '@rs/ui-new/button'
 import { EmptyState } from '@rs/ui-new/empty-state'
 import { For } from '@rs/ui-new/for'
+import { Icon } from '@rs/ui-new/icon'
 import { InteractiveRow } from '@rs/ui-new/interactive-row'
 import { Show } from '@rs/ui-new/show'
 import { Skeleton } from '@rs/ui-new/skeleton'
@@ -33,6 +34,8 @@ interface AnalyzeDrawerOverviewProps {
   currentAnalysisId?: string
   /** The target the library is reading, when the row carries none. */
   target?: string | null
+  /** A measurement of this query is in flight, started from any view. */
+  isAnalyzing?: boolean
   /** Open one stored analysis, which is the Analyze tab's job. */
   onOpenAnalysis: (analysisId: string) => void
   /** Measure the query again rather than reading what it already has. */
@@ -127,6 +130,7 @@ export function AnalyzeDrawerOverview({
   entry,
   currentAnalysisId,
   target,
+  isAnalyzing = false,
   onOpenAnalysis,
   onAnalyzeAgain,
 }: AnalyzeDrawerOverviewProps) {
@@ -145,6 +149,14 @@ export function AnalyzeDrawerOverview({
   const hasEvidence =
     queryImpactMs(entry) > 0 ||
     (entry.observation_count ?? entry.frequency ?? 0) > 0
+  const timestamps = formatMeta([
+    entry.last_analyzed
+      ? `updated ${formatTimestamp(entry.last_analyzed).toLowerCase()}`
+      : null,
+    entry.first_analyzed && entry.first_analyzed !== entry.last_analyzed
+      ? `created ${formatTimestamp(entry.first_analyzed).toLowerCase()}`
+      : null,
+  ])
 
   return (
     <VStack
@@ -167,32 +179,54 @@ export function AnalyzeDrawerOverview({
 
       <Section
         label="Analyses"
+        // Analyze is the drawer's one solid action. With no analysis yet the
+        // empty state owns that CTA, so the section header withholds it
+        // rather than printing a second copy of it. A run already in flight
+        // owns it too: the only thing left to do with it is watch it.
         action={
-          <Button
-            variant="primary"
-            modifier="ghost"
-            size="small"
-            icon="speedometer"
-            iconPosition="left"
-            label="Analyze again"
-            onClick={onAnalyzeAgain}
-          />
+          history.entries.length > 0 || isAnalyzing ? (
+            <Button
+              variant="primary"
+              modifier="solid"
+              size="small"
+              icon="speedometer"
+              iconPosition="left"
+              label={isAnalyzing ? 'View progress' : 'Analyze again'}
+              onClick={onAnalyzeAgain}
+            />
+          ) : undefined
         }
       >
         <Show when={history.isLoading}>
           <Skeleton className="h-16 w-full" />
         </Show>
         <Show when={!history.isLoading && history.entries.length === 0}>
-          <EmptyState
-            icon="speedometer"
-            title="No analysis yet"
-            body="Analyzing this query explains why it is slow and whether Readyset can cache it."
-            action={{
-              label: 'Analyze',
-              icon: 'speedometer',
-              onClick: onAnalyzeAgain,
-            }}
-          />
+          {isAnalyzing ? (
+            // A run started here survives the drawer being closed, so recall
+            // has to report it: saying "no analysis yet" would invite a second
+            // measurement of a query already being measured.
+            <EmptyState
+              icon="speedometer"
+              title="Analysis in progress"
+              body="This query is being measured now. The Analyze tab follows the run as it advances."
+              action={{
+                label: 'View progress',
+                icon: 'speedometer',
+                onClick: onAnalyzeAgain,
+              }}
+            />
+          ) : (
+            <EmptyState
+              icon="speedometer"
+              title="No analysis yet"
+              body="Analyzing this query explains why it is slow and whether Readyset can cache it."
+              action={{
+                label: 'Analyze',
+                icon: 'speedometer',
+                onClick: onAnalyzeAgain,
+              }}
+            />
+          )}
         </Show>
         <VStack className="items-stretch gap-1">
           <For each={history.entries} keyExtractor={(run) => run.analysis_id}>
@@ -222,9 +256,17 @@ export function AnalyzeDrawerOverview({
                     </Show>
                     <Show when={current}>
                       <Text level="caption" className="text-content-layout-3">
-                        current
+                        Current
                       </Text>
                     </Show>
+                    {/* Says the row opens something: without it these read as
+                        the static detail rows above and below them (B-12). */}
+                    <Icon
+                      name="chevron-right"
+                      label=""
+                      aria-hidden="true"
+                      className="ml-auto h-4 w-4 shrink-0 text-content-layout-3"
+                    />
                   </HStack>
                 </InteractiveRow>
               )
@@ -284,8 +326,11 @@ export function AnalyzeDrawerOverview({
         )}
       </Show>
 
-      <Section label="Details">
-        <VStack className="items-stretch gap-1.5">
+      {/* One caption and a couple of tags are a footer, not a section: given
+          a heading of their own they left the pane looking unfinished
+          (B-22). With neither, the pane simply ends. */}
+      <Show when={parameterKeys.length > 0 || Boolean(timestamps)}>
+        <HStack className="flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border-layout-1 pt-3">
           <Show when={parameterKeys.length > 0}>
             <HStack className="flex-wrap items-center gap-1.5">
               <Text level="caption" className="text-content-layout-3">
@@ -303,18 +348,10 @@ export function AnalyzeDrawerOverview({
             </HStack>
           </Show>
           <Text level="caption" className="text-content-layout-3">
-            {formatMeta([
-              entry.last_analyzed
-                ? `updated ${formatTimestamp(entry.last_analyzed).toLowerCase()}`
-                : null,
-              entry.first_analyzed &&
-              entry.first_analyzed !== entry.last_analyzed
-                ? `created ${formatTimestamp(entry.first_analyzed).toLowerCase()}`
-                : null,
-            ])}
+            {timestamps}
           </Text>
-        </VStack>
-      </Section>
+        </HStack>
+      </Show>
     </VStack>
   )
 }

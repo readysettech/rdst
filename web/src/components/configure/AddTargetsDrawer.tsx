@@ -680,7 +680,7 @@ export function AddTargetsDrawer({
           <DrawerContent size="XLarge" direction="right" className="p-0">
             <DrawerHeader className="p-5 border-b border-border-layout-1">
               <DrawerTitle>
-                {step === 'credentials' ? 'Set credentials' : 'Add connection'}
+                {step === 'credentials' ? 'Set credentials' : 'Add target'}
               </DrawerTitle>
               <DrawerDescription>
                 {step === 'credentials'
@@ -1254,7 +1254,7 @@ export function AddTargetsDrawer({
                                           <TooltipTrigger asChild>
                                             {body}
                                           </TooltipTrigger>
-                                          <TooltipContent label="This database has already been imported as a target." />
+                                          <TooltipContent label="This database is already a target." />
                                         </Tooltip>
                                       </TooltipProvider>
                                     )

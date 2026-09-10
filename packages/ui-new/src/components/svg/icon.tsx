@@ -33,6 +33,12 @@ type IconVariantProps =
   | { variant: 'bulk'; name: IconBulkName }
 
 export type IconProps = IconVariantProps & {
+  /**
+   * What the icon says that the surrounding markup does not. Pass `''` when the
+   * icon sits beside its own visible label: the icon is then decorative and
+   * contributes nothing to the accessible name, instead of announcing that
+   * label a second time.
+   */
   label: string
   className?: string
 } & IconStyleProps &
@@ -46,15 +52,21 @@ export const Icon = ({
   className,
   ...rest
 }: IconProps) => {
-  return (
-    <AccessibleIcon.Root label={label}>
-      <svg
-        {...rest}
-        className={iconRecipe({ size, class: className })}
-        style={variant === 'bulk' ? { strokeWidth: 0 } : undefined}
-      >
-        <use href={`/icons/sprite-${variant}.svg#${name}`} />
-      </svg>
-    </AccessibleIcon.Root>
+  const svg = (
+    <svg
+      {...rest}
+      aria-hidden={label ? rest['aria-hidden'] : 'true'}
+      focusable="false"
+      className={iconRecipe({ size, class: className })}
+      style={variant === 'bulk' ? { strokeWidth: 0 } : undefined}
+    >
+      <use href={`/icons/sprite-${variant}.svg#${name}`} />
+    </svg>
   )
+
+  // A decorative icon carries no name of its own: wrapping it would add a
+  // screen-reader-only copy of the label the user can already see.
+  if (!label) return svg
+
+  return <AccessibleIcon.Root label={label}>{svg}</AccessibleIcon.Root>
 }

@@ -41,7 +41,7 @@ describe('ConfigureForm connection URL parsing', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add connection' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add target' }))
 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -73,12 +73,24 @@ describe('ConfigureForm connection URL parsing', () => {
     fireEvent.change(screen.getByPlaceholderText('my-database'), {
       target: { value: 'customer prod' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Add connection' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add target' }))
 
     const submitted = onSubmit.mock.calls[0][0]
     expect(submitted.name).toBe('customer prod')
     expect(submitted.password).toBe('secret')
     expect(submitted.password_env).toBeUndefined()
+  })
+})
+
+describe('ConfigureForm required markers', () => {
+  it('marks the minority: nothing on the required block, "(optional)" on the rest', () => {
+    render(<ConfigureForm onSubmit={vi.fn()} onCancel={vi.fn()} />)
+
+    // Seven fields all carried "*", so the marker said nothing. [A-18]
+    for (const label of ['Target name', 'Host', 'Port', 'Database', 'User']) {
+      expect(screen.getByLabelText(label)).toBeTruthy()
+      expect(screen.queryByLabelText(`${label} *`)).toBeNull()
+    }
   })
 })
 
@@ -90,7 +102,7 @@ describe('ConfigureForm engine defaults', () => {
 
     selectMysql()
 
-    expect((screen.getByLabelText('Port *') as HTMLInputElement).value).toBe(
+    expect((screen.getByLabelText('Port') as HTMLInputElement).value).toBe(
       '3306'
     )
     expect(screen.getByPlaceholderText('mysql.example.com')).toBeTruthy()
@@ -99,13 +111,13 @@ describe('ConfigureForm engine defaults', () => {
 
   it('preserves a manually edited port when the engine changes', () => {
     render(<ConfigureForm />)
-    fireEvent.change(screen.getByLabelText('Port *'), {
+    fireEvent.change(screen.getByLabelText('Port'), {
       target: { value: '15432' },
     })
 
     selectMysql()
 
-    expect((screen.getByLabelText('Port *') as HTMLInputElement).value).toBe(
+    expect((screen.getByLabelText('Port') as HTMLInputElement).value).toBe(
       '15432'
     )
   })
@@ -150,7 +162,7 @@ describe('ConfigureForm sandbox behavior', () => {
       }
     )
     fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add connection' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add target' }))
 
     const submitted = onSubmit.mock.calls[0]?.[0]
     expect(submitted).toBeDefined()
@@ -219,7 +231,7 @@ describe('ConfigureForm sandbox behavior', () => {
     ).toBeNull()
     expect(screen.queryByRole('button', { name: 'Proceed anyway' })).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add connection' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add target' }))
 
     expect(onTest).toHaveBeenCalledOnce()
     expect(onSubmit).not.toHaveBeenCalled()
@@ -230,7 +242,7 @@ describe('ConfigureForm sandbox behavior', () => {
       })
     ).toBeTruthy()
     fireEvent.click(
-      within(dialog).getByRole('button', { name: 'Add connection' })
+      within(dialog).getByRole('button', { name: 'Add target' })
     )
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -266,7 +278,7 @@ describe('ConfigureForm sandbox behavior', () => {
       { target: { value: connectionUri() } }
     )
     fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add connection' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add target' }))
 
     expect(
       await screen.findByRole('heading', {
@@ -281,7 +293,7 @@ describe('ConfigureForm sandbox behavior', () => {
     ).toBeTruthy()
 
     fireEvent.click(
-      within(dialog).getByRole('button', { name: 'Add connection' })
+      within(dialog).getByRole('button', { name: 'Add target' })
     )
 
     expect(onSubmit).toHaveBeenCalledWith(
@@ -348,7 +360,7 @@ describe('ConfigureForm SSH jump host', () => {
     fireEvent.change(screen.getByLabelText('SSH user'), {
       target: { value: 'ec2-user' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Update connection' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Update target' }))
 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -388,7 +400,7 @@ describe('ConfigureForm SSH jump host', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Jump host' }), {
       target: { value: '' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Update connection' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Update target' }))
 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({ ssh: undefined })

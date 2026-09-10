@@ -884,6 +884,26 @@ def test_detect_parameters_mirrors_client():
     assert read_model.detect_parameters("SELECT a::text FROM t") == []
 
 
+def test_detect_parameters_reads_no_slots_inside_string_literals():
+    """A value is data. Reading its text as SQL turned an ordinary email into
+    a parameter named after its domain, and the query into one whose values
+    were never ready."""
+    for sql in (
+        "SELECT id FROM users WHERE email = 'seed@example.com'",
+        "SELECT id FROM orders WHERE note = '$100 refund'",
+        "SELECT id FROM orders WHERE note = 'note:urgent'",
+        "SELECT id FROM orders WHERE note = 'why?'",
+        "SELECT id FROM orders WHERE note = 'it''s @bob'",
+        "SELECT id FROM orders WHERE note = $tag$ :p1 $tag$",
+    ):
+        assert read_model.detect_parameters(sql) == [], sql
+
+    # The real slots around such a literal are still found.
+    assert read_model.detect_parameters(
+        "SELECT id FROM users WHERE email = 'a@b.com' AND id = $1"
+    ) == [("$1", 1, "positional")]
+
+
 def test_derive_query_name_mirrors_client():
     assert read_model.derive_query_name("SELECT * FROM public.users") == (
         "Select \u00b7 users"

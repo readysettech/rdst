@@ -241,8 +241,10 @@ test('answers a clarification and resumes the original ask session', async ({
     page.getByText('One quick question', { exact: true })
   ).toBeVisible()
   await expect(page.getByText(`You asked: ${question}`)).toBeVisible()
+  // The question renders as written; splitting it on the first colon dropped
+  // the half that disambiguated it.
   await expect(
-    page.getByText('Which revenue definition', { exact: true })
+    page.getByText('Which revenue definition: choose one', { exact: true })
   ).toBeVisible()
   await page.getByRole('radio', { name: 'Gross revenue' }).check()
   // The submit button says the outcome ("Get answer"), not a step advance.
@@ -325,7 +327,7 @@ test('a streamed Ask failure keeps the question and Try again re-runs it', async
     })
   ).toBeVisible()
   await expect(
-    page.getByText('Failed while: Generating SQL', { exact: true })
+    page.getByText('Failed while generating SQL', { exact: true })
   ).toBeVisible()
 
   // TRUE retry: the SAME question is re-run — the input is never wiped.
@@ -346,14 +348,15 @@ test('a streamed Ask failure keeps the question and Try again re-runs it', async
     { question, target: 'e2e-guard' },
   ])
 
-  // Only "Ask another" clears the box and returns to a clean input.
-  await page.getByRole('button', { name: 'Ask another' }).click()
+  // A failure routes back to the composer with the question intact, so the
+  // recovery is "Edit question" rather than a fresh, empty box.
+  await page.getByRole('button', { name: 'Edit question' }).click()
   await expect(
     page.getByPlaceholder(
       'For example: Which customers placed the most orders this month?'
     )
-  ).toHaveValue('')
-  await expect(page.getByRole('button', { name: 'Get answer' })).toBeDisabled()
+  ).toHaveValue(question)
+  await expect(page.getByRole('button', { name: 'Get answer' })).toBeEnabled()
 })
 
 test('a model context limit is shown as a schema-size error', async ({
@@ -392,11 +395,13 @@ test('a model context limit is shown as a schema-size error', async ({
     page.getByText('Database schema is too large', { exact: true })
   ).toBeVisible()
   await expect(
-    page.getByText('Failed while: Generating SQL', { exact: true })
+    page.getByText('Failed while generating SQL', { exact: true })
   ).toBeVisible()
   await expect(page.getByText('AI service authentication failed')).toHaveCount(
     0
   )
   await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Ask another' })).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Edit question' })
+  ).toBeVisible()
 })

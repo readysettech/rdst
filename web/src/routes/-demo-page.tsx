@@ -496,6 +496,7 @@ function HeartbeatDot() {
       <Tooltip>
         <TooltipTrigger asChild>
           <span
+            role="img"
             className="qpdemo-heartbeat inline-block h-2.5 w-2.5 cursor-default rounded-full bg-surface-positive-solid"
             aria-label="QueryPilot activity"
           />
@@ -930,6 +931,13 @@ function PreflightItem({
 // "about 2 GB" — so a single missing image no longer overstates the cost
 // [Demo 2 nit-1; USE-065 disclose costs honestly]. The undefined fallback is
 // never displayed (that row shows "checking" until preflight resolves).
+/** A disk figure the backend did not send must not reach the DOM as `NaN`. */
+function formatDiskRequirement(gb: number | undefined | null): string {
+  return typeof gb === 'number' && Number.isFinite(gb) && gb > 0
+    ? `about ${Math.round(gb)} GB`
+    : 'more free disk'
+}
+
 function formatDownloadSize(mb: number | undefined | null): string {
   if (!mb || mb <= 0) return '1 GB'
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
@@ -964,8 +972,8 @@ function DemoTrialInvite() {
         </div>
         <Text level="body-small" className="mt-2 text-content-layout-2">
           You just watched Readyset cache these queries live — the same speedup
-          works on your data. Sign in for capped hosted AI inference, then point
-          RDST at your database.
+          works on your data. Sign in for the free included AI, then point RDST
+          at your database.
         </Text>
         <div className="mt-4 flex flex-col gap-2">
           <Button
@@ -1041,7 +1049,7 @@ function StartCard({ onStart }: { onStart: () => void }) {
             size="small"
             icon="filter-reset"
             iconPosition="left"
-            label="Re-check"
+            label="Try again"
             disabled={checking}
             onClick={recheck}
           />
@@ -1084,7 +1092,7 @@ function StartCard({ onStart }: { onStart: () => void }) {
             okLabel="Container images downloaded"
             pendingLabel={
               checks && !checks.disk_space_ok
-                ? `Not enough free disk — the demo needs about ${Math.round(checks.disk_required_gb)} GB`
+                ? `Not enough free disk — the demo needs ${formatDiskRequirement(checks.disk_required_gb)}`
                 : `Container images not downloaded yet — about ${formatDownloadSize(checks?.download_mb)}`
             }
           />
@@ -1550,9 +1558,8 @@ function PatternTable({
                       row.status.startsWith('cached_') ? (
                         // Freshly cached: the average is held until the cache is
                         // actually serving, so show that the number is on its way.
-                        <span
+                        <output
                           className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent align-middle opacity-70"
-                          role="status"
                           aria-label="warming cache"
                         />
                       ) : (

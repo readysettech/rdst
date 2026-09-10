@@ -1,11 +1,10 @@
 import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card'
 import { Progress } from '@rs/ui-new/progress'
-import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { cancelActiveAudit } from '../../lib/auditSession'
-import { formatSecondsClock } from '../../lib/formatters'
+import { formatElapsedOfWindow, formatSecondsClock } from '../../lib/formatters'
 import { ActivityPulse } from './ActivityPulse'
 
 function activityForPhase(phase: string | undefined): string {
@@ -27,12 +26,15 @@ function activityForPhase(phase: string | undefined): string {
 
 export function RunProgress({
   phase,
+  scopeLabel,
   statusMessage,
   durationSeconds,
   elapsedSeconds,
   totalElapsedSeconds,
 }: {
   phase: string | undefined
+  /** What the run covers, e.g. "Running on e2e-guard". */
+  scopeLabel?: string
   statusMessage: string | undefined
   durationSeconds: number
   elapsedSeconds: number
@@ -47,7 +49,9 @@ export function RunProgress({
     ? Math.min(100, (elapsedSeconds / durationSeconds) * 100)
     : undefined
   const runningClock =
-    !hasCaptureDuration && totalElapsedSeconds !== undefined && totalElapsedSeconds >= 0
+    !hasCaptureDuration &&
+    totalElapsedSeconds !== undefined &&
+    totalElapsedSeconds >= 0
       ? `${formatSecondsClock(totalElapsedSeconds)} elapsed`
       : ''
   const label = activityForPhase(phase)
@@ -72,18 +76,12 @@ export function RunProgress({
               className="text-content-layout-3 tabular-nums text-right"
             >
               {hasCaptureDuration
-                ? `${formatSecondsClock(elapsedSeconds)} / ${formatSecondsClock(durationSeconds)}`
+                ? formatElapsedOfWindow(elapsedSeconds, durationSeconds)
                 : runningClock}
             </Text>
-            <div
-              className="col-start-1 min-w-0"
-              title={statusMessage}
-            >
-              <Text
-                level="caption"
-                className="text-content-layout-3 truncate"
-              >
-                {detail}
+            <div className="col-start-1 min-w-0" title={statusMessage}>
+              <Text level="caption" className="text-content-layout-3 truncate">
+                {scopeLabel ? `${scopeLabel} · ${detail}` : detail}
               </Text>
             </div>
             <Button
@@ -97,9 +95,9 @@ export function RunProgress({
               onClick={cancelActiveAudit}
             />
           </div>
-          <Show when={percent !== undefined}>
-            <Progress value={percent ?? 0} max={100} />
-          </Show>
+          {/* A phase with no countable end keeps an indeterminate track, so
+              the card never goes still while the run is alive. */}
+          <Progress value={percent} label={`${label} progress`} />
         </VStack>
       </Card.Content>
     </Card>

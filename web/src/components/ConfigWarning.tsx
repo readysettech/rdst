@@ -48,10 +48,10 @@ function getWarningConfig(
     trialState.percent_remaining <= 0
   ) {
     return {
-      title: 'Trial Credits Exhausted',
+      title: 'Included AI used up',
       description: TRIAL_EXHAUSTED_MESSAGE,
       severity: 'error',
-      actionLabel: 'Set API Key',
+      actionLabel: 'Set API key',
       actionType: 'open-env-dialog',
     }
   }
@@ -63,10 +63,10 @@ function getWarningConfig(
     trialState.percent_remaining < 25
   ) {
     return {
-      title: 'Low Trial Balance',
-      description: `${trialState.remaining_tokens_display} of ${trialState.limit_tokens_display} trial tokens remaining. Consider getting your own API key.`,
+      title: 'Included AI running low',
+      description: `${trialState.remaining_tokens_display} of ${trialState.limit_tokens_display} included AI tokens remaining. Consider adding your own API key.`,
       severity: 'warning',
-      actionLabel: 'Set API Key',
+      actionLabel: 'Set API key',
       actionType: 'open-env-dialog',
     }
   }
@@ -76,7 +76,7 @@ function getWarningConfig(
     return {
       title: 'AI sign-in required',
       description:
-        'Sign in to Readyset for capped hosted inference, or add your own Anthropic API key.',
+        'Sign in to Readyset for the free included AI, or add your own Anthropic API key.',
       severity: 'warning',
       actionLabel: 'Sign in to Readyset',
       actionType: 'open-trial-dialog',

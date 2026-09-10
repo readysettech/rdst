@@ -347,7 +347,7 @@ describe('DemoPage', () => {
     const preflightCalls = () =>
       fetchMock.mock.calls.filter(([u]) => String(u).includes('/preflight')).length;
     const before = preflightCalls();
-    fireEvent.click(screen.getByRole('button', { name: /Re-check/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
     // Re-check must re-run the preflight; assert it triggered at least one more
     // call rather than a fixed total, which is brittle if the mount effect fires
     // more than once.

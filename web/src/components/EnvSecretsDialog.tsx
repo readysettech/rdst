@@ -44,7 +44,7 @@ function toMissingEntries(requirements: EnvRequirement[]): MissingEntry[] {
     const label =
       item.kind === 'target_password'
         ? `Password${item.target ? ` (${item.target})` : ''}`
-        : 'Anthropic API Key'
+        : 'Anthropic API key'
     const hint =
       item.kind === 'target_password'
         ? `Enter the password${item.target ? ` for ${item.target}` : ''}.`
@@ -77,7 +77,7 @@ export function EnvSecretsDialog({
       {
         key: 'anthropic_api_key:ANTHROPIC_API_KEY:global',
         envName: 'ANTHROPIC_API_KEY',
-        label: 'Anthropic API Key',
+        label: 'Anthropic API key',
         hint: 'Paste your Anthropic API key.',
       },
     ]
@@ -339,8 +339,9 @@ export function EnvSecretsDialog({
                 disabled={setEnvSecretMutation.isPending}
               />
               <Button
-                variant="rising"
-                label="Save Secrets"
+                variant="primary"
+                modifier="solid"
+                label="Save secrets"
                 icon="tick"
                 iconPosition="right"
                 onClick={handleSubmit}

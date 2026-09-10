@@ -25,7 +25,6 @@ from tests.web_e2e.fakes import (
     FakeAskService,
     FakeAuditService,
     FakeTargetBootstrapService,
-    FakeCacheService,
     FakeReadysetExperimentService,
     FakeInitService,
     FakeScanService,
@@ -57,7 +56,6 @@ analyze_routes.AnalyzeService = FakeAnalyzeService
 ask_routes.AskService = FakeAskService
 audit_routes.AuditService = FakeAuditService
 bootstrap_routes.TargetBootstrapService = FakeTargetBootstrapService
-cache_routes.CacheService = FakeCacheService
 cache_routes._docker_runtime_status = fake_docker_runtime_status
 cache_routes._probe_upstream = fake_probe_upstream
 cache_experiment_service.ReadysetExperimentService = FakeReadysetExperimentService

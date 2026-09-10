@@ -1,5 +1,6 @@
 import domMax from '@rs/ui-new/dom-max'
 import LazyMotion from '@rs/ui-new/lazy-motion'
+import { MotionConfig } from '@rs/ui-new/motion'
 import { Toaster } from '@rs/ui-new/toaster'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRouter, RouterProvider } from '@tanstack/react-router'
@@ -26,7 +27,15 @@ declare module '@tanstack/react-router' {
   }
 }
 
-const queryClient = new QueryClient()
+// React Query's default (three retries with exponential backoff) held every
+// list behind its loading state for ~7s before the error branch could run, so
+// a dead endpoint looked like a slow one. One retry covers a transient blip
+// and still surfaces a real failure in about two seconds. [F-06]
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: 1, retryDelay: 800 },
+  },
+})
 installAnalysisRunInvalidation(queryClient)
 
 const rootElement = document.getElementById('root')!
@@ -35,10 +44,14 @@ if (!rootElement.innerHTML) {
   root.render(
     <StrictMode>
       <LazyMotion features={domMax} strict>
-        <QueryClientProvider client={queryClient}>
-          <RouterProvider router={router} />
-          <Toaster />
-        </QueryClientProvider>
+        {/* Every m.* entrance in the product reads the user's motion
+            preference from here, so no call site has to remember to. */}
+        <MotionConfig reducedMotion="user">
+          <QueryClientProvider client={queryClient}>
+            <RouterProvider router={router} />
+            <Toaster />
+          </QueryClientProvider>
+        </MotionConfig>
       </LazyMotion>
     </StrictMode>
   )

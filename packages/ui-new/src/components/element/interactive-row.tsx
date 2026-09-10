@@ -7,6 +7,7 @@ import {
   memo,
   type ReactNode,
 } from 'react'
+import { controlTransition, focusRingClass } from '../../helpers/focus'
 
 interface InteractiveRowProps
   extends Omit<
@@ -38,10 +39,9 @@ const InteractiveRow = forwardRef<HTMLButtonElement, InteractiveRowProps>(
       data-active={active || undefined}
       className={cn(
         'group relative w-full cursor-pointer text-left',
-        'transition duration-fast ease-base',
-        'focus-visible:outline-none focus-visible:ring-2',
-        'focus-visible:ring-border-primary-soft focus-visible:ring-offset-2',
-        'focus-visible:ring-offset-surface-layout-1',
+        controlTransition,
+        'duration-fast ease-base',
+        focusRingClass,
         'active:scale-[0.995] active:origin-center',
         active && 'bg-surface-primary-soft/10',
         disabled && 'pointer-events-none cursor-not-allowed opacity-50',

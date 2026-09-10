@@ -3,13 +3,24 @@ import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card-2'
 import { Icon } from '@rs/ui-new/icon'
 import { IconTile } from '@rs/ui-new/icon-tile'
+import { Spinner } from '@rs/ui-new/spinner'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { TableHeaderCell } from '../../../components/TableHeaderCell'
 import type { BenchmarkRequest } from '../../../lib/api'
 import type { LoadTestProgress } from '../../../lib/backgroundRuns'
-import { formatMs, shortHash } from '../../../lib/formatters'
+import {
+  formatElapsedOfWindow,
+  formatMs,
+  formatSecondsShort,
+  shortHash,
+} from '../../../lib/formatters'
+import {
+  BenchmarkProgress,
+  useElapsedSeconds,
+} from '../shared/BenchmarkProgress'
+import { type StatusTone, statusToneIcon } from '../shared/statusTone'
 import { LoadTestLiveChart } from './LoadTestLiveChart'
 import {
   type LoadTestLaneStats,
@@ -63,22 +74,27 @@ function LaneMetric({
   qps,
   p95,
   errors,
+  lead,
   readyset = false,
 }: {
   label: string
   qps: number
   p95: number
   errors: number
+  /** The metric the run's verdict is computed from, shown as the big figure. */
+  lead: 'qps' | 'p95'
   readyset?: boolean
 }) {
   return (
     <VStack className="min-w-0 items-stretch gap-4 p-5">
       <HStack className="items-center gap-2">
+        {/* Both lanes carry the chart's own colour key, so neither dot
+            disappears into the surface behind it. [D-14] */}
         <span
           aria-hidden="true"
           className={cn(
             'h-2 w-2 rounded-full',
-            readyset ? 'bg-surface-positive-solid' : 'bg-surface-layout-2'
+            readyset ? 'bg-content-viz-cache' : 'bg-content-viz-origin'
           )}
         />
         <Text level="label-small" className="text-content-layout-1">
@@ -94,10 +110,10 @@ function LaneMetric({
               readyset ? 'text-content-positive-soft' : 'text-content-layout-1'
             )}
           >
-            {qps.toFixed(qps >= 10 ? 0 : 1)}
+            {lead === 'qps' ? qps.toFixed(qps >= 10 ? 0 : 1) : formatMs(p95)}
           </Text>
           <Text level="caption" className="text-content-layout-3">
-            QPS
+            {lead === 'qps' ? 'QPS' : 'p95 latency'}
           </Text>
         </VStack>
         <VStack className="items-end gap-1">
@@ -105,7 +121,9 @@ function LaneMetric({
             level="label-small"
             className="text-content-layout-1 tabular-nums"
           >
-            {formatMs(p95)} p95
+            {lead === 'qps'
+              ? `${formatMs(p95)} p95`
+              : `${qps.toFixed(qps >= 10 ? 0 : 1)} QPS`}
           </Text>
           <Text
             level="caption"
@@ -139,7 +157,7 @@ function LaneStatCell({
           aria-hidden="true"
           className={cn(
             'h-1.5 w-1.5 rounded-full',
-            readyset ? 'bg-surface-positive-solid' : 'bg-surface-layout-2'
+            readyset ? 'bg-content-viz-cache' : 'bg-content-viz-origin'
           )}
         />
         <Text
@@ -212,77 +230,122 @@ export function LoadTestResults({
     laneAggregates,
     speedup,
   } = model
+  // Preparation ticks carry no elapsed time of their own, so the minutes the
+  // user is being asked to wait are counted here. [D-18]
+  const preparingSeconds = useElapsedSeconds(!!preparation)
   const failed = outcome === 'failed'
   const partial = outcome === 'partial'
   const noMeasurements = outcome === 'no_measurements'
+  // Why this run cannot be repeated, if it cannot. `null` means it can.
+  const runAgainBlockedReason = targetLocked
+    ? 'Unlock this database to run the test again.'
+    : !request
+      ? 'This run was restored without its settings, so it cannot be repeated. Adjust the load to configure a new one.'
+      : null
+  const tone: StatusTone = running
+    ? 'informative'
+    : failed || noMeasurements
+      ? 'negative'
+      : outcome === 'cancelled'
+        ? 'neutral'
+        : partial
+          ? 'warning'
+          : 'positive'
 
   return (
     <VStack className="w-full items-stretch gap-6">
       <Card aria-live="polite">
         <Card.Header className="items-start gap-4 tablet:flex-row tablet:items-center tablet:justify-between">
           <HStack className="min-w-0 items-center gap-3">
-            <IconTile
-              icon={
-                running
-                  ? 'play'
-                  : failed || noMeasurements
-                    ? 'alert'
-                    : outcome === 'cancelled'
-                      ? 'close'
-                      : 'tick-double'
-              }
-              size="base"
-              accent={
-                running
-                  ? 'primary'
-                  : failed || noMeasurements
-                    ? 'negative'
-                    : outcome === 'cancelled'
-                      ? 'rising'
-                      : partial
-                        ? 'warning'
-                        : 'positive'
-              }
-            />
+            {preparation ? (
+              <HStack className="h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border-primary-soft">
+                <Spinner size="large" color="primary-soft" />
+              </HStack>
+            ) : (
+              <IconTile
+                icon={
+                  running
+                    ? 'play'
+                    : failed || noMeasurements
+                      ? 'alert'
+                      : outcome === 'cancelled'
+                        ? 'close'
+                        : 'tick-double'
+                }
+                size="base"
+                accent={
+                  running
+                    ? 'primary'
+                    : failed || noMeasurements
+                      ? 'negative'
+                      : outcome === 'cancelled'
+                        ? 'rising'
+                        : partial
+                          ? 'warning'
+                          : 'positive'
+                }
+              />
+            )}
             <VStack className="min-w-0 items-start gap-0.5">
               <Card.Title>{title}</Card.Title>
               <Card.Description>{description}</Card.Description>
             </VStack>
           </HStack>
           <Tag
-            variant={
-              running
-                ? 'informative'
-                : failed || noMeasurements
-                  ? 'negative'
-                  : outcome === 'cancelled'
-                    ? 'neutral'
-                    : partial
-                      ? 'warning'
-                      : 'positive'
-            }
+            variant={tone}
             modifier="solid"
+            icon={statusToneIcon(tone)}
+            iconPosition="left"
             label={statusLabel}
           />
         </Card.Header>
 
         <Card.Content>
-          {queued || preparation ? (
+          {preparation ? (
+            <BenchmarkProgress
+              value={preparation.preparedCount}
+              max={preparation.prepareTotal}
+              ariaLabel="Cache preparation"
+              label={`${preparation.preparedCount} of ${preparation.prepareTotal} queries cached`}
+              timing={`${formatSecondsShort(preparingSeconds)} elapsed`}
+              detail="Measurement starts once every query is cached. On a cold sandbox that takes a few minutes; stopping the test here costs nothing."
+            />
+          ) : queued ? (
             <HStack className="items-start gap-3 rounded-xl border border-border-info-soft p-4">
               <Icon
                 name="info"
-                label={preparation ? 'Preparing' : 'Queued'}
+                label="Queued"
                 className="mt-0.5 h-5 w-5 shrink-0 text-content-info-soft"
               />
               <VStack className="items-start gap-1">
                 <Text level="label-small" className="text-content-layout-1">
-                  No action is required
+                  Waiting for the running measurement to finish
                 </Text>
                 <Text level="body-small" className="text-content-layout-3">
-                  {preparation
-                    ? 'Every query in this run is cached first; the timer starts after that.'
-                    : runMessage ||
-                      'The timer starts only after the first query begins.'}
+                  {runMessage ||
+                    'The timer starts only after the first query begins.'}
+                </Text>
+              </VStack>
+            </HStack>
+          ) : failed && totalExecutions === 0 ? (
+            // A run that never completed a request has no metrics to grid and
+            // no pacing to explain — only the reason it ended. [D-19]
+            <HStack className="items-start gap-3 rounded-xl border border-border-negative-soft p-4">
+              <Icon
+                name="alert"
+                label="Load test error"
+                className="mt-0.5 h-5 w-5 shrink-0 text-content-negative-soft"
+              />
+              <VStack className="items-start gap-1">
+                <Text
+                  level="label-small"
+                  className="text-content-negative-soft"
+                >
+                  The load test could not complete
+                </Text>
+                <Text level="body-small" className="text-content-layout-3">
+                  {error ||
+                    'The run ended before a request completed, so nothing was measured.'}
                 </Text>
               </VStack>
             </HStack>
@@ -368,22 +431,17 @@ export function LoadTestResults({
                 </VStack>
               </HStack>
               {running && (
-                <VStack className="mt-4 items-stretch gap-2">
-                  <HStack className="justify-between gap-3">
-                    <Text level="caption" className="text-content-layout-3">
-                      {progress?.elapsed_seconds.toFixed(1) ?? '0.0'}s elapsed
-                    </Text>
-                    <Text level="caption" className="text-content-layout-3">
-                      {durationSeconds}s duration
-                    </Text>
-                  </HStack>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-surface-layout-2">
-                    <div
-                      className="h-full rounded-full bg-surface-primary-solid transition-[width] duration-300"
-                      style={{ width: `${progressPercent}%` }}
-                    />
-                  </div>
-                </VStack>
+                <div className="mt-4">
+                  <BenchmarkProgress
+                    value={progressPercent}
+                    ariaLabel="Load test progress"
+                    label="Measuring"
+                    timing={formatElapsedOfWindow(
+                      progress?.elapsed_seconds ?? 0,
+                      durationSeconds
+                    )}
+                  />
+                </div>
               )}
             </>
           )}
@@ -405,12 +463,25 @@ export function LoadTestResults({
             <Button
               variant="negative"
               modifier="outline"
-              label={queued ? 'Cancel queued test' : 'Stop test'}
+              label={
+                queued
+                  ? 'Cancel queued test'
+                  : preparation
+                    ? 'Cancel preparation'
+                    : 'Stop test'
+              }
               icon="close"
               onClick={onStop}
             />
           ) : (
             <HStack className="flex-wrap items-center gap-2">
+              {/* A dead primary says why it is dead, next to itself, rather
+                  than leaving the reader to guess (GUIDELINES §10). */}
+              {runAgainBlockedReason ? (
+                <Text level="caption" className="text-content-warning-soft">
+                  {runAgainBlockedReason}
+                </Text>
+              ) : null}
               <Button
                 variant="primary"
                 modifier="ghost"
@@ -419,12 +490,12 @@ export function LoadTestResults({
                 onClick={onAdjust}
               />
               <Button
-                variant="rising"
+                variant="primary"
                 modifier="solid"
                 label="Run again"
                 icon="play"
                 onClick={onRunAgain}
-                disabled={targetLocked || !request}
+                disabled={Boolean(runAgainBlockedReason)}
               />
             </HStack>
           )}
@@ -453,7 +524,12 @@ export function LoadTestResults({
                       : `${Math.abs((speedup - 1) * 100).toFixed(0)}% slower with Readyset`}
                 </Card.Title>
                 <Card.Description>
-                  The same workload ran against both lanes side by side.
+                  {/* Both lanes of a paced run are throttled to the same rate by
+                      construction, so QPS is the one metric that cannot carry
+                      the claim — latency is. [D-14] */}
+                  {profile === 'capacity'
+                    ? 'The same workload ran against both lanes side by side; the comparison is sustained throughput.'
+                    : 'The same workload ran against both lanes side by side at the same paced rate; the comparison is p95 latency.'}
                 </Card.Description>
               </VStack>
             </HStack>
@@ -465,12 +541,14 @@ export function LoadTestResults({
                 qps={laneAggregates.origin.qps}
                 p95={laneAggregates.origin.p95}
                 errors={laneAggregates.origin.failures}
+                lead={profile === 'capacity' ? 'qps' : 'p95'}
               />
               <LaneMetric
                 label="Readyset"
                 qps={laneAggregates.readyset.qps}
                 p95={laneAggregates.readyset.p95}
                 errors={laneAggregates.readyset.failures}
+                lead={profile === 'capacity' ? 'qps' : 'p95'}
                 readyset
               />
             </div>
@@ -705,7 +783,7 @@ export function LoadTestResults({
         </Card>
       )}
 
-      {error && (
+      {error && !(failed && totalExecutions === 0) && (
         <Card className="border-border-negative-soft">
           <Card.Content>
             <HStack className="items-start gap-3">

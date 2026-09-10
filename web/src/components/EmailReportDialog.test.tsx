@@ -16,7 +16,10 @@ vi.mock('../lib/api', async () => {
 
 type Identity = { email: string | null; verified: boolean }
 
-function stubFetch(identity: Identity, verifyPoll: { verified: boolean } = { verified: false }) {
+function stubFetch(
+  identity: Identity,
+  verifyPoll: { verified: boolean } = { verified: false }
+) {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     void init
     const url = String(input)
@@ -62,7 +65,9 @@ describe('EmailReportDialog', () => {
     await waitFor(() => {
       expect(emailAuditReport).toHaveBeenCalledWith('audit_prod_1', undefined)
     })
-    expect(await screen.findByText(/Report sent to ada@example.com/i)).toBeTruthy()
+    expect(
+      await screen.findByText(/Report sent to ada@example.com/i)
+    ).toBeTruthy()
   })
 
   it('collects an address first when none is verified', async () => {
@@ -90,7 +95,8 @@ describe('EmailReportDialog', () => {
     // The address is registered through the settings endpoint before the send.
     expect(
       fetchMock.mock.calls.some(
-        ([url, init]) => String(url) === '/api/settings/email' && init?.method === 'POST'
+        ([url, init]) =>
+          String(url) === '/api/settings/email' && init?.method === 'POST'
       )
     ).toBe(true)
     expect(
@@ -98,27 +104,36 @@ describe('EmailReportDialog', () => {
     ).toBeTruthy()
   })
 
-  it('rejects a malformed address without calling the API', async () => {
+  it('rejects a malformed address at the field, without calling the API', async () => {
     stubFetch({ email: null, verified: false })
 
     renderWithClient(
       <EmailReportDialog isOpen onClose={() => {}} runId="audit_prod_1" />
     )
 
-    const input = await screen.findByPlaceholderText('you@company.com')
+    const input = await screen.findByLabelText('Email address')
     fireEvent.change(input, { target: { value: 'not-an-email' } })
-    fireEvent.click(screen.getByRole('button', { name: /send report/i }))
+    // Validated on blur, so the rejection is there before Send is pressed. [E-11]
+    fireEvent.blur(input)
 
-    expect(
-      await screen.findByText(/Please enter a valid email address/i)
-    ).toBeTruthy()
+    const error = await screen.findByText(/Enter a valid email address/i)
+    expect(error).toBeTruthy()
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    // The helper text is swapped for the error, not stacked above it.
+    expect(screen.queryByText(/one-time confirmation link/i)).toBeNull()
+    expect(input.getAttribute('aria-describedby')?.length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: /send report/i }))
     expect(emailAuditReport).not.toHaveBeenCalled()
   })
 
   it('polls for verification and reports success once the link is clicked', async () => {
     vi.useFakeTimers()
     try {
-      stubFetch({ email: 'ada@example.com', verified: false }, { verified: true })
+      stubFetch(
+        { email: 'ada@example.com', verified: false },
+        { verified: true }
+      )
       vi.mocked(emailAuditReport).mockResolvedValue({
         status: 'verification_sent',
         email: 'ada@example.com',

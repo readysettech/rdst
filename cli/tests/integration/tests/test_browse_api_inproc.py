@@ -1,9 +1,12 @@
 """In-process integration tests for the /api/browse endpoint.
 
-Covers directory listing and the ext filter used by the file picker UI.
+Covers directory listing, the ext filter used by the file picker UI, and the
+home-directory flag the picker uses to refuse a one-click whole-home scan.
 """
 
 from __future__ import annotations
+
+import os
 
 from shared.api.routes import browse
 
@@ -65,3 +68,27 @@ async def test_browse_ext_accepts_leading_dot(client, tmp_path):
 async def test_browse_rejects_missing_path(client, tmp_path):
     response = await client.get(f"/api/browse?path={tmp_path}/nope")
     assert response.status_code == 400
+
+
+async def test_browse_without_a_path_starts_in_the_working_directory(
+    client, tmp_path, monkeypatch
+):
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    response = await client.get("/api/browse")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["current"] == os.path.abspath(str(project))
+    assert body["is_home"] is False
+
+
+async def test_browse_flags_the_home_directory(client, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    response = await client.get(f"/api/browse?path={home}")
+    assert response.status_code == 200
+    assert response.json()["is_home"] is True

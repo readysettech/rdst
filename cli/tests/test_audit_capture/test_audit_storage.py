@@ -55,6 +55,27 @@ class TestAuditStorage:
         assert loaded["total_queries"] == 500
         assert len(loaded["queries"]) == 1
 
+    def test_saved_run_carries_why_a_step_produced_nothing(self):
+        run = _make_run("run_skipped")
+        run.analysis_error = "the model provider returned 503"
+        run.readyset_notice = "Readyset benchmark skipped: no Docker"
+        self.storage.save_run(run)
+
+        loaded = self.storage.load_run("mydb", "run_skipped")
+        assert loaded is not None
+        # Without these the report has an empty analysis and no explanation for
+        # it, so it reads as "nothing was wrong" instead of "nothing was run".
+        assert loaded["analysis_error"] == "the model provider returned 503"
+        assert loaded["readyset_notice"] == "Readyset benchmark skipped: no Docker"
+
+    def test_saved_run_defaults_to_no_skipped_steps(self):
+        self.storage.save_run(_make_run("run_clean"))
+
+        loaded = self.storage.load_run("mydb", "run_clean")
+        assert loaded is not None
+        assert loaded["analysis_error"] is None
+        assert loaded["readyset_notice"] is None
+
     def test_list_runs(self):
         self.storage.save_run(_make_run("run_a", "mydb"))
         self.storage.save_run(_make_run("run_b", "mydb"))

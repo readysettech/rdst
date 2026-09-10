@@ -7,6 +7,7 @@ import {
   memo,
   type ReactNode,
 } from 'react'
+import { focusRingClass } from '../../helpers/focus'
 
 export interface PressableProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'> {
@@ -29,7 +30,7 @@ const PressableBase = forwardRef<HTMLButtonElement, PressableProps>(
       type={type}
       disabled={disabled}
       className={cn(
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-primary-soft focus-visible:ring-offset-2 focus-visible:ring-offset-surface-layout-1',
+        focusRingClass,
         disabled && 'cursor-not-allowed opacity-50',
         className
       )}

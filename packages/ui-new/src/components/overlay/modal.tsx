@@ -44,7 +44,7 @@ const modalStyles = tv({
       'shadow-lg',
       'border-(length:--border-base)',
       'border-border-layout-1',
-      'rounded-[1.25rem]',
+      'rounded-card',
       'notranslate',
     ],
     header: ['flex', 'flex-col', 'gap-1.5', 'text-center', 'tablet:text-left'],
@@ -235,6 +235,9 @@ export const ModalContent = forwardRef<
         </Dialog.Overlay>
         <Dialog.Content
           ref={ref}
+          // Radix hides the rest of the document from assistive tech; saying so
+          // on the dialog itself is what a screen reader reads out.
+          aria-modal="true"
           className={styles.content({ class: className })}
           translate="no"
           contentEditable={false}

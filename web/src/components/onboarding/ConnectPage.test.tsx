@@ -36,22 +36,44 @@ vi.mock('../../lib/useOnboarding', () => ({
   useOnboarding: vi.fn(),
 }))
 
-// The real form pulls in the full configure stack; the page only needs a
-// hook to fire onSubmit with form data.
+// The real form pulls in the full configure stack. The stand-in reproduces the
+// one part of its contract the page depends on: with `onTest` and
+// `reviewWritePrivilegesOnSubmit`, submit probes the connection first and saves
+// nothing when the probe fails.
 vi.mock('../configure', () => ({
   ConfigureForm: ({
     onSubmit,
+    onTest,
+    submitLabel,
+    reviewWritePrivilegesOnSubmit,
   }: {
     onSubmit: (data: Record<string, unknown>) => void
+    onTest?: (data: Record<string, unknown>) => Promise<unknown>
+    submitLabel?: string
+    reviewWritePrivilegesOnSubmit?: boolean
   }) => (
-    <button type="button" onClick={() => onSubmit({ name: 'mydb' })}>
-      Mock Submit
+    <button
+      type="button"
+      data-tests-connection={String(
+        Boolean(onTest && reviewWritePrivilegesOnSubmit)
+      )}
+      onClick={async () => {
+        const data = { name: 'mydb' }
+        if (onTest && reviewWritePrivilegesOnSubmit) {
+          const result = (await onTest(data)) as { connected?: boolean } | null
+          if (!result?.connected) return
+        }
+        onSubmit(data)
+      }}
+    >
+      {submitLabel ?? 'Mock Submit'}
     </button>
   ),
 }))
 
 const addTarget = vi.fn()
 const setDefaultTarget = vi.fn()
+const testConnection = vi.fn()
 const cancel = vi.fn()
 const completeInit = vi.fn()
 
@@ -73,10 +95,13 @@ describe('ConnectPage', () => {
     addTarget.mockResolvedValue(undefined)
     setDefaultTarget.mockResolvedValue(undefined)
     completeInit.mockResolvedValue(true)
+    testConnection.mockResolvedValue({ connected: true })
     vi.mocked(useConfigure).mockReturnValue({
       addTarget,
       setDefaultTarget,
+      testConnection,
       cancel,
+      connectionTestResult: null,
       loading: false,
     } as unknown as ReturnType<typeof useConfigure>)
     vi.mocked(useOnboarding).mockReturnValue({
@@ -121,7 +146,7 @@ describe('ConnectPage', () => {
     const queryClient = renderPage({ redirectTo: '/queries' })
     queryClient.setQueryData(['init-status'], { initialized: false })
 
-    fireEvent.click(screen.getByRole('button', { name: /Mock Submit/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Test & connect/i }))
 
     await waitFor(() => {
       expect(mockHistoryPush).toHaveBeenCalledWith('/queries')
@@ -135,6 +160,31 @@ describe('ConnectPage', () => {
     })
   })
 
+  it('tests the connection before saving anything', async () => {
+    renderPage()
+
+    const submit = screen.getByRole('button', { name: /Test & connect/i })
+    expect(submit.getAttribute('data-tests-connection')).toBe('true')
+    fireEvent.click(submit)
+
+    await waitFor(() => expect(testConnection).toHaveBeenCalled())
+    expect(testConnection.mock.calls[0][0]).toBe('mydb')
+    await waitFor(() => expect(addTarget).toHaveBeenCalled())
+  })
+
+  it('saves nothing when the connection cannot be reached', async () => {
+    testConnection.mockResolvedValue({ connected: false })
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: /Test & connect/i }))
+
+    await waitFor(() => expect(testConnection).toHaveBeenCalled())
+    expect(addTarget).not.toHaveBeenCalled()
+    expect(setDefaultTarget).not.toHaveBeenCalled()
+    expect(completeInit).not.toHaveBeenCalled()
+    expect(mockNavigate).not.toHaveBeenCalled()
+  })
+
   it('stays on the page when a connect step fails', async () => {
     // addTarget can throw after the target was created server-side (e.g. the
     // password secret save failed); the page must not complete init or leave.
@@ -142,7 +192,7 @@ describe('ConnectPage', () => {
 
     renderPage()
 
-    fireEvent.click(screen.getByRole('button', { name: /Mock Submit/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Test & connect/i }))
 
     await waitFor(() => {
       expect(addTarget).toHaveBeenCalled()

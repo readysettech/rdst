@@ -22,8 +22,11 @@ export function ComparePage({
   onFindQueries: () => void
 }) {
   const controller = useCompareController(initialQueryHash)
+  // A failed check is an answer, not a wait: the skeleton gives way to the
+  // error panel and stays there. [D-05]
   const waitingForStatus =
-    controller.statusQuery.isLoading || !controller.passwordLock.isResolved
+    (controller.statusQuery.isLoading && !controller.statusQuery.isError) ||
+    !controller.passwordLock.isResolved
   const sandboxUnavailable =
     controller.statusQuery.data &&
     (!controller.statusQuery.data.docker_installed ||
@@ -40,7 +43,7 @@ export function ComparePage({
   const listError = controller.registry.listError
 
   return (
-    <div className="h-full min-h-0 w-full space-y-6 overflow-y-auto">
+    <div className="w-full space-y-6 desktop:h-full desktop:min-h-0 desktop:overflow-y-auto">
       {controller.historyOpen && <CompareHistory controller={controller} />}
 
       {!controller.historyOpen &&
@@ -53,7 +56,6 @@ export function ComparePage({
             failure={controller.connectivity.failure}
             isChecking={controller.connectivity.isChecking}
             onRetry={() => void controller.startComparison()}
-            retryLabel="Try comparison again"
           />
         )}
 
@@ -98,7 +100,7 @@ export function ComparePage({
             title="Docker is required for comparisons"
             body="Start Docker so RDST can prepare its temporary Readyset sandbox."
             action={{
-              label: 'Check again',
+              label: 'Try again',
               icon: 'observe',
               onClick: () => void controller.statusQuery.refetch(),
             }}
@@ -140,9 +142,9 @@ export function ComparePage({
         !controller.registry.listError &&
         controller.queries.length === 0 && (
           <EmptyState
-            icon="layers"
+            icon="play"
             title="No queries to compare"
-            body="Add or discover a high-impact query before measuring its Readyset speedup. Cacheability is checked when the comparison runs."
+            body="Add or discover a high-impact query before measuring its Readyset speedup."
             action={{
               label: 'Find queries',
               icon: 'search',

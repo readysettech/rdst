@@ -1,19 +1,19 @@
 import { Alert } from '@rs/ui-new/alert'
-import { BaseInputCheckbox } from '@rs/ui-new/base-input-checkbox'
 import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card-2'
-import { ConfirmDialog } from '@rs/ui-new/confirm-dialog'
 import { Icon } from '@rs/ui-new/icon'
 import { Skeleton } from '@rs/ui-new/skeleton'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { QueryCard } from '../../../components/QueryCard'
+import { SQLInput } from '../../../components/SQLInput'
 import { TargetConnectivityNotice } from '../../../components/TargetConnectivityNotice'
 import { TargetLockNotice } from '../../../components/TargetLockNotice'
 import { ParameterDialog } from '../../../components/top'
 import { AnalysisResults } from './AnalysisResults'
+import { AnalyzeConsent } from './AnalyzeConsent'
 import { StoredAnalysisHeader } from './StoredAnalysisHeader'
 import type { ResultsController } from './useResultsController'
 
@@ -75,6 +75,14 @@ export function ResultsBody({
     actions,
   } = controller
 
+  // A failure the database blames on the query itself is answered by changing
+  // the query, so the card that shows the SQL becomes the place to fix it.
+  // [B-21]
+  const [sqlDraft, setSqlDraft] = useState<string | null>(null)
+  const queryShapeFailed =
+    analysis.state === 'error' && analysis.errorEnvelope?.code === 'invalid_sql'
+  const isEditingSql = sqlDraft !== null
+
   const inlinePrompts = prompts === 'inline'
   // A pre-run step owns the body until the user answers it: showing an empty
   // results shell underneath would suggest the run had already started.
@@ -86,9 +94,14 @@ export function ResultsBody({
   const storedAnalysisMissing =
     stored.isActive && !stored.isLoading && !stored.record && !!stored.error
   const databaseEngine = analysis.results?.explain_results?.database_engine
+  // A run exists once one has been asked for: before that the card is showing
+  // the query as written, and calling it "analyzed" would be a claim about
+  // work that has not started (B-04).
+  const hasRun = stored.isActive || analysis.state !== 'idle'
   const queryMeta = [
     query.target ? `Target ${query.target}` : null,
     databaseEngine?.toUpperCase(),
+    hasRun && parameters.isSubstituted ? 'with your values' : null,
   ]
     .filter(Boolean)
     .join(' · ')
@@ -109,92 +122,107 @@ export function ResultsBody({
         />
       ) : null}
 
-      <QueryCard
-        sql={query.sql}
-        leading={
-          <Icon
-            name="querypilot"
-            label=""
-            aria-hidden="true"
-            className="h-4 w-4 text-content-layout-3"
-          />
-        }
-        title={
-          <Text level="label-small" className="text-content-layout-1">
-            Analyzed query
-          </Text>
-        }
-        badges={
-          <Tag
-            variant="neutral"
-            modifier="ghost"
-            size="small"
-            label={query.fast ? 'Fast analysis' : 'Detailed analysis'}
-          />
-        }
-        meta={queryMeta}
-        primaryAction={
-          analysis.state === 'complete' && !stored.isActive ? (
-            <Button
-              variant="primary"
+      {/* One query block per screen. While the inline parameter form is
+          collecting values it carries the query itself, with the placeholders
+          highlighted, so the card stands down until there is something else to
+          show (B-04). */}
+      {hasInlinePrompt && parameters.isOpen ? null : (
+        <QueryCard
+          sql={query.sql}
+          leading={
+            <Icon
+              name="querypilot"
+              label=""
+              aria-hidden="true"
+              className="h-4 w-4 text-content-layout-3"
+            />
+          }
+          title={
+            <Text level="label-small" className="text-content-layout-1">
+              {hasRun ? 'Analyzed query' : 'Query'}
+            </Text>
+          }
+          badges={
+            <Tag
+              variant="neutral"
               modifier="ghost"
               size="small"
-              label="Run analysis again"
-              icon="play"
-              iconPosition="left"
-              onClick={actions.runAgainDeliberately}
+              label={query.fast ? 'Fast analysis' : 'Detailed analysis'}
             />
-          ) : undefined
-        }
-      />
+          }
+          meta={queryMeta}
+          editor={
+            isEditingSql ? (
+              <SQLInput
+                value={sqlDraft}
+                onChange={setSqlDraft}
+                minHeight="10rem"
+                target={query.target}
+                showPrettify
+              />
+            ) : undefined
+          }
+          secondaryActions={
+            isEditingSql ? (
+              <Button
+                variant="primary"
+                modifier="ghost"
+                size="small"
+                label="Cancel"
+                onClick={() => setSqlDraft(null)}
+              />
+            ) : undefined
+          }
+          primaryAction={
+            isEditingSql ? (
+              <Button
+                variant="primary"
+                modifier="solid"
+                size="small"
+                label="Analyze"
+                icon="play"
+                iconPosition="left"
+                disabled={!sqlDraft.trim() || sqlDraft.trim() === query.sql}
+                onClick={() => {
+                  const edited = sqlDraft.trim()
+                  setSqlDraft(null)
+                  actions.editQuery(edited)
+                }}
+              />
+            ) : queryShapeFailed && !stored.isActive ? (
+              <Button
+                variant="primary"
+                modifier="ghost"
+                size="small"
+                label="Edit query"
+                icon="edit"
+                iconPosition="left"
+                onClick={() => setSqlDraft(query.sql)}
+              />
+            ) : analysis.state === 'complete' && !stored.isActive ? (
+              <Button
+                variant="primary"
+                modifier="ghost"
+                size="small"
+                label="Run analysis again"
+                icon="play"
+                iconPosition="left"
+                onClick={actions.runAgainDeliberately}
+              />
+            ) : undefined
+          }
+        />
+      )}
 
-      {hasInlinePrompt && consent.isOpen ? (
-        <Card data-testid="analyze-consent-inline">
-          <Card.Content className="space-y-4 p-4">
-            <VStack className="items-stretch gap-1">
-              <Text level="label-medium" className="text-content-layout-1">
-                Run EXPLAIN ANALYZE?
-              </Text>
-              <Text level="body-small" className="text-content-layout-2">
-                Analyze runs EXPLAIN ANALYZE, which executes your query once
-                against the database to measure it. Cancel if this query should
-                not be executed.
-              </Text>
-            </VStack>
-            <HStack className="flex-wrap items-center justify-between gap-3">
-              <HStack className="items-center gap-3">
-                <BaseInputCheckbox
-                  checked={consent.skipFuturePrompts}
-                  onCheckedChange={(checked) =>
-                    actions.setSkipAnalyzeConsent(checked === true)
-                  }
-                  aria-label="Don't ask again"
-                />
-                <Text level="body-small" className="text-content-layout-2">
-                  Don't ask again
-                </Text>
-              </HStack>
-              <HStack className="items-center gap-2">
-                <Button
-                  variant="primary"
-                  modifier="ghost"
-                  size="small"
-                  label="Cancel"
-                  onClick={actions.cancelAnalysis}
-                />
-                <Button
-                  variant="primary"
-                  modifier="solid"
-                  size="small"
-                  label="Run analyze"
-                  icon="play"
-                  iconPosition="left"
-                  onClick={actions.confirmAnalysis}
-                />
-              </HStack>
-            </HStack>
-          </Card.Content>
-        </Card>
+      {hasInlinePrompt ? (
+        <AnalyzeConsent
+          presentation="inline"
+          isOpen={consent.isOpen}
+          skipFuturePrompts={consent.skipFuturePrompts}
+          onSkipFuturePrompts={actions.setSkipAnalyzeConsent}
+          onCancel={actions.cancelAnalysis}
+          onConfirm={actions.confirmAnalysis}
+        />
       ) : null}
 
       {hasInlinePrompt && parameters.isOpen ? (
@@ -202,6 +230,7 @@ export function ResultsBody({
           presentation="inline"
           isOpen
           onClose={actions.cancelParameters}
+          onEscape={actions.dismissParameters}
           onSubmit={actions.submitParameters}
           query={query.sql}
           target={passwordLock.targetName ?? query.target}
@@ -223,7 +252,6 @@ export function ResultsBody({
           failure={connectivity.failure}
           isChecking={connectivity.isChecking}
           onRetry={() => void actions.runAgain()}
-          retryLabel="Try analysis again"
         />
       )}
 
@@ -269,8 +297,11 @@ export function ResultsBody({
         />
       ) : null}
 
+      {/* Consent is the step before values, so while it is on screen this card
+          would be a second call to action for a question not yet reached. */}
       {parameters.hasParameters &&
       !parameters.isOpen &&
+      !consent.isOpen &&
       !stored.isActive &&
       analysis.state === 'idle' ? (
         <Card>
@@ -333,34 +364,14 @@ export function ResultsBody({
         />
       )}
 
-      <ConfirmDialog
+      <AnalyzeConsent
+        presentation="modal"
         isOpen={!inlinePrompts && consent.isOpen}
-        onClose={actions.cancelAnalysis}
+        skipFuturePrompts={consent.skipFuturePrompts}
+        onSkipFuturePrompts={actions.setSkipAnalyzeConsent}
+        onCancel={actions.cancelAnalysis}
         onConfirm={actions.confirmAnalysis}
-        title="Run EXPLAIN ANALYZE?"
-        notice={{
-          accent: 'warning',
-          icon: 'alert',
-          message:
-            'Analyze runs EXPLAIN ANALYZE, which executes your query once against the database to measure it. Cancel if this query should not be executed.',
-        }}
-        confirmLabel="Run analyze"
-        confirmVariant="primary"
-        cancelLabel="Cancel"
-      >
-        <HStack className="items-center gap-3">
-          <BaseInputCheckbox
-            checked={consent.skipFuturePrompts}
-            onCheckedChange={(checked) =>
-              actions.setSkipAnalyzeConsent(checked === true)
-            }
-            aria-label="Don't ask again"
-          />
-          <Text level="body-small" className="text-content-layout-2">
-            Don't ask again
-          </Text>
-        </HStack>
-      </ConfirmDialog>
+      />
     </>
   )
 }

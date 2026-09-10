@@ -187,9 +187,9 @@ export function PerformanceCardsLabPage() {
           <HStack className="min-w-0 items-center gap-3">
             <IconTile icon="play" size="base" accent="primary" />
             <VStack className="min-w-0 items-start gap-0.5">
-              <Card.Title>Compare cache performance</Card.Title>
+              <Card.Title>Compare against Readyset</Card.Title>
               <Card.Description>
-                Apply the same concurrency to upstream and Readyset.
+                See how much faster these queries are with Readyset.
               </Card.Description>
             </VStack>
           </HStack>
@@ -307,7 +307,7 @@ export function PerformanceCardsLabPage() {
             Prototype only — the run action is inert.
           </Text>
           <Button
-            variant="rising"
+            variant="primary"
             modifier="solid"
             label="Run comparison"
             icon="play"

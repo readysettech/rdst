@@ -4,7 +4,7 @@
 
 import { Alert } from '@rs/ui-new/alert'
 import { Button } from '@rs/ui-new/button'
-import { ErrorState } from '@rs/ui-new/error-state'
+import { ErrorState, InlineNotice } from '@rs/ui-new/error-state'
 import { Icon } from '@rs/ui-new/icon'
 import { m } from '@rs/ui-new/motion'
 import { SegmentedControl } from '@rs/ui-new/segmented-control'
@@ -64,7 +64,8 @@ import { StoragePrivacySection } from './StoragePrivacySection'
 // trips): `edit` opens a connection's edit form, `section=ai` focuses the AI
 // key card, `returnTo` sends the user back to the feature after the fix, and
 // `add` opens the Add Targets drawer on that source tab (the relocation target
-// for the retired /fleet route).
+// for the retired /fleet route), and `from` names the retired route that sent
+// the reader here so the arrival can be explained.
 // Parse-only — never throw here (keeps the app shell intact; B1 lesson).
 export type ConfigureSearch = {
   edit?: string
@@ -72,12 +73,34 @@ export type ConfigureSearch = {
   panel?: SettingsPanel
   returnTo?: string
   add?: AddTab
+  from?: 'fleet' | 'dev-settings'
+}
+
+// A redirect that changes the mental model says so once on arrival. The
+// developer tools are a development-build section, so in a shipped build the
+// notice is what /dev-settings has to offer. [E-51, F-54, A-12]
+function movedNotice(from: ConfigureSearch['from']) {
+  if (from === 'fleet') {
+    return {
+      title: 'Fleet moved into Settings',
+      message:
+        'Targets, their groups and their connectivity are all managed here now.',
+    }
+  }
+  if (from === 'dev-settings' && !import.meta.env.DEV) {
+    return {
+      title: 'Developer settings are a development-build tool',
+      message:
+        'This build ships without them, so the link lands on Targets instead.',
+    }
+  }
+  return null
 }
 
 export type SettingsPanel = 'connections' | 'ai' | 'privacy' | 'developer'
 
 const settingsPanels: { value: SettingsPanel; label: string }[] = [
-  { value: 'connections', label: 'Connections' },
+  { value: 'connections', label: 'Targets' },
   { value: 'ai', label: 'AI' },
   { value: 'privacy', label: 'Data & privacy' },
 ]
@@ -122,6 +145,8 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
       ? 'connections'
       : requestedPanel
   const [activePanel, setActivePanel] = useState<SettingsPanel>(initialPanel)
+  const arrival = movedNotice(search.from)
+  const [arrivalNoticeOpen, setArrivalNoticeOpen] = useState(Boolean(arrival))
   const [showForm, setShowForm] = useState(false)
   const [editingTarget, setEditingTarget] =
     useState<ConfigureTargetDetail | null>(null)
@@ -163,11 +188,17 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
     setDefaultTarget,
     testConnection,
     cancel: cancelConfigure,
+    state: configureState,
     targets,
     connectionTestResult,
     error,
     loading,
   } = useConfigure()
+  // 'idle' is "the list has not been asked for yet", which on first paint is
+  // indistinguishable from "there are no targets" unless it is carried
+  // through to the list. [F-20]
+  const targetsPending =
+    configureState === 'idle' || configureState === 'loading'
 
   // Groups and tags are fleet-side attributes; the row set and its CRUD stay
   // with useConfigure, and this list is joined by name purely for the labels.
@@ -282,7 +313,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
       toast({
         title:
           provider === 'readyset'
-            ? 'Using Readyset-hosted AI'
+            ? 'Using the included AI'
             : 'Using your Anthropic key',
         variant: 'positive',
       })
@@ -323,22 +354,44 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
     keyValidity?.valid === false &&
     keyValidity.reason === 'rejected'
 
+  // The tile is a status indicator: a configuration that can already answer
+  // reads positive, a rejected key negative, an in-flight probe neutral, and a
+  // configuration the user still has to finish warning. [A-11]
+  const aiStatusTone: 'positive' | 'negative' | 'warning' | 'neutral' =
+    keyRejected
+      ? 'negative'
+      : keyChecking
+        ? 'neutral'
+        : usingReadyset
+          ? readysetAccountConnected
+            ? 'positive'
+            : 'warning'
+          : anthropicRequirement?.satisfied
+            ? 'positive'
+            : 'warning'
+  const aiStatusTileTokens = {
+    positive: 'bg-surface-positive-soft text-content-positive-soft',
+    negative: 'bg-surface-negative-soft text-content-negative-soft',
+    warning: 'bg-surface-warning-soft text-content-warning-soft',
+    neutral: 'bg-surface-raised text-content-layout-2',
+  }[aiStatusTone]
+
   const anthropicStatusTitle = usingReadyset
     ? readysetAccountConnected
-      ? 'Using Readyset-hosted AI'
-      : 'Readyset Sign-in Required'
+      ? 'Using the included AI'
+      : 'Readyset sign-in required'
     : keyRejected
-      ? 'Anthropic Key Rejected'
+      ? 'Anthropic key rejected'
       : keyChecking
-        ? 'Checking Anthropic Key…'
+        ? 'Checking Anthropic key…'
         : anthropicRequirement?.satisfied
-          ? 'Anthropic API Key Configured'
-          : 'Anthropic API Key Missing'
+          ? 'Anthropic API key configured'
+          : 'Anthropic API key missing'
 
   const anthropicStatusDescription = usingReadyset
     ? readysetAccountConnected
-      ? 'Analyze, Ask, and Health Check use your Readyset account.'
-      : 'Sign in again to use Readyset-hosted AI.'
+      ? 'Analyze, Ask, and Health check use your Readyset account.'
+      : 'Sign in again to use the included AI.'
     : keyRejected
       ? 'Anthropic rejected this key. Update it with a valid key to keep AI analysis working.'
       : keyChecking
@@ -642,6 +695,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
       onAdd={handleAddClick}
       onMoveToGroup={setMoveTarget}
       isLoading={loading}
+      isPending={targetsPending}
       connectivity={connectivity}
       checkableTargets={checkableTargets}
       testingTargetName={testingTarget}
@@ -675,6 +729,18 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
   return (
     <div className="space-y-6 w-full">
       <SettingsHeader />
+      {arrival && arrivalNoticeOpen && (
+        <InlineNotice
+          accent="info"
+          icon="info"
+          title={arrival.title}
+          message={arrival.message}
+          action={{
+            label: 'Got it',
+            onClick: () => setArrivalNoticeOpen(false),
+          }}
+        />
+      )}
       <TabList aria-label="Settings sections" className="gap-6">
         {[
           ...settingsPanels,
@@ -699,20 +765,20 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
         role="tabpanel"
         aria-labelledby={`settings-tab-${activePanel}`}
       >
-        {/* ── Database connections — primary section; Add moves in here ── */}
+        {/* ── Targets — primary section; Add moves in here ── */}
         <Show when={activePanel === 'connections'}>
           <SettingsSection
             id="connections"
-            title="Database connections"
-            description="Manage databases and review their access."
+            title="Targets"
+            description="Manage the databases RDST connects to and review their access."
             action={
               !showForm ? (
                 <Button
-                  variant="rising"
+                  variant="primary"
                   modifier="solid"
                   icon="add"
                   iconPosition="left"
-                  label="Add connection"
+                  label="Add target"
                   onClick={handleAddClick}
                 />
               ) : undefined
@@ -730,14 +796,11 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
                       code: '',
                       message: error ?? '',
                     })}
-                    title="Connection action failed"
-                    message={
-                      error ??
-                      'The last action on your connections could not complete.'
-                    }
-                    trustworthy="Your saved connections are unchanged."
+                    title="Target action failed"
+                    message="The last action on your targets could not complete."
+                    trustworthy="Your saved targets are unchanged."
+                    detail={error ?? undefined}
                     onRetry={() => void listTargets()}
-                    retryLabel="Reload connections"
                   />
                 </m.div>
               </Show>
@@ -749,12 +812,10 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
                     message: connectivityError ?? '',
                   })}
                   title="Connectivity check failed"
-                  message={
-                    connectivityError ?? 'The connectivity check could not run.'
-                  }
-                  trustworthy="The connection list is unaffected — only the live reachability of each row is stale."
+                  message="Readyset could not check which of your targets are reachable right now."
+                  trustworthy="The target list is unaffected — only the live reachability of each row is stale."
+                  detail={connectivityError ?? undefined}
                   onRetry={checkAll}
-                  retryLabel="Check again"
                 />
               </Show>
 
@@ -818,7 +879,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
               </Show>
 
               {/* The list — and, at zero targets, its polished hero empty-state
-                (the "Add your first connection" surface) render here. [VIS-102].
+                (the "Add your first target" surface) render here. [VIS-102].
                 Connectivity and the unreachable notice render per row. */}
               <Show when={!showForm}>
                 <m.div
@@ -853,7 +914,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
           <SettingsSection
             id="ai"
             title="AI access"
-            description="Use Readyset-hosted AI or your own Anthropic key for Analyze, Ask, and Health Check insights."
+            description="Use the free AI included with a Readyset account, or your own Anthropic key, for Analyze, Ask, and Health check insights."
           >
             <m.div
               initial={{ opacity: 0, y: 10 }}
@@ -861,20 +922,18 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
               transition={{ duration: 0.2 }}
             >
               <div className="rounded-xl border border-border-layout-1 bg-surface-layout-2/50 p-4 space-y-3">
-                <HStack className="items-start gap-3 justify-between">
-                  <HStack className="gap-3 items-start">
+                <HStack className="flex-col items-stretch gap-3 tablet:flex-row tablet:items-start tablet:justify-between">
+                  <HStack className="min-w-0 gap-3 items-start">
                     <div
-                      className={`w-9 h-9 rounded-xl flex items-center justify-center ${keyRejected ? 'bg-surface-negative-soft' : 'bg-surface-warning-soft'}`}
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center ${aiStatusTileTokens}`}
                     >
                       <Icon
                         name={usingReadyset ? 'sparkles' : 'key'}
-                        label={
-                          usingReadyset ? 'Readyset-hosted AI' : 'Anthropic'
-                        }
-                        className={`w-4 h-4 ${keyRejected ? 'text-content-negative-soft' : 'text-content-warning-soft'}`}
+                        label={usingReadyset ? 'Included AI' : 'Anthropic'}
+                        className="w-4 h-4"
                       />
                     </div>
-                    <VStack className="gap-0.5 items-start">
+                    <VStack className="min-w-0 gap-0.5 items-start">
                       <Text
                         level="label-small"
                         className="text-content-layout-1"
@@ -895,7 +954,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
                       ) : null}
                     </VStack>
                   </HStack>
-                  <HStack className="gap-2 items-center">
+                  <HStack className="flex-wrap gap-2 items-center tablet:shrink-0">
                     <Show when={readysetAccountConnected}>
                       <Button
                         variant="primary"
@@ -922,7 +981,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
                       label={
                         readysetAccountConnected
                           ? 'Switch Readyset account'
-                          : 'Use Readyset-hosted AI'
+                          : 'Use the included AI'
                       }
                       icon="sparkles"
                       iconPosition="left"
@@ -1055,8 +1114,9 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
             isLoading={loading}
             isTesting={testingForm}
             testResult={connectionTestResult}
-            submitLabel="Add connection"
+            submitLabel="Add target"
             showHeader={false}
+            stickyFooter
             reviewWritePrivilegesOnSubmit
           />
         }

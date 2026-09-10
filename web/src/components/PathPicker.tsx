@@ -1,17 +1,19 @@
 /**
- * Server-side path picker — clicking the input opens a popover with a folder
- * browser. Selects a directory by default; pass `fileExt` to pick a file with
- * that extension instead.
+ * Server-side path field — a real text input that accepts a typed or pasted
+ * path, with Browse opening a popover folder browser beside it. Selects a
+ * directory by default; pass `fileExt` to pick a file with that extension.
  */
 
+import { BaseInputText } from '@rs/ui-new/base-input-text';
 import { Button } from '@rs/ui-new/button';
 import { Icon } from '@rs/ui-new/icon';
+import { Label } from '@rs/ui-new/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@rs/ui-new/popover';
 import { Pressable } from '@rs/ui-new/pressable';
 import { Scrollable } from '@rs/ui-new/scrollable';
-import { VStack } from '@rs/ui-new/stack';
+import { HStack, VStack } from '@rs/ui-new/stack';
 import { Text } from '@rs/ui-new/text';
-import { useCallback, useState } from 'react';
+import { useCallback, useId, useState } from 'react';
 import { useBrowse } from '../lib/useBrowse';
 
 interface PathPickerProps {
@@ -34,6 +36,7 @@ export function PathPicker({
   label,
   placeholder,
 }: PathPickerProps) {
+  const inputId = useId();
   const [open, setOpen] = useState(false);
   const [browsePath, setBrowsePath] = useState<string | undefined>(undefined);
   const { data, isLoading, isError } = useBrowse(browsePath, open, fileExt);
@@ -85,50 +88,49 @@ export function PathPicker({
 
   return (
     <VStack className="gap-1.5 items-start flex-1">
-      <Text as="label" level="label-small" className="text-content-layout-2">
+      <Label htmlFor={inputId}>
         {label ?? (fileExt ? 'File path' : 'Directory path')}
-      </Text>
+      </Label>
 
       <Popover open={open} onOpenChange={handleOpen}>
-        <PopoverTrigger asChild>
-          {/* Kept as a hand-roll (as are the recent/breadcrumb/parent/dir/file
-              rows in the popover below): this is an input-styled PopoverTrigger
-              asChild target and the list rows are menu items, none of which are
-              design-system Button candidates. */}
-          <Pressable
-            type="button"
+        {/* The path is typed or pasted; browsing is the secondary way in. A
+            picker whose one-click default is $HOME made "scan my entire home
+            directory" the shortest route through the flow. [E-16] The
+            recent/breadcrumb/parent/dir/file rows in the popover stay
+            hand-rolled: they are menu items, not Button candidates. */}
+        <HStack className="gap-2 items-center w-full">
+          <BaseInputText
+            id={inputId}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
             disabled={disabled}
-            className="flex items-center gap-2 h-10 w-full rounded-lg border border-border-layout-1 bg-surface-layout-2 px-3 py-2 text-body-medium text-left cursor-pointer hover:border-border-layout-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Icon
-              name={fileExt ? 'document-validation' : 'folder-file'}
-              label=""
-              className="w-4 h-4 text-content-layout-3 shrink-0"
+            spellCheck={false}
+            autoComplete="off"
+            icon={fileExt ? 'document-validation' : 'folder-file'}
+            iconPosition="left"
+            placeholder={
+              placeholder ??
+              (fileExt ? `/path/to/queries.${fileExt}` : '/path/to/your/project')
+            }
+            title={value || undefined}
+          />
+          <PopoverTrigger asChild>
+            <Button
+              variant="primary"
+              modifier="outline"
+              label="Browse"
+              disabled={disabled}
+              className="shrink-0"
             />
-            {value.trim() ? (
-              // RTL outer span moves the ellipsis to the left so the final
-              // path segment stays visible; the bdi keeps the path itself LTR.
-              <span
-                className="text-content-layout-1 truncate text-left [direction:rtl]"
-                title={value}
-              >
-                <bdi>{value}</bdi>
-              </span>
-            ) : (
-              <span className="text-content-layout-3">
-                {placeholder ??
-                  (fileExt ? `Choose a .${fileExt} file...` : 'Choose a project folder...')}
-              </span>
-            )}
-          </Pressable>
-        </PopoverTrigger>
+          </PopoverTrigger>
+        </HStack>
 
           <PopoverContent
             side="bottom"
-            align="start"
+            align="end"
             sideOffset={4}
             variant="layout"
-            className="w-[var(--radix-popover-trigger-width)] min-w-80 max-w-none flex-col p-0"
+            className="min-w-96 max-w-none flex-col p-0"
           >
             {/* Recent directories */}
             {recentDirs && recentDirs.length > 0 && (
@@ -267,17 +269,28 @@ export function PathPicker({
               )}
             </Scrollable>
 
-            {/* Select button (directory mode only; files are picked directly) */}
+            {/* Select button (directory mode only; files are picked directly).
+                The home directory is never selectable in one click: a scan of
+                every project at once is nobody's intent, so the reader has to
+                walk into the folder they mean. [E-16] */}
             {!fileExt && (
               <div className="border-t border-border-layout-1 px-3 py-2">
                 <Button
-                  variant="rising"
+                  variant="primary"
                   modifier="solid"
                   label="Select this folder"
                   onClick={handleSelect}
                   className="w-full"
-                  disabled={!data?.current}
+                  disabled={!data?.current || data.is_home}
                 />
+                {data?.is_home && (
+                  <Text
+                    level="caption"
+                    className="text-content-layout-3 mt-1.5 block text-center"
+                  >
+                    Open the project you want to scan, then select it.
+                  </Text>
+                )}
               </div>
             )}
           </PopoverContent>

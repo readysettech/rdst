@@ -90,14 +90,24 @@ vi.mock('../components/top', () => ({
   ParameterDialog: ({
     isOpen,
     onClose,
+    onSubmit,
   }: {
     isOpen: boolean
     onClose: () => void
+    onSubmit: (query: string) => void
   }) =>
     isOpen ? (
-      <button type="button" onClick={onClose}>
-        Cancel parameters
-      </button>
+      <>
+        <button type="button" onClick={onClose}>
+          Cancel parameters
+        </button>
+        <button
+          type="button"
+          onClick={() => onSubmit('select * from posts where id = 7')}
+        >
+          Submit parameters
+        </button>
+      </>
     ) : null,
   hasParameters: hasParametersSpy,
 }))
@@ -220,7 +230,8 @@ describe('ResultsPage analyze consent', () => {
           target: 'prod',
           fast: false,
         },
-        { queryHash: undefined, queryLabel: undefined }
+        // The job carries the query's derived name, not its raw SQL (B-27).
+        { queryHash: undefined, queryLabel: 'Select' }
       )
     )
     expect(window.localStorage.getItem('rdst.explain-analyze-consent')).toBe(
@@ -228,7 +239,77 @@ describe('ResultsPage analyze consent', () => {
     )
   })
 
+  it('asks for consent before values, then runs on the values submit', async () => {
+    const analyzeSpy = vi.fn()
+    hasParametersSpy.mockReturnValue(true)
+    vi.mocked(useAnalyze).mockReturnValue({
+      analyze: analyzeSpy,
+      state: 'idle',
+      progress: undefined,
+      results: undefined,
+      rewriteTesting: undefined,
+      readysetCacheability: undefined,
+      error: undefined,
+      errorEnvelope: undefined,
+      reset: vi.fn(),
+    })
+    vi.mocked(useTargetPasswordLock).mockReturnValue({
+      isResolved: true,
+      isLocked: false,
+      targetName: 'prod',
+      message: '',
+      missingTargetRequirements: [],
+      keyringAvailable: true,
+    })
+
+    const view = render(
+      <ResultsPage
+        search={{
+          query: 'select * from posts where id = $1',
+          target: 'prod',
+          fast: false,
+        }}
+      />
+    )
+
+    // Consent owns the screen first, and the values form is not behind it.
+    expect(await screen.findByText('Run EXPLAIN ANALYZE?')).toBeTruthy()
+    expect(
+      screen.queryByRole('button', { name: 'Cancel parameters' })
+    ).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run analyze' }))
+
+    // Consent is answered once: the values form replaces it, and submitting
+    // the values measures rather than asking again.
+    expect(
+      await screen.findByRole('button', { name: 'Submit parameters' })
+    ).toBeTruthy()
+    expect(screen.queryByText('Run EXPLAIN ANALYZE?')).toBeNull()
+    expect(analyzeSpy).not.toHaveBeenCalled()
+
+    hasParametersSpy.mockReturnValue(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Submit parameters' }))
+
+    // Router navigation applies the filled query on the next render. The
+    // controller must hold the submission across that handoff instead of
+    // reopening the parameter step against the old URL.
+    view.rerender(
+      <ResultsPage
+        search={{
+          query: 'select * from posts where id = 7',
+          target: 'prod',
+          fast: false,
+        }}
+      />
+    )
+
+    await waitFor(() => expect(analyzeSpy).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText('Run EXPLAIN ANALYZE?')).toBeNull()
+  })
+
   it('returns to Queries when parameter entry is cancelled', async () => {
+    window.localStorage.setItem('rdst.explain-analyze-consent', 'accepted')
     hasParametersSpy.mockReturnValue(true)
     vi.mocked(useAnalyze).mockReturnValue({
       analyze: vi.fn(),

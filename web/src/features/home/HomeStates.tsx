@@ -94,7 +94,7 @@ export function ConnectedHome({
               this database instead of guessing.
             </Card.Description>
           </Card.Header>
-          <Card.Content className="grid gap-3 tablet:grid-cols-3">
+          <Card.Content className="grid gap-3 tablet:grid-cols-2">
             {[
               'Table purpose and business context',
               'Column shapes, ranges, and null rates',
@@ -268,8 +268,8 @@ export function ActiveHome({
             <Card.Header>
               <Card.Title>Query activity could not be loaded</Card.Title>
               <Card.Description>
-                Home could not read the Query Library summary. Your saved
-                queries and database were not changed.
+                Home could not read your query summary. Your saved queries and
+                database were not changed.
               </Card.Description>
             </Card.Header>
             <Card.Footer className="justify-start gap-2">
@@ -282,7 +282,7 @@ export function ActiveHome({
               <Button
                 variant="primary"
                 modifier="ghost"
-                label="Open Query Library"
+                label="Open queries"
                 onClick={() => navigate({ to: '/queries' })}
               />
             </Card.Footer>
@@ -335,7 +335,7 @@ export function ActiveHome({
                 variant="primary"
                 modifier={counts.candidates > 0 ? 'solid' : 'outline'}
                 label={
-                  counts.candidates > 0 ? 'Compare candidates' : 'Open Queries'
+                  counts.candidates > 0 ? 'Compare candidates' : 'Open queries'
                 }
                 icon="arrow-right"
                 iconPosition="right"
@@ -372,7 +372,7 @@ export function ActiveHome({
         <JobCard
           to="/queries"
           icon="observe"
-          title="Query Library"
+          title="Queries"
           description="Review every observed, saved, and analyzed query for this target."
           chip={{ label: target, variant: 'informative' }}
         />

@@ -104,9 +104,14 @@ export function PerformanceQueryList({
   return (
     <section
       aria-label={ariaLabel}
-      className="flex min-h-0 flex-1 flex-col overflow-hidden"
+      className="flex flex-col overflow-hidden desktop:min-h-0 desktop:flex-1"
     >
-      <Scrollable type="always" className="h-full">
+      {/* Below desktop the list flows with the page and caps its own height;
+          from desktop it fills the bounded column beside the run summary. */}
+      <Scrollable
+        type="always"
+        className="max-h-96 desktop:max-h-none desktop:h-full"
+      >
         <VStack className="items-stretch gap-3 p-1 pr-5">{children}</VStack>
       </Scrollable>
       {footer}

@@ -32,7 +32,7 @@ export function QueryCardFooter({
           {meta}
         </div>
       ) : null}
-      <HStack className="ml-auto gap-2 items-center shrink-0">
+      <HStack className="ml-auto gap-2 items-center justify-end flex-wrap">
         {onToggleDetails ? (
           <Button
             variant="primary"

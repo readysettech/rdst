@@ -1,5 +1,5 @@
 import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FleetConnectivityEvent, FleetMember } from '../../types/fleet'
 import { ScopeSelector } from './ScopeSelector'
 
@@ -19,6 +19,60 @@ const unreachable = (name: string): Record<string, FleetConnectivityEvent> => ({
 })
 
 describe('ScopeSelector', () => {
+  it('says the inventory is loading instead of "0 targets selected"', () => {
+    render(
+      <ScopeSelector
+        members={[]}
+        connectivity={{}}
+        selection={[]}
+        onSelectionChange={() => {}}
+        isPending
+      />
+    )
+
+    expect(screen.getByText('Loading targets')).toBeTruthy()
+    expect(screen.queryByText('0 targets selected')).toBeNull()
+    expect(
+      screen
+        .getByRole('button', { name: /Select all|Clear all/ })
+        .hasAttribute('disabled')
+    ).toBe(true)
+  })
+
+  it('replaces the picker with an empty state when no target is connected', () => {
+    const onAddTarget = vi.fn()
+    render(
+      <ScopeSelector
+        members={[]}
+        connectivity={{}}
+        selection={[]}
+        onSelectionChange={() => {}}
+        onAddTarget={onAddTarget}
+      />
+    )
+
+    expect(screen.getByRole('heading', { name: 'No targets yet' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Add a target' })).toBeTruthy()
+    // The label read "Clear all" over an empty list: 0 === 0. [E-09]
+    expect(
+      screen.queryByRole('button', { name: /Select all|Clear all/ })
+    ).toBeNull()
+    expect(screen.queryByText('0 targets selected')).toBeNull()
+  })
+
+  it('reports an empty selection once the inventory has landed', () => {
+    render(
+      <ScopeSelector
+        members={members}
+        connectivity={{}}
+        selection={[]}
+        onSelectionChange={() => {}}
+      />
+    )
+
+    expect(screen.getByText('0 targets selected')).toBeTruthy()
+  })
+
   it('keeps a selected target in place when a probe later reports it unreachable', () => {
     const { rerender } = render(
       <ScopeSelector

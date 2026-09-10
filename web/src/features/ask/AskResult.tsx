@@ -2,12 +2,14 @@ import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card'
 import { CopyButton } from '@rs/ui-new/copy-button'
 import { Disclosure } from '@rs/ui-new/disclosure'
+import { EmptyState } from '@rs/ui-new/empty-state'
 import { Icon } from '@rs/ui-new/icon'
 import { m } from '@rs/ui-new/motion'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
-import { useCallback, useState } from 'react'
+import { getTransition } from '@rs/ui-new/transition'
+import { useCallback, useMemo, useState } from 'react'
 import { SQLDisplay } from '../../components/SQLDisplay'
 import { TableHeaderCell } from '../../components/TableHeaderCell'
 import type { AskResultEvent, AskSqlGeneratedEvent } from '../../lib/ask'
@@ -43,12 +45,15 @@ export function AskResult({
   onNewQuestion,
 }: AskResultProps) {
   const [showSql, setShowSql] = useState(false)
+  // A query that ran and matched nothing is a distinct outcome from a verified
+  // answer, and the header must not carry the positive tone for it. [C-30]
+  const noRows = result.row_count === 0 && result.rows.length === 0
 
   return (
     <m.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      transition={{ duration: 0.4 }}
+      transition={getTransition()}
       className="w-full"
     >
       <VStack className="gap-4 items-start w-full">
@@ -58,15 +63,23 @@ export function AskResult({
               <VStack className="min-w-0 items-start gap-2">
                 <HStack className="items-center gap-2">
                   <Icon
-                    name="tick-double"
-                    label="Answered"
-                    className="size-4 shrink-0 text-content-positive-soft"
+                    name={noRows ? 'empty' : 'tick-double'}
+                    label={noRows ? 'No rows' : 'Answered'}
+                    className={`size-4 shrink-0 ${
+                      noRows
+                        ? 'text-content-layout-3'
+                        : 'text-content-positive-soft'
+                    }`}
                   />
                   <Text
                     level="overline"
-                    className="uppercase tracking-wider text-content-positive-soft"
+                    className={`uppercase tracking-wider ${
+                      noRows
+                        ? 'text-content-layout-3'
+                        : 'text-content-positive-soft'
+                    }`}
                   >
-                    Verified answer
+                    {noRows ? 'Query ran, no rows' : 'Verified answer'}
                   </Text>
                 </HStack>
                 {question && (
@@ -82,9 +95,9 @@ export function AskResult({
                   />
                   <Text level="caption" className="text-content-layout-3">
                     Answered from{' '}
-                    <span className="font-medium text-content-layout-2">
+                    <strong className="text-content-layout-2">
                       {answeredFrom}
-                    </span>{' '}
+                    </strong>{' '}
                     via {provenanceSource}
                   </Text>
                   {savedTag && (
@@ -92,9 +105,9 @@ export function AskResult({
                       <span className="text-content-layout-3">·</span>
                       <Text level="caption" className="text-content-layout-3">
                         Saved as{' '}
-                        <span className="font-medium text-content-layout-2">
+                        <strong className="text-content-layout-2">
                           {savedTag}
-                        </span>
+                        </strong>
                       </Text>
                     </>
                   )}
@@ -218,8 +231,7 @@ function SqlDisclosure({
                 level="body-small"
                 className="text-content-layout-2 leading-relaxed"
               >
-                A <code className="font-mono">LIMIT</code> was added to keep the
-                result set bounded.
+                A <code>LIMIT</code> was added to keep the result set bounded.
               </Text>
             </HStack>
           </div>
@@ -229,6 +241,16 @@ function SqlDisclosure({
         <CopyButton text={sql} />
       </div>
     </div>
+  )
+}
+
+/** A value that reads as a quantity, whether the driver typed it or not. */
+function isNumeric(cell: unknown): boolean {
+  if (typeof cell === 'number') return Number.isFinite(cell)
+  return (
+    typeof cell === 'string' &&
+    cell.trim() !== '' &&
+    !Number.isNaN(Number(cell))
   )
 }
 
@@ -246,6 +268,17 @@ function ResultsTable({
     downloadCsv(csv, createCsvFilename())
   }, [result])
   const hasRows = result.rows.length > 0
+  // Numbers line up by place value on the right; text stays left (C-32).
+  const numericColumns = useMemo(
+    () =>
+      result.columns.map((_, index) => {
+        const values = result.rows
+          .map((row) => row[index])
+          .filter((cell) => cell !== null && cell !== '')
+        return values.length > 0 && values.every((cell) => isNumeric(cell))
+      }),
+    [result]
+  )
 
   return (
     <Card className="w-full overflow-hidden">
@@ -302,8 +335,11 @@ function ResultsTable({
             <table className="w-full">
               <thead>
                 <tr className="bg-surface-layout-2 border-b border-border-layout-1">
-                  {result.columns.map((column) => (
-                    <TableHeaderCell key={column} className="whitespace-nowrap">
+                  {result.columns.map((column, index) => (
+                    <TableHeaderCell
+                      key={column}
+                      className={`whitespace-nowrap ${numericColumns[index] ? 'text-right' : ''}`}
+                    >
                       {column}
                     </TableHeaderCell>
                   ))}
@@ -311,17 +347,14 @@ function ResultsTable({
               </thead>
               <tbody>
                 {result.rows.slice(0, 50).map((row, rowIndex) => (
-                  <m.tr
+                  <tr
                     key={`${rowIndex}-${row.map(String).join('-')}`}
-                    className="border-b border-border-layout-1 last:border-b-0 hover:bg-surface-layout-2/50 transition-colors"
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: Math.min(rowIndex * 0.02, 0.5) }}
+                    className="border-b border-border-layout-1 last:border-b-0 hover:bg-surface-layout-2 transition-colors"
                   >
                     {row.map((cell, cellIndex) => (
                       <td
                         key={`${cellIndex}-${String(cell)}`}
-                        className="px-4 py-3 text-content-layout-1 text-mono-small whitespace-nowrap"
+                        className={`px-4 py-3 text-content-layout-1 text-mono-small whitespace-nowrap ${numericColumns[cellIndex] ? 'text-right' : ''}`}
                       >
                         {cell === null ? (
                           <span className="text-content-layout-3 italic">
@@ -332,33 +365,19 @@ function ResultsTable({
                         )}
                       </td>
                     ))}
-                  </m.tr>
+                  </tr>
                 ))}
               </tbody>
             </table>
           </div>
         ) : (
-          <div className="p-8 text-center">
-            <Icon
-              name="empty"
-              label="No rows"
-              className="size-12 mx-auto mb-3 text-content-layout-3"
-            />
-            <Text level="body-medium" className="text-content-layout-2">
-              No rows matched
-            </Text>
-            <Text level="body-small" className="mt-1 text-content-layout-3">
-              Try broadening or rephrasing your question.
-            </Text>
-            <Button
-              onClick={onRefine}
-              variant="primary"
-              modifier="ghost"
-              size="small"
-              label="Refine question"
-              className="mt-4"
-            />
-          </div>
+          <EmptyState
+            layout="compact"
+            icon="empty"
+            title="No rows matched"
+            body="Try broadening or rephrasing your question."
+            action={{ label: 'Edit question', onClick: onRefine, icon: 'add' }}
+          />
         )}
       </Card.Content>
       {result.rows.length > 50 && (

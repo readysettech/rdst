@@ -205,7 +205,7 @@ export function ReportDialog({
         <ModalContent
           size="base"
           className="gap-0 p-0 overflow-hidden"
-          title="Share Your Feedback"
+          title="Share your feedback"
           description="Help us improve RDST for everyone"
         >
           {/* Header with gradient */}
@@ -226,7 +226,7 @@ export function ReportDialog({
               </div>
               <VStack className="gap-0.5 items-start">
                 <Text level="headline-4" className="text-content-layout-1">
-                  Share Your Feedback
+                  Share your feedback
                 </Text>
                 <Text level="body-small" className="text-content-layout-3">
                   Help us improve RDST for everyone
@@ -557,7 +557,7 @@ export function ReportDialog({
               variant={
                 currentSentiment?.value === 'positive' ? 'rising' : 'primary'
               }
-              label={submitMutation.isPending ? 'Sending...' : 'Send Feedback'}
+              label={submitMutation.isPending ? 'Sending...' : 'Send feedback'}
               icon="arrow-up-right"
               iconPosition="right"
               onClick={handleSubmit}

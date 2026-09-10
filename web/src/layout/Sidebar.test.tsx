@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { __resetSetupGuideStoreForTests } from '../features/setup/setupGuideStore'
 import { trackEvent } from '../lib/analytics'
 import {
   __resetAuditSessionForTests,
@@ -14,6 +15,7 @@ const queryState = vi.hoisted(() => ({
     signed_in: boolean
     email?: string | null
   } | null,
+  setupProgress: null as Record<string, unknown> | null,
 }))
 
 vi.mock('@tanstack/react-router', () => ({
@@ -22,15 +24,12 @@ vi.mock('@tanstack/react-router', () => ({
   Link: ({
     to,
     children,
-    className,
-    onClick,
+    ...rest
   }: {
     to: string
     children?: ReactNode
-    className?: string
-    onClick?: () => void
-  }) => (
-    <a href={to} className={className} onClick={onClick}>
+  } & Record<string, unknown>) => (
+    <a href={to} {...rest}>
       {children}
     </a>
   ),
@@ -38,9 +37,18 @@ vi.mock('@tanstack/react-router', () => ({
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => ({
-    data: queryKey[0] === 'account-status' ? queryState.accountStatus : null,
+    data:
+      queryKey[0] === 'account-status'
+        ? queryState.accountStatus
+        : queryKey[0] === 'setup-progress'
+          ? queryState.setupProgress
+          : null,
   }),
   useQueryClient: () => ({}),
+  useMutation: ({ mutationFn }: { mutationFn: () => Promise<unknown> }) => ({
+    mutate: () => void mutationFn(),
+    isPending: false,
+  }),
 }))
 
 vi.mock('../components/TargetDropdown', () => ({
@@ -90,6 +98,17 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
     const onClose = vi.fn()
     render(<Sidebar mobileOpen onMobileClose={onClose} />)
     fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('dismisses from a control inside the drawer, not only the scrim', () => {
+    const onClose = vi.fn()
+    render(<Sidebar mobileOpen onMobileClose={onClose} />)
+    const inDrawer = screen
+      .getAllByRole('button', { name: 'Close navigation' })
+      .find((button) => button.closest('#app-sidebar'))
+    expect(inDrawer).toBeDefined()
+    fireEvent.click(inDrawer as HTMLElement)
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
@@ -167,7 +186,7 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
     render(<Sidebar />)
 
     expect(
-      screen.queryByRole('button', { name: /Use Readyset-hosted AI/ })
+      screen.queryByRole('button', { name: /Use the included AI/ })
     ).toBeNull()
     expect(screen.getByRole('link', { name: /Settings/ })).toBeTruthy()
   })
@@ -339,5 +358,66 @@ describe('Sidebar Docs affordance (C4)', () => {
     expect(
       docs.compareDocumentPosition(feedback) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+  })
+})
+
+describe('Sidebar setup checklist (MG-03)', () => {
+  afterEach(() => {
+    cleanup()
+    queryState.setupProgress = null
+    localStorage.clear()
+    __resetSetupGuideStoreForTests()
+  })
+
+  const outstanding = {
+    target: 'demo',
+    connected: true,
+    schema_built: false,
+    queries_found: false,
+    analyzed: false,
+    compared: false,
+  }
+
+  it('docks the checklist in the footer above the utilities', () => {
+    queryState.setupProgress = outstanding
+    render(<Sidebar />)
+
+    const steps = screen.getByTestId('setup-steps')
+    const status = screen.getByTestId('sidebar-footer-status')
+    const utilities = screen.getByTestId('sidebar-footer-utilities')
+    expect(
+      status.compareDocumentPosition(steps) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      steps.compareDocumentPosition(utilities) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    // Chrome, not an overlay: it displaces nothing on the page it describes.
+    expect(steps.className).not.toContain('fixed')
+    expect(steps.textContent).toContain('1 of 5')
+  })
+
+  it('carries the same checklist inside the open mobile drawer', () => {
+    queryState.setupProgress = outstanding
+    render(<Harness open onClose={vi.fn()} />)
+
+    const drawer = document.getElementById('app-sidebar')
+    const steps = screen.getByTestId('setup-steps')
+    expect(drawer?.contains(steps)).toBe(true)
+    fireEvent.click(screen.getByTestId('setup-steps-toggle'))
+    // The drawer's Tab trap collects the links and buttons inside the aside,
+    // so the checklist's own controls are keyboard-reachable there.
+    expect(steps.querySelector('a[aria-current="step"]')).toBeTruthy()
+    expect(screen.getByTestId('setup-steps-dismiss').tagName).toBe('BUTTON')
+  })
+
+  it('leaves the way back once the checklist is hidden', () => {
+    queryState.setupProgress = outstanding
+    render(<Sidebar />)
+
+    fireEvent.click(screen.getByTestId('setup-steps-dismiss'))
+
+    expect(screen.queryByTestId('setup-steps')).toBeNull()
+    expect(screen.getByTestId('setup-guide-help-entry')).toBeTruthy()
   })
 })

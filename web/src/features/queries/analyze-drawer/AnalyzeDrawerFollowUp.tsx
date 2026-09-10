@@ -1,10 +1,10 @@
-import { Button } from '@rs/ui-new/button'
 import { EmptyState } from '@rs/ui-new/empty-state'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import {
   AnalysisConversation,
   type AnalysisConversationContext,
+  ClearConversationButton,
   useAnalysisConversation,
 } from '../../../components/AnalysisConversation'
 
@@ -52,26 +52,20 @@ function FollowUpConversation({
   return (
     <VStack
       data-testid="analyze-drawer-follow-up"
-      className="items-stretch gap-4"
+      className="min-h-0 flex-1 items-stretch"
     >
-      <HStack className="items-center justify-between gap-2">
+      <HStack className="items-center justify-between gap-2 pb-3">
         <Text level="body-small" className="text-content-layout-2">
           Ask about this analysis — its plan, its rewrites, its index findings.
         </Text>
         {conversation.hasPreviousChat ? (
-          <Button
-            variant="primary"
-            modifier="ghost"
-            size="small"
-            icon="trash"
-            iconPosition="left"
-            label="Clear conversation"
-            disabled={conversation.isLoading}
-            onClick={() => void conversation.clearConversation()}
-          />
+          <ClearConversationButton conversation={conversation} />
         ) : null}
       </HStack>
-      <AnalysisConversation conversation={conversation} />
+      {/* The pane owns its height, so the thread scrolls and the composer
+          stays where it was last seen instead of drifting down the page as
+          the conversation grows (C-03). */}
+      <AnalysisConversation conversation={conversation} layout="panel" />
     </VStack>
   )
 }

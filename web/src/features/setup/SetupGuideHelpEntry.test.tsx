@@ -13,6 +13,8 @@ vi.mock('../../hooks/useTarget', () => ({
   useTarget: () => ({ target: 'orders', setTarget: vi.fn() }),
 }))
 
+vi.mock('../../lib/analytics', () => ({ trackEvent: vi.fn() }))
+
 function progress(overrides: Partial<SetupProgress> = {}): SetupProgress {
   return {
     target: 'orders',
@@ -72,14 +74,17 @@ describe('SetupGuideHelpEntry', () => {
     expect(screen.queryByTestId('setup-guide-help-entry')).toBeNull()
   })
 
-  it('undoes the dismissal and asks for the guide', async () => {
+  it('undoes the dismissal so the sidebar block comes back', async () => {
     dismissSetupGuide()
     stubProgress(progress())
     renderWithClient(<SetupGuideHelpEntry className="nav" />)
 
-    fireEvent.click(await screen.findByTestId('setup-guide-help-entry'))
+    const entry = await screen.findByTestId('setup-guide-help-entry')
+    expect(entry.textContent).toContain('Show setup guide')
+    fireEvent.click(entry)
 
     expect(getSetupGuideState().dismissed).toBe(false)
-    expect(getSetupGuideState().openRequest).toBe(1)
+    // Its own condition is gone, so the entry retires with the same click.
+    expect(screen.queryByTestId('setup-guide-help-entry')).toBeNull()
   })
 })

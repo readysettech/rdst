@@ -150,6 +150,8 @@ export interface WorkloadRun
     | 'cloudwatch_cpu'
     | 'health_report'
     | 'readyset_comparison'
+    | 'analysis_error'
+    | 'readyset_notice'
   > {
   run_id?: string;
   db_engine?: string;
@@ -288,4 +290,7 @@ export interface AuditReport {
   health_report?: AuditHealthReport | null;
   workload?: WorkloadSummary & { analysis?: WorkloadAnalysis | null; error?: string };
   readyset_comparison?: ReadysetComparison | null;
+  /** Why a step of the run produced nothing, saved with the run itself. */
+  analysis_error?: string | null;
+  readyset_notice?: string | null;
 }

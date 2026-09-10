@@ -60,9 +60,7 @@ test('loads guard details, checks SQL, and creates a guard', async ({
   })
 
   await page.goto('/guards')
-  await expect(
-    page.getByRole('heading', { name: 'Query Guards' })
-  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Guards' })).toBeVisible()
   await expect(page.getByText('WHERE required', { exact: true })).toBeVisible()
 
   const piiRow = page.getByRole('button').filter({ hasText: 'pii-guard' })

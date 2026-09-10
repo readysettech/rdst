@@ -17,7 +17,7 @@ const cardStyles = tv({
       'flex-col',
       'gap-1',
       'p-1',
-      'rounded-[1.25rem]',
+      'rounded-card',
       'bg-surface-layout-soft',
       'shadow-none',
     ],
@@ -33,12 +33,11 @@ const cardStyles = tv({
     title: ['text-balance'],
     description: ['text-content-layout-3'],
     content: [
-      'rounded-2xl',
+      'rounded-panel',
       'border-(length:--border-base)',
       'border-border-layout-soft',
       'bg-surface-layout-1',
       'p-6',
-      'rounded-2xl',
     ],
     footer: [
       stackStyles({ variant: 'hstack' }),

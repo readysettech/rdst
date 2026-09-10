@@ -134,7 +134,7 @@ export function SchemaAddRelationshipDialog({
           {/* Relationship type */}
           <div>
             <Text level="label-small" className="text-content-layout-2 mb-1">
-              Relationship Type
+              Relationship type
             </Text>
             <BaseInputSelect
               name="relationship_type"

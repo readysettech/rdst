@@ -1,5 +1,10 @@
 import type { Page } from '@playwright/test'
-import { clearTargets, expect, test } from '../fixtures'
+import {
+  acceptExplainAnalyzeConsent,
+  clearTargets,
+  expect,
+  test,
+} from '../fixtures'
 
 // The Postgres tier runs the unmodified app against a live database, so these
 // suggestions come from real pg_stats / column reads, not fixtures.
@@ -35,11 +40,15 @@ async function configurePostgresTarget(page: Page) {
 test('suggests real column values for a templated query from a live database', async ({
   page,
 }) => {
+  await acceptExplainAnalyzeConsent(page)
   await configurePostgresTarget(page)
 
-  const response = await page.request.post('/api/analyze/parameter-suggestions', {
-    data: { query: templatedQuery, target: 'postgres-e2e' },
-  })
+  const response = await page.request.post(
+    '/api/analyze/parameter-suggestions',
+    {
+      data: { query: templatedQuery, target: 'postgres-e2e' },
+    }
+  )
   expect(response.ok()).toBe(true)
   const body = (await response.json()) as {
     placeholders: {
@@ -58,7 +67,14 @@ test('suggests real column values for a templated query from a live database', a
   const titleTypes = byPlaceholder['$1'].suggestions.map((s) => s.value)
   expect(titleTypes.length).toBeGreaterThan(0)
   for (const value of titleTypes) {
-    expect(['short', 'movie', 'tvSeries', 'tvEpisode', 'video', 'tvMovie']).toContain(value)
+    expect([
+      'short',
+      'movie',
+      'tvSeries',
+      'tvEpisode',
+      'video',
+      'tvMovie',
+    ]).toContain(value)
   }
   for (const suggestion of byPlaceholder['$1'].suggestions) {
     expect(suggestion.provenance).toMatch(/title_basics\.titletype/)
@@ -69,7 +85,10 @@ test('suggests real column values for a templated query from a live database', a
   ])
 
   // The same values show up in the parameter dialog before analysis runs.
-  const search = new URLSearchParams({ query: templatedQuery, target: 'postgres-e2e' })
+  const search = new URLSearchParams({
+    query: templatedQuery,
+    target: 'postgres-e2e',
+  })
   await page.goto(`/results?${search.toString()}`)
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByText('Enter parameter values')).toBeVisible()

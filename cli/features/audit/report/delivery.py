@@ -34,6 +34,9 @@ class RunEmailResponse(BaseModel):
     status: str
     email: str
     verified: bool
+    # Why an "unavailable" send failed, in words a reader can act on. Carried
+    # so the caller reports the reason rather than the status alone. [E-26]
+    reason: Optional[str] = None
 
 
 async def deliver_run_report(
@@ -80,8 +83,14 @@ async def deliver_run_report(
         config.save()
 
     if not result.get("success"):
-        logger.warning("Report delivery failed for %s: %s", run_id, result.get("error"))
-        return RunEmailResponse(status="unavailable", email=email, verified=False)
+        reason = (result.get("error") or "").strip()
+        logger.warning("Report delivery failed for %s: %s", run_id, reason)
+        return RunEmailResponse(
+            status="unavailable",
+            email=email,
+            verified=False,
+            reason=reason or None,
+        )
     if result.get("queued"):
         return RunEmailResponse(status="verification_sent", email=email, verified=False)
     return RunEmailResponse(status="sent", email=email, verified=True)

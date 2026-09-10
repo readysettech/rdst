@@ -105,7 +105,7 @@ export function SchemaEditTableDialog({
           {/* Business Context */}
           <div>
             <Text level="label-small" className="text-content-layout-2 mb-1">
-              Business Context
+              Business context
             </Text>
             <BaseInputTextarea
               value={businessContext}

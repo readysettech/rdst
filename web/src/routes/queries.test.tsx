@@ -90,7 +90,9 @@ describe('QueriesPage workspace', () => {
   it('moves page actions into the header', () => {
     render(<QueriesPage search={{}} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Run benchmark' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Compare against Readyset' })
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Add query' }))
 
     expect(openBenchmark).toHaveBeenCalledOnce()

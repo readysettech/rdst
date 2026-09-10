@@ -621,6 +621,7 @@ class CaptureService:
                 except Exception as exc:
                     logger.warning("Analysis failed: %s", exc)
                     analysis_error = str(exc)
+                    run.analysis_error = analysis_error
                     _phase_done("analysis", success=False, error_type=type(exc).__name__)
                     yield WorkloadStatusEvent(
                         type="status",
@@ -637,10 +638,13 @@ class CaptureService:
                 )
 
                 if not docker_available():
+                    run.readyset_notice = (
+                        "Docker is not available — skipped Readyset cache benchmark"
+                    )
                     yield WorkloadStatusEvent(
                         type="status",
                         phase="readyset",
-                        message="Docker is not available — skipped Readyset cache benchmark",
+                        message=run.readyset_notice,
                     )
                 else:
                     yield WorkloadStatusEvent(
@@ -656,10 +660,13 @@ class CaptureService:
                         readyset_comparison = build_comparison(outcome["results"])
                         run.readyset_comparison = readyset_comparison
                     else:
+                        run.readyset_notice = (
+                            f"Readyset benchmark skipped: {outcome.get('detail')}"
+                        )
                         yield WorkloadStatusEvent(
                             type="status",
                             phase="readyset",
-                            message=f"Readyset benchmark skipped: {outcome.get('detail')}",
+                            message=run.readyset_notice,
                         )
 
             number_to_save = save_top_queries if save_top_queries is not None else len(queries)
@@ -718,6 +725,7 @@ class CaptureService:
                 "path": path,
                 "has_analysis": analysis_dict is not None,
                 "analysis_error": analysis_error,
+                "readyset_notice": run.readyset_notice,
                 "phase_timings_ms": dict(phase_timings),
                 "total_duration_ms": total_duration_ms,
                 "queries": query_dicts,

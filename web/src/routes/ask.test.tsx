@@ -1,13 +1,27 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 let passwordLocked = false
 let connectivityChecking = false
 let connectivityFailure: { target: string; message: string } | null = null
+let aiBlocked = false
 const ensureReachable = vi.fn(async () => !connectivityFailure)
+
+vi.mock('../components/AiSetupNotice', () => ({
+  AiSetupNotice: ({ feature }: { feature: string }) =>
+    aiBlocked ? <div data-testid="ai-setup-notice">{feature}</div> : null,
+  useAiBlocked: () => aiBlocked,
+}))
 
 vi.mock('../hooks/useTarget', () => ({
   useTarget: () => ({ target: 'orders_db', setTarget: vi.fn() }),
+  useTargetResolution: () => ({
+    target: 'orders_db',
+    setTarget: vi.fn(),
+    isResolving: false,
+    isUnavailable: false,
+    refetch: vi.fn(),
+  }),
 }))
 vi.mock('../lib/useTargetPasswordLock', () => ({
   useTargetPasswordLock: () => ({
@@ -76,6 +90,7 @@ beforeEach(() => {
   passwordLocked = false
   connectivityChecking = false
   connectivityFailure = null
+  aiBlocked = false
   ensureReachable.mockClear()
 })
 
@@ -84,8 +99,12 @@ afterEach(() => {
 })
 
 describe('ask route', () => {
-  it('does not carry the retired Ask/Conversations view search contract', () => {
-    expect(Route.options.validateSearch).toBeUndefined()
+  it('accepts only the retired-agents arrival flag, never a view switcher', () => {
+    const validateSearch = Route.options.validateSearch as (
+      search: Record<string, unknown>
+    ) => Record<string, unknown>
+    expect(validateSearch({ from: 'agents' })).toEqual({ from: 'agents' })
+    expect(validateSearch({ view: 'chat', from: 'elsewhere' })).toEqual({})
   })
 })
 
@@ -110,6 +129,22 @@ describe('AskPage workspace', () => {
     expect(screen.queryByText('Conversations')).toBeNull()
   })
 
+  it('says what happened when the reader arrives from the retired /agents URL', () => {
+    render(<AskPage movedFrom="agents" />)
+
+    expect(screen.getByRole('alert').textContent).toMatch(/rdst CLI/i)
+    expect(screen.getByText('Agents was retired')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
+    expect(screen.queryAllByText('Agents was retired')).toHaveLength(0)
+  })
+
+  it('shows no arrival notice when Ask is opened directly', () => {
+    render(<AskPage />)
+
+    expect(screen.queryAllByText('Agents was retired')).toHaveLength(0)
+  })
+
   it('keeps Ask visible but blocks submissions while connectivity is checked', () => {
     connectivityChecking = true
     render(<AskPage />)
@@ -117,6 +152,17 @@ describe('AskPage workspace', () => {
     expect(screen.getByTestId('target-connectivity-notice').textContent).toBe(
       'checking'
     )
+    expect(screen.getByTestId('ask-panel').getAttribute('data-disabled')).toBe(
+      'true'
+    )
+  })
+
+  it('asks for an AI provider in place, without replacing the page', () => {
+    aiBlocked = true
+    render(<AskPage />)
+
+    expect(screen.getByRole('heading', { name: 'Ask' })).toBeTruthy()
+    expect(screen.getByTestId('ai-setup-notice').textContent).toBe('Ask')
     expect(screen.getByTestId('ask-panel').getAttribute('data-disabled')).toBe(
       'true'
     )

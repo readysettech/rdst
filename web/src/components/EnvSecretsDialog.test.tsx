@@ -82,7 +82,7 @@ describe('EnvSecretsDialog', () => {
     expect(input.getAttribute('data-1p-ignore')).toBe('true');
     expect(input.getAttribute('data-lpignore')).toBe('true');
     fireEvent.change(input, { target: { value: 'my-secret' } });
-    fireEvent.click(screen.getByRole('button', { name: /Save Secrets/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save secrets/i }));
 
     await waitFor(() => {
       expect(setEnvSecret).toHaveBeenCalledWith({
@@ -129,13 +129,13 @@ describe('EnvSecretsDialog', () => {
 
     const { rerender } = renderWithClient(exhaustedDialog(onClose), queryClient);
 
-    const input = screen.getByPlaceholderText('Enter Anthropic API Key');
+    const input = screen.getByPlaceholderText('Enter Anthropic API key');
     fireEvent.change(input, { target: { value: 'sk-ant-typed' } });
-    fireEvent.click(screen.getByRole('button', { name: /Save Secrets/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save secrets/i }));
 
     rerender(exhaustedDialog(onClose));
 
-    expect((screen.getByPlaceholderText('Enter Anthropic API Key') as HTMLInputElement).value).toBe(
+    expect((screen.getByPlaceholderText('Enter Anthropic API key') as HTMLInputElement).value).toBe(
       'sk-ant-typed'
     );
   });
@@ -146,7 +146,7 @@ describe('EnvSecretsDialog', () => {
 
     const { rerender } = renderWithClient(exhaustedDialog(onClose), queryClient);
 
-    fireEvent.click(screen.getByRole('button', { name: /Save Secrets/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save secrets/i }));
     expect(screen.getByText(/Enter at least one secret value before saving\./i)).toBeTruthy();
 
     rerender(exhaustedDialog(onClose));
@@ -160,15 +160,15 @@ describe('EnvSecretsDialog', () => {
 
     const { rerender } = renderWithClient(exhaustedDialog(onClose), queryClient);
 
-    const input = screen.getByPlaceholderText('Enter Anthropic API Key');
+    const input = screen.getByPlaceholderText('Enter Anthropic API key');
     fireEvent.change(input, { target: { value: 'sk-ant-typed' } });
-    fireEvent.click(screen.getByRole('button', { name: /Save Secrets/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save secrets/i }));
 
     rerender(exhaustedDialog(onClose, false));
 
     rerender(exhaustedDialog(onClose));
 
-    expect((screen.getByPlaceholderText('Enter Anthropic API Key') as HTMLInputElement).value).toBe('');
+    expect((screen.getByPlaceholderText('Enter Anthropic API key') as HTMLInputElement).value).toBe('');
     expect(screen.queryByText(/Enter at least one secret value before saving\./i)).toBeNull();
   });
 });

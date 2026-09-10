@@ -13,6 +13,9 @@ export interface EmptyStateAction {
   label: string
   onClick: () => void
   icon?: IconStrokeName
+  /** The action is in flight — the button spins and stops accepting clicks. */
+  loading?: boolean
+  disabled?: boolean
 }
 
 // Neutral counterpart to ErrorState: same centered composition, no accent or
@@ -103,11 +106,7 @@ function EmptyStateImpl({
         ))}
 
       <VStack className="gap-1 items-center">
-        <Text
-          as="h3"
-          level="subtitle-1"
-          className="text-content-layout-1"
-        >
+        <Text as="h3" level="subtitle-1" className="text-content-layout-1">
           {title}
         </Text>
         {body && (
@@ -121,7 +120,12 @@ function EmptyStateImpl({
       </VStack>
 
       {(action || secondaryAction) && (
-        <div className={cn('flex flex-wrap items-center justify-center gap-3', body || icon || media ? 'mt-2' : '')}>
+        <div
+          className={cn(
+            'flex flex-wrap items-center justify-center gap-3',
+            body || icon || media ? 'mt-2' : ''
+          )}
+        >
           {action && (
             <Button
               variant="primary"
@@ -129,6 +133,8 @@ function EmptyStateImpl({
               label={action.label}
               icon={action.icon}
               iconPosition={action.icon ? 'left' : 'none'}
+              loading={action.loading}
+              disabled={action.disabled || action.loading}
               onClick={action.onClick}
             />
           )}
@@ -139,6 +145,8 @@ function EmptyStateImpl({
               label={secondaryAction.label}
               icon={secondaryAction.icon}
               iconPosition={secondaryAction.icon ? 'left' : 'none'}
+              loading={secondaryAction.loading}
+              disabled={secondaryAction.disabled || secondaryAction.loading}
               onClick={secondaryAction.onClick}
             />
           )}

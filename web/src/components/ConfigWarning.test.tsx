@@ -154,7 +154,7 @@ describe('ConfigWarning env secret flow', () => {
 
     await waitFor(() => expect(vi.mocked(fetchEnvRequirements)).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: /Sign in to Readyset/i })).toBeNull();
-    expect(screen.queryByText(/Missing Anthropic API Key/i)).toBeNull();
+    expect(screen.queryByText(/Missing Anthropic API key/i)).toBeNull();
   });
 
   it('stays off the home page even when the key is missing', async () => {
@@ -165,7 +165,7 @@ describe('ConfigWarning env secret flow', () => {
 
     await waitFor(() => expect(vi.mocked(fetchEnvRequirements)).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: /Sign in to Readyset/i })).toBeNull();
-    expect(screen.queryByText(/Missing Anthropic API Key/i)).toBeNull();
+    expect(screen.queryByText(/Missing Anthropic API key/i)).toBeNull();
   });
 
   it('keeps a fresh zero-target install on the home page', async () => {
@@ -392,7 +392,7 @@ describe('ConfigWarning env secret flow', () => {
 
     await waitFor(() => {
       expect(fetchTrialStatus).not.toHaveBeenCalled()
-      expect(screen.queryByText(/Trial Credits Exhausted/i)).toBeNull()
+      expect(screen.queryByText(/Included AI used up/i)).toBeNull()
     })
   });
 
@@ -423,7 +423,7 @@ describe('ConfigWarning env secret flow', () => {
     renderWarning(queryClient);
 
     await waitFor(() => {
-      expect(screen.queryByText(/Trial Credits Exhausted/i)).toBeNull();
+      expect(screen.queryByText(/Included AI used up/i)).toBeNull();
     });
   });
 });

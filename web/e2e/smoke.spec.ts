@@ -23,10 +23,10 @@ test('serves client-side routes directly', async ({ page }) => {
   setBackendFixtures()
   await configureTestTarget(page, { hasPassword: true })
   await page.goto('/query-registry')
-  // /query-registry redirects into the Queries workspace's starred shortlist,
-  // which is what the saved list became.
+  // /query-registry redirects into the Queries workspace, which is what the
+  // saved list became, and applies no filter of its own. [C-81]
   await expect(
     page.getByRole('heading', { name: 'Queries', exact: true })
   ).toBeVisible()
-  await expect(page).toHaveURL(/\/queries\?.*starred=true/)
+  await expect(page).toHaveURL(/\/queries$/)
 })

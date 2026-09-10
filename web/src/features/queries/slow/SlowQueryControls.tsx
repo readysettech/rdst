@@ -191,7 +191,7 @@ export function SlowQueryControls({
           </Show>
           <Show when={!isStreaming && !primaryActionHidden}>
             <Button
-              variant="rising"
+              variant="primary"
               modifier="solid"
               label={primaryLabel}
               icon={mode === 'realtime' ? 'play' : 'search'}

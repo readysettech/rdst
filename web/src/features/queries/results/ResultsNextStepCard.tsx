@@ -177,7 +177,7 @@ export function ResultsNextStepCard({
           <CopyButton text={step.sql} label="Copy SQL" />
         ) : step.kind === 'readyset' && onSetUpCaching ? (
           <Button
-            variant="rising"
+            variant="primary"
             modifier="solid"
             label="Set up caching…"
             icon="database-settings"

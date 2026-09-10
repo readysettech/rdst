@@ -5,6 +5,7 @@ import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card-2'
+import { InlineNotice } from '@rs/ui-new/error-state'
 import { Icon } from '@rs/ui-new/icon'
 import { IconTile } from '@rs/ui-new/icon-tile'
 import { AnimatePresence, m } from '@rs/ui-new/motion'
@@ -111,6 +112,8 @@ export function LoadTestSetup({
     setTestProfile,
     comparative,
     setComparative,
+    dockerUnavailable,
+    recheckSandbox,
     intervalMs,
     setIntervalMs,
     capacityClients,
@@ -204,7 +207,7 @@ export function LoadTestSetup({
   }, [residualQueryHash])
 
   return (
-    <VStack className="h-full min-h-0 w-full items-stretch gap-6">
+    <VStack className="w-full items-stretch gap-6 desktop:h-full desktop:min-h-0">
       {confirmDialog}
       <AnimatePresence>
         {destinationLock.isLocked && (
@@ -232,15 +235,14 @@ export function LoadTestSetup({
           />
         )}
 
-      <Card className="min-h-0 flex-1">
+      <Card className="desktop:min-h-0 desktop:flex-1">
         <Card.Header className="items-start gap-4 tablet:flex-row tablet:items-center tablet:justify-between">
           <HStack className="min-w-0 items-center gap-3">
             <IconTile icon="layers" size="base" accent="primary" />
             <VStack className="min-w-0 items-start gap-0.5">
-              <Card.Title>Configure load test</Card.Title>
+              <Card.Title>Load test</Card.Title>
               <Card.Description>
-                Observe database behavior or measure throughput with a
-                controlled read-only workload.
+                See how your database behaves under sustained read traffic.
               </Card.Description>
             </VStack>
           </HStack>
@@ -252,9 +254,12 @@ export function LoadTestSetup({
           />
         </Card.Header>
 
-        <Card.Content className="min-h-0 flex-1 overflow-hidden">
-          <div className="grid h-full min-h-0 gap-8 tablet:grid-cols-3">
-            <VStack className="min-h-0 min-w-0 items-stretch gap-6 tablet:col-span-2">
+        <Card.Content className="desktop:min-h-0 desktop:flex-1 desktop:overflow-hidden">
+          {/* Two columns only where both stay readable; from desktop the row
+              is bounded so each column scrolls inside it rather than growing
+              past the card. */}
+          <div className="grid gap-8 desktop:h-full desktop:min-h-0 desktop:grid-cols-3 desktop:grid-rows-[minmax(0,1fr)]">
+            <VStack className="min-h-0 min-w-0 items-stretch gap-6 desktop:col-span-2">
               <VStack className="items-stretch gap-2">
                 <HStack className="items-center justify-between gap-3">
                   <VStack className="items-start gap-0.5">
@@ -546,25 +551,43 @@ export function LoadTestSetup({
               </VStack>
             </VStack>
 
-            <VStack className="items-stretch gap-4">
+            {/* The column is taller than the card at every supported size, so
+                it scrolls on its own the way the query list beside it does.
+                Without this the advanced settings are simply unreachable, and
+                without `shrink-0` the flex column squashes them instead. */}
+            <VStack className="min-h-0 items-stretch gap-4 overflow-y-auto [&>*]:shrink-0">
               <HStack className="items-center justify-between gap-3 rounded-xl border border-border-layout-soft px-4 py-3">
                 <VStack className="min-w-0 items-start gap-0.5">
                   <Text level="label-small" className="text-content-layout-1">
                     Compare against Readyset
                   </Text>
                   <Text level="caption" className="text-content-layout-3">
-                    {comparative
-                      ? 'Run against your database and Readyset side by side.'
-                      : 'Origin only. Readyset is skipped for this run.'}
+                    {dockerUnavailable
+                      ? 'Readyset runs in a local Docker sandbox, and Docker is not running.'
+                      : comparative
+                        ? 'Run against your database and Readyset side by side.'
+                        : 'Origin only. Readyset is skipped for this run.'}
                   </Text>
                 </VStack>
                 <BaseInputSwitch
                   name="load-test-comparative"
                   aria-label="Compare against Readyset"
-                  checked={comparative}
+                  checked={comparative && !dockerUnavailable}
+                  disabled={dockerUnavailable}
                   onCheckedChange={setComparative}
                 />
               </HStack>
+              {/* Said before the run, not after real traffic has already been
+                  driven at the database for the configured duration. [D-11] */}
+              <Show when={dockerUnavailable}>
+                <InlineNotice
+                  errorClass="local-dependency"
+                  accent="warning"
+                  title="Docker is required to compare against Readyset"
+                  message="Start Docker so RDST can prepare its temporary Readyset sandbox, then try again. This run will measure the origin database only."
+                  onRetry={() => void recheckSandbox()}
+                />
+              </Show>
 
               <VStack className="items-start gap-0.5">
                 <Text level="label-small" className="text-content-layout-1">
@@ -787,7 +810,7 @@ export function LoadTestSetup({
             )}
           </VStack>
           <Button
-            variant="rising"
+            variant="primary"
             modifier="solid"
             label="Run load test"
             icon="play"

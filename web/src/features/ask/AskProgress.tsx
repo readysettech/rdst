@@ -147,8 +147,8 @@ export function AskProgress({
             You can cancel without changing the database.
           </Text>
           <Button
-            variant="negative"
-            modifier="outline"
+            variant="primary"
+            modifier="ghost"
             size="small"
             label="Cancel"
             onClick={onCancel}

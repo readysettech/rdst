@@ -14,7 +14,7 @@ export function SettingsHeader() {
         <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
           <Icon
             name="settings"
-            label="Configure"
+            label=""
             className="w-6 h-6 text-content-primary-soft"
           />
         </div>
@@ -23,7 +23,7 @@ export function SettingsHeader() {
             Settings
           </Text>
           <Text level="body-small" className="text-content-layout-3">
-            Manage connections, AI access, and local data.
+            Manage targets, AI access, and local data.
           </Text>
         </VStack>
       </HStack>

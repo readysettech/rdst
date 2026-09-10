@@ -18,7 +18,7 @@ describe('fleet route (redirect after merge)', () => {
     return undefined
   }
 
-  it('beforeLoad redirects to the Database connections section', () => {
+  it('beforeLoad redirects to the Targets section', () => {
     const thrown = runBeforeLoad({})
 
     expect(thrown).toBeDefined()
@@ -27,11 +27,15 @@ describe('fleet route (redirect after merge)', () => {
   })
 
   it('forwards ?add so the discovery drawer still opens on its tab', () => {
-    // search: true carries the whole query string through the redirect,
-    // including the validated ?add the drawer reads on the other side.
+    // The redirect rebuilds the search so it can add `from`, and carries the
+    // validated ?add the drawer reads on the other side with it.
     expect(JSON.stringify(runBeforeLoad({ add: 'aws' }))).toContain(
-      '"search":true'
+      '"add":"aws"'
     )
+  })
+
+  it('tells Settings where the reader came from, so the move is explained', () => {
+    expect(JSON.stringify(runBeforeLoad({}))).toContain('"from":"fleet"')
   })
 
   it('only accepts the two known drawer tabs', () => {

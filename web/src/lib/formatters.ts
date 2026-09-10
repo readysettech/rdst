@@ -51,6 +51,22 @@ export function formatSecondsShort(seconds: number): string {
 }
 
 /**
+ * Elapsed against a window with a known end, in the one shape every long-run
+ * surface uses: `12s of 1m 0s - ~48s left`. Once the window is spent it drops
+ * the remainder rather than counting backwards.
+ */
+export function formatElapsedOfWindow(
+  elapsedSeconds: number,
+  durationSeconds: number
+): string {
+  const spent = `${formatSecondsClock(elapsedSeconds)} of ${formatSecondsClock(durationSeconds)}`
+  const remaining = durationSeconds - elapsedSeconds
+  return remaining >= 1
+    ? `${spent} · ~${formatSecondsShort(remaining)} left`
+    : spent
+}
+
+/**
  * Canonical sub-second-aware ms formatter for latency/duration readouts:
  * `<1ms` under a millisecond, `X.Xms` under a second, `X.XXs` above.
  * Distinct from `formatDuration` (which collapses zero/sub-1ms to `-`) so the

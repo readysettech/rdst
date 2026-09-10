@@ -6,8 +6,7 @@ import { IconTile } from '@rs/ui-new/icon-tile'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
-import type { CompareBatchStatus } from './compareRuns'
-import { compareStatusLabel } from './compareUi'
+import { compareStatusPresentation } from './compareUi'
 import {
   type CompareController,
   initialCompareConcurrency,
@@ -18,12 +17,6 @@ function average(values: number[]) {
   return values.length > 0
     ? values.reduce((sum, value) => sum + value, 0) / values.length
     : 0
-}
-
-function statusVariant(status: CompareBatchStatus) {
-  if (status === 'complete') return 'positive' as const
-  if (status === 'partial' || status === 'running') return 'warning' as const
-  return 'negative' as const
 }
 
 export function CompareHistory({
@@ -76,6 +69,7 @@ export function CompareHistory({
             snapshot.results.map(({ result }) => result.speedup_mean)
           )
           const completedAt = batch.outcome?.completedAt ?? batch.createdAt
+          const status = compareStatusPresentation(snapshot.status)
           const initialConcurrency = initialCompareConcurrency(
             batch.queries.length
           )
@@ -100,9 +94,11 @@ export function CompareHistory({
                   </Text>
                   <Tag
                     size="small"
-                    variant={statusVariant(snapshot.status)}
+                    variant={status.variant}
                     modifier="ghost"
-                    label={compareStatusLabel(snapshot.status)}
+                    icon={status.icon}
+                    iconPosition="left"
+                    label={status.label}
                   />
                 </HStack>
                 <Text level="caption" className="text-content-layout-3">
@@ -153,7 +149,7 @@ export function CompareHistory({
       {controller.historyEntries.length > 0 && (
         <Card.Footer className="justify-end">
           <Button
-            variant="rising"
+            variant="primary"
             modifier="solid"
             label="New comparison"
             icon="add"

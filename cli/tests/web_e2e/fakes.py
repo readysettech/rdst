@@ -34,7 +34,6 @@ from features.bootstrap.events import BootstrapEvent
 from features.bootstrap.service import TargetBootstrapService
 from features.cache.events import CacheEvent
 from features.cache.experiment_service import ReadysetExperimentService
-from features.cache.service import CacheService
 from features.init.events import InitEvent
 from features.init.service import InitService
 from features.scan.events import ScanEvent
@@ -130,48 +129,6 @@ class FakeTargetBootstrapService(TargetBootstrapService):
                     raise RuntimeError("Bootstrap fixture needs a resume event")
                 await key_wakeup.wait()
                 key_wakeup.clear()
-
-
-class FakeCacheService(CacheService):
-    async def get_status(self, input_data):
-        del input_data
-        async for event in fixtures.events("cache_status", CACHE_EVENT):
-            yield event
-
-    async def list_caches(self, input_data):
-        del input_data
-        async for event in fixtures.events("cache_list", CACHE_EVENT):
-            yield event
-
-    async def deploy(self, input_data, options):
-        del input_data, options
-        async for event in fixtures.events("cache_deploy", CACHE_EVENT):
-            yield event
-
-    async def add_cache(self, input_data, options):
-        del input_data, options
-        async for event in fixtures.events("cache_add", CACHE_EVENT):
-            yield event
-
-    async def register_cache_endpoint(self, input_data, host, port):
-        del input_data, host, port
-        async for event in fixtures.events("cache_register", CACHE_EVENT):
-            yield event
-
-    async def lifecycle(self, input_data, operation):
-        del input_data, operation
-        async for event in fixtures.events("cache_lifecycle", CACHE_EVENT):
-            yield event
-
-    async def run_comparison(self, input_data, iterations=5, warmup=2):
-        del input_data, iterations, warmup
-        async for event in fixtures.events("cache_run", CACHE_EVENT):
-            yield event
-
-    async def delete_cache(self, input_data):
-        del input_data
-        async for event in fixtures.events("cache_delete", CACHE_EVENT):
-            yield event
 
 
 class FakeReadysetExperimentService(ReadysetExperimentService):
@@ -384,7 +341,6 @@ SERVICE_FAKES = [
     FakeAskService,
     FakeAuditService,
     FakeTargetBootstrapService,
-    FakeCacheService,
     FakeReadysetExperimentService,
     FakeInitService,
     FakeScanService,

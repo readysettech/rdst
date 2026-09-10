@@ -15,6 +15,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { controlTransition, focusRing } from '../../helpers/focus'
 import type { WithClassName } from '../../helpers/types'
 import { m } from '../../motion/motion'
 import { getTransition } from '../../motion/transition'
@@ -33,10 +34,13 @@ const tabItemStyles = tv({
     'relative flex items-center   justify-start gap-2 rounded-none px-3 py-2 cursor-pointer',
     'px-0 py-1',
     'h-12 w-auto text-label-medium text-content-layout-2',
-    'transition-[background,color] duration-slower ease-base',
-    'select-none outline-none',
+    `${controlTransition} duration-slower ease-base`,
+    'select-none',
     'hover:text-content-primary-soft',
-    'focus:text-content-primary-soft',
+    // A tab's box is its 48px hit area with no horizontal padding, so the ring
+    // takes an offset to keep clear of the label's own glyphs.
+    ...focusRing,
+    'focus-visible:rounded-md',
     'disabled:pointer-events-none disabled:opacity-50',
     // Unavailable tabs stay focusable and hoverable, so the reason they give
     // can actually be read.

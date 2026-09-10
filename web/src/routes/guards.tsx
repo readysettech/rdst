@@ -8,8 +8,12 @@ import { Button } from '@rs/ui-new/button';
 import { Card } from '@rs/ui-new/card';
 import { ConfirmDialog } from '@rs/ui-new/confirm-dialog';
 import { Disclosure } from '@rs/ui-new/disclosure';
+import { EmptyState } from '@rs/ui-new/empty-state';
+import { ErrorState, InlineNotice } from '@rs/ui-new/error-state';
+import { Field } from '@rs/ui-new/field';
 import { Icon } from '@rs/ui-new/icon';
 import { IconTile } from '@rs/ui-new/icon-tile';
+import { Label } from '@rs/ui-new/label';
 import { AnimatePresence, m } from '@rs/ui-new/motion';
 import { Pressable } from '@rs/ui-new/pressable';
 import {
@@ -17,7 +21,7 @@ import {
   type SegmentedControlSegment,
 } from '@rs/ui-new/segmented-control';
 import { Show } from '@rs/ui-new/show';
-import { Spinner } from '@rs/ui-new/spinner';
+import { Skeleton } from '@rs/ui-new/skeleton';
 import { HStack, VStack } from '@rs/ui-new/stack';
 import { Tag } from '@rs/ui-new/tag';
 import { Text } from '@rs/ui-new/text';
@@ -27,6 +31,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ExperimentalBanner } from '../components/ExperimentalBanner';
 import { RoutableNotice } from '../components/RoutableNotice';
 import { useTarget } from '../hooks/useTarget';
+import { errorDetail } from '../lib/errorContract';
 import {
   checkGuardSql,
   deriveGuard,
@@ -305,7 +310,7 @@ function SectionCard({
         <div className="px-5 py-3 border-b border-border-layout-1 bg-surface-layout-2/50">
           <HStack className="gap-2 items-center justify-between">
             <HStack className="gap-2 items-center">
-              <Icon name={icon} label={title} className="w-4 h-4 text-content-layout-3" />
+              <Icon name={icon} label="" className="w-4 h-4 text-content-layout-3" />
               <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
                 {title}
               </Text>
@@ -319,12 +324,16 @@ function SectionCard({
   );
 }
 
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <Text as="label" level="label-small" className="text-content-layout-2">
-      {children}
-    </Text>
-  );
+// The design system's own label, so the editor's fields read and associate the
+// same way every other form in the app does.
+function FieldLabel({
+  htmlFor,
+  children,
+}: {
+  htmlFor?: string;
+  children: React.ReactNode;
+}) {
+  return <Label htmlFor={htmlFor}>{children}</Label>;
 }
 
 // Segmented control that merges the former "New Guard" / "Describe Intent" heroes
@@ -386,13 +395,6 @@ function GuardDetailView({ detail }: { detail: GuardDetail }) {
   return (
     <div className="p-5">
       <VStack className="gap-5 items-stretch">
-        {detail.description && (
-          <DetailRow label="Description">
-            <Text level="body-small" className="text-content-layout-2">
-              {detail.description}
-            </Text>
-          </DetailRow>
-        )}
         {detail.intent && (
           <DetailRow label="Intent">
             <Text level="body-small" className="text-content-layout-3 italic">
@@ -418,27 +420,27 @@ function GuardDetailView({ detail }: { detail: GuardDetail }) {
         </Show>
 
         <Show when={(restrictions.denied_columns?.length ?? 0) > 0}>
-          <DetailRow label="Denied Columns">
+          <DetailRow label="Denied columns">
             <HStack className="gap-1.5 items-center flex-wrap">
               {(restrictions.denied_columns ?? []).map((col) => (
-                <Tag key={col} size="small" variant="negative" modifier="ghost" label={col} />
+                <Tag key={col} size="small" variant="informative" modifier="ghost" label={col} />
               ))}
             </HStack>
           </DetailRow>
         </Show>
 
         <Show when={(restrictions.allowed_tables?.length ?? 0) > 0}>
-          <DetailRow label="Allowed Tables">
+          <DetailRow label="Allowed tables">
             <HStack className="gap-1.5 items-center flex-wrap">
               {(restrictions.allowed_tables ?? []).map((table) => (
-                <Tag key={table} size="small" variant="positive" modifier="ghost" label={table} />
+                <Tag key={table} size="small" variant="informative" modifier="ghost" label={table} />
               ))}
             </HStack>
           </DetailRow>
         </Show>
 
         <Show when={requiredFilters.length > 0}>
-          <DetailRow label="Required Filters">
+          <DetailRow label="Required filters">
             <VStack className="gap-1.5 items-stretch w-full">
               {requiredFilters.map(([table, columns]) => (
                 <HStack key={table} className="gap-2 items-center">
@@ -448,7 +450,7 @@ function GuardDetailView({ detail }: { detail: GuardDetail }) {
                   <Icon name="arrow-right" label="requires" className="w-3 h-3 text-content-layout-3" />
                   <HStack className="gap-1 items-center flex-wrap">
                     {columns.map((col) => (
-                      <Tag key={col} size="small" variant="warning" modifier="ghost" label={col} />
+                      <Tag key={col} size="small" variant="informative" modifier="ghost" label={col} />
                     ))}
                   </HStack>
                 </HStack>
@@ -518,22 +520,37 @@ function GuardEditor({
       {/* Name + description */}
       <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4">
         <Show when={showName}>
-          <VStack className="gap-1.5 items-start">
-            <FieldLabel>Name</FieldLabel>
-            <BaseInputText
-              name="guard-name"
-              value={form.name}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => update('name', e.target.value)}
-              placeholder="pii-guard"
-              disabled={!nameEditable}
-              error={!nameValid}
-            />
-            <Show when={!nameValid}>
-              <Text level="caption" className="text-content-negative-soft">
-                Use letters, digits, _ or -; must start with a letter or underscore.
-              </Text>
-            </Show>
-          </VStack>
+          <Field.Root className="px-0 py-0">
+            <Field.Label htmlFor="guard-name">Name</Field.Label>
+            <Field.Content>
+              <BaseInputText
+                id="guard-name"
+                name="guard-name"
+                value={form.name}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => update('name', e.target.value)}
+                placeholder="pii-guard"
+                disabled={!nameEditable}
+                error={!nameValid}
+                aria-invalid={nameValid ? undefined : true}
+                aria-describedby="guard-name-info"
+              />
+              {/* A disabled field says why it is disabled. [F-13] */}
+              <div id="guard-name-info">
+                <Field.Info
+                  errorMessage={
+                    nameValid
+                      ? undefined
+                      : 'Use letters, digits, _ or -; must start with a letter or underscore.'
+                  }
+                  infoMessage={
+                    nameEditable
+                      ? 'This is how you will refer to the guard everywhere.'
+                      : "A guard's name is its identity, so it can't be changed after it is created."
+                  }
+                />
+              </div>
+            </Field.Content>
+          </Field.Root>
         </Show>
         <VStack className="gap-1.5 items-start">
           <FieldLabel>Description</FieldLabel>
@@ -611,7 +628,7 @@ function GuardEditor({
       <Disclosure title="Table & column restrictions" subtitle="denied columns · allowed tables">
       <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4">
         <VStack className="gap-1.5 items-start">
-          <FieldLabel>Denied Columns</FieldLabel>
+          <FieldLabel>Denied columns</FieldLabel>
           <BaseInputTextarea
             name="denied-columns"
             value={form.deniedColumns}
@@ -626,7 +643,7 @@ function GuardEditor({
           </Text>
         </VStack>
         <VStack className="gap-1.5 items-start">
-          <FieldLabel>Allowed Tables</FieldLabel>
+          <FieldLabel>Allowed tables</FieldLabel>
           <BaseInputTextarea
             name="allowed-tables"
             value={form.allowedTables}
@@ -647,7 +664,7 @@ function GuardEditor({
       <Disclosure title="Required filters">
       <VStack className="gap-2 items-stretch">
         <HStack className="justify-between items-center">
-          <FieldLabel>Required Filters</FieldLabel>
+          <FieldLabel>Required filters</FieldLabel>
           <Button
             label="Add filter"
             icon="add"
@@ -753,7 +770,7 @@ function GuardEditor({
       <Disclosure title="Limits" subtitle="rows, tables, cost, est. rows">
       <div className="grid grid-cols-2 tablet:grid-cols-5 gap-4">
         <VStack className="gap-1.5 items-start">
-          <FieldLabel>Max Tables</FieldLabel>
+          <FieldLabel>Max tables</FieldLabel>
           <BaseInputText
             name="max-tables"
             type="number"
@@ -765,7 +782,7 @@ function GuardEditor({
           />
         </VStack>
         <VStack className="gap-1.5 items-start">
-          <FieldLabel>Cost Limit</FieldLabel>
+          <FieldLabel>Cost limit</FieldLabel>
           <BaseInputText
             name="cost-limit"
             type="number"
@@ -777,7 +794,7 @@ function GuardEditor({
           />
         </VStack>
         <VStack className="gap-1.5 items-start">
-          <FieldLabel>Max Est. Rows</FieldLabel>
+          <FieldLabel>Max est. rows</FieldLabel>
           <BaseInputText
             name="max-estimated-rows"
             type="number"
@@ -789,7 +806,7 @@ function GuardEditor({
           />
         </VStack>
         <VStack className="gap-1.5 items-start">
-          <FieldLabel>Max Rows</FieldLabel>
+          <FieldLabel>Max rows</FieldLabel>
           <BaseInputText
             name="max-rows"
             type="number"
@@ -929,7 +946,7 @@ function TestSqlPanel({ guardNames }: { guardNames: string[] }) {
         </HStack>
 
         <Show when={!!error}>
-          <div className="px-4 py-3 bg-surface-negative-soft/30 border border-border-negative-soft rounded-xl">
+          <div className="px-4 py-3 bg-surface-negative-soft/30 border border-border-negative-soft rounded-panel">
             <HStack className="gap-2 items-center">
               <Icon name="alert" label="Error" className="w-4 h-4 text-content-negative-soft" />
               <Text level="body-small" className="text-content-negative-soft">
@@ -985,14 +1002,14 @@ function ResultBanner({ result }: { result: GuardCheckResponse }) {
   };
   const { surface, text, icon, label } = banner[severity];
   return (
-    <div role="status" className={cn('px-4 py-3 rounded-xl border', surface)}>
+    <output className={cn('block px-4 py-3 rounded-panel border', surface)}>
       <HStack className="gap-2 items-center">
         <Icon name={icon} label="" aria-hidden="true" className={cn('w-5 h-5 shrink-0', text)} />
         <Text level="label-medium" className={text}>
           {label}
         </Text>
       </HStack>
-    </div>
+    </output>
   );
 }
 
@@ -1013,7 +1030,7 @@ function CheckResultView({ result }: { result: GuardCheckResponse }) {
           return (
             <div
               key={`${finding.guard_name}-${index}`}
-              className="px-4 py-3 rounded-xl border border-border-layout-1 bg-surface-layout-2/40"
+              className="px-4 py-3 rounded-panel border border-border-layout-1 bg-surface-layout-2/40"
             >
               <HStack className="gap-3 items-start">
                 <Icon
@@ -1063,6 +1080,28 @@ function CheckResultView({ result }: { result: GuardCheckResponse }) {
 // Guard list row
 // ---------------------------------------------------------------------------
 
+// A list filling in is skeletoned, never spinner-and-a-sentence: the rows keep
+// their place so the layout does not jump when the guards land. [F-08, F-22]
+function GuardListSkeleton() {
+  return (
+    <div aria-busy="true" className="divide-y divide-border-layout-1">
+      <span className="sr-only">Loading guards</span>
+      {[0, 1, 2].map((row) => (
+        <div key={row} className="px-5 py-3">
+          <HStack className="gap-3 items-center">
+            <Skeleton className="h-4 w-4 rounded-sm shrink-0" />
+            <VStack className="gap-1.5 items-start flex-1 min-w-0">
+              <Skeleton className="h-3.5 w-40 rounded-md" />
+              <Skeleton className="h-3 w-64 rounded-md" />
+            </VStack>
+            <Skeleton className="h-5 w-28 rounded-md shrink-0" />
+          </HStack>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function GuardListRow({
   guard,
   expanded,
@@ -1078,7 +1117,9 @@ function GuardListRow({
   onDelete: () => void;
   deleting: boolean;
 }) {
-  const detailQuery = useGuardDetail(expanded ? guard.name : null);
+  // A row whose delete is in flight stops asking for its detail, so the read
+  // never chases a name the server has just dropped. [F-16]
+  const detailQuery = useGuardDetail(expanded && !deleting ? guard.name : null);
 
   return (
     <div className={expanded ? 'bg-surface-primary-soft/5' : ''}>
@@ -1087,14 +1128,14 @@ function GuardListRow({
         onClick={onToggle}
         className="w-full text-left px-5 py-3 hover:bg-surface-layout-2/50 transition-colors cursor-pointer"
       >
-        <HStack className="justify-between items-center gap-4">
-          <HStack className="gap-3 items-center min-w-0 flex-1">
+        <HStack className="flex-col justify-between items-stretch gap-2 tablet:flex-row tablet:items-center tablet:gap-4">
+          <HStack className="gap-3 items-center min-w-0 flex-1 basis-1/2">
             <Icon
               name={expanded ? 'chevron-down' : 'chevron-right'}
               label="Toggle"
               className="w-4 h-4 text-content-layout-3 shrink-0"
             />
-            <VStack className="gap-0.5 items-start min-w-0 w-full">
+            <VStack className="gap-0.5 items-start min-w-0">
               <HStack className="gap-2 items-center">
                 <Text level="label-medium" className="text-content-layout-1 truncate">
                   {guard.name}
@@ -1113,14 +1154,14 @@ function GuardListRow({
               </Show>
             </VStack>
           </HStack>
-          <HStack className="gap-2 items-center shrink-0">
-            <HStack className="gap-1.5 items-center flex-wrap justify-end max-w-md">
+          <HStack className="gap-2 items-center flex-wrap min-w-0 pl-7 tablet:pl-0 tablet:justify-end">
+            <HStack className="gap-1.5 items-center flex-wrap min-w-0 tablet:justify-end tablet:max-w-md">
               {ruleTags(guard.rules)}
             </HStack>
             {(guard.mask_count ?? 0) > 0 && (
               <Tag
                 size="small"
-                variant="warning"
+                variant="informative"
                 modifier="ghost"
                 label={`${guard.mask_count} mask${guard.mask_count === 1 ? '' : 's'}`}
               />
@@ -1147,14 +1188,21 @@ function GuardListRow({
                 <div className="p-5">
                   <HStack className="gap-2 items-center">
                     <Show when={!detailQuery.isError} fallback={
-                      <Text level="body-small" className="text-content-negative-soft">
-                        Failed to load guard: {detailQuery.error instanceof Error ? detailQuery.error.message : ''}
-                      </Text>
+                      <InlineNotice
+                        errorClass="rdst-service"
+                        title="This guard couldn't be loaded"
+                        message="RDST couldn't read the rules behind this guard."
+                        detail={errorDetail(detailQuery.error)}
+                        onRetry={() => void detailQuery.refetch()}
+                        className="w-full"
+                      />
                     }>
-                      <Spinner size="base" />
-                      <Text level="body-small" className="text-content-layout-3">
-                        Loading guard…
-                      </Text>
+                      <VStack aria-busy="true" className="gap-2 items-stretch w-full">
+                        <span className="sr-only">Loading guard</span>
+                        <Skeleton className="h-3.5 w-48 rounded-md" />
+                        <Skeleton className="h-3 w-full rounded-md" />
+                        <Skeleton className="h-3 w-2/3 rounded-md" />
+                      </VStack>
                     </Show>
                   </HStack>
                 </div>
@@ -1213,12 +1261,13 @@ function guardProtectionSummary(guard: GuardSummary): string {
   return parts.join(' and ');
 }
 
-// Deleting a guard is a SECURITY-boundary change (audit HIGH): every agent
-// bound to it silently loses its masking + query rules, with no undo. Route the
-// delete through the shared ConfirmDialog so the security consequence is named
-// at the point of action, the red lives on the confirm button — never on the
-// row's Delete trigger — and Cancel is the focused default. The delete handler
-// fires only on explicit confirm; Cancel / Escape / overlay never delete.
+// Deleting a guard is a SECURITY-boundary change (audit HIGH): every CLI agent,
+// MCP tool call and Slack bot bound to it silently loses its masking + query
+// rules, with no undo. Route the delete through the shared ConfirmDialog so the
+// security consequence is named at the point of action, the red lives on the
+// confirm button — never on the row's Delete trigger — and Cancel is the
+// focused default. The delete handler fires only on explicit confirm;
+// Cancel / Escape / overlay never delete.
 // Exported so the open→cancel / confirm-once behaviour can be unit-tested in
 // isolation, mirroring SchemaReinitDialog. [USE-077, VIS-023]
 export function GuardDeleteDialog({
@@ -1247,9 +1296,10 @@ export function GuardDeleteDialog({
       notice={{
         accent: 'negative',
         icon: 'alert',
-        title: 'Agents lose this protection',
-        message: `${protection}Any agent bound to this guard loses that protection the moment it is deleted. This cannot be undone.`,
+        title: 'Bound agents lose this protection',
+        message: `${protection}Every rdst agent bound to this guard — through the CLI, the MCP server or the Slack bot — loses that protection the moment it is deleted. This cannot be undone.`,
       }}
+      requireTyped={name || undefined}
       confirmLabel="Delete guard"
       confirmIcon="trash"
       confirmVariant="negative"
@@ -1405,15 +1455,17 @@ function GuardsPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        <HStack className="justify-between items-start">
-          <HStack className="gap-4 items-center">
+        <HStack className="justify-between items-start gap-4 flex-wrap">
+          <HStack className="gap-4 items-start min-w-0">
             <IconTile icon="user-shield" />
-            <VStack className="gap-1 items-start">
+            <VStack className="gap-1 items-start min-w-0">
               <Text as="h1" level="headline-3" className="text-content-layout-1">
-                Query Guards
+                Guards
               </Text>
               <Text level="body-small" className="text-content-layout-2">
-                Rules that decide what an assistant may read — and what it must hide.
+                Rules for what an agent may read and what it must hide, enforced
+                wherever an rdst agent runs: the CLI, the MCP server and the
+                Slack bot.
               </Text>
             </VStack>
           </HStack>
@@ -1511,7 +1563,7 @@ function GuardsPage() {
                           label="Derive"
                           icon="sparkles"
                           iconPosition="left"
-                          variant="rising"
+                          variant="primary"
                           modifier="outline"
                           onClick={handleDerive}
                           loading={deriving}
@@ -1552,55 +1604,46 @@ function GuardsPage() {
       </AnimatePresence>
 
       {/* Guard list */}
-      <SectionCard icon="user-shield" title={`Guards (${guards.length})`}>
+      {/* The count comes from settled data only: a header reading "Guards (0)"
+          over an unresolved (or failed) request asserts something it does not
+          know yet. [F-06] */}
+      <SectionCard
+        icon="user-shield"
+        title={
+          guardsQuery.isLoading || guardsQuery.isError
+            ? 'Guards'
+            : `Guards (${guards.length})`
+        }
+      >
         <Show
           when={!guardsQuery.isLoading}
-          fallback={
-            <div className="p-5">
-              <HStack className="gap-2 items-center">
-                <Spinner size="base" />
-                <Text level="body-small" className="text-content-layout-3">
-                  Loading guards…
-                </Text>
-              </HStack>
-            </div>
-          }
+          fallback={<GuardListSkeleton />}
         >
           <Show when={!guardsQuery.isError} fallback={
             <div className="p-5">
-              <Text level="body-small" className="text-content-negative-soft">
-                Failed to load guards: {guardsQuery.error instanceof Error ? guardsQuery.error.message : ''}
-              </Text>
+              <ErrorState
+                errorClass="rdst-service"
+                title="Guards couldn't be loaded"
+                message="RDST couldn't read the guards for this install."
+                trustworthy="No guard was changed; running agents are still held to the guards already in force."
+                detail={errorDetail(guardsQuery.error)}
+                onRetry={() => void guardsQuery.refetch()}
+              />
             </div>
           }>
             <Show
               when={guards.length > 0}
               fallback={
-                <div className="p-10">
-                  <VStack className="gap-4 items-center text-center">
-                    <div className="w-14 h-14 rounded-2xl bg-surface-layout-2 shadow-elevation-1 flex items-center justify-center">
-                      <Icon name="user-shield" label="" aria-hidden="true" className="w-7 h-7 text-content-layout-2" />
-                    </div>
-                    <VStack className="gap-1 items-center">
-                      <Text level="label-large" className="text-content-layout-1">
-                        No guards yet
-                      </Text>
-                      <Text level="body-small" className="text-content-layout-2 max-w-sm">
-                        Create a guard to mask columns, restrict tables, and set the rules an
-                        assistant must follow.
-                      </Text>
-                    </VStack>
-                    <Show when={!editorOpen}>
-                      <Button
-                        label="Create a guard"
-                        icon="add"
-                        iconPosition="left"
-                        variant="primary"
-                        onClick={openCreate}
-                      />
-                    </Show>
-                  </VStack>
-                </div>
+                <EmptyState
+                  icon="user-shield"
+                  title="No guards yet"
+                  body="Create a guard to mask columns, restrict tables, and set the rules an rdst agent must follow, then bind it with rdst agent create --guard."
+                  action={
+                    editorOpen
+                      ? undefined
+                      : { label: 'Create a guard', icon: 'add', onClick: openCreate }
+                  }
+                />
               }
             >
               <div className="divide-y divide-border-layout-1">

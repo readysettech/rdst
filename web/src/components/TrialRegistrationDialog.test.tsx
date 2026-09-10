@@ -167,13 +167,37 @@ describe('AccountLoginDialog', () => {
     expect(screen.getByText('Readyset account connected')).toBeTruthy()
   })
 
+  it('answers an invalid address under the field and holds the request', async () => {
+    renderWithClient(
+      <AccountLoginDialog isOpen onClose={vi.fn()} />,
+      createTestQueryClient()
+    )
+
+    const input = screen.getByLabelText('Email address')
+    fireEvent.change(input, { target: { value: 'not-an-email' } })
+    fireEvent.blur(input)
+
+    // Was: submit stayed enabled and a red block landed at the top of the
+    // dialog, 285px above the field it was about to reject. [A-16]
+    expect(screen.getByText('Enter a valid email address.')).toBeTruthy()
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    expect(screen.queryByText(/secure sign-in link/i)).toBeNull()
+    expect(
+      screen
+        .getByRole('button', { name: 'Send sign-in link' })
+        .hasAttribute('disabled')
+    ).toBe(true)
+  })
+
   it('offers GitHub OAuth from the same Readyset dialog', async () => {
     renderWithClient(
       <AccountLoginDialog isOpen onClose={vi.fn()} />,
       createTestQueryClient()
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Continue with GitHub' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with GitHub' })
+    )
 
     await waitFor(() =>
       expect(startAccountGithubOAuth).toHaveBeenCalledWith(context)

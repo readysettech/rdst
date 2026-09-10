@@ -1,6 +1,16 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { QueryRegistryEntry } from '../../../lib/api'
+import {
+  __resetBackgroundRunsForTests,
+  upsertLocalRun,
+} from '../../../lib/backgroundRuns'
 import type { ResultsSearch } from '../results/types'
 import type { ResultsShell } from '../results/useResultsController'
 import { AnalyzeDrawer } from './AnalyzeDrawer'
@@ -40,6 +50,15 @@ vi.mock('../../../components/AnalysisConversation', () => {
   mocks.conversationLoaded.current = true
   return {
     AnalysisConversation: () => <div data-testid="analysis-conversation" />,
+    ClearConversationButton: ({
+      conversation,
+    }: {
+      conversation: { clearConversation: () => void }
+    }) => (
+      <button type="button" onClick={() => conversation.clearConversation()}>
+        Clear conversation
+      </button>
+    ),
     useAnalysisConversation: (...args: unknown[]) => {
       mocks.useAnalysisConversation(...args)
       return {
@@ -176,7 +195,10 @@ beforeEach(() => {
   })
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  __resetBackgroundRunsForTests()
+})
 
 describe('AnalyzeDrawer', () => {
   it('stays closed until the URL names a query', () => {
@@ -200,12 +222,77 @@ describe('AnalyzeDrawer', () => {
     })
   })
 
-  it('gives the analysis the widest drawer the design system has', async () => {
+  it('gives the analysis the widest drawer that clears the sidebar', async () => {
     renderDrawer({ hash: 'h1' })
 
     const drawer = await findDrawer()
     expect(drawer.className).toContain('max-w-6xl')
     expect(drawer.className).not.toContain('max-w-2xl')
+    // Never wider than the space beside the sidebar, so it cannot straddle
+    // the jobs chip and cut it in half (B-08).
+    expect(drawer.className).toContain(
+      'tablet:max-w-[min(72rem,calc(100vw-20rem))]'
+    )
+  })
+
+  it('carries the job list, since the sidebar is behind its scrim (B-08)', async () => {
+    upsertLocalRun({
+      runId: 'analyze_1',
+      kind: 'analyze',
+      target: 'demo',
+      status: 'running',
+      message: 'Measuring the query...',
+      queryLabel: 'Orders lookup',
+    })
+    renderDrawer({ hash: 'h1' })
+
+    const drawer = await findDrawer()
+    const jobs = within(drawer).getByRole('button', { name: /Jobs/ })
+    expect(jobs).toBeTruthy()
+
+    fireEvent.click(jobs)
+    expect(within(drawer).getByText('Analyzing Orders lookup')).toBeTruthy()
+    expect(
+      within(drawer).getByTitle('Stop Analyzing Orders lookup')
+    ).toBeTruthy()
+  })
+
+  it('says in its header that a run is in flight (B-06)', async () => {
+    mocks.run = { state: 'analyzing' }
+    renderDrawer({ hash: 'h1' })
+
+    await findDrawer()
+    expect(screen.getByText('Analyzing')).toBeTruthy()
+    expect(screen.getByLabelText('Analysis in progress')).toBeTruthy()
+  })
+
+  it('resumes the run in flight rather than a stored analysis', async () => {
+    mocks.run = { state: 'analyzing' }
+    renderDrawer({ hash: 'h1' })
+
+    await findDrawer()
+    // Closing the drawer mid-run and reopening the query lands back on the
+    // measurement, not on the older record the link would otherwise resolve to.
+    expect(mocks.useLatestAnalysisQuery).toHaveBeenCalledWith('h1', false)
+    expect(controllerSearch().analysisId).toBeUndefined()
+  })
+
+  it('keeps the finished run in view when the query is reopened', async () => {
+    mocks.run = { state: 'complete', results: { query_hash: 'qh1' } }
+    renderDrawer({ hash: 'h1' })
+
+    await findDrawer()
+    expect(controllerSearch().analysisId).toBeUndefined()
+  })
+
+  it('reports a run in flight on the Overview, and offers no second one', async () => {
+    mocks.run = { state: 'analyzing' }
+    renderDrawer({ hash: 'h1', tab: 'overview' })
+
+    await findOverview()
+    expect(screen.getByText('Analysis in progress')).toBeTruthy()
+    expect(screen.queryByText('No analysis yet')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Analyze' })).toBeNull()
   })
 
   it('measures the query when the link asks for a re-run', async () => {

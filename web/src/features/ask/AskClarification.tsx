@@ -6,7 +6,7 @@ import { Pressable } from '@rs/ui-new/pressable'
 import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
-import { useCallback, useState } from 'react'
+import { type KeyboardEvent, useCallback, useState } from 'react'
 import type { AskClarificationQuestion } from '../../lib/ask'
 
 interface AskClarificationProps {
@@ -38,11 +38,14 @@ function buildAnswers(
 function ClarificationOption({
   label,
   selected,
+  tabbable,
   onSelect,
   disabled,
 }: {
   label: string
   selected: boolean
+  /** The group's single tab stop — the checked option, or the first one. */
+  tabbable: boolean
   onSelect: () => void
   disabled?: boolean
 }) {
@@ -51,6 +54,7 @@ function ClarificationOption({
       type="button"
       role="radio"
       aria-checked={selected}
+      tabIndex={tabbable ? 0 : -1}
       onClick={onSelect}
       disabled={disabled}
       className={`flex w-full items-center gap-3 rounded-xl border-(length:--border-base) px-4 py-3 text-left transition-colors duration-fast ease-base focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50 ${
@@ -98,7 +102,10 @@ export function AskClarification({
   const selectedValue = currentQuestion
     ? selectedOptions[currentQuestion.id]
     : undefined
-  const customValue = currentQuestion ? customInputs[currentQuestion.id] : ''
+  // Picking "Something else" before typing leaves no entry behind it, and the
+  // answer check reads this string either way.
+  const customValue =
+    (currentQuestion ? customInputs[currentQuestion.id] : '') ?? ''
   const hasAnswer =
     currentQuestion &&
     ((selectedValue === CUSTOM_OPTION_VALUE && customValue.trim().length > 0) ||
@@ -158,6 +165,39 @@ export function AskClarification({
     onSubmit,
   ])
 
+  // The radio contract a screen reader is told to expect from `role="radio"`:
+  // one tab stop for the group, arrows to move, and moving selects. [C-23]
+  const handleGroupKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      const back = event.key === 'ArrowUp' || event.key === 'ArrowLeft'
+      const forward = event.key === 'ArrowDown' || event.key === 'ArrowRight'
+      if (!back && !forward && event.key !== 'Home' && event.key !== 'End') {
+        return
+      }
+      const options = Array.from(
+        event.currentTarget.querySelectorAll<HTMLButtonElement>(
+          '[role="radio"]:not([disabled])'
+        )
+      )
+      if (options.length === 0) return
+      const current = options.indexOf(
+        document.activeElement as HTMLButtonElement
+      )
+      const next =
+        event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? options.length - 1
+            : back
+              ? (Math.max(current, 0) + options.length - 1) % options.length
+              : (current + 1) % options.length
+      event.preventDefault()
+      options[next].focus()
+      options[next].click()
+    },
+    []
+  )
+
   const handleSkip = useCallback(() => {
     if (disabled) return
     const activeQuestion = questions[currentIndex]
@@ -184,13 +224,17 @@ export function AskClarification({
 
   if (!currentQuestion) return null
 
-  const questionText = currentQuestion.question.split(':')[0].trim()
+  // Rendered as written: splitting on the first colon dropped the
+  // disambiguating half of "Which revenue definition: gross or net?". [C-22]
+  const questionText = currentQuestion.question.trim()
 
   return (
     <VStack className="gap-5 items-start w-full">
       <VStack className="gap-1 items-start w-full">
         <Text level="headline-5" className="text-content-layout-1">
-          One quick question
+          {questions.length === 1
+            ? 'One quick question'
+            : 'A few quick questions'}
         </Text>
         {question && (
           <Text level="body-small" className="text-content-layout-3">
@@ -246,12 +290,17 @@ export function AskClarification({
                 role="radiogroup"
                 aria-label={questionText}
                 className="grid w-full gap-2"
+                onKeyDown={handleGroupKeyDown}
               >
-                {currentQuestion.options.map((option) => (
+                {currentQuestion.options.map((option, index) => (
                   <ClarificationOption
                     key={option}
                     label={option}
                     selected={selectedValue === option}
+                    tabbable={
+                      selectedValue === option ||
+                      (!selectedValue && index === 0)
+                    }
                     onSelect={() => handleSelect(currentQuestion.id, option)}
                     disabled={disabled}
                   />
@@ -259,6 +308,10 @@ export function AskClarification({
                 <ClarificationOption
                   label="Something else (let me type it)"
                   selected={selectedValue === CUSTOM_OPTION_VALUE}
+                  tabbable={
+                    selectedValue === CUSTOM_OPTION_VALUE ||
+                    (!selectedValue && currentQuestion.options.length === 0)
+                  }
                   onSelect={() =>
                     handleSelect(currentQuestion.id, CUSTOM_OPTION_VALUE)
                   }
@@ -268,8 +321,9 @@ export function AskClarification({
               <Show when={selectedValue === CUSTOM_OPTION_VALUE}>
                 <BaseInputText
                   name={`custom-${currentQuestion.id}`}
+                  aria-label="Your own answer"
                   placeholder="Type your own answer..."
-                  value={customValue || ''}
+                  value={customValue}
                   onChange={(event) =>
                     handleCustomChange(currentQuestion.id, event.target.value)
                   }

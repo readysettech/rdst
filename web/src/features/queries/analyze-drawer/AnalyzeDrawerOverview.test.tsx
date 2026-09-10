@@ -58,7 +58,7 @@ function localRun(result?: CacheRunResult): BackgroundRunState {
     target: 'demo',
     stage: 'complete',
     status: 'done',
-    message: 'Performance test complete',
+    message: 'Load test complete',
     lastSeq: 5,
     current: 15,
     total: 15,

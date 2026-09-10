@@ -195,10 +195,10 @@ const DropdownItem = forwardRef<
           rel="noopener noreferrer"
         >
           <HStack>
-            {leftIcon && <Icon name={leftIcon} label={label} />}
+            {leftIcon && <Icon name={leftIcon} label="" />}
             {label}
           </HStack>
-          {rightIcon && <Icon name={rightIcon} label={label} />}
+          {rightIcon && <Icon name={rightIcon} label="" />}
         </a>
       </DropdownMenu.Item>
     )
@@ -207,10 +207,10 @@ const DropdownItem = forwardRef<
   return (
     <DropdownMenu.Item ref={ref} className={styles} {...restProps}>
       <HStack>
-        {leftIcon && <Icon name={leftIcon} label={label} />}
+        {leftIcon && <Icon name={leftIcon} label="" />}
         {label}
       </HStack>
-      {rightIcon && <Icon name={rightIcon} label={label} />}
+      {rightIcon && <Icon name={rightIcon} label="" />}
     </DropdownMenu.Item>
   )
 })

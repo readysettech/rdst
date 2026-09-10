@@ -2,13 +2,19 @@ import { Button } from '@rs/ui-new/button'
 import { m } from '@rs/ui-new/motion'
 import { VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
+import { AiSetupNotice } from '../../../components/AiSetupNotice'
 import { trackEvent } from '../../../lib/analytics'
+import { deriveQueryName } from '../../../lib/queryIdentity'
 import { ResultsBody } from './ResultsBody'
 import type { ResultsSearch } from './types'
 import { useResultsController } from './useResultsController'
 
 export function ResultsPage({ search }: { search: ResultsSearch }) {
-  const controller = useResultsController(search)
+  // The job list names a run the same way wherever it was started: by the
+  // query's derived name, never by raw SQL truncated mid-clause (B-27).
+  const controller = useResultsController(search, undefined, {
+    jobLabel: deriveQueryName(search.query),
+  })
   const { origin, backLabel, actions } = controller
 
   const handleBack = () => {
@@ -45,6 +51,8 @@ export function ResultsPage({ search }: { search: ResultsSearch }) {
           </VStack>
         </VStack>
       </m.header>
+
+      <AiSetupNotice feature="Query analysis" />
 
       <ResultsBody controller={controller} />
     </div>

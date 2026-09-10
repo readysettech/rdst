@@ -35,8 +35,10 @@ describe('relativeAge', () => {
     expect(relativeAge(ago(3 * DAY), NOW)).toBe('3 days ago')
   })
 
-  it('falls back to a date once relative time stops helping', () => {
-    expect(relativeAge(ago(60 * DAY), NOW)).toMatch(/^on /)
+  it('stays on the relative scale past a week', () => {
+    expect(relativeAge(ago(10 * DAY), NOW)).toBe('1 week ago')
+    expect(relativeAge(ago(60 * DAY), NOW)).toBe('2 months ago')
+    expect(relativeAge(ago(800 * DAY), NOW)).toBe('2 years ago')
   })
 
   it('says so rather than inventing an age for an unreadable timestamp', () => {

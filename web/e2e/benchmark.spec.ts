@@ -76,7 +76,9 @@ test('explains why a queued benchmark has not started', async ({ page }) => {
   await expect(
     page.getByText(/another performance measurement is active/i)
   ).toBeVisible()
-  await expect(page.getByText(/no action is required/i)).toBeVisible()
+  await expect(
+    page.getByText(/this test will begin automatically/i)
+  ).toBeVisible()
   await expect(
     page.getByRole('button', { name: /Cancel queued test/ })
   ).toBeVisible()

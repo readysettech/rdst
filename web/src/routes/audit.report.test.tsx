@@ -46,16 +46,16 @@ const INNER_TAB_DESCRIPTIONS = INNER_REPORT_TABS.map(
 /** Content each inner tab must still show after the tabs have been walked. */
 const TAB_CONTENT: Array<[string, string[], boolean]> = [
   [
-    'Detailed Analysis',
+    'Detailed analysis',
     [
-      'Vacuum & Bloat',
+      'Vacuum & bloat',
       'public.orders',
       'Indexes',
       'orders_old_idx',
       'orders_a',
-      'Connection Detail',
+      'Connection detail',
       'UPDATE orders',
-      'Configuration Audit',
+      'Configuration audit',
       'shared_buffers',
       'Replication',
       'analytics',
@@ -66,9 +66,9 @@ const TAB_CONTENT: Array<[string, string[], boolean]> = [
     false,
   ],
   ['Sizing', ['CloudWatch CPU', 'db.r6g.medium'], true],
-  ['Savings', ['$400.00/mo', '$650.00/mo', 'Cost Breakdown'], true],
+  ['Savings', ['$400.00/mo', '$650.00/mo', 'Cost breakdown'], true],
   ['Queries', ['Queries (1)'], true],
-  ['Next Steps', ['Tune the pool'], true],
+  ['Next steps', ['Tune the pool'], true],
 ]
 
 /** Every inner tab's honest empty state, keyed by tab label. */
@@ -77,10 +77,10 @@ const EMPTY_TAB_MESSAGES: Array<[string, string]> = [
   ['Sizing', 'No sizing data was collected for this run.'],
   ['Savings', 'No savings or cost data was collected for this run.'],
   [
-    'Detailed Analysis',
+    'Detailed analysis',
     'No detailed analysis data was collected for this run.',
   ],
-  ['Next Steps', 'No recommended next steps were generated for this run.'],
+  ['Next steps', 'No recommended next steps were generated for this run.'],
 ]
 
 const fullReport: AuditReport = {
@@ -249,6 +249,77 @@ function renderFleet(
   )
 }
 
+describe('AuditReportView findings honesty', () => {
+  it('says the analysis did not run instead of reporting no findings', () => {
+    renderReport({
+      health_analysis: { error: 'the model provider returned 503' },
+    })
+
+    expect(
+      screen.queryByText('No critical findings were identified.')
+    ).toBeNull()
+    expect(screen.getByText('AI analysis unavailable')).toBeTruthy()
+    expect(
+      screen.getByText(
+        /Findings were not generated for this run: the model provider returned 503/
+      )
+    ).toBeTruthy()
+  })
+
+  it('carries the reason from the saved run when the analysis left none', () => {
+    renderReport({
+      health_analysis: null,
+      analysis_error: 'Analysis failed: rate limited',
+    })
+
+    expect(
+      screen.getByText(
+        /Findings were not generated for this run: Analysis failed: rate limited/
+      )
+    ).toBeTruthy()
+  })
+
+  it('keeps the negative result for an analysis that ran and found nothing', () => {
+    renderReport({
+      health_analysis: { health_score: 88, top_findings: [] },
+    })
+
+    expect(
+      screen.getByText('No critical findings were identified.')
+    ).toBeTruthy()
+    expect(screen.queryByText('AI analysis unavailable')).toBeNull()
+  })
+})
+
+describe('FleetSnapshotView failed targets', () => {
+  it('counts and names a target that could not be audited', () => {
+    renderFleet(
+      [
+        auditReportFixture({ target_name: 'aurora-writer' }),
+        {
+          target_name: 'aurora-reader',
+          error: 'password authentication failed for user "rdst_e2e"',
+        },
+      ],
+      { targets_audited: 1, targets_failed: 0 }
+    )
+
+    expect(screen.getByText('Targets that failed')).toBeTruthy()
+    expect(screen.getByText('aurora-reader could not be audited')).toBeTruthy()
+    expect(
+      screen.getByText('password authentication failed for user "rdst_e2e"')
+    ).toBeTruthy()
+    const failedStat = screen.getByText('Failed targets').closest('div')
+    expect(failedStat?.textContent).toContain('1')
+  })
+
+  it('leaves a clean run without a failure block', () => {
+    renderFleet([auditReportFixture({ target_name: 'aurora-writer' })])
+
+    expect(screen.queryByText('Targets that failed')).toBeNull()
+  })
+})
+
 describe('AuditReportView', () => {
   it('explains what each inner report tab contains', () => {
     renderReport()
@@ -276,7 +347,7 @@ describe('AuditReportView', () => {
     // assertion message names the tab rather than splitting into it.each.
     for (const [tab, texts, exact] of TAB_CONTENT) {
       selectInnerTab(tab)
-      if (tab === 'Detailed Analysis') {
+      if (tab === 'Detailed analysis') {
         openDetailDisclosures([
           'Table statistics (1)',
           'Unused indexes (1)',
@@ -294,7 +365,7 @@ describe('AuditReportView', () => {
       }
     }
 
-    selectInnerTab('Detailed Analysis')
+    selectInnerTab('Detailed analysis')
     openDetailDisclosures(['Database settings (1)'])
     expect(
       screen.queryByRole('button', { name: /overview metrics/i })
@@ -331,7 +402,7 @@ describe('AuditReportView', () => {
         exact: true,
       }).length
     ).toBeGreaterThan(0)
-    selectInnerTab('Detailed Analysis')
+    selectInnerTab('Detailed analysis')
     expect(
       screen.getByText(
         'No tracked queries because query statistics were unavailable during this check.',
@@ -345,7 +416,7 @@ describe('AuditReportView', () => {
       tags: ['aws-account:123456789012', 'role:reader', 'production'],
     })
 
-    selectInnerTab('Detailed Analysis')
+    selectInnerTab('Detailed analysis')
     expect(screen.queryByText(/aws-account:123456789012/)).toBeNull()
     expect(screen.queryByText(/role:reader/)).toBeNull()
     expect(screen.getByText('Role: reader', { exact: true })).toBeTruthy()
@@ -412,7 +483,7 @@ describe('AuditReportView', () => {
     expect(
       screen
         .getAllByText('Queries (1)', { exact: true })
-        .filter((element) => element.tagName === 'P')
+        .filter((element) => element.tagName === 'H2')
     ).toHaveLength(1)
     expect(
       screen
@@ -437,7 +508,7 @@ describe('AuditReportView', () => {
     expect(screen.queryByText(/Readyset Cache Comparison/)).toBeNull()
     expect(screen.queryByText(/Caching Candidates/)).toBeNull()
 
-    selectInnerTab('Detailed Analysis')
+    selectInnerTab('Detailed analysis')
     expect(document.body.textContent).toContain('orders_customer_idx')
     expect(document.body.textContent).toContain(
       'CREATE INDEX orders_customer_idx ON orders(customer_id)'
@@ -445,7 +516,7 @@ describe('AuditReportView', () => {
     expect(
       screen
         .getAllByText('Indexes', { exact: true })
-        .filter((element) => element.tagName === 'P')
+        .filter((element) => element.tagName === 'H2')
     ).toHaveLength(1)
     expect(
       screen.getByText('Add an index on products(product_id)', { exact: true })
@@ -554,7 +625,7 @@ describe('AuditReportView', () => {
     selectInnerTab('Queries')
     const capturedTab = screen.getByRole('tab', { name: /Captured \(live\)/ })
     expect(capturedTab.getAttribute('aria-selected')).toBe('true')
-    selectInnerTab('Detailed Analysis')
+    selectInnerTab('Detailed analysis')
     fireEvent.click(screen.getByRole('link', { name: 'F2D8' }))
     const historicalTab = screen.getByRole('tab', {
       name: /Historical \(top by time\)/,
@@ -564,7 +635,7 @@ describe('AuditReportView', () => {
     expect(window.location.search).toContain('tab=queries')
     expect(window.location.search).toContain('queryTab=historical')
 
-    selectInnerTab('Next Steps')
+    selectInnerTab('Next steps')
     expect(screen.getByText('Cache the hottest lookup')).toBeTruthy()
     expect(screen.getByText('cache', { exact: true })).toBeTruthy()
     expect(screen.getByText('low effort')).toBeTruthy()
@@ -601,7 +672,7 @@ describe('AuditReportView', () => {
     expect(
       screen
         .getAllByText('Queries (1)', { exact: true })
-        .filter((element) => element.tagName === 'P')
+        .filter((element) => element.tagName === 'H2')
     ).toHaveLength(1)
     expect(screen.queryByText(/Captured Queries/)).toBeNull()
     expect(screen.queryByText(/Readyset Cache Comparison/)).toBeNull()
@@ -612,15 +683,15 @@ describe('AuditReportView', () => {
       snapshot_id: 'fleet_disclosures',
     })
 
-    expect(screen.queryByText('Database Overview')).toBeNull()
+    expect(screen.queryByText('Database overview')).toBeNull()
     const outerTabs = screen.getByRole('tablist', {
       name: 'Fleet report sections',
     })
     expect(
-      within(outerTabs).getByRole('tab', { name: 'Fleet Summary' })
+      within(outerTabs).getByRole('tab', { name: 'Fleet summary' })
     ).toBeTruthy()
     expect(
-      within(outerTabs).getByRole('tab', { name: 'Fleet Savings' })
+      within(outerTabs).getByRole('tab', { name: 'Fleet savings' })
     ).toBeTruthy()
     expect(within(outerTabs).getAllByRole('tab')).toHaveLength(2)
     expect(
@@ -643,8 +714,8 @@ describe('AuditReportView', () => {
       'Queries',
       'Sizing',
       'Savings',
-      'Detailed Analysis',
-      'Next Steps',
+      'Detailed analysis',
+      'Next steps',
     ]) {
       expect(screen.getByRole('tab', { name: tab })).toBeTruthy()
     }
@@ -654,12 +725,12 @@ describe('AuditReportView', () => {
         { exact: true }
       )
     ).toBeTruthy()
-    selectInnerTab('Detailed Analysis')
-    expect(screen.getAllByText('Database Overview').length).toBeGreaterThan(0)
+    selectInnerTab('Detailed analysis')
+    expect(screen.getAllByText('Database overview').length).toBeGreaterThan(0)
     expect(window.location.search).toContain('fleetTab=target')
     expect(window.location.search).toContain('target=Fleet+Aurora+3')
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Fleet Savings' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Fleet savings' }))
     expect(
       screen.getByText(
         'Review current and suggested monthly fleet costs, total potential savings, and the per-instance rollup.',
@@ -668,7 +739,7 @@ describe('AuditReportView', () => {
     ).toBeTruthy()
     expect(screen.getByRole('tablist', { name: 'Instances' })).toBeTruthy()
     expect(screen.getByText('Current cluster total')).toBeTruthy()
-    expect(screen.getAllByText('Per-Node Sizing Rollup')).toHaveLength(1)
+    expect(screen.getAllByText('Per-node sizing rollup')).toHaveLength(1)
   })
 
   it('renders rounded fleet summary values, severity badges, and sizing totals', () => {
@@ -719,14 +790,14 @@ describe('AuditReportView', () => {
     expect(screen.getByText('72/100', { exact: true })).toBeTruthy()
     expect(screen.queryByText('71.66666666666667/100')).toBeNull()
     expect(screen.queryByText('$194.18/mo', { exact: true })).toBeNull()
-    fireEvent.click(screen.getByRole('tab', { name: 'Fleet Savings' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Fleet savings' }))
     expect(
       screen.getAllByText('$194.18/mo', { exact: true }).length
     ).toBeGreaterThan(0)
     expect(
       screen.getAllByText('$97.82/mo', { exact: true }).length
     ).toBeGreaterThan(0)
-    expect(screen.getAllByText('Fleet Sizing Summary').length).toBeGreaterThan(
+    expect(screen.getAllByText('Fleet sizing summary').length).toBeGreaterThan(
       0
     )
     expect(

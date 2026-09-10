@@ -12,8 +12,11 @@ import { Scrollable } from '@rs/ui-new/scrollable'
 import { Skeleton } from '@rs/ui-new/skeleton'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { TabItemButton, TabList } from '@rs/ui-new/tab'
+import { Text } from '@rs/ui-new/text'
 import { useNavigate } from '@tanstack/react-router'
 import { lazy, type ReactNode, Suspense, useId, useState } from 'react'
+import { ActivityPulse } from '../../../components/audit/ActivityPulse'
+import { InlineBackgroundJobs } from '../../../components/BackgroundJobs'
 import { QueryStarButton } from '../../../components/QueryStarButton'
 import { useAnalysisRunForQuery } from '../../../lib/analysisRuns'
 import type { QueryRegistryEntry } from '../../../lib/api'
@@ -91,6 +94,7 @@ function DrawerShell({
   tab,
   onOpenTab,
   unavailableTabs,
+  fill,
   children,
 }: {
   title?: string
@@ -102,6 +106,9 @@ function DrawerShell({
   onOpenTab?: (tab: AnalyzeDrawerTab) => void
   /** Panes that cannot be opened yet, each mapped to the reason why. */
   unavailableTabs?: Partial<Record<AnalyzeDrawerTab, string>>
+  /** The pane scrolls its own regions, so it takes the height rather than
+      growing the drawer's one scroll container. */
+  fill?: boolean
   children: ReactNode
 }) {
   const id = useId()
@@ -117,10 +124,11 @@ function DrawerShell({
     <DrawerContent
       // The analysis is a dense read — plan tables, rewrites, index findings.
       // It gets the design system's widest right drawer, the same one the
-      // target-configuration drawer uses.
+      // target-configuration drawer uses, and on narrow screens stops at the
+      // sidebar rather than straddling it (B-08).
       size="XXLarge"
       direction="right"
-      className="p-0"
+      className="p-0 tablet:max-w-[min(72rem,calc(100vw-20rem))]"
       hideCloseButton
       data-testid="analyze-drawer"
     >
@@ -149,6 +157,10 @@ function DrawerShell({
         <DrawerDescription className="truncate">
           {description}
         </DrawerDescription>
+        {/* The sidebar is behind this drawer's scrim, so the job list comes
+            with it: stopping or opening background work stays possible for as
+            long as the drawer is what the user is looking at (B-08). */}
+        <InlineBackgroundJobs />
         {tab && onOpenTab ? (
           <TabList aria-label="Query views" className="mt-2">
             {DRAWER_TABS.map((item) => {
@@ -171,11 +183,17 @@ function DrawerShell({
           </TabList>
         ) : null}
       </VStack>
-      <Scrollable className="flex-1">
-        <div {...panelProps} className="space-y-6 p-5">
+      {fill ? (
+        <div {...panelProps} className="flex min-h-0 flex-1 flex-col p-5">
           {children}
         </div>
-      </Scrollable>
+      ) : (
+        <Scrollable className="flex-1">
+          <div {...panelProps} className="space-y-6 p-5">
+            {children}
+          </div>
+        </Scrollable>
+      )}
     </DrawerContent>
   )
 }
@@ -206,9 +224,15 @@ export function AnalyzeDrawerContent({
     target,
   })
 
-  // Opening a query rather than a specific run resumes the analysis it already
-  // has. Only a deliberate re-run measures a query that was analyzed before.
-  const wantsLatest = !link.analysisId && !link.rerun
+  // A run this session started for the query is what the drawer is about: it
+  // is fresher than any stored record and it is what the user was watching
+  // when they closed the drawer. Only a query with no run of its own resumes
+  // the analysis it already has, and only a deliberate re-run measures a query
+  // that was analyzed before.
+  const sessionRun = useAnalysisRunForQuery({ hash: link.hash })
+  const hasSessionRun =
+    sessionRun?.state === 'analyzing' || sessionRun?.state === 'complete'
+  const wantsLatest = !link.analysisId && !link.rerun && !hasSessionRun
   const latest = useLatestAnalysisQuery(link.hash, wantsLatest)
   const analysisId =
     link.analysisId ?? (wantsLatest ? latest.summary?.analysis_id : undefined)
@@ -303,6 +327,7 @@ function LoadedAnalyzeDrawer({
   const hasAnalysis =
     Boolean(analysisId) ||
     (run?.state === 'complete' && Boolean(run.results?.query_hash))
+  const isAnalyzing = run?.state === 'analyzing'
 
   return (
     <DrawerShell
@@ -310,11 +335,22 @@ function LoadedAnalyzeDrawer({
       description={identityLine(entry)}
       tab={tab}
       onOpenTab={(next) => onOpenLink({ ...link, tab: next })}
+      fill={tab === 'follow-up' && hasAnalysis}
       unavailableTabs={
         hasAnalysis ? undefined : { 'follow-up': FOLLOW_UP_HINT }
       }
       action={
         <>
+          {/* The header says what the drawer is doing, whichever tab is open:
+              the same state the query's card carries in the library. */}
+          {isAnalyzing ? (
+            <HStack className="items-center gap-2 rounded-lg bg-surface-primary-soft/20 px-2 py-1">
+              <ActivityPulse label="Analysis in progress" />
+              <Text level="caption" className="text-content-primary-soft">
+                Analyzing
+              </Text>
+            </HStack>
+          ) : null}
           <QueryStarButton
             starred={entry.starred === true}
             onToggle={(next) => onToggleStar(entry.hash, next)}
@@ -342,6 +378,7 @@ function LoadedAnalyzeDrawer({
             entry={entry}
             currentAnalysisId={analysisId}
             target={target}
+            isAnalyzing={isAnalyzing}
             onOpenAnalysis={(id) =>
               onOpenLink({ hash: link.hash, analysisId: id, tab: 'analyze' })
             }

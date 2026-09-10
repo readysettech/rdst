@@ -3,7 +3,7 @@
  * Two-step flow: Step 1 = configure & start, Step 2 = progress & results
  */
 
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { ExperimentalBanner } from '../components/ExperimentalBanner';
 import { useState, useCallback } from 'react';
 import { Button } from '@rs/ui-new/button';
@@ -12,9 +12,12 @@ import { Icon } from '@rs/ui-new/icon';
 import { Tag } from '@rs/ui-new/tag';
 import { HStack } from '@rs/ui-new/stack';
 import { Show } from '@rs/ui-new/show';
+import { Skeleton } from '@rs/ui-new/skeleton';
+import { EmptyState } from '@rs/ui-new/empty-state';
+import { ErrorState } from '@rs/ui-new/error-state';
 import { m, AnimatePresence } from '@rs/ui-new/motion';
 import { TargetLockNotice } from '../components';
-import { useTarget } from '../hooks/useTarget';
+import { useTargetResolution } from '../hooks/useTarget';
 import { useRecentScanDirs } from '../hooks/useRecentScanDirs';
 import { sanitizeWebError } from '../lib/errorContract';
 import { useScan } from '../lib/useScan';
@@ -34,7 +37,8 @@ export const Route = createFileRoute('/scan')({
 });
 
 function ScanPage() {
-  const { target } = useTarget();
+  const navigate = useNavigate();
+  const { target, isResolving, isUnavailable, refetch } = useTargetResolution();
   const { recentDirs, addRecentDir } = useRecentScanDirs();
   const passwordLock = useTargetPasswordLock(target);
 
@@ -114,7 +118,13 @@ function ScanPage() {
 
   // Collect active option tags for the context bar
   const optionTags: { label: string; variant: 'informative' | 'primary' | 'warning' }[] = [];
-  if (analyze) optionTags.push({ label: shallow ? 'shallow analyze' : 'analyze', variant: 'primary' });
+  // The tag repeats the switch that turned the option on, so the context bar
+  // and the filters name the same thing. [E-44]
+  if (analyze)
+    optionTags.push({
+      label: shallow ? 'Analyze performance (shallow)' : 'Analyze performance',
+      variant: 'primary',
+    });
   if (dryRun) optionTags.push({ label: 'dry-run', variant: 'informative' });
   if (diff.trim()) optionTags.push({ label: `diff: ${diff.trim()}`, variant: 'informative' });
   if (check) optionTags.push({ label: 'CI check', variant: 'warning' });
@@ -123,15 +133,37 @@ function ScanPage() {
 
   return (
     <div className="space-y-6 w-full">
-      <ExperimentalBanner name="Code Scan" />
+      <ExperimentalBanner name="Code scan" />
       <ScanHeader state={state} queriesCount={queries.length} />
 
-      <Show when={!target}>
-        <div className="bg-surface-warning-soft rounded-xl border border-border-warning-soft p-4">
-          <Text level="body-small" className="text-content-warning-soft">
-            Please select a target database from the sidebar to continue.
-          </Text>
+      {/* Three distinct no-target outcomes. Telling a user to pick a target
+          they have not been offered yet, or that the server failed to list,
+          sends them looking for a problem they do not have. [F-20, F-25] */}
+      <Show when={isResolving}>
+        <div className="rounded-xl border border-border-layout-1 p-4">
+          <Skeleton aria-busy="true" className="h-4 w-72 rounded-md" />
         </div>
+      </Show>
+      <Show when={isUnavailable}>
+        <ErrorState
+          errorClass="rdst-service"
+          title="Could not load your database targets"
+          message="RDST could not list the configured targets, so there is nothing to scan against yet."
+          trustworthy="Nothing was scanned or changed."
+          onRetry={() => void refetch()}
+        />
+      </Show>
+      <Show when={!target && !isResolving && !isUnavailable}>
+        <EmptyState
+          icon="database"
+          title="No target selected"
+          body="A scan reads your code, then explains each query it finds against a connected database."
+          action={{
+            label: 'Add a target',
+            icon: 'add',
+            onClick: () => void navigate({ to: '/configure', hash: 'connections' }),
+          }}
+        />
       </Show>
       <Show when={passwordLock.isLocked}>
         <TargetLockNotice
@@ -241,11 +273,14 @@ function ScanPage() {
             )}
 
             {error !== null && (
-              <div className="bg-surface-negative-soft rounded-xl border border-border-negative-soft p-4">
-                <Text level="body-small" className="text-content-negative-soft">
-                  Error: {sanitizeWebError(error, 'The scan could not be completed.')}
-                </Text>
-              </div>
+              <ErrorState
+                errorClass="rdst-service"
+                title="The scan stopped"
+                message={sanitizeWebError(error, 'The scan could not be completed.')}
+                trustworthy="Nothing in your code was changed, and the queries found before the failure are listed below."
+                onRetry={handleStart}
+                detail={error}
+              />
             )}
 
             {summary && <ScanSummaryPanel summary={summary} />}

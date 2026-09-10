@@ -75,7 +75,7 @@ export function AddQueryDialog({
               />
               {mode === 'add' ? (
                 <Button
-                  variant="rising"
+                  variant="primary"
                   modifier="solid"
                   label="Add query"
                   icon="tick"
@@ -86,7 +86,7 @@ export function AddQueryDialog({
                 />
               ) : (
                 <Button
-                  variant="rising"
+                  variant="primary"
                   modifier="solid"
                   label="Import queries"
                   icon="folder-file"

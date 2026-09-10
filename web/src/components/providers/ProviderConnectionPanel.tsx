@@ -143,7 +143,6 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
         message={error instanceof Error ? error.message : String(error)}
         trustworthy="Your fleet inventory and saved reports are unaffected."
         onRetry={() => void refetch()}
-        retryLabel="Re-check"
       />
     )
   if (!status) return null

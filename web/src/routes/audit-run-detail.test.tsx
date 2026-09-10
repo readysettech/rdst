@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from '@testing-library/react'
+import type { ComponentType } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // vitest isn't configured with globals, so RTL's auto-cleanup never registers —
@@ -35,9 +36,10 @@ vi.mock('../lib/useFleet', () => ({
   fetchFleetSnapshotDetail: (id: string) => fetchFleetSnapshotDetail(id),
 }))
 
+const navigateSpy = vi.fn()
 vi.mock('@tanstack/react-router', async () => {
   const { fileRouteModuleMock } = await import('@/test-utils')
-  return fileRouteModuleMock()
+  return fileRouteModuleMock({ useNavigate: () => navigateSpy })
 })
 
 import type { AuditReport, WorkloadRun } from '../types/audit'
@@ -86,6 +88,50 @@ describe('audit run detail loader', () => {
   })
 })
 
+describe('the route boundaries', () => {
+  // autoCodeSplitting rewrites the boundaries it splits into an arrow function
+  // importing the route's split chunk; the ones it leaves alone are still the
+  // function declarations from this file (so they carry a prototype).
+  const boundary = async (name: 'pendingComponent' | 'errorComponent') => {
+    const node = (Route as unknown as Record<string, unknown>)[name] as
+      | ComponentType<{ error: Error }>
+      | (() => Promise<Record<string, ComponentType<{ error: Error }>>>)
+    if (Object.hasOwn(node, 'prototype')) {
+      return node as ComponentType<{ error: Error }>
+    }
+    const split = await (
+      node as () => Promise<Record<string, ComponentType<{ error: Error }>>>
+    )()
+    return split[name]
+  }
+
+  it('skeletons the report it is about to show', async () => {
+    const Boundary = await boundary('pendingComponent')
+    render(<Boundary error={new Error('unused')} />)
+
+    // Was a bare spinner over an empty page, so the layout jumped. [E-47]
+    expect(screen.getByText('Loading saved run')).toBeTruthy()
+    expect(document.querySelectorAll('#skeleton').length).toBeGreaterThan(0)
+  })
+
+  it('says a missing run is gone and routes back, not "Failed to fetch: 404"', async () => {
+    const Boundary = await boundary('errorComponent')
+    render(<Boundary error={new Error('Failed to fetch audit run: 404')} />)
+
+    // The failure surface is the shared one: alert role, human sentence,
+    // a routed action, and the raw client string behind the expander. [E-25]
+    expect(screen.getByRole('alert')).toBeTruthy()
+    expect(screen.getByText('This run is no longer saved')).toBeTruthy()
+    expect(screen.queryByText(/Failed to fetch audit run/)).toBeNull()
+    expect(
+      screen.getAllByRole('button', { name: /Back to Reports/ }).length
+    ).toBeGreaterThan(0)
+    expect(
+      screen.getByRole('button', { name: 'Technical details' })
+    ).toBeTruthy()
+  })
+})
+
 describe('AuditRunDetailPage', () => {
   it('renders a back link that returns to /audit', () => {
     render(
@@ -108,6 +154,23 @@ describe('AuditRunDetailPage', () => {
     expect(screen.getByTestId('report-view')).toBeTruthy()
     expect(screen.queryByTestId('workload-view')).toBeNull()
     expect(screen.getByText('r1')).toBeTruthy()
+  })
+
+  it('carries the skipped-step reasons from the saved run onto the report', () => {
+    const run = {
+      run_id: 'cap_2',
+      queries: [],
+      started_at: null,
+      analysis_error: 'the model provider returned 503',
+      readyset_notice: 'Readyset benchmark skipped: no Docker',
+    } as unknown as WorkloadRun
+    render(
+      <AuditRunDetailPage data={{ kind: 'audit', data: run }} runId="cap_2" />
+    )
+
+    expect(screen.getByText('Analysis skipped')).toBeTruthy()
+    expect(screen.getByText('the model provider returned 503')).toBeTruthy()
+    expect(screen.getByText('Readyset benchmark skipped')).toBeTruthy()
   })
 
   it('shows the workload view for a capture run', () => {

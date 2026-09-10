@@ -202,6 +202,10 @@ class WorkloadRun:
     total_queries: int = 0
     total_query_time_ms: float = 0.0
     analysis: WorkloadAnalysis | None = None
+    # Why a step produced nothing. Persisted so the saved report can say the
+    # analysis was not computed instead of reporting an empty one as a result.
+    analysis_error: str | None = None
+    readyset_notice: str | None = None
     readyset_comparison: dict[str, Any] | None = None
     version: str = "1.0"
 

@@ -4,8 +4,13 @@ import { Spinner } from '@rs/ui-new/spinner'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
+import { Fragment } from 'react'
 import { formatSecondsShort } from '../../../lib/formatters'
 import { summarizeSustainedComparison } from '../comparisonMetrics'
+import {
+  BenchmarkProgress,
+  useElapsedSeconds,
+} from '../shared/BenchmarkProgress'
 import {
   type CompareBatchSnapshot,
   isNotComparableCompareOutcome,
@@ -15,7 +20,7 @@ import {
   compareBatchProgressLine,
   compareBatchRemainingSeconds,
   comparePreparationState,
-  compareStatusLabel,
+  compareStatusPresentation,
   formatQps,
   formatSpeedup,
 } from './compareUi'
@@ -62,6 +67,7 @@ export function CompareVerdictBand({
     controller.batch?.durationSeconds ?? DEFAULT_COMPARE_DURATION
   const remaining = compareBatchRemainingSeconds(snapshot, durationSeconds)
   const progressLine = compareBatchProgressLine(snapshot)
+  const batchStatus = compareStatusPresentation(snapshot.status)
 
   const headline = running
     ? preparation
@@ -73,9 +79,10 @@ export function CompareVerdictBand({
         ? `${formatSpeedup(comparison.speedup)}× faster with Readyset`
         : `${Math.abs(comparison.improvementPercent).toFixed(0)}% slower with Readyset`
 
-  const detail = running
-    ? `${progressLine}${remaining > 0 ? ` · ~${formatSecondsShort(remaining)} left` : ''}`
-    : `${progressLine} · ${compareBatchOutcomeSummary(snapshot)}`
+  const settledDetail = `${progressLine} · ${compareBatchOutcomeSummary(snapshot)}`
+  // Nothing has been measured yet while the sandbox warms, so the batch has no
+  // countable progress to claim; the clock is what the user can read. [D-27]
+  const preparingSeconds = useElapsedSeconds(!!preparation)
   // The two lanes compress to one line here, each behind the colour key its
   // curve carries; the per-query cards below carry the same split query by
   // query.
@@ -105,27 +112,35 @@ export function CompareVerdictBand({
               {headline}
             </Text>
             <Tag
-              variant={
-                running
-                  ? 'informative'
-                  : snapshot.status === 'complete'
-                    ? 'positive'
-                    : snapshot.status === 'partial'
-                      ? 'warning'
-                      : 'negative'
-              }
+              variant={batchStatus.variant}
               modifier="solid"
-              label={preparation?.label ?? compareStatusLabel(snapshot.status)}
+              icon={batchStatus.icon}
+              iconPosition="left"
+              label={preparation?.label ?? batchStatus.label}
             />
           </HStack>
-          <Text level="caption" className="text-content-layout-2">
-            {detail}
-          </Text>
-          {preparation ? (
-            <Text level="caption" className="text-content-layout-3">
-              {preparation.message}
+          {running ? (
+            <BenchmarkProgress
+              value={preparation ? undefined : snapshot.completed}
+              max={snapshot.total}
+              ariaLabel="Comparison progress"
+              label={progressLine}
+              timing={
+                preparation
+                  ? `${formatSecondsShort(preparingSeconds)} elapsed`
+                  : remaining > 0
+                    ? `~${formatSecondsShort(remaining)} left`
+                    : undefined
+              }
+              detail={preparation?.message}
+              className="w-full"
+            />
+          ) : (
+            <Text level="caption" className="text-content-layout-2">
+              {settledDetail}
             </Text>
-          ) : totals ? (
+          )}
+          {!preparation && totals ? (
             <HStack className="flex-wrap items-center gap-x-4 gap-y-1">
               <HStack className="items-center gap-1.5">
                 <CompareLaneDot lane="upstream" />
@@ -154,35 +169,40 @@ export function CompareVerdictBand({
             </HStack>
           ) : null}
         </VStack>
+      </Card.Content>
 
-        <HStack className="flex-wrap items-center justify-end gap-2">
-          {running ? (
-            <>
-              <Text level="caption" className="text-content-layout-3">
-                This comparison continues if you leave the page.
-              </Text>
+      {/* What the batch is and what to do about it are two readings, so the
+          actions sit under the content rather than beside it — the same
+          footer row the Load test card has carried all along. */}
+      <Card.Footer className="flex-wrap items-center justify-between gap-3 px-5 pt-0 pb-4">
+        {/* Keyed so React tears the running group down instead of reconciling
+            it into the settled one position-by-position: without the keys
+            "Adjust" inherited the stop button's cancel glyph. */}
+        {running ? (
+          <Fragment key="running">
+            <Text level="caption" className="text-content-layout-3">
+              This comparison continues if you leave the page.
+            </Text>
+            <Button
+              variant="negative"
+              modifier="outline"
+              label="Stop comparison"
+              icon="close"
+              iconPosition="left"
+              onClick={() => void controller.cancelComparison()}
+            />
+          </Fragment>
+        ) : (
+          <Fragment key="settled">
+            <Button
+              variant="primary"
+              modifier="ghost"
+              label={`History ${controller.historyEntries.length}`}
+              icon="observe"
+              onClick={() => controller.setHistoryOpen(true)}
+            />
+            <HStack className="ml-auto flex-wrap items-center gap-2">
               <Button
-                size="small"
-                variant="negative"
-                modifier="ghost"
-                label="Stop comparison"
-                icon="close"
-                iconPosition="left"
-                onClick={() => void controller.cancelComparison()}
-              />
-            </>
-          ) : (
-            <>
-              <Button
-                size="small"
-                variant="primary"
-                modifier="ghost"
-                label={`History ${controller.historyEntries.length}`}
-                icon="observe"
-                onClick={() => controller.setHistoryOpen(true)}
-              />
-              <Button
-                size="small"
                 variant="primary"
                 modifier="outline"
                 label="Adjust"
@@ -190,20 +210,16 @@ export function CompareVerdictBand({
                 onClick={controller.clearBatch}
               />
               <Button
-                size="small"
-                variant="rising"
+                variant="primary"
                 modifier="solid"
                 label="Run again"
                 icon="play"
-                onClick={() => {
-                  controller.clearBatch()
-                  controller.setReviewOpen(true)
-                }}
+                onClick={controller.reRunBatch}
               />
-            </>
-          )}
-        </HStack>
-      </Card.Content>
+            </HStack>
+          </Fragment>
+        )}
+      </Card.Footer>
     </Card>
   )
 }

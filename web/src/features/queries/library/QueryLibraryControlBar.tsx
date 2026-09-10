@@ -475,7 +475,7 @@ export function QueryLibraryControlBar({
   return (
     <div className="space-y-3">
       <HStack className="items-center justify-between gap-3 flex-wrap">
-        <HStack className="items-center gap-2">
+        <HStack className="items-center gap-2 flex-wrap">
           <FilterMenu
             idPrefix={idPrefix}
             filters={filters}
@@ -514,7 +514,7 @@ export function QueryLibraryControlBar({
           </Show>
         </HStack>
 
-        <div className="relative ml-auto w-80 max-w-full">
+        <div className="relative ml-auto w-full tablet:w-80">
           <Label htmlFor={searchId} className="sr-only">
             Search by name, hash, or SQL
           </Label>

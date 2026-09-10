@@ -34,7 +34,9 @@ is the most common misuse.
   `link`.
 
 Pick one `modifier="solid"` per view for the primary action; use `outline` /
-`ghost` for secondary and tertiary.
+`ghost` for secondary and tertiary. That primary is always `variant="primary"`;
+`rising` is reserved for the single brand moment that asks for a Readyset
+account (GUIDELINES section 2).
 
 **`link` modifier** — styles the button as an inline text link (underlined, no
 fill) for low-emphasis, navigation-ish actions inside prose ("Learn more",

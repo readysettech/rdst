@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test:e2e": "pnpm run test:browser-integration",
     "test:browser-integration": "node ./e2e/run.mjs",
+    "test:qa": "node ./e2e/run.mjs --config playwright.qa.config.ts",
     "test:e2e:postgres": "node ./e2e/run.mjs --config playwright.postgres.config.ts",
     "test:e2e:web": "node ./e2e/run.mjs --config playwright.web-e2e.config.ts",
     "test:e2e:ui": "node ./e2e/run.mjs --ui",

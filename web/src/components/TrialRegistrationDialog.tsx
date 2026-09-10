@@ -1,12 +1,13 @@
 import { Alert } from '@rs/ui-new/alert'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
+import { Field } from '@rs/ui-new/field'
 import { Icon } from '@rs/ui-new/icon'
 import { Modal, ModalContentContainer } from '@rs/ui-new/modal'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import {
   completeAccountRedirect,
   sendAccountMagicLink,
@@ -17,6 +18,7 @@ import { fetchAccountBrowserCallback, startAccountLogin } from '../lib/api'
 import { isDesktopRuntime } from '../lib/desktop'
 import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
 import { TaskDialogContent } from './dialog/TaskDialogContent'
+import { isValidEmail, normalizeEmail } from './emailValidation'
 
 interface AccountLoginDialogProps {
   isOpen: boolean
@@ -78,14 +80,21 @@ export function AccountLoginDialog({
   callbackLoginId = null,
 }: AccountLoginDialogProps) {
   const queryClient = useQueryClient()
+  const emailFieldId = useId()
   const [email, setEmail] = useState('')
+  const [emailError, setEmailError] = useState<string | null>(null)
   const [linkSent, setLinkSent] = useState(false)
   const [complete, setComplete] = useState(false)
   const [desktopLoginId, setDesktopLoginId] = useState<string | null>(null)
   const [callbackPollingError, setCallbackPollingError] = useState<
     string | null
   >(null)
+  // A dead callback link is abandoned locally: the `login_id` prop stays in the
+  // URL, so without this the dialog keeps claiming the sign-in is in progress
+  // underneath the error that ended it. [A-15]
+  const [callbackAbandoned, setCallbackAbandoned] = useState(false)
   const callbackStarted = useRef(false)
+  const emailInputRef = useRef<HTMLInputElement>(null)
 
   const finish = async () => {
     setComplete(true)
@@ -181,15 +190,26 @@ export function AccountLoginDialog({
 
   const reset = () => {
     setEmail('')
+    setEmailError(null)
     setLinkSent(false)
     setComplete(false)
     setDesktopLoginId(null)
     setCallbackPollingError(null)
+    setCallbackAbandoned(false)
     callbackStarted.current = false
     magicLinkMutation.reset()
     googleMutation.reset()
     githubMutation.reset()
     callbackMutation.reset()
+  }
+
+  // The address is checked on blur and again before the request, so an obvious
+  // typo is answered under the field rather than by a red block at the top of
+  // the dialog, 285px away from it. [A-16]
+  const validateEmailField = () => {
+    const valid = isValidEmail(normalizeEmail(email))
+    setEmailError(valid ? null : 'Enter a valid email address.')
+    return valid
   }
 
   const handleClose = () => {
@@ -208,6 +228,18 @@ export function AccountLoginDialog({
     googleMutation.isPending ||
     githubMutation.isPending ||
     callbackMutation.isPending
+  const callbackFailed =
+    !!callbackLoginId &&
+    !callbackAbandoned &&
+    (callbackMutation.isError || !!callbackPollingError)
+  const completingCallback =
+    !!callbackLoginId && !callbackAbandoned && !callbackFailed
+  const startOver = () => {
+    setCallbackAbandoned(true)
+    setCallbackPollingError(null)
+    callbackStarted.current = false
+    callbackMutation.reset()
+  }
 
   return (
     <Modal open={isOpen} onOpenChange={(open) => !open && handleClose()}>
@@ -215,11 +247,18 @@ export function AccountLoginDialog({
         <TaskDialogContent
           size="base"
           icon="sparkles"
+          // Radix would open with focus on the first control, which here is a
+          // one-Enter trip into a third-party OAuth redirect. The email field
+          // is the safe landing spot. [F-45]
+          onOpenAutoFocus={(event) => {
+            event.preventDefault()
+            emailInputRef.current?.focus()
+          }}
           title={complete ? 'Signed in to Readyset' : 'Sign in to Readyset'}
           description={
             complete
-              ? 'Readyset-hosted AI is ready to use.'
-              : 'Create an account or sign in to use Readyset-hosted AI for free.'
+              ? 'Your included AI is ready to use.'
+              : 'Create an account or sign in to use the included AI for free.'
           }
           bodyClassName="space-y-4"
           footer={
@@ -233,17 +272,31 @@ export function AccountLoginDialog({
                   disabled={pending}
                 />
               )}
-              {!complete && !callbackLoginId && !linkSent && (
+              {callbackFailed && (
                 <Button
                   variant="rising"
-                  label="Send sign-in link"
-                  icon="arrow-right"
-                  iconPosition="right"
-                  onClick={() => magicLinkMutation.mutate()}
-                  loading={magicLinkMutation.isPending}
-                  disabled={!email.trim() || pending}
+                  label="Start over"
+                  icon="observe"
+                  iconPosition="left"
+                  onClick={startOver}
                 />
               )}
+              {!complete &&
+                !completingCallback &&
+                !callbackFailed &&
+                !linkSent && (
+                  <Button
+                    variant="rising"
+                    label="Send sign-in link"
+                    icon="arrow-right"
+                    iconPosition="right"
+                    onClick={() => {
+                      if (validateEmailField()) magicLinkMutation.mutate()
+                    }}
+                    loading={magicLinkMutation.isPending}
+                    disabled={!email.trim() || !!emailError || pending}
+                  />
+                )}
               {complete && (
                 <Button variant="primary" label="Done" onClick={handleClose} />
               )}
@@ -254,7 +307,11 @@ export function AccountLoginDialog({
             <Alert
               variant="negative"
               modifier="outline"
-              label={error ?? callbackPollingError ?? 'Readyset sign-in failed'}
+              label={
+                callbackFailed
+                  ? 'This sign-in link has expired or was already used.'
+                  : (error ?? callbackPollingError ?? 'Readyset sign-in failed')
+              }
             />
           )}
 
@@ -272,14 +329,23 @@ export function AccountLoginDialog({
                   Readyset account connected
                 </Text>
                 <Text level="body-small" className="text-content-layout-3">
-                  Readyset-hosted AI is ready to use.
+                  Your included AI is ready to use.
                 </Text>
               </VStack>
             </div>
-          ) : callbackLoginId ? (
+          ) : completingCallback ? (
             <VStack className="gap-3 items-center py-6">
               <Text level="body-small" className="text-content-layout-3">
                 Completing your Readyset sign-in…
+              </Text>
+            </VStack>
+          ) : callbackFailed ? (
+            <VStack className="gap-2 items-stretch py-3">
+              <Text level="subtitle-2" className="text-content-layout-1">
+                Sign-in could not be completed
+              </Text>
+              <Text level="body-small" className="text-content-layout-3">
+                Start over to request a fresh sign-in link or use a provider.
               </Text>
             </VStack>
           ) : linkSent ? (
@@ -327,23 +393,34 @@ export function AccountLoginDialog({
                 </Text>
                 <div className="h-px flex-1 bg-border-layout-1" />
               </HStack>
-              <VStack className="gap-1 items-stretch">
-                <Text level="label-small" className="text-content-layout-1">
-                  Email address
-                </Text>
-                <BaseInputText
-                  type="email"
-                  aria-label="Email address"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  disabled={pending}
-                  placeholder="you@example.com"
-                />
-                <Text level="caption" className="text-content-layout-3">
-                  We’ll email you a secure sign-in link.
-                </Text>
-              </VStack>
+              <Field.Root className="px-0 py-0">
+                <Field.Label htmlFor={emailFieldId}>Email address</Field.Label>
+                <Field.Content>
+                  <BaseInputText
+                    ref={emailInputRef}
+                    id={emailFieldId}
+                    type="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(event) => {
+                      setEmail(event.target.value)
+                      if (emailError) setEmailError(null)
+                    }}
+                    onBlur={validateEmailField}
+                    disabled={pending}
+                    placeholder="you@example.com"
+                    error={!!emailError}
+                    aria-invalid={emailError ? true : undefined}
+                    aria-describedby={`${emailFieldId}-info`}
+                  />
+                  <div id={`${emailFieldId}-info`}>
+                    <Field.Info
+                      errorMessage={emailError ?? undefined}
+                      infoMessage="We’ll email you a secure sign-in link."
+                    />
+                  </div>
+                </Field.Content>
+              </Field.Root>
             </VStack>
           )}
         </TaskDialogContent>

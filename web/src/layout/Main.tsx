@@ -21,7 +21,7 @@ export function Main({ children }: MainProps) {
         }}
         // Sidebar offset only from tablet up; below that the sidebar is
         // off-canvas so content spans full width (responsive chrome, T19).
-        className="relative tablet:pl-80 h-[calc(100dvh-56px)] overflow-y-hidden bg-surface-layout-2"
+        className="relative tablet:pl-64 desktop:pl-80 h-[calc(100dvh-56px)] overflow-y-hidden bg-surface-layout-2"
       >
         {/* Radix's direct child is a `display:table; min-width:100%`
             measurement wrapper. Keep it as a table so its height tracks

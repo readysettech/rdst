@@ -1,9 +1,10 @@
 'use client'
 
 import { tv, type VariantProps } from '@rs/tailwind-base'
-import { forwardRef, type TextareaHTMLAttributes } from 'react'
-import { Icon } from '../../svg/icon'
 import type { IconStrokeName } from '@rs/ui-icons/icon-name'
+import { forwardRef, type TextareaHTMLAttributes } from 'react'
+import { controlTransition } from '../../../helpers/focus'
+import { Icon } from '../../svg/icon'
 import { IconWithSpinner } from '../../svg/icon-with-spinner'
 
 const textareaStyles = tv({
@@ -21,7 +22,7 @@ const textareaStyles = tv({
       'px-3',
       'py-2',
       'text-body-medium',
-      'transition',
+      controlTransition,
       'duration-fast',
       'ease-base',
       'placeholder:text-content-layout-3',
@@ -133,7 +134,10 @@ const BaseInputTextarea = forwardRef<
       <div className={containerClasses}>
         {hasLeftIcon && (
           <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-content-layout-3">
-            <Icon name={icon as IconStrokeName} label={icon as IconStrokeName} />
+            <Icon
+              name={icon as IconStrokeName}
+              label={icon as IconStrokeName}
+            />
           </div>
         )}
         <textarea

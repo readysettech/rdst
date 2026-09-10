@@ -1,11 +1,17 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, renderHook } from '@testing-library/react'
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { createElement, type ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { QueryRegistryEntry } from '../../../lib/useQueryRegistry'
 
 const mocks = vi.hoisted(() => ({
   useQueryRegistry: vi.fn(),
+  fetchSandboxDiagnostics: vi.fn(),
+}))
+
+vi.mock('../sandbox', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../sandbox')>()),
+  fetchSandboxDiagnostics: mocks.fetchSandboxDiagnostics,
 }))
 
 vi.mock('../../../hooks/useTarget', () => ({
@@ -161,25 +167,53 @@ describe('Load Test Readyset lane', () => {
     vi.clearAllMocks()
   })
 
-  it('leaves the Readyset lane off until the user asks for it', () => {
+  it('arms the Readyset lane by default, so the run proves the fix', () => {
     mocks.useQueryRegistry.mockReturnValue(registry([entry('q1')]))
+    mocks.fetchSandboxDiagnostics.mockResolvedValue({
+      docker_installed: true,
+      docker_running: true,
+    })
 
     const { result } = renderController()
 
+    expect(result.current.comparative).toBe(true)
+    expect(result.current.confirmIncludesReadyset).toBe(true)
+  })
+
+  it('falls back to origin only where no sandbox can exist (D-11)', async () => {
+    mocks.useQueryRegistry.mockReturnValue(registry([entry('q1')]))
+    mocks.fetchSandboxDiagnostics.mockResolvedValue({
+      docker_installed: false,
+      docker_running: false,
+    })
+
+    const { result } = renderController()
+
+    await waitFor(() => expect(result.current.dockerUnavailable).toBe(true))
     expect(result.current.comparative).toBe(false)
     // Nothing to warn about in the confirm dialog: the run is origin-only.
     expect(result.current.confirmIncludesReadyset).toBe(false)
   })
 
-  it('tells the confirm dialog when the run will drive Readyset too', () => {
+  it('follows the switch when a capacity-only run turns the lane off', () => {
     mocks.useQueryRegistry.mockReturnValue(registry([entry('q1')]))
+    mocks.fetchSandboxDiagnostics.mockResolvedValue({
+      docker_installed: true,
+      docker_running: true,
+    })
 
     const { result } = renderController()
 
     act(() => {
+      result.current.setComparative(false)
+    })
+    expect(result.current.comparative).toBe(false)
+    // Nothing to warn about in the confirm dialog: the run is origin-only.
+    expect(result.current.confirmIncludesReadyset).toBe(false)
+
+    act(() => {
       result.current.setComparative(true)
     })
-
     expect(result.current.confirmIncludesReadyset).toBe(true)
   })
 })

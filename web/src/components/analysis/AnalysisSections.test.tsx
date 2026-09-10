@@ -21,7 +21,7 @@ describe('ReadysetCacheabilitySection', () => {
       />
     )
 
-    expect(screen.getAllByText('Not Verified').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Not verified').length).toBeGreaterThan(0)
     expect(screen.getByText('UNAVAILABLE')).toBeTruthy()
     expect(screen.queryByText('Not Cacheable')).toBeNull()
     expect(screen.queryByText('Not cacheable')).toBeNull()

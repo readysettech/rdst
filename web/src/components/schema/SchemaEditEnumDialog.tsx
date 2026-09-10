@@ -177,7 +177,7 @@ export function SchemaEditEnumDialog({
           {/* Add new entry */}
           <div className="border-t border-border-layout-1 pt-4">
             <Text level="label-small" className="text-content-layout-2 mb-2">
-              Add New Value
+              Add new value
             </Text>
             <div className="flex items-end gap-2">
               <div className="flex-1">

@@ -97,7 +97,7 @@ function jobTitle(run: AnalysisRun): string {
 
 function reportJob(
   run: AnalysisRun,
-  status: 'running' | 'done' | 'failed',
+  status: 'running' | 'done' | 'failed' | 'cancelled',
   message: string
 ): void {
   upsertLocalRun(
@@ -110,7 +110,7 @@ function reportJob(
       queryHash: run.meta.queryHash,
       queryLabel: jobTitle(run),
     },
-    { onCancel: () => resetAnalysisRun(run.key) }
+    { onCancel: () => cancelAnalysisRun(run.key) }
   )
 }
 
@@ -146,6 +146,22 @@ function subscribe(listener: () => void): () => void {
 
 export function getAnalysisRun(key: string | null): AnalysisRun | undefined {
   return key ? runs.get(key) : undefined
+}
+
+/**
+ * The key of the run this session started for a registry hash, if it is still
+ * held. The request a view can rebuild is not always the request the run was
+ * started with — substituted parameter values live in the view that filled
+ * them in — so the hash is the identity that survives that view closing.
+ */
+export function useAnalysisRunKeyForHash(
+  hash?: string | null
+): string | undefined {
+  return useSyncExternalStore(
+    subscribe,
+    () => (hash ? runKeysByHash.get(hash) : undefined),
+    () => undefined
+  )
 }
 
 /** Read one run, re-rendering as its stream advances. */
@@ -222,6 +238,22 @@ export function startAnalysisRun(
   publish()
   void streamRun(key, request, controller)
   return key
+}
+
+/**
+ * Stop one run and keep it. Every view attached to the run — the drawer, the
+ * `/results` screen, the query's card — reads the terminal state and says the
+ * measurement was stopped, rather than falling back to idle and starting the
+ * same work again (B-10).
+ */
+export function cancelAnalysisRun(key: string | null): void {
+  if (!key) return
+  controllers.get(key)?.abort()
+  controllers.delete(key)
+  const run = runs.get(key)
+  if (!run || run.state !== 'analyzing') return
+  update(key, { state: 'cancelled' })
+  reportJob(runs.get(key) ?? run, 'cancelled', 'Analysis cancelled')
 }
 
 /** Forget one run. The stream, if any, is abandoned with it. */

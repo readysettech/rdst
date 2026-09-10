@@ -30,6 +30,27 @@ test('completes first-run onboarding and persists the target', async ({
     ],
   })
 
+  // "Test & connect" tests before it saves, so the connection the first run
+  // stores is one that answered. A read-only role needs no further review.
+  await page.route('**/api/configure/targets/e2e-db/test', (route) =>
+    route.fulfill({
+      headers: { 'content-type': 'text/event-stream' },
+      body: [
+        'event: connection_test',
+        `data: ${JSON.stringify({
+          target_name: 'e2e-db',
+          status: 'success',
+          server_version: 'PostgreSQL 15',
+          privileges: { writable: false },
+        })}`,
+        '',
+        'event: success',
+        'data: {"message":"Connection test complete"}',
+        '',
+      ].join('\n'),
+    })
+  )
+
   // The four-step wizard was replaced by the single, exitable ConnectPage:
   // one form, one primary action, straight back into the app.
   await page.goto('/onboarding')

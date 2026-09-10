@@ -1,3 +1,4 @@
+import { EmptyState } from '@rs/ui-new/empty-state'
 import { ErrorState } from '@rs/ui-new/error-state'
 import type {
   AnalysisState,
@@ -82,6 +83,21 @@ export function AnalysisResults({
 
   if (state === 'analyzing') {
     return <ResultsLoading progress={progress} />
+  }
+
+  if (state === 'cancelled') {
+    return (
+      <EmptyState
+        icon="close"
+        title="Analysis cancelled"
+        body="This run was stopped before it finished, so nothing was measured."
+        action={
+          onRetry
+            ? { label: 'Run analysis again', onClick: onRetry }
+            : undefined
+        }
+      />
+    )
   }
 
   if (state === 'error') {

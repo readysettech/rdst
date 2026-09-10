@@ -17,7 +17,7 @@ export interface ApiErrorEnvelope {
 export type { ErrorClass }
 
 export const TRIAL_EXHAUSTED_MESSAGE =
-  'Hosted AI access is unavailable. Check your Readyset account quota or add your own Anthropic API key.'
+  "You've used this month's included AI. Add your own Anthropic key to keep going."
 
 export function isTrialExhaustedError(
   error: Pick<ApiErrorEnvelope, 'code' | 'message'> | string | undefined
@@ -60,6 +60,16 @@ export function isModelContextLimitError(
   )
 }
 
+/**
+ * The raw text behind a thrown failure, for the `Technical details` expander.
+ * Never for primary copy — the human sentence is written at the call site.
+ */
+export function errorDetail(error: unknown): string | undefined {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
+  return error ? String(error) : undefined
+}
+
 /** One routed recovery action: a human label + an app route to send them to. */
 export interface RecoveryTarget {
   label: string
@@ -71,7 +81,7 @@ export interface RecoveryTarget {
 // Target Secrets vs AI Settings + footer Settings); Readyset/Docker setup lives
 // on `/cache`. `valid-negative` is a real result, not a failure — no recovery.
 const RECOVERY: Record<ErrorClass, RecoveryTarget | undefined> = {
-  'user-config': { label: 'Open Settings', to: '/configure' },
+  'user-config': { label: 'Open settings', to: '/configure' },
   database: { label: 'Check connection', to: '/configure' },
   'local-dependency': { label: 'Set up caching', to: '/cache' },
   'rdst-service': { label: 'Fix API key', to: '/configure' },
@@ -208,8 +218,11 @@ export function classifyError(envelope: ApiErrorEnvelope): ErrorClass {
 }
 
 /**
- * Turn a raw EXPLAIN/driver error into a friendly, safe message. Keeps the
- * database's own syntax text (the useful part) but frames it for a human.
+ * Turn a raw EXPLAIN/driver error into a friendly, safe message. The sentence
+ * is the user's own words; the driver's wording travels separately as the
+ * envelope's `detail`, so a surface can put it behind a disclosure. A syntax
+ * error is the exception: the database's "at or near" pointer is the sentence,
+ * not driver noise. [B-21]
  */
 export function friendlySqlError(raw: string | undefined): string {
   const text = (raw ?? '').trim()
@@ -241,9 +254,9 @@ export function friendlySqlError(raw: string | undefined): string {
       text
     )
   ) {
-    return `The query references something the database can't find: ${text}`
+    return "The query references a table or column the database doesn't have. Check the names against the schema."
   }
-  return `The query could not be analyzed: ${text}`
+  return 'The query could not be analyzed. Check the SQL and try again.'
 }
 
 /**

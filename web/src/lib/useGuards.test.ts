@@ -1,5 +1,7 @@
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { createTestQueryClient, queryClientWrapper } from '@/test-utils'
 import {
   checkGuardSql,
   createGuard,
@@ -8,6 +10,7 @@ import {
   fetchGuard,
   fetchGuards,
   updateGuard,
+  useDeleteGuard,
 } from './useGuards'
 import type { GuardDetail } from '../types/guards'
 
@@ -153,6 +156,34 @@ describe('deleteGuard', () => {
     const request = requestOf(fetchMock)
     expect(request.url).toContain('/api/guards/pii-guard')
     expect(request.method).toBe('DELETE')
+  })
+})
+
+describe('useDeleteGuard', () => {
+  // The list key is a prefix of every detail key, so invalidating it wholesale
+  // would send the open row's detail read at a name the server just dropped.
+  // [F-16]
+  it('drops the deleted guard\'s detail instead of refetching it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ status: 'deleted' })))
+    const client = createTestQueryClient()
+    client.setQueryData(['guards'], { count: 1, guards: [] })
+    client.setQueryData(['guards', 'pii-guard'], sampleDetail)
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+
+    const { result } = renderHook(() => useDeleteGuard(), {
+      wrapper: queryClientWrapper(client),
+    })
+    await act(async () => {
+      await result.current.mutateAsync('pii-guard')
+    })
+
+    await waitFor(() =>
+      expect(client.getQueryData(['guards', 'pii-guard'])).toBeUndefined()
+    )
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['guards'],
+      exact: true,
+    })
   })
 })
 

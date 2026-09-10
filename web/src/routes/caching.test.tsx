@@ -100,12 +100,14 @@ describe('CachingPage workspace', () => {
     render(<CachingPage view="compare" />)
     expect(screen.getByRole('heading', { name: 'Benchmarks' })).toBeTruthy()
     expect(screen.queryByRole('tab', { name: 'Quick test' })).toBeNull()
-    expect(screen.getByRole('tab', { name: 'Compare' })).toBeTruthy()
+    expect(
+      screen.getByRole('tab', { name: 'Compare against Readyset' })
+    ).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Load test' })).toBeTruthy()
     expect(screen.getByTestId('compare-page')).toBeTruthy()
   })
 
-  it('renders Compare as a distinct mode', () => {
+  it('renders the comparison as a distinct mode', () => {
     render(<CachingPage view="compare" />)
     expect(screen.getByTestId('compare-page')).toBeTruthy()
   })

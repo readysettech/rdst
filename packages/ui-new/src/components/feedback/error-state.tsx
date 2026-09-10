@@ -42,6 +42,11 @@ export interface ErrorAction {
 interface ErrorFields {
   /** What failed (short headline). */
   title: string
+  /**
+   * Heading level for `title`. An error surface names a region of the page, so
+   * it is a heading; the caller picks the level that fits its own outline.
+   */
+  titleAs?: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
   /** The most specific safe cause — never a raw driver dump. */
   message: string
   /** Which results remain trustworthy (shown when only part of a flow failed). */
@@ -188,6 +193,7 @@ function ErrorStateImpl({
   layout = 'card',
   eyebrow,
   title,
+  titleAs,
   message,
   trustworthy,
   action,
@@ -244,7 +250,7 @@ function ErrorStateImpl({
         )}
 
         <Text
-          as="h1"
+          as={titleAs ?? 'h1'}
           level="headline-3"
           className={cn('text-content-layout-1', eyebrow ? 'mt-2' : 'mt-8')}
         >
@@ -326,6 +332,7 @@ function ErrorStateImpl({
         </div>
         <VStack className="gap-2 items-start flex-1 min-w-0">
           <Text
+            as={titleAs ?? 'h3'}
             level="headline-4"
             className={accentTextRecipe({ accent } as AccentVariant)}
           >
@@ -397,6 +404,7 @@ function InlineNoticeImpl({
   accent: accentOverride,
   icon,
   title,
+  titleAs,
   message,
   trustworthy,
   action,
@@ -434,6 +442,7 @@ function InlineNoticeImpl({
         <VStack className="gap-1 items-start flex-1 min-w-0">
           {title && (
             <Text
+              as={titleAs ?? 'h3'}
               level="label-small"
               className={accentTextRecipe({ accent } as AccentVariant)}
             >

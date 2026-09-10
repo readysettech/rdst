@@ -245,17 +245,15 @@ test('moves a target to a new group from its overflow menu', async ({
   await expect(page.getByText('archive', { exact: true })).toBeVisible()
 })
 
-test('/fleet redirects to the Database connections section', async ({
-  page,
-}) => {
+test('/fleet redirects to the Targets section', async ({ page }) => {
   await prepareSettingsPage(page)
 
   await page.goto('/fleet')
   await page.waitForURL(/\/configure/)
-  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
   await expect(
-    page.getByRole('heading', { name: 'Database connections' })
+    page.getByRole('heading', { name: 'Settings', level: 1 })
   ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Targets' })).toBeVisible()
 })
 
 test('/fleet?add=aws lands with the discovery drawer open on the AWS tab', async ({
@@ -270,7 +268,7 @@ test('/fleet?add=aws lands with the discovery drawer open on the AWS tab', async
   await page.goto('/fleet?add=aws')
   await page.waitForURL(/\/configure/)
 
-  const drawer = page.getByRole('dialog', { name: 'Add connection' })
+  const drawer = page.getByRole('dialog', { name: 'Add target' })
   await expect(drawer).toBeVisible()
   await expect(drawer.getByText('Regions', { exact: true })).toBeVisible()
   await expect(
@@ -328,7 +326,7 @@ test('completes the signed-out AWS SSO browser flow and polls to success', async
 
   // Signed out, AWS sign-in lives inside the discovery drawer.
   await page.goto('/configure')
-  await page.getByRole('button', { name: 'Add connection' }).first().click()
+  await page.getByRole('button', { name: 'Add target' }).first().click()
   await page.getByRole('button', { name: 'AWS', exact: true }).click()
 
   await expect(
@@ -513,7 +511,7 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
   })
 
   await page.goto('/configure')
-  await page.getByRole('button', { name: 'Add connection' }).first().click()
+  await page.getByRole('button', { name: 'Add target' }).first().click()
   await page.getByRole('button', { name: 'AWS', exact: true }).click()
   await expect(
     page.getByText(
@@ -529,7 +527,7 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
   expect(previewBody?.profile).toBe('dev')
   expect(previewBody?.regions).toEqual(expect.arrayContaining(['us-east-1']))
   const addTargetsDialog = page.getByRole('dialog', {
-    name: 'Add connection',
+    name: 'Add target',
   })
   const groupedPreviewLabel = addTargetsDialog.getByText('orders-cluster', {
     exact: true,
@@ -651,8 +649,19 @@ test('CSV picker posts browser file content instead of a server path', async ({
     'name,host,engine,port,database,user\n' +
     'browser-csv,browser.test,postgresql,5432,app,app_user\n'
   await page.goto('/configure')
-  await page.getByRole('button', { name: 'Add connection' }).first().click()
+  // The drawer opens on AWS and fetches that account's status, which re-lays
+  // the panel out. Let it land before picking a source, so the click cannot
+  // fall outside the drawer and dismiss it.
+  const awsStatus = page.waitForResponse('**/api/providers/aws-status*')
+  await page.getByRole('button', { name: 'Add target' }).first().click()
+  await awsStatus
+  await expect(
+    page.getByText('Choose an integration', { exact: true })
+  ).toBeVisible()
   await page.getByRole('button', { name: 'CSV file', exact: true }).click()
+  await expect(
+    page.getByRole('button', { name: 'Choose CSV file' })
+  ).toBeVisible()
   await page.locator('input[type="file"]').setInputFiles({
     name: 'fleet.csv',
     mimeType: 'text/csv',

@@ -199,7 +199,6 @@ def _sse_event_unions() -> dict[str, tuple[Any, list[str]]]:
     union as an SSE stream. They get a `text/event-stream` 200 response added
     to their operation, pointing at the union schema.
     """
-    from features.agent.events import ChatEvent
     from features.analyze.events import AnalyzeEvent
     from features.ask.events import AskEvent
     from features.audit.events import AuditEvent, WorkloadEvent
@@ -240,7 +239,6 @@ def _sse_event_unions() -> dict[str, tuple[Any, list[str]]]:
             BackgroundRunEvent,
             ["/api/runs/{run_id}/events"],
         ),
-        "ChatEvent": (ChatEvent, ["/api/agents/chat/sessions/{session_id}/message"]),
         # Capture events reach the client through the background-run stream;
         # the union is still published so the frontend keeps its typed variants.
         "WorkloadEvent": (WorkloadEvent, []),
@@ -357,7 +355,6 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
 
     register_error_handlers(app)
 
-    from features.agent.api import routes as agent
     from features.account.api import routes as account
     from features.allowlist.api import routes as allowlist
     from features.analyze.api import routes as analyze
@@ -391,7 +388,6 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     )
 
     app.include_router(account.router, prefix="/api", tags=["account"])
-    app.include_router(agent.router, prefix="/api")
     app.include_router(allowlist.router, prefix="/api")
     app.include_router(analyze.router, prefix="/api")
     app.include_router(audit.router, prefix="/api", tags=["audit"])

@@ -2,7 +2,7 @@
  * Developer settings — the tools formerly on the standalone `/dev-settings`
  * route, merged into the Settings page as its last section (owner decision:
  * "Dev Settings => Settings içine taşınmalı"). Two destructive-ish dev tools
- * (Simulate Trial Exhausted, Clear Keyring), each an elevated card with an
+ * (Simulate trial exhausted, Clear keyring), each an elevated card with an
  * icon + label + description, matching the other Settings sections.
  *
  * DEV-only: the caller gates this behind `import.meta.env.DEV` (a compile-time
@@ -33,7 +33,7 @@ export function DevSettingsSection() {
     isTrialSource &&
     (trialStatus?.status === 'exhausted' || trialStatus?.active === false)
 
-  // --- Simulate Trial Exhausted ---
+  // --- Simulate trial exhausted ---
   const simulateTrialMutation = useMutation({
     mutationFn: async () => {
       const result = await simulateTrialExhausted()
@@ -64,7 +64,7 @@ export function DevSettingsSection() {
     simulateTrialMutation.mutate()
   }
 
-  // --- Clear Keyring ---
+  // --- Clear keyring ---
   const clearKeyringMutation = useMutation({
     mutationFn: clearKeyring,
     onSuccess: () => {
@@ -97,7 +97,7 @@ export function DevSettingsSection() {
               </div>
               <VStack className="gap-0.5 items-start">
                 <Text level="label-small" className="text-content-layout-1">
-                  Simulate Trial Exhausted
+                  Simulate trial exhausted
                 </Text>
                 <Text level="body-small" className="text-content-layout-3">
                   Marks the current trial as exhausted for testing the exhausted
@@ -135,13 +135,13 @@ export function DevSettingsSection() {
             <div className="w-9 h-9 rounded-xl bg-surface-negative-soft flex items-center justify-center">
               <Icon
                 name="trash"
-                label="Clear Keyring"
+                label="Clear keyring"
                 className="w-4 h-4 text-content-negative-soft"
               />
             </div>
             <VStack className="gap-0.5 items-start">
               <Text level="label-small" className="text-content-layout-1">
-                Clear Keyring
+                Clear keyring
               </Text>
               <Text level="body-small" className="text-content-layout-3">
                 Removes stored secrets from the OS keychain, clears local trial

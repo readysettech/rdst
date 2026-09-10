@@ -1,45 +1,39 @@
-import type { ChangeEvent, KeyboardEvent } from 'react';
-import { BaseInputTextarea } from '@rs/ui-new/base-input-textarea';
-import { Button } from '@rs/ui-new/button';
-import { VStack } from '@rs/ui-new/stack';
+import { PromptComposer } from './PromptComposer'
 
 interface MessageInputProps {
-  value: string;
-  onChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
-  onSubmit: () => void;
-  isLoading?: boolean;
-  placeholder?: string;
+  value: string
+  onChange: (value: string) => void
+  onSubmit: () => void
+  isLoading?: boolean
+  placeholder?: string
 }
 
-export function MessageInput({ value, onChange, onSubmit, isLoading, placeholder }: MessageInputProps) {
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      onSubmit();
-    }
-  };
-
+/**
+ * The conversation's composer: the shared {@link PromptComposer}, sized for a
+ * follow-up question — two lines to start, five at most, with the send action
+ * beside it rather than under it.
+ */
+export function MessageInput({
+  value,
+  onChange,
+  onSubmit,
+  isLoading,
+  placeholder,
+}: MessageInputProps) {
   return (
-    <VStack className="gap-2 items-stretch">
-      <BaseInputTextarea
-        value={value}
-        onChange={onChange}
-        onKeyDown={handleKeyDown}
-        placeholder={placeholder || "Ask a question..."}
-        disabled={isLoading}
-      />
-      <Button
-        onClick={onSubmit}
-        disabled={isLoading || !value.trim()}
-        variant="primary"
-        modifier="solid"
-        size="base"
-        label="Send"
-        icon="arrow-right"
-        iconPosition="right"
-        loading={isLoading}
-        fullWidth
-      />
-    </VStack>
-  );
+    <PromptComposer
+      value={value}
+      onChange={onChange}
+      onSubmit={onSubmit}
+      label="Follow-up question"
+      placeholder={placeholder || 'Ask about this analysis'}
+      busy={isLoading}
+      submitLabel="Send"
+      submitIcon="arrow-right"
+      submitIconPosition="right"
+      submitSize="small"
+      fieldClassName="min-h-[2lh] max-h-[5lh]"
+      autoGrow
+    />
+  )
 }

@@ -305,6 +305,15 @@
   --shadow-glow-warning: 0 0 20px rgba(234, 179, 8, 0.15);
   --shadow-glow-negative: 0 0 20px rgba(239, 68, 68, 0.15);
 
+  /* Container radius by role. A surface takes the radius of what it is, not
+     a value picked per screen: card = a page-level card or section, panel = a
+     container nested inside one, control = inputs, buttons and code shells,
+     pill = chips, tags and avatars. */
+  --radius-card: 1.25rem;
+  --radius-panel: 0.75rem;
+  --radius-control: 0.5rem;
+  --radius-pill: 9999px;
+
   /* Keyframes */
   @keyframes enter {
     from {
@@ -871,7 +880,9 @@
 
     /* WCAG AA (QW8): white label on the purple solid fill (surface-rising-solid,
        #6E56CF) — black was 3.90:1, white is 5.39:1. Light theme already uses a
-       near-white on-color; this fixes the dark theme. [USE-004/VIS-015] */
+       near-white on-color; this fixes the dark theme. [USE-004/VIS-015]
+       Fading it puts it back under AA (3.89:1 at 80%), so secondary copy on
+       this fill keeps the full color and leans on size and weight. [F-47] */
     --content-rising-solid: var(--neutral-white);
     --content-rising-soft: var(--purple-dark-11);
     --content-rising-plain: var(--purple-dark-11);

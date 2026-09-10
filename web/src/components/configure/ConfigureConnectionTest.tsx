@@ -47,7 +47,7 @@ export function ConfigureConnectionTest({
         <HStack className="gap-2.5 items-center">
           <Spinner size="base" color="layout" />
           <Text level="body-small" className="text-content-layout-2">
-            Testing {targetName ? `“${targetName}”` : 'connection'}…
+            Testing {targetName ? `“${targetName}”` : 'the target'}…
           </Text>
         </HStack>
       </div>

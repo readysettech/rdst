@@ -22,7 +22,7 @@ describe('QueryCardImpact', () => {
         data-testid="impact-query"
         data-query-hash="abc"
         secondaryActions={<Button label="Analyze" />}
-        primaryAction={<Button label="Compare & test" />}
+        primaryAction={<Button label="Compare against Readyset" />}
       />
     )
 
@@ -43,7 +43,7 @@ describe('QueryCardImpact', () => {
       within(footer)
         .getAllByRole('button')
         .map((button) => button.textContent)
-    ).toEqual(['Analyze', 'Compare & test'])
+    ).toEqual(['Analyze', 'Compare against Readyset'])
   })
 
   it('keeps whole-card selection keyboard accessible', () => {

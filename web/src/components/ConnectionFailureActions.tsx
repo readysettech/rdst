@@ -94,7 +94,7 @@ export function ConnectionFailureActions({
               {displayMessage}
             </Text>
             <Button
-              variant="rising"
+              variant="primary"
               modifier="solid"
               size="base"
               icon="key"
@@ -137,7 +137,7 @@ export function ConnectionFailureActions({
             size="small"
             icon="database-settings"
             iconPosition="left"
-            label="Open connection settings"
+            label="Open target settings"
             onClick={openSettings}
           />
         </HStack>

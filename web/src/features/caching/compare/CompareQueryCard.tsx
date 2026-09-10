@@ -5,7 +5,12 @@ import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { Link } from '@tanstack/react-router'
-import { formatMeta, shortHash } from '../../../lib/formatters'
+import {
+  formatElapsedOfWindow,
+  formatMeta,
+  shortHash,
+} from '../../../lib/formatters'
+import { BenchmarkProgress } from '../shared/BenchmarkProgress'
 import { CompareLiveChart } from './CompareLiveChart'
 import { COMPARE_QUEUED_MESSAGE, type CompareQueryOutcome } from './compareRuns'
 import {
@@ -183,6 +188,8 @@ export function CompareQueryCard({
               size="small"
               variant={status.variant}
               modifier="ghost"
+              icon={status.icon}
+              iconPosition="left"
               label={status.label}
             />
           </HStack>
@@ -202,16 +209,15 @@ export function CompareQueryCard({
     100,
     Math.round(outcome.percent ?? (elapsed / durationSeconds) * 100)
   )
-  const secondsLeft = Math.max(0, durationSeconds - elapsed)
   const errors = readouts
     ? readouts.upstream.errors + readouts.readyset.errors
     : 0
   const meta = formatMeta([
+    // A running query's clock lives on its progress row, so the meta line
+    // carries it only once the measurement is settled.
     outcome.result
       ? `${Math.round(outcome.result.elapsed_seconds)}s measured`
-      : running
-        ? `${elapsed}s of ${durationSeconds}s`
-        : null,
+      : null,
     readouts ? `${errors} ${errors === 1 ? 'error' : 'errors'}` : null,
     queryHash ? `hash ${shortHash(queryHash)}` : null,
   ])
@@ -236,8 +242,12 @@ export function CompareQueryCard({
                 <Lane label="Readyset" readout={readouts.readyset} readyset />
               </>
             ) : (
+              // The past tense belongs to a query that finished without a
+              // measurement; one that has not started yet says so. [D-09]
               <Text level="caption" className="text-content-layout-3">
-                No measurement was produced for this query.
+                {running
+                  ? 'Waiting for the first sample.'
+                  : 'No measurement was produced for this query.'}
               </Text>
             )}
             {/* Only a measurement has a speedup; every other verdict is the
@@ -257,26 +267,12 @@ export function CompareQueryCard({
           <VStack className="min-w-0 items-stretch gap-3 p-5">
             <QueryCardTitle outcome={outcome} queryHash={queryHash} />
             {running && (
-              <VStack className="items-stretch gap-1.5">
-                <Text level="caption" className="text-content-primary-soft">
-                  Running · {percent}% · ~{secondsLeft}s left
-                </Text>
-                <HStack className="items-center gap-2">
-                  <div
-                    role="progressbar"
-                    aria-label={`${outcome.label} progress`}
-                    aria-valuenow={percent}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    className="h-1.5 flex-1 overflow-hidden rounded-full bg-border-layout-1"
-                  >
-                    <div
-                      className="h-full rounded-full bg-surface-primary-solid transition-[width] duration-slow"
-                      style={{ width: `${percent}%` }}
-                    />
-                  </div>
-                </HStack>
-              </VStack>
+              <BenchmarkProgress
+                value={percent}
+                ariaLabel={`${outcome.label} progress`}
+                label="Measuring"
+                timing={formatElapsedOfWindow(elapsed, durationSeconds)}
+              />
             )}
             {/* Batches settled before per-query curves were retained have
                 nothing to draw; the card still carries their verdict. */}
@@ -302,6 +298,8 @@ export function CompareQueryCard({
             size="small"
             variant={status.variant}
             modifier="ghost"
+            icon={status.icon}
+            iconPosition="left"
             label={status.label}
           />
           {meta && (
