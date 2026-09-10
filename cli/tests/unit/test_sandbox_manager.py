@@ -353,12 +353,17 @@ async def test_local_adapter_uses_allocated_sandbox_port(
             "host": "localhost",
             "port": upstream_port,
             "database": "app",
+            "tls": True,
+            "tls_verify": True,
+            "tls_ca": "/tmp/test-ca.pem",
             "user": "app",
         },
     )
 
     assert launched["readyset_port"] == str(base_port)
     assert "metrics_port" not in launched
+    assert launched["db_tls"] is True
+    assert launched["db_tls_ca"] == "/tmp/test-ca.pem"
     assert sandbox.connection.port == base_port + 1
 
 
@@ -2428,3 +2433,63 @@ async def test_cancelled_target_removal_does_not_block_future_leases(
             pass
 
     await asyncio.wait_for(lease_again(), timeout=1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reuse", [False, True])
+async def test_cancel_run_during_readiness_finishes_and_releases_queue(
+    tmp_path, target_configs, reuse
+):
+    from shared.run_registry import RunRegistry
+
+    class BlockingReadinessAdapter(FakeAdapter):
+        def __init__(self):
+            super().__init__()
+            self.block = False
+            self.started = asyncio.Event()
+            self.finish = asyncio.Event()
+
+        async def wait_ready(self, sandbox, timeout_seconds):
+            if self.block:
+                self.started.set()
+                await self.finish.wait()
+            await super().wait_ready(sandbox, timeout_seconds)
+
+    adapter = BlockingReadinessAdapter()
+    manager = ReadysetSandboxManager(
+        adapter=adapter, metadata_path=tmp_path / "metadata.json"
+    )
+    if reuse:
+        async with manager.lease(target="one", owner_id="warm", purpose="test"):
+            pass
+    adapter.block = True
+    registry = RunRegistry()
+
+    async def run():
+        async with manager.lease(target="one", owner_id="run", purpose="test"):
+            yield {"type": "complete"}
+
+    run_id = registry.start("test", "one", run())
+    await asyncio.wait_for(adapter.started.wait(), timeout=1)
+    assert registry.cancel(run_id)
+
+    async def terminal():
+        return [record async for record in registry.events(run_id)]
+
+    observer = asyncio.create_task(terminal())
+    try:
+        records = await asyncio.wait_for(asyncio.shield(observer), timeout=1)
+        assert records[-1]["data"]["status"] == "cancelled"
+        assert registry.status(run_id) == "cancelled"
+        assert adapter.removed == (0 if reuse else 1)
+    finally:
+        adapter.finish.set()
+        await observer
+
+    adapter.block = False
+
+    async def next_run():
+        async with manager.lease(target="two", owner_id="next", purpose="test"):
+            pass
+
+    await asyncio.wait_for(next_run(), timeout=1)

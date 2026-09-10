@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webFrame } from 'electron'
 
 import type { UpdateStatePayload } from '../main/update-policy.js'
 
@@ -49,3 +49,21 @@ contextBridge.exposeInMainWorld('rdstDesktop', {
     },
   },
 })
+
+// A non-passive listener suppresses Chromium's default gesture zoom and scrolling.
+window.addEventListener(
+  'wheel',
+  (event) => {
+    const modifier =
+      event.ctrlKey || (process.platform === 'darwin' && event.metaKey)
+    if (!modifier || event.deltaY === 0) return
+    event.preventDefault()
+    webFrame.setZoomLevel(
+      Math.max(
+        -3,
+        Math.min(5, webFrame.getZoomLevel() - Math.sign(event.deltaY) * 0.5)
+      )
+    )
+  },
+  { passive: false, capture: true }
+)

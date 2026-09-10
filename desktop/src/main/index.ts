@@ -183,6 +183,27 @@ async function createWindow(rendererUrl: string): Promise<BrowserWindow> {
       zoomFactor: DEFAULT_ZOOM_FACTOR,
     },
   })
+  // Handle unshifted Ctrl+= as well as Ctrl++ before menu accelerators.
+  window.webContents.on('before-input-event', (event, input) => {
+    const modifier = isMac ? input.meta : input.control
+    if (input.type !== 'keyDown' || !modifier || input.alt) return
+    const direction =
+      input.key === '=' || input.key === '+'
+        ? 1
+        : input.key === '-' || input.key === '_'
+          ? -1
+          : 0
+    if (!direction && input.key !== '0') return
+    event.preventDefault()
+    const level = direction
+      ? Math.max(
+          -3,
+          Math.min(5, window.webContents.getZoomLevel() + direction * 0.5)
+        )
+      : 0
+    window.webContents.setZoomLevel(level)
+  })
+
   mainWindow = window
   if (deepLinkPending) {
     deepLinkPending = false

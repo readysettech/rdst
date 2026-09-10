@@ -44,7 +44,7 @@ from shared.password_resolver import resolve_password_value
 logger = logging.getLogger(__name__)
 
 SANDBOX_CONTAINER_NAME = "rdst-readyset-sandbox"
-SANDBOX_DEPLOYMENT_VERSION = 4
+SANDBOX_DEPLOYMENT_VERSION = 5
 DEFAULT_IDLE_TTL = timedelta(days=1)
 DEFAULT_MANAGED_SANDBOX_PORTS = {"postgresql": 5433, "mysql": 3307}
 SANDBOX_STARTUP_ATTEMPTS = 3
@@ -341,6 +341,8 @@ class LocalDockerSandboxAdapter:
             "db_user": str(target_config.get("user", "postgres")),
             "db_name": str(target_config.get("database", "")),
             "db_engine": engine,
+            "db_tls": bool(target_config.get("tls") or target_config.get("tls_verify")),
+            "db_tls_ca": target_config.get("tls_ca"),
             "readyset_port": str(
                 DEFAULT_MANAGED_SANDBOX_PORTS.get(engine, 5433)
             ),
@@ -451,10 +453,14 @@ class LocalDockerSandboxAdapter:
                         "Readyset stopped after its SQL readiness check"
                     )
                 self._require_identity(sandbox, identity)
-                await asyncio.to_thread(
-                    _update_metadata,
-                    self.metadata_path,
-                    lambda metadata: _mark_metadata_ready(metadata, sandbox),
+                # Drain this write before cancellation can remove the sandbox;
+                # never let a late thread mark a replacement container ready.
+                await _finish_before_cancelling(
+                    asyncio.to_thread(
+                        _update_metadata,
+                        self.metadata_path,
+                        lambda metadata: _mark_metadata_ready(metadata, sandbox),
+                    )
                 )
                 return
             except (
@@ -1357,10 +1363,8 @@ class ReadysetSandboxManager:
             )
             for index, timeout_seconds in enumerate(probes):
                 try:
-                    await _finish_before_cancelling(
-                        self._adapter.wait_ready(
-                            self._sandbox, timeout_seconds=timeout_seconds
-                        )
+                    await self._adapter.wait_ready(
+                        self._sandbox, timeout_seconds=timeout_seconds
                     )
                 except SandboxNotReadyError as exc:
                     health_error = exc
@@ -1456,10 +1460,10 @@ class ReadysetSandboxManager:
                 "waiting_for_readyset",
                 "Waiting for Readyset to accept SQL",
             )
-            await _finish_before_cancelling(
-                self._adapter.wait_ready(
-                    sandbox, timeout_seconds=self._readiness_timeout_seconds
-                )
+            # Readiness polling must stop on cancellation. Only mutations such
+            # as provisioning and rollback need to finish before releasing ownership.
+            await self._adapter.wait_ready(
+                sandbox, timeout_seconds=self._readiness_timeout_seconds
             )
             async with self._condition:
                 self._sandbox = sandbox
@@ -1668,6 +1672,8 @@ def target_fingerprint(target: str, config: dict[str, Any]) -> str:
         "database": config.get("database"),
         "user": config.get("user") or config.get("username"),
         "tls": bool(config.get("tls")),
+        "tls_verify": bool(config.get("tls_verify")),
+        "tls_ca": config.get("tls_ca"),
         "sslmode": config.get("sslmode"),
         "ssl_params": config.get("ssl_params") or {},
         "password_source": password_source,

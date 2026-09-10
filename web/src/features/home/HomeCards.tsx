@@ -24,7 +24,7 @@ export function JobCard({ to, icon, title, description, chip }: JobCardProps) {
   return (
     <Link
       to={to}
-      className="group rounded-2xl border border-border-layout-1 bg-surface-layout-1 p-5 transition-colors hover:bg-surface-layout-2"
+      className="group block h-full rounded-2xl border border-border-layout-1 bg-surface-layout-1 p-5 transition-colors hover:bg-surface-layout-2"
     >
       <VStack className="h-full items-start gap-3">
         <HStack className="w-full items-center gap-3">

@@ -9,6 +9,7 @@ import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404
 import time
 import uuid
 from typing import Any, Dict, Optional
+from pathlib import Path
 from urllib.parse import quote as urlquote
 
 from shared.deploy.docker_topology import (
@@ -863,8 +864,22 @@ def _managed_create_command(
         f"{db_type}://{safe_user}:{safe_password}@{network.upstream_host}:"
         f"{variables['db_port']}/{variables['db_name']}"
     )
+    if variables.get("db_tls"):
+        db_url += "?require_ssl=true" if db_type == "mysql" else "?sslmode=require"
     readyset_port = variables["readyset_port"]
     command = ["docker", "create", "--pull=never"]
+    if variables.get("db_tls") and variables.get("db_tls_ca"):
+        if DockerTopology.from_environment().remote:
+            raise DockerTopologyError(
+                "A custom TLS CA for the sandbox requires a local Docker daemon"
+            )
+        ca_path = Path(str(variables["db_tls_ca"])).expanduser().resolve(strict=True)
+        if not ca_path.is_file():
+            raise ValueError("The target TLS CA must be a certificate file")
+        command.extend([
+            "--mount", f"type=bind,src={ca_path},dst=/rdst-upstream-ca.pem,readonly",
+            "-e", "SSL_ROOT_CERT=/rdst-upstream-ca.pem",
+        ])
     if restart_policy:
         command.append("--restart=unless-stopped")
     command.extend(

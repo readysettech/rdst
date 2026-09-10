@@ -241,3 +241,44 @@ def test_remote_daemon_requires_published_host_for_tunnel():
                 "RDST_DOCKER_REMOTE": "true",
             }
         )
+
+
+@pytest.mark.parametrize("engine,tls,expected", [
+    ("postgresql", True, {"sslmode": ["require"]}),
+    ("postgresql", False, {}),
+    ("mysql", True, {"require_ssl": ["true"]}),
+    ("mysql", False, {}),
+])
+def test_sandbox_passes_target_encryption(engine, tls, expected):
+    from urllib.parse import parse_qs, urlsplit
+    from shared.deploy.local_docker import _managed_create_command
+
+    command = _managed_create_command(
+        {"db_user": "app", "db_name": "db", "db_port": "5432",
+         "db_engine": engine, "db_tls": tls, "readyset_port": "5433",
+         "container_name": "test", "readyset_image": "readyset:test"},
+        "secret", DockerTopology.from_environment({}).bridge_network_for("db.example.com"),
+        extra_args=None, restart_policy=False,
+    )
+    url = next(arg.split("=", 1)[1] for arg in command if arg.startswith("UPSTREAM_DB_URL="))
+    assert parse_qs(urlsplit(url).query) == expected
+    assert not any("DISABLE_UPSTREAM_SSL_VERIFICATION" in arg for arg in command)
+
+
+def test_sandbox_mounts_target_ca_read_only(tmp_path, monkeypatch):
+    from shared.deploy.local_docker import _managed_create_command
+
+    topology = DockerTopology.from_environment({})
+    monkeypatch.setattr(DockerTopology, "from_environment", lambda: topology)
+    ca = tmp_path / "ca.pem"
+    ca.write_text("test certificate")
+    command = _managed_create_command(
+        {"db_user": "app", "db_name": "db", "db_port": "5432",
+         "db_engine": "postgresql", "db_tls": True, "db_tls_ca": str(ca),
+         "readyset_port": "5433", "container_name": "test",
+         "readyset_image": "readyset:test"},
+        "secret", topology.bridge_network_for("db.example.com"),
+        extra_args=None, restart_policy=False,
+    )
+    assert f"type=bind,src={ca},dst=/rdst-upstream-ca.pem,readonly" in command
+    assert "SSL_ROOT_CERT=/rdst-upstream-ca.pem" in command
