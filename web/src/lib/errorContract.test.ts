@@ -3,6 +3,7 @@ import {
   classifyError,
   friendlySqlError,
   isConnectionFailure,
+  isModelTimeout,
   isModelContextLimitError,
   isTrialExhaustedError,
   normalizeExplainError,
@@ -68,6 +69,25 @@ describe('classifyError', () => {
     expect(
       classifyError({ code: 'error', message: 'connection refused' })
     ).toBe('database')
+  })
+
+  it('maps a timed-out model step to rdst-service, not the API key', () => {
+    expect(
+      classifyError({
+        code: 'error',
+        message: "Step 'Perform LLM analysis' timed out after 2 minutes.",
+      })
+    ).toBe('rdst-service')
+    expect(recoveryFor('rdst-service')?.label).toBe('Open AI settings')
+    expect(
+      isModelTimeout({ code: 'error', message: 'Step X timed out after 5 minutes.' })
+    ).toBe(false)
+    expect(
+      isModelTimeout({
+        code: 'error',
+        message: "Step 'Perform LLM analysis' timed out after 5 minutes.",
+      })
+    ).toBe(true)
   })
 
   it('maps trial/keyservice failures to rdst-service', () => {

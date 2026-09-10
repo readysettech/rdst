@@ -97,7 +97,7 @@ class GeminiProvider(Provider):
                 payload.update(filtered_extras)
 
         try:
-            resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=60)
+            resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=300)
         except Exception as e:
             raise LLMError(f"Gemini request error: {e}", code="HTTP_ERROR", cause=e)
 

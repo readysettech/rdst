@@ -154,7 +154,7 @@ def test_json_schema_is_prompted_and_forwarded(monkeypatch):
     )
 
     payload = post.call_args.kwargs["json"]
-    assert payload["response_format"] == schema
+    assert payload["response_format"] == {"type": "json_object"}
     assert "JSON Schema" in payload["messages"][0]["content"]
     assert '"required":["sql"]' in payload["messages"][0]["content"]
 

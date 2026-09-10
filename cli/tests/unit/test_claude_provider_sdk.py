@@ -326,6 +326,6 @@ def test_stream_uses_sdk_text_stream_and_zero_retries():
 
     assert tokens == ["one", " two"]
     constructor = anthropic_client.call_args.kwargs
-    assert constructor["timeout"] == 120
+    assert constructor["timeout"] == 300
     assert constructor["max_retries"] == 0
     assert stream_call.call_args.kwargs["model"] == "claude-sonnet-4-6"

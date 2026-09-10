@@ -3,6 +3,8 @@ import { m } from '@rs/ui-new/motion'
 import {
   type ApiErrorEnvelope,
   classifyError,
+  isModelTimeout,
+  MODEL_TIMEOUT_MESSAGE,
   recoveryFor,
   retryHelps,
 } from '../../../lib/errorContract'
@@ -25,6 +27,7 @@ export function ResultsError({
       'An unknown error occurred while analyzing the query. Try again.',
   }
   const errorClass = classifyError(envelope)
+  const modelTimeout = isModelTimeout(envelope)
   const invalidSql = envelope.code === 'invalid_sql'
   const title = invalidSql
     ? "We couldn't run this query"
@@ -36,7 +39,7 @@ export function ResultsError({
       label: 'Back to queries',
       onClick: () => onRecover('/queries'),
     }
-  } else {
+  } else if (!modelTimeout) {
     const recovery = recoveryFor(errorClass)
     if (recovery && onRecover) {
       action = {
@@ -55,7 +58,7 @@ export function ResultsError({
       <ErrorState
         errorClass={errorClass}
         title={title}
-        message={envelope.message}
+        message={modelTimeout ? MODEL_TIMEOUT_MESSAGE : envelope.message}
         action={action}
         onRetry={retryHelps(errorClass) && onRetry ? onRetry : undefined}
         detail={envelope.detail}

@@ -361,7 +361,7 @@ class WorkflowManager:
                         timeout_str += f" {timeout % 60} second{'s' if timeout % 60 != 1 else ''}"
                 else:
                     timeout_str = f"{timeout} second{'s' if timeout != 1 else ''}"
-                raise WorkflowError(f"Step '{state_name}' timed out after {timeout_str}. This query is taking too long to execute on the database. Consider adding indexes or optimizing the query before analyzing.")
+                raise WorkflowError(f"Step '{state_name}' timed out after {timeout_str}.")
         else:
             return func(**call_args) if isinstance(call_args, dict) else func(call_args)
 

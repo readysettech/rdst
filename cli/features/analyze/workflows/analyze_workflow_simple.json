@@ -92,7 +92,7 @@
                 "MaxAttempts": 1,
                 "IntervalSeconds": 2
             },
-            "TimeoutSeconds": 60
+            "TimeoutSeconds": 300
         },
         "TestQueryRewrites": {
             "Type": "Task",

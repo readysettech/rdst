@@ -93,7 +93,7 @@ class LMStudioProvider(Provider):
 
         base_url = self._get_base_url()
         try:
-            resp = requests.post(base_url, headers=headers, data=json.dumps(payload), timeout=120)
+            resp = requests.post(base_url, headers=headers, data=json.dumps(payload), timeout=300)
         except requests.exceptions.ConnectionError as e:
             raise LLMError(
                 f"LM Studio connection error: {e}. Is LM Studio running on {base_url}?",

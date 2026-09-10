@@ -134,7 +134,7 @@
                 "IntervalSeconds": 2,
                 "BackoffRate": 2.0
             },
-            "TimeoutSeconds": 60
+            "TimeoutSeconds": 300
         },
         "CheckLLMAnalysisSuccess": {
             "Type": "Choice",

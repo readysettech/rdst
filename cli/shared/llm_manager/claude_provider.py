@@ -432,7 +432,7 @@ class ClaudeProvider(Provider):
             api_key=api_key,
             base_url=base_url,
             extra_headers=extra_headers,
-            timeout=120,
+            timeout=300,
         )
         try:
             with client.messages.stream(**payload) as stream:

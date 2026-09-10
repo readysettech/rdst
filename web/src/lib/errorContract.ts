@@ -84,7 +84,7 @@ const RECOVERY: Record<ErrorClass, RecoveryTarget | undefined> = {
   'user-config': { label: 'Open settings', to: '/configure' },
   database: { label: 'Check connection', to: '/configure' },
   'local-dependency': { label: 'Set up caching', to: '/cache' },
-  'rdst-service': { label: 'Fix API key', to: '/configure' },
+  'rdst-service': { label: 'Open AI settings', to: '/configure' },
   provider: { label: 'Fix API key', to: '/configure' },
   'valid-negative': undefined,
 }
@@ -107,6 +107,18 @@ export function retryHelps(errorClass: ErrorClass): boolean {
 const CONTAINS = (haystack: string, needles: string[]): boolean =>
   needles.some((n) => haystack.includes(n))
 
+/** A model step that ran out of time: a service delay, never a credential problem. */
+export function isModelTimeout(envelope: ApiErrorEnvelope): boolean {
+  const hay = `${envelope.code ?? ''} ${envelope.message ?? ''}`.toLowerCase()
+  return (
+    /\btimed out\b/.test(hay) &&
+    CONTAINS(hay, ['llm', 'analysis model', 'hosted'])
+  )
+}
+
+export const MODEL_TIMEOUT_MESSAGE =
+  "The hosted model didn't answer in time. Try again, or use your own Anthropic key for faster inference."
+
 /**
  * Best-effort classification of an envelope into one of the six contract
  * classes, from the code first and the message text as a fallback. Presentation
@@ -123,6 +135,7 @@ export function classifyError(envelope: ApiErrorEnvelope): ErrorClass {
   if (isConnectionFailure(envelope)) return 'database'
 
   if (code === 'hosted_cap_reached') return 'rdst-service'
+  if (isModelTimeout(envelope)) return 'rdst-service'
 
   if (
     CONTAINS(hay, [

@@ -55,7 +55,7 @@ class OpenAIProvider(Provider):
         payload.update(request.extra or {})
 
         try:
-            resp = requests.post(self._BASE_URL, headers=headers, data=json.dumps(payload), timeout=60)
+            resp = requests.post(self._BASE_URL, headers=headers, data=json.dumps(payload), timeout=300)
         except Exception as e:
             raise LLMError(f"OpenAI request error: {e}", code="HTTP_ERROR", cause=e)
 
