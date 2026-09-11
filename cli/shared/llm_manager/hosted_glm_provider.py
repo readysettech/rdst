@@ -139,15 +139,14 @@ class HostedGLMProvider(Provider):
         except Exception:
             payload.setdefault("attribution", {})["analytics_disabled"] = True
         payload.setdefault("attribution", {})["client_version"] = _client_version()
-        # The schema itself rides in the system prompt (see _messages). The
-        # transport asks only for a JSON object so every host in the pool is
-        # eligible; strict json_schema support is not universal.
+        # Forward the caller's contract as given. Callers that ask for a strict
+        # json_schema validate the reply strictly, so the host must enforce it.
         response_format = (request.extra or {}).get("response_format")
         if isinstance(response_format, dict) and response_format.get("type") in {
             "json_object",
             "json_schema",
         }:
-            payload["response_format"] = {"type": "json_object"}
+            payload["response_format"] = response_format
         if request.top_p is not None:
             payload["top_p"] = request.top_p
         if request.stop_sequences:

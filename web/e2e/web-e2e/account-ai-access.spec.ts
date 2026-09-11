@@ -1,10 +1,5 @@
 import type { Page } from '@playwright/test'
-import {
-  acceptBrowserError,
-  clearTargets,
-  expect,
-  test,
-} from '../fixtures'
+import { acceptBrowserError, clearTargets, expect, test } from '../fixtures'
 import { ciAddress, waitForEmail } from './mailbox'
 
 /** Live account enrollment, hosted inference, and sign-out coverage. */
@@ -50,22 +45,26 @@ async function resetLocalState(page: Page): Promise<void> {
   await clearTargets(page.request)
 }
 
-async function expectAiGate(page: Page): Promise<void> {
+/** The AI access card on Settings, in its signed-out state. */
+async function expectSignedOutAiAccess(page: Page): Promise<void> {
+  await page.goto('/configure?panel=ai')
+  await expect(page.getByText('AI access', { exact: true })).toBeVisible()
   await expect(
-    page.getByRole('heading', { name: 'Choose how RDST uses AI' })
+    page.getByRole('button', { name: 'Use the included AI' })
   ).toBeVisible()
-  await expect(page.getByText('No Readyset account required')).toBeVisible()
-  await expect(
-    page.getByRole('button', { name: 'Add Anthropic key' })
-  ).toBeVisible()
+  await expect(page.getByText(/Signed in as/)).toHaveCount(0)
 }
 
 async function signInWithEmail(page: Page, emailLabel: string): Promise<Page> {
   const email = ciAddress(emailLabel)
   const requestedAt = new Date()
 
-  await page.getByRole('button', { name: 'Sign up or sign in' }).click()
+  await page.goto('/configure?panel=ai')
+  await page.getByRole('button', { name: 'Use the included AI' }).click()
   const dialog = page.getByRole('dialog')
+  await expect(
+    dialog.getByRole('heading', { name: 'Sign in to Readyset' })
+  ).toBeVisible()
   await expect(
     dialog.getByRole('button', { name: 'Continue with Google' })
   ).toBeVisible()
@@ -84,10 +83,19 @@ async function signInWithEmail(page: Page, emailLabel: string): Promise<Page> {
     expect(response.ok()).toBe(true)
     expect((await response.json()).signed_in).toBe(true)
   }).toPass({ timeout: 60_000 })
+
+  // The card shows the account once the session exists. If the provider
+  // preference has not followed the sign-in yet, choose the included AI.
+  await signedInPage.goto('/configure?panel=ai')
+  await expect(signedInPage.getByText(`Signed in as ${email}`)).toBeVisible()
+  const useIncluded = signedInPage.getByRole('button', {
+    name: 'Use the included AI',
+  })
+  if (await useIncluded.isVisible()) await useIncluded.click()
   return signedInPage
 }
 
-test('account login unlocks hosted Ask and sign-out restores the AI gate', async ({
+test('account login unlocks hosted Ask and sign-out restores the AI access choice', async ({
   browserErrors,
   page,
 }) => {
@@ -99,11 +107,10 @@ test('account login unlocks hosted Ask and sign-out restores the AI gate', async
     'Failed to load resource: the server responded with a status of 429 ()'
   )
   await resetLocalState(page)
-  await page.goto('/')
-  await expectAiGate(page)
+  await expectSignedOutAiAccess(page)
 
   // The alternate BYOK path must remain usable without creating an account.
-  await page.getByRole('button', { name: 'Add Anthropic key' }).click()
+  await page.getByRole('button', { name: 'Set key' }).click()
   const keyDialog = page.getByRole('dialog')
   await expect(
     keyDialog.getByRole('heading', { name: 'Update Anthropic API key' })
@@ -111,7 +118,12 @@ test('account login unlocks hosted Ask and sign-out restores the AI gate', async
   await expect(keyDialog.getByLabel('Anthropic API key')).toBeVisible()
   await keyDialog.getByRole('button', { name: 'Cancel' }).click()
 
-  const signedInPage = await signInWithEmail(page, 'account')
+  // Supabase rate-limits magic links per address, so every attempt signs in
+  // as a fresh account on the catch-all domain.
+  const signedInPage = await signInWithEmail(
+    page,
+    `account-r${test.info().retry}`
+  )
 
   await test.step('configure a live database', async () => {
     let bootstrapRequests = 0
@@ -138,11 +150,19 @@ test('account login unlocks hosted Ask and sign-out restores the AI gate', async
       .locator('[name="password"]')
       .fill(process.env.RDST_E2E_DB_PASSWORD!)
     await signedInPage.getByRole('button', { name: 'Test & connect' }).click()
+    // The e2e role has write access, so RDST asks before adding it.
+    const writableAccount = signedInPage.getByRole('dialog', {
+      name: 'Use this database account?',
+    })
+    await expect(writableAccount).toBeVisible({ timeout: 60_000 })
+    await writableAccount.getByRole('button', { name: 'Add target' }).click()
 
     // Ask is available as soon as the target is connected. Semantic-layer
     // discovery deliberately continues in the background, so waiting for it
     // here would turn an unrelated model job into a prerequisite for Ask.
-    await expect(signedInPage).toHaveURL('/')
+    // A real database is tested, saved, and promoted before the app leaves
+    // onboarding; give that more than the fake backend's instant reply.
+    await expect(signedInPage).toHaveURL('/', { timeout: 60_000 })
     const targets = await signedInPage.request.get('/api/configure/targets')
     expect(targets.ok()).toBe(true)
     await expect(targets.json()).resolves.toMatchObject({
@@ -198,12 +218,58 @@ test('account login unlocks hosted Ask and sign-out restores the AI gate', async
     ).toContain('title_basics')
   })
 
+  await test.step('a question that needs clarification is asked, not failed', async () => {
+    // The clarification detector asks the host for a strict schema and rejects
+    // any drift from it. A host that ignores the contract fails every question
+    // at this step while the keyservice records the call as a success, so this
+    // has to run against a real host, and the failure text is asserted absent.
+    await signedInPage.goto('/ask')
+    await signedInPage
+      .getByPlaceholder(
+        'For example: Which customers placed the most orders this month?'
+      )
+      .fill('Show me the top titles')
+    await signedInPage.getByRole('button', { name: 'Get answer' }).click()
+    const clarification = signedInPage.getByText(
+      /One quick question|A few quick questions/
+    )
+    const answer = signedInPage.getByText('Answer', { exact: true })
+    const clarifyFailure = signedInPage.getByText(
+      'Failed while clarifying the question'
+    )
+    await expect(
+      clarification.or(answer).or(clarifyFailure).first()
+    ).toBeVisible({ timeout: 180_000 })
+    await expect(clarifyFailure).not.toBeVisible()
+    if (await clarification.isVisible()) {
+      await expect(
+        signedInPage.getByText('You asked: Show me the top titles')
+      ).toBeVisible()
+      // One question or several: answer each with its first option, then
+      // ask for the answer from the last one.
+      for (let step = 0; step < 6; step += 1) {
+        await signedInPage.getByRole('radio').first().check()
+        const next = signedInPage.getByRole('button', { name: 'Next' })
+        if (await next.isVisible()) {
+          await next.click()
+          continue
+        }
+        await signedInPage.getByRole('button', { name: 'Get answer' }).click()
+        break
+      }
+      await expect(answer.or(clarifyFailure).first()).toBeVisible({
+        timeout: 180_000,
+      })
+      await expect(clarifyFailure).not.toBeVisible()
+    }
+  })
+
   await test.step('sign out and require an AI access choice again', async () => {
     // `section=ai` is the recovery deep link and opens the Anthropic-key
     // dialog. The settings panel itself is selected with `panel=ai`.
     await signedInPage.goto('/configure?panel=ai')
     await signedInPage.getByRole('button', { name: 'Sign out' }).click()
-    await expectAiGate(signedInPage)
+    await expectSignedOutAiAccess(signedInPage)
     const status = await signedInPage.request.get('/api/account/status')
     expect(status.ok()).toBe(true)
     expect((await status.json()).signed_in).toBe(false)

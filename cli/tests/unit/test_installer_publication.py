@@ -296,7 +296,9 @@ def test_every_step_dependency_is_emitted(tmp_path: Path, branch, changed):
             assert name in keys, f"{step.get('key')} depends on missing {name}"
 
 
-def test_live_hosted_inference_e2e_is_not_emitted(tmp_path: Path):
+def test_live_hosted_inference_e2e_runs_against_the_preview(tmp_path: Path):
+    """The live account and hosted-inference suite gates every CL that deploys a
+    preview Worker, and the preview is torn down only after it has run."""
     pipeline = generate_pipeline(
         tmp_path,
         branch="cl/hosted-inference",
@@ -308,10 +310,14 @@ def test_live_hosted_inference_e2e_is_not_emitted(tmp_path: Path):
         if "key" in step
     }
     assert "keyservice-preview-deploy" in steps
-    assert "rdst-web-e2e" not in steps
-    assert "annotate-rdst-web-e2e" not in steps
+    assert steps["rdst-web-keyservice-e2e"]["depends_on"] == "keyservice-preview-deploy"
+    assert "run-web-e2e-ci.sh" in steps["rdst-web-keyservice-e2e"]["command"]
+    assert steps["annotate-rdst-web-keyservice-e2e"]["depends_on"] == [
+        "rdst-web-keyservice-e2e"
+    ]
     assert steps["keyservice-preview-teardown"]["depends_on"] == [
-        "keyservice-preview-deploy"
+        "keyservice-preview-deploy",
+        "rdst-web-keyservice-e2e",
     ]
 
 

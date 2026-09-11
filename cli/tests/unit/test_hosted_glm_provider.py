@@ -154,7 +154,7 @@ def test_json_schema_is_prompted_and_forwarded(monkeypatch):
     )
 
     payload = post.call_args.kwargs["json"]
-    assert payload["response_format"] == {"type": "json_object"}
+    assert payload["response_format"] == schema
     assert "JSON Schema" in payload["messages"][0]["content"]
     assert '"required":["sql"]' in payload["messages"][0]["content"]
 
@@ -253,3 +253,52 @@ def test_serializes_hosted_requests_from_one_process(monkeypatch):
         "SELECT COUNT(*) FROM users"
     ] * 4
     assert max_active == 1
+
+
+def test_strict_contracts_from_real_callers_reach_the_keyservice_unchanged(monkeypatch):
+    """Callers that validate a reply strictly must have their strict schema enforced by
+    the host. Ask's clarification step is the canary: a plain JSON reply that drifts from
+    its schema fails every question, while the keyservice records the call as a success.
+    """
+    import json
+
+    from features.ask.ambiguity_detection import detect_ambiguities
+
+    class CapturingManager:
+        def __init__(self):
+            self.extra = None
+
+        def generate_response(self, *, prompt, **kwargs):
+            self.extra = kwargs.get("extra") or {}
+            return {
+                "response": json.dumps({
+                    "ambiguities": [],
+                    "total_ambiguities": 0,
+                    "requires_clarification": False,
+                    "can_proceed_with_assumptions": True,
+                    "overall_confidence": 1.0,
+                }),
+                "usage": {"total_tokens": 1},
+                "model": "test-model",
+            }
+
+    manager = CapturingManager()
+    detect_ambiguities(
+        nl_question="How many orders shipped last month?",
+        filtered_schema="CREATE TABLE orders (id int, status text, created_at timestamptz);",
+        database_engine="postgresql",
+        llm_manager=manager,
+    )
+    contract = manager.extra["response_format"]
+    assert contract["type"] == "json_schema"
+    assert contract["json_schema"]["strict"] is True
+
+    post = MagicMock(return_value=_response())
+    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    HostedGLMProvider().complete(
+        _request({"response_format": contract}),
+        api_key="supabase-access",
+        base_url="https://keyservice.example",
+    )
+    payload = post.call_args.kwargs["json"]
+    assert payload["response_format"] == contract
