@@ -65,7 +65,9 @@ def test_keyservice_error_preserves_rate_limit_status(monkeypatch):
     assert "Too many sign-in attempts" in str(raised.value)
 
 
-def test_complete_login_parks_then_picks_up_and_saves_session(monkeypatch):
+@pytest.mark.parametrize("enabled", [True, False])
+def test_complete_login_parks_then_picks_up_and_saves_session(monkeypatch, enabled):
+    monkeypatch.setattr("shared.telemetry.telemetry.is_enabled", lambda: enabled)
     service = AccountService()
     service._logins["login-1"] = {
         **CONTEXT,
@@ -107,6 +109,7 @@ def test_complete_login_parks_then_picks_up_and_saves_session(monkeypatch):
                 "access_token": "access",
                 "refresh_token": "refresh",
                 "expires_in": 3600,
+                "analytics_disabled": not enabled,
             },
         ),
         (

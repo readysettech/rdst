@@ -167,6 +167,12 @@ class AccountService:
                 raise KeyError(login_id)
             if not hmac.compare_digest(str(login["state"]), state):
                 raise AccountServiceError("Readyset sign-in state does not match")
+        try:
+            from shared.telemetry import telemetry
+
+            analytics_disabled = not telemetry.is_enabled()
+        except Exception:
+            analytics_disabled = True
         self._post(
             "/account-auth/complete",
             {
@@ -175,6 +181,7 @@ class AccountService:
                 "access_token": access_token,
                 "refresh_token": refresh_token,
                 "expires_in": expires_in,
+                "analytics_disabled": analytics_disabled,
             },
         )
         return self.login_status(login_id)
