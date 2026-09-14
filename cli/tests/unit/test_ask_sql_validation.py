@@ -21,6 +21,7 @@ from features.ask.sql_generation import generate_sql_from_nl
 from features.ask.sql_validation import (
     check_read_only,
     validate_filter_literal_provenance,
+    validate_resolved_columns_against_schema,
     validate_sql_for_ask,
     validate_tables_against_schema,
 )
@@ -202,6 +203,35 @@ def test_table_validation_rejects_unknown_physical_table() -> None:
 
     assert result["is_valid"] is False
     assert result["invalid_tables"] == ["invented_users"]
+
+
+@pytest.mark.parametrize("dialect", ["mysql", "postgresql"])
+@pytest.mark.parametrize("validator", [
+    validate_tables_against_schema,
+    validate_resolved_columns_against_schema,
+])
+def test_schema_validation_rejects_unescaped_apostrophe_without_raising(validator, dialect):
+    result = validator(
+        "SELECT event_name FROM events WHERE event_name = 'Women's Soccer'",
+        {"events": ["event_name"]},
+        dialect,
+    )
+    assert result["is_valid"] is False
+    assert "tokenizing" in result["error_message"]
+
+
+def test_validation_phase_records_tokenizer_failure_for_repair():
+    ctx = Ask3Context(question="Show women's soccer events", target="fixture")
+    ctx.db_type = "mysql"
+    ctx.sql = "SELECT event_name FROM events WHERE event_name = 'Women's Soccer'"
+    ctx.schema_info = SchemaInfo(target="fixture", db_type="mysql", tables={
+        "events": TableInfo(name="events", columns={
+            "event_name": ColumnInfo(name="event_name", data_type="text")
+        })
+    })
+    validate_sql(ctx, MagicMock())
+    assert ctx.validation_errors
+    assert "tokenizing" in ctx.validation_errors[0].message
 
 
 def test_table_validation_does_not_treat_cte_alias_as_physical_table() -> None:

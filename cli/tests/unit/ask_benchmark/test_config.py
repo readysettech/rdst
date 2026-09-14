@@ -13,12 +13,21 @@ from devtools.ask_benchmark.config import (
 def test_default_model_matrix_has_controlled_routes():
     specs = load_model_specs()
 
-    assert len(specs) == 20
+    assert len(specs) == 21
     assert specs["glm-5.3-flash-high"].model == "z-ai/glm-5.3-flash"
     assert specs["glm-5.3-flash-high"].provider_order == ("deepinfra",)
     assert specs["glm-5.3-flash-high"].reasoning_effort == "high"
     assert specs["glm-5.3-flash-high"].structured_output_mode == "prompted"
     assert specs["glm-5.3-flash-high"].provider_retains_prompts is False
+    cloudflare = specs["glm-5.3-flash-high-cloudflare"]
+    assert cloudflare.model == "z-ai/glm-5.3-flash"
+    assert cloudflare.provider_order == ("cloudflare",)
+    assert cloudflare.allow_fallbacks is False
+    assert cloudflare.reasoning_effort == "high"
+    assert cloudflare.structured_output_mode == "prompted"
+    # Route availability does not establish the provider's data policy.
+    assert cloudflare.provider_data_training is None
+    assert cloudflare.provider_retains_prompts is None
     assert "kimi-k3-max" in specs
     assert "grok-4.6-xhigh" in specs
     assert specs["mistral-medium-3.5-high"].model == "mistralai/mistral-medium-3-5"
@@ -53,8 +62,9 @@ def test_default_model_matrix_has_controlled_routes():
         spec.reasoning_effort is not None or spec.name in default_reasoning_specs
         for spec in current_specs
     )
-    assert all(spec.provider_data_training is not None for spec in current_specs)
-    assert all(spec.provider_retains_prompts is not None for spec in current_specs)
+    documented_policy_specs = [spec for spec in current_specs if spec != cloudflare]
+    assert all(spec.provider_data_training is not None for spec in documented_policy_specs)
+    assert all(spec.provider_retains_prompts is not None for spec in documented_policy_specs)
     assert specs["gpt-5.6-sol-max"].reasoning_effort == "max"
     assert {
         specs[f"claude-sonnet-4.6-{effort}"].reasoning_effort

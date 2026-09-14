@@ -241,6 +241,17 @@ provider_data_training = false
 provider_retains_prompts = false
 
 [[models]]
+name = "glm-5.3-flash-high-cloudflare"
+model = "z-ai/glm-5.3-flash"
+transport = "openrouter"
+provider_order = ["cloudflare"]
+reasoning_effort = "high"
+structured_output_mode = "prompted"
+input_usd_per_token = "0.00000015"
+output_usd_per_token = "0.0000005"
+cached_input_usd_per_token = "0.00000003"
+
+[[models]]
 name = "qwen3.8-max-xhigh"
 model = "qwen/qwen3.8-max"
 transport = "openrouter"

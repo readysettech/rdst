@@ -34,6 +34,10 @@ from .sql_validation import check_read_only
 logger = logging.getLogger(__name__)
 
 
+class _SQLGenerationResponseError(ValueError):
+    """The model returned JSON that violates the generation contract."""
+
+
 # The completion budget includes provider reasoning tokens on reasoning-capable
 # routes. Eight hundred tokens is sufficient for the visible response, but can
 # expire before those routes emit any structured output. Keep the response
@@ -395,11 +399,14 @@ def generate_sql_from_nl(
 
         logger.debug(f"LLM response (first 500 chars): {response_text[:500]}")
 
-        result_data = _parse_json_object_response(
-            response_text,
-            required_fields=set(SQL_GENERATION_RESPONSE_SCHEMA["required"]),
-            allowed_fields=set(SQL_GENERATION_RESPONSE_SCHEMA["properties"]),
-        )
+        try:
+            result_data = _parse_json_object_response(
+                response_text,
+                required_fields=set(SQL_GENERATION_RESPONSE_SCHEMA["required"]),
+                allowed_fields=set(SQL_GENERATION_RESPONSE_SCHEMA["properties"]),
+            )
+        except TypeError as exc:
+            raise _SQLGenerationResponseError(str(exc)) from exc
 
         required_fields = set(SQL_GENERATION_RESPONSE_SCHEMA["required"])
         missing_fields = sorted(required_fields - result_data.keys())
@@ -419,7 +426,7 @@ def generate_sql_from_nl(
             result_data.keys() - SQL_GENERATION_RESPONSE_SCHEMA["properties"].keys()
         )
         if unexpected_fields:
-            raise ValueError(
+            raise _SQLGenerationResponseError(
                 "SQL generation response has unexpected fields: "
                 + ", ".join(unexpected_fields)
             )
@@ -437,30 +444,30 @@ def generate_sql_from_nl(
         )
 
         if not isinstance(result.sql, str) or not isinstance(result.explanation, str):
-            raise ValueError("sql and explanation must be strings")
+            raise _SQLGenerationResponseError("sql and explanation must be strings")
         if (
             isinstance(result.confidence, bool)
             or not isinstance(result.confidence, (int, float))
             or not 0.0 <= float(result.confidence) <= 1.0
         ):
-            raise ValueError("confidence must be a number between 0 and 1")
+            raise _SQLGenerationResponseError("confidence must be a number between 0 and 1")
         if not isinstance(result.assumptions, list) or not all(
             isinstance(item, str) for item in result.assumptions
         ):
-            raise ValueError("assumptions must be an array of strings")
+            raise _SQLGenerationResponseError("assumptions must be an array of strings")
         if not isinstance(result.cannot_answer, bool):
-            raise ValueError("cannot_answer must be a boolean")
-        if result.cannot_answer_reason not in {
+            raise _SQLGenerationResponseError("cannot_answer must be a boolean")
+        if not isinstance(result.cannot_answer_reason, str) or result.cannot_answer_reason not in {
             "",
             "missing_schema",
             "unsupported_request",
             "ambiguous",
         }:
-            raise ValueError("invalid cannot_answer_reason")
+            raise _SQLGenerationResponseError("invalid cannot_answer_reason")
         if not isinstance(result.missing_schema, list) or not all(
             isinstance(item, str) for item in result.missing_schema
         ):
-            raise ValueError("missing_schema must be an array of strings")
+            raise _SQLGenerationResponseError("missing_schema must be an array of strings")
 
         if result.cannot_answer:
             if result.sql.strip():
@@ -499,6 +506,17 @@ def generate_sql_from_nl(
             "error": result.error,
             "raw_response": result_data,
             **size_diagnostics,
+        }
+
+    except _SQLGenerationResponseError as e:
+        # Invalid model output is an answer failure, including in benchmarks
+        # that propagate transport and programming errors to their runner.
+        return {
+            "success": False,
+            "sql": "",
+            "explanation": "",
+            "confidence": 0.0,
+            "error": str(e),
         }
 
     except json.JSONDecodeError as e:

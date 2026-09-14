@@ -1057,6 +1057,7 @@ def validate_resolved_columns_against_schema(
         )
     except (
         sqlglot.errors.ParseError,
+        sqlglot.errors.TokenError,
         sqlglot.errors.OptimizeError,
         ValueError,
     ) as exc:
@@ -1079,7 +1080,7 @@ def validate_tables_against_schema(
             sql,
             read="postgres" if dialect == "postgresql" else dialect,
         )
-    except sqlglot.errors.ParseError as exc:
+    except (sqlglot.errors.ParseError, sqlglot.errors.TokenError) as exc:
         return {
             "is_valid": False,
             "invalid_tables": [],
