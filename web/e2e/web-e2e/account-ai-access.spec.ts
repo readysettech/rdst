@@ -45,12 +45,15 @@ async function resetLocalState(page: Page): Promise<void> {
   await clearTargets(page.request)
 }
 
-/** The AI access card on Settings, in its signed-out state. */
+/** Signed-out users must choose a provider before entering the app. */
 async function expectSignedOutAiAccess(page: Page): Promise<void> {
   await page.goto('/configure?panel=ai')
-  await expect(page.getByText('AI access', { exact: true })).toBeVisible()
   await expect(
-    page.getByRole('button', { name: 'Use the included AI' })
+    page.getByRole('heading', { name: 'Choose how RDST uses AI' })
+  ).toBeVisible()
+  await expect(page.locator('#main-content')).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: 'Sign up or sign in' })
   ).toBeVisible()
   await expect(page.getByText(/Signed in as/)).toHaveCount(0)
 }
@@ -60,7 +63,7 @@ async function signInWithEmail(page: Page, emailLabel: string): Promise<Page> {
   const requestedAt = new Date()
 
   await page.goto('/configure?panel=ai')
-  await page.getByRole('button', { name: 'Use the included AI' }).click()
+  await page.getByRole('button', { name: 'Sign up or sign in' }).click()
   const dialog = page.getByRole('dialog')
   await expect(
     dialog.getByRole('heading', { name: 'Sign in to Readyset' })
@@ -110,7 +113,7 @@ test('account login unlocks hosted Ask and sign-out restores the AI access choic
   await expectSignedOutAiAccess(page)
 
   // The alternate BYOK path must remain usable without creating an account.
-  await page.getByRole('button', { name: 'Set key' }).click()
+  await page.getByRole('button', { name: 'Add Anthropic key' }).click()
   const keyDialog = page.getByRole('dialog')
   await expect(
     keyDialog.getByRole('heading', { name: 'Update Anthropic API key' })

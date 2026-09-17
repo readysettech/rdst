@@ -10,6 +10,7 @@ import {
   useNavigate,
 } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useState } from 'react'
+import { AiAccessBoundary } from '../components/AiAccessBoundary'
 import { ActivityPulse } from '../components/audit/ActivityPulse'
 // Direct import: the components barrel re-exports the SQL editor stack,
 // which would statically pull CodeMirror into the eager entry chunk.
@@ -80,15 +81,13 @@ function AppShell({ children }: { children: ReactNode }) {
 }
 
 function RootComponent() {
-  return <ReadyRoot />
+  return (
+    <AiAccessBoundary>
+      <ReadyRoot />
+    </AiAccessBoundary>
+  )
 }
 
-/**
- * The AI credential state belongs to the features that consume it, so it is
- * asked for by `AiSetupNotice` where those features live rather than gating the
- * router: connections, benchmarks, health checks, schema and the demo all work
- * without a provider. [MG-01]
- */
 function ReadyRoot() {
   const { target } = useTarget()
   useQueryDiscoveryTransport(target)
