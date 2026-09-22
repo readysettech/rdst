@@ -21,6 +21,12 @@ export const QUERY_LIBRARY_SORTS = [
   'most-frequent',
   'slowest-average',
   'recently-analyzed',
+  'jev-priority',
+  'jev-index_coverage',
+  'jev-join_growth',
+  'jev-broad_work',
+  'jev-repeated_work',
+  'jev-access_expression_risk',
 ] as const
 
 export type QueryLibrarySort = (typeof QUERY_LIBRARY_SORTS)[number]
@@ -61,6 +67,24 @@ export type QueryLibraryActivityWindow =
 
 export const QUERY_LIBRARY_IMPACT_FILTERS = ['all', '1m', '10m', '1h'] as const
 
+/**
+ * The fixed rubric concerns Jev can report, plus the two brackets that ask for
+ * "anything it flagged" and "nothing it flagged" without naming each one.
+ */
+export const QUERY_LIBRARY_FINDING_FILTERS = [
+  'all',
+  'any',
+  'index_coverage',
+  'join_growth',
+  'broad_work',
+  'repeated_work',
+  'access_expression_risk',
+  'none',
+] as const
+
+export type QueryLibraryFindingFilter =
+  (typeof QUERY_LIBRARY_FINDING_FILTERS)[number]
+
 export type QueryLibraryImpactFilter =
   (typeof QUERY_LIBRARY_IMPACT_FILTERS)[number]
 
@@ -70,6 +94,7 @@ export type QueryLibraryFilterKey =
   | 'params'
   | 'activity'
   | 'impact'
+  | 'finding'
 
 export type QueryLibraryAction = 'add'
 
@@ -88,6 +113,7 @@ export type QueryLibrarySearch = {
   params?: QueryLibraryParameterFilter
   activity?: QueryLibraryActivityWindow
   impact?: QueryLibraryImpactFilter
+  finding?: QueryLibraryFindingFilter
   sort?: QueryLibrarySort
   /**
    * The user's own mark, independent of `view`: "my shortlist, not yet
@@ -121,6 +147,7 @@ const CLEARED_QUERY_LIBRARY_FILTERS = {
   params: undefined,
   activity: undefined,
   impact: undefined,
+  finding: undefined,
   action: undefined,
   run: undefined,
 } as const
@@ -188,6 +215,9 @@ export function parseQueryLibrarySearch(
     impact: includes(QUERY_LIBRARY_IMPACT_FILTERS, search.impact)
       ? search.impact
       : undefined,
+    finding: includes(QUERY_LIBRARY_FINDING_FILTERS, search.finding)
+      ? search.finding
+      : undefined,
     sort: includes(QUERY_LIBRARY_SORTS, search.sort) ? search.sort : undefined,
     // The mark used to be a value of `view`; a link written then still asks
     // for the same rows, now as the independent boolean.
@@ -214,6 +244,7 @@ export function resolvedQueryLibraryState(search: QueryLibrarySearch) {
     params: search.params ?? 'all',
     activity: search.activity ?? 'all',
     impact: search.impact ?? 'all',
+    finding: search.finding ?? 'all',
     sort: search.sort ?? 'highest-impact',
     starred: search.starred === true,
   } satisfies {
@@ -223,6 +254,7 @@ export function resolvedQueryLibraryState(search: QueryLibrarySearch) {
     params: QueryLibraryParameterFilter
     activity: QueryLibraryActivityWindow
     impact: QueryLibraryImpactFilter
+    finding: QueryLibraryFindingFilter
     sort: QueryLibrarySort
     starred: boolean
   }

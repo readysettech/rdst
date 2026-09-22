@@ -32,6 +32,7 @@ if not MIGRATIONS_DIR.is_dir():
 sys.path.insert(0, str(MIGRATIONS_DIR.parent / "src"))
 import hosted_admin_dashboard  # noqa: E402
 import hosted_inference  # noqa: E402
+import jev_inference  # noqa: E402
 
 # Mirrors the INSERT in keyservice/src/index.py. Update both together.
 USAGE_LOG_INSERT = (
@@ -48,6 +49,63 @@ def test_migrations_apply_cleanly_in_order():
         db.executescript(path.read_text(encoding="utf-8"))
         applied.append(path.name)
     assert applied, "no migration files found"
+
+
+def test_jev_tables_are_separate_from_generative_inference():
+    db = sqlite3.connect(":memory:")
+    for path in sorted(MIGRATIONS_DIR.glob("0*.sql")):
+        db.executescript(path.read_text(encoding="utf-8"))
+    tables = {
+        row[0]
+        for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    }
+    assert {"jev_rate_buckets", "jev_reservations", "jev_requests", "jev_usage"} <= tables
+    keys = {
+        row[0]
+        for row in db.execute("SELECT key FROM inference_settings WHERE key LIKE 'jev_%'")
+    }
+    assert "jev_user_requests_per_hour" in keys
+    assert "jev_global_input_units_per_minute" in keys
+
+    # A stored setting overrides the code default, so a migration that seeds a
+    # different number silently caps throughput below what the Worker ships.
+    seeded = dict(
+        db.execute("SELECT key, value FROM inference_settings WHERE key LIKE 'jev_%'")
+    )
+    assert int(seeded["jev_user_requests_per_hour"]) == (
+        jev_inference.DEFAULT_USER_REQUESTS_PER_HOUR
+    )
+    assert int(seeded["jev_ip_requests_per_hour"]) == (
+        jev_inference.DEFAULT_IP_REQUESTS_PER_HOUR
+    )
+    assert int(seeded["jev_global_requests_per_minute"]) == (
+        jev_inference.DEFAULT_GLOBAL_REQUESTS_PER_MINUTE
+    )
+    assert int(seeded["jev_global_input_units_per_minute"]) == (
+        jev_inference.DEFAULT_GLOBAL_INPUT_UNITS_PER_MINUTE
+    )
+    assert int(seeded["jev_user_monthly_limit_microusd"]) == (
+        jev_inference.DEFAULT_USER_MONTHLY_LIMIT_MICROUSD
+    )
+    assert int(seeded["jev_global_monthly_limit_microusd"]) == (
+        jev_inference.DEFAULT_GLOBAL_MONTHLY_LIMIT_MICROUSD
+    )
+
+
+def test_jev_contract_version_matches_the_client():
+    """The Worker rejects any request whose rubric version it does not own.
+
+    A drift between the two constants takes every quick assessment offline, so
+    it has to fail here rather than at the first live call.
+    """
+    from features.query_registry import assessment_rubric
+
+    assert jev_inference.MODEL == assessment_rubric.MODEL
+    assert jev_inference.RUBRIC_VERSION == assessment_rubric.RUBRIC_VERSION
+    assert set(jev_inference.QUESTIONS) == {
+        *assessment_rubric.CHOICES,
+        "priority",
+    }
 
 
 def test_local_wrangler_config_binds_the_migrated_database():

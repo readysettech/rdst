@@ -1,5 +1,6 @@
 """Service for database target configuration with async event streaming."""
 
+import logging
 from typing import AsyncGenerator, Any, Dict, Optional
 
 from shared.config.targets import TargetsConfig, default_port_for
@@ -21,6 +22,8 @@ from .events import (
     ConfigureTargetListEvent,
 )
 from .models import ConfigureInput, ConfigureOptions, TargetDetail, TargetSummary
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigureService:
@@ -307,6 +310,15 @@ class ConfigureService:
 
             get_tunnel_manager().close(name)
 
+            try:
+                from shared.query_registry import QueryRegistry
+
+                store = QueryRegistry().library_store
+                if store is not None:
+                    store.delete_target_assessments(name)
+            except Exception:
+                logger.warning("Failed to remove quick assessments for target %s", name, exc_info=True)
+
             yield ConfigureSuccessEvent(
                 type="success",
                 operation=operation_name("remove"),
@@ -407,6 +419,7 @@ class ConfigureService:
                     message=result.get("message", "Connection successful"),
                     server_version=result.get("server_version"),
                     privileges=result.get("privileges"),
+                    query_capture=result.get("query_capture"),
                 )
             else:
                 yield ConfigureConnectionTestEvent(
@@ -485,6 +498,7 @@ class ConfigureService:
                     "message": "Connected successfully!",
                     "server_version": (version[:120] + "...") if len(version) > 120 else version,
                     "privileges": privileges,
+                    "query_capture": self._query_capture_capability(conn, engine),
                 }
 
             if engine == "mysql":
@@ -505,6 +519,7 @@ class ConfigureService:
                     "message": "Connected successfully!",
                     "server_version": f"MySQL {version}",
                     "privileges": privileges,
+                    "query_capture": self._query_capture_capability(conn, engine),
                 }
 
             return {
@@ -639,6 +654,54 @@ class ConfigureService:
                     conn.close()
                 except Exception:
                     pass
+
+    @staticmethod
+    def _query_capture_capability(conn: Any, engine: str) -> Dict[str, Any]:
+        cursor = conn.cursor()
+        try:
+            if engine == "postgresql":
+                try:
+                    cursor.execute("SELECT 1 FROM pg_stat_statements(false) LIMIT 1")
+                    cursor.fetchone()
+                    return {"available": True, "source": "pg_stat_statements", "title": "Historical query discovery is ready", "instructions": []}
+                except Exception as exc:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    return {
+                        "available": False, "source": "pg_stat_statements",
+                        "title": "Enable historical query discovery",
+                        "detail": "permission" if "permission" in str(exc).lower() else "missing",
+                        "instructions": [
+                            "Add pg_stat_statements to shared_preload_libraries and restart PostgreSQL.",
+                            "Run CREATE EXTENSION IF NOT EXISTS pg_stat_statements; in this database.",
+                            "Grant this database user permission to read pg_stat_statements.",
+                        ],
+                    }
+            try:
+                cursor.execute("SHOW VARIABLES LIKE 'performance_schema'")
+                row = cursor.fetchone()
+                if row and str(row[1]).lower() in {"on", "1", "true"}:
+                    cursor.execute("SELECT 1 FROM performance_schema.events_statements_summary_by_digest LIMIT 1")
+                    cursor.fetchone()
+                    return {"available": True, "source": "performance_schema", "title": "Historical query discovery is ready", "instructions": []}
+            except Exception:
+                pass
+            return {
+                "available": False, "source": "performance_schema",
+                "title": "Enable historical query discovery",
+                "instructions": [
+                    "Set performance_schema=ON in the MySQL server configuration and restart MySQL.",
+                    "Grant this database user SELECT access to performance_schema statement digest tables.",
+                    "Verify with SHOW VARIABLES LIKE 'performance_schema';.",
+                ],
+            }
+        finally:
+            try:
+                cursor.close()
+            except Exception:
+                pass
 
     @staticmethod
     def _password_required_result(config: Dict[str, Any]) -> Dict[str, Any]:

@@ -45,6 +45,12 @@ class FixtureStore:
         self._operations = operations
         self._indices = {}
 
+    def responses(self, operation: str) -> list[dict[str, Any]]:
+        """Every configured response for an operation, without consuming any."""
+        with self._lock:
+            self._reload()
+            return list(self._operations.get(operation) or [])
+
     def take(self, operation: str, *, default: Any = _MISSING) -> dict[str, Any]:
         with self._lock:
             self._reload()

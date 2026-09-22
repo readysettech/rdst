@@ -10,6 +10,7 @@ import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useState } from 'react'
+import { QueryLibrarySortMenu } from './QueryLibrarySortMenu'
 import {
   QUERY_LIBRARY_DEFAULT_DISPLAY_PROPERTIES,
   QUERY_LIBRARY_DISPLAY_PROPERTIES,
@@ -19,22 +20,23 @@ import {
 import { QUERY_LIBRARY_VISIBLE_DISPLAY_MODES } from './queryLibraryDisplayStore'
 import {
   QUERY_LIBRARY_ACTIVITY_LABELS,
+  QUERY_LIBRARY_FINDING_LABELS,
   QUERY_LIBRARY_IMPACT_LABELS,
   QUERY_LIBRARY_PARAMETER_LABELS,
-  QUERY_LIBRARY_SORT_LABELS,
   QUERY_LIBRARY_SOURCE_LABELS,
   QUERY_LIBRARY_VIEW_LABELS,
   type QueryLibrarySelection,
 } from './queryLibrarySelectors'
 import {
   QUERY_LIBRARY_ACTIVITY_WINDOWS,
+  QUERY_LIBRARY_FINDING_FILTERS,
   QUERY_LIBRARY_IMPACT_FILTERS,
   QUERY_LIBRARY_PARAMETER_FILTERS,
-  QUERY_LIBRARY_SORTS,
   QUERY_LIBRARY_SOURCES,
   QUERY_LIBRARY_VIEWS,
   type QueryLibraryActivityWindow,
   type QueryLibraryFilterKey,
+  type QueryLibraryFindingFilter,
   type QueryLibraryImpactFilter,
   type QueryLibraryParameterFilter,
   type QueryLibrarySort,
@@ -48,6 +50,7 @@ export type QueryLibraryFilters = {
   params: QueryLibraryParameterFilter
   activity: QueryLibraryActivityWindow
   impact: QueryLibraryImpactFilter
+  finding: QueryLibraryFindingFilter
 }
 
 type FilterCategory = {
@@ -59,6 +62,7 @@ type FilterCategory = {
     | 'adjustment-horizontal'
     | 'speedometer'
     | 'observe'
+    | 'sparkles'
 }
 
 const FILTER_CATEGORIES: FilterCategory[] = [
@@ -71,6 +75,7 @@ const FILTER_CATEGORIES: FilterCategory[] = [
   },
   { key: 'impact', label: 'Database time', icon: 'speedometer' },
   { key: 'activity', label: 'Last activity', icon: 'observe' },
+  { key: 'finding', label: 'Jev concern', icon: 'sparkles' },
 ]
 
 const FILTER_DEFAULTS: QueryLibraryFilters = {
@@ -79,6 +84,7 @@ const FILTER_DEFAULTS: QueryLibraryFilters = {
   params: 'all',
   activity: 'all',
   impact: 'all',
+  finding: 'all',
 }
 
 const FILTER_LABELS = {
@@ -87,6 +93,7 @@ const FILTER_LABELS = {
   params: QUERY_LIBRARY_PARAMETER_LABELS,
   activity: QUERY_LIBRARY_ACTIVITY_LABELS,
   impact: QUERY_LIBRARY_IMPACT_LABELS,
+  finding: QUERY_LIBRARY_FINDING_LABELS,
 }
 
 type QueryLibraryControlBarProps = {
@@ -186,6 +193,9 @@ function FilterMenu({
       case 'activity':
         onFilterChange('activity', value as QueryLibraryActivityWindow)
         break
+      case 'finding':
+        onFilterChange('finding', value as QueryLibraryFindingFilter)
+        break
     }
   }
 
@@ -229,6 +239,14 @@ function FilterMenu({
           disabled:
             selection.facetCounts.activity[value] === 0 &&
             value !== filters.activity,
+        }))
+      case 'finding':
+        return QUERY_LIBRARY_FINDING_FILTERS.map((value) => ({
+          value,
+          label: `${QUERY_LIBRARY_FINDING_LABELS[value]} · ${selection.facetCounts.finding[value]}`,
+          disabled:
+            selection.facetCounts.finding[value] === 0 &&
+            value !== filters.finding,
         }))
     }
   }
@@ -490,23 +508,22 @@ export function QueryLibraryControlBar({
             properties={properties}
             onToggleProperty={onToggleProperty}
           />
-          <div className="w-48 max-w-full">
+          <div className="min-w-48 max-w-full shrink-0 basis-auto">
             <Label htmlFor={sortId} className="sr-only">
               Order queries
             </Label>
-            <BaseInputSelect
+            <QueryLibrarySortMenu
               id={sortId}
-              name={sortId}
-              value={sort}
-              options={QUERY_LIBRARY_SORTS.map((value) => ({
-                value,
-                label: QUERY_LIBRARY_SORT_LABELS[value],
-              }))}
-              onValueChange={(value) => onSortChange(value as QueryLibrarySort)}
+              sort={sort}
+              onSortChange={onSortChange}
             />
           </div>
           <Show when={typeof resultCount === 'number'}>
-            <Text level="body-small" className="px-1 text-content-layout-3">
+            <Text
+              level="body-small"
+              className="shrink-0 whitespace-nowrap px-1 text-content-layout-3"
+              data-testid="query-library-result-count"
+            >
               {typeof totalCount === 'number' && totalCount > (resultCount ?? 0)
                 ? `${resultCount} of ${totalCount} queries`
                 : `${resultCount} ${resultCount === 1 ? 'query' : 'queries'}`}

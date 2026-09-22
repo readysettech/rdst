@@ -138,6 +138,9 @@ async def lifespan(app: FastAPI):
     await sandbox_manager.start()
     scheduler: ObservationScheduler | None = None
     discovery_coordinator = None
+    from features.query_registry.assessment import query_assessment_worker
+
+    await query_assessment_worker.start()
     # The app configures no handlers of its own, so module-level INFO logs
     # are invisible under the default WARNING threshold; lifecycle notices
     # go through uvicorn's console logger to stay operator-visible.
@@ -152,6 +155,7 @@ async def lifespan(app: FastAPI):
             console.info("Observation scheduler enabled (RDST_OBSERVATION_SCHEDULER)")
         yield
     finally:
+        await query_assessment_worker.stop()
         # Shutdown order (research Q5): the scheduler stops admitting,
         # cancels in-flight collections, and releases its leases before
         # anything else is torn down.

@@ -68,7 +68,7 @@ type FixtureResponse = (
       // Semantic layer definition persisted for real by the fake init.
       layer?: Record<string, unknown>
     }
-  | { value: unknown }
+  | { value: unknown; delay_ms?: number; match_sql?: string }
   | { error: { status: number; detail: string } }
 ) & { repeat?: boolean }
 

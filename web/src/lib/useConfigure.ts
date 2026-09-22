@@ -467,6 +467,7 @@ export function useConfigure(): UseConfigureReturn {
                       category: data.category,
                       passwordEnv: data.password_env,
                       privileges: data.privileges,
+                      queryCapture: data.query_capture,
                       databaseEngine:
                         databaseEngine ??
                         (String(data.server_version || '').startsWith('MySQL')

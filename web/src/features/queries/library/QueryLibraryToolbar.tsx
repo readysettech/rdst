@@ -19,6 +19,7 @@ export function QueryLibraryToolbar({
     params: library.params,
     activity: library.activity,
     impact: library.impact,
+    finding: library.finding,
   }
 
   const setFilter = <Key extends QueryLibraryFilterKey>(

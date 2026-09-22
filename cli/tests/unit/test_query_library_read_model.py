@@ -175,7 +175,7 @@ async def test_read_model_response_shape(app, registry):
         "queries", "facet_counts", "next_cursor", "total", "freshness", "error",
     }
     assert set(body["facet_counts"].keys()) == {
-        "view", "source", "params", "activity", "impact",
+        "view", "source", "params", "activity", "impact", "finding",
     }
 
 

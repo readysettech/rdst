@@ -6,6 +6,7 @@
  * reachable while a test is in flight. [USE-099, USE-025, USE-008]
  */
 
+import { InlineNotice } from '@rs/ui-new/error-state'
 import { Icon } from '@rs/ui-new/icon'
 import { IconButton } from '@rs/ui-new/icon-button'
 import { m } from '@rs/ui-new/motion'
@@ -138,6 +139,26 @@ export function ConfigureConnectionTest({
             database={database}
           />
         </div>
+      </Show>
+      <Show
+        when={
+          result.connected && result.queryCapture?.available === false
+            ? result.queryCapture
+            : null
+        }
+      >
+        {(capture) => (
+          <div className="mt-3">
+            <InlineNotice
+              errorClass="database"
+              accent="warning"
+              icon="alert"
+              title={capture.title}
+              message={`${capture.source} is required to find historical query shapes when no query is active. ${capture.instructions.join(' ')}`}
+              trustworthy="The target was not changed. Enable this before relying on automatic query discovery and Jev classification."
+            />
+          </div>
+        )}
       </Show>
     </m.div>
   )

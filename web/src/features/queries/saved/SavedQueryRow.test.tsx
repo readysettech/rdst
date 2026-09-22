@@ -144,7 +144,9 @@ describe('SavedQueryRow stored analysis (A2/A3)', () => {
       />
     )
 
-    expect(await screen.findByText('Good · 82/100')).toBeTruthy()
+    expect(
+      await screen.findByText('Deep analysis · Good · 82/100')
+    ).toBeTruthy()
     expect(screen.getByText('Analyzed 2 hours ago')).toBeTruthy()
   })
 
@@ -164,7 +166,7 @@ describe('SavedQueryRow stored analysis (A2/A3)', () => {
       />
     )
 
-    await screen.findByText('Poor · 32/100')
+    await screen.findByText('Deep analysis · Poor · 32/100')
     expect(screen.getByTestId('query-registry-row').className).toContain(
       'border-l-border-negative-soft'
     )
@@ -756,5 +758,127 @@ describe('SavedQueryRow SQL (B-03)', () => {
       row.querySelector('[title="SELECT :p1 FROM revealed_table"]')
     ).toBeNull()
     expect(screen.getByText(/no parameters/)).toBeTruthy()
+  })
+})
+
+describe('SavedQueryRow Jev quick assessment', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('shows pending state and discloses a completed advisory assessment', async () => {
+    stubLatestAnalysis(null)
+    const actions = makeActions()
+    const { rerender } = renderWithClient(
+      <SavedQueryRow
+        entry={entry()}
+        state={makeState()}
+        actions={actions}
+        animateEntry={false}
+      />
+    )
+    expect(screen.getByText('Waiting for Jev assessment')).toBeTruthy()
+
+    rerender(
+      <SavedQueryRow
+        entry={entry({
+          jev_assessment: {
+            status: 'complete',
+            band: 'High',
+            priority_score: 80,
+            findings: [
+              {
+                id: 'index_coverage',
+                label: 'Possible index gap',
+                verdict: 'strong_concern',
+                confidence: 0.9,
+                description: 'Check important filters with Deep Analyze.',
+              },
+            ],
+          },
+        })}
+        state={makeState()}
+        actions={actions}
+        animateEntry={false}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'View Jev results' }))
+    expect(screen.getByText(/Jev classified this query/)).toBeTruthy()
+    // The label appears twice once open: the collapsed chip and the panel row,
+    // and the panel adds the plain-language definition beneath it.
+    expect(screen.getAllByText('Missing index').length).toBe(2)
+    expect(screen.getByText(/column with no supporting index/)).toBeTruthy()
+    expect(screen.getByText(/Schema context:/)).toBeTruthy()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Deep analyze this query' })
+    )
+    expect(actions.analyze).toHaveBeenCalled()
+  })
+
+  it('shows each concern as a chip before the panel is opened', () => {
+    stubLatestAnalysis(null)
+    renderWithClient(
+      <SavedQueryRow
+        entry={entry({
+          jev_assessment: {
+            status: 'complete',
+            band: 'High',
+            priority_score: 80,
+            findings: [
+              {
+                id: 'index_coverage',
+                label: 'Possible index gap',
+                verdict: 'strong_concern',
+                confidence: 0.9,
+                description: 'Check important filters with Deep Analyze.',
+              },
+              {
+                id: 'join_growth',
+                label: 'Join expansion concern',
+                verdict: 'possible_concern',
+                confidence: 0.5,
+                description: 'Measure row flow before changing it.',
+              },
+            ],
+          },
+        })}
+        state={makeState()}
+        actions={makeActions()}
+        animateEntry={false}
+      />
+    )
+
+    // Collapsed: the concerns and the score read off the card, and the action
+    // says plainly that there is something to open.
+    expect(screen.queryByText(/Jev classified this query/)).toBeNull()
+    expect(screen.queryByText('80/100')).toBeNull()
+    const toggle = screen.getByRole('button', { name: 'View Jev results' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.getByText('Missing index')).toBeTruthy()
+    expect(screen.getByText('Possible join growth')).toBeTruthy()
+  })
+
+  it('drops the per-card attribution now that the page header carries it', () => {
+    stubLatestAnalysis(null)
+    renderWithClient(
+      <SavedQueryRow
+        entry={entry({
+          jev_assessment: {
+            status: 'complete',
+            band: 'Low',
+            priority_score: 20,
+            findings: [],
+          },
+        })}
+        state={makeState()}
+        actions={makeActions()}
+        animateEntry={false}
+      />
+    )
+
+    expect(
+      screen.queryByText('AI query classification powered by Jev')
+    ).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'View Jev results' })
+    ).toBeTruthy()
   })
 })

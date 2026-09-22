@@ -6543,6 +6543,130 @@
         "title": "InteractiveMessageRequest",
         "type": "object"
       },
+      "JevAssessmentSummary": {
+        "properties": {
+          "assessed_at": {
+            "default": "",
+            "title": "Assessed At",
+            "type": "string"
+          },
+          "attempt_count": {
+            "default": 0,
+            "title": "Attempt Count",
+            "type": "integer"
+          },
+          "band": {
+            "default": "",
+            "title": "Band",
+            "type": "string"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "error_code": {
+            "default": "",
+            "title": "Error Code",
+            "type": "string"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/JevFinding"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "priority_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority Score"
+          },
+          "rubric_version": {
+            "default": "",
+            "title": "Rubric Version",
+            "type": "string"
+          },
+          "schema_collected_at": {
+            "default": "",
+            "title": "Schema Collected At",
+            "type": "string"
+          },
+          "schema_coverage": {
+            "default": "",
+            "title": "Schema Coverage",
+            "type": "string"
+          },
+          "schema_fingerprint": {
+            "default": "",
+            "title": "Schema Fingerprint",
+            "type": "string"
+          },
+          "status": {
+            "default": "pending",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "JevAssessmentSummary",
+        "type": "object"
+      },
+      "JevFinding": {
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "verdict"
+        ],
+        "title": "JevFinding",
+        "type": "object"
+      },
       "LLMAnalysis": {
         "additionalProperties": true,
         "properties": {
@@ -7577,6 +7701,13 @@
             "title": "Activity",
             "type": "object"
           },
+          "finding": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Finding",
+            "type": "object"
+          },
           "impact": {
             "additionalProperties": {
               "type": "integer"
@@ -7611,7 +7742,8 @@
           "source",
           "params",
           "activity",
-          "impact"
+          "impact",
+          "finding"
         ],
         "title": "QueryLibraryFacetCounts",
         "type": "object"
@@ -7766,6 +7898,16 @@
             "default": false,
             "title": "Is New",
             "type": "boolean"
+          },
+          "jev_assessment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JevAssessmentSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "last_analyzed": {
             "title": "Last Analyzed",
@@ -17419,6 +17561,32 @@
           },
           {
             "in": "query",
+            "name": "finding",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "all",
+                    "any",
+                    "index_coverage",
+                    "join_growth",
+                    "broad_work",
+                    "repeated_work",
+                    "access_expression_risk",
+                    "none"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Finding"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort",
             "required": false,
             "schema": {
@@ -17430,7 +17598,13 @@
                     "newest",
                     "most-frequent",
                     "slowest-average",
-                    "recently-analyzed"
+                    "recently-analyzed",
+                    "jev-priority",
+                    "jev-access_expression_risk",
+                    "jev-index_coverage",
+                    "jev-join_growth",
+                    "jev-repeated_work",
+                    "jev-broad_work"
                   ],
                   "type": "string"
                 },

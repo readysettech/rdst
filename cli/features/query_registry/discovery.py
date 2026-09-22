@@ -371,6 +371,7 @@ class QueryDiscoveryCollector:
             "new_hashes": [],
             "changed": False,
             "stats": None,
+            "capture_warning": None,
             "error": None,
         }
 
@@ -1641,6 +1642,26 @@ class QueryDiscoveryCollector:
             return None
         return {"source_unavailable": self._source_unavailable}
 
+    def _capture_warning(self) -> Optional[Dict[str, Any]]:
+        if self._source_unavailable is None:
+            return None
+        if self._engine == "mysql":
+            return {
+                "source": "performance_schema",
+                "instructions": [
+                    "Set performance_schema=ON in the MySQL server configuration and restart MySQL.",
+                    "Grant the RDST database user SELECT access to performance_schema statement digest tables.",
+                ],
+            }
+        return {
+            "source": "pg_stat_statements",
+            "instructions": [
+                "Add pg_stat_statements to shared_preload_libraries and restart PostgreSQL.",
+                "Run CREATE EXTENSION IF NOT EXISTS pg_stat_statements; in this database.",
+                "Grant the RDST database user permission to read pg_stat_statements.",
+            ],
+        }
+
     def _maybe_run_retention(self) -> None:
         """Compact store retention after a successful cycle, on a time gate.
 
@@ -1744,6 +1765,7 @@ class QueryDiscoveryCollector:
                     **self._snapshot,
                     "state": "unavailable",
                     "changed": False,
+                    "capture_warning": self._capture_warning(),
                     "error": error,
                 }
                 return self._publish("discovery_error", self._snapshot)
@@ -1826,6 +1848,7 @@ class QueryDiscoveryCollector:
                     "persistence_ms": round(persistence_ms, 3),
                     "service_reused": service_reused,
                 },
+                "capture_warning": self._capture_warning(),
                 "error": None,
             }
             return self._publish("discovery_update", self._snapshot)
@@ -1929,6 +1952,12 @@ class QueryDiscoveryCoordinator:
             collector.set_subscriber_state_callback(self._subscription_listener)
             self._collectors[target] = collector
         return collector
+
+    def publish_assessment_update(self, target: str) -> None:
+        collector = self._collectors.get(target)
+        if collector is None or not collector.has_subscribers:
+            return
+        collector._publish("assessment_update", {"target": target, "changed": True})
 
     async def close(self) -> None:
         await asyncio.gather(

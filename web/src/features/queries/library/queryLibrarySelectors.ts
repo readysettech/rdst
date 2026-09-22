@@ -7,6 +7,7 @@ import {
 import type { QueryRegistryEntry } from '../../../lib/useQueryRegistry'
 import type {
   QueryLibraryActivityWindow,
+  QueryLibraryFindingFilter,
   QueryLibraryImpactFilter,
   QueryLibraryParameterFilter,
   QueryLibrarySort,
@@ -15,8 +16,10 @@ import type {
 } from './queryLibraryState'
 import {
   QUERY_LIBRARY_ACTIVITY_WINDOWS,
+  QUERY_LIBRARY_FINDING_FILTERS,
   QUERY_LIBRARY_IMPACT_FILTERS,
   QUERY_LIBRARY_PARAMETER_FILTERS,
+  QUERY_LIBRARY_SORTS,
   QUERY_LIBRARY_SOURCES,
   QUERY_LIBRARY_VIEWS,
 } from './queryLibraryState'
@@ -41,6 +44,58 @@ export const QUERY_LIBRARY_SORT_LABELS: Record<QueryLibrarySort, string> = {
   'most-frequent': 'Most frequent',
   'slowest-average': 'Slowest average',
   'recently-analyzed': 'Recently analyzed',
+  'jev-priority': 'Review priority',
+  'jev-index_coverage': 'Missing index',
+  'jev-join_growth': 'Join growth',
+  'jev-broad_work': 'Broad work',
+  'jev-repeated_work': 'Repeated work',
+  'jev-access_expression_risk': 'Index bypassed',
+}
+
+/** Workload metrics, shown flat. */
+export const QUERY_LIBRARY_STANDARD_SORTS = QUERY_LIBRARY_SORTS.filter(
+  (value) => !value.startsWith('jev-')
+)
+
+/** Jev orderings, shown in the sort menu's Jev submenu. */
+export const QUERY_LIBRARY_JEV_SORTS = QUERY_LIBRARY_SORTS.filter((value) =>
+  value.startsWith('jev-')
+)
+
+export const QUERY_LIBRARY_FINDING_LABELS: Record<
+  QueryLibraryFindingFilter,
+  string
+> = {
+  all: 'Any assessment state',
+  any: 'Any Jev concern',
+  index_coverage: 'Missing index',
+  join_growth: 'Join growth',
+  broad_work: 'Broad work',
+  repeated_work: 'Repeated work',
+  access_expression_risk: 'Index bypassed',
+  none: 'No concern found',
+}
+
+/**
+ * One plain sentence per concern: what it means and what would make it true.
+ * Used as the tooltip on every chip and sort option and as the visible line
+ * under each concern in the expanded panel, so a short label never has to
+ * carry the explanation on its own.
+ */
+export const QUERY_LIBRARY_FINDING_DEFINITIONS: Record<string, string> = {
+  index_coverage:
+    'A query that filters, joins, or sorts on a column with no supporting index.',
+  join_growth:
+    'A query whose joins can multiply rows before the final result is produced.',
+  broad_work: 'A query that sorts, groups, or scans a large share of a table.',
+  repeated_work:
+    'A query that repeats a subquery for every row of its outer result.',
+  access_expression_risk:
+    'A query that wraps an indexed column in a function or cast, so the existing index cannot be used.',
+  priority: 'Queries Jev recommends deep analyzing first.',
+  any: 'A query where Jev flagged at least one structural risk.',
+  none: 'A query where Jev flagged no structural risk.',
+  all: 'Every query, assessed or not.',
 }
 
 export const QUERY_LIBRARY_SOURCE_LABELS: Record<QueryLibrarySource, string> = {
@@ -276,6 +331,11 @@ export function compareQueries(
         timestamp(right.last_analyzed_at ?? right.last_analyzed) -
         timestamp(left.last_analyzed_at ?? left.last_analyzed)
       break
+    case 'jev-priority':
+      delta =
+        numeric(right.jev_assessment?.priority_score ?? -1) -
+        numeric(left.jev_assessment?.priority_score ?? -1)
+      break
   }
   return delta || left.hash.localeCompare(right.hash)
 }
@@ -290,6 +350,7 @@ export type QueryLibrarySelection = {
     params: Record<QueryLibraryParameterFilter, number>
     activity: Record<QueryLibraryActivityWindow, number>
     impact: Record<QueryLibraryImpactFilter, number>
+    finding: Record<QueryLibraryFindingFilter, number>
   }
   isFiltered: boolean
 }
@@ -326,6 +387,7 @@ export function normalizeQueryLibraryFacetCounts(
     params: pick(QUERY_LIBRARY_PARAMETER_FILTERS, counts?.params),
     activity: pick(QUERY_LIBRARY_ACTIVITY_WINDOWS, counts?.activity),
     impact: pick(QUERY_LIBRARY_IMPACT_FILTERS, counts?.impact),
+    finding: pick(QUERY_LIBRARY_FINDING_FILTERS, counts?.finding),
   }
 }
 
@@ -389,6 +451,7 @@ export function selectQueryLibrary({
     params: emptyCounts(QUERY_LIBRARY_PARAMETER_FILTERS),
     activity: emptyCounts(QUERY_LIBRARY_ACTIVITY_WINDOWS),
     impact: emptyCounts(QUERY_LIBRARY_IMPACT_FILTERS),
+    finding: emptyCounts(QUERY_LIBRARY_FINDING_FILTERS),
   }
   const selected: QueryRegistryEntry[] = []
 

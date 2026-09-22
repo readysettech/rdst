@@ -40,6 +40,7 @@ import re
 import shutil
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from itertools import count
@@ -70,7 +71,7 @@ __all__ = [
     "library_db_path_for",
 ]
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 15
 
 # Analyses kept per query. A re-run appends, and the oldest beyond this
 # many is dropped at insert, so the history stays bounded per query
@@ -218,6 +219,22 @@ _READ_MODEL_INDEXES = (
     "(target_key, rm_recently_analyzed_ms DESC, rm_hash ASC)",
 )
 
+# Bit order is supplied by the rubric; the store only stores and matches the
+# mask so shared/ keeps no dependency on the feature package.
+_FINDING_BITS = (
+    "access_expression_risk",
+    "index_coverage",
+    "join_growth",
+    "repeated_work",
+    "broad_work",
+)
+_FINDING_COLUMNS = {"all": "1"}
+for _bit, _name in enumerate(_FINDING_BITS):
+    _FINDING_COLUMNS[_name] = f"(rm_jev_findings & {1 << _bit}) != 0"
+_FINDING_COLUMNS["any"] = "rm_jev_findings != 0"
+# A ranked assessment with no concern; unassessed and Limited rows are excluded.
+_FINDING_COLUMNS["none"] = "(rm_jev_priority >= 0 AND rm_jev_findings = 0)"
+
 _SORT_COLUMNS = {
     "highest-impact": ("rm_impact_ms", "tq_rm_impact"),
     "recently-observed": ("rm_last_observed_ms", "tq_rm_observed"),
@@ -225,7 +242,32 @@ _SORT_COLUMNS = {
     "most-frequent": ("rm_frequency", "tq_rm_frequency"),
     "slowest-average": ("rm_avg_duration_ms", "tq_rm_average"),
     "recently-analyzed": ("rm_recently_analyzed_ms", "tq_rm_analyzed"),
+    "jev-priority": ("rm_jev_priority", "tq_rm_jev_priority"),
 }
+
+# Sorting by one concern lifts the rows carrying it above everything else and
+# orders each band by review priority, so a non-matching row can never
+# outrank a matching one (priority tops out at 100).
+_FINDING_SORT_OFFSET = 1000
+_FINDING_SORTS = {
+    f"jev-{name}": (
+        f"(CASE WHEN (tq.rm_jev_findings & {1 << bit}) != 0 THEN "
+        f"{_FINDING_SORT_OFFSET} ELSE 0 END) + tq.rm_jev_priority"
+    )
+    for bit, name in enumerate(_FINDING_BITS)
+}
+
+
+def _sort_terms(sort: str) -> tuple[str, str]:
+    """SQL for one sort: its row expression and its index hint, if any.
+
+    A stored column can force its covering index; a per-concern expression
+    cannot, so those sorts let the planner choose.
+    """
+    if sort in _FINDING_SORTS:
+        return _FINDING_SORTS[sort], ""
+    column, index = _SORT_COLUMNS[sort]
+    return f"tq.{column}", f"INDEXED BY {index}"
 
 _VIEW_COLUMNS = {
     "all": "1",
@@ -384,6 +426,79 @@ def _schema_v13(strict: bool) -> tuple[str, ...]:
     )
 
 
+def _schema_v14(strict: bool) -> tuple[str, ...]:
+    """Persist one Jev quick assessment per query and physical target."""
+    s_only = " STRICT" if strict else ""
+    return (
+        "ALTER TABLE target_query ADD COLUMN rm_jev_priority "
+        "REAL NOT NULL DEFAULT -1",
+        "ALTER TABLE target_query ADD COLUMN rm_jev_target_identity "
+        "TEXT NOT NULL DEFAULT ''",
+        "CREATE INDEX IF NOT EXISTS tq_rm_jev_priority ON target_query"
+        "(target_key, rm_jev_priority DESC, rm_hash ASC)",
+        f"""
+        CREATE TABLE IF NOT EXISTS query_assessment (
+          id INTEGER PRIMARY KEY,
+          identity_id INTEGER NOT NULL REFERENCES query_identity(id) ON DELETE CASCADE,
+          target_key TEXT NOT NULL, target_identity TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at REAL NOT NULL, updated_at REAL NOT NULL,
+          next_attempt_at REAL NOT NULL DEFAULT 0.0,
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          claim_owner TEXT NOT NULL DEFAULT '', claim_expiry REAL NOT NULL DEFAULT 0.0,
+          generation INTEGER NOT NULL DEFAULT 0, request_id TEXT NOT NULL DEFAULT '',
+          input_fingerprint TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
+          rubric_version TEXT NOT NULL DEFAULT '', schema_fingerprint TEXT NOT NULL DEFAULT '',
+          schema_collected_at TEXT NOT NULL DEFAULT '', schema_coverage TEXT NOT NULL DEFAULT '',
+          assessed_at TEXT NOT NULL DEFAULT '', result_json TEXT NOT NULL DEFAULT '{{}}',
+          priority_score REAL, band TEXT NOT NULL DEFAULT '', confidence REAL,
+          error_code TEXT NOT NULL DEFAULT '',
+          UNIQUE(identity_id, target_key, target_identity)
+        ){s_only}""",
+        "CREATE INDEX IF NOT EXISTS qa_due ON query_assessment"
+        "(target_key, target_identity, status, next_attempt_at, created_at)",
+        "CREATE INDEX IF NOT EXISTS qa_claim ON query_assessment(claim_expiry, status)",
+        f"""
+        CREATE TABLE IF NOT EXISTS assessment_schema_snapshot (
+          target_key TEXT NOT NULL, target_identity TEXT NOT NULL,
+          table_set_hash TEXT NOT NULL, collected_at TEXT NOT NULL,
+          schema_fingerprint TEXT NOT NULL, coverage TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          PRIMARY KEY(target_key, target_identity, table_set_hash)
+        ){s_only}""",
+    )
+
+
+def _schema_v15(strict: bool) -> tuple[str, ...]:
+    """Project the Jev finding set so the registry can filter on it."""
+    del strict
+    return (
+        "ALTER TABLE target_query ADD COLUMN rm_jev_findings "
+        "INTEGER NOT NULL DEFAULT 0",
+        "CREATE INDEX IF NOT EXISTS tq_rm_jev_findings ON target_query"
+        "(target_key, rm_jev_findings)",
+        # Assessments completed before this column existed keep their findings
+        # only inside result_json. Without this backfill every concern sort
+        # would silently degrade to the plain priority sort on upgrade.
+        """
+        UPDATE target_query SET rm_jev_findings = COALESCE((
+          SELECT SUM(DISTINCT CASE json_extract(finding.value, '$.id')
+            WHEN 'access_expression_risk' THEN 1
+            WHEN 'index_coverage' THEN 2
+            WHEN 'join_growth' THEN 4
+            WHEN 'repeated_work' THEN 8
+            WHEN 'broad_work' THEN 16
+            ELSE 0 END)
+          FROM query_assessment AS qa,
+               json_each(json_extract(qa.result_json, '$.findings')) AS finding
+          WHERE qa.identity_id = target_query.identity_id
+            AND qa.target_key = target_query.target_key
+            AND qa.target_identity = target_query.rm_jev_target_identity
+            AND qa.status = 'complete'
+        ), 0)""",
+    )
+
+
 # Migration ladder: version N maps to the DDL that brings a version N-1
 # file to version N. Additive only; this file is never rebuilt. Version 2
 # is a data cleanup with no DDL; its logic lives in
@@ -454,6 +569,8 @@ _MIGRATIONS: Dict[int, Any] = {
     # query_analysis, importing the file inside this transaction; see
     # _import_analysis_toml.
     13: _schema_v13,
+    14: _schema_v14,
+    15: _schema_v15,
 }
 
 # Data-cleanup versions: each runs _prune_system_only_entries inside its
@@ -1276,7 +1393,7 @@ class LibraryStore:
             conn.execute("BEGIN IMMEDIATE")
             try:
                 for statement in _MIGRATIONS[version](_strict_mode()):
-                    if version == 7 and statement.startswith("ALTER TABLE"):
+                    if statement.startswith("ALTER TABLE target_query ADD COLUMN"):
                         column = statement.split()[5]
                         existing = {
                             row["name"]
@@ -1351,6 +1468,10 @@ class LibraryStore:
             for statement in _MIGRATIONS[7](_strict_mode()):
                 conn.execute(statement)
             for statement in _MIGRATIONS[13](_strict_mode()):
+                conn.execute(statement)
+            for statement in _MIGRATIONS[14](_strict_mode()):
+                conn.execute(statement)
+            for statement in _MIGRATIONS[15](_strict_mode()):
                 conn.execute(statement)
             for statement in _READ_MODEL_INDEXES:
                 conn.execute(statement)
@@ -1664,6 +1785,181 @@ class LibraryStore:
             if entry is not None:
                 entry["target_lifecycle"][row["target_key"]] = _decode_lifecycle(row)
         return entries
+
+    # -- Jev quick assessments ----------------------------------------------
+
+    def prepare_assessments(self, target: str, target_identity: str, *, limit: int = 200, now: Optional[float] = None) -> int:
+        at = time.time() if now is None else float(now)
+        with self._write() as conn:
+            conn.execute(
+                "UPDATE target_query SET rm_jev_priority = -1, rm_jev_findings = 0, "
+                "rm_jev_target_identity = ? "
+                "WHERE target_key = ? AND rm_jev_target_identity != ?",
+                (target_identity, target, target_identity),
+            )
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO query_assessment "
+                "(identity_id, target_key, target_identity, status, created_at, updated_at, next_attempt_at, claim_expiry) "
+                "SELECT tq.identity_id, tq.target_key, ?, 'pending', CAST(? AS REAL), "
+                "CAST(? AS REAL), CAST(0 AS REAL), CAST(0 AS REAL) "
+                "FROM target_query AS tq WHERE tq.target_key = ? AND NOT EXISTS ("
+                "SELECT 1 FROM query_assessment AS qa WHERE qa.identity_id = tq.identity_id "
+                "AND qa.target_key = tq.target_key AND qa.target_identity = ?) "
+                "ORDER BY tq.identity_id DESC LIMIT ?",
+                (target_identity, at, at, target, target_identity, max(1, limit)),
+            )
+            return cursor.rowcount or 0
+
+    def recover_expired_assessment_claims(self, *, now: Optional[float] = None) -> int:
+        at = time.time() if now is None else float(now)
+        with self._write() as conn:
+            cursor = conn.execute(
+                "UPDATE query_assessment SET status = 'retry_wait', claim_owner = '', "
+                "claim_expiry = 0, next_attempt_at = ?, updated_at = ?, "
+                "error_code = 'claim_expired' WHERE status = 'running' AND claim_expiry <= ?",
+                (at, at, at),
+            )
+            return cursor.rowcount or 0
+
+    def set_target_assessment_state(self, target: str, target_identity: str, status: str, *, error_code: str = "", now: Optional[float] = None) -> int:
+        if status not in {"pending", "waiting_connection", "waiting_schema", "waiting_auth", "paused"}:
+            raise ValueError(f"Unsupported assessment state: {status}")
+        at = time.time() if now is None else float(now)
+        with self._write() as conn:
+            cursor = conn.execute(
+                "UPDATE query_assessment SET status = ?, updated_at = ?, error_code = ? "
+                "WHERE target_key = ? AND target_identity = ? "
+                "AND status NOT IN ('complete', 'unsupported', 'running')",
+                (status, at, error_code[:64], target, target_identity),
+            )
+            return cursor.rowcount or 0
+
+    def claim_assessment(self, target: str, target_identity: str, *, owner: str, request_id: str, lease_seconds: float = 120.0, prefer_new: bool = True, now: Optional[float] = None) -> Optional[Dict[str, Any]]:
+        at = time.time() if now is None else float(now)
+        direction = "DESC" if prefer_new else "ASC"
+        with self._write() as conn:
+            row = conn.execute(
+                f"SELECT qa.id, qa.generation, qa.request_id, qi.hash, qi.sql, qi.original_sql "
+                "FROM query_assessment AS qa JOIN query_identity AS qi ON qi.id = qa.identity_id "
+                "JOIN target_query AS tq ON tq.identity_id = qa.identity_id AND tq.target_key = qa.target_key "
+                "WHERE qa.target_key = ? AND qa.target_identity = ? "
+                "AND qa.status IN ('pending','waiting_connection','waiting_schema','waiting_auth','retry_wait') "
+                f"AND qa.next_attempt_at <= ? ORDER BY qa.attempt_count ASC, qa.created_at {direction}, "
+                f"qa.identity_id {direction} LIMIT 1",
+                (target, target_identity, at),
+            ).fetchone()
+            if row is None:
+                return None
+            generation = int(row["generation"]) + 1
+            stable_request_id = str(row["request_id"] or request_id)
+            claimed = conn.execute(
+                "UPDATE query_assessment SET status = 'running', claim_owner = ?, claim_expiry = ?, "
+                "generation = ?, request_id = ?, attempt_count = attempt_count + 1, updated_at = ?, error_code = '' "
+                "WHERE id = ? AND generation = ? AND status != 'complete'",
+                (owner, at + max(10.0, lease_seconds), generation, stable_request_id, at, row["id"], row["generation"]),
+            )
+            if claimed.rowcount != 1:
+                return None
+            return {"id": int(row["id"]), "generation": generation, "request_id": stable_request_id,
+                    "hash": str(row["hash"]), "sql": str(row["sql"]),
+                    "original_sql": str(row["original_sql"] or ""), "target": target,
+                    "target_identity": target_identity}
+
+    def retry_assessment(self, assessment_id: int, generation: int, owner: str, *, error_code: str, next_attempt_at: float, status: str = "retry_wait", now: Optional[float] = None) -> bool:
+        if status not in {"retry_wait", "waiting_connection", "waiting_schema", "waiting_auth", "paused", "unsupported"}:
+            raise ValueError(f"Unsupported retry state: {status}")
+        at = time.time() if now is None else float(now)
+        with self._write() as conn:
+            cursor = conn.execute(
+                "UPDATE query_assessment SET status = ?, error_code = ?, next_attempt_at = ?, "
+                "claim_owner = '', claim_expiry = 0, updated_at = ? WHERE id = ? "
+                "AND generation = ? AND claim_owner = ? AND status = 'running'",
+                (status, error_code[:64], float(next_attempt_at), at, assessment_id, generation, owner),
+            )
+            return cursor.rowcount == 1
+
+    def complete_assessment(self, assessment_id: int, generation: int, owner: str, *, result: Dict[str, Any], priority_score: Optional[int], band: str, confidence: float, finding_mask: int = 0, model: str, rubric_version: str, input_fingerprint: str, schema_fingerprint: str, schema_collected_at: str, schema_coverage: str, assessed_at: str, now: Optional[float] = None) -> bool:
+        at = time.time() if now is None else float(now)
+        payload = json.dumps(result, separators=(",", ":"), sort_keys=True)
+        with self._write() as conn:
+            row = conn.execute(
+                "SELECT identity_id, target_key, target_identity FROM query_assessment "
+                "WHERE id = ? AND generation = ? AND claim_owner = ? AND status = 'running'",
+                (assessment_id, generation, owner),
+            ).fetchone()
+            if row is None:
+                return False
+            conn.execute(
+                "UPDATE query_assessment SET status = 'complete', updated_at = ?, next_attempt_at = 0, "
+                "claim_owner = '', claim_expiry = 0, input_fingerprint = ?, model = ?, rubric_version = ?, "
+                "schema_fingerprint = ?, schema_collected_at = ?, schema_coverage = ?, assessed_at = ?, "
+                "result_json = ?, priority_score = ?, band = ?, confidence = ?, error_code = '' WHERE id = ?",
+                (at, input_fingerprint, model, rubric_version, schema_fingerprint, schema_collected_at,
+                 schema_coverage, assessed_at, payload,
+                 int(priority_score) if priority_score is not None else None,
+                 band, float(confidence), assessment_id),
+            )
+            conn.execute(
+                "UPDATE target_query SET rm_jev_priority = ?, rm_jev_findings = ?, "
+                "rm_jev_target_identity = ? "
+                "WHERE identity_id = ? AND target_key = ? AND rm_jev_target_identity = ?",
+                (int(priority_score) if priority_score is not None else -1, int(finding_mask), row["target_identity"],
+                 row["identity_id"], row["target_key"], row["target_identity"]),
+            )
+            return True
+
+    def assessment_for(self, query_hash: str, target: str, target_identity: str) -> Optional[Dict[str, Any]]:
+        self.ensure_open()
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT qa.* FROM query_assessment AS qa JOIN query_identity AS qi ON qi.id = qa.identity_id "
+                "WHERE qi.hash = ? AND qa.target_key = ? AND qa.target_identity = ?",
+                (query_hash, target, target_identity),
+            ).fetchone()
+            return self._decode_assessment(row) if row else None
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _decode_assessment(row: sqlite3.Row) -> Dict[str, Any]:
+        return {"status": row["status"], "attempt_count": int(row["attempt_count"]),
+                "model": row["model"], "rubric_version": row["rubric_version"],
+                "schema_fingerprint": row["schema_fingerprint"],
+                "schema_collected_at": row["schema_collected_at"], "schema_coverage": row["schema_coverage"],
+                "assessed_at": row["assessed_at"], "result": json.loads(row["result_json"] or "{}"),
+                "priority_score": int(row["priority_score"]) if row["priority_score"] is not None else None,
+                "band": row["band"], "confidence": row["confidence"], "error_code": row["error_code"]}
+
+    def load_schema_snapshot(self, target: str, target_identity: str, table_set_hash: str) -> Optional[Dict[str, Any]]:
+        self.ensure_open()
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM assessment_schema_snapshot WHERE target_key = ? AND target_identity = ? AND table_set_hash = ?", (target, target_identity, table_set_hash)).fetchone()
+            return ({"collected_at": row["collected_at"], "schema_fingerprint": row["schema_fingerprint"],
+                     "coverage": row["coverage"], "payload": json.loads(row["payload"])}) if row else None
+        finally:
+            conn.close()
+
+    def save_schema_snapshot(self, target: str, target_identity: str, table_set_hash: str, *, collected_at: str, schema_fingerprint: str, coverage: str, payload: Dict[str, Any]) -> None:
+        encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+        with self._write() as conn:
+            conn.execute(
+                "INSERT INTO assessment_schema_snapshot (target_key, target_identity, table_set_hash, collected_at, schema_fingerprint, coverage, payload) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(target_key, target_identity, table_set_hash) DO UPDATE SET "
+                "collected_at = excluded.collected_at, schema_fingerprint = excluded.schema_fingerprint, "
+                "coverage = excluded.coverage, payload = excluded.payload",
+                (target, target_identity, table_set_hash, collected_at, schema_fingerprint, coverage, encoded),
+            )
+
+    def delete_target_assessments(self, target: str) -> int:
+        if not self._db_path.exists():
+            return 0
+        with self._write() as conn:
+            cursor = conn.execute("DELETE FROM query_assessment WHERE target_key = ?", (target,))
+            conn.execute("DELETE FROM assessment_schema_snapshot WHERE target_key = ?", (target,))
+            conn.execute("UPDATE target_query SET rm_jev_priority = -1, rm_jev_target_identity = '' WHERE target_key = ?", (target,))
+            return cursor.rowcount or 0
 
     def _backfill_read_model(self, conn: sqlite3.Connection) -> None:
         """Populate v7 in bounded batches without loading the registry.
@@ -2389,6 +2685,7 @@ class LibraryStore:
         activity: str,
         impact: str,
         now_ms: float,
+        finding: str = "all",
     ) -> Dict[str, str]:
         return {
             "view": _VIEW_COLUMNS[view],
@@ -2396,6 +2693,7 @@ class LibraryStore:
             "params": _PARAM_COLUMNS[params],
             "activity": _activity_sql(activity, now_ms),
             "impact": _impact_sql(impact),
+            "finding": _FINDING_COLUMNS[finding],
         }
 
     @staticmethod
@@ -2443,6 +2741,22 @@ class LibraryStore:
         lifecycle["sources"] = json.loads(row["sources"])
         lifecycle.update(json.loads(row["lifecycle_extra"]))
         entry["target_lifecycle"] = {row["target_key"]: lifecycle}
+        if "assessment_status" in row.keys() and row["assessment_status"]:
+            entry["_assessment"] = {
+                "status": row["assessment_status"],
+                "attempt_count": int(row["assessment_attempt_count"] or 0),
+                "model": row["assessment_model"] or "",
+                "rubric_version": row["assessment_rubric_version"] or "",
+                "schema_fingerprint": row["assessment_schema_fingerprint"] or "",
+                "schema_collected_at": row["assessment_schema_collected_at"] or "",
+                "schema_coverage": row["assessment_schema_coverage"] or "",
+                "assessed_at": row["assessment_assessed_at"] or "",
+                "result": json.loads(row["assessment_result_json"] or "{}"),
+                "priority_score": int(row["assessment_priority_score"]) if row["assessment_priority_score"] is not None else None,
+                "band": row["assessment_band"] or "",
+                "confidence": row["assessment_confidence"],
+                "error_code": row["assessment_error_code"] or "",
+            }
         return entry
 
     def query_library(
@@ -2456,6 +2770,7 @@ class LibraryStore:
         activity: str,
         impact: str,
         sort: str,
+        finding: str = "all",
         cursor_position: Optional[tuple[float, str]],
         limit: int,
         now_ms: float,
@@ -2495,6 +2810,7 @@ class LibraryStore:
             activity=activity,
             impact=impact,
             now_ms=now_ms,
+            finding=finding,
         )
 
         dimensions: Dict[str, Dict[str, str]] = {
@@ -2505,6 +2821,7 @@ class LibraryStore:
                 name: _activity_sql(name, now_ms) for name in _ACTIVITY_WINDOWS_MS
             },
             "impact": {name: _impact_sql(name) for name in _IMPACT_THRESHOLDS_MS},
+            "finding": _FINDING_COLUMNS,
         }
         aggregates = [
             "SUM(CASE WHEN "
@@ -2533,7 +2850,7 @@ class LibraryStore:
             + " FROM candidate"
         )
 
-        sort_column, sort_index = _SORT_COLUMNS[sort]
+        sort_value, index_hint = _sort_terms(sort)
         page_predicates = [candidate_clause, *selected.values()]
         values["page_probe"] = limit + 1
         identity_columns = ", ".join(
@@ -2547,15 +2864,31 @@ class LibraryStore:
                    qi.extra AS identity_extra,
                    {lifecycle_columns},
                    tq.extra AS lifecycle_extra,
-                   tq.{sort_column} AS page_sort_value
+                   {sort_value} AS page_sort_value,
+                   qa.status AS assessment_status,
+                   qa.attempt_count AS assessment_attempt_count,
+                   qa.model AS assessment_model,
+                   qa.rubric_version AS assessment_rubric_version,
+                   qa.schema_fingerprint AS assessment_schema_fingerprint,
+                   qa.schema_collected_at AS assessment_schema_collected_at,
+                   qa.schema_coverage AS assessment_schema_coverage,
+                   qa.assessed_at AS assessment_assessed_at,
+                   qa.result_json AS assessment_result_json,
+                   qa.priority_score AS assessment_priority_score,
+                   qa.band AS assessment_band,
+                   qa.confidence AS assessment_confidence,
+                   qa.error_code AS assessment_error_code
         """
         if cursor_position is None:
             page_sql = result_select + f"""
-                FROM target_query AS tq INDEXED BY {sort_index}
+                FROM target_query AS tq {index_hint}
                 JOIN query_identity AS qi ON qi.id = tq.identity_id
+                LEFT JOIN query_assessment AS qa ON qa.identity_id = tq.identity_id
+                  AND qa.target_key = tq.target_key
+                  AND qa.target_identity = tq.rm_jev_target_identity
                 WHERE tq.target_key = :target
                   AND {' AND '.join(page_predicates)}
-                ORDER BY tq.{sort_column} DESC, tq.rm_hash ASC
+                ORDER BY {sort_value} DESC, tq.rm_hash ASC
                 LIMIT :page_probe
             """
         else:
@@ -2568,20 +2901,20 @@ class LibraryStore:
             page_sql = f"""
                 WITH lower_metric AS (
                   SELECT tq.*
-                  FROM target_query AS tq INDEXED BY {sort_index}
+                  FROM target_query AS tq {index_hint}
                   WHERE tq.target_key = :target
                     AND {base_predicates}
-                    AND tq.{sort_column} < :cursor_value
-                  ORDER BY tq.{sort_column} DESC, tq.rm_hash ASC
+                    AND {sort_value} < :cursor_value
+                  ORDER BY {sort_value} DESC, tq.rm_hash ASC
                   LIMIT :page_probe
                 ), same_metric AS (
                   SELECT tq.*
-                  FROM target_query AS tq INDEXED BY {sort_index}
+                  FROM target_query AS tq {index_hint}
                   WHERE tq.target_key = :target
                     AND {base_predicates}
-                    AND tq.{sort_column} = :cursor_value
+                    AND {sort_value} = :cursor_value
                     AND tq.rm_hash > :cursor_hash
-                  ORDER BY tq.{sort_column} DESC, tq.rm_hash ASC
+                  ORDER BY {sort_value} DESC, tq.rm_hash ASC
                   LIMIT :page_probe
                 ), page_keys AS (
                   SELECT * FROM lower_metric
@@ -2591,7 +2924,10 @@ class LibraryStore:
                 {result_select}
                 FROM page_keys AS tq
                 JOIN query_identity AS qi ON qi.id = tq.identity_id
-                ORDER BY tq.{sort_column} DESC, tq.rm_hash ASC
+                LEFT JOIN query_assessment AS qa ON qa.identity_id = tq.identity_id
+                  AND qa.target_key = tq.target_key
+                  AND qa.target_identity = tq.rm_jev_target_identity
+                ORDER BY {sort_value} DESC, tq.rm_hash ASC
                 LIMIT :page_probe
             """
 
@@ -2635,24 +2971,24 @@ class LibraryStore:
         is exposed only to keep the required index-use regression test small.
         """
         self.ensure_open()
-        sort_column, sort_index = _SORT_COLUMNS[sort]
+        sort_value, index_hint = _sort_terms(sort)
         conn = self._connect()
         try:
             rows = conn.execute(
                 f"""
                 EXPLAIN QUERY PLAN
                 WITH lower_metric AS (
-                  SELECT tq.identity_id, tq.{sort_column}, tq.rm_hash
-                  FROM target_query AS tq INDEXED BY {sort_index}
-                  WHERE tq.target_key = ? AND tq.{sort_column} < ?
-                  ORDER BY tq.{sort_column} DESC, tq.rm_hash ASC
+                  SELECT tq.identity_id, {sort_value} AS page_sort_value, tq.rm_hash
+                  FROM target_query AS tq {index_hint}
+                  WHERE tq.target_key = ? AND {sort_value} < ?
+                  ORDER BY {sort_value} DESC, tq.rm_hash ASC
                   LIMIT 51
                 ), same_metric AS (
-                  SELECT tq.identity_id, tq.{sort_column}, tq.rm_hash
-                  FROM target_query AS tq INDEXED BY {sort_index}
-                  WHERE tq.target_key = ? AND tq.{sort_column} = ?
+                  SELECT tq.identity_id, {sort_value} AS page_sort_value, tq.rm_hash
+                  FROM target_query AS tq {index_hint}
+                  WHERE tq.target_key = ? AND {sort_value} = ?
                     AND tq.rm_hash > ?
-                  ORDER BY tq.{sort_column} DESC, tq.rm_hash ASC
+                  ORDER BY {sort_value} DESC, tq.rm_hash ASC
                   LIMIT 51
                 )
                 SELECT * FROM lower_metric
@@ -2754,9 +3090,15 @@ class LibraryStore:
         values = [identity_id, target_key] + [
             row[column] for column in _LIFECYCLE_FIELDS + ("extra",)
         ] + [read_model[column] for column in _READ_MODEL_COLUMNS]
+        assignments = ", ".join(
+            f"{column} = excluded.{column}"
+            for column in _LIFECYCLE_FIELDS + ("extra",) + _READ_MODEL_COLUMNS
+        )
         conn.execute(
-            f"INSERT OR REPLACE INTO target_query ({', '.join(columns)})"
-            f" VALUES ({', '.join('?' for _ in columns)})",
+            f"INSERT INTO target_query ({', '.join(columns)})"
+            f" VALUES ({', '.join('?' for _ in columns)})"
+            " ON CONFLICT(identity_id, target_key) DO UPDATE SET "
+            + assignments,
             values,
         )
 

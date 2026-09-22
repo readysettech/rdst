@@ -100,6 +100,7 @@ describe('useQueryLibraryController read model wiring', () => {
           params: 'values-ready',
           activity: '24h',
           impact: '1m',
+          finding: 'all',
           sort: 'newest',
         },
       })
@@ -113,6 +114,7 @@ describe('useQueryLibraryController read model wiring', () => {
         params: 'values-ready',
         activity: '24h',
         impact: '1m',
+        finding: 'all',
         sort: 'newest',
         starred: false,
       },
@@ -131,6 +133,7 @@ describe('useQueryLibraryController read model wiring', () => {
         params: 'all',
         activity: 'all',
         impact: 'all',
+        finding: 'all',
         sort: 'highest-impact',
         starred: false,
       },

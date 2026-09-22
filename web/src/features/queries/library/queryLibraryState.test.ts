@@ -111,6 +111,7 @@ describe('query library URL state', () => {
       params: 'all',
       activity: 'all',
       impact: 'all',
+      finding: 'all',
       sort: 'highest-impact',
       starred: false,
     })

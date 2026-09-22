@@ -275,6 +275,7 @@ export type QueryRegistryReadModelSpec = {
   params: string
   activity: string
   impact: string
+  finding: string
   sort: string
   /** The star: an independent boolean that composes with every other value. */
   starred: boolean
@@ -296,13 +297,33 @@ export function useQueryRegistryReadModel(
   pageSize = QUERY_REGISTRY_READ_MODEL_PAGE_SIZE
 ) {
   const queryClient = useQueryClient()
-  const { search, view, source, params, activity, impact, sort, starred } = spec
+  const {
+    search,
+    view,
+    source,
+    params,
+    activity,
+    impact,
+    finding,
+    sort,
+    starred,
+  } = spec
   const queryKey = useMemo(
     () =>
       [
         ...queryRegistryQueryKey(target),
         'read-model',
-        { search, view, source, params, activity, impact, sort, starred },
+        {
+          search,
+          view,
+          source,
+          params,
+          activity,
+          impact,
+          finding,
+          sort,
+          starred,
+        },
         pageSize,
       ] as const,
     [
@@ -312,6 +333,7 @@ export function useQueryRegistryReadModel(
       params,
       activity,
       impact,
+      finding,
       sort,
       starred,
       pageSize,
@@ -330,6 +352,7 @@ export function useQueryRegistryReadModel(
         params,
         activity,
         impact,
+        finding,
         sort,
         starred,
         limit: pageSize,

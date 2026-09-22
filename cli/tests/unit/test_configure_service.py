@@ -634,3 +634,33 @@ class TestTestConnectionSingleStatusMessage:
         )
         assert conn_events[0].status == "in_progress"
         assert conn_events[1].status == "success"
+
+
+def test_query_capture_probe_returns_direct_postgres_setup_steps():
+    from features.configure.service import ConfigureService
+
+    cursor = Mock()
+    cursor.execute.side_effect = RuntimeError("relation pg_stat_statements does not exist")
+    connection = Mock()
+    connection.cursor.return_value = cursor
+    result = ConfigureService._query_capture_capability(connection, "postgresql")
+    assert result["available"] is False
+    assert result["source"] == "pg_stat_statements"
+    assert any("shared_preload_libraries" in step for step in result["instructions"])
+    assert any("CREATE EXTENSION" in step for step in result["instructions"])
+
+
+def test_query_capture_probe_accepts_mysql_performance_schema():
+    cursor = Mock()
+    cursor.fetchone.side_effect = [("performance_schema", "ON"), None]
+    connection = Mock()
+    connection.cursor.return_value = cursor
+    from features.configure.service import ConfigureService
+
+    result = ConfigureService._query_capture_capability(connection, "mysql")
+    assert result == {
+        "available": True,
+        "source": "performance_schema",
+        "title": "Historical query discovery is ready",
+        "instructions": [],
+    }

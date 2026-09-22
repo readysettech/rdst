@@ -39,6 +39,9 @@ export function QueryLibraryNewQueriesCard({
   const reviewCount = library.newVisibleCount
   const hasPending = pendingNewCount + pendingUpdatedCount > 0
   const hasReviewable = reviewCount > 0
+  const finding = library.selection?.facetCounts?.finding
+  const assessed = finding ? finding.any + finding.none : 0
+  const unassessed = finding ? Math.max(0, finding.all - assessed) : 0
 
   if (!hasPending && !hasReviewable) return null
 
@@ -67,6 +70,9 @@ export function QueryLibraryNewQueriesCard({
             {hasPending
               ? 'Readyset kept your current list still while these queries arrived.'
               : 'Review the new workload evidence, then clear the update when you are done.'}
+            {unassessed > 0
+              ? ` Jev has assessed ${assessed} of ${finding?.all ?? 0}.`
+              : ''}
           </Text>
         </VStack>
 

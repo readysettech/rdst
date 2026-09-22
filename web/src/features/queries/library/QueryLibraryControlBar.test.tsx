@@ -40,6 +40,7 @@ function renderControlBar(
         params: 'all',
         activity: 'all',
         impact: 'all',
+        finding: 'all',
       }}
       onFilterChange={vi.fn()}
       onClearFilter={vi.fn()}
@@ -79,6 +80,16 @@ function renderControlBar(
             '30d': 0,
           },
           impact: { all: 0, '1m': 0, '10m': 0, '1h': 0 },
+          finding: {
+            all: 0,
+            any: 0,
+            index_coverage: 0,
+            join_growth: 0,
+            broad_work: 0,
+            repeated_work: 0,
+            access_expression_risk: 0,
+            none: 0,
+          },
         },
       }}
       {...overrides}
@@ -138,6 +149,7 @@ describe('Queries Starred filter', () => {
         params: 'all',
         activity: 'all',
         impact: 'all',
+        finding: 'all',
       },
     })
 

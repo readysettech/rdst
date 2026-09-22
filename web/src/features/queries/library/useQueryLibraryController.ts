@@ -124,6 +124,7 @@ export function useQueryLibraryController({
     [
       optimisticSearch.activity,
       optimisticSearch.impact,
+      optimisticSearch.finding,
       optimisticSearch.params,
       optimisticSearch.q,
       optimisticSearch.sort,
@@ -147,6 +148,7 @@ export function useQueryLibraryController({
       params: deferredState.params,
       activity: deferredState.activity,
       impact: deferredState.impact,
+      finding: deferredState.finding,
       sort: deferredState.sort,
       starred: deferredState.starred,
     },
@@ -216,6 +218,7 @@ export function useQueryLibraryController({
     deferredState.params,
     deferredState.activity,
     deferredState.impact,
+    deferredState.finding,
     deferredState.sort,
     String(deferredState.starred),
     String(readModel.pageCount),
@@ -253,6 +256,7 @@ export function useQueryLibraryController({
     search.tab,
     search.hash,
     search.impact,
+    search.finding,
     search.params,
     search.q,
     search.run,
@@ -307,6 +311,7 @@ export function useQueryLibraryController({
       params: current.params,
       activity: current.activity,
       impact: current.impact,
+      finding: current.finding,
       sort: current.sort,
     }
 
@@ -372,6 +377,7 @@ export function useQueryLibraryController({
       setActivity: (activity: typeof state.activity) =>
         updateSearch({ activity }),
       setImpact: (impact: typeof state.impact) => updateSearch({ impact }),
+      setFinding: (finding: typeof state.finding) => updateSearch({ finding }),
       setSort: (sort: typeof state.sort) => updateSearch({ sort }),
       setStarred: (starred: boolean) =>
         updateSearch({ starred: starred || undefined }),
@@ -388,6 +394,7 @@ export function useQueryLibraryController({
           params: undefined,
           activity: undefined,
           impact: undefined,
+          finding: undefined,
           starred: undefined,
         }),
       clearAdvancedFilters: () =>
@@ -396,6 +403,7 @@ export function useQueryLibraryController({
           params: undefined,
           activity: undefined,
           impact: undefined,
+          finding: undefined,
         }),
       clearFilters: () =>
         updateSearch({
@@ -405,6 +413,7 @@ export function useQueryLibraryController({
           params: undefined,
           activity: undefined,
           impact: undefined,
+          finding: undefined,
           sort: undefined,
           starred: undefined,
         }),

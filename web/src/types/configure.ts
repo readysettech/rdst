@@ -75,4 +75,11 @@ export interface ConfigureConnectionStatus {
   passwordEnv?: string
   privileges?: { writable: boolean; evidence: string }
   databaseEngine?: string
+  queryCapture?: {
+    available: boolean
+    source: string
+    title: string
+    detail?: string
+    instructions: string[]
+  }
 }

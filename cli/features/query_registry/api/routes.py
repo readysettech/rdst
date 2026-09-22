@@ -6,7 +6,6 @@ from typing import Any, Optional, Literal, AsyncGenerator, Union
 from datetime import datetime, timezone
 from sse_starlette.sse import EventSourceResponse
 import json
-import asyncio
 import hashlib
 import logging
 import os
@@ -83,6 +82,30 @@ class LastCompareOutcome(BaseModel):
     detail: Optional[str] = None
 
 
+class JevFinding(BaseModel):
+    id: str
+    label: str
+    verdict: str
+    confidence: Optional[float] = None
+    description: str = ""
+
+
+class JevAssessmentSummary(BaseModel):
+    status: str = "pending"
+    attempt_count: int = 0
+    model: str = ""
+    rubric_version: str = ""
+    schema_fingerprint: str = ""
+    schema_collected_at: str = ""
+    schema_coverage: str = ""
+    assessed_at: str = ""
+    priority_score: Optional[int] = None
+    band: str = ""
+    confidence: Optional[float] = None
+    findings: list[JevFinding] = Field(default_factory=list)
+    error_code: str = ""
+
+
 class QueryRegistryEntry(BaseModel):
     sql: str
     hash: str
@@ -122,6 +145,7 @@ class QueryRegistryEntry(BaseModel):
     starred: bool = False
     starred_at: str = ""
     last_compare: Optional[LastCompareOutcome] = None
+    jev_assessment: Optional[JevAssessmentSummary] = None
 
 
 class QueryRegistryResponse(BaseModel):
@@ -140,6 +164,7 @@ class QueryLibraryFacetCounts(BaseModel):
     params: dict[str, int]
     activity: dict[str, int]
     impact: dict[str, int]
+    finding: dict[str, int]
 
 
 class QueryLibraryFreshness(BaseModel):
@@ -259,11 +284,17 @@ async def stream_query_discovery(
     collector = query_discovery.collector_for(guard.target_name)
 
     async def event_stream() -> AsyncGenerator[dict, None]:
-        yield {"retry": SSE_RETRY_MILLISECONDS}
-        async for event in collector.subscribe(after_cursor):
-            if await request.is_disconnected():
-                break
-            yield event.to_sse()
+        from ..assessment import query_assessment_worker
+
+        query_assessment_worker.select_target(guard.target_name)
+        try:
+            yield {"retry": SSE_RETRY_MILLISECONDS}
+            async for event in collector.subscribe(after_cursor):
+                if await request.is_disconnected():
+                    break
+                yield event.to_sse()
+        finally:
+            query_assessment_worker.release_target(guard.target_name)
 
     # Bookmarks are the keepalive; the transport's comment ping only
     # backstops a stalled subscriber loop at the same cadence.
@@ -292,10 +323,18 @@ def _last_compare(lifecycle) -> Optional[LastCompareOutcome]:
     )
 
 
-def _to_registry_entry(q, target: Optional[str]) -> QueryRegistryEntry:
+def _to_registry_entry(q, target: Optional[str], assessment: Optional[dict] = None) -> QueryRegistryEntry:
     """Map one registry row to its API entry for the requested target."""
     entry_target = target or q.home_target
     lifecycle = q.lifecycle_for(entry_target)
+    assessment_payload = None
+    if assessment:
+        result = assessment.get("result")
+        findings = result.get("findings", []) if isinstance(result, dict) else []
+        assessment_payload = JevAssessmentSummary(
+            **{key: value for key, value in assessment.items() if key != "result"},
+            findings=findings if isinstance(findings, list) else [],
+        )
     return QueryRegistryEntry(
         sql=q.sql,
         hash=q.hash,
@@ -335,6 +374,7 @@ def _to_registry_entry(q, target: Optional[str]) -> QueryRegistryEntry:
         starred=bool(lifecycle and lifecycle.saved_at),
         starred_at=lifecycle.saved_at if lifecycle else "",
         last_compare=_last_compare(lifecycle),
+        jev_assessment=assessment_payload,
     )
 
 
@@ -370,6 +410,7 @@ def _library_read_model(
     sort: Optional[str],
     cursor: Optional[str],
     limit: Optional[int],
+    finding: Optional[str] = None,
 ) -> QueryLibraryResponse:
     """Full-set filtering, facets, and keyset pagination for the Query Library."""
     resolved = {
@@ -381,6 +422,7 @@ def _library_read_model(
         "params": params or "all",
         "activity": activity or "all",
         "impact": impact or "all",
+        "finding": finding or "all",
         "sort": sort or "highest-impact",
     }
     spec = read_model.spec_hash(**resolved)
@@ -399,7 +441,6 @@ def _library_read_model(
     page_size = limit if limit is not None and limit > 0 else 50
     page_size = min(page_size, _LIBRARY_MAX_PAGE)
     try:
-        from shared.query_registry import QueryRegistry
         from shared.query_registry.query_registry import QueryEntry
 
         store = _cached_read_model_store()
@@ -413,6 +454,7 @@ def _library_read_model(
                 params=resolved["params"],
                 activity=resolved["activity"],
                 impact=resolved["impact"],
+                finding=resolved["finding"],
                 sort=resolved["sort"],
                 cursor_position=cursor_position,
                 limit=page_size,
@@ -421,7 +463,8 @@ def _library_read_model(
             page = []
             for entry in stored_page:
                 try:
-                    page.append(_to_registry_entry(QueryEntry.from_dict(entry), target))
+                    assessment = entry.pop("_assessment", None)
+                    page.append(_to_registry_entry(QueryEntry.from_dict(entry), target, assessment))
                 except Exception:
                     logger.warning(
                         "Skipping malformed registry entry %s", entry.get("hash")
@@ -446,6 +489,7 @@ def _library_read_model(
                 params=resolved["params"],
                 activity=resolved["activity"],
                 impact=resolved["impact"],
+                finding=resolved["finding"],
                 sort=resolved["sort"],
             )
             page, next_position = read_model.paginate(
@@ -494,6 +538,7 @@ async def get_query_registry(
     params: Optional[read_model.ParamsName] = None,
     activity: Optional[read_model.ActivityName] = None,
     impact: Optional[read_model.ImpactName] = None,
+    finding: Optional[read_model.FindingName] = None,
     sort: Optional[read_model.SortName] = None,
     cursor: Optional[str] = None,
 ) -> Union[QueryLibraryResponse, QueryRegistryResponse]:
@@ -512,7 +557,8 @@ async def get_query_registry(
     if any(
         value is not None
         for value in (
-            search, view, starred, source, params, activity, impact, sort, cursor,
+            search, view, starred, source, params, activity, impact, finding,
+            sort, cursor,
         )
     ):
         return _library_read_model(
@@ -524,6 +570,7 @@ async def get_query_registry(
             params=params,
             activity=activity,
             impact=impact,
+            finding=finding,
             sort=sort,
             cursor=cursor,
             limit=limit,

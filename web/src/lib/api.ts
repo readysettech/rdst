@@ -193,6 +193,30 @@ export type QueryCompareOutcome = {
   detail?: string | null
 }
 
+export type JevAssessmentFinding = {
+  id?: string
+  label?: string
+  verdict?: string
+  confidence?: number | null
+  description?: string
+}
+
+export type JevAssessmentSummary = {
+  status?: string
+  attempt_count?: number
+  model?: string
+  rubric_version?: string
+  schema_fingerprint?: string
+  schema_collected_at?: string
+  schema_coverage?: string
+  assessed_at?: string
+  priority_score?: number | null
+  band?: string
+  confidence?: number | null
+  findings?: JevAssessmentFinding[]
+  error_code?: string
+}
+
 /**
  * A registry row, plus the read-model fields added since the last gen:api run:
  * the user's star and the durable compare outcome. Both are optional, so a
@@ -203,6 +227,7 @@ export type QueryRegistryEntry =
     starred?: boolean
     starred_at?: string | null
     last_compare?: QueryCompareOutcome | null
+    jev_assessment?: JevAssessmentSummary | null
   }
 export type QueryRegistryResponse =
   apiComponents['schemas']['QueryRegistryResponse']
@@ -258,6 +283,7 @@ export type QueryRegistryReadModelRequest = {
   params: string
   activity: string
   impact: string
+  finding: string
   sort: string
   /** The star, an independent boolean that composes with every other filter. */
   starred?: boolean
@@ -289,6 +315,7 @@ export async function fetchQueryRegistryReadModel(
     params: request.params,
     activity: request.activity,
     impact: request.impact,
+    finding: request.finding,
     sort: request.sort,
     limit: String(request.limit),
   })

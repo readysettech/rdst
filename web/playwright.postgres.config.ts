@@ -38,6 +38,7 @@ export default defineConfig({
       RDST_WEB_DIST_DIR: distDir,
       RDST_TESTING: '1',
       RDST_TELEMETRY: 'off',
+      RDST_E2E_CONTROLLED_JEV: '1',
       RDST_E2E_DB_PASSWORD:
         process.env.RDST_E2E_DB_PASSWORD ?? 'rdst_e2e_password',
       PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',

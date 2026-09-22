@@ -9,6 +9,197 @@ import {
   test,
 } from './fixtures'
 
+function jevResponse(score: number, choice = 'possible_concern') {
+  const probabilities = {
+    no_evidence: choice === 'no_evidence' ? 1 : 0,
+    possible_concern: choice === 'possible_concern' ? 1 : 0,
+    strong_concern: choice === 'strong_concern' ? 1 : 0,
+    insufficient_context: choice === 'insufficient_context' ? 1 : 0,
+  }
+  const answer = {
+    type: 'choice',
+    choice,
+    probabilities,
+    confidence: 0.82,
+  }
+  return {
+    model: 'jev-1.13.0',
+    rubric_version: 'query-quick-assessment-v2',
+    answers: {
+      access_expression_risk: answer,
+      index_coverage: answer,
+      join_growth: answer,
+      repeated_work: answer,
+      broad_work: answer,
+      priority: {
+        type: 'score',
+        score,
+        legend: {
+          '0': 'low',
+          '1': 'one',
+          '2': 'two',
+          '3': 'three',
+          '4': 'high',
+        },
+        probabilities: { '0': 0, '1': 0, '2': 0, '3': 1, '4': 0 },
+        confidence: 0.76,
+      },
+    },
+    usage: { input_tokens: 850, output_tokens: 20 },
+  }
+}
+
+test('shows persisted Jev assessments and applies server priority sorting', async ({
+  page,
+}) => {
+  setBackendFixtures({
+    jev_assessment: [
+      { value: jevResponse(3.2), delay_ms: 300, match_sql: 'FROM orders' },
+      { value: jevResponse(0.8, 'no_evidence'), match_sql: 'FROM customers' },
+    ],
+  })
+  await clearQueryRegistry(page.request)
+  await configureTestTarget(page, { hasPassword: true })
+  const low = await page.request.post('/api/query-registry', {
+    data: {
+      sql: 'SELECT id FROM customers WHERE email = 1',
+      target: 'e2e-guard',
+    },
+  })
+  const high = await page.request.post('/api/query-registry', {
+    data: {
+      sql: 'SELECT * FROM orders ORDER BY created_at',
+      target: 'e2e-guard',
+    },
+  })
+  expect(low.ok()).toBe(true)
+  expect(high.ok()).toBe(true)
+
+  await page.goto('/queries')
+  await expect(page.getByText('Jev · High priority')).toBeVisible({
+    timeout: 10_000,
+  })
+  await expect(page.getByText('Jev · Low priority')).toBeVisible({
+    timeout: 10_000,
+  })
+
+  const highRow = page
+    .getByTestId('query-registry-row')
+    .filter({ hasText: 'Jev · High priority' })
+  await highRow.getByRole('button', { name: 'View Jev results' }).click()
+  await expect(page.getByText(/Jev classified this query/)).toBeVisible()
+  await expect(page.getByText(/Schema context:/)).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Deep analyze this query' })
+  ).toBeVisible()
+
+  await page.getByRole('button', { name: 'Order queries' }).click()
+  await page.getByRole('menuitem', { name: 'Jev' }).click()
+  await page.getByRole('menuitem', { name: 'Review priority' }).click()
+  await expect(page).toHaveURL(/sort=jev-priority/)
+  const rows = page.getByTestId('query-registry-row')
+  await expect(rows.first().locator('code[title]')).toHaveAttribute(
+    'title',
+    'SELECT * FROM orders ORDER BY created_at'
+  )
+})
+
+test('orders the registry by the Jev concern shown on the card', async ({
+  page,
+}) => {
+  setBackendFixtures({
+    jev_assessment: [
+      { value: jevResponse(3.2, 'strong_concern'), match_sql: 'FROM orders' },
+      { value: jevResponse(0.8, 'no_evidence'), match_sql: 'FROM customers' },
+    ],
+  })
+  await clearQueryRegistry(page.request)
+  await configureTestTarget(page, { hasPassword: true })
+  await page.request.post('/api/query-registry', {
+    data: {
+      sql: 'SELECT id FROM customers WHERE email = 1',
+      target: 'e2e-guard',
+    },
+  })
+  await page.request.post('/api/query-registry', {
+    data: {
+      sql: 'SELECT * FROM orders ORDER BY created_at',
+      target: 'e2e-guard',
+    },
+  })
+
+  await page.goto('/queries')
+  await expect(page.getByText('Jev · High priority')).toBeVisible({
+    timeout: 10_000,
+  })
+  await expect(page.getByText('Jev · Low priority')).toBeVisible({
+    timeout: 10_000,
+  })
+
+  // The concern reads off the collapsed card, before any disclosure opens.
+  const rows = page.getByTestId('query-registry-row')
+  const flaggedRow = rows.filter({ hasText: 'Jev · High priority' })
+  await expect(flaggedRow.getByText('Missing index')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Order queries' }).click()
+  await page.getByRole('menuitem', { name: 'Jev' }).click()
+  await page.getByRole('menuitem', { name: 'Missing index' }).click()
+  await expect(page).toHaveURL(/sort=jev-index_coverage/)
+  await expect(rows.first().locator('code[title]')).toHaveAttribute(
+    'title',
+    'SELECT * FROM orders ORDER BY created_at'
+  )
+})
+
+test('keeps the sort trigger clear of the result count at every width', async ({
+  page,
+}) => {
+  setBackendFixtures({ jev_assessment: [{ value: jevResponse(3.2) }] })
+  await clearQueryRegistry(page.request)
+  await configureTestTarget(page, { hasPassword: true })
+  await page.request.post('/api/query-registry', {
+    data: {
+      sql: 'SELECT * FROM orders ORDER BY created_at',
+      target: 'e2e-guard',
+    },
+  })
+  await page.goto('/queries')
+
+  // The longest label the control can show.
+  await page.getByRole('button', { name: 'Order queries' }).click()
+  await page.getByRole('menuitem', { name: 'Jev' }).click()
+  await page.getByRole('menuitem', { name: 'Missing index' }).click()
+  await expect(page).toHaveURL(/sort=jev-index_coverage/)
+
+  const trigger = page.getByTestId('query-library-sort-trigger')
+  const count = page.getByTestId('query-library-result-count')
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.waitForTimeout(300)
+    await expect(trigger).toBeVisible()
+    await expect(count).toBeVisible()
+    const a = await trigger.boundingBox()
+    const b = await count.boundingBox()
+    expect(a, `trigger box at ${width}`).not.toBeNull()
+    expect(b, `count box at ${width}`).not.toBeNull()
+    if (!a || !b) continue
+    const overlaps =
+      a.x < b.x + b.width &&
+      b.x < a.x + a.width &&
+      a.y < b.y + b.height &&
+      b.y < a.y + a.height
+    expect(overlaps, `sort trigger overlaps the count at ${width}`).toBe(false)
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth
+      ),
+      `horizontal overflow at ${width}`
+    ).toBe(0)
+  }
+})
+
 test('creates, renames, edits, searches, analyzes, and deletes a saved query', async ({
   page,
 }) => {

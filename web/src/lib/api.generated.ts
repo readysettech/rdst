@@ -5915,6 +5915,81 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** JevAssessmentSummary */
+        JevAssessmentSummary: {
+            /**
+             * Assessed At
+             * @default
+             */
+            assessed_at?: string;
+            /**
+             * Attempt Count
+             * @default 0
+             */
+            attempt_count?: number;
+            /**
+             * Band
+             * @default
+             */
+            band?: string;
+            /** Confidence */
+            confidence?: number | null;
+            /**
+             * Error Code
+             * @default
+             */
+            error_code?: string;
+            /** Findings */
+            findings?: components["schemas"]["JevFinding"][];
+            /**
+             * Model
+             * @default
+             */
+            model?: string;
+            /** Priority Score */
+            priority_score?: number | null;
+            /**
+             * Rubric Version
+             * @default
+             */
+            rubric_version?: string;
+            /**
+             * Schema Collected At
+             * @default
+             */
+            schema_collected_at?: string;
+            /**
+             * Schema Coverage
+             * @default
+             */
+            schema_coverage?: string;
+            /**
+             * Schema Fingerprint
+             * @default
+             */
+            schema_fingerprint?: string;
+            /**
+             * Status
+             * @default pending
+             */
+            status?: string;
+        };
+        /** JevFinding */
+        JevFinding: {
+            /** Confidence */
+            confidence?: number | null;
+            /**
+             * Description
+             * @default
+             */
+            description?: string;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Verdict */
+            verdict: string;
+        };
         /** LLMAnalysis */
         LLMAnalysis: {
             /** @default null */
@@ -6361,6 +6436,10 @@ export interface components {
             activity: {
                 [key: string]: number;
             };
+            /** Finding */
+            finding: {
+                [key: string]: number;
+            };
             /** Impact */
             impact: {
                 [key: string]: number;
@@ -6447,6 +6526,7 @@ export interface components {
              * @default false
              */
             is_new?: boolean;
+            jev_assessment?: components["schemas"]["JevAssessmentSummary"] | null;
             /** Last Analyzed */
             last_analyzed: string;
             /**
@@ -11678,7 +11758,8 @@ export interface operations {
                 params?: ("all" | "without-parameters" | "values-ready" | "values-needed") | null;
                 activity?: ("all" | "1m" | "1h" | "8h" | "24h" | "7d" | "30d") | null;
                 impact?: ("all" | "1m" | "10m" | "1h") | null;
-                sort?: ("highest-impact" | "recently-observed" | "newest" | "most-frequent" | "slowest-average" | "recently-analyzed") | null;
+                finding?: ("all" | "any" | "index_coverage" | "join_growth" | "broad_work" | "repeated_work" | "access_expression_risk" | "none") | null;
+                sort?: ("highest-impact" | "recently-observed" | "newest" | "most-frequent" | "slowest-average" | "recently-analyzed" | "jev-priority" | "jev-access_expression_risk" | "jev-index_coverage" | "jev-join_growth" | "jev-repeated_work" | "jev-broad_work") | null;
                 cursor?: string | null;
             };
             header?: never;

@@ -34,6 +34,8 @@ from tests.web_e2e.fakes import (
     fake_sandbox_manager,
     fake_probe_upstream,
     fake_autocomplete_schema,
+    FakeJevClient,
+    fake_assessment_context,
 )
 
 
@@ -64,6 +66,12 @@ scan_routes.ScanService = FakeScanService
 semantic_layer_routes.SchemaService = FakeSchemaService
 top_routes.TopService = FakeTopService
 schema_routes.collect_all_tables_schema = fake_autocomplete_schema
+
+from features.query_registry import assessment as assessment_module
+
+assessment_module.query_assessment_worker._client = FakeJevClient()
+assessment_module.collect_assessment_context = fake_assessment_context
+assessment_module.is_signed_in_locally = lambda: True
 
 # The integration tier validates browser/API/background-run behavior without
 # touching Docker. Full-stack browser tests use the unmodified production

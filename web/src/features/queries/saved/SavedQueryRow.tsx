@@ -49,6 +49,7 @@ import type {
 } from '../library/queryLibraryDisplay'
 import { analysisOutcome, type ResultTone } from '../results/resultsSelectors'
 import { analyzedAgoLabel } from '../results/storedAnalysis'
+import { JevAssessment } from './JevAssessment'
 import { SavedQueryMenu } from './SavedQueryMenu'
 import { reportsCacheTestRun, SavedQueryTestPanel } from './SavedQueryTestPanel'
 import { getSourceMeta } from './savedQuerySelectors'
@@ -251,7 +252,21 @@ export function SavedQueryRow({
     ) : undefined
   // A cache test the user started keeps the slot: it is the newer answer, and
   // the header still carries the analysis state.
-  const expansion = testPanel ?? analysisPanel
+  const jevPanel = isDefaultState ? (
+    <JevAssessment
+      assessment={entry.jev_assessment}
+      onDeepAnalyze={openStoredAnalysis ?? openAnalysis}
+      hasDeepAnalysis={Boolean(openStoredAnalysis)}
+    />
+  ) : undefined
+  const activeWorkPanel = testPanel ?? analysisPanel
+  const expansion =
+    jevPanel || activeWorkPanel ? (
+      <VStack className="items-stretch gap-3">
+        {jevPanel}
+        {activeWorkPanel}
+      </VStack>
+    ) : undefined
   const visible = visibleProperties
     ? new Set<QueryLibraryDisplayProperty>(visibleProperties)
     : null
@@ -304,7 +319,7 @@ export function SavedQueryRow({
       size="small"
       variant={outcome.tone}
       modifier="ghost"
-      label={outcome.label}
+      label={`Deep analysis · ${outcome.label}`}
     />
   ) : null
   const analyzedMeta = analyzedAgo ? (

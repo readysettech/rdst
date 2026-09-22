@@ -1,3 +1,4 @@
+import { InlineNotice } from '@rs/ui-new/error-state'
 import { m } from '@rs/ui-new/motion'
 import { ParameterDialog } from '../../../components/top'
 import { AddQueryDialog } from '../saved/AddQueryDialog'
@@ -39,6 +40,16 @@ export function QueryLibraryPage({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.1 }}
       >
+        {controller.library.discovery.capture_warning ? (
+          <InlineNotice
+            errorClass="database"
+            accent="warning"
+            icon="alert"
+            title="Historical query discovery needs setup"
+            message={`${controller.library.discovery.capture_warning.source} is unavailable, so Readyset may miss queries that are not active during a live sample. ${controller.library.discovery.capture_warning.instructions.join(' ')}`}
+            trustworthy="Saved queries and completed Jev assessments remain available."
+          />
+        ) : null}
         <QueryLibraryToolbar controller={controller} />
         <QueryLibraryList controller={controller} />
       </m.div>

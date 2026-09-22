@@ -267,6 +267,42 @@ test('account login unlocks hosted Ask and sign-out restores the AI access choic
     }
   })
 
+  await test.step('run a persisted Jev assessment through the preview Keyservice', async () => {
+    const sql =
+      'SELECT primarytitle FROM title_basics WHERE startyear > 2000 ORDER BY primarytitle'
+    const added = await signedInPage.request.post('/api/query-registry', {
+      data: { sql, target: TARGET },
+    })
+    expect(added.ok()).toBe(true)
+    const hash = ((await added.json()) as { hash: string }).hash
+    // The live target carries background traffic, so every assertion is
+    // pinned to this one shape: search matches a hash prefix.
+    const query = `/api/query-registry?target=${TARGET}&search=${hash}&view=all&source=all&params=all&activity=all&impact=all&sort=jev-priority&limit=10`
+    await expect(async () => {
+      const registry = await signedInPage.request.get(query)
+      expect(registry.ok()).toBe(true)
+      const body = (await registry.json()) as {
+        queries: { jev_assessment?: { status: string; model: string } }[]
+      }
+      expect(body.queries[0]?.jev_assessment).toMatchObject({
+        status: 'complete',
+        model: 'jev-1.13.0',
+      })
+    }).toPass({ timeout: 120_000 })
+    await signedInPage.goto(`/queries?q=${hash}`)
+    await expect(
+      signedInPage.getByText(
+        /Jev · (High|Medium|Low|Unranked) priority|Jev · Limited assessment/
+      )
+    ).toBeVisible({ timeout: 30_000 })
+    await signedInPage.getByRole('button', { name: 'View Jev results' }).click()
+    await expect(
+      signedInPage.getByText(
+        /Jev classified this query from the structural risks|Jev could not assess this query/
+      )
+    ).toBeVisible()
+  })
+
   await test.step('sign out and require an AI access choice again', async () => {
     // `section=ai` is the recovery deep link and opens the Anthropic-key
     // dialog. The settings panel itself is selected with `panel=ai`.

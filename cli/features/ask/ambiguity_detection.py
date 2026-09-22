@@ -106,6 +106,10 @@ class AmbiguityOption:
             data["score"], (int, float)
         ):
             raise ValueError("ambiguity option score must be numeric")
+        # Providers without structured output sometimes send one string; the
+        # schema asks for a list of strings.
+        if isinstance(data["evidence"], str):
+            data["evidence"] = [data["evidence"]]
         if not isinstance(data["evidence"], list) or not all(
             isinstance(item, str) for item in data["evidence"]
         ):

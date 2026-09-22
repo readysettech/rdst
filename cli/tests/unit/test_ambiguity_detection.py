@@ -464,3 +464,18 @@ def test_ranked_resolver_abstains_on_tie_or_weak_margin() -> None:
     assert resolution.action == "abstain"
     assert resolution.selected_option_id is None
     assert resolution.reason == "ranking_margin_below_threshold"
+
+
+def test_option_accepts_single_evidence_string():
+    from features.ask.ambiguity_detection import AmbiguityOption
+
+    option = AmbiguityOption.from_dict(
+        {
+            "id": "opt-1",
+            "text": "Return the 5 most viewed titles",
+            "score": 0.3,
+            "evidence": "\"top\" often implies a short list",
+            "sql_effect": "Limits the result to 5 rows",
+        }
+    )
+    assert option.evidence == ["\"top\" often implies a short list"]

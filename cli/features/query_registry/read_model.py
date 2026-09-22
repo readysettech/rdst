@@ -38,6 +38,17 @@ SourceName = Literal["all", "observed", "ask", "manual", "file", "scan"]
 ParamsName = Literal["all", "without-parameters", "values-ready", "values-needed"]
 ActivityName = Literal["all", "1m", "1h", "8h", "24h", "7d", "30d"]
 ImpactName = Literal["all", "1m", "10m", "1h"]
+FindingName = Literal[
+    "all",
+    "any",
+    "index_coverage",
+    "join_growth",
+    "broad_work",
+    "repeated_work",
+    "access_expression_risk",
+    "none",
+]
+
 SortName = Literal[
     "highest-impact",
     "recently-observed",
@@ -45,6 +56,12 @@ SortName = Literal[
     "most-frequent",
     "slowest-average",
     "recently-analyzed",
+    "jev-priority",
+    "jev-access_expression_risk",
+    "jev-index_coverage",
+    "jev-join_growth",
+    "jev-repeated_work",
+    "jev-broad_work",
 ]
 
 VIEWS: Tuple[str, ...] = (
@@ -56,6 +73,18 @@ PARAMS_FILTERS: Tuple[str, ...] = (
 )
 ACTIVITY_WINDOWS: Tuple[str, ...] = ("all", "1m", "1h", "8h", "24h", "7d", "30d")
 IMPACT_FILTERS: Tuple[str, ...] = ("all", "1m", "10m", "1h")
+# "any"/"none" bracket the fixed rubric concerns so the page can ask for
+# "anything Jev flagged" without naming each one.
+FINDING_FILTERS: Tuple[str, ...] = (
+    "all",
+    "any",
+    "index_coverage",
+    "join_growth",
+    "broad_work",
+    "repeated_work",
+    "access_expression_risk",
+    "none",
+)
 
 _OBSERVED_SOURCES = frozenset({"top", "top-historical", "audit"})
 _ASK_SOURCES = frozenset({"ask", "prompt"})
@@ -319,6 +348,24 @@ def _impact_matches(entry: Any) -> Dict[str, bool]:
     return {name: impact >= _IMPACT_THRESHOLD_MS[name] for name in IMPACT_FILTERS}
 
 
+def _finding_matches(entry: Any) -> Dict[str, bool]:
+    assessment = getattr(entry, "jev_assessment", None)
+    found = {
+        str(item.get("id") if isinstance(item, dict) else getattr(item, "id", ""))
+        for item in (getattr(assessment, "findings", None) or [])
+    }
+    matches = {name: name in found for name in FINDING_FILTERS}
+    matches["all"] = True
+    matches["any"] = bool(found)
+    assessment = getattr(entry, "jev_assessment", None)
+    ranked = (
+        getattr(assessment, "status", "") == "complete"
+        and getattr(assessment, "priority_score", None) is not None
+    )
+    matches["none"] = ranked and not found
+    return matches
+
+
 def _view_matches(entry: Any) -> Dict[str, bool]:
     # The client additionally treats rows whose lifecycle fields are absent
     # (undefined) as legacy-saved; the API always serializes those fields, so
@@ -361,6 +408,16 @@ def sort_value(entry: Any, sort: str) -> float:
             else entry.last_analyzed
         )
         return _timestamp_ms(value)
+    if sort == "jev-priority":
+        assessment = getattr(entry, "jev_assessment", None)
+        value = getattr(assessment, "priority_score", None)
+        return _finite_number(value) if value is not None else -1.0
+    if sort.startswith("jev-"):
+        assessment = getattr(entry, "jev_assessment", None)
+        value = getattr(assessment, "priority_score", None)
+        score = _finite_number(value) if value is not None else -1.0
+        matches = _finding_matches(entry).get(sort[len("jev-") :], False)
+        return (1000.0 if matches else 0.0) + score
     raise ValueError(f"Unknown sort: {sort}")
 
 
@@ -371,6 +428,7 @@ def empty_facet_counts() -> Dict[str, Dict[str, int]]:
         "params": {name: 0 for name in PARAMS_FILTERS},
         "activity": {name: 0 for name in ACTIVITY_WINDOWS},
         "impact": {name: 0 for name in IMPACT_FILTERS},
+        "finding": {name: 0 for name in FINDING_FILTERS},
     }
 
 
@@ -384,6 +442,7 @@ def select_library(
     params: str = "all",
     activity: str = "all",
     impact: str = "all",
+    finding: str = "all",
     sort: str = "highest-impact",
     now_ms: Optional[float] = None,
 ) -> Tuple[List[Any], Dict[str, Dict[str, int]]]:
@@ -413,13 +472,14 @@ def select_library(
         parameters = _parameter_matches(entry)
         activities = _activity_matches(entry, now_ms)
         impacts = _impact_matches(entry)
+        findings = _finding_matches(entry)
         matches_view = views[view]
         matches_source = sources[source]
         matches_params = parameters[params]
         matches_activity = activities[activity]
         matches_impact = impacts[impact]
-
-        if matches_source and matches_params and matches_activity and matches_impact:
+        matches_finding = findings[finding]
+        if matches_source and matches_params and matches_activity and matches_impact and matches_finding:
             for candidate in VIEWS:
                 if views[candidate]:
                     facet_counts["view"][candidate] += 1
@@ -427,18 +487,22 @@ def select_library(
             for candidate in SOURCES:
                 if sources[candidate]:
                     facet_counts["source"][candidate] += 1
-        if matches_view and matches_source and matches_activity and matches_impact:
+        if matches_view and matches_source and matches_activity and matches_impact and matches_finding:
             for candidate in PARAMS_FILTERS:
                 if parameters[candidate]:
                     facet_counts["params"][candidate] += 1
-        if matches_view and matches_source and matches_params and matches_impact:
+        if matches_view and matches_source and matches_params and matches_impact and matches_finding:
             for candidate in ACTIVITY_WINDOWS:
                 if activities[candidate]:
                     facet_counts["activity"][candidate] += 1
-        if matches_view and matches_source and matches_params and matches_activity:
+        if matches_view and matches_source and matches_params and matches_activity and matches_finding:
             for candidate in IMPACT_FILTERS:
                 if impacts[candidate]:
                     facet_counts["impact"][candidate] += 1
+        if matches_view and matches_source and matches_params and matches_activity and matches_impact:
+            for candidate in FINDING_FILTERS:
+                if findings[candidate]:
+                    facet_counts["finding"][candidate] += 1
 
         if (
             matches_view
@@ -446,6 +510,7 @@ def select_library(
             and matches_params
             and matches_activity
             and matches_impact
+            and matches_finding
         ):
             selected.append(entry)
 
@@ -470,6 +535,7 @@ def spec_hash(
     activity: str,
     impact: str,
     sort: str,
+    finding: str = "all",
     starred: Optional[bool] = None,
 ) -> str:
     """Short fingerprint of everything that defines row order and membership.
@@ -487,6 +553,7 @@ def spec_hash(
             "params": params,
             "activity": activity,
             "impact": impact,
+            "finding": finding,
             "sort": sort,
         },
         sort_keys=True,

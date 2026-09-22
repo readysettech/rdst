@@ -52,6 +52,7 @@ class ConfigureConnectionTestEvent:
     category: Optional[str] = None
     password_env: Optional[str] = None
     privileges: Optional[Dict[str, Any]] = None
+    query_capture: Optional[Dict[str, Any]] = None
 
 
 @dataclass

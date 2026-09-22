@@ -13,6 +13,7 @@ so the read paths stay real.
 from __future__ import annotations
 
 import asyncio
+import time
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -44,6 +45,7 @@ from features.schema.semantic_models import SemanticLayer
 from features.schema.service import SchemaService
 from features.top.events import TopEvent
 from features.top.service import TopService
+from features.schema.assessment_context import AssessmentContext
 
 
 ANALYZE_EVENT = TypeAdapter(AnalyzeEvent)
@@ -357,3 +359,35 @@ def fake_autocomplete_schema(
         "success": True,
         "tables": fixtures.value("autocomplete_schema", default={}),
     }
+
+
+class FakeJevClient:
+    def assess(self, **kwargs):
+        # Lanes run concurrently, so a fixture that names the SQL it answers
+        # is matched by content rather than consumed in arrival order.
+        sql = str(kwargs.get("sql") or "")
+        response = None
+        for candidate in fixtures.responses("jev_assessment"):
+            match = candidate.get("match_sql")
+            if match and match in sql:
+                response = candidate
+                break
+        if response is None:
+            response = fixtures.take("jev_assessment", default=None)
+        if response is None:
+            from shared.llm_manager.jev_client import JevClientError
+
+            raise JevClientError("JEV_NOT_CONFIGURED", 503)
+        time.sleep(float(response.get("delay_ms", 0)) / 1000)
+        return response["value"]
+
+
+def fake_assessment_context(sql, *, target, target_config, store):
+    del sql, target, target_config, store
+    return AssessmentContext(
+        payload={"tables": ["orders"], "schema": "Table: orders"},
+        fingerprint="e2e-schema",
+        collected_at="2026-09-21T12:00:00Z",
+        coverage="relevant tables",
+        table_set_hash="orders",
+    )

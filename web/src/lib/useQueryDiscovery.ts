@@ -32,6 +32,10 @@ export type QueryDiscoverySnapshot = {
   // Absent on older backends; false marks a no-change poll.
   changed?: boolean
   stats?: QueryDiscoveryStats | null
+  capture_warning?: {
+    source: string
+    instructions: string[]
+  } | null
 }
 
 export type QueryDiscoveryResync = {
@@ -54,6 +58,7 @@ function initialSnapshot(target: string): QueryDiscoverySnapshot {
     engine: '',
     query_count: 0,
     new_hashes: [],
+    capture_warning: null,
     error: null,
   }
 }
@@ -122,15 +127,23 @@ export function useQueryDiscoveryTransport(target?: string | null) {
       })
     }
 
+    const assessmentUpdate = () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryRegistryQueryKey(target),
+      })
+    }
+
     source.addEventListener('discovery_snapshot', receive)
     source.addEventListener('discovery_update', receive)
     source.addEventListener('discovery_error', receive)
+    source.addEventListener('assessment_update', assessmentUpdate)
     source.addEventListener('resync', resync)
 
     return () => {
       source.removeEventListener('discovery_snapshot', receive)
       source.removeEventListener('discovery_update', receive)
       source.removeEventListener('discovery_error', receive)
+      source.removeEventListener('assessment_update', assessmentUpdate)
       source.removeEventListener('resync', resync)
       source.close()
     }

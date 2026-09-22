@@ -23,6 +23,7 @@ export function useTopQueryHash(
         params: 'all',
         activity: 'all',
         impact: 'all',
+        finding: 'all',
         sort: 'highest-impact',
         limit: 1,
       }),

@@ -1,5 +1,7 @@
 import { Button } from '@rs/ui-new/button'
 import { Show } from '@rs/ui-new/show'
+import { Text } from '@rs/ui-new/text'
+import { Fragment } from 'react'
 import { DataResponse } from '../../../components/data-response/DataResponse'
 import {
   QueryListEmptyState,
@@ -10,6 +12,7 @@ import { SavedQueryRow } from '../saved/SavedQueryRow'
 import { QueryLibraryNewQueriesCard } from './QueryLibraryNewQueriesCard'
 import {
   QUERY_LIBRARY_ACTIVITY_LABELS,
+  QUERY_LIBRARY_FINDING_LABELS,
   QUERY_LIBRARY_IMPACT_LABELS,
   QUERY_LIBRARY_PARAMETER_LABELS,
   QUERY_LIBRARY_SOURCE_LABELS,
@@ -85,6 +88,34 @@ export function QueryLibraryList({
           onClick: library.clearFilters,
         }
 
+  // A Jev finding sort lifts matching queries above the rest; the headings mark
+  // where that group ends so the effect of the sort is visible.
+  const sortFinding =
+    library.sort?.startsWith('jev-') && library.sort !== 'jev-priority'
+      ? library.sort.slice(4)
+      : null
+  const hasFinding = (entry: (typeof library.visibleQueries)[number]) =>
+    (entry.jev_assessment?.findings ?? []).some(
+      (finding) => finding.id === sortFinding
+    )
+  const matchCount = sortFinding
+    ? library.visibleQueries.filter(hasFinding).length
+    : 0
+  const findingLabel = sortFinding
+    ? QUERY_LIBRARY_FINDING_LABELS[
+        sortFinding as keyof typeof QUERY_LIBRARY_FINDING_LABELS
+      ]
+    : ''
+  const groupHeading = (index: number) => {
+    if (!sortFinding) return null
+    if (index === 0)
+      return matchCount > 0
+        ? `${matchCount} ${matchCount === 1 ? 'query' : 'queries'} flagged: ${findingLabel}`
+        : `No queries flagged: ${findingLabel}`
+    if (index === matchCount && matchCount > 0) return 'Other queries'
+    return null
+  }
+
   return (
     <div aria-busy={library.isPending}>
       <DataResponse
@@ -139,17 +170,30 @@ export function QueryLibraryList({
         {() => (
           <div className="space-y-3">
             <QueryLibraryNewQueriesCard controller={controller} />
-            {library.visibleQueries.map((entry) => (
-              <SavedQueryRow
-                key={library.keyForHash(entry.hash)}
-                entry={entry}
-                target={controller.target}
-                state={rowState}
-                actions={rowActions}
-                displayMode={library.renderDisplayMode}
-                visibleProperties={library.renderProperties}
-              />
-            ))}
+            {library.visibleQueries.map((entry, index) => {
+              const heading = groupHeading(index)
+              return (
+                <Fragment key={library.keyForHash(entry.hash)}>
+                  {heading ? (
+                    <Text
+                      level="label-small"
+                      className="px-1 pt-2 text-content-layout-2"
+                      data-testid="jev-sort-group-heading"
+                    >
+                      {heading}
+                    </Text>
+                  ) : null}
+                  <SavedQueryRow
+                    entry={entry}
+                    target={controller.target}
+                    state={rowState}
+                    actions={rowActions}
+                    displayMode={library.renderDisplayMode}
+                    visibleProperties={library.renderProperties}
+                  />
+                </Fragment>
+              )
+            })}
             <Show when={library.hasNextPage}>
               <div className="flex justify-center pt-1">
                 <Button
