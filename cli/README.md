@@ -3,7 +3,7 @@
 <img src="docs/assets/rdst-banner.svg" alt="RDST - the Readyset Data and SQL Toolkit" width="100%"/>
 
 <p>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License: Apache 2.0"/></a>
   <img src="https://img.shields.io/badge/platform-macOS_%7C_Linux_%7C_Windows-lightgrey" alt="Platforms"/>
   <img src="https://img.shields.io/badge/databases-PostgreSQL_%7C_MySQL-336791" alt="PostgreSQL and MySQL"/>
   <a href="https://readyset.io/docs/readyset-ai/rdst/cli"><img src="https://img.shields.io/badge/docs-readyset.io-4cc38a" alt="Documentation"/></a>
@@ -204,4 +204,4 @@ Learn more at [readyset.io](https://readyset.io).
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+Apache License 2.0 — see [LICENSE](LICENSE) for details.

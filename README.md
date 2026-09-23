@@ -105,5 +105,5 @@ they land.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE). Third-party fonts and icons keep their own
+Apache 2.0 — see [`LICENSE`](LICENSE). Third-party fonts and icons keep their own
 licenses, listed in [`LICENSE-THIRD-PARTY`](LICENSE-THIRD-PARTY).

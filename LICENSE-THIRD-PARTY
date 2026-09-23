@@ -1,9 +1,10 @@
 THIRD-PARTY LICENSES
 ====================
 
-The RDST source in this repository is MIT licensed (see LICENSE). The fonts and
-icon artwork it ships are third-party works under their own licenses, listed
-here with the exact upstream revision each was taken from.
+The RDST source in this repository is licensed under the Apache License 2.0
+(see LICENSE). The fonts and icon artwork it ships are third-party works under
+their own licenses, listed here with the exact upstream revision each was taken
+from.
 
 Python and JavaScript dependencies are not listed here; they are resolved at
 install time from cli/pyproject.toml and pnpm-lock.yaml and carry their own
@@ -88,7 +89,7 @@ service, not to claim endorsement, sponsorship or affiliation.
 5. Readyset trademarks
 ----------------------
 
-MIT licenses the code, not the marks. "Readyset", "RDST", the Readyset logo
+Apache 2.0 licenses the code, not the marks. "Readyset", "RDST", the Readyset logo
 (packages/ui-new/src/components/svg/logo.tsx) and the application icons
 (desktop/resources/icon.*) are trademarks of Readyset, Inc. and are not
 licensed by LICENSE. Forks and derivative distributions must use their own
