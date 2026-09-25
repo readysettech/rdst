@@ -414,7 +414,7 @@ class TestReadysetLaneFallback:
         assert endpoints.sql("readyset") == []
 
     @pytest.mark.asyncio
-    async def test_readyset_lane_alone_falls_back_to_the_origin(self):
+    async def test_readyset_lane_alone_never_falls_back_to_the_origin(self):
         endpoints = _Endpoints()
         events = await _run(
             endpoints,
@@ -422,10 +422,34 @@ class TestReadysetLaneFallback:
             lanes=["readyset"],
         )
 
+        assert events[-1].type == "error"
+        assert events[-1].code == "benchmark_readyset_unavailable"
+        assert endpoints.opened == []
+
+    @pytest.mark.asyncio
+    async def test_readyset_only_prepares_caches_and_measures_without_source(self):
+        endpoints = _Endpoints()
+        prepared = []
+
+        def prepare(endpoint, owner_id, queries, **kwargs):
+            prepared.extend(queries)
+            return {}
+        events = await _run(
+            endpoints,
+            queries=[{"identifier": "one", "sql": "SELECT 1"},
+                     {"identifier": "two", "sql": "SELECT 2"}],
+            lanes=["readyset"],
+            readyset=_sandbox(),
+            prepare=prepare,
+        )
         complete = events[-1]
-        assert complete.lanes_run == ["origin"]
-        assert complete.total_successes == 4
-        assert {endpoint for endpoint, _, _ in endpoints.opened} == {"origin"}
+        assert complete.type == "complete"
+        assert complete.lanes_run == ["readyset"]
+        assert {stats.query_hash for stats in complete.queries} == {"one", "two"}
+        assert all(set(stats.lanes) == {"readyset"} for stats in complete.queries)
+        assert all(stats.successes > 0 for stats in complete.queries)
+        assert {endpoint for endpoint, _, _ in endpoints.opened} == {"readyset"}
+        assert prepared == [("one", "SELECT 1"), ("two", "SELECT 2")]
 
 
 class TestUncacheableQueries:

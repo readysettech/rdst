@@ -50,7 +50,7 @@ describe('AI provider startup gate', () => {
 
   afterEach(cleanup)
 
-  it('offers Readyset signup and Anthropic BYOK without a skip action', () => {
+  it('leads with sign-in and keeps an own key secondary', () => {
     renderWithClient(
       <AiProviderGate gate={{ status: 'blocked', reason: 'missing' }} />,
       createTestQueryClient()
@@ -59,7 +59,15 @@ describe('AI provider startup gate', () => {
     expect(
       screen.getByRole('heading', { name: 'Choose how RDST uses AI' })
     ).toBeTruthy()
-    expect(screen.getByText('No Readyset account required')).toBeTruthy()
+    // Sign-in is the one primary path; an own key is a small secondary option
+    // that says what it covers, and nothing on the screen talks about money.
+    expect(screen.getByTestId('ai-access-sign-in').textContent).toContain(
+      'AI monitoring needs a Readyset account'
+    )
+    expect(screen.getByTestId('ai-access-own-key').textContent).toContain(
+      'covers deep analysis and reports'
+    )
+    expect(document.body.textContent).not.toMatch(/\bfree\b|trial|credit/i)
     expect(screen.queryByRole('button', { name: /skip/i })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Sign up or sign in' }))

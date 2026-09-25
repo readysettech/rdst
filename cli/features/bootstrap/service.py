@@ -214,7 +214,7 @@ class TargetBootstrapService:
         else:
             initialized = await run_blocking(schema.init, target, target_config)
             ok = initialized.success
-            message = initialized.error or f"{initialized.tables} tables found"
+            message = initialized.error or f"{initialized.tables} {'table' if initialized.tables == 1 else 'tables'} found"
         if not ok:
             yield _stage(STAGE_STRUCTURE, "failed", message)
             return

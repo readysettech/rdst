@@ -7,7 +7,6 @@ import { useDisclosure } from '@rs/ui-new/use-disclosure'
 import { Link } from '@tanstack/react-router'
 import { useId } from 'react'
 import { trackEvent } from '../../lib/analytics'
-import { useAiGate } from '../../lib/useAiGate'
 import { dismissSetupGuide, useSetupGuideState } from './setupGuideStore'
 import {
   completedSetupSteps,
@@ -21,7 +20,6 @@ import {
   useSetupProgress,
   useSetupStepCompletionEvents,
 } from './useSetupProgress'
-import { useTopQueryHash } from './useTopQueryHash'
 
 const ROW = 'flex items-center gap-2 rounded-md px-2 py-1'
 
@@ -41,35 +39,6 @@ function StepMarker({ index, current }: { index: number; current: boolean }) {
     >
       {index + 1}
     </span>
-  )
-}
-
-/**
- * The AI-key prerequisite for "Analyze a query", surfaced just-in-time under
- * the step that needs it rather than as a sixth row — a six-step list reads
- * harder than a five-step one. Mounted only while that step is the current
- * one, so the key probe never runs for a step nobody has reached.
- */
-function AiKeyNote() {
-  const gate = useAiGate()
-  if (gate.status !== 'blocked') return null
-  const label =
-    gate.reason === 'exhausted'
-      ? 'Your included AI is used up — sign in again or add a key'
-      : gate.reason === 'invalid'
-        ? 'This AI key was rejected — update it'
-        : 'Needs an AI key — add one'
-  return (
-    <Link
-      to="/configure"
-      data-testid="setup-steps-ai-key-note"
-      className={`ml-8 flex items-center gap-1.5 rounded-md px-2 py-0.5 text-content-warning-soft hover:bg-surface-warning-soft ${FOCUS_RING}`}
-    >
-      <Icon name="key" label="" aria-hidden="true" className="h-3.5 w-3.5" />
-      <Text level="caption" className="text-content-warning-soft">
-        {label}
-      </Text>
-    </Link>
   )
 }
 
@@ -115,7 +84,6 @@ function StepRow({
   return (
     <Link
       to={step.to}
-      search={step.search}
       aria-current="step"
       title={step.why}
       className={`${ROW} bg-surface-layout-2 hover:bg-surface-layout-soft motion-safe:transition-colors motion-safe:duration-fast ${FOCUS_RING}`}
@@ -131,10 +99,11 @@ function StepRow({
 /**
  * The setup checklist, docked in the sidebar footer above the utilities.
  *
- * It is chrome, not an overlay: the five steps live beside the navigation on
- * every route, so nothing the guide says can sit on top of the page it is
- * describing. All of its state is derived from `/api/setup-progress` except
- * the one persisted flag — the block is hidden once the user hides it, and it
+ * It is chrome, not an overlay: the two steps (connect a database, turn on
+ * monitoring) live beside the navigation on every route, so nothing the guide
+ * says can sit on top of the page it is describing. All of its state is derived
+ * from `/api/setup-progress` and the monitor settings except the one persisted
+ * flag — the block is hidden once the user hides it, and it
  * retires on its own once every step is done. The sidebar's setup utility is
  * the way back.
  */
@@ -154,15 +123,9 @@ export function SetupSteps() {
   const known = hasSetupSignal(data)
   const visible = known && !dismissed && !isSetupComplete(data)
 
-  // Step 4 names a query rather than the library at large.
-  const analyzeHash = useTopQueryHash(
-    known ? data.target : undefined,
-    visible && known && data.queries_found && !data.analyzed
-  )
-
   if (!visible) return null
 
-  const steps = setupSteps(data, { analyzeHash })
+  const steps = setupSteps(data)
   const done = completedSetupSteps(data)
   const currentId = steps.find((step) => !step.done)?.id
 
@@ -248,9 +211,6 @@ export function SetupSteps() {
                   index={index}
                   current={step.id === currentId}
                 />
-                {step.id === 'analyze-query' && step.id === currentId ? (
-                  <AiKeyNote />
-                ) : null}
               </li>
             ))}
           </m.ol>

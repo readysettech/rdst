@@ -60,6 +60,7 @@ class CompleteEvent:
     type: Literal["complete"]
     success: bool
     analysis_id: Optional[str] = None
+    stored_analysis_id: Optional[str] = None
     query_hash: Optional[str] = None
     explain_results: Optional[ExplainResults] = None
     llm_analysis: Optional[LLMAnalysis] = None

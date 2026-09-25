@@ -57,6 +57,14 @@ class TestSchemaCollectorExtractTables:
         assert "orders" in tables
         assert "products" in tables
 
+    def test_mysql_digest_text_backticks_and_schema(self):
+        """MySQL digest text quotes every name and spaces the schema dot."""
+        sql = ("SELECT `p` . `id` FROM `shop` . `order_items` `oi` "
+               "JOIN `products` `p` ON `p` . `id` = `oi` . `product_id`")
+        assert _extract_table_names_from_sql(sql) == {"order_items", "products"}
+        assert _extract_table_names_from_sql(
+            "SELECT * FROM `payments` WHERE `provider_ref` = ?") == {"payments"}
+
     def test_insert_query(self):
         """Test extracting from INSERT."""
         sql = "INSERT INTO users (name) VALUES ('test')"

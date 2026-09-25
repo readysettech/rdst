@@ -41,7 +41,7 @@ export function SchemaReinitDialog({
         icon: 'alert',
         title: 'This discards every annotation',
         message:
-          'Re-init rebuilds the layer from a fresh introspection and does not merge existing annotations. All table and column descriptions, enum meanings, business terms, metrics, and relationships — human and AI-authored — will be permanently deleted. This cannot be undone.',
+          "Re-init rebuilds the layer from a fresh introspection and doesn't merge existing annotations. All table and column descriptions, enum meanings, business terms, metrics, and relationships - human and AI-authored - will be permanently deleted. This can't be undone.",
       }}
       confirmLabel="Discard & re-init"
       confirmVariant="negative"

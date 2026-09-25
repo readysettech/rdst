@@ -32,6 +32,7 @@ Completeness vocabulary (one value per result):
 from __future__ import annotations
 
 import hashlib
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Optional
 
@@ -47,7 +48,7 @@ COMPLETENESS_VALUES = frozenset(
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CounterRow:
     """One engine statistics row at a point in time.
 
@@ -74,9 +75,12 @@ class CounterRow:
     stats_since: Optional[float] = None
     first_seen: Optional[float] = None
     minmax_stats_since: Optional[float] = None
+    blks_hit: int = 0
+    blks_read: int = 0
+    temp_blks: int = 0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DeltaResult:
     """Outcome of diffing one engine_key across a window.
 
@@ -265,6 +269,8 @@ def process_snapshot(
             row.calls < base.calls
             or row.total_exec_time < base.total_exec_time
             or row.rows < base.rows
+            or row.blks_hit < base.blks_hit
+            or row.blks_read < base.blks_read
         ):
             emit(row.engine_key, COUNTER_REGRESSION, attribution=row.calls,
                  start=row_start, end=row_end)
@@ -302,15 +308,30 @@ def process_snapshot(
 
 
 def advance_baseline(
-    prev: Mapping[str, CounterRow], curr: Iterable[CounterRow]
+    prev: Mapping[str, CounterRow], curr: Iterable[CounterRow], *,
+    stale_after_s: float = 3600, max_keys: int = 10000,
 ) -> dict[str, CounterRow]:
     """Baseline for the next window: every observed row re-baselines to its
     current values (correct for all completeness outcomes), and absent rows
     are retained because disappearance is not deletion (Q9 rule 10). A
     retained row that later reappears is validated by the epoch and
-    regression guards like any other pair.
+    regression guards like any other pair. Absent keys expire after an hour;
+    evicted keys reappear as fresh baselines without manufacturing a delta.
     """
-    merged: dict[str, CounterRow] = dict(prev)
+    if max_keys <= 0:
+        return {}
+    merged: OrderedDict[str, CounterRow] = OrderedDict()
+    for key, row in prev.items():
+        merged[key] = row
+        if len(merged) > max_keys:
+            merged.popitem(last=False)
     for row in curr:
+        merged.pop(row.engine_key, None)
         merged[row.engine_key] = row
-    return merged
+        if len(merged) > max_keys:
+            merged.popitem(last=False)
+    if not merged:
+        return merged
+    newest = max(row.captured_at for row in merged.values())
+    return {key: row for key, row in merged.items()
+            if newest - row.captured_at <= stale_after_s}

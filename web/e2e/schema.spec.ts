@@ -1,4 +1,5 @@
 import {
+  acceptBrowserError,
   configureTestTarget,
   consumeBrowserError,
   expect,
@@ -51,16 +52,17 @@ test('shows only the actionable password notice for a locked target', async ({
   page,
   browserErrors,
 }) => {
+  // The locked target's 423 can reach the console after the assertions, so accept it up front.
+  acceptBrowserError(
+    browserErrors,
+    'Failed to load resource: the server responded with a status of 423 (Locked)'
+  )
   await configureTestTarget(page)
 
   await page.goto('/schema')
 
   await expect(page.getByText('Connection needs a password')).toBeVisible()
   await expect(page.getByText(/^Error: HTTP 423:/)).toHaveCount(0)
-  consumeBrowserError(
-    browserErrors,
-    'Failed to load resource: the server responded with a status of 423 (Locked)'
-  )
 })
 
 test('initializes, explores, refreshes, and deletes a semantic layer', async ({

@@ -347,7 +347,7 @@ def check_max_tables(sql: str, max_tables: int) -> CheckResult:
             passed=False,
             level="warn",  # Warning, not block
             guard_name="max_tables",
-            message=f"Query uses {table_count} tables (limit: {max_tables})",
+            message=f"Query uses {table_count} {'table' if table_count == 1 else 'tables'} (limit: {max_tables})",
             suggestion="Consider simplifying the query or breaking it into parts",
         )
 

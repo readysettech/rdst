@@ -313,3 +313,99 @@ describe('getReadysetVerdict', () => {
     expect(view.nextStep.plannerVerdict?.cost_reduction_pct).toBe(99.9)
   })
 })
+
+describe('the next step agrees with the recommendations below it', () => {
+  it('names an untested rewrite the analysis suggested', () => {
+    const view = selectResultsViewModel(
+      completeEvent({
+        llm_analysis: {
+          success: true,
+          performance_assessment: {
+            overall_rating: 'fair',
+            efficiency_score: 55,
+            primary_concerns: [],
+          },
+          rewrite_suggestions: [
+            {
+              rewritten_sql: 'SELECT c.tier FROM customers c',
+              explanation: 'Aggregates orders first.',
+              expected_improvement: '5-15%',
+              optimization_type: 'join',
+              priority: 'medium',
+            },
+          ],
+        },
+      }),
+      { tested: false, skipped_reason: 'background_analysis' } as RewriteTesting
+    )
+    expect(view.nextStep).toMatchObject({
+      kind: 'rewrite',
+      evidence: 'Suggested',
+      title: 'Try the suggested rewrite',
+      supportingText: 'Estimated: 5-15%',
+      sql: 'SELECT c.tier FROM customers c',
+    })
+  })
+
+  it('falls back to a high-priority recommendation before saying nothing', () => {
+    const view = selectResultsViewModel(
+      completeEvent({
+        llm_analysis: {
+          success: true,
+          performance_assessment: {
+            overall_rating: 'fair',
+            efficiency_score: 55,
+            primary_concerns: [],
+          },
+          optimization_opportunities: [
+            { priority: 'medium', type: 'configuration', description: 'Raise work_mem.' },
+            {
+              priority: 'high',
+              type: 'caching',
+              description: 'Precompute spend per customer.',
+              example: 'CREATE MATERIALIZED VIEW mv AS SELECT 1',
+            },
+          ],
+        },
+      })
+    )
+    expect(view.nextStep).toMatchObject({
+      kind: 'opportunity',
+      title: 'Precompute or cache the result',
+      body: 'Precompute spend per customer.',
+      sql: 'CREATE MATERIALIZED VIEW mv AS SELECT 1',
+    })
+  })
+
+  it('does not suggest a rewrite that testing measured without a gain', () => {
+    const view = selectResultsViewModel(
+      completeEvent({
+        llm_analysis: {
+          success: true,
+          rewrite_suggestions: [
+            {
+              rewritten_sql: 'SELECT 2',
+              explanation: 'x',
+              expected_improvement: '5%',
+              optimization_type: 'x',
+              priority: 'low',
+            },
+          ],
+        },
+      }),
+      {
+        tested: true,
+        original_performance: { execution_time_ms: 10, rows_returned: 1 },
+        rewrite_results: [
+          {
+            success: true,
+            sql: 'SELECT 2',
+            performance: { execution_time_ms: 12, rows_returned: 1 },
+            improvement: { overall: { improvement_pct: -20 } },
+          },
+        ],
+      } as RewriteTesting
+    )
+    expect(view.nextStep.kind).toBe('none')
+  })
+})

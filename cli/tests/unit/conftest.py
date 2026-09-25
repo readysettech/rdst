@@ -19,6 +19,10 @@ from keyring.backend import KeyringBackend
 from shared.secret_store_service import SecretStoreService
 
 
+def pytest_configure(config):
+    config.addinivalue_line("markers", "slow: opt-in monitor performance benchmark")
+
+
 def make_loopback_request(path: str = "/", headers: dict | None = None) -> Request:
     """Build the minimal Request that `require_local_request` accepts.
 
@@ -231,3 +235,28 @@ def run_api_client(run_registry, run_api_target):
         yield client
     finally:
         client.close()
+
+
+@pytest.fixture(autouse=True)
+def _no_host_docker_desktop(monkeypatch, tmp_path_factory):
+    """Docker topology tests describe native Linux unless they opt into Desktop, so a
+    developer machine with Docker Desktop's WSL integration doesn't change their outcome."""
+    from shared.deploy import docker_topology
+
+    monkeypatch.setattr(docker_topology, "_DESKTOP_WSL_MOUNT",
+                        tmp_path_factory.getbasetemp() / "no-docker-desktop")
+
+
+@pytest.fixture(autouse=True)
+def _no_param_sampler(monkeypatch):
+    """The monitor's parameter sampler polls live databases; unit tests opt in explicitly."""
+    monkeypatch.setenv("RDST_MONITOR_SAMPLE_INTERVAL_S", "0")
+
+
+@pytest.fixture(autouse=True)
+def _monitor_account_session(request, monkeypatch):
+    """Monitor policy tests use a signed-in account unless they override authorization."""
+    if request.path.name.startswith("test_monitor"):
+        from features.monitor import database_limit
+
+        monkeypatch.setattr(database_limit, "_signed_in", lambda: True)

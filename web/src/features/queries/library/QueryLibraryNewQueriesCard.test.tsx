@@ -71,7 +71,7 @@ describe('QueryLibraryNewQueriesCard', () => {
       />
     )
 
-    expect(screen.getByText('2 new, 1 updated queries')).toBeDefined()
+    expect(screen.getByText('2 new, 1 updated query')).toBeDefined()
     expect(
       screen.getByRole('button', { name: 'Show 2 new, 1 updated' })
     ).toBeDefined()

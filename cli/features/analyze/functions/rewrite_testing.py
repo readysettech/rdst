@@ -169,6 +169,15 @@ def test_query_rewrites(original_sql: str, rewrite_suggestions: List[Dict[str, A
         }
 
 
+def _timeout_ms(value: Any) -> Optional[int]:
+    """A statement timeout passed through the workflow, which may arrive as text."""
+    try:
+        timeout = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    return timeout if timeout > 0 else None
+
+
 def _convert_explain_result_to_baseline(explain_result: Dict[str, Any], original_sql: str) -> Dict[str, Any]:
     """Convert explain_result from ExecuteExplainAnalyze step to baseline_result format."""
     return {
@@ -321,6 +330,10 @@ def _test_single_rewrite(suggestion: Dict[str, Any], baseline_result: Dict[str, 
             rewrite_max_time_ms = MAX_REWRITE_TIME_MS
         else:
             rewrite_max_time_ms = baseline_time_ms
+        # A run's own statement timeout (background runs set one) bounds each rewrite too.
+        statement_timeout_ms = _timeout_ms(kwargs.get('statement_timeout_ms'))
+        if statement_timeout_ms:
+            rewrite_max_time_ms = min(rewrite_max_time_ms, statement_timeout_ms)
 
         # Execute EXPLAIN ANALYZE on rewrite with timeout
         explain_result = execute_explain_analyze(
@@ -328,7 +341,9 @@ def _test_single_rewrite(suggestion: Dict[str, Any], baseline_result: Dict[str, 
             target=target,
             target_config=kwargs.get('target_config'),
             fast_mode=kwargs.get('fast_mode', False),
-            rewrite_max_time_ms=rewrite_max_time_ms
+            rewrite_max_time_ms=rewrite_max_time_ms,
+            non_interactive=kwargs.get('non_interactive', False),
+            statement_timeout_ms=statement_timeout_ms,
         )
 
         if not explain_result.get('success', False):

@@ -25,6 +25,8 @@ from features.ask.models import AskInput, AskOptions
 from features.ask.profiles import default_ask_service_options
 from features.ask.service import AskService
 from features.ask.telemetry import ask_terminal_detector
+from features.schema.assessment_context import referenced_tables
+from shared import agent_activity
 from shared.api.models import AskRequest
 from shared.api.target_guard import TargetGuard, require_target_body
 from shared.telemetry import telemetry
@@ -150,17 +152,55 @@ def _event_to_sse(event: AskEvent) -> dict:
     }
 
 
+def _describe_ask(activity: agent_activity.Activity, event: AskEvent) -> None:
+    """The audit entry's subject and decision, from what Ask reported."""
+    if isinstance(event, AskResultEvent):
+        try:
+            tables = referenced_tables(event.sql) if event.sql else []
+        except Exception:
+            tables = []
+        activity.describe(
+            subject=", ".join(name.rsplit(".", 1)[-1] for name in tables[:4]),
+            outcome="done" if event.success else "failed",
+            decision=f"Ran the generated query; {event.row_count} "
+            f"{'row' if event.row_count == 1 else 'rows'} shown to you, not kept in this log"
+            if event.success else "The generated query didn't run")
+    elif isinstance(event, AskClarificationNeededEvent):
+        activity.describe(outcome="done", decision="Asked you to pick an interpretation")
+    elif isinstance(event, AskErrorEvent):
+        activity.describe(outcome="failed", summary=event.message[:300])
+
+
 async def _ask_generator(
     input_data: AskInput | None,
     options: AskOptions | None,
     target_engine: str = "unknown",
     session_id: str | None = None,
     clarification_answers: dict | None = None,
+    target: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     extra: dict = {
         "is_resume": bool(session_id),
         "dry_run": options.dry_run if options else False,
     }
+    question = input_data.question if input_data else None
+    with agent_activity.action("ask", target or (input_data.target if input_data else None),
+                               read_kind="query", question=question,
+                               resumed=bool(session_id) or None) as activity:
+        async for item in _ask_events(input_data, options, target_engine, session_id,
+                                      clarification_answers, extra, activity):
+            yield item
+
+
+async def _ask_events(
+    input_data: AskInput | None,
+    options: AskOptions | None,
+    target_engine: str,
+    session_id: str | None,
+    clarification_answers: dict | None,
+    extra: dict,
+    activity: agent_activity.Activity,
+) -> AsyncGenerator[dict, None]:
     async with telemetry.command_run(
         "ask",
         source="web",
@@ -176,14 +216,17 @@ async def _ask_generator(
                     clarification_answers=clarification_answers,
                 ):
                     run.observe(event)
+                    _describe_ask(activity, event)
                     yield _event_to_sse(event)
                 return
 
             async for event in service.ask(input_data, options):
                 run.observe(event)
+                _describe_ask(activity, event)
                 yield _event_to_sse(event)
         except Exception as exc:
             run.error(exc)
+            activity.describe(outcome="failed", summary="The question could not be answered.")
             # Shared {code, message, detail} envelope (B7/T24); never raw str(e).
             yield {
                 "event": "error",
@@ -294,6 +337,7 @@ async def ask(
                 target_engine=guard.target_engine,
                 session_id=body.session_id,
                 clarification_answers=body.clarification_answers,
+                target=guard.target_name,
             )
         )
 

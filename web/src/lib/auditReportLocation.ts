@@ -22,7 +22,6 @@ export const INNER_REPORT_TABS: Array<{
   { id: 'overview', label: 'Overview' },
   { id: 'queries', label: 'Queries' },
   { id: 'sizing', label: 'Sizing' },
-  { id: 'savings', label: 'Savings' },
   { id: 'detailed-analysis', label: 'Detailed analysis' },
   { id: 'next-steps', label: 'Next steps' },
 ]
@@ -31,11 +30,10 @@ export const INNER_REPORT_TAB_DESCRIPTIONS: Record<InnerReportTab, string> = {
   overview:
     'See the headline verdict and the findings that matter most for this database.',
   queries:
-    'Review the queries observed on this database—captured live during the audit window and historically busiest—and whether Readyset can cache them.',
+    'Review the queries observed on this database - captured live during the audit window and historically busiest - and whether Readyset can cache them.',
   sizing:
     'Compare how this instance is provisioned with the capacity its observed workload actually needs.',
-  savings:
-    'See the estimated monthly savings from right-sizing this instance and caching eligible queries with Readyset.',
+  savings: 'Review instance sizing recommendations.',
   'detailed-analysis':
     'Inspect database health across configuration, memory and cache, vacuum and bloat, indexes, connections, and replication.',
   'next-steps':
@@ -49,14 +47,13 @@ export const FLEET_REPORT_TABS: Array<{
   label: string
 }> = [
   { id: 'summary', label: 'Fleet summary' },
-  { id: 'sizing', label: 'Fleet savings' },
+  { id: 'sizing', label: 'Fleet sizing' },
 ]
 
 export const FLEET_REPORT_TAB_DESCRIPTIONS: Record<FleetReportTab, string> = {
   summary:
     'See the fleet-wide health verdict, audit coverage, and highest-priority findings across all instances.',
-  sizing:
-    'Review current and suggested monthly fleet costs, total potential savings, and the per-instance rollup.',
+  sizing: 'Review current and suggested instance sizes across the fleet.',
 }
 
 export const REPORT_LOCATION_EVENT = 'rdst:report-location-change'

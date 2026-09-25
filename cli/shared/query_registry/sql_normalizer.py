@@ -115,6 +115,18 @@ _SYSTEM_SCHEMAS = {
     "sys",
 }
 
+# Statistics views that extensions install into whatever schema they were created in
+# (often "public"), so the schema alone does not identify them as system relations.
+_EXTENSION_STAT_VIEWS = {
+    "pg_stat_statements",
+    "pg_stat_statements_info",
+    "pg_stat_monitor",
+    "pg_stat_kcache",
+    "pg_qualstats",
+    "pg_wait_sampling_profile",
+    "pg_wait_sampling_history",
+}
+
 
 # RDST prefixes its own observation statements with this marker; PostgreSQL
 # stores the first-seen text verbatim while the queryid jumble ignores
@@ -140,23 +152,30 @@ _UTILITY_PREFIXES = (
     "listen",
     "notify",
     "unlisten",
+    # Statements about statements or tables, never workload. MySQL's statement digests
+    # record them (RDST's own schema reads included); pg_stat_statements doesn't.
+    "describe ",
+    "desc ",
+    "explain ",
+    "explain\n",
 )
 
 # Parse-failure fallback: capture relation tokens after FROM/JOIN/INTO/
 # UPDATE/DELETE FROM so catalog-only statements the parser cannot handle
-# (array casts, tooling SQL) are still classified instead of failing open.
+# (array casts, tooling SQL, MySQL digest text such as `a` . `b`) are still
+# classified instead of failing open.
 _RELATION_TOKEN = re.compile(
     r"\b(?:from|join|into|update|delete\s+from)\s+"
-    r'("?[A-Za-z_][\w$]*"?(?:\."?[A-Za-z_][\w$]*"?)?)',
+    r'([`"]?[A-Za-z_][\w$]*[`"]?(?:\s*\.\s*[`"]?[A-Za-z_][\w$]*[`"]?)?)',
     re.IGNORECASE,
 )
 
 
 def _is_system_relation(token: str) -> bool:
-    parts = [part.strip('"').lower() for part in token.split(".")]
+    parts = [part.strip().strip('"`').lower() for part in token.split(".")]
     schema = parts[0] if len(parts) == 2 else ""
     name = parts[-1]
-    if schema in _SYSTEM_SCHEMAS:
+    if schema in _SYSTEM_SCHEMAS or name in _EXTENSION_STAT_VIEWS:
         return True
     return not schema and name.startswith("pg_")
 
@@ -205,7 +224,7 @@ def references_user_relations(sql: str, dialect: str = None) -> bool:
         schema = (table.db or "").lower()
         if not name or (not schema and name in cte_names):
             continue
-        if schema in _SYSTEM_SCHEMAS:
+        if schema in _SYSTEM_SCHEMAS or name in _EXTENSION_STAT_VIEWS:
             continue
         if not schema and name.startswith("pg_"):
             continue
@@ -233,6 +252,12 @@ def normalize_and_extract(sql: str, dialect: str = None) -> Tuple[str, Dict[str,
         logger.debug(f"SQLGlot parsing failed, falling back to regex: {e}")
         return _fallback_normalize(sql)
 
+    params = _extract_literals(tree)
+    return _compat_generator(dialect).generate(tree), params
+
+
+def _extract_literals(tree: exp.Expression) -> Dict[str, dict]:
+    """Replace each data literal with a named :pN placeholder, in AST order."""
     params = {}
     literals = [lit for lit in tree.find_all(exp.Literal) if not _is_structural_literal(lit)]
     for i, literal in enumerate(literals, 1):
@@ -244,8 +269,65 @@ def normalize_and_extract(sql: str, dialect: str = None) -> Tuple[str, Dict[str,
             params[param_name] = {'value': literal.this, 'type': 'number'}
         # Replace with named :p1, :p2 placeholder
         literal.replace(exp.Placeholder(this=param_name))
+    return params
 
-    return _compat_generator(dialect).generate(tree), params
+
+# MySQL digest texts fold a value list to `(...)`, one slot standing for any length.
+_DIGEST_LIST = re.compile(r"\(\s*\.\.\.\s*\)")
+_DOLLAR_NAME = re.compile(r"\$\d+")
+
+
+def _is_value_slot(node: exp.Expression) -> bool:
+    if isinstance(node, exp.Neg):
+        return _is_value_slot(node.this)
+    if isinstance(node, (exp.Placeholder, exp.Parameter, exp.Literal)):
+        return True
+    return isinstance(node, exp.Column) and bool(_DOLLAR_NAME.fullmatch(node.name or ""))
+
+
+def identity_text(sql: str, dialect: str = None, *, preserve_table_case: bool = True) -> str:
+    """Normalized text that names one logical query, whichever entry point supplied it.
+
+    Literal SQL, pg_stat_statements `$N` text and MySQL digest text (backtick quoting,
+    `IN (...)`, spaced punctuation) converge: literals become placeholders, MySQL
+    identifier quoting is dropped, and a list of values counts as one slot whatever its
+    length, as the MySQL digest already records it.
+    Only identity derives from this text; stored and displayed SQL keep their form.
+    Expects comment-free input (see query_registry.canonicalize_sql).
+    Table and database case survives for MySQL and unknown dialects. PostgreSQL folds
+    unquoted names. preserve_table_case=False reproduces the v16 hash for migration.
+    """
+    if not sql or not sql.strip():
+        return sql
+    parse_dialect = None
+    if "`" in mask_string_literals(sql) or _DIGEST_LIST.search(sql):
+        sql = _DIGEST_LIST.sub("(?)", sql)
+        parse_dialect = "mysql"
+    try:
+        tree = parse_one(sql, dialect=parse_dialect)
+    except Exception:
+        return _fallback_normalize(sql)[0]
+    _extract_literals(tree)
+    relation_identifiers = {
+        id(identifier)
+        for node in tree.find_all(exp.Table, exp.Column)
+        for key in (("this", "db", "catalog") if isinstance(node, exp.Table)
+                    else ("table", "db", "catalog"))
+        if isinstance(identifier := node.args.get(key), exp.Identifier)
+    }
+    for identifier in tree.find_all(exp.Identifier):
+        if parse_dialect == "mysql" or not identifier.quoted:
+            identifier.set("quoted", False)
+            keep_case = (preserve_table_case and dialect != "postgres"
+                         and id(identifier) in relation_identifiers)
+            if (not keep_case and isinstance(identifier.this, str)
+                    and not _DOLLAR_NAME.fullmatch(identifier.this)):
+                identifier.set("this", identifier.this.lower())
+    for node in tree.find_all(exp.In):
+        values = node.expressions
+        if len(values) > 1 and all(_is_value_slot(value) for value in values):
+            node.set("expressions", values[:1])
+    return _compat_generator(None).generate(tree)
 
 
 # Positional `$N` slots (pg_stat_statements texts) name the same parameter as
@@ -319,6 +401,28 @@ def _substitute_dollar_slots(sql: str, params: Dict[str, dict]) -> str:
     return "".join(pieces)
 
 
+def _question_slots(sql: str) -> list[re.Match[str]]:
+    """MySQL digest text's positional `?` slots outside string literals, when the text has
+    no named or `$N` placeholders; the k-th one names `pk`."""
+    masked = mask_string_literals(sql)
+    if _DOLLAR_SLOT.search(masked) or re.search(r"(?<![:\w]):p\d+", masked):
+        return []
+    return list(re.finditer(r"\?", masked))
+
+
+def _substitute_question_slots(sql: str, params: Dict[str, dict]) -> str:
+    pieces, last = [], 0
+    for index, match in enumerate(_question_slots(sql), start=1):
+        param_info = params.get(f"p{index}")
+        if not isinstance(param_info, dict):
+            continue
+        pieces.append(sql[last : match.start()])
+        pieces.append(_param_literal(param_info))
+        last = match.end()
+    pieces.append(sql[last:])
+    return "".join(pieces)
+
+
 def reconstruct_sql(normalized_sql: str, params: Dict[str, dict], dialect: str = None) -> str:
     """
     Reconstruct executable SQL by replacing :p1, :p2 and $1, $2 placeholders
@@ -339,6 +443,8 @@ def reconstruct_sql(normalized_sql: str, params: Dict[str, dict], dialect: str =
         return normalized_sql
 
     normalized_sql = _substitute_dollar_slots(normalized_sql, params)
+    if dialect == "mysql":
+        normalized_sql = _substitute_question_slots(normalized_sql, params)
 
     try:
         tree = parse_one(normalized_sql, dialect=dialect)
@@ -503,6 +609,8 @@ def get_placeholder_names(normalized_sql: str, dialect: str = None) -> Set[str]:
         return set()
 
     names = _dollar_slot_names(normalized_sql)
+    if dialect == "mysql":
+        names |= {f"p{index}" for index in range(1, len(_question_slots(normalized_sql)) + 1)}
     try:
         tree = parse_one(normalized_sql, dialect=dialect)
         return names | {p.this for p in tree.find_all(exp.Placeholder) if p.this}

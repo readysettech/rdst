@@ -350,7 +350,7 @@ class CaptureService:
                     phase="warning",
                     message=(
                         f"WARNING: {extension} is not enabled. Workload capture will have no query "
-                        f"data — only database-level health metrics. Enable {extension} for meaningful results."
+                        f"data - only database-level health metrics. Enable {extension} for meaningful results."
                     ),
                 )
 
@@ -385,7 +385,7 @@ class CaptureService:
                 yield WorkloadStatusEvent(
                     type="status",
                     phase="replay",
-                    message=f"Replaying {len(replay_queries)} queries with {concurrency} threads",
+                    message=f"Replaying {len(replay_queries)} {'query' if len(replay_queries) == 1 else 'queries'} with {concurrency} threads",
                 )
 
             # The health verdict needs only the metrics audit, so it runs while
@@ -650,7 +650,7 @@ class CaptureService:
 
                 if not docker_available():
                     run.readyset_notice = (
-                        "Docker is not available — skipped Readyset cache benchmark"
+                        "Docker is not available - skipped Readyset cache benchmark"
                     )
                     yield WorkloadStatusEvent(
                         type="status",

@@ -69,10 +69,10 @@ function AiKeyNotice({
 }) {
   const label =
     gate.reason === 'exhausted'
-      ? 'Your included AI is used up — sign in again or add a key to keep asking'
+      ? 'Your included AI is used up - sign in again or add a key to keep asking'
       : gate.reason === 'invalid'
-        ? 'This AI key was rejected — update it to keep asking'
-        : 'Follow-up questions need an AI key — add one'
+        ? 'This AI key was rejected - update it to keep asking'
+        : 'Follow-up questions need an AI key - add one'
 
   return (
     <Link

@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
+import { subscribeShared } from './sse/sharedEventSource'
 import { queryRegistryQueryKey } from './useQueryRegistry'
 
 export type QueryDiscoveryState = 'starting' | 'watching' | 'unavailable'
@@ -63,9 +64,9 @@ function initialSnapshot(target: string): QueryDiscoverySnapshot {
   }
 }
 
-function parseEvent<T>(event: MessageEvent<string>): T | null {
+function parse<T>(raw: string): T | null {
   try {
-    return JSON.parse(event.data) as T
+    return JSON.parse(raw) as T
   } catch {
     return null
   }
@@ -74,78 +75,86 @@ function parseEvent<T>(event: MessageEvent<string>): T | null {
 /**
  * Own the app-wide discovery transport. Mount this once in the root shell;
  * Query Library screens consume the snapshot from React Query instead of
- * opening page-local collectors.
+ * opening page-local collectors. The stream is shared by every open tab (one
+ * connection per target), so tabs never starve the browser's connection pool.
  */
 export function useQueryDiscoveryTransport(target?: string | null) {
   const queryClient = useQueryClient()
-  const cursorByTarget = useRef(new Map<string, number>())
 
   useEffect(() => {
-    if (!target || typeof EventSource === 'undefined') return
-
+    if (!target) return
     const params = new URLSearchParams({ target })
-    const cursor = cursorByTarget.current.get(target)
-    if (cursor != null && cursor > 0) params.set('cursor', String(cursor))
 
-    const source = new EventSource(
-      `/api/query-registry/discovery/stream?${params}`
-    )
-
-    const receive = (event: Event) => {
-      const snapshot = parseEvent<QueryDiscoverySnapshot>(
-        event as MessageEvent<string>
+    const queryKey = queryRegistryQueryKey(target)
+    let lastRefresh = Number.NEGATIVE_INFINITY
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const refresh = () => {
+      timer = undefined
+      lastRefresh = Date.now()
+      void queryClient.invalidateQueries({ queryKey })
+    }
+    // Classification can emit an event for each row. Keep a trailing refresh
+    // so bursts update the list at most once every five seconds.
+    const scheduleRefresh = () => {
+      if (timer !== undefined) return
+      const updatedAt = queryClient
+        .getQueryCache()
+        .findAll({ queryKey })
+        .reduce(
+          (latest, query) => Math.max(latest, query.state.dataUpdatedAt),
+          0
+        )
+      const delay = Math.max(
+        0,
+        5_000 - (Date.now() - Math.max(lastRefresh, updatedAt))
       )
+      if (delay === 0) refresh()
+      else timer = setTimeout(refresh, delay)
+    }
+
+    const receive = (raw: string) => {
+      const snapshot = parse<QueryDiscoverySnapshot>(raw)
       if (!snapshot || snapshot.target !== target) return
-      cursorByTarget.current.set(target, snapshot.cursor)
       queryClient.setQueryData(queryDiscoveryQueryKey(target), snapshot)
       // A no-change poll (changed === false) only refreshes the snapshot;
       // refetch registry lists just for this target when a change is signaled
       // or the backend predates the changed flag.
       if (snapshot.state === 'watching' && snapshot.changed !== false) {
-        void queryClient.invalidateQueries({
-          queryKey: queryRegistryQueryKey(target),
-        })
+        scheduleRefresh()
       }
     }
 
-    // The server replays missed events with durable ids; when the cursor is
-    // no longer retained it sends a resync on the open stream instead of an
-    // error. Adopt its cursor, publish the embedded snapshot, and refetch the
-    // registry once since deltas may have been dropped.
-    const resync = (event: Event) => {
-      const payload = parseEvent<QueryDiscoveryResync>(
-        event as MessageEvent<string>
-      )
+    // When the server can't replay missed events it sends a resync with the
+    // current state; publish it and refetch the registry once since deltas may
+    // have been dropped.
+    const resync = (raw: string) => {
+      const payload = parse<QueryDiscoveryResync>(raw)
       if (!payload || payload.state?.target !== target) return
-      cursorByTarget.current.set(target, payload.cursor)
       queryClient.setQueryData(queryDiscoveryQueryKey(target), {
         ...payload.state,
         cursor: payload.cursor,
       })
-      void queryClient.invalidateQueries({
-        queryKey: queryRegistryQueryKey(target),
-      })
+      scheduleRefresh()
     }
 
-    const assessmentUpdate = () => {
-      void queryClient.invalidateQueries({
-        queryKey: queryRegistryQueryKey(target),
-      })
-    }
-
-    source.addEventListener('discovery_snapshot', receive)
-    source.addEventListener('discovery_update', receive)
-    source.addEventListener('discovery_error', receive)
-    source.addEventListener('assessment_update', assessmentUpdate)
-    source.addEventListener('resync', resync)
-
+    const unsubscribe = subscribeShared(
+      `/api/query-registry/discovery/stream?${params}`,
+      [
+        'discovery_snapshot',
+        'discovery_update',
+        'discovery_error',
+        'assessment_update',
+        'resync',
+      ],
+      (name, raw) => {
+        if (name === 'resync') resync(raw)
+        else if (name === 'assessment_update') scheduleRefresh()
+        else receive(raw)
+      }
+    )
     return () => {
-      source.removeEventListener('discovery_snapshot', receive)
-      source.removeEventListener('discovery_update', receive)
-      source.removeEventListener('discovery_error', receive)
-      source.removeEventListener('assessment_update', assessmentUpdate)
-      source.removeEventListener('resync', resync)
-      source.close()
+      if (timer !== undefined) clearTimeout(timer)
+      unsubscribe()
     }
   }, [queryClient, target])
 }

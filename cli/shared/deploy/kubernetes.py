@@ -314,7 +314,7 @@ def _wait_for_rollout(
         return {"ready": result.returncode == 0}
 
     except subprocess.TimeoutExpired:
-        print("Rollout not ready yet — pod may still be starting.")
+        print("Rollout not ready yet - pod may still be starting.")
         print(f"  kubectl get pods -n {namespace}")
         print(f"  kubectl logs deployment/{deployment_name} -n {namespace}")
         return {"ready": False}

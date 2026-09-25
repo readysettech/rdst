@@ -5,8 +5,10 @@ Executes EXPLAIN ANALYZE queries against target databases to gather
 actual execution plans and performance metrics for analysis.
 """
 
+import contextvars
 import json
 import os
+import re
 import time
 import sys
 import signal
@@ -22,6 +24,7 @@ except ImportError:
     tty = None
 from typing import Dict, Any, Optional, List
 from contextlib import contextmanager
+from sqlglot import exp, parse
 
 try:
     import psycopg2
@@ -45,6 +48,7 @@ from shared.db_connection import (
     resolve_connection_params,
 )
 from shared.query_registry.observation_store import record_execution_evidence
+from shared import analysis_lane
 
 
 _WORKER_SETTLE_TIMEOUT_SECONDS = 1.0
@@ -52,6 +56,57 @@ _WORKER_SETTLE_TIMEOUT_SECONDS = 1.0
 # EXPLAIN wrappers reference the user's tables and land in statement stores
 # as their own texts; the marker keeps them out of registry admission.
 _SELF_MARKER = rdst_self_marker("rdst/analyze")
+
+
+def _mysql_analyze_sql(sql: str, version: str, timeout_ms: int | None) -> str | None:
+    """Only a single read-only query (a SELECT, with or without CTEs, or a set operation)
+    can be executed by MySQL Deep Analyze. A statement that starts with SELECT carries the
+    timeout as a MAX_EXECUTION_TIME hint; for the others the caller's wait loop enforces it
+    with KILL QUERY."""
+    match = re.match(r"(\d+)\.(\d+)\.(\d+)", version)
+    if ("mariadb" in version.lower() or not match
+            or tuple(map(int, match.groups())) < (8, 0, 18)):
+        return None
+    try:
+        statements = [statement for statement in parse(sql, read="mysql") if statement]
+    except Exception:
+        return None
+    if (len(statements) != 1
+            or not isinstance(statements[0], (exp.Select, exp.Union, exp.Except, exp.Intersect))
+            or any(isinstance(node, (exp.Insert, exp.Update, exp.Delete, exp.Into, exp.Lock))
+                   for node in statements[0].walk())
+            or re.search(r"\bLOCK\s+IN\s+SHARE\s+MODE\b|\bFOR\s+(?:UPDATE|SHARE)\b",
+                         sql, re.IGNORECASE)):
+        return None
+    if timeout_ms is None or not re.match(r"^\s*SELECT\b", sql, re.IGNORECASE):
+        return sql
+    # The hint is attached to the executed SELECT, not to EXPLAIN or a session.
+    return re.sub(r"^(\s*SELECT\b)",
+                  rf"\1 /*+ MAX_EXECUTION_TIME({timeout_ms}) */", sql,
+                  count=1, flags=re.IGNORECASE)
+
+
+def _mysql_restore_table_case(cursor, monitor_run, sql: str) -> str:
+    """Digest-derived text can spell a keyword-named table (events) in upper case; match it
+    to the schema's tables. Best effort: the SQL is unchanged when the catalog read fails."""
+    from features.query_registry.statement_stats import MYSQL_TABLE_NAMES_SQL, mysql_table_case
+
+    try:
+        analysis_lane.execute(monitor_run, lambda: cursor.execute(MYSQL_TABLE_NAMES_SQL))
+        tables = [next(iter(row.values())) if isinstance(row, dict) else row[0]
+                  for row in cursor.fetchall()]
+    except Exception:
+        return sql
+    return mysql_table_case(sql, tables)
+
+
+@contextmanager
+def _monitored_connection(target, conn, engine, config):
+    run = analysis_lane.register(target, conn, engine, config)
+    try:
+        yield run
+    finally:
+        analysis_lane.unregister(run, conn)
 
 
 class _AnalyzeWorkerState:
@@ -236,6 +291,12 @@ def execute_explain_analyze(sql: str, target: str = None, **kwargs) -> Dict[str,
         # Handle case where WorkflowManager passes "False" or "True" as strings
         if isinstance(fast_mode, str):
             fast_mode = fast_mode.lower() in ['true', '1', 'yes']
+        non_interactive = kwargs.get('non_interactive', False) in (True, 'True', 'true', '1')
+        statement_timeout_ms = kwargs.get('statement_timeout_ms')
+        try:
+            statement_timeout_ms = max(1000, min(30000, int(statement_timeout_ms)))
+        except (ValueError, TypeError):
+            statement_timeout_ms = None
 
         # Extract rewrite_max_time_ms for rewrite testing timeout
         rewrite_max_time_ms = kwargs.get('rewrite_max_time_ms')
@@ -263,6 +324,8 @@ def execute_explain_analyze(sql: str, target: str = None, **kwargs) -> Dict[str,
             fast_mode=fast_mode,
             rewrite_max_time_ms=rewrite_max_time_ms,
             target=target,
+            non_interactive=non_interactive,
+            statement_timeout_ms=statement_timeout_ms,
         )
 
         # These private values exist only when a cancelled worker could not
@@ -351,6 +414,8 @@ def _execute_postgres_explain_analyze(
     fast_mode: bool = False,
     rewrite_max_time_ms: float = None,
     target: str = None,
+    non_interactive: bool = False,
+    statement_timeout_ms: int | None = None,
 ) -> Dict[str, Any]:
     """Execute EXPLAIN ANALYZE for PostgreSQL with timeout handling.
 
@@ -372,7 +437,8 @@ def _execute_postgres_explain_analyze(
     import threading
     has_pg_params = re.search(r'\$\d+', sql) is not None
     has_question_mark = '?' in sql
-    if has_pg_params or has_question_mark:
+    # A plan-only run can keep `$N` placeholders: PostgreSQL 16+ plans them generically.
+    if (has_pg_params or has_question_mark) and not (fast_mode and has_pg_params):
         placeholder_type = "$1, $2" if has_pg_params else "?"
         return {
             "success": False,
@@ -409,11 +475,29 @@ def _execute_postgres_explain_analyze(
         # FAST MODE: Skip EXPLAIN ANALYZE entirely, only run EXPLAIN
         if fast_mode:
             try:
-                with _postgres_connection(conn_params) as conn:
+                with _postgres_connection(conn_params) as conn, _monitored_connection(
+                    target, conn, 'postgresql', target_config) as monitor_run:
                     with conn.cursor() as cursor:
-                        explain_query = f"{_SELF_MARKER}EXPLAIN (VERBOSE true, COSTS true, FORMAT JSON) {sql}"
+                        if statement_timeout_ms:
+                            analysis_lane.execute(monitor_run, lambda: cursor.execute(
+                                "SET LOCAL statement_timeout = %s", (statement_timeout_ms,)))
+                        # PostgreSQL 16+ can plan without choosing concrete
+                        # parameter values. This is the appropriate plan for
+                        # unattended plain-EXPLAIN fallback work.
+                        generic = "GENERIC_PLAN true, " if getattr(conn, "server_version", 0) >= 160000 else ""
+                        if has_pg_params and not generic:
+                            return {
+                                "success": False,
+                                "error": ("No real values were available for this query's "
+                                          "parameters, and PostgreSQL before 16 can't plan it "
+                                          "without them."),
+                                "explain_plan": None,
+                                "execution_time_ms": 0,
+                                "skipped_reason": "parameterized_query_from_digest",
+                            }
+                        explain_query = f"{_SELF_MARKER}EXPLAIN ({generic}VERBOSE true, COSTS true, FORMAT JSON) {sql}"
                         start_time = time.perf_counter()
-                        cursor.execute(explain_query)  # nosem
+                        analysis_lane.execute(monitor_run, lambda: cursor.execute(explain_query))  # nosem
                         end_time = time.perf_counter()
 
                         result = cursor.fetchone()
@@ -454,11 +538,15 @@ def _execute_postgres_explain_analyze(
         explain_plan_time_ms = 0
 
         try:
-            with _postgres_connection(conn_params) as conn:
+            with _postgres_connection(conn_params) as conn, _monitored_connection(
+                target, conn, 'postgresql', target_config) as monitor_run:
                 with conn.cursor() as cursor:
+                    if statement_timeout_ms:
+                        analysis_lane.execute(monitor_run, lambda: cursor.execute(
+                            "SET LOCAL statement_timeout = %s", (statement_timeout_ms,)))
                     explain_query = f"{_SELF_MARKER}EXPLAIN (VERBOSE true, COSTS true, FORMAT JSON) {sql}"
                     start_time = time.perf_counter()
-                    cursor.execute(explain_query)  # nosem
+                    analysis_lane.execute(monitor_run, lambda: cursor.execute(explain_query))  # nosem
                     end_time = time.perf_counter()
 
                     result = cursor.fetchone()
@@ -479,22 +567,29 @@ def _execute_postgres_explain_analyze(
         worker_state = _AnalyzeWorkerState('backend_pid')
         query_result = worker_state.result
         query_lock = worker_state.lock
+        active_connection = [None]
 
         def execute_explain_analyze():
             query_conn = None
+            monitor_run = None
             data = None
             error = None
             try:
                 query_conn = psycopg2.connect(**conn_params)
+                active_connection[0] = query_conn
+                monitor_run = analysis_lane.register(target, query_conn, 'postgresql', target_config)
                 with query_conn.cursor() as query_cursor:
-                    query_cursor.execute("SELECT pg_backend_pid()")
+                    if statement_timeout_ms:
+                        analysis_lane.execute(monitor_run, lambda: query_cursor.execute(
+                            "SET LOCAL statement_timeout = %s", (statement_timeout_ms,)))
+                    analysis_lane.execute(monitor_run, lambda: query_cursor.execute("SELECT pg_backend_pid()"))
                     backend_pid = query_cursor.fetchone()[0]
                     worker_state.set_identifier(backend_pid)
 
                     explain_analyze_query = f"{_SELF_MARKER}EXPLAIN (ANALYZE true, VERBOSE true, COSTS true, BUFFERS true, FORMAT JSON) {sql}"
                     if not worker_state.begin_execution():
                         return
-                    query_cursor.execute(explain_analyze_query)  # nosem
+                    analysis_lane.execute(monitor_run, lambda: query_cursor.execute(explain_analyze_query))  # nosem
                     worker_state.mark_database_completion()
                     result = query_cursor.fetchone()
 
@@ -504,6 +599,8 @@ def _execute_postgres_explain_analyze(
             except Exception as e:
                 error = str(e)
             finally:
+                analysis_lane.unregister(monitor_run, query_conn)
+                active_connection[0] = None
                 # Publish the terminal execution state before connection
                 # cleanup, which may itself block in a broken driver/socket.
                 worker_state.finish(data=data, error=error)
@@ -527,6 +624,12 @@ def _execute_postgres_explain_analyze(
         # Helper to cancel the backend query using shared utility
         def cancel_backend_query():
             worker_state.request_cancel()
+            if active_connection[0] is not None:
+                try:
+                    active_connection[0].cancel()
+                    return True
+                except Exception:
+                    pass
             backend_pid = worker_state.identifier()
             if backend_pid:
                 return cancel_postgres_by_pid(conn_params, backend_pid, verbose=True)
@@ -548,7 +651,7 @@ def _execute_postgres_explain_analyze(
         # TTY for interactive skip
         tty_fd = None
         old_settings = None
-        if not rewrite_max_time_ms:  # Only try TTY if not in rewrite testing mode
+        if not non_interactive and not rewrite_max_time_ms:
             try:
                 tty_fd = open('/dev/tty', 'r')
                 old_settings = termios.tcgetattr(tty_fd)
@@ -558,12 +661,13 @@ def _execute_postgres_explain_analyze(
 
         try:
             # Install SIGINT handler (only works in main thread)
-            try:
-                original_sigint_handler = signal.getsignal(signal.SIGINT)
-                signal.signal(signal.SIGINT, sigint_handler)
-                sigint_supported = True
-            except ValueError:
-                pass  # Not in main thread, signal handling not available
+            if not non_interactive:
+                try:
+                    original_sigint_handler = signal.getsignal(signal.SIGINT)
+                    signal.signal(signal.SIGINT, sigint_handler)
+                    sigint_supported = True
+                except ValueError:
+                    pass
 
             while time.perf_counter() - start_time < max_wait_time:
                 # Check if Ctrl+C was pressed
@@ -585,7 +689,7 @@ def _execute_postgres_explain_analyze(
                     break
 
                 # Interactive mode: show prompt after 10 seconds
-                if elapsed >= 10 and not prompt_shown and not rewrite_max_time_ms:
+                if elapsed >= 10 and not prompt_shown and not rewrite_max_time_ms and not non_interactive:
                     prompt_shown = True
                     # Always show the prompt (Ctrl+C works even without TTY)
                     print(f"\n** EXPLAIN ANALYZE has been running for 10 seconds...", flush=True)
@@ -618,8 +722,9 @@ def _execute_postgres_explain_analyze(
                 if should_cancel:
                     max_wait_timeout = True
                     user_skipped = True
-                    print(f"\n>> Max wait time ({max_wait_time}s) exceeded - cancelling query...\n")
-                    sys.stdout.flush()
+                    if not non_interactive:
+                        print(f"\n>> Max wait time ({max_wait_time}s) exceeded - cancelling query...\n")
+                        sys.stdout.flush()
                     cancel_backend_query()
         finally:
             # Restore original SIGINT handler if we installed one
@@ -749,6 +854,8 @@ def _execute_mysql_explain_analyze(
     fast_mode: bool = False,
     rewrite_max_time_ms: float = None,
     target: str = None,
+    non_interactive: bool = False,
+    statement_timeout_ms: int | None = None,
 ) -> Dict[str, Any]:
     """Execute EXPLAIN ANALYZE for MySQL.
 
@@ -800,8 +907,10 @@ def _execute_mysql_explain_analyze(
             'cursorclass': pymysql.cursors.DictCursor
         }
 
-        with _mysql_connection(mysql_params, conn_overrides) as conn:
+        with _mysql_connection(mysql_params, conn_overrides) as conn, _monitored_connection(
+            target, conn, 'mysql', target_config) as monitor_run:
             with conn.cursor() as cursor:
+                sql = _mysql_restore_table_case(cursor, monitor_run, sql)
                 # TWO-PHASE APPROACH for slow queries:
                 # Phase 1: Always run EXPLAIN (instant, no execution) to get query plan
                 # Phase 2: Try EXPLAIN ANALYZE (executes query, may timeout)
@@ -814,7 +923,7 @@ def _execute_mysql_explain_analyze(
                     start_time = time.perf_counter()
                     # Safe: sql parameter is user\'s query to analyze (intended functionality), validated by query_safety.py
 
-                    cursor.execute(explain_query)  # nosem
+                    analysis_lane.execute(monitor_run, lambda: cursor.execute(explain_query))  # nosem
                     end_time = time.perf_counter()
 
                     result = cursor.fetchone()
@@ -829,6 +938,24 @@ def _execute_mysql_explain_analyze(
                         "error": f"MySQL EXPLAIN failed: {str(explain_error)}",
                         "explain_plan": None,
                         "execution_time_ms": 0
+                    }
+
+                analyze_sql = None
+                if not fast_mode:
+                    analysis_lane.execute(monitor_run, lambda: cursor.execute("SELECT VERSION()"))
+                    version_row = cursor.fetchone()
+                    version = str(next(iter(version_row.values())) if isinstance(version_row, dict)
+                                  else version_row[0])
+                    analyze_sql = _mysql_analyze_sql(sql, version, statement_timeout_ms)
+                if fast_mode or analyze_sql is None:
+                    return {
+                        "success": True, "explain_plan": explain_plan_data,
+                        "execution_time_ms": plan_time_ms,
+                        "rows_examined": _extract_mysql_json_rows_examined(explain_plan_data),
+                        "rows_returned": _extract_mysql_json_rows_returned(explain_plan_data),
+                        "cost_estimate": _extract_mysql_json_cost(explain_plan_data),
+                        "database_engine": "mysql", "plan_format": "json",
+                        "explain_analyze_skipped": True,
                     }
 
                 # PHASE 2: Try EXPLAIN ANALYZE with interactive skip option
@@ -849,6 +976,7 @@ def _execute_mysql_explain_analyze(
                 def execute_explain_analyze():
                     """Execute EXPLAIN ANALYZE in separate thread with its own connection."""
                     query_conn = None
+                    monitor_run = None
                     data = None
                     error = None
                     try:
@@ -857,25 +985,27 @@ def _execute_mysql_explain_analyze(
                             mysql_params,
                             **conn_overrides,
                         )
+                        monitor_run = analysis_lane.register(target, query_conn, 'mysql', target_config)
                         with query_conn.cursor() as query_cursor:
                             # Get this thread's connection ID
-                            query_cursor.execute("SELECT CONNECTION_ID()")
+                            analysis_lane.execute(monitor_run, lambda: query_cursor.execute("SELECT CONNECTION_ID()"))
                             thread_conn_id = query_cursor.fetchone()['CONNECTION_ID()']
                             worker_state.set_identifier(thread_conn_id)
 
                             # Execute EXPLAIN ANALYZE
-                            explain_query = f"{_SELF_MARKER}EXPLAIN ANALYZE {sql}"
+                            explain_query = f"{_SELF_MARKER}EXPLAIN ANALYZE {analyze_sql}"
                             # Safe: sql parameter is user\'s query to analyze (intended functionality), validated by query_safety.py
 
                             if not worker_state.begin_execution():
                                 return
-                            query_cursor.execute(explain_query)  # nosem
+                            analysis_lane.execute(monitor_run, lambda: query_cursor.execute(explain_query))  # nosem
                             worker_state.mark_database_completion()
                             results = query_cursor.fetchall()
                             data = results
                     except Exception as e:
                         error = str(e)
                     finally:
+                        analysis_lane.unregister(monitor_run, query_conn)
                         # Publish completion before potentially blocking
                         # connection cleanup; no SQL can run after this point.
                         worker_state.finish(data=data, error=error)
@@ -887,15 +1017,23 @@ def _execute_mysql_explain_analyze(
 
                 # Start EXPLAIN ANALYZE in background thread
                 start_time = time.perf_counter()
-                analyze_thread = threading.Thread(target=execute_explain_analyze, daemon=True)
+                # The worker's connection is recorded into the caller's agent action.
+                analyze_thread = threading.Thread(
+                    target=contextvars.copy_context().run, args=(execute_explain_analyze,),
+                    daemon=True)
                 analyze_thread.start()
 
                 # Monitor for 10 seconds, then offer skip option
                 user_skipped = False
                 max_wait_timeout = False
+                rewrite_timeout_exceeded = False
                 ctrl_c_pressed = False
                 prompt_shown = False
                 max_wait_time = 600  # 10 minutes total timeout
+                if statement_timeout_ms:
+                    # A CTE or set operation can't carry the hint; the wait loop's
+                    # KILL QUERY bounds it (a hinted SELECT stops on its own first).
+                    max_wait_time = min(max_wait_time, statement_timeout_ms / 1000 + 1)
 
                 # Helper to kill the MySQL query using shared utility
                 def kill_mysql_query():
@@ -926,22 +1064,23 @@ def _execute_mysql_explain_analyze(
                 # Try to open /dev/tty for interactive input (works even if stdin is redirected)
                 tty_fd = None
                 old_settings = None
-                try:
-                    tty_fd = open('/dev/tty', 'r')
-                    # Put terminal in raw mode so we can read single characters without Enter
-                    old_settings = termios.tcgetattr(tty_fd)
-                    tty.setcbreak(tty_fd)
-                except:
-                    pass  # No TTY available, will just timeout normally
+                if not non_interactive:
+                    try:
+                        tty_fd = open('/dev/tty', 'r')
+                        old_settings = termios.tcgetattr(tty_fd)
+                        tty.setcbreak(tty_fd)
+                    except:
+                        pass
 
                 try:
                     # Install SIGINT handler (only works in main thread)
-                    try:
-                        original_sigint_handler = signal.getsignal(signal.SIGINT)
-                        signal.signal(signal.SIGINT, sigint_handler)
-                        sigint_supported = True
-                    except ValueError:
-                        pass  # Not in main thread, signal handling not available
+                    if not non_interactive:
+                        try:
+                            original_sigint_handler = signal.getsignal(signal.SIGINT)
+                            signal.signal(signal.SIGINT, sigint_handler)
+                            sigint_supported = True
+                        except ValueError:
+                            pass
 
                     while time.perf_counter() - start_time < max_wait_time:
                         # Check if Ctrl+C was pressed
@@ -954,8 +1093,16 @@ def _execute_mysql_explain_analyze(
 
                         elapsed = time.perf_counter() - start_time
 
+                        # Rewrite testing: cancel once the rewrite is slower than the baseline.
+                        if rewrite_max_time_ms and elapsed * 1000 >= rewrite_max_time_ms:
+                            rewrite_timeout_exceeded = True
+                            user_skipped = True
+                            kill_mysql_query()
+                            break
+
                         # After 10 seconds: auto-skip if fast_mode, or show prompt
-                        if elapsed >= 10 and not prompt_shown:
+                        if (elapsed >= 10 and not prompt_shown and not rewrite_max_time_ms
+                                and not non_interactive):
                             prompt_shown = True
 
                             if fast_mode:
@@ -990,7 +1137,7 @@ def _execute_mysql_explain_analyze(
                                 tty_fd.close()
                                 tty_fd = None
 
-                            time.sleep(0.1)
+                        time.sleep(0.1)
                     else:
                         # Loop completed due to max_wait_time timeout (not break)
                         # Kill the still-running query
@@ -999,8 +1146,9 @@ def _execute_mysql_explain_analyze(
                         if should_cancel:
                             max_wait_timeout = True
                             user_skipped = True
-                            print(f"\n>> Max wait time ({max_wait_time}s) exceeded - cancelling query...\n")
-                            sys.stdout.flush()
+                            if not non_interactive:
+                                print(f"\n>> Max wait time ({max_wait_time}s) exceeded - cancelling query...\n")
+                                sys.stdout.flush()
                             kill_mysql_query()
                 finally:
                     # Restore original SIGINT handler if we installed one
@@ -1022,7 +1170,7 @@ def _execute_mysql_explain_analyze(
                         except:
                             pass
 
-                if user_skipped or max_wait_timeout or ctrl_c_pressed:
+                if user_skipped or rewrite_timeout_exceeded or max_wait_timeout or ctrl_c_pressed:
                     worker_state.request_cancel()
                 worker_settled = _settle_analyze_worker(analyze_thread)
                 query_snapshot = worker_state.snapshot()
@@ -1071,7 +1219,9 @@ def _execute_mysql_explain_analyze(
                     else:
                         elapsed_str = f"{int(elapsed_seconds)} sec"
 
-                    if ctrl_c_pressed:
+                    if rewrite_timeout_exceeded:
+                        skip_reason = f"Rewrite slower than baseline (cancelled after {elapsed_str})"
+                    elif ctrl_c_pressed:
                         skip_reason = f"Cancelled by user (Ctrl+C) after {elapsed_str}"
                     elif max_wait_timeout:
                         skip_reason = f"Max wait time exceeded (cancelled after {elapsed_str})"
@@ -1092,6 +1242,7 @@ def _execute_mysql_explain_analyze(
                         "plan_format": "json",
                         "explain_analyze_timeout": not user_skipped,
                         "explain_analyze_skipped": user_skipped,
+                        "rewrite_timeout_exceeded": rewrite_timeout_exceeded,
                         "fallback_reason": f"Using EXPLAIN plan only - {skip_reason}",
                         "skip_reason": skip_reason,
                         **execution_evidence,
@@ -1118,24 +1269,26 @@ def _execute_mysql_explain_analyze(
 def _postgres_connection(conn_params):
     """Context manager for PostgreSQL connections."""
     conn = None
-    try:
-        conn = psycopg2.connect(**conn_params)
-        yield conn
-    finally:
-        if conn:
-            conn.close()
+    with analysis_lane.connection_budget():
+        try:
+            conn = psycopg2.connect(**conn_params)
+            yield conn
+        finally:
+            if conn:
+                conn.close()
 
 
 @contextmanager
 def _mysql_connection(params, overrides=None):
     """Context manager for MySQL connections."""
     conn = None
-    try:
-        conn = create_mysql_connection_from_params(params, **(overrides or {}))
-        yield conn
-    finally:
-        if conn:
-            conn.close()
+    with analysis_lane.connection_budget():
+        try:
+            conn = create_mysql_connection_from_params(params, **(overrides or {}))
+            yield conn
+        finally:
+            if conn:
+                conn.close()
 
 
 # PostgreSQL plan analysis helpers
@@ -1235,9 +1388,12 @@ def _extract_mysql_rows_returned(results: List[Dict[str, Any]]) -> int:
                 except ValueError:
                     pass
 
-            # If no limit, look for the outermost operation's row count
+            # If no limit, the outermost operation's actual rows. Its "(cost=... rows=N)" is the
+            # optimizer's estimate (10% of the table for an unindexed equality filter), which
+            # would present a selective filter as an unselective one.
             first_line = explain_text.split('\n')[0]
-            row_match = re.search(r'rows=([0-9,]+)', first_line)
+            row_match = (re.search(r'\(actual time=[^)]*rows=([0-9,]+)', first_line)
+                         or re.search(r'rows=([0-9,]+)', first_line))
             if row_match:
                 try:
                     return int(row_match.group(1).replace(',', ''))

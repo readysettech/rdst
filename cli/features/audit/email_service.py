@@ -283,9 +283,9 @@ class EmailService:
         report_queued = bool(reg.get("report_queued"))
         if on_status:
             if report_queued:
-                on_status("Verification email sent — click the link in your inbox to release your report...")
+                on_status("Verification email sent - click the link in your inbox to release your report...")
             else:
-                on_status("Verification email sent — click the link in your inbox...")
+                on_status("Verification email sent - click the link in your inbox...")
 
         poll_result = self.poll_verification(email)
         if not poll_result.get("verified"):
@@ -294,11 +294,11 @@ class EmailService:
                     "success": True,
                     "queued": True,
                     "message": (
-                        "Verification still pending — your report will be sent automatically "
+                        "Verification still pending - your report will be sent automatically "
                         "as soon as you click the verify link."
                     ),
                 }
-            return {"success": False, "error": "Verification timed out — check your email and try again"}
+            return {"success": False, "error": "Verification timed out - check your email and try again"}
 
         token = poll_result["report_token"]
         if report_queued:

@@ -2,10 +2,10 @@ import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
-import { toast } from '@rs/ui-new/use-toast'
 import { useQueryClient } from '@tanstack/react-query'
-import { useNavigate, useRouter } from '@tanstack/react-router'
-import { type ReactNode, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
+import { type ReactNode, useEffect, useMemo, useState } from 'react'
+import { selectGlobalTarget } from '../../features/database/targetSelection'
 import { startBootstrapRun } from '../../lib/backgroundRuns'
 import { useConfigure } from '../../lib/useConfigure'
 import { useOnboarding } from '../../lib/useOnboarding'
@@ -77,15 +77,14 @@ function ProviderDiscoverTile({
  * [USE-006, USE-008, USE-068, USE-050/052, VIS-011, VIS-116]
  */
 export function ConnectPage({
-  redirectTo,
   from,
 }: {
+  /** Where the user was headed; a new database goes on to turn on monitoring. */
   redirectTo?: string
   from?: string
 }) {
   const fromDemo = from === 'demo'
   const navigate = useNavigate()
-  const router = useRouter()
   const queryClient = useQueryClient()
   const {
     addTarget,
@@ -94,9 +93,20 @@ export function ConnectPage({
     cancel,
     connectionTestResult,
     loading,
+    listTargets,
+    targets,
+    error,
   } = useConfigure()
   const { completeInit } = useOnboarding()
   const [testing, setTesting] = useState(false)
+  // Names already taken: the form refuses a duplicate while typing.
+  useEffect(() => {
+    void listTargets()
+  }, [listTargets])
+  const existingNames = useMemo(
+    () => targets.map((target) => target.name),
+    [targets]
+  )
 
   // "Test & connect" has to test. Without this the form's submit saved an
   // unreachable database, promoted it to default with verified:false, and
@@ -110,16 +120,7 @@ export function ConnectPage({
     }
   }
 
-  const leave = () => {
-    // Return to where the user was headed when routed here, else Home.
-    if (redirectTo && redirectTo !== '/onboarding') {
-      router.history.push(redirectTo)
-    } else {
-      navigate({ to: '/' })
-    }
-  }
-
-  const finishToHome = () => {
+  const markInitialized = () => {
     queryClient.setQueryData(
       ['init-status'],
       (previous: { initialized?: boolean } | undefined) =>
@@ -127,7 +128,17 @@ export function ConnectPage({
     )
     queryClient.invalidateQueries({ queryKey: ['init-status'] })
     queryClient.invalidateQueries({ queryKey: ['status'] })
-    leave()
+  }
+
+  // Choosing to monitor lands on the new database's page with the turn-on dialog open,
+  // so the choice ends with monitoring on.
+  const finishToMonitoring = async (target: string) => {
+    markInitialized()
+    selectGlobalTarget(target)
+    // The Database page sends a target-less install back here, so it must see the
+    // new target before it opens.
+    await queryClient.refetchQueries({ queryKey: ['status'] })
+    void navigate({ to: '/database', search: { panel: 'enable' } })
   }
 
   const handleSubmit = async (data: ConfigureFormData) => {
@@ -143,8 +154,9 @@ export function ConnectPage({
     // Kick off schema/annotation bootstrap while the user lands in the app.
     // Readyset itself starts lazily only when the user runs a comparison.
     startBootstrapRun(data.name)
-    toast({ title: `Connected to ${data.name}`, variant: 'positive' })
-    finishToHome()
+    // The next step is turning on monitoring; its dialog names the database and checks
+    // the prerequisites, so no toast sits over it.
+    await finishToMonitoring(data.name)
   }
 
   const skip = () => {
@@ -188,7 +200,7 @@ export function ConnectPage({
               className="mt-0.5 h-4 w-4 shrink-0 text-content-primary-soft"
             />
             <Text level="body-small" className="text-content-layout-2">
-              You&rsquo;ve seen the demo — now connect your own database to find
+              You&rsquo;ve seen the demo - now connect your own database to find
               your caching wins.
             </Text>
           </div>
@@ -292,6 +304,8 @@ export function ConnectPage({
             isTesting={testing}
             testResult={connectionTestResult}
             submitLabel="Test & connect"
+            existingNames={existingNames}
+            submitError={error}
             submitSize="large"
             reviewWritePrivilegesOnSubmit
           />

@@ -1,67 +1,194 @@
-import { Dropdown } from '@rs/ui-new/dropdown';
-import { Icon } from '@rs/ui-new/icon';
-import { Pressable } from '@rs/ui-new/pressable';
-import { Skeleton } from '@rs/ui-new/skeleton';
-import { Text } from '@rs/ui-new/text';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@rs/ui-new/tooltip';
-import { useNavigate } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
-import { type TargetInfo } from '../lib/api';
-import { useTargetSwitchLockState } from '../lib/targetSwitchLock';
-import { useSystemStatus } from '../lib/useSystemStatus';
+import { Dropdown } from '@rs/ui-new/dropdown'
+import { Icon } from '@rs/ui-new/icon'
+import { Pressable } from '@rs/ui-new/pressable'
+import { Skeleton } from '@rs/ui-new/skeleton'
+import { Text } from '@rs/ui-new/text'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@rs/ui-new/tooltip'
+import { useNavigate } from '@tanstack/react-router'
+import { useEffect, useRef, useState } from 'react'
+import { limitLine } from '../features/monitor-kit/aiMonitoring'
+import { useMonitorPulse } from '../features/monitor-kit/useMonitorPulse'
+import type { TargetInfo } from '../lib/api'
+import { useMonitoringLimit, useMonitorSettings } from '../lib/monitor/hooks'
+import { useTargetSwitchLockState } from '../lib/targetSwitchLock'
+import { useSystemStatus } from '../lib/useSystemStatus'
+import {
+  TargetMonitorStatus,
+  useTargetMonitorLines,
+} from './TargetMonitorStatus'
 
-interface TargetDropdownProps {
-  selectedTarget: string | null;
-  onSelectTarget: (target: string | null) => void;
+/** Database page params that belong to one target: a new target starts without them. */
+const TARGET_SCOPED_PARAMS = [
+  'query',
+  'tab',
+  'zoom',
+  'from',
+  'queries',
+  'report',
+  'panel',
+  'q',
+  'table',
+]
+
+/** Pages that aren't about one database: picking a target there opens its Database page. */
+const NON_DATABASE_PATHS = [
+  '/',
+  '/inbox',
+  '/configure',
+  '/fleet',
+  '/agents',
+  '/agent-activity',
+]
+
+/**
+ * Where a target pick goes: `open` opens the Database page fresh (from a page that isn't
+ * per-database), `stay` keeps the Database page with the target's own params dropped, and
+ * null stays put (any other per-database page follows the new target in place).
+ */
+export function switchDestination(
+  pathname: string,
+  sameTarget: boolean
+): 'open' | 'stay' | null {
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
+  if (NON_DATABASE_PATHS.includes(path)) return 'open'
+  if (sameTarget || path !== '/database') return null
+  return 'stay'
 }
 
-export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdownProps) {
-  const [open, setOpen] = useState(false);
-  const navigate = useNavigate();
-  const { isLocked, message: lockMessage } = useTargetSwitchLockState();
+interface TargetDropdownProps {
+  selectedTarget: string | null
+  onSelectTarget: (target: string | null) => void
+}
 
-  const { data: status, isLoading, error } = useSystemStatus();
+export function TargetDropdown({
+  selectedTarget,
+  onSelectTarget,
+}: TargetDropdownProps) {
+  const [open, setOpen] = useState(false)
+  const navigate = useNavigate()
+  const { isLocked, message: lockMessage } = useTargetSwitchLockState()
 
-  const targets = status?.targets || [];
-  const normalizedSelectedTarget = selectedTarget?.trim() || null;
+  const {
+    data: status,
+    isLoading,
+    error,
+    refetch,
+    dataUpdatedAt,
+  } = useSystemStatus()
+
+  const targets = status?.targets || []
+  const normalizedSelectedTarget = selectedTarget?.trim() || null
   const isSelectedValid = normalizedSelectedTarget
     ? targets.some((target) => target.name === normalizedSelectedTarget)
-    : false;
-  const fallbackTarget = (status?.default_target && targets.some((target) => target.name === status.default_target))
-    ? status.default_target
-    : (targets.length > 0 ? targets[0].name : null);
-  const currentTarget = isSelectedValid ? normalizedSelectedTarget : fallbackTarget;
+    : false
+  const fallbackTarget =
+    status?.default_target &&
+    targets.some((target) => target.name === status.default_target)
+      ? status.default_target
+      : targets.length > 0
+        ? targets[0].name
+        : null
+  const currentTarget = isSelectedValid
+    ? normalizedSelectedTarget
+    : fallbackTarget
+  // Holding a monitored target's stream here keeps it open across page changes, so
+  // arriving on a page never restarts readings, and gives the switcher its live state.
+  const settings = useMonitorSettings(currentTarget ?? '')
+  const pulse = useMonitorPulse(settings.data?.enabled ? currentTarget : null)
+  const lines = useTargetMonitorLines(
+    targets.map((target) => target.name),
+    open,
+    { target: currentTarget, state: pulse.state }
+  )
+  const limit = useMonitoringLimit(undefined, open)
+  const summary = limitLine(limit.data)
+
+  /** Switches target. A per-database page stays put, for the new target; any other
+   * page (the Inbox, Home) opens the new target's Database page. */
+  const switchTo = (name: string) => {
+    onSelectTarget(name)
+    const destination = switchDestination(
+      window.location.pathname,
+      name === currentTarget
+    )
+    if (destination === 'open') {
+      void navigate({ to: '/database' })
+      return
+    }
+    if (destination !== 'stay') return
+    void navigate({
+      to: '/database',
+      search: ((previous: Record<string, unknown>) => {
+        const next = { ...previous }
+        for (const param of TARGET_SCOPED_PARAMS) delete next[param]
+        return next
+      }) as never,
+      replace: true,
+    })
+  }
 
   // Track the last invalid→fallback correction we applied so status refetches
   // do not loop, while still allowing new invalid parent selections to resync.
-  const lastCorrectionRef = useRef<string | null>(null);
-  const correctionKey = !isLoading && status && currentTarget !== normalizedSelectedTarget
-    ? `${normalizedSelectedTarget ?? '<none>'}=>${currentTarget ?? '<none>'}`
-    : null;
+  const lastCorrectionRef = useRef<string | null>(null)
+  // The selection is shared by every open tab. A name this tab's list doesn't hold may be
+  // a database another tab just added, so the list is read again before the selection is
+  // overridden. Overriding it from a stale list made two tabs flip the selection back and
+  // forth without end, remounting every page that follows the target.
+  const verifyRef = useRef<{ name: string; after: number } | null>(null)
+  const correctionKey =
+    !isLoading && status && currentTarget !== normalizedSelectedTarget
+      ? `${normalizedSelectedTarget ?? '<none>'}=>${currentTarget ?? '<none>'}`
+      : null
 
   useEffect(() => {
     if (!correctionKey) {
-      lastCorrectionRef.current = null;
-      return;
+      lastCorrectionRef.current = null
+      verifyRef.current = null
+      return
     }
 
     if (lastCorrectionRef.current === correctionKey) {
-      return;
+      return
     }
 
-    lastCorrectionRef.current = correctionKey;
-    onSelectTarget(currentTarget);
-  }, [correctionKey, currentTarget, onSelectTarget]);
+    if (normalizedSelectedTarget) {
+      const verify = verifyRef.current
+      if (verify?.name !== normalizedSelectedTarget) {
+        verifyRef.current = {
+          name: normalizedSelectedTarget,
+          after: dataUpdatedAt,
+        }
+        void refetch()
+        return
+      }
+      if (dataUpdatedAt <= verify.after) return
+    }
+
+    lastCorrectionRef.current = correctionKey
+    onSelectTarget(currentTarget)
+  }, [
+    correctionKey,
+    currentTarget,
+    normalizedSelectedTarget,
+    onSelectTarget,
+    refetch,
+    dataUpdatedAt,
+  ])
 
   useEffect(() => {
     if (isLocked) {
-      setOpen(false);
+      setOpen(false)
     }
-  }, [isLocked]);
+  }, [isLocked])
 
   // Lock still forces the menu visually closed immediately while the effect above
   // clears the internal open state so it stays closed after unlocking.
-  const effectiveOpen = open && !isLocked;
+  const effectiveOpen = open && !isLocked
 
   if (isLoading) {
     return (
@@ -69,25 +196,29 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
         <Skeleton className="h-10 w-10 rounded-md" />
         <Skeleton className="h-4 w-24" />
       </div>
-    );
+    )
   }
 
   if (error || !status) {
     return (
       <div className="flex p-2 pr-3 h-14 w-full items-center gap-2">
-        <Icon name="alert" label="Error" className="text-content-negative-soft" />
+        <Icon
+          name="alert"
+          label="Error"
+          className="text-content-negative-soft"
+        />
         <Text level="label-medium" className="text-content-negative-soft">
           Connection Error
         </Text>
       </div>
-    );
+    )
   }
 
-  const currentTargetInfo = targets.find((t) => t.name === currentTarget);
+  const currentTargetInfo = targets.find((t) => t.name === currentTarget)
   const handleOpenChange = (nextOpen: boolean) => {
-    if (nextOpen && isLocked) return;
-    setOpen(nextOpen);
-  };
+    if (nextOpen && isLocked) return
+    setOpen(nextOpen)
+  }
 
   // A real <Pressable> so the one always-visible config control is keyboard
   // focusable and Enter/Space-activatable — the Dropdown.Trigger→<Pressable> fix
@@ -95,7 +226,11 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
   const trigger = (
     <Pressable
       type="button"
-      aria-label={`Switch target — current: ${currentTarget ?? 'none'}`}
+      aria-label={`Switch target, current: ${currentTarget ?? 'none'}${
+        currentTarget && lines.get(currentTarget)
+          ? `, ${lines.get(currentTarget)?.label}`
+          : ''
+      }`}
       aria-disabled={isLocked}
       title={isLocked ? lockMessage : undefined}
       className={`flex justify-between items-center text-content-layout-1 p-2 pr-3 h-14 w-full rounded-lg ${
@@ -104,30 +239,51 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
           : 'cursor-pointer hover:bg-surface-primary-soft-hover focus-visible:shadow-focus focus-visible:outline-none'
       }`}
     >
-      <div className="flex gap-2 items-center">
-        <div className="w-8 h-8 rounded-md bg-surface-layout-2 flex items-center justify-center">
+      <div className="flex min-w-0 gap-2 items-center">
+        <div className="w-8 h-8 shrink-0 rounded-md bg-surface-layout-2 flex items-center justify-center">
           <Icon name="database" label="Database" size="small" />
         </div>
-        <Text level="label-medium">{currentTarget}</Text>
+        <div className="flex min-w-0 flex-col items-start">
+          <Text level="label-medium" className="max-w-full truncate">
+            {currentTarget}
+          </Text>
+          {currentTarget ? (
+            <TargetMonitorStatus
+              line={lines.get(currentTarget)}
+              compact
+              className="max-w-full"
+            />
+          ) : null}
+        </div>
       </div>
       <div className="flex gap-1 items-center">
         {currentTargetInfo && !currentTargetInfo.has_password && (
-          <Icon name="alert" label="No password" size="small" className="text-content-warning-soft" />
+          <Icon
+            name="alert"
+            label="No password"
+            size="small"
+            className="text-content-warning-soft"
+          />
         )}
         <Icon name="chevron-down" label="Target dropdown" />
       </div>
     </Pressable>
-  );
+  )
 
   if (targets.length === 0) {
     return (
       <div className="flex p-2 pr-3 h-14 w-full items-center gap-2">
-        <Icon name="alert" label="" aria-hidden="true" className="text-content-warning-soft" />
+        <Icon
+          name="alert"
+          label=""
+          aria-hidden="true"
+          className="text-content-warning-soft"
+        />
         <Text level="label-medium" className="text-content-warning-soft">
           No targets
         </Text>
       </div>
-    );
+    )
   }
 
   return (
@@ -135,35 +291,57 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
       {isLocked ? (
         <TooltipProvider delayDuration={0}>
           <Tooltip>
-            <TooltipTrigger asChild>
-              {trigger}
-            </TooltipTrigger>
+            <TooltipTrigger asChild>{trigger}</TooltipTrigger>
             <TooltipContent label={lockMessage} />
           </Tooltip>
         </TooltipProvider>
       ) : (
         <Dropdown.Trigger asChild>{trigger}</Dropdown.Trigger>
       )}
-      <Dropdown.Content align="start" className="min-w-64">
+      <Dropdown.Content align="start" className="min-w-72">
+        {summary ? (
+          <>
+            <Text
+              as="p"
+              level="label-small"
+              className="px-3 pt-2 pb-1 text-content-layout-2"
+              data-testid="target-switcher-summary"
+            >
+              {summary}
+            </Text>
+            <Dropdown.Separator />
+          </>
+        ) : null}
         {targets.map((target: TargetInfo) => (
           <Dropdown.ItemWithChildren
             key={target.name}
+            active={target.name === currentTarget}
+            className="h-auto min-h-14 py-2"
             onClick={() => {
               if (isLocked) {
-                return;
+                return
               }
-              onSelectTarget(target.name);
-              setOpen(false);
+              switchTo(target.name)
+              setOpen(false)
             }}
           >
-            <div className="flex gap-2 items-center">
-              <div className="w-8 h-8 rounded-md bg-surface-layout-2 flex items-center justify-center">
+            <div className="flex min-w-0 gap-2 items-center">
+              <div className="w-8 h-8 shrink-0 rounded-md bg-surface-layout-2 flex items-center justify-center">
                 <Icon name="database" label="Database" size="small" />
               </div>
-              <Text level="label-medium">{target.name}</Text>
-              {target.is_default && (
-                <Text level="label-small" className="text-content-layout-3">(default)</Text>
-              )}
+              <div className="flex min-w-0 flex-col items-start">
+                <span className="flex min-w-0 items-center gap-1">
+                  <Text level="label-medium" className="truncate">
+                    {target.name}
+                  </Text>
+                  {target.is_default && (
+                    <Text level="label-small" className="text-content-layout-3">
+                      (default)
+                    </Text>
+                  )}
+                </span>
+                <TargetMonitorStatus line={lines.get(target.name)} />
+              </div>
             </div>
             {target.has_password ? (
               <Icon
@@ -188,11 +366,14 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
           label="Manage targets"
           leftIcon="settings"
           onClick={() => {
-            setOpen(false);
-            void navigate({ to: '/configure', search: { panel: 'connections' } });
+            setOpen(false)
+            void navigate({
+              to: '/configure',
+              search: { panel: 'connections' },
+            })
           }}
         />
       </Dropdown.Content>
     </Dropdown>
-  );
+  )
 }

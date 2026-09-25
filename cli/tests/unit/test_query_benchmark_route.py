@@ -90,3 +90,34 @@ async def test_cross_site_benchmark_is_forbidden():
 
     assert raised.value.status_code == 403
     assert started == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lanes", [["readyset"], ["origin", "readyset"], ["origin"]])
+async def test_benchmarks_check_source_credentials_without_deployed_cache(lanes):
+    import json
+    from features.query_registry.api.routes import require_benchmark_target
+
+    request = _http_request()
+    request._body = json.dumps({"target": "demo", "lanes": lanes}).encode()
+    with patch("shared.api.target_guard.ensure_target_password", return_value=_guard()) as password:
+        guard = await require_benchmark_target(request)
+    password.assert_called_once_with("demo")
+    assert guard.target_name == "demo"
+
+
+@pytest.mark.asyncio
+async def test_readyset_only_requires_source_credentials():
+    import json
+    from features.query_registry.api.routes import require_benchmark_target
+
+    request = _http_request()
+    request._body = json.dumps({"target": "demo", "lanes": ["readyset"]}).encode()
+    with patch(
+        "shared.api.target_guard.ensure_target_password",
+        side_effect=HTTPException(status_code=423, detail="Source password required"),
+    ) as password:
+        with pytest.raises(HTTPException) as raised:
+            await require_benchmark_target(request)
+    assert raised.value.status_code == 423
+    password.assert_called_once_with("demo")

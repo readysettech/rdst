@@ -137,9 +137,9 @@ async def simulate_trial_exhaustion(request: Request) -> TrialSimulationResponse
     if not result.active and result.status == "exhausted":
         return TrialSimulationResponse(
             success=True,
-            message="Trial marked as exhausted for simulation.",
+            message="AI limit reached for simulation.",
         )
     return TrialSimulationResponse(
         success=False,
-        message="No active trial token found to simulate.",
+        message="No active AI access token found to simulate.",
     )

@@ -9,38 +9,28 @@ import {
 } from './setupModel'
 
 function progress(overrides: Partial<SetupProgress> = {}): SetupProgress {
-  return {
-    target: 'orders',
-    connected: false,
-    schema_built: false,
-    queries_found: false,
-    analyzed: false,
-    compared: false,
-    ...overrides,
-  }
+  return { target: 'orders', connected: false, ...overrides }
 }
 
 describe('setupModel', () => {
-  it('maps every signal to one labelled step and its deep link', () => {
-    const steps = setupSteps(progress({ connected: true, schema_built: true }))
+  it('is two steps: connect a database, then turn on monitoring', () => {
+    const steps = setupSteps(progress({ connected: true }))
 
     expect(steps).toHaveLength(SETUP_STEP_COUNT)
     expect(steps.map((step) => [step.label, step.to, step.done])).toEqual([
       ['Connect a database', '/onboarding', true],
-      ['Build the schema', '/schema', true],
-      ['Find your queries', '/queries', false],
-      ['Analyze a query', '/queries', false],
-      ['Compare origin vs Readyset', '/cache', false],
+      ['Turn on monitoring', '/database', false],
     ])
   })
 
-  it('names the query the analyze step should open, when one is known', () => {
-    const withQuery = setupSteps(progress(), { analyzeHash: 'top-hash' })
-    expect(withQuery[3].search).toEqual({ analyze: 'top-hash' })
-    expect(withQuery[3].to).toBe('/queries')
-
-    // Nothing observed yet: the library itself is the honest destination.
-    expect(setupSteps(progress())[3].search).toBeUndefined()
+  it('never counts schema discovery or library activity as setup', () => {
+    const done = progress({
+      schema_built: true,
+      queries_found: true,
+      analyzed: true,
+      compared: true,
+    })
+    expect(completedSetupSteps(done)).toBe(0)
   })
 
   it('keeps every why-line to eight words or fewer', () => {
@@ -51,18 +41,10 @@ describe('setupModel', () => {
 
   it('counts completion from the signals alone', () => {
     expect(completedSetupSteps(progress())).toBe(0)
-    expect(completedSetupSteps(progress({ analyzed: true }))).toBe(1)
+    expect(completedSetupSteps(progress({ connected: true }))).toBe(1)
     expect(isSetupComplete(progress({ connected: true }))).toBe(false)
     expect(
-      isSetupComplete(
-        progress({
-          connected: true,
-          schema_built: true,
-          queries_found: true,
-          analyzed: true,
-          compared: true,
-        })
-      )
+      isSetupComplete(progress({ connected: true, monitoring: true }))
     ).toBe(true)
   })
 

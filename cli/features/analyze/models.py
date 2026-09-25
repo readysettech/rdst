@@ -25,6 +25,9 @@ class AnalyzeOptions:
     readyset_cache: bool = False
     test_rewrites: bool = False
     model: Optional[str] = None
+    non_interactive: bool = False
+    statement_timeout_ms: Optional[int] = None
+    hosted_only: bool = False
 
 
 @dataclass

@@ -581,7 +581,7 @@ function AuditPage() {
             Health check
           </Text>
           <Text level="body-small" className="text-content-layout-3">
-            Capture live database activity and report what it costs.
+            Capture live database activity and see where it needs attention.
           </Text>
         </VStack>
       </HStack>

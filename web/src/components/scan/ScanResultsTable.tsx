@@ -561,7 +561,7 @@ export function ScanResultsTable({
                   className="w-3 h-3 text-content-warning-soft shrink-0"
                 />
                 <Text level="caption" className="text-content-warning-soft">
-                  Experimental · AI-converted SQL — verify before use
+                  Experimental · AI-converted SQL - verify before use
                 </Text>
               </HStack>
             </div>

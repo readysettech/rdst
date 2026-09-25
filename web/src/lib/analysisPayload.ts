@@ -9,10 +9,21 @@
 
 import type {
   CompleteEvent,
+  ExplainResults,
   ReadysetCacheability,
   RewriteTesting,
   StoredAnalysis,
 } from './api'
+
+/** EXPLAIN formats describe planner estimates; ANALYZE records execution. */
+export function isPlanOnly(
+  explain: ExplainResults | null | undefined
+): boolean {
+  return (
+    typeof explain?.plan_format === 'string' &&
+    explain.plan_format !== 'analyze'
+  )
+}
 
 /** Reconcile the shapes a rewrite-testing payload arrives in into one. */
 export function normalizeRewriteTesting(
@@ -65,7 +76,8 @@ export interface StoredAnalysisResults {
  * live and stored paths hand the presentation identical data.
  */
 export function storedAnalysisResults(
-  record: StoredAnalysis
+  record: StoredAnalysis,
+  mode?: string | null
 ): StoredAnalysisResults {
   const payload = record.analysis?.display_payload
   if (!payload || Object.keys(payload).length === 0) {
@@ -77,6 +89,10 @@ export function storedAnalysisResults(
     results: {
       ...payload,
       type: 'complete',
+      explain_results:
+        mode === 'explain' && payload.explain_results
+          ? { ...payload.explain_results, plan_format: 'explain' }
+          : payload.explain_results,
       success: true,
       query_hash: record.hash,
       analysis_id: payload.analysis_id ?? record.analysis_id,

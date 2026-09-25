@@ -3,6 +3,7 @@ import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { AnimatedSurfaceBackdrop } from '../../../components/AnimatedSurfaceBackdrop'
+import { plural } from '../../monitor-kit/format'
 import type { QueryLibraryController } from './useQueryLibraryController'
 
 function queryNoun(count: number) {
@@ -23,7 +24,7 @@ function pendingPhrase(newCount: number, updatedCount: number) {
 
 function pendingHeadline(newCount: number, updatedCount: number) {
   if (newCount > 0 && updatedCount > 0) {
-    return `${newCount} new, ${updatedCount} updated queries`
+    return `${newCount} new, ${plural(updatedCount, 'updated query', 'updated queries')}`
   }
   if (newCount > 0) return `${newCount} new ${queryNoun(newCount)} discovered`
   return `${updatedCount} ${queryNoun(updatedCount)} updated`
@@ -71,7 +72,7 @@ export function QueryLibraryNewQueriesCard({
               ? 'Readyset kept your current list still while these queries arrived.'
               : 'Review the new workload evidence, then clear the update when you are done.'}
             {unassessed > 0
-              ? ` Jev has assessed ${assessed} of ${finding?.all ?? 0}.`
+              ? ` RDST has classified ${assessed} of ${finding?.all ?? 0}.`
               : ''}
           </Text>
         </VStack>

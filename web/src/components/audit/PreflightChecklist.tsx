@@ -125,7 +125,7 @@ export function PreflightChecklist({
               ? TRIAL_EXHAUSTED_MESSAGE
               : aiGate.reason === 'invalid'
                 ? "The configured key isn't working"
-                : 'Not connected — the check still runs, with the AI analysis skipped'
+                : 'Not connected - the check still runs, with the AI analysis skipped'
   return (
     <div
       className="border-t border-border-layout-1 pt-4"
@@ -315,7 +315,7 @@ export function PreflightChecklist({
                 <IconButton
                   icon="info"
                   label="Why sign in to AWS?"
-                  tooltip="AWS sign-in adds actual monthly cost, provisioned compute, and CloudWatch CPU metrics for more accurate sizing and savings. It is required only when AWS-hosted targets are selected."
+                  tooltip="AWS sign-in adds provisioned compute and CloudWatch CPU metrics for more accurate sizing. It's required only when AWS-hosted targets are selected."
                   size="small"
                   modifier="ghost"
                   classMerge="bg-transparent text-content-layout-3 hover:text-content-layout-2"

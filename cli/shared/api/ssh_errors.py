@@ -119,6 +119,8 @@ def ssh_error_payload(
             f"SSH authentication failed for jump host {jump_host}. Check the SSH "
             "user and key, and confirm the public key is authorized on the jump host."
         )
+    elif category == "ssh_jump_unreachable" and getattr(exc, "cause", None):
+        message = str(exc)[:300]
     elif category == "ssh_jump_unreachable":
         message = (
             f"SSH jump host {jump_host}:{jump_port} is unreachable. Check its "
@@ -161,7 +163,7 @@ def connectivity_error_payload(
             "code": TARGET_PASSWORD_REQUIRED_CODE,
             "category": TARGET_PASSWORD_REQUIRED_CATEGORY,
             "message": (
-                f"No password is available for target '{target_name}' — open its "
+                f"No password is available for target '{target_name}' - open its "
                 "connection settings and enter the database password."
             ),
             "target_name": target_name,

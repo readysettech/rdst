@@ -9,6 +9,8 @@ import json
 import logging
 import time
 from typing import Dict, Any, Optional
+
+import sqlparse
 from shared.query_registry import QueryRegistry, hash_sql
 from shared.query_safety import validate_query_safety
 from shared.workflow_manager_runtime import WorkflowError
@@ -76,7 +78,6 @@ def store_analysis_results(**kwargs) -> Dict[str, Any]:
         # Extract required data from workflow context
         query = kwargs.get("query", "")
         target = kwargs.get("target", "")
-        registry_normalization = kwargs.get("registry_normalization", {})
 
         if not query or not target:
             return {
@@ -85,6 +86,14 @@ def store_analysis_results(**kwargs) -> Dict[str, Any]:
                 "query_hash": "",
                 "analysis_id": None,
             }
+
+        engine = _ensure_dict(kwargs.get("explain_results")).get("database_engine")
+        if engine in ("postgresql", "postgres"):
+            # Separate VALUES rows so SQLGlot recognizes positional parameters after commas.
+            query = "".join(
+                value + " " if kind is sqlparse.tokens.Punctuation and value == "," else value
+                for kind, value in sqlparse.lexer.tokenize(query)
+            )
 
         # Store/update query in query registry using the original SQL
         source = kwargs.get("source", "analyze")
@@ -98,6 +107,7 @@ def store_analysis_results(**kwargs) -> Dict[str, Any]:
             target=target,
             analyzed=True,
             save_intent=False,
+            dialect="postgres" if engine in ("postgresql", "postgres") else None,
         )
 
         stored_analysis_id = _persist_analysis_record(stored_hash, target, kwargs)
@@ -141,15 +151,13 @@ def _analysis_performance_metrics(explain_results: Dict[str, Any]) -> Dict[str, 
 
 def _persist_analysis_record(
     query_hash: str, target: str, context: Dict[str, Any]
-) -> Optional[str]:
+) -> str:
     """Persist this run's analysis body and return its analysis id.
 
     The Query Library reads the newest record for each query's outcome, and
     the results viewer reopens a stored one instead of re-running, so the
     whole body is kept rather than the compact assessment alone. The history
-    is bounded per query. Best effort: the analysis itself has already
-    succeeded, so a store failure returns None instead of failing the
-    workflow step.
+    is bounded per query. Storage failures propagate to the workflow result.
     """
     try:
         from shared.query_registry import (
@@ -188,7 +196,7 @@ def _persist_analysis_record(
         logger.warning(
             "Could not persist the analysis record for %s", query_hash, exc_info=True
         )
-        return None
+        raise
 
 
 def format_analysis_output(**kwargs) -> Dict[str, Any]:
@@ -264,6 +272,7 @@ def format_analysis_output(**kwargs) -> Dict[str, Any]:
                 "database_engine": explain_results.get("database_engine", ""),
                 "analyzed_at": explain_results.get("timestamp", ""),
                 "llm_model": llm_analysis.get("llm_model", ""),
+                "llm_info": _llm_info(llm_analysis),
             },
         }
 
@@ -519,6 +528,23 @@ def _format_index_testing(index_test_results: Dict[str, Any]) -> Dict[str, Any]:
     formatted = {k: index_test_results.get(k) for k in keys if index_test_results.get(k) is not None}
     formatted["tested"] = bool(index_test_results.get("tested"))
     return formatted
+
+
+def _llm_info(llm_analysis: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Which AI answered, its tokens and cost: charged for hosted calls, estimated from
+    published prices for a user's own Claude key."""
+    usage = llm_analysis.get("token_usage")
+    model = llm_analysis.get("llm_model")
+    if not isinstance(usage, dict) or not model:
+        return None
+    provider = usage.get("provider") or llm_analysis.get("llm_provider")
+    charged = usage.get("cost_usd")
+    estimated = charged is None and provider == "claude"
+    return {"model": str(model), "tokens": int(usage.get("total") or 0),
+            "provider": provider,
+            "cost": charged if charged is not None else (
+                usage.get("estimated_cost_usd") if estimated else None),
+            "cost_estimated": estimated}
 
 
 def _format_rewrite_testing(rewrite_test_results: Dict[str, Any]) -> Dict[str, Any]:

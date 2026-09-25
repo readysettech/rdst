@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import hmac
+import json
+import logging
 import os
+import stat
+import tempfile
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import requests
 
 from shared.config.targets import TargetsConfig
+from shared.constants import rdst_data_dir
 from shared.keyservice import keyservice_url
 from shared.secret_store_service import SecretStoreService
 
@@ -22,6 +28,8 @@ REFRESH_LEEWAY_SECONDS = 60
 REQUEST_TIMEOUT_SECONDS = 15
 _REFRESH_LOCK = threading.Lock()
 _SESSION_METADATA_LOCK = threading.RLock()
+
+logger = logging.getLogger(__name__)
 
 
 class AccountSessionError(RuntimeError):
@@ -38,16 +46,80 @@ def _read_secret(name: str, store: SecretStoreService) -> str | None:
         return None
 
 
+def _session_file() -> Path:
+    return rdst_data_dir() / "account-session.json"
+
+
+def _load_file_session() -> dict[str, str]:
+    """Read the fallback only when its owner and permissions protect the tokens."""
+    try:
+        fd = os.open(_session_file(), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "r") as source:
+            info = os.fstat(source.fileno())
+            if not stat.S_ISREG(info.st_mode) or (os.name == "posix" and (
+                    info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600)):
+                logger.warning("Readyset session file has unsafe ownership or permissions")
+                return {}
+            values = json.loads(source.read(65536))
+        if not isinstance(values, dict) or any(
+                not isinstance(values.get(name), str) for name in SESSION_SECRET_NAMES):
+            return {}
+        return values
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_file_session(values: dict[str, str]) -> None:
+    """Atomically store a complete session in a private file when the keyring cannot."""
+    path = _session_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".account-session-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as destination:
+            if os.name == "posix":
+                os.fchmod(destination.fileno(), 0o600)
+            json.dump(values, destination)
+            destination.flush()
+            os.fsync(destination.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
+
+
+def _clear_file_session() -> None:
+    try:
+        _session_file().unlink()
+    except FileNotFoundError:
+        pass
+
+
 def load_session(
     store: SecretStoreService | None = None,
 ) -> dict[str, Any] | None:
+    """Return the stored session, or None when there is nothing to sign in with.
+
+    The refresh token is what keeps a session alive. Builds that stored the access token
+    as one keyring entry lost it on Windows whenever it was longer than Credential Manager
+    allows, while the refresh token and expiry were kept. Such a session comes back with an
+    empty access token and an expiry in the past, so the next use refreshes it and stores
+    the new access token in a form that fits.
+    """
     store = store or SecretStoreService()
-    access_token = _read_secret(ACCESS_TOKEN_NAME, store)
-    if not access_token:
+    fallback = _load_file_session()
+
+    def read(name: str) -> str | None:
+        # A complete fallback also covers a keyring that stored only part of a rotation.
+        return os.getenv(name) or fallback.get(name) or _read_secret(name, store)
+
+    refresh_token = read(REFRESH_TOKEN_NAME)
+    if not refresh_token:
         return None
-    refresh_token = _read_secret(REFRESH_TOKEN_NAME, store)
-    expires_at_raw = _read_secret(EXPIRES_AT_NAME, store)
-    if not refresh_token or not expires_at_raw:
+    access_token = read(ACCESS_TOKEN_NAME) or ""
+    expires_at_raw = read(EXPIRES_AT_NAME)
+    if not access_token:
+        expires_at_raw = "0"
+    if not expires_at_raw:
         return None
     try:
         expires_at = float(expires_at_raw or 0)
@@ -87,6 +159,17 @@ def save_session(
             name: store.set_secret(name, value, persist=True)
             for name, value in values.items()
         }
+        unsaved = [
+            name for name, result in persistence.items()
+            if isinstance(result, dict) and not result.get("persisted", True)
+        ]
+        if unsaved:
+            _save_file_session(values)
+            persistence = {name: {"persisted": True, "session_only": False,
+                                  "message": "Readyset session saved in a private file."}
+                           for name in values}
+        else:
+            _clear_file_session()
 
         if account:
             save_account_metadata(account)
@@ -189,7 +272,11 @@ def access_token(
     session = load_session(store)
     if session is None:
         return None
-    if not force_refresh and time.time() < float(session["expires_at"]) - REFRESH_LEEWAY_SECONDS:
+    if (
+        not force_refresh
+        and session["access_token"]
+        and time.time() < float(session["expires_at"]) - REFRESH_LEEWAY_SECONDS
+    ):
         return str(session["access_token"])
     return refresh_session(session, store)
 
@@ -197,6 +284,7 @@ def access_token(
 def clear_session(store: SecretStoreService | None = None) -> None:
     store = store or SecretStoreService()
     with _SESSION_METADATA_LOCK:
+        _clear_file_session()
         store.clear_required(SESSION_SECRET_NAMES)
         try:
             config = TargetsConfig()

@@ -81,7 +81,7 @@ test('viewports: the queries toolbar fits 390', async ({ page }) => {
 })
 
 /**
- * F-48 - the Ask header keeps its title, description and semantic-layer badge
+ * F-48 - the Ask header keeps its title, description and target switcher
  * on separate lines at phone width instead of painting them over each other.
  */
 test('viewports: the Ask header does not overprint at 390', async ({
@@ -94,18 +94,14 @@ test('viewports: the Ask header does not overprint at 390', async ({
   await title.waitFor()
   await settle(page, 800)
 
-  // The badge names whichever state the target is in, so it reads "Semantic
-  // layer" once an earlier flow has discovered one and "Live introspection"
-  // otherwise. Either way it belongs to the header and has to stay off the
-  // title and the description.
   const header = page.locator('#main-content header').first()
-  const badge = header.getByText(/Live introspection|Semantic layer/).first()
+  const target = header.getByRole('button', { name: /^Switch target/ })
   const description = header.getByText(
     'Turn a database question into a verified answer and reusable SQL.'
   )
-  await expect(badge).toBeVisible()
+  await expect(target).toBeVisible()
   expect(await clipped(title), 'title clipped').toBe(false)
-  expect(await clipped(badge), 'badge clipped').toBe(false)
+  expect(await clipped(target), 'target switcher clipped').toBe(false)
 
   const box = async (locator: Locator): Promise<Box> => {
     const rect = await locator.boundingBox()
@@ -113,12 +109,13 @@ test('viewports: the Ask header does not overprint at 390', async ({
     return { text: '', x: rect!.x, y: rect!.y, w: rect!.width, h: rect!.height }
   }
   const titleBox = await box(title)
-  expect(overlaps(titleBox, await box(badge)), 'badge over the title').toBe(
-    false
-  )
   expect(
-    overlaps(await box(description), await box(badge)),
-    'badge over the description'
+    overlaps(titleBox, await box(target)),
+    'target switcher over the title'
+  ).toBe(false)
+  expect(
+    overlaps(await box(description), await box(target)),
+    'target switcher over the description'
   ).toBe(false)
   expect(await widestOffenders(page)).toEqual([])
   expect(await documentOverflow(page)).toBe(0)

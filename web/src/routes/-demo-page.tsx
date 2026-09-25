@@ -4,6 +4,7 @@
 // eager entry chunk. The route file imports `DemoPage` only for its `component:`
 // wrapper; the tests import `DemoPage` and the pure helpers from here. See
 // evidence/gates-final.md §Defect D-1.
+import { plural } from '../features/monitor-kit/format'
 import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
 import { Button } from '@rs/ui-new/button'
 import { ConfirmDialog } from '@rs/ui-new/confirm-dialog'
@@ -119,9 +120,9 @@ const MODE_RESET_COPY =
 const HEARTBEAT_TOOLTIP =
   'QueryPilot watches traffic and caches by the selected policy, re-evaluating every 15 seconds.'
 const CHART_INFO_TOOLTIP =
-  'Throughput on each path, side by side. This is a comparison, not an offload — the gap between the lines is how much faster queries run once Readyset caches them.'
+  'Compare throughput on each path. The gap between the lines shows how much faster queries run once Readyset caches them.'
 const LEGEND_POSTGRES_TOOLTIP =
-  'The same queries run directly against Postgres, uncached — the baseline.'
+  'The same queries run directly against Postgres without caching to measure the baseline.'
 const LEGEND_READYSET_TOOLTIP =
   'Queries through Readyset: cached ones served from cache, everything else passed through untouched.'
 const MANUAL_CACHE_DISABLED_TOOLTIP =
@@ -186,12 +187,12 @@ function formatSpanLabel(seconds: number) {
 }
 
 function formatMs(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value)) return '—'
+  if (value == null || !Number.isFinite(value)) return '-'
   return `${value >= 10 ? value.toFixed(1) : value.toFixed(2).replace(/0$/, '')} ms`
 }
 
 function formatWholeMs(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value)) return '—'
+  if (value == null || !Number.isFinite(value)) return '-'
   return `${Math.round(value).toLocaleString()} ms`
 }
 
@@ -934,8 +935,8 @@ function PreflightItem({
 /** A disk figure the backend did not send must not reach the DOM as `NaN`. */
 function formatDiskRequirement(gb: number | undefined | null): string {
   return typeof gb === 'number' && Number.isFinite(gb) && gb > 0
-    ? `about ${Math.round(gb)} GB`
-    : 'more free disk'
+    ? `about ${Math.round(gb)} GB of`
+    : 'more'
 }
 
 function formatDownloadSize(mb: number | undefined | null): string {
@@ -971,9 +972,8 @@ function DemoTrialInvite() {
           </Pressable>
         </div>
         <Text level="body-small" className="mt-2 text-content-layout-2">
-          You just watched Readyset cache these queries live — the same speedup
-          works on your data. Sign in for the free included AI, then point RDST
-          at your database.
+          Sign in for the included AI, then connect your database to test how
+          much Readyset caching helps your queries.
         </Text>
         <div className="mt-4 flex flex-col gap-2">
           <Button
@@ -1066,8 +1066,8 @@ function StartCard({ onStart }: { onStart: () => void }) {
             okLabel="Docker is running"
             pendingLabel={
               checks && !checks.docker_installed
-                ? "Docker isn't installed — install Docker Desktop to continue"
-                : "Docker isn't running — start Docker to continue"
+                ? "Docker isn't installed. Install Docker Desktop to continue."
+                : "Docker isn't running. Start Docker to continue."
             }
           />
           {/* Apple Silicon only, and only when the engine definitively cannot
@@ -1092,8 +1092,8 @@ function StartCard({ onStart }: { onStart: () => void }) {
             okLabel="Container images downloaded"
             pendingLabel={
               checks && !checks.disk_space_ok
-                ? `Not enough free disk — the demo needs ${formatDiskRequirement(checks.disk_required_gb)}`
-                : `Container images not downloaded yet — about ${formatDownloadSize(checks?.download_mb)}`
+                ? `The demo needs ${formatDiskRequirement(checks.disk_required_gb)} available disk space.`
+                : `Download the container images, about ${formatDownloadSize(checks?.download_mb)}.`
             }
           />
         </ul>
@@ -1147,13 +1147,13 @@ function popoverCopy(
   switch (reason.kind) {
     case 'selected':
       return {
-        sentence: `Cached: one of the top ${budget} ${modePhrase(activeMode)} queries right now.`,
-        numbers: `${scoreFormula(reason, row)} · budget: top ${budget}`,
+        sentence: `Cached: one of the top ${plural(budget, `${modePhrase(activeMode)} query`, `${modePhrase(activeMode)} queries`)} right now.`,
+        numbers: `${scoreFormula(reason, row)} · selection: top ${budget}`,
       }
     case 'below_rank':
       return {
-        sentence: `Not cached: not among the top ${budget} ${modePhrase(activeMode)} queries right now.`,
-        numbers: `${scoreFormula(reason, row)} · budget: top ${budget}`,
+        sentence: `Not cached: not among the top ${plural(budget, `${modePhrase(activeMode)} query`, `${modePhrase(activeMode)} queries`)} right now.`,
+        numbers: `${scoreFormula(reason, row)} · selection: top ${budget}`,
       }
     case 'below_min_execution':
       return {
@@ -1842,7 +1842,7 @@ function tourConfig(step: TourStepId): {
     case 'traffic':
       return {
         anchor: 'traffic',
-        copy: 'Traffic starts flowing to both paths — Readyset and Postgres — establishing a baseline throughput to measure against.',
+        copy: 'Traffic runs through Readyset and directly against Postgres to measure baseline throughput.',
       }
     case 'chart':
       return {
@@ -1853,7 +1853,7 @@ function tourConfig(step: TourStepId): {
     case 'table':
       return {
         anchor: 'table',
-        copy: 'Every query in the workload, with how often it runs and how long it takes on each path. Expand a row to see the query.',
+        copy: 'See how often each query runs and how long it takes on each path. Expand a row to read its SQL.',
         primary: 'Next',
       }
     case 'manual':
@@ -1864,7 +1864,7 @@ function tourConfig(step: TourStepId): {
     case 'manualResult':
       return {
         anchor: 'manual-suggestions',
-        copy: 'These two rows are now served from cache: Readyset latency drops sharply against Postgres — the same query answered from memory instead of recomputed.',
+        copy: 'Readyset now serves these two queries from memory. Compare their latency with Postgres.',
         primary: 'Next',
       }
     case 'querypilot':
@@ -1880,7 +1880,7 @@ function tourConfig(step: TourStepId): {
     case 'autoCachedChart':
       return {
         anchor: 'chart',
-        copy: 'QueryPilot just cached the most frequent queries — the teal line climbs as Readyset serves them from memory.',
+        copy: 'QueryPilot cached the most frequent queries. The teal line climbs as Readyset serves them from memory.',
         primary: 'Next',
       }
     case 'autoCached':
@@ -1892,12 +1892,12 @@ function tourConfig(step: TourStepId): {
     case 'mode':
       return {
         anchor: 'mode',
-        copy: 'Switch to Most expensive — QueryPilot re-caches around the 20 most expensive queries instead.',
+        copy: 'Switch to Most expensive to have QueryPilot cache the 20 queries that use the most database time.',
       }
     case 'reselecting':
       return {
         anchor: 'chart',
-        copy: 'QueryPilot dropped its old picks and is re-selecting for Most expensive. The Readyset line climbs as the new caches build — continue when ready.',
+        copy: 'QueryPilot dropped its old picks and is selecting for Most expensive. The Readyset line climbs as the new caches build. Continue when ready.',
         primary: 'Next',
       }
     case 'modeWhyNot':
@@ -2109,8 +2109,8 @@ function BridgePanel({ onConnect }: { onConnect: () => void }) {
           Ready to see this on your data?
         </Text>
         <Text as="p" level="body-small" className="mt-1 text-content-layout-2">
-          You just saw it on a sample Orders database — point RDST at your own
-          Postgres or MySQL to find the queries worth caching.
+          Connect your own Postgres or MySQL database to find the queries worth
+          caching.
         </Text>
       </div>
       <Button
@@ -2435,10 +2435,10 @@ export function DemoPage() {
             level="body-small"
             className="mt-1 max-w-[72ch] text-content-layout-2"
           >
-            Readyset Platform is a drop-in cache for Postgres and MySQL: it sits
-            in front of your database, serves hot queries from memory, and keeps
-            results fresh automatically as your data changes — no application
-            changes required.{' '}
+            Readyset Platform caches queries for Postgres and MySQL. It sits in
+            front of your database and serves cached queries from memory. It
+            keeps results fresh as your data changes, and your application can
+            use it without code changes.{' '}
             <a
               href="https://readyset.io/docs"
               target="_blank"

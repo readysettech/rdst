@@ -6,6 +6,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react'
+import { plural } from '../features/monitor-kit/format'
 import { readSSE } from './sseReader'
 
 // ---- types -----------------------------------------------------------------
@@ -900,7 +901,7 @@ export function useDemo() {
             : 'most frequent'
         const budget = status?.cache_budget ?? cacheBudget
         setNotice(
-          `QueryPilot is on. It caches your top ${budget} ${policy} queries.`
+          `QueryPilot is on. It caches your top ${plural(budget, `${policy} query`, `${policy} queries`)}.`
         )
       }
     },
@@ -930,7 +931,7 @@ export function useDemo() {
         nextMode === 'sum_time' ? 'most expensive' : 'most frequent'
       const budget = status?.cache_budget ?? cacheBudget
       setNotice(
-        `QueryPilot dropped its picks — re-selecting the top ${budget} ${policy} on the next pass.`
+        `QueryPilot dropped its picks - re-selecting the top ${budget} ${policy} on the next pass.`
       )
     },
     [
@@ -949,7 +950,7 @@ export function useDemo() {
       setCacheBudgetState(clamped)
       await setDemoSettings(clamped)
       setNotice(
-        `QueryPilot may cache up to ${clamped} queries on its next pass.`
+        `QueryPilot may cache up to ${plural(clamped, 'query', 'queries')} on its next pass.`
       )
       await refreshStatus()
     },
@@ -989,7 +990,7 @@ export function useDemo() {
       setMode('count_star')
       setNextPassEta(null)
       setCacheBudgetState(10)
-      setNotice("Everything's cleaned up — nothing left on your system.")
+      setNotice("Everything's cleaned up - nothing left on your system.")
     } catch (e: any) {
       setError(e?.message ?? String(e))
       setProvisionPhase('ready')

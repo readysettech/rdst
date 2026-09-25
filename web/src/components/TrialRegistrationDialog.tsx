@@ -14,7 +14,11 @@ import {
   startAccountGithubOAuth,
   startAccountGoogleOAuth,
 } from '../lib/accountAuth'
-import { fetchAccountBrowserCallback, startAccountLogin } from '../lib/api'
+import {
+  fetchAccountBrowserCallback,
+  fetchAccountStatus,
+  startAccountLogin,
+} from '../lib/api'
 import { isDesktopRuntime } from '../lib/desktop'
 import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
 import { TaskDialogContent } from './dialog/TaskDialogContent'
@@ -63,6 +67,30 @@ function GithubMark() {
   )
 }
 
+const RETURN_KEY = 'rdst_login_return_to'
+
+/** Remember the page sign-in started on, so the sign-in tab can come back to it. */
+function rememberReturn() {
+  try {
+    const here = `${window.location.pathname}${window.location.search}`
+    if (!here.startsWith('/account-login'))
+      localStorage.setItem(RETURN_KEY, here)
+  } catch {
+    /* the sign-in tab lands on Home instead */
+  }
+}
+
+/** Where a finished sign-in goes back to: the page it started on, or Home. */
+export function takeLoginReturn(): string {
+  try {
+    const path = localStorage.getItem(RETURN_KEY)
+    localStorage.removeItem(RETURN_KEY)
+    return path?.startsWith('/') && !path.startsWith('//') ? path : '/'
+  } catch {
+    return '/'
+  }
+}
+
 function localCallbackUrl(): string {
   return new URL('/account-login', window.location.origin).toString()
 }
@@ -102,8 +130,12 @@ export function AccountLoginDialog({
     onSuccess?.()
   }
 
+  const finishRef = useRef(finish)
+  finishRef.current = finish
+
   const magicLinkMutation = useMutation({
     mutationFn: async () => {
+      rememberReturn()
       const context = await startAccountLogin(accountCallbackUrl())
       await sendAccountMagicLink(context, email.trim())
       if (isDesktopRuntime()) setDesktopLoginId(context.login_id)
@@ -113,6 +145,7 @@ export function AccountLoginDialog({
 
   const googleMutation = useMutation({
     mutationFn: async () => {
+      rememberReturn()
       const context = await startAccountLogin(accountCallbackUrl())
       await startAccountGoogleOAuth(context)
       if (isDesktopRuntime()) setDesktopLoginId(context.login_id)
@@ -121,6 +154,7 @@ export function AccountLoginDialog({
 
   const githubMutation = useMutation({
     mutationFn: async () => {
+      rememberReturn()
       const context = await startAccountLogin(accountCallbackUrl())
       await startAccountGithubOAuth(context)
       if (isDesktopRuntime()) setDesktopLoginId(context.login_id)
@@ -137,6 +171,28 @@ export function AccountLoginDialog({
     }) => completeAccountRedirect(loginId, callbackUrl),
     onSuccess: finish,
   })
+
+  // In a browser, the emailed link signs in from another tab. This one notices, so the
+  // user carries on right where they were (an open dialog keeps its state).
+  useEffect(() => {
+    if (!isOpen || !linkSent || isDesktopRuntime() || complete) return
+    let cancelled = false
+    const id = window.setInterval(async () => {
+      try {
+        const status = await fetchAccountStatus()
+        if (!cancelled && status.signed_in) {
+          window.clearInterval(id)
+          void finishRef.current()
+        }
+      } catch {
+        /* keep waiting for the link */
+      }
+    }, 2_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [isOpen, linkSent, complete])
 
   useEffect(() => {
     if (!isOpen || !callbackLoginId || callbackStarted.current) return
@@ -257,8 +313,8 @@ export function AccountLoginDialog({
           title={complete ? 'Signed in to Readyset' : 'Sign in to Readyset'}
           description={
             complete
-              ? 'Your included AI is ready to use.'
-              : 'Create an account or sign in to use the included AI for free.'
+              ? 'AI monitoring and the AI in RDST are ready to use.'
+              : 'Create an account or sign in to turn on AI monitoring and the AI in RDST.'
           }
           bodyClassName="space-y-4"
           footer={

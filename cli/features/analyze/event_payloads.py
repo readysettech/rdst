@@ -61,6 +61,11 @@ class TokenUsage(_Base):
     output: int
     total: int
     estimated_cost_usd: float
+    # "readyset" (hosted through Keyservice) or "claude" (the user's own key).
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    # What the call was charged, when the provider reported it.
+    cost_usd: Optional[float] = None
 
 
 class LLMAnalysis(_Base):
@@ -215,7 +220,11 @@ class Recommendations(_Base):
 class LlmInfo(_Base):
     model: str
     tokens: int
-    cost: float
+    # The charged cost for hosted calls; null when unknown.
+    cost: Optional[float] = None
+    provider: Optional[str] = None
+    # True when `cost` is estimated from published per-token prices.
+    cost_estimated: bool = False
 
 
 class AnalysisMetadata(_Base):

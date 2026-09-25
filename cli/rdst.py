@@ -749,6 +749,15 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
                 return RdstResult(False, "Failed to clear one or more secure env vars.")
             return RdstResult(True, "")
 
+        from shared import startup_status
+
+        startup_status.enable()
+        startup_status.emit("starting")
+
+        from shared.runtime_memory import limit_malloc_arenas
+
+        limit_malloc_arenas()
+
         try:
             import uvicorn
         except ImportError:
@@ -790,12 +799,20 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
         restored_envs, missing_envs, restore_errors = _restore_web_required_env_vars()
 
         try:
+            from shared.product_telemetry import surface_properties
             from shared.telemetry import telemetry
+
+            # The desktop app starts this server on every launch, including each OS login
+            # when it starts at login; launched_by tells those apart from a person opening it.
+            desktop = os.environ.get("RDST_DESKTOP") == "1"
+            launched_by = os.environ.get("RDST_DESKTOP_LAUNCHED_BY") if desktop else "cli"
             telemetry.track("web_started", {
                 "host": host,
                 "port": port,
                 "serve_static": serve_static,
                 "ui_mode": ui_mode,
+                "launched_by": launched_by if launched_by in ("login", "user", "cli") else "user",
+                **surface_properties(),
             })
         except Exception:
             pass

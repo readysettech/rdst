@@ -20,6 +20,7 @@ import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
 import { TrialRegistrationDialog } from './TrialRegistrationDialog'
 
 interface AskPanelProps {
+  initialQuestion?: string
   target?: string | null
   /** The default target is still being looked up, so nothing is known yet. */
   targetResolving?: boolean
@@ -32,6 +33,7 @@ function sourceLabel(source: string | undefined): string {
 }
 
 export function AskPanel({
+  initialQuestion,
   target,
   targetResolving = false,
   disabled = false,
@@ -39,7 +41,7 @@ export function AskPanel({
 }: AskPanelProps) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const [question, setQuestion] = useState('')
+  const [question, setQuestion] = useState(initialQuestion ?? '')
   const [askedTarget, setAskedTarget] = useState<string | null>(null)
   const [showTrialDialog, setShowTrialDialog] = useState(false)
   const {
@@ -137,8 +139,8 @@ export function AskPanel({
 
   const handleViewInQueries = useCallback(() => {
     navigate({
-      to: '/queries',
-      search: { hash: result?.query_hash || undefined },
+      to: '/database',
+      search: { query: result?.query_hash || undefined },
     })
   }, [navigate, result?.query_hash])
 

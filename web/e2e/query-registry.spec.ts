@@ -76,25 +76,27 @@ test('shows persisted Jev assessments and applies server priority sorting', asyn
   expect(high.ok()).toBe(true)
 
   await page.goto('/queries')
-  await expect(page.getByText('Jev · High priority')).toBeVisible({
+  await expect(page.getByText('High priority', { exact: true })).toBeVisible({
     timeout: 10_000,
   })
-  await expect(page.getByText('Jev · Low priority')).toBeVisible({
+  await expect(page.getByText('Low priority', { exact: true })).toBeVisible({
     timeout: 10_000,
   })
 
   const highRow = page
     .getByTestId('query-registry-row')
-    .filter({ hasText: 'Jev · High priority' })
-  await highRow.getByRole('button', { name: 'View Jev results' }).click()
-  await expect(page.getByText(/Jev classified this query/)).toBeVisible()
-  await expect(page.getByText(/Schema context:/)).toBeVisible()
+    .filter({ hasText: 'High priority' })
+  await highRow.getByRole('button', { name: 'View classification' }).click()
+  await expect(
+    page.getByText(/The classification comes from the SQL and schema/)
+  ).toBeVisible()
+  await expect(page.getByTestId('jev-basis')).toBeVisible()
   await expect(
     page.getByRole('button', { name: 'Deep analyze this query' })
   ).toBeVisible()
 
   await page.getByRole('button', { name: 'Order queries' }).click()
-  await page.getByRole('menuitem', { name: 'Jev' }).click()
+  await page.getByRole('menuitem', { name: 'Classification' }).click()
   await page.getByRole('menuitem', { name: 'Review priority' }).click()
   await expect(page).toHaveURL(/sort=jev-priority/)
   const rows = page.getByTestId('query-registry-row')
@@ -129,20 +131,20 @@ test('orders the registry by the Jev concern shown on the card', async ({
   })
 
   await page.goto('/queries')
-  await expect(page.getByText('Jev · High priority')).toBeVisible({
+  await expect(page.getByText('High priority', { exact: true })).toBeVisible({
     timeout: 10_000,
   })
-  await expect(page.getByText('Jev · Low priority')).toBeVisible({
+  await expect(page.getByText('Low priority', { exact: true })).toBeVisible({
     timeout: 10_000,
   })
 
   // The concern reads off the collapsed card, before any disclosure opens.
   const rows = page.getByTestId('query-registry-row')
-  const flaggedRow = rows.filter({ hasText: 'Jev · High priority' })
+  const flaggedRow = rows.filter({ hasText: 'High priority' })
   await expect(flaggedRow.getByText('Missing index')).toBeVisible()
 
   await page.getByRole('button', { name: 'Order queries' }).click()
-  await page.getByRole('menuitem', { name: 'Jev' }).click()
+  await page.getByRole('menuitem', { name: 'Classification' }).click()
   await page.getByRole('menuitem', { name: 'Missing index' }).click()
   await expect(page).toHaveURL(/sort=jev-index_coverage/)
   await expect(rows.first().locator('code[title]')).toHaveAttribute(
@@ -167,7 +169,7 @@ test('keeps the sort trigger clear of the result count at every width', async ({
 
   // The longest label the control can show.
   await page.getByRole('button', { name: 'Order queries' }).click()
-  await page.getByRole('menuitem', { name: 'Jev' }).click()
+  await page.getByRole('menuitem', { name: 'Classification' }).click()
   await page.getByRole('menuitem', { name: 'Missing index' }).click()
   await expect(page).toHaveURL(/sort=jev-index_coverage/)
 

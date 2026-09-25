@@ -565,7 +565,7 @@ export function FleetRunSection({
               error ??
               'This run selects more targets than a single health check supports.'
             }
-            trustworthy="Nothing ran — no results were changed."
+            trustworthy="Nothing ran - no results were changed."
             action={{
               label: 'Adjust targets',
               icon: 'layers',

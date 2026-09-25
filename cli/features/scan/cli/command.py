@@ -522,7 +522,7 @@ class ScanCommand:
                             idx_stmt = rec.get("index_statement") or rec.get("sql") or str(rec)
                             rationale = rec.get("rationale") or rec.get("reason", "")
                             if rationale:
-                                recommendations.append(f"Index: {idx_stmt} — {rationale}")
+                                recommendations.append(f"Index: {idx_stmt} - {rationale}")
                             else:
                                 recommendations.append(f"Index: {idx_stmt}")
 
@@ -669,7 +669,7 @@ class ScanCommand:
 
                         rating = None
                         risk_score = None
-                        issues = ["EXPLAIN ANALYZE timed out — analyzed with EXPLAIN only"]
+                        issues = ["EXPLAIN ANALYZE timed out - analyzed with EXPLAIN only"]
                         recommendations = []
 
                         if llm_analysis and llm_analysis.get("success"):
@@ -690,7 +690,7 @@ class ScanCommand:
                                     idx_stmt = rec.get("index_statement") or rec.get("sql") or str(rec)
                                     rationale = rec.get("rationale") or rec.get("reason", "")
                                     if rationale:
-                                        recommendations.append(f"Index: {idx_stmt} — {rationale}")
+                                        recommendations.append(f"Index: {idx_stmt} - {rationale}")
                                     else:
                                         recommendations.append(f"Index: {idx_stmt}")
 
@@ -1118,9 +1118,9 @@ class ScanCommand:
             # Build a useful error message
             if analysis_results["failed"] > 0 and analysis_results["successful"] == 0:
                 first_error = analysis_results["failed_queries"][0]["error"] if analysis_results["failed_queries"] else "unknown"
-                analysis_results["worst_score"] = f"ERROR — all {analysis_results['failed']} queries failed: {first_error[:80]}"
+                analysis_results["worst_score"] = f"ERROR - all {analysis_results['failed']} queries failed: {first_error[:80]}"
             else:
-                analysis_results["worst_score"] = "ERROR — no LLM scores returned"
+                analysis_results["worst_score"] = "ERROR - no LLM scores returned"
         else:
             if worst_score < fail_threshold:
                 analysis_results["ci_status"] = "fail"
@@ -1198,7 +1198,7 @@ class ScanCommand:
                     rationale = idx.get("rationale", "")
                     if idx_sql:
                         if rationale:
-                            query_result["recommendations"].append(f"Index: {idx_sql} — {rationale}")
+                            query_result["recommendations"].append(f"Index: {idx_sql} - {rationale}")
                         else:
                             query_result["recommendations"].append(f"Index: {idx_sql}")
 

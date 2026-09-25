@@ -934,7 +934,7 @@ class DemoService:
             self._track_demo_event("demo_provisioned", "RDST Demo Provisioned")
             self._track_first_demo_once()
             yield {"type": "complete", "percent": 100, "targets": [],
-                   "message": "Environment ready. QueryPilot is off — cache by hand first."}
+                   "message": "Environment ready. QueryPilot is off - cache by hand first."}
         except Exception as e:
             self._last_error = str(e)
             yield {"type": "error", "message": str(e)}

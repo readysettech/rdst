@@ -8,6 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from shared.constants import rdst_data_dir
 from shared.persistence import is_safe_file_stem, require_safe_file_stem, write_json
 
 from .models import FleetAuditSnapshot, FleetDiff, FleetDiffEntry
@@ -35,7 +36,7 @@ class SnapshotStore:
     """Manages audit snapshots at ~/.rdst/fleet/snapshots/."""
 
     def __init__(self, base_dir: Path | None = None):
-        self.base_dir = base_dir or (Path.home() / ".rdst" / "fleet" / "snapshots")
+        self.base_dir = base_dir or (rdst_data_dir() / "fleet" / "snapshots")
 
     def save(self, snapshot: FleetAuditSnapshot) -> str:
         require_safe_file_stem(snapshot.snapshot_id, "snapshot id")

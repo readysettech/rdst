@@ -63,7 +63,7 @@ export function QueryLibrarySortMenu({
           innerClassName="gap-2"
         >
           <span className="truncate">
-            {jevActive ? 'Jev · ' : ''}
+            {jevActive ? 'Classification · ' : ''}
             {QUERY_LIBRARY_SORT_LABELS[sort]}
           </span>
           <Icon
@@ -97,7 +97,7 @@ export function QueryLibrarySortMenu({
                 aria-hidden="true"
                 className="h-4 w-4"
               />
-              <span>Jev</span>
+              <span>Classification</span>
             </HStack>
             <Icon
               name="chevron-right"

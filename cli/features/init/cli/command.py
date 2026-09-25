@@ -195,6 +195,18 @@ class InitCommand:
 
         asyncio.run(_run_validation())
 
+        # Connected targets: can monitoring see their queries?
+        for tested in results:
+            target_config = cfg.get(tested.name) if tested.ok else None
+            if not target_config:
+                continue
+            try:
+                from features.configure.cli.prerequisites_renderer import render_prerequisites
+
+                render_prerequisites(self.console, tested.name, dict(target_config))
+            except Exception:
+                pass  # Prerequisites are advice here; validation already reported the target.
+
         if llm_result.get("success"):
             from shared.llm_manager.key_resolution import HOSTED_MODEL
 

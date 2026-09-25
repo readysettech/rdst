@@ -216,7 +216,7 @@ async def run_fleet_audit(
             yield ErrorEvent(
                 type="error",
                 message=(
-                    f"Audit up to {MAX_FLEET_AUDIT_TARGETS} targets at once — "
+                    f"Audit up to {MAX_FLEET_AUDIT_TARGETS} targets at once - "
                     f"filter by group or tag ({len(targets)} targets selected)"
                 ),
                 code="too_many_targets",

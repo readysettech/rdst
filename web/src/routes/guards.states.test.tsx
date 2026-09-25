@@ -117,7 +117,7 @@ describe('guards list states', () => {
     const name = await screen.findByLabelText('Name')
     expect(name.hasAttribute('disabled')).toBe(false)
     expect(
-      screen.getByText('This is how you will refer to the guard everywhere.')
+      screen.getByText("You'll use this name to refer to the guard.")
     ).toBeTruthy()
   })
 
@@ -145,7 +145,7 @@ describe('guards list states', () => {
     expect(locked.hasAttribute('disabled')).toBe(true)
     expect(
       screen.getByText(
-        "A guard's name is its identity, so it can't be changed after it is created."
+        "A guard's name is its identity, so it can't be changed after it's created."
       )
     ).toBeTruthy()
   })

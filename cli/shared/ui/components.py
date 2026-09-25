@@ -959,17 +959,20 @@ class AnalysisHeaderPanel(HeaderPanelBase):
         return self
 
     def with_llm_info(
-        self, model: str, tokens: int, cost: float
+        self, model: str, tokens: int, cost: Optional[float], provider: Optional[str] = None
     ) -> "AnalysisHeaderPanel":
         model_short = (
             model.replace("claude-", "")
             .replace("-20250514", "")
             .replace("-20250929", "")
         )
+        if provider == "readyset":
+            model_short = f"Readyset AI ({model_short})"
+        cost_text = f", ~${cost:.3f}" if cost is not None else ""
         self._text.append("\n")
         self._text.append("LLM: ", style="bold")
         self._text.append(f"{model_short} ", style=StyleTokens.SECONDARY)
-        self._text.append(f"({tokens:,} tokens, ~${cost:.3f})", style=StyleTokens.MUTED)
+        self._text.append(f"({tokens:,} tokens{cost_text})", style=StyleTokens.MUTED)
         self.content = self._text
         return self
 
@@ -988,7 +991,8 @@ def AnalysisHeader(
         model = llm_info.get("model", "")
         if model:
             header.with_llm_info(
-                model, llm_info.get("tokens", 0), llm_info.get("cost", 0)
+                model, llm_info.get("tokens", 0), llm_info.get("cost"),
+                llm_info.get("provider"),
             )
     return header._build_panel()
 

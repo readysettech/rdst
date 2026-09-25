@@ -177,7 +177,9 @@ describe('AddTargetsDrawer', () => {
   it('opens on the requested source tab', () => {
     renderDrawer({ initialTab: 'csv' })
 
-    expect(screen.getByText(/columns: name, host, engine/)).toBeTruthy()
+    expect(
+      screen.getByText(/Include name, host, and engine in each row/)
+    ).toBeTruthy()
   })
 
   it('previews discovered instances and adds only the new checked ones', async () => {
@@ -211,6 +213,57 @@ describe('AddTargetsDrawer', () => {
     await waitFor(() =>
       expect(screen.getByTestId('credentials-step')).toBeTruthy()
     )
+  })
+
+  it('marks selected regions as pressed and sends exactly those', async () => {
+    renderDrawer({ initialTab: 'aws' })
+    const east2 = await screen.findByRole('button', { name: 'us-east-2' })
+    expect(east2.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(east2)
+    expect(
+      screen
+        .getByRole('button', { name: 'us-east-2' })
+        .getAttribute('aria-pressed')
+    ).toBe('false')
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Discover' }) as HTMLButtonElement)
+          .disabled
+      ).toBe(false)
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Discover' }))
+    await waitFor(() => expect(fetchFleetDiscoverPreview).toHaveBeenCalled())
+    const sent = vi
+      .mocked(fetchFleetDiscoverPreview)
+      .mock.calls.at(-1)?.[0] as {
+      regions: string[]
+    }
+    expect(sent.regions).not.toContain('us-east-2')
+    expect(sent.regions).toContain('us-east-1')
+  })
+
+  it('keeps Aurora readers out of the import until cluster monitoring', async () => {
+    vi.mocked(fetchFleetDiscoverPreview).mockResolvedValueOnce({
+      members: [discovered[0], { ...discovered[1], already_exists: false }],
+      errors: [],
+    } as never)
+    renderDrawer({ initialTab: 'aws' })
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Discover' }) as HTMLButtonElement)
+          .disabled
+      ).toBe(false)
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Discover' }))
+    await waitFor(() =>
+      expect(screen.getByText(/Aurora readers are coming soon/)).toBeTruthy()
+    )
+    expect(
+      screen.getByLabelText('Select orders-writer').getAttribute('aria-checked')
+    ).toBe('true')
+    // No checkbox at all: a reader can't be added.
+    expect(screen.queryByLabelText('Select orders-reader')).toBeNull()
+    expect(screen.getByText('coming soon')).toBeTruthy()
   })
 
   it('supports global and per-group selection and shows searched regions', async () => {
@@ -256,13 +309,7 @@ describe('AddTargetsDrawer', () => {
     renderDrawer({ initialTab: 'supabase' })
 
     expect(screen.queryByText('Regions')).toBeNull()
-    await waitFor(() =>
-      expect(
-        (screen.getByRole('button', { name: 'Discover' }) as HTMLButtonElement)
-          .disabled
-      ).toBe(false)
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Discover' }))
+    // A connected account discovers without a click.
 
     await waitFor(() =>
       expect(fetchFleetDiscoverPreview).toHaveBeenCalledWith({
@@ -283,13 +330,7 @@ describe('AddTargetsDrawer', () => {
     renderDrawer({ initialTab: 'neon' })
 
     expect(screen.queryByText('Regions')).toBeNull()
-    await waitFor(() =>
-      expect(
-        (screen.getByRole('button', { name: 'Discover' }) as HTMLButtonElement)
-          .disabled
-      ).toBe(false)
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Discover' }))
+    // A connected account discovers without a click.
 
     await waitFor(() =>
       expect(fetchFleetDiscoverPreview).toHaveBeenCalledWith({
@@ -310,13 +351,7 @@ describe('AddTargetsDrawer', () => {
     renderDrawer({ initialTab: 'digitalocean' })
 
     expect(screen.queryByText('Regions')).toBeNull()
-    await waitFor(() =>
-      expect(
-        (screen.getByRole('button', { name: 'Discover' }) as HTMLButtonElement)
-          .disabled
-      ).toBe(false)
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Discover' }))
+    // A connected account discovers without a click.
 
     await waitFor(() =>
       expect(fetchFleetDiscoverPreview).toHaveBeenCalledWith({

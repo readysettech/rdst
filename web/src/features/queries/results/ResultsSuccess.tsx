@@ -53,6 +53,17 @@ export function ResultsSuccess({
         (recommendation) => recommendation.sql !== highlightedIndexSql
       )
     : view.indexRecommendations
+  // The top recommendation shown as the next step isn't repeated below.
+  const leadOpportunity =
+    view.nextStep.kind === 'opportunity' ? view.nextStep.body : undefined
+  const remainingOpportunities = (view.additionalRecommendations ?? []).filter(
+    (opportunity) => opportunity.description !== leadOpportunity
+  )
+  // An automatic run skips rewrite testing; that's only worth a word when it suggested one.
+  const showTesting =
+    view.testing &&
+    (view.testing.skipped_reason !== 'background_analysis' ||
+      Boolean(results.llm_analysis?.rewrite_suggestions?.length))
   return (
     <m.div
       className="space-y-6"
@@ -63,6 +74,7 @@ export function ResultsSuccess({
       <div className="space-y-4">
         <ResultsSummaryCard
           performance={view.performance}
+          planOnly={view.planOnly}
           explainResults={view.explainResults}
         />
         {view.cacheability && view.readysetVerdict ? (
@@ -97,11 +109,15 @@ export function ResultsSuccess({
           modifier="outline"
           icon="info"
           iconPosition="left"
-          label="The analysis model wasn't available. Measured execution data is still shown."
+          label={
+            view.planOnly
+              ? "The analysis model wasn't available. Planner estimates are still shown."
+              : "The analysis model wasn't available. Measured execution data is still shown."
+          }
         />
       ) : null}
 
-      {view.testing ? (
+      {showTesting && view.testing ? (
         <TestedOptimizationsSection testing={view.testing} />
       ) : null}
 
@@ -112,10 +128,9 @@ export function ResultsSuccess({
         />
       ) : null}
 
-      {view.additionalRecommendations &&
-      view.additionalRecommendations.length > 0 ? (
+      {remainingOpportunities.length > 0 ? (
         <AdditionalRecommendationsSection
-          opportunities={view.additionalRecommendations}
+          opportunities={remainingOpportunities}
           collapsible
         />
       ) : null}

@@ -41,7 +41,7 @@ describe("GuardDeleteDialog (audit HIGH: deleting a guard is a security-boundary
     expect(
       screen.getAllByText(/Every rdst agent bound to this guard/i).length,
     ).toBeGreaterThan(0);
-    expect(screen.getAllByText(/cannot be undone/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/can't be undone/i).length).toBeGreaterThan(0);
   });
 
   it("omits the protection clause when the row carries no masks or rules", () => {

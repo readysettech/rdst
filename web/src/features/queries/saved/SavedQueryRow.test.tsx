@@ -761,7 +761,7 @@ describe('SavedQueryRow SQL (B-03)', () => {
   })
 })
 
-describe('SavedQueryRow Jev quick assessment', () => {
+describe('SavedQueryRow query classification', () => {
   afterEach(() => vi.unstubAllGlobals())
 
   it('shows pending state and discloses a completed advisory assessment', async () => {
@@ -775,7 +775,7 @@ describe('SavedQueryRow Jev quick assessment', () => {
         animateEntry={false}
       />
     )
-    expect(screen.getByText('Waiting for Jev assessment')).toBeTruthy()
+    expect(screen.getByText('Waiting for query classification')).toBeTruthy()
 
     rerender(
       <SavedQueryRow
@@ -784,6 +784,7 @@ describe('SavedQueryRow Jev quick assessment', () => {
             status: 'complete',
             band: 'High',
             priority_score: 80,
+            schema_coverage: 'relevant tables (2 tables, 1 index)',
             findings: [
               {
                 id: 'index_coverage',
@@ -800,13 +801,19 @@ describe('SavedQueryRow Jev quick assessment', () => {
         animateEntry={false}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'View Jev results' }))
-    expect(screen.getByText(/Jev classified this query/)).toBeTruthy()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'View classification details' })
+    )
+    expect(
+      screen.getByText(/comes from the SQL and schema, before deep analysis/)
+    ).toBeTruthy()
     // The label appears twice once open: the collapsed chip and the panel row,
     // and the panel adds the plain-language definition beneath it.
     expect(screen.getAllByText('Missing index').length).toBe(2)
     expect(screen.getByText(/column with no supporting index/)).toBeTruthy()
-    expect(screen.getByText(/Schema context:/)).toBeTruthy()
+    expect(screen.getByTestId('jev-basis').textContent).toBe(
+      'Based on 2 tables and 1 index'
+    )
     fireEvent.click(
       screen.getByRole('button', { name: 'Deep analyze this query' })
     )
@@ -848,9 +855,11 @@ describe('SavedQueryRow Jev quick assessment', () => {
 
     // Collapsed: the concerns and the score read off the card, and the action
     // says plainly that there is something to open.
-    expect(screen.queryByText(/Jev classified this query/)).toBeNull()
+    expect(screen.queryByText(/RDST classified this query/)).toBeNull()
     expect(screen.queryByText('80/100')).toBeNull()
-    const toggle = screen.getByRole('button', { name: 'View Jev results' })
+    const toggle = screen.getByRole('button', {
+      name: 'View classification details',
+    })
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(screen.getByText('Missing index')).toBeTruthy()
     expect(screen.getByText('Possible join growth')).toBeTruthy()
@@ -874,11 +883,9 @@ describe('SavedQueryRow Jev quick assessment', () => {
       />
     )
 
+    expect(screen.queryByText('AI query classification')).toBeNull()
     expect(
-      screen.queryByText('AI query classification powered by Jev')
-    ).toBeNull()
-    expect(
-      screen.getByRole('button', { name: 'View Jev results' })
+      screen.getByRole('button', { name: 'View classification details' })
     ).toBeTruthy()
   })
 })

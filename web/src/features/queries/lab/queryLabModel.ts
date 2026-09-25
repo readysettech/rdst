@@ -18,7 +18,7 @@ export const QUERY_LAB_VARIANTS: Record<
   '2': {
     name: 'Impact rail',
     hypothesis:
-      'A 16rem evidence rail makes workload cost scannable while preserving every production interaction.',
+      'A 16rem evidence rail makes workload load scannable while preserving every production interaction.',
   },
 }
 

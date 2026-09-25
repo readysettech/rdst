@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -11,7 +12,16 @@ from pydantic import BaseModel
 
 from features.account.service import AccountServiceError, account_service
 from shared.api.guards import require_local_request
+from shared.monitor.monitor_store import MonitorStore, default_monitor_db_path
 from shared.run_registry import run_registry
+
+
+def _signed_in() -> None:
+    run_registry.wake_needs_key()
+    # Sign-in alerts otherwise wait for the next monitor cycle to clear.
+    if default_monitor_db_path().exists():
+        MonitorStore().resolve_sign_in_items(int(time.time()))
+
 
 router = APIRouter()
 
@@ -206,7 +216,7 @@ async def complete_account_login(
     except AccountServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     if result["state"] == "success":
-        run_registry.wake_needs_key()
+        await asyncio.to_thread(_signed_in)
     return AccountLoginStatusResponse(**result)
 
 
@@ -222,7 +232,7 @@ async def account_login_status(
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Sign-in attempt not found") from exc
     if result["state"] == "success":
-        run_registry.wake_needs_key()
+        await asyncio.to_thread(_signed_in)
     return AccountLoginStatusResponse(**result)
 
 

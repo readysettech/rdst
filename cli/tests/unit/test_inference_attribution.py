@@ -3,7 +3,9 @@ from pathlib import Path
 
 from shared.llm_manager.inference_attribution import (
     attribution_for,
+    count_billable_calls,
     inference_workflow,
+    record_billable_call,
 )
 
 
@@ -52,3 +54,37 @@ def test_unscoped_calls_default_to_the_process_surface(monkeypatch):
 
     monkeypatch.setenv("RDST_DESKTOP", "1")
     assert attribution_for("analyze_query")["surface"] == "desktop"
+
+
+def test_monitor_override_is_scoped_and_interactive_analyze_keeps_its_operation():
+    with inference_workflow("monitor", "web", operation="monitor_analyze"):
+        for purpose in ("analyze_query", "analyze_index", "analyze_cache"):
+            assert attribution_for(purpose)["operation"] == "monitor_analyze"
+            assert attribution_for(purpose)["feature"] == "monitor"
+        assert attribution_for("analyze_query")["surface"] == "web"
+    with inference_workflow("analyze", "web"):
+        assert attribution_for("analyze_query")["operation"] == "analyze_query"
+        assert attribution_for("analyze_query")["feature"] == "analyze"
+
+
+def test_workflow_threads_preserve_attribution_and_billable_count():
+    from shared.workflow_manager_runtime import WorkflowManager
+
+    observed = []
+
+    def call(**kwargs):
+        observed.append(attribution_for("analyze_query"))
+        record_billable_call()
+        return {}
+
+    workflow = {"StartAt": "Call", "States": {"Call": {
+        "Type": "Task", "Resource": "call", "TimeoutSeconds": 5, "End": True}}}
+    manager = WorkflowManager.from_dict(workflow, resources={"call": call})
+    with count_billable_calls() as calls, inference_workflow(
+        "monitor", "web", operation="monitor_analyze"
+    ):
+        run_id = manager.run_async()
+        manager.get_workflow_status(run_id).thread.join(timeout=2)
+    assert len(observed) == 1
+    assert observed[0]["operation"] == "monitor_analyze"
+    assert calls.count == 1

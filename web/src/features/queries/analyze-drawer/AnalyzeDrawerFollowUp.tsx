@@ -31,7 +31,7 @@ export function AnalyzeDrawerFollowUp({
       <EmptyState
         icon="message-multiple"
         title="This analysis has nothing to discuss"
-        body="It was saved before full results were kept, so there is no plan or finding to ask about. Re-run it to ask follow-up questions."
+        body="It was saved before full results were kept, so there's no plan or finding to ask about. Re-run it to ask follow-up questions."
         action={{ label: 'Run analysis again', onClick: onReRun, icon: 'play' }}
       />
     )
@@ -56,7 +56,7 @@ function FollowUpConversation({
     >
       <HStack className="items-center justify-between gap-2 pb-3">
         <Text level="body-small" className="text-content-layout-2">
-          Ask about this analysis — its plan, its rewrites, its index findings.
+          Ask how the query runs or whether a suggested rewrite or index would help.
         </Text>
         {conversation.hasPreviousChat ? (
           <ClearConversationButton conversation={conversation} />

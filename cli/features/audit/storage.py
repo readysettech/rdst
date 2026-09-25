@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from shared.constants import rdst_data_dir
 from shared.persistence import write_json
 
 from .models import WorkloadRun
@@ -22,7 +23,7 @@ class AuditStorage:
     """Manages audit capture runs at ~/.rdst/audits/<target>/<run_id>.json."""
 
     def __init__(self, base_dir: Path | None = None):
-        self.base_dir = base_dir or (Path.home() / ".rdst" / "audits")
+        self.base_dir = base_dir or (rdst_data_dir() / "audits")
 
     def generate_run_id(self, target_name: str = "") -> str:
         """Generate a unique run ID."""

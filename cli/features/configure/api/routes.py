@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Optional, Union
 
-from fastapi import APIRouter, Body, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from sse_starlette.sse import EventSourceResponse
 
@@ -395,6 +395,12 @@ async def add_target(
 ) -> Union[TargetResponse, ErrorResponse]:
     """Add a new database target."""
     require_local_request(http_request)
+    # Checked before the password is stored, so a duplicate never overwrites the existing
+    # target's saved password.
+    existing = TargetsConfig()
+    existing.load()
+    if existing.get(request.name) is not None:
+        raise HTTPException(409, f"A target named {request.name} already exists.")
     service = ConfigureService()
     input_data = ConfigureInput(target_name=request.name)
     password_env = _password_env_for_request(request.name, request.target)
@@ -580,3 +586,20 @@ async def test_connection(
             yield _event_to_sse(event)
 
     return EventSourceResponse(_test_generator())
+
+
+@router.get("/configure/targets/{name}/prerequisites")
+async def get_prerequisites(http_request: Request, name: str) -> dict:
+    """Check that RDST can see the target's queries (monitoring prerequisites).
+
+    Safe to poll every few seconds: each call opens two short sessions and runs
+    read-only catalog queries plus one tagged probe statement.
+    """
+    import asyncio
+
+    from features.configure.prerequisites import check_target
+    from shared.api.target_guard import ensure_target_password
+
+    require_local_request(http_request)
+    guard = ensure_target_password(name)
+    return await asyncio.to_thread(check_target, guard.target_name, guard.target_config)

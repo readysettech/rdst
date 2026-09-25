@@ -16,21 +16,17 @@ vi.mock('../../hooks/useTarget', () => ({
 vi.mock('../../lib/analytics', () => ({ trackEvent: vi.fn() }))
 
 function progress(overrides: Partial<SetupProgress> = {}): SetupProgress {
-  return {
-    target: 'orders',
-    connected: true,
-    schema_built: false,
-    queries_found: false,
-    analyzed: false,
-    compared: false,
-    ...overrides,
-  }
+  return { target: 'orders', connected: true, ...overrides }
 }
 
-function stubProgress(value: SetupProgress) {
+function stubProgress(value: SetupProgress, monitoring = false) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => new Response(JSON.stringify(value), { status: 200 }))
+    vi.fn(async (url: string) =>
+      url.startsWith('/api/monitor/')
+        ? new Response(JSON.stringify({ enabled: monitoring }), { status: 200 })
+        : new Response(JSON.stringify(value), { status: 200 })
+    )
   )
 }
 
@@ -60,17 +56,10 @@ describe('SetupGuideHelpEntry', () => {
 
   it('stays absent for a finished setup, dismissed or not', async () => {
     dismissSetupGuide()
-    stubProgress(
-      progress({
-        schema_built: true,
-        queries_found: true,
-        analyzed: true,
-        compared: true,
-      })
-    )
+    stubProgress(progress(), true)
     renderWithClient(<SetupGuideHelpEntry className="nav" />)
 
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalled())
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
     expect(screen.queryByTestId('setup-guide-help-entry')).toBeNull()
   })
 

@@ -3,7 +3,9 @@
 PostgreSQL: pg_stat_activity for states + application_name for pooler signatures
 (pgbouncer, pgpool-II). Flag idle-in-transaction connections older than 60s.
 
-MySQL: performance_schema.threads + information_schema.PROCESSLIST for state.
+MySQL: performance_schema.threads for state; information_schema.INNODB_TRX joined to
+sleeping sessions for idle-in-transaction; connect attributes for ProxySQL or
+MySQL Router.
 """
 
 from __future__ import annotations
@@ -119,23 +121,41 @@ def _collect_pg(conn: Any) -> ConnectionAnalysisSection:
     return section
 
 
+# Sessions sitting idle (COMMAND = 'Sleep') while InnoDB holds a transaction open for them:
+# MySQL's idle in transaction.
+_MYSQL_IDLE_IN_TX_SQL = """
+SELECT th.PROCESSLIST_ID, TIMESTAMPDIFF(SECOND, trx.trx_started, NOW()),
+       th.PROCESSLIST_USER, th.PROCESSLIST_HOST,
+       (SELECT a.ATTR_VALUE FROM performance_schema.session_connect_attrs a
+        WHERE a.PROCESSLIST_ID = th.PROCESSLIST_ID AND a.ATTR_NAME = 'program_name' LIMIT 1),
+       LEFT(COALESCE(trx.trx_query, ''), 200)
+FROM information_schema.INNODB_TRX trx
+JOIN performance_schema.threads th ON th.PROCESSLIST_ID = trx.trx_mysql_thread_id
+WHERE th.PROCESSLIST_COMMAND = 'Sleep'
+ORDER BY trx.trx_started ASC
+LIMIT 100
+"""
+_MYSQL_POOLERS = {"proxysql": "proxysql", "mysqlrouter": "mysqlrouter",
+                  "mysql router": "mysqlrouter"}
+
+
 def _collect_mysql(conn: Any) -> ConnectionAnalysisSection:
     section = ConnectionAnalysisSection()
-    try:
-        with conn.cursor() as cur:
+    with conn.cursor() as cur:
+        try:
             cur.execute("SHOW VARIABLES LIKE 'max_connections';")
             row = cur.fetchone()
             if row:
-                try:
-                    section.max_connections = int(row[1])
-                except (TypeError, ValueError, IndexError):
-                    pass
+                section.max_connections = int(row[1])
+        except Exception:
+            pass
 
+        try:
             cur.execute(
                 """
                 SELECT COALESCE(PROCESSLIST_COMMAND,'Unknown'), COUNT(*)
                 FROM performance_schema.threads
-                WHERE TYPE = 'FOREGROUND'
+                WHERE TYPE = 'FOREGROUND' AND PROCESSLIST_ID IS NOT NULL
                 GROUP BY COALESCE(PROCESSLIST_COMMAND,'Unknown');
                 """
             )
@@ -146,6 +166,43 @@ def _collect_mysql(conn: Any) -> ConnectionAnalysisSection:
                 total += int(count)
             section.by_state = by_state
             section.total_connections = total
-    except Exception:
-        pass
+        except Exception:
+            pass
+
+        try:
+            cur.execute(_MYSQL_IDLE_IN_TX_SQL)
+            rows = cur.fetchall()
+            section.idle_in_transaction_count = len(rows)
+            for pid, age, user, host, program, preview in rows:
+                if float(age or 0) <= 60:
+                    continue
+                section.long_running_idle_in_tx.append(
+                    LongRunningTransaction(
+                        pid=int(pid) if pid is not None else None,
+                        state="idle in transaction",
+                        duration_seconds=float(age or 0.0),
+                        application_name=program or user,
+                        client_addr=host,
+                        query_preview=preview or None,
+                    )
+                )
+            section.long_running_idle_in_tx = section.long_running_idle_in_tx[:20]
+        except Exception:
+            pass
+
+        try:
+            cur.execute(
+                """
+                SELECT DISTINCT LOWER(ATTR_VALUE) FROM performance_schema.session_connect_attrs
+                WHERE ATTR_NAME IN ('program_name', '_client_name')
+                """
+            )
+            for (value,) in cur.fetchall():
+                pooler = next((name for sig, name in _MYSQL_POOLERS.items()
+                               if sig in (value or "")), None)
+                if pooler:
+                    section.pooler_detected, section.pooler_type = True, pooler
+                    break
+        except Exception:
+            pass
     return section

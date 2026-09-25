@@ -380,7 +380,7 @@ class TestTargetsConfig:
             "targets": {},
             "ssh_hosts": {},
             "default": None,
-            "init": {"completed": False},
+            "init": {"completed": False, "monitoring_upgrade_targets": []},
             "llm": {},
         }
 

@@ -36,6 +36,7 @@ from tests.web_e2e.fakes import (
     fake_autocomplete_schema,
     FakeJevClient,
     fake_assessment_context,
+    monitor_fake_router,
 )
 
 
@@ -86,3 +87,4 @@ from shared.api.app import create_app
 
 
 app = create_app(static_dist_dir=os.environ.get("RDST_WEB_DIST_DIR"))
+app.include_router(monitor_fake_router)

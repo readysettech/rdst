@@ -1,11 +1,12 @@
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, devices } from '@playwright/test'
+import { webBuild } from './e2e/web-build'
 
 const appDir = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(appDir, '..', '..', '..')
 const rdstDir = resolve(repoRoot, 'rdst')
-const distDir = resolve(appDir, 'dist')
+const { distDir, command: buildCommand } = webBuild(appDir)
 const baseURL = process.env.RDST_E2E_BASE_URL ?? 'http://127.0.0.1:8788'
 const isCI = Boolean(process.env.CI)
 
@@ -31,7 +32,7 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
   webServer: {
-    command: `pnpm run build && uv run --directory "${rdstDir}" uvicorn tests.web_e2e.full_stack_server:app --host 0.0.0.0 --port 8788`,
+    command: `${buildCommand} && uv run --directory "${rdstDir}" uvicorn tests.web_e2e.full_stack_server:app --host 0.0.0.0 --port 8788`,
     cwd: appDir,
     env: {
       ...process.env,

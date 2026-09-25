@@ -1,13 +1,21 @@
 import {
+  acceptBrowserError,
   configureTestTarget,
   expect,
+  mockPrerequisites,
   setBackendFixtures,
   test,
 } from './fixtures'
 
 test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
   page,
+  browserErrors,
 }) => {
+  // The new database's page asks for its latest report, which it doesn't have yet.
+  acceptBrowserError(
+    browserErrors,
+    'Failed to load resource: the server responded with a status of 404 (Not Found)'
+  )
   setBackendFixtures({
     bootstrap: [
       {
@@ -85,6 +93,7 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
       ].join('\n'),
     })
   )
+  await mockPrerequisites(page, 'needs-key-db')
   await page.getByRole('button', { name: 'Add target' }).last().click()
 
   const jobsTrigger = page.getByTestId('jobs-trigger')
@@ -92,6 +101,11 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
   await expect(jobsTrigger).toContainText('Setting up needs-key-db')
   await expect(jobsTrigger).toContainText(missingAiAccess)
   await expect(page.getByTestId('job-warning-icon')).toBeVisible()
+  // The next step is the turn-on dialog on the new database's page; leave it for now.
+  await page
+    .getByRole('dialog', { name: 'Turn on monitoring for needs-key-db' })
+    .getByRole('button', { name: 'Not now' })
+    .click()
   await jobsTrigger.click()
 
   const parkedJob = page.locator(

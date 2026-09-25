@@ -47,12 +47,15 @@ export function CredentialsStep({
   targets,
   keyringAvailable,
   onClose,
+  onDone,
   onSaved,
   privateTargetGroups = [],
 }: {
   targets: FleetMember[]
   keyringAvailable: boolean
   onClose: () => void
+  /** Every target connected: move on (defaults to closing). */
+  onDone?: () => void
   /**
    * The passwords reached the config for these targets. Fires on a successful
    * save, ahead of the connectivity verdict, so a wrong-but-stored password
@@ -667,10 +670,10 @@ export function CredentialsStep({
           <Button
             variant="primary"
             modifier="solid"
-            label="Done"
-            icon="tick"
+            label={onDone ? 'Continue' : 'Done'}
+            icon={onDone ? 'arrow-right' : 'tick'}
             iconPosition="right"
-            onClick={onClose}
+            onClick={onDone ?? onClose}
           />
         ) : (
           <Button

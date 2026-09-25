@@ -158,6 +158,21 @@ class RunRegistry:
             "metadata": handle.metadata,
         }
 
+    def list_runs(
+        self, kinds: str | Iterable[str], target: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Runs this process knows (in flight and recently finished), newest first,
+        with their first and last events for progress summaries."""
+        accepted = {kinds} if isinstance(kinds, str) else set(kinds)
+        runs = []
+        for run_id, handle in reversed(self._runs.items()):
+            if handle.kind not in accepted or (target is not None and handle.target != target):
+                continue
+            runs.append({"run_id": run_id, "kind": handle.kind, "target": handle.target,
+                         "status": handle.status, "metadata": dict(handle.metadata),
+                         "events": list(handle.events)})
+        return runs
+
     def find_active(
         self, kinds: str | Iterable[str], target: str | None = None
     ) -> str | None:

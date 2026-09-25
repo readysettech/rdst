@@ -89,16 +89,25 @@ function analyzeEvents(indexTesting: Record<string, unknown>) {
   ]
 }
 
-async function openResults(page: Parameters<typeof configureTestTarget>[0], sql = query) {
+async function openResults(
+  page: Parameters<typeof configureTestTarget>[0],
+  sql = query
+) {
   await clearQueryRegistry(page.request)
   await configureTestTarget(page, { hasPassword: true })
   await mockConnectivityOk(page)
   await acceptExplainAnalyzeConsent(page)
-  const search = new URLSearchParams({ query: sql, target: 'e2e-guard', fast: 'true' })
+  const search = new URLSearchParams({
+    query: sql,
+    target: 'e2e-guard',
+    fast: 'true',
+  })
   await page.goto(`/results?${search.toString()}`)
 }
 
-test('promotes the index the planner verified with hypopg', async ({ page }) => {
+test('promotes the index the planner verified with hypopg', async ({
+  page,
+}) => {
   setBackendFixtures({
     analyze: [
       {
@@ -106,7 +115,8 @@ test('promotes the index the planner verified with hypopg', async ({ page }) => 
           tested: true,
           method: 'hypopg',
           baseline_cost: 49586,
-          summary: 'Planner uses 1 of 2 recommended index(es) (estimated cost down 99.9%).',
+          summary:
+            'Planner uses 1 of 2 recommended index(es) (estimated cost down 99.9%).',
           results: [
             {
               index_sql: 'CREATE INDEX idx_orders_channel ON orders (channel)',
@@ -137,15 +147,23 @@ test('promotes the index the planner verified with hypopg', async ({ page }) => 
   })
   await openResults(page)
 
-  await expect(page.getByText('Recommended next step', { exact: true })).toBeVisible()
-  // The planner-verified composite index wins over the guessed "high" one.
-  await expect(page.getByText('Planner-verified', { exact: true })).toBeVisible()
   await expect(
-    page.getByText(/hypopg check: the planner uses this index \(Bitmap Index Scan\)\. Estimated cost 49,586 to 36 \(99\.9% lower\)/)
+    page.getByText('Recommended next step', { exact: true })
+  ).toBeVisible()
+  // The planner-verified composite index wins over the guessed "high" one.
+  await expect(
+    page.getByText('Planner-verified', { exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      /hypopg check: the planner uses this index \(Bitmap Index Scan\)\. Planner estimate 49,586 to 36 \(99\.9% lower\)/
+    )
   ).toBeVisible()
   // The index the planner ignores is still listed, with an explicit verdict.
   await expect(
-    page.getByText(/hypopg check: the planner would not use this index for this query/)
+    page.getByText(
+      /hypopg check: the planner would not use this index for this query/
+    )
   ).toBeVisible()
 })
 
@@ -167,16 +185,24 @@ test('explains how to enable planner verification when hypopg is missing', async
   })
   await openResults(page)
 
-  await expect(page.getByText('Recommended next step', { exact: true })).toBeVisible()
-  await expect(page.getByText('Planner-verified', { exact: true })).toHaveCount(0)
-  await expect(page.getByText(/hypopg check unavailable: hypopg is available/)).toBeVisible()
-  await expect(page.getByText('CREATE EXTENSION IF NOT EXISTS hypopg;')).toBeVisible()
+  await expect(
+    page.getByText('Recommended next step', { exact: true })
+  ).toBeVisible()
+  await expect(page.getByText('Planner-verified', { exact: true })).toHaveCount(
+    0
+  )
+  await expect(
+    page.getByText(/hypopg check unavailable: hypopg is available/)
+  ).toBeVisible()
+  await expect(
+    page.getByText('CREATE EXTENSION IF NOT EXISTS hypopg;')
+  ).toBeVisible()
 })
 
 test('offers sampled real values for a templated query before analyzing', async ({
   page,
 }) => {
-  const capturedSql = "SELECT id, total FROM orders WHERE customer_id = 4242"
+  const capturedSql = 'SELECT id, total FROM orders WHERE customer_id = 4242'
   setBackendFixtures({
     parameter_suggestions: [
       {
@@ -188,7 +214,10 @@ test('offers sampled real values for a templated query before analyzing', async 
               column: 'orders.customer_id',
               suggestions: [
                 { value: '4242', provenance: 'pg_stat_activity (running now)' },
-                { value: '17', provenance: 'Common value in orders.customer_id (pg_stats)' },
+                {
+                  value: '17',
+                  provenance: 'Common value in orders.customer_id (pg_stats)',
+                },
               ],
             },
           ],
@@ -202,7 +231,14 @@ test('offers sampled real values for a templated query before analyzing', async 
         repeat: true,
       },
     ],
-    analyze: [{ events: analyzeEvents({ tested: false, skipped_reason: 'no_recommendations' }) }],
+    analyze: [
+      {
+        events: analyzeEvents({
+          tested: false,
+          skipped_reason: 'no_recommendations',
+        }),
+      },
+    ],
   })
   await openResults(page, templatedQuery)
 
@@ -219,13 +255,23 @@ test('offers sampled real values for a templated query before analyzing', async 
   ).toBeVisible()
 
   // A captured real run can be analyzed as written.
-  await expect(dialog.getByText(/A real run of this query was captured/)).toBeVisible()
+  await expect(
+    dialog.getByText(/A real run of this query was captured/)
+  ).toBeVisible()
   const analysisRequest = page.waitForRequest(
     (request) =>
-      request.method() === 'POST' && new URL(request.url()).pathname === '/api/analyze'
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === '/api/analyze'
   )
-  await dialog.getByRole('button', { name: 'Analyze captured statement' }).click()
+  await dialog
+    .getByRole('button', { name: 'Analyze captured statement' })
+    .click()
   const request = await analysisRequest
-  expect(request.postDataJSON()).toMatchObject({ query: capturedSql, target: 'e2e-guard' })
-  await expect(page.getByText('Recommended next step', { exact: true })).toBeVisible()
+  expect(request.postDataJSON()).toMatchObject({
+    query: capturedSql,
+    target: 'e2e-guard',
+  })
+  await expect(
+    page.getByText('Recommended next step', { exact: true })
+  ).toBeVisible()
 })

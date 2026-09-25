@@ -67,7 +67,7 @@ const AnalyzeDrawerFollowUp = lazy(() =>
 
 const DRAWER_TITLE = 'Query'
 const DRAWER_DESCRIPTION =
-  'Measured performance, practical improvements, and Readyset fit.'
+  'See how this query performs and what could improve it. Check whether Readyset can cache it.'
 
 /** What the Follow-up tab is waiting for before it can be opened. */
 const FOLLOW_UP_HINT = 'Run an analysis first'

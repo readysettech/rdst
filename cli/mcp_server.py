@@ -32,16 +32,17 @@ PASSWORD HANDLING:
 """
 
 import json
-import re
-import sys
 import os
+import re
 import signal
 import subprocess
+import sys
+from typing import Any, Dict, List, Optional, Set
 
 from shared.child_process import rdst_child_argv
+from shared.constants import rdst_data_dir
 from shared.shell import environment_assignment
 from shared.stdio import configure_utf8_stdio
-from typing import Any, Dict, List, Optional, Set
 
 # MCP Protocol constants
 JSONRPC_VERSION = "2.0"
@@ -1776,6 +1777,27 @@ def get_resources() -> List[Dict[str, Any]]:
     ]
 
 
+def _monitoring_prerequisites(target: str) -> dict:
+    """Whether monitoring can see the new target's queries, with fixes for what fails.
+
+    Needs the target's password in this process; without it the result carries
+    `connection_error` and the tool's next steps say how to export it.
+    """
+    try:
+        from features.configure.prerequisites import check_target
+        from shared.config.targets import TargetsConfig
+
+        cfg = TargetsConfig()
+        cfg.load()
+        target_config = cfg.get(target)
+        if not target_config:
+            return {"target": target, "ready": False, "checks": [],
+                    "connection_error": f"Target '{target}' not found"}
+        return check_target(target, dict(target_config))
+    except Exception as exc:  # the add itself succeeded
+        return {"target": target, "ready": False, "checks": [], "connection_error": str(exc)}
+
+
 def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     """Handle a tool call and return the result."""
 
@@ -1803,6 +1825,8 @@ def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
             args.append("--default")
         args.append("--skip-verify")  # Skip connection verification for MCP
         result = run_rdst_command(args)
+        if result["success"]:
+            result["prerequisites"] = _monitoring_prerequisites(arguments["target"])
 
         # Add helpful context about next steps
         if result["success"]:
@@ -1814,6 +1838,10 @@ IMPORTANT: Before using this target, the user must export the password:
 
 Then they can run:
   rdst analyze -q "SELECT 1" --target {arguments["target"]}
+
+Monitoring prerequisites are in `prerequisites`: when `ready` is false, show the
+user each failed check's `fix` (SQL to run and provider steps). Re-check with
+`rdst configure test {arguments["target"]}`.
 """
         return result
 
@@ -1964,7 +1992,7 @@ Then they can run:
         return run_rdst_command(["version"])
 
     elif name == "rdst_read_config":
-        config_path = os.path.expanduser("~/.rdst/config.toml")
+        config_path = str(rdst_data_dir() / "config.toml")
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 content = f.read()
@@ -2020,7 +2048,7 @@ This is the RDST configuration file. Key sections:
 
     elif name == "rdst_help":
         # This is the main entry point - reads config and checks env vars
-        config_path = os.path.expanduser("~/.rdst/config.toml")
+        config_path = str(rdst_data_dir() / "config.toml")
         try:
             import toml
             with open(config_path, "r", encoding="utf-8") as f:
@@ -2570,7 +2598,7 @@ def handle_resource(uri: str) -> Dict[str, Any]:
     """Handle a resource request and return the content."""
 
     if uri == "rdst://config":
-        config_path = os.path.expanduser("~/.rdst/config.toml")
+        config_path = str(rdst_data_dir() / "config.toml")
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 content = f.read()

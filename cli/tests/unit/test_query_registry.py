@@ -1264,6 +1264,25 @@ class TestVerifyQueryCompleteness:
         assert is_valid is False
         assert "Empty" in error
 
+    @pytest.mark.parametrize("sql", [
+        "INSERT INTO EVENTS ( `id` , `customer_id` , `kind` ) VALUES (...)",
+        "SELECT `id` FROM `orders` WHERE `status` IN (...) AND `id` > ?",
+    ])
+    def test_mysql_digest_value_lists_are_whole(self, sql):
+        assert verify_query_completeness(sql, "mysql") == (True, None)
+
+    def test_mysql_digest_value_list_keeps_its_identity_in_the_registry(self, tmp_path):
+        registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+        registry.load()
+        digest = "INSERT INTO EVENTS ( `id` , `customer_id` ) VALUES (...)"
+        query_hash, _ = registry.add_query(digest, source="top-historical", target="shop",
+                                           dialect="mysql", observed=True)
+        assert query_hash == hash_sql(digest)
+
+    def test_an_ellipsis_outside_mysql_digests_is_still_rejected(self):
+        is_valid, _ = verify_query_completeness("SELECT id FROM orders WHERE id IN (...)")
+        assert is_valid is False
+
     def test_valid_select_with_leading_line_comment(self):
         """Leading line comments are ignored for completeness validation."""
         is_valid, error = verify_query_completeness(

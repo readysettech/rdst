@@ -25,7 +25,7 @@ export function QueriesWorkspace({ search }: { search: QueryLibrarySearch }) {
   return (
     <WorkspaceLayout<QueryLibraryView>
       title="Queries"
-      description="Find, save, and improve the queries that shape your database workload. AI query classification powered by Jev."
+      description="Find, save, and improve the queries that shape your database workload. AI query classification."
       icon="folder-file"
       panelId={PANEL_ID}
       headerDivider

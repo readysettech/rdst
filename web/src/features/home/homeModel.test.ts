@@ -21,11 +21,31 @@ function entry(over: Partial<QueryRegistryEntry>): QueryRegistryEntry {
   } as QueryRegistryEntry
 }
 
+function history(firstTs: number | null, span = 0) {
+  return {
+    first_ts: firstTs,
+    last_ts: firstTs == null ? null : firstTs + span,
+    span_seconds: span,
+    resolutions: {
+      '60': { first_ts: firstTs },
+      '300': { first_ts: null },
+      '3600': { first_ts: null },
+      '86400': { first_ts: null },
+    },
+  }
+}
+
 describe('deriveHomeState', () => {
-  it('keeps the targetless, connected, and active boundaries explicit', () => {
-    expect(deriveHomeState(0, true)).toBe('first-run')
-    expect(deriveHomeState(2, false)).toBe('connected')
-    expect(deriveHomeState(1, true)).toBe('active')
+  it('follows the setup: connect, turn on monitoring, collect, then monitor', () => {
+    expect(deriveHomeState(0, true, undefined)).toBe('first-run')
+    expect(deriveHomeState(2, false, history(null))).toBe('connected')
+    expect(deriveHomeState(1, true, history(null))).toBe('collecting')
+    expect(deriveHomeState(1, true, history(1000, 120))).toBe('collecting')
+    expect(deriveHomeState(1, true, history(1000, 3600))).toBe('active')
+  })
+
+  it('keeps paused monitoring with history on the active home', () => {
+    expect(deriveHomeState(1, false, history(1000, 86_400))).toBe('active')
   })
 })
 

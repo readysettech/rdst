@@ -6,6 +6,7 @@ import { Progress } from '@rs/ui-new/progress'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import type { ComponentProps, ReactNode } from 'react'
+import { plural } from '../../features/monitor-kit/format'
 import type { SchemaDetails, SchemaStatus } from '../../types/schema'
 
 interface SchemaGuidedSequenceProps {
@@ -154,7 +155,7 @@ export function SchemaGuidedSequence({
         />
         <Text level="body-small" className="text-content-layout-3">
           Documented{updatedLabel ? ` · Updated ${updatedLabel}` : ''} ·{' '}
-          {totalTables} tables · {totalColumns} columns
+          {plural(totalTables, 'table')} · {plural(totalColumns, 'column')}
         </Text>
       </HStack>
     )
@@ -198,8 +199,8 @@ export function SchemaGuidedSequence({
             index={1}
             done
             title="Structure"
-            what="Tables, columns, and types, read from your database."
-            cost="Free · seconds"
+            what="See the tables in your database and the name and type of each column."
+            cost="Takes seconds"
             action={ghost(
               'Refresh',
               'database-settings',
@@ -209,7 +210,8 @@ export function SchemaGuidedSequence({
           >
             <Text level="caption" className="text-content-layout-3">
               Loaded{updatedLabel ? ` · updated ${updatedLabel}` : ''} ·{' '}
-              {status.tables} tables · {status.columns} columns
+              {plural(status.tables, 'table')} ·{' '}
+              {plural(status.columns, 'column')}
             </Text>
           </StageRow>
 
@@ -219,13 +221,13 @@ export function SchemaGuidedSequence({
             index={2}
             done={profileDone}
             title="Column profile"
-            what="Shapes, ranges, null rates, and sample values, sampled with read-only queries."
+            what="See what values each column holds. RDST samples them with read-only queries and shows their ranges and how often they're null."
             cost="Read-only DB · no AI"
             action={ghost('Profile', 'speedometer', onProfile, profiling)}
           >
             <Text level="caption" className="text-content-layout-3">
               {profiledTables > 0
-                ? `Profiled · ${profiledTables} of ${status.tables} tables${profiledLabel ? ` · ${profiledLabel}` : ''}`
+                ? `Profiled · ${profiledTables} of ${plural(status.tables, 'table')}${profiledLabel ? ` · ${profiledLabel}` : ''}`
                 : "Lets Ask reason about what's in a column, not just its name."}
             </Text>
           </StageRow>
@@ -252,13 +254,13 @@ export function SchemaGuidedSequence({
               <Progress value={pct} max={100} className="min-w-40 flex-1" />
             </HStack>
             <Text level="body-small" className="text-content-layout-2">
-              {undocumentedTables} of {totalTables} tables and{' '}
-              {undocumentedColumns} of {totalColumns} columns still need
-              meanings.
+              {undocumentedTables} of {plural(totalTables, 'table')} and{' '}
+              {undocumentedColumns} of {plural(totalColumns, 'column')} still
+              need meanings.
             </Text>
             <Text level="caption" className="text-content-layout-3">
-              The difference between AI that guesses at your tables and AI that
-              asks the right questions back.
+              These descriptions help RDST interpret your questions about this
+              database.
             </Text>
           </StageRow>
         </VStack>

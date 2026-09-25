@@ -41,6 +41,26 @@ class FleetCommand:
             return RdstResult(False, f"Unknown fleet subcommand: {subcommand}")
         return handler(args)
 
+    @staticmethod
+    def _check_prerequisites(console, names: list, args: argparse.Namespace) -> dict | None:
+        """Show whether monitoring can see each new target's queries (re-check in a TTY)."""
+        from features.configure.cli.prerequisites_renderer import (
+            prerequisites_data,
+            run_prerequisite_flow,
+        )
+
+        cfg = TargetsConfig()
+        cfg.load()
+        targets = [(name, dict(cfg.get(name))) for name in dict.fromkeys(names) if cfg.get(name)]
+        if not targets:
+            return None
+        if not getattr(args, "output_json", False):
+            console.print("\n[bold]Monitoring setup[/bold]")
+        results = run_prerequisite_flow(
+            console, targets, json_mode=bool(getattr(args, "output_json", False))
+        )
+        return prerequisites_data(results)
+
     # =========================================================================
     # Configure (interactive wizard)
     # =========================================================================
@@ -214,8 +234,9 @@ class FleetCommand:
         try:
             tc = cfg.get(name)
             conn = create_direct_connection(tc)
-            close_connection(conn, tc.get("engine", "postgresql"))
+            close_connection(conn)
             console.print(f"[green]Connection successful.[/green]")
+            self._check_prerequisites(console, [name], args)
         except Exception as e:
             console.print(f"[yellow]Connection test failed: {e}[/yellow]")
             console.print(f"[dim]Target saved. Check credentials and try: rdst fleet status[/dim]")
@@ -249,6 +270,7 @@ class FleetCommand:
         console = get_console()
 
         result_data = {"imported": 0, "skipped": 0, "errors": 0}
+        imported_names: list[str] = []
 
         async def _run():
             async for event in service.import_fleet(
@@ -269,6 +291,7 @@ class FleetCommand:
                     result_data["imported"] = event.imported
                     result_data["skipped"] = event.skipped
                     result_data["errors"] = event.errors
+                    imported_names.extend(event.target_names or [])
 
         asyncio.run(_run())
 
@@ -279,6 +302,10 @@ class FleetCommand:
         console.print(
             f"\n{prefix}[bold]Import complete:[/bold] {imported} imported, {skipped} skipped, {errors} errors"
         )
+        if imported_names and not dry_run:
+            prerequisites = self._check_prerequisites(console, imported_names, args)
+            if prerequisites:
+                result_data["prerequisites"] = prerequisites
         return RdstResult(True, f"{imported} targets imported", data=result_data)
 
     # =========================================================================
@@ -505,10 +532,13 @@ class FleetCommand:
             )
 
         # Interactive credential setup for newly discovered instances
+        data = None
         if imported > 0 and not dry_run:
             self._setup_credentials_after_discover(console, cfg, discovered_names)
+            prerequisites = self._check_prerequisites(console, discovered_names, args)
+            data = {"prerequisites": prerequisites} if prerequisites else None
 
-        return RdstResult(True, f"{imported} discovered")
+        return RdstResult(True, f"{imported} discovered", data=data)
 
     def _setup_credentials_after_discover(self, console, cfg, discovered_names: list) -> None:
         """Interactive credential setup for newly discovered instances."""

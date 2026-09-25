@@ -204,14 +204,14 @@ test('sort, search and the star filter are named and recoverable', async ({
   const cards = page.getByTestId('query-registry-row')
   await expect(cards).toHaveCount(2)
 
-  const sort = page.getByRole('combobox', { name: 'Order queries' })
+  const sort = page.getByRole('button', { name: 'Order queries' })
   await expect(sort).toBeVisible()
   await sort.click()
   await expect(
-    page.getByRole('option', { name: 'Highest impact' })
+    page.getByRole('menuitem', { name: 'Highest impact' })
   ).toBeVisible()
   await expect(
-    page.getByRole('option', { name: 'Recently analyzed' })
+    page.getByRole('menuitem', { name: 'Recently analyzed' })
   ).toBeVisible()
   await page.keyboard.press('Escape')
 

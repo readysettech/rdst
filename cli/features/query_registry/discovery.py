@@ -9,6 +9,7 @@ turning an observation into explicit Saved intent.
 from __future__ import annotations
 
 import asyncio
+import heapq
 from collections import deque
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -21,12 +22,14 @@ import time
 from typing import Any, AsyncGenerator, Callable, Deque, Dict, Optional
 
 from features.query_registry.statement_stats import (
+    COLLECT_ENTRANT_STATEMENTS,
     PG_VERSION_SQL,
     CollectResult,
     MysqlDigestSource,
     PgStatStatementsSource,
     StatementStatsSource,
     _toplevel_flag,
+    mysql_sample_template,
     pg_engine_key,
 )
 from features.top.events import (
@@ -60,8 +63,89 @@ from shared.query_registry.observation_store import (
     ObservationStore,
     default_cache_db_path,
 )
+from shared.monitor.monitor_store import (
+    FULL_DETAIL_QUERIES, SERIES_QUERIES, MonitorStore, default_monitor_db_path, is_locked,
+)
 
 logger = logging.getLogger(__name__)
+
+PG_MONITOR_DB_SQL = (
+    "/*rdst:observe*/ SELECT xact_commit,xact_rollback,blks_hit,blks_read,"
+    "deadlocks,numbackends,current_setting('max_connections')::integer,"
+    "EXTRACT(EPOCH FROM stats_reset),"
+    "(SELECT COUNT(*) FROM pg_stat_activity WHERE datname=current_database() "
+    "AND wait_event_type='Lock' AND pid<>pg_backend_pid() "
+    "AND COALESCE(application_name, '') NOT LIKE 'rdst/%') "
+    "FROM pg_stat_database WHERE datname=current_database()"
+)
+LIBRARY_ADMISSION_LIMIT = 100
+LIBRARY_REFRESH_LIMIT = 100
+# Collector readings kept while monitor.db stays locked.
+MONITOR_PENDING_MAX = 60
+# Statement texts hashed into identities per cycle; the rest wait for later cycles,
+# heaviest first. Hashing costs milliseconds per text, so this bounds one cycle's work.
+IDENTITY_RESOLUTION_BATCH = 5_000
+# The first monitored reading seeds its baseline before wider Library reconciliation.
+STARTUP_IDENTITY_RESOLUTION_BATCH = 100
+# Wall-clock budget for hashing identities in one cycle. A frozen build on a slow machine
+# can spend tens of milliseconds per text, so thousands of new statements would hold the
+# cycle past its deadline; the rest wait for later cycles, heaviest first.
+IDENTITY_RESOLUTION_BUDGET_SECONDS = 3.0
+
+MYSQL_MONITOR_STATUS_SQL = (
+    "/*rdst:observe*/ SHOW GLOBAL STATUS WHERE Variable_name IN "
+    "('Com_commit','Com_rollback','Innodb_buffer_pool_read_requests',"
+    "'Innodb_pages_read','Innodb_deadlocks','Threads_connected')"
+)
+MYSQL_MONITOR_LOCK_SQL = "/*rdst:observe*/ SELECT COUNT(*) FROM performance_schema.data_lock_waits"
+MYSQL_MONITOR_MAX_SQL = "/*rdst:observe*/ SHOW GLOBAL VARIABLES LIKE 'max_connections'"
+MYSQL_MONITOR_DEADLOCK_SQL = (
+    "/*rdst:observe*/ SELECT COUNT FROM information_schema.INNODB_METRICS "
+    "WHERE NAME='lock_deadlocks' AND STATUS='enabled'"
+)
+# Data statements that failed. PostgreSQL's xact_rollback counts every transaction that ended
+# in an error as well as explicit ROLLBACKs; Com_rollback only sees the ROLLBACK statements.
+# Failed DESCRIBE, SHOW and unparseable statements (tools, RDST's schema reads) aren't
+# transactions.
+MYSQL_MONITOR_ERRORS_SQL = (
+    "/*rdst:observe*/ SELECT COALESCE(SUM(SUM_ERRORS),0) FROM "
+    "performance_schema.events_statements_summary_global_by_event_name WHERE EVENT_NAME IN ("
+    "'statement/sql/select','statement/sql/insert','statement/sql/update',"
+    "'statement/sql/delete','statement/sql/replace','statement/sql/insert_select',"
+    "'statement/sql/replace_select','statement/sql/update_multi','statement/sql/delete_multi',"
+    "'statement/sql/call_procedure')"
+)
+
+
+def mysql_monitor_sample(executor: Callable, epoch_id: str) -> tuple[int | str | None, ...]:
+    """Return counters in the same positions as the PostgreSQL monitor sample."""
+    status = {str(name).lower(): int(value) for name, value in
+              executor(MYSQL_MONITOR_STATUS_SQL, None)}
+    maximum = int(executor(MYSQL_MONITOR_MAX_SQL, None)[0][1])
+    deadlocks = status.get("innodb_deadlocks")
+    if deadlocks is None:
+        try:
+            rows = executor(MYSQL_MONITOR_DEADLOCK_SQL, None)
+            deadlocks = int(rows[0][0]) if rows else 0
+        except Exception:
+            deadlocks = 0
+    try:
+        rows = executor(MYSQL_MONITOR_ERRORS_SQL, None)
+        errors = int(rows[0][0] or 0) if rows else 0
+    except Exception:
+        errors = 0
+    try:
+        rows = executor(MYSQL_MONITOR_LOCK_SQL, None)
+        lock_waits = int(rows[0][0]) if rows else None
+    except Exception:
+        lock_waits = None
+    return (status.get("com_commit", 0), status.get("com_rollback", 0) + errors,
+            status.get("innodb_buffer_pool_read_requests", 0),
+            # Every page read from disk, read-ahead included, like PostgreSQL's blks_read;
+            # Innodb_buffer_pool_reads leaves out the pages a scan prefetches.
+            status.get("innodb_pages_read", 0),
+            deadlocks, status["threads_connected"],
+            maximum, epoch_id, lock_waits)
 
 
 def _utc_now() -> str:
@@ -110,6 +194,8 @@ RETENTION_EVENT_KEEP = 1000
 # Retention piggybacks on a successful cycle at most this often, so
 # steady-state cycles are not taxed with compaction work.
 RETENTION_MIN_INTERVAL_SECONDS = 600
+# Per-cycle observation windows in cache.db; monitor.db keeps the history the product reads.
+OBSERVATION_RETENTION_SECONDS = 60 * 60
 
 # Attribution overlap reads widen the queried range symmetrically by this
 # allowance: the per-cycle clock offset carries sub-second noise (fetch
@@ -224,6 +310,15 @@ def _connection_executor(connection: Any) -> Callable[..., Any]:
     return executor
 
 
+def _counters_moved(previous: Optional[CounterRow], current: CounterRow) -> bool:
+    """Whether ``current`` differs from the checkpointed row it would replace."""
+    return previous is None or (
+        previous.calls, previous.rows, previous.total_exec_time, previous.min_exec_time,
+        previous.max_exec_time, previous.stats_since, previous.epoch_id,
+    ) != (current.calls, current.rows, current.total_exec_time, current.min_exec_time,
+          current.max_exec_time, current.stats_since, current.epoch_id)
+
+
 def _default_connection_factory(target: str) -> tuple[Any, str]:
     """Open the collector's own direct connection and report the target's engine."""
     from shared.config.targets import TargetsConfig, normalize_db_type
@@ -251,6 +346,7 @@ def _default_connection_factory(target: str) -> tuple[Any, str]:
             import pymysql.cursors
 
             connection.cursorclass = pymysql.cursors.Cursor
+            connection.autocommit(True)
         except Exception:
             logger.debug("Could not set tuple cursor for target %s", target, exc_info=True)
     return connection, engine
@@ -313,6 +409,16 @@ class QueryDiscoveryCollector:
         self._stats_source: Optional[StatementStatsSource] = None
         self._engine = ""
         self._source_name = ""
+        self._monitor: Optional[MonitorStore] = None
+        self._monitor_enabled = False
+        self._monitor_db_sample: Optional[tuple[Any, ...]] = None
+        self._monitor_db_previous: Optional[tuple[Any, ...]] = None
+        # False until a monitored cycle has set the baseline that rates are measured from.
+        self._monitor_baseline_set = False
+        # Minutes whose write failed on a locked monitor.db, written first next cycle.
+        self._monitor_pending: Deque[tuple[Any, ...]] = deque(maxlen=MONITOR_PENDING_MAX)
+        self._db_touch_seconds = 0.0
+        self._library_refresh_cursor = 0
         # A permanent source/capability gap (missing extension, missing
         # privileges) switches this collector to the legacy TopService path
         # for its remaining lifetime; transient errors never set this.
@@ -395,6 +501,8 @@ class QueryDiscoveryCollector:
     def set_scheduler_owned(self, owned: bool) -> None:
         """Select scheduler-owned cadence instead of subscriber-owned polling."""
         self._scheduler_owned = owned
+        if owned:
+            self._wake.set()
 
     def set_subscriber_state_callback(
         self, callback: Optional[Callable[[str, bool], None]]
@@ -474,9 +582,23 @@ class QueryDiscoveryCollector:
             )
             return None
 
-    def _publish(self, event: str, data: Dict[str, Any]) -> QueryDiscoveryEvent:
+    def _persist(self, event: str, data: Dict[str, Any]) -> Optional[int]:
         self._sync_cursor()
-        seq = self._store_append(event, data)
+        return self._store_append(event, data)
+
+    async def publish_async(self, event: str, data: Dict[str, Any]) -> QueryDiscoveryEvent:
+        """Persist in a worker thread, then deliver on the loop.
+
+        The observation store can wait on another writer's lock (the Library write fence
+        holds it across a commit); that wait must never stall the event loop.
+        """
+        return self._deliver(event, data, await asyncio.to_thread(self._persist, event, data))
+
+    def _publish(self, event: str, data: Dict[str, Any]) -> QueryDiscoveryEvent:
+        return self._deliver(event, data, self._persist(event, data))
+
+    def _deliver(self, event: str, data: Dict[str, Any],
+                 seq: Optional[int]) -> QueryDiscoveryEvent:
         # Ids stay monotonic even when the store is unavailable for a few
         # cycles; a reconnect then lands ahead of the durable seq and is
         # healed by the resync path.
@@ -561,6 +683,8 @@ class QueryDiscoveryCollector:
         return [self.resync_event("cursor_not_retained")]
 
     async def ensure_started(self) -> None:
+        if self._scheduler_owned:
+            return
         if self._task is None or self._task.done():
             self._wake.clear()
             self._task = asyncio.create_task(
@@ -681,7 +805,7 @@ class QueryDiscoveryCollector:
                 await self.close()
 
     async def _run(self) -> None:
-        while True:
+        while not self._scheduler_owned:
             try:
                 await self.collect_now()
             except asyncio.CancelledError:
@@ -715,7 +839,7 @@ class QueryDiscoveryCollector:
                     "changed": False,
                     "error": "Query discovery is temporarily unavailable.",
                 }
-                self._publish("discovery_error", self._snapshot)
+                await self.publish_async("discovery_error", self._snapshot)
             try:
                 await asyncio.wait_for(
                     self._wake.wait(), timeout=self.interval_seconds
@@ -945,13 +1069,53 @@ class QueryDiscoveryCollector:
             for row in rows
         }
 
+    def _timed_executor(self, connection: Any) -> Callable[..., Any]:
+        execute = _connection_executor(connection)
+
+        def timed(sql: str, params: Any = None) -> Any:
+            started = time.monotonic()
+            try:
+                return execute(sql, params)
+            finally:
+                self._db_touch_seconds += time.monotonic() - started
+
+        return timed
+
+    def _engine_total_delta(self, result: CollectResult) -> Optional[tuple[int, float]]:
+        """Engine-wide (calls, ms) since the previous reading, when both readings share an
+        epoch and no statement was evicted in between; None otherwise."""
+        previous = getattr(self, "_engine_totals", None)
+        dealloc = result.capabilities.get("dealloc")
+        self._engine_totals = ((result.epoch_id, dealloc, result.totals)
+                               if result.totals is not None else None)
+        if previous is None or result.totals is None or previous[:2] != (result.epoch_id, dealloc):
+            return None
+        calls = result.totals[1] - previous[2][1]
+        total_ms = result.totals[2] - previous[2][2]
+        return (calls, total_ms) if calls >= 0 and total_ms >= 0 else None
+
+    def _unresolved_batch(self, rows: list[CounterRow]) -> list[CounterRow]:
+        """The engine rows still lacking an identity that this cycle resolves: the heaviest
+        IDENTITY_RESOLUTION_BATCH of them, so a newly seen engine with a hundred thousand
+        statements is resolved over several cycles instead of one long one."""
+        unresolved = [row for row in rows if row.engine_key not in self._alias_map]
+        limit = (min(IDENTITY_RESOLUTION_BATCH, STARTUP_IDENTITY_RESOLUTION_BATCH)
+                 if self._monitor_enabled and not self._monitor_baseline_set
+                 else IDENTITY_RESOLUTION_BATCH)
+        # Heaviest first, so a cycle cut short by the time budget resolves what matters.
+        return heapq.nlargest(min(limit, len(unresolved)), unresolved,
+                              key=lambda row: row.total_exec_time)
+
     def _two_phase_fetch(
         self,
     ) -> tuple[CollectResult, Dict[str, str], list[str]]:
         """Blocking Phase A (plus Phase B when keys lack text) on the reused
         connection, then one bounded activity snapshot for parameter values."""
+        self._db_touch_seconds = 0.0
         if self._connection is None:
+            connect_started = time.monotonic()
             connection, engine = self._connection_factory(self.target)
+            self._db_touch_seconds += time.monotonic() - connect_started
             self._connection = connection
             self._engine = engine
             if engine == "postgresql":
@@ -971,31 +1135,50 @@ class QueryDiscoveryCollector:
                 )
         connection = self._connection
         source = self._stats_source
-        executor = _connection_executor(connection)
+        executor = self._timed_executor(connection)
 
         try:
             result = source.collect(
                 executor,
                 cursor_state=self._cursor_state,
                 known_text_keys=frozenset(self._alias_map),
+                tracked_keys=tuple(self._baseline),
             )
             if result.epoch_id != self._alias_epoch:
                 self._alias_map = self._load_persisted_aliases(result.epoch_id)
                 self._alias_epoch = result.epoch_id
             texts = dict(result.texts)
             needed = {
-                row.engine_key
-                for row in result.rows
-                if row.engine_key not in self._alias_map
-                and row.engine_key not in texts
+                row.engine_key for row in self._unresolved_batch(result.rows)
+                if row.engine_key not in texts
             }
             texts.update(self._fetch_statement_texts(needed))
+            if self._monitor_enabled and self._monitor is not None:
+                # Query Library admission is intentionally capped per pass, but
+                # monitor history needs text for every observed identity. On a
+                # restart, backfill older aliases that predate this sink path.
+                try:
+                    known = {row["query_key"] for row in self._monitor.read(
+                        "SELECT query_key FROM query_text WHERE target=?", (self.target,))}
+                    missing_monitor = sorted(
+                        row.engine_key for row in result.rows
+                        if row.engine_key not in texts
+                        and (key := self._alias_map.get(row.engine_key)) is not None
+                        and key not in known and key not in self._system_identities
+                    )
+                    texts.update(self._fetch_statement_texts(set(missing_monitor[:500])))
+                except Exception:
+                    logger.warning("Monitor text backfill failed for %s", self.target,
+                                   exc_info=True)
             # The activity snapshot only recovers parameter values, so its
             # failure (privileges, timeout) never fails the cycle -- the
             # same non-fatal posture as every store write.
             activity_texts: list[str] = []
+            self._activity_sample_ok = False
+            source.last_activity_details = []
             try:
                 activity_texts = source.activity_sample(executor)
+                self._activity_sample_ok = True
             except Exception:
                 logger.debug(
                     "Activity sampling failed for target %s; the cycle "
@@ -1003,18 +1186,33 @@ class QueryDiscoveryCollector:
                     self.target,
                     exc_info=True,
                 )
+            self._monitor_db_sample = None
+            if self._monitor_enabled:
+                try:
+                    if self._engine == "postgresql":
+                        rows = executor(PG_MONITOR_DB_SQL, None)
+                        self._monitor_db_sample = tuple(rows[0]) if rows else None
+                    else:
+                        self._monitor_db_sample = mysql_monitor_sample(executor, result.epoch_id)
+                except Exception:
+                    self._monitor_db_sample = None
+                    logger.debug("Monitor database sample failed for %s", self.target, exc_info=True)
             return result, texts, activity_texts
         finally:
             # End the read transaction so the reused connection idles between
             # cycles (SET LOCAL scoping relies on it on PostgreSQL).
-            try:
-                connection.rollback()
-            except Exception:
-                logger.debug(
-                    "Rollback after collection failed for target %s",
-                    self.target,
-                    exc_info=True,
-                )
+            if self._engine == "postgresql":
+                rollback_started = time.monotonic()
+                try:
+                    connection.rollback()
+                except Exception:
+                    logger.debug(
+                        "Rollback after collection failed for target %s",
+                        self.target,
+                        exc_info=True,
+                    )
+                finally:
+                    self._db_touch_seconds += time.monotonic() - rollback_started
 
     def _fetch_statement_texts(self, needed: set[str]) -> Dict[str, str]:
         """Blocking Phase B: fetch statement text for exactly these engine keys.
@@ -1028,7 +1226,7 @@ class QueryDiscoveryCollector:
             source, PgStatStatementsSource
         ):
             return {}
-        executor = _connection_executor(connection)
+        executor = self._timed_executor(connection)
         texts: Dict[str, str] = {}
         try:
             for statement in source.text_fetch_setup_statements:
@@ -1049,6 +1247,7 @@ class QueryDiscoveryCollector:
                         texts[key] = usable
             return texts
         finally:
+            rollback_started = time.monotonic()
             try:
                 connection.rollback()
             except Exception:
@@ -1057,11 +1256,20 @@ class QueryDiscoveryCollector:
                     self.target,
                     exc_info=True,
                 )
+            finally:
+                self._db_touch_seconds += time.monotonic() - rollback_started
 
     def _recent_observation_rows(
         self, deltas: list[DeltaResult], *, incremental: bool
     ) -> list[Dict[str, Any]]:
         """Window results keyed by library identity; engine keys without one are dropped."""
+        tiers = None
+        coarse = {}
+        if self._monitor_enabled and self._monitor is not None:
+            tiers = {row["query_key"]: row["rank"] for row in self._monitor.read(
+                "SELECT query_key,rank FROM query_tier WHERE target=?", (self.target,))}
+            coarse = {key: row for key, row in getattr(self, "_coarse_observations", {}).items()
+                      if tiers.get(key, 0) > FULL_DETAIL_QUERIES}
         merged: Dict[str, Dict[str, Any]] = {}
         for delta in deltas:
             if delta.is_baseline:
@@ -1075,6 +1283,8 @@ class QueryDiscoveryCollector:
                     "Dropping a window delta for engine key %s: no resolved identity yet",
                     delta.engine_key,
                 )
+                continue
+            if tiers is not None and normalized not in tiers:
                 continue
             row = {
                 "normalized_hash": normalized,
@@ -1096,6 +1306,31 @@ class QueryDiscoveryCollector:
                 # One incomplete engine row makes the merged window incomplete;
                 # its metrics are already None.
                 merged[normalized] = row
+        if tiers is not None:
+            completed = []
+            for key, row in merged.items():
+                if tiers[key] <= FULL_DETAIL_QUERIES:
+                    completed.append(row)
+                    continue
+                prior = coarse.get(key)
+                if prior is not None:
+                    row["window_start"] = min(prior["window_start"], row["window_start"])
+                    if prior["completeness"] == COMPLETE and row["completeness"] == COMPLETE:
+                        row["calls_delta"] += prior["calls_delta"]
+                        row["exec_time_delta"] += prior["exec_time_delta"]
+                        row["approximate_qps"] = row["calls_delta"] / max(
+                            1, row["window_end"] - row["window_start"])
+                    else:
+                        row.update(calls_delta=None, exec_time_delta=None, approximate_qps=None,
+                                   completeness=prior["completeness"] if prior["completeness"] != COMPLETE
+                                   else row["completeness"])
+                if row["window_end"] - row["window_start"] >= 300:
+                    completed.append(row)
+                    coarse.pop(key, None)
+                else:
+                    coarse[key] = row
+            self._coarse_observations = coarse
+            return completed
         return list(merged.values())
 
     def _apply_rdst_attribution(
@@ -1252,6 +1487,26 @@ class QueryDiscoveryCollector:
                 return sample
         return None
 
+    def _pg_target_reset(self, rows: list[CounterRow]) -> bool:
+        """Detect a selective PG stats reset that leaves the global epoch unchanged."""
+        if self._engine != "postgresql" or self._baseline_captured_at is None:
+            return False
+        previous = {key: row for key, row in self._baseline.items()
+                    if row.captured_at == self._baseline_captured_at}
+        if len(previous) < 100:
+            return False
+        current = {row.engine_key: row for row in rows}
+        shared = set(previous) & set(current)
+        if len(shared) * 2 >= len(previous):
+            return False
+        if len(shared) < 10:
+            return True
+        regressions = sum(
+            current[key].calls < previous[key].calls or
+            current[key].total_exec_time < previous[key].total_exec_time
+            for key in shared)
+        return regressions >= max(5, len(shared) // 5)
+
     async def _collect_two_phase(self) -> Optional[QueryDiscoveryEvent]:
         """One two-phase cycle, or None when a capability gap engaged the
         sticky legacy fallback and the caller should finish the cycle there."""
@@ -1259,6 +1514,18 @@ class QueryDiscoveryCollector:
         attempted_at = self._unix_clock()
         connection_reused = self._connection is not None
         self._restore_cursor_state()
+        self._monitor_enabled = False
+        monitor_path = default_monitor_db_path()
+        if monitor_path.exists():
+            try:
+                if (
+                    self._monitor is None
+                    or str(self._monitor.path) != os.path.realpath(monitor_path)
+                ):
+                    self._monitor = MonitorStore(monitor_path)
+                self._monitor_enabled = self._monitor.levers(self.target)["enabled"]
+            except Exception:
+                logger.warning("Monitor store unavailable for %s", self.target, exc_info=True)
 
         fetch_started = time.monotonic()
         try:
@@ -1290,9 +1557,8 @@ class QueryDiscoveryCollector:
                 self.target,
                 type(exc).__name__,
             )
-            self._record_collector_state(
-                state="unavailable",
-                last_attempt_at=attempted_at,
+            await asyncio.to_thread(
+                self._record_collector_state, state="unavailable", last_attempt_at=attempted_at,
                 duration_ms=int((time.monotonic() - collection_started) * 1000),
                 error_code="collection_failed",
             )
@@ -1302,70 +1568,150 @@ class QueryDiscoveryCollector:
                 "changed": False,
                 "error": "Query discovery is temporarily unavailable.",
             }
-            return self._publish("discovery_error", self._snapshot)
+            return await self.publish_async("discovery_error", self._snapshot)
         fetch_ms = (time.monotonic() - fetch_started) * 1000.0
         local_fetched_at = self._local_clock()
 
-        rows_by_key = {row.engine_key: row for row in result.rows}
-        captured_at = result.rows[0].captured_at if result.rows else float(attempted_at)
-        if result.rows:
-            # Both clocks were just read around the same fetch: captured_at
-            # is the server's now() and local_fetched_at the local one.
-            self._clock_offset = captured_at - local_fetched_at
+        def advance() -> tuple[Dict[str, CounterRow], float, Dict[str, str], bool, bool,
+                               list[DeltaResult], Dict[str, CounterRow], list[CounterRow],
+                               Optional[tuple[int, float]], Optional[float]]:
+            rows_by_key = {row.engine_key: row for row in result.rows}
+            captured_at = result.rows[0].captured_at if result.rows else float(attempted_at)
+            if result.rows:
+                # Both clocks were just read around the same fetch: captured_at
+                # is the server's now() and local_fetched_at the local one.
+                self._clock_offset = captured_at - local_fetched_at
 
-        # Identity resolution: alias newly texted keys with the same hash the
-        # registry computes, so both lanes agree on one identity. Missing or
-        # placeholder text leaves the key unresolved so it is retried; the
-        # aliases are persisted after registry validation below.
-        new_aliases: Dict[str, str] = {}
-        for engine_key, text in texts.items():
-            if engine_key in self._alias_map or engine_key not in rows_by_key:
-                continue
-            usable = _usable_statement_text(text)
-            if usable is None:
-                continue
-            try:
-                new_aliases[engine_key] = hash_sql(usable)
-            except Exception:
-                logger.debug(
-                    "Failed to hash statement text for engine key %s",
-                    engine_key,
-                    exc_info=True,
+            # Identity resolution: alias newly texted keys with the same hash the
+            # registry computes, so both lanes agree on one identity. Missing or
+            # placeholder text leaves the key unresolved so it is retried; the
+            # aliases are persisted after registry validation below.
+            new_aliases: Dict[str, str] = {}
+            resolve_deadline = time.monotonic() + IDENTITY_RESOLUTION_BUDGET_SECONDS
+            for row in self._unresolved_batch(result.rows):
+                if time.monotonic() >= resolve_deadline:
+                    break
+                engine_key = row.engine_key
+                text = texts.get(engine_key)
+                if text is None:
+                    continue
+                usable = _usable_statement_text(text)
+                if usable is None:
+                    continue
+                try:
+                    new_aliases[engine_key] = hash_sql(usable)
+                except Exception:
+                    logger.debug(
+                        "Failed to hash statement text for engine key %s",
+                        engine_key,
+                        exc_info=True,
+                    )
+            self._alias_map.update(new_aliases)
+
+            # Delta lane: diffing is valid only within one epoch; a change resets
+            # the baseline and cursor and produces no deltas this cycle.
+            target_reset = (self._baseline_epoch == result.epoch_id
+                            and self._pg_target_reset(result.rows))
+            epoch_changed = bool(self._baseline) and (
+                self._baseline_epoch != result.epoch_id or target_reset)
+            if target_reset and self._store is not None:
+                try:
+                    self._store.clear_counter_snapshots(
+                        self.target, result.epoch_id, **self._fence_kwargs())
+                except LeaseLostError:
+                    raise
+                except Exception:
+                    logger.warning("Failed to clear reset counters for %s", self.target,
+                                   exc_info=True)
+            deltas: list[DeltaResult] = []
+            if epoch_changed:
+                self._baseline = {}
+                self._baseline_captured_at = None
+                self._cursor_state = None
+            elif self._baseline and self._baseline_captured_at is not None:
+                deltas = process_snapshot(
+                    self._baseline, result.rows, self._baseline_captured_at, captured_at
                 )
-        self._alias_map.update(new_aliases)
+            prior_baseline = dict(self._baseline)
+            baseline_rows = result.rows
+            if self._monitor_enabled and self._monitor is not None:
+                tier_rows = self._monitor.read(
+                    "SELECT query_key,rank FROM query_tier WHERE target=?", (self.target,))
+                ranks = {row["query_key"]: row["rank"] for row in tier_rows}
+                # Retained queries need a counter pair even when the native sweep exceeds the cap.
+                baseline_rows = sorted(result.rows, key=lambda row: (
+                    -ranks.get(self._alias_map.get(row.engine_key), SERIES_QUERIES + 1),
+                    row.total_exec_time))
+            previous_capture = self._baseline_captured_at
+            # Tracked queries keep their pairs; the headroom pairs the heaviest newcomers, so a
+            # newly hot statement gets a delta and can earn a tracked slot.
+            self._baseline = advance_baseline(self._baseline, baseline_rows,
+                                              max_keys=SERIES_QUERIES + COLLECT_ENTRANT_STATEMENTS)
+            self._baseline_captured_at = captured_at
+            self._baseline_epoch = result.epoch_id
+            self._cursor_state = result.next_cursor_state
+            # Only baseline rows can pair with a later sweep, and a row whose counters match its
+            # stored checkpoint adds nothing a restart could use, so neither is rewritten.
+            checkpoint = [row for row in result.rows if self._baseline.get(row.engine_key) is row
+                          and _counters_moved(prior_baseline.get(row.engine_key), row)]
+            # A full sweep re-reads every held pair, so a pair whose window starts before the
+            # previous sweep left the slice in between: that window is a gap, not a minute.
+            contiguous = previous_capture if not result.incremental else None
+            return (rows_by_key, captured_at, new_aliases, target_reset, epoch_changed, deltas,
+                    prior_baseline, checkpoint, self._engine_total_delta(result), contiguous)
 
-        # Delta lane: diffing is valid only within one epoch; a change resets
-        # the baseline and cursor and produces no deltas this cycle.
-        epoch_changed = bool(self._baseline) and self._baseline_epoch != result.epoch_id
-        deltas: list[DeltaResult] = []
-        if epoch_changed:
-            self._baseline = {}
-            self._baseline_captured_at = None
-            self._cursor_state = None
-        elif self._baseline and self._baseline_captured_at is not None:
-            deltas = process_snapshot(
-                self._baseline, result.rows, self._baseline_captured_at, captured_at
-            )
-        self._baseline = advance_baseline(self._baseline, result.rows)
-        self._baseline_captured_at = captured_at
-        self._baseline_epoch = result.epoch_id
-        self._cursor_state = result.next_cursor_state
+        # Hashing new texts and diffing a full native sweep are CPU work over every
+        # engine row; they run off the event loop so API requests keep being served.
+        (rows_by_key, captured_at, new_aliases, target_reset, epoch_changed, deltas,
+         prior_baseline, checkpoint, engine_delta, contiguous) = await asyncio.to_thread(advance)
 
-        registry = self._registry()
-        registry.load()
-        previously_observed: set[str] = set()
-        prior_stats: Dict[str, tuple[int, float]] = {}
-        for entry in registry.list_queries(limit=None):
-            lifecycle = entry.lifecycle_for(self.target)
-            if lifecycle and lifecycle.first_observed_at:
-                previously_observed.add(entry.hash)
-            prior_stats[entry.hash] = (entry.frequency, entry.avg_duration_ms)
+        # Commit the counter checkpoint before its delta reaches monitor.db,
+        # so a restart cannot count the same window twice.
+        await asyncio.to_thread(
+            self._record_counter_rows, checkpoint, result.epoch_id, captured_at=captured_at
+        )
+
+        # Preserve the minute bucket before any Library parsing or admission.
+        # The monitor owns its text and identity history independently.
+        if not self._monitor_enabled:
+            self._monitor_baseline_set = False
+        if self._monitor_enabled and self._monitor is not None:
+            # The first monitored reading's deltas reach back to a snapshot taken before
+            # monitoring started (or before a restart), over an interval the chart can't
+            # know. That reading only sets the baseline; rates start with the next one.
+            baseline = not self._monitor_baseline_set
+            self._monitor_baseline_set = True
+
+            def record_monitor() -> None:
+                with self._registry_write_guard():
+                    self._record_monitor_cycle(
+                        int(local_fetched_at), deltas, None,
+                        getattr(self._stats_source, "last_activity_details", []),
+                        result.rows, prior_baseline, result.sample_texts, texts,
+                        activity_sampled=getattr(self, "_activity_sample_ok", False),
+                        baseline=baseline, engine_delta=engine_delta,
+                        contiguous_since=contiguous,
+                    )
+
+            try:
+                await asyncio.to_thread(record_monitor)
+            except LeaseLostError:
+                raise
+            except Exception:
+                logger.warning("Monitor sink failed for %s", self.target, exc_info=True)
+            else:
+                await asyncio.to_thread(self._name_new_queries)
+
+        def load_registry() -> tuple[QueryRegistry, set[str]]:
+            registry = self._registry()
+            return registry, registry.observed_hashes(self.target)
+
+        registry, previously_observed = await asyncio.to_thread(load_registry)
 
         # Identity-level aggregation over the merged baseline: absent engine
         # keys keep their last counters, so an incremental sweep never
-        # shrinks an identity's cumulative evidence, and every aliased
-        # identity in the epoch stays a Library candidate even when its
-        # first sighting lost the top-K cut.
+        # shrinks an identity's cumulative evidence. Absent identities can
+        # be admitted to the Library when they reappear with fetchable text.
         identity_rows: Dict[str, list[CounterRow]] = {}
         for engine_key, counter_row in self._baseline.items():
             normalized = self._alias_map.get(engine_key)
@@ -1385,227 +1731,267 @@ class QueryDiscoveryCollector:
                 return sum(windows)
             return sum(row.total_exec_time for row in identity_rows[normalized])
 
-        # Library adds stay bounded: one slot per normalized identity, only
-        # identities the target has not observed before, ranked by this
-        # window's execution time (cumulative total without a valid window)
-        # and capped at the collector limit.
+        # Library adds stay bounded. Retained baselines include absent engine
+        # keys after eviction or a selective reset; those keys have no text
+        # to fetch and must not occupy every top-K admission slot.
+        present = set(rows_by_key)
+        admission_limit = LIBRARY_ADMISSION_LIMIT
+        refresh_limit = LIBRARY_REFRESH_LIMIT
+        tracked = None
+        if self._monitor_enabled and self._monitor is not None:
+            tracked = {row["query_key"] for row in await asyncio.to_thread(self._monitor.read,
+                "SELECT query_key FROM query_text WHERE target=? UNION "
+                "SELECT query_key FROM query_load WHERE target=?", (self.target, self.target))}
         candidates = sorted(
             (
                 normalized
                 for normalized in identity_rows
                 if normalized not in previously_observed
+                and (tracked is None or normalized in tracked)
                 and normalized not in self._system_identities
+                and any(row.engine_key in present for row in identity_rows[normalized])
             ),
             key=interval_rank,
             reverse=True,
-        )[: self.limit]
+        )[: min(self.limit, admission_limit)]
+
+        # Refresh a rotating slice of present Library identities. New
+        # identities retain their separate top-K admission budget.
+        known = sorted(
+            key for key in identity_rows
+            if key in previously_observed and key not in self._system_identities
+            and any(row.engine_key in present for row in identity_rows[key])
+        )
+        if known:
+            offset = self._library_refresh_cursor % len(known)
+            ordered = known[offset:] + known[:offset]
+            refresh_keys = set(ordered[:refresh_limit])
+            self._library_refresh_cursor = (offset + len(refresh_keys)) % len(known)
+        else:
+            refresh_keys = set()
+
+        def scope_registry() -> Dict[str, str]:
+            # The cycle reads and writes only these identities; the Library can be far
+            # larger than one cycle's work, so it is never decoded whole here.
+            captures = _activity_capture_map(activity_texts)
+            registry.load_keys([*candidates, *refresh_keys, *captures])
+            return captures
+
+        activity_captures = await asyncio.to_thread(scope_registry)
         candidate_texts = await self._resolve_candidate_texts(
             candidates, identity_rows, texts, registry
         )
 
-        new_hashes: list[str] = []
-        changed = False
-        refreshed = 0
-        params_captured = 0
-        system_skipped = 0
-        sql_dialect = "postgres" if self._engine == "postgresql" else self._engine
-        # Only MySQL texts need their dialect in the registry: DIGEST_TEXT
-        # backtick-quotes every identifier, which the dialect-less parser
-        # rejects. PostgreSQL must stay dialect-less because the postgres
-        # parser reads the digits of $N placeholders as literals.
-        add_dialect = "mysql" if self._engine == "mysql" else None
-        persist_started = time.monotonic()
-        with registry.defer_save():
-            for normalized in candidates:
-                text = candidate_texts.get(normalized)
-                if text is None:
-                    # No usable text this cycle; the identity is retried as
-                    # long as it keeps ranking into the top-K.
-                    continue
-                if not references_user_relations(text, dialect=sql_dialect):
-                    # Catalog-only and relation-free statements are RDST's
-                    # own observation traffic or probes, not user workload;
-                    # they stay in the counter/delta lanes but never enter
-                    # the Query Library or future candidate rankings.
-                    self._system_identities.add(normalized)
-                    system_skipped += 1
-                    continue
-                if match_self_template(text):
-                    # Statement stores replay RDST's own diagnostic
-                    # statements captured before self markers were emitted;
-                    # recognizing the shapes here keeps them out of the
-                    # library regardless of what the store remembers.
-                    self._system_identities.add(normalized)
-                    system_skipped += 1
-                    continue
-                counter_rows = identity_rows[normalized]
-                calls = sum(item.calls for item in counter_rows)
-                avg_ms = (
-                    sum(item.mean_exec_time * item.calls for item in counter_rows)
-                    / calls
-                    if calls
-                    else 0.0
-                )
-                try:
-                    query_hash, _ = registry.add_query(
-                        sql=text,
-                        source="top-historical",
-                        frequency=calls,
-                        target=self.target,
-                        dialect=add_dialect,
-                        avg_duration_ms=avg_ms,
-                        observed_params_sql=self._sample_text_for(
-                            normalized, identity_rows, result.sample_texts
-                        ),
-                        observed=True,
-                        save_intent=False,
+        def admit() -> tuple[list[str], bool, int, int, int, float]:
+            new_hashes: list[str] = []
+            changed = False
+            refreshed = 0
+            params_captured = 0
+            system_skipped = 0
+            sql_dialect = "postgres" if self._engine == "postgresql" else self._engine
+            # Only MySQL texts need their dialect in the registry: DIGEST_TEXT
+            # backtick-quotes every identifier, which the dialect-less parser
+            # rejects. PostgreSQL must stay dialect-less because the postgres
+            # parser reads the digits of $N placeholders as literals.
+            add_dialect = "mysql" if self._engine == "mysql" else None
+            persist_started = time.monotonic()
+            with registry.defer_save():
+                for normalized in candidates:
+                    text = candidate_texts.get(normalized)
+                    if text is None:
+                        # No usable text this cycle; the identity is retried as
+                        # long as it keeps ranking into the top-K.
+                        continue
+                    if not references_user_relations(text, dialect=sql_dialect):
+                        # Catalog-only and relation-free statements are RDST's
+                        # own observation traffic or probes, not user workload;
+                        # they stay in the counter/delta lanes but never enter
+                        # the Query Library or future candidate rankings.
+                        self._system_identities.add(normalized)
+                        system_skipped += 1
+                        continue
+                    if match_self_template(text):
+                        # Statement stores replay RDST's own diagnostic
+                        # statements captured before self markers were emitted;
+                        # recognizing the shapes here keeps them out of the
+                        # library regardless of what the store remembers.
+                        self._system_identities.add(normalized)
+                        system_skipped += 1
+                        continue
+                    counter_rows = identity_rows[normalized]
+                    calls = sum(item.calls for item in counter_rows)
+                    avg_ms = (
+                        sum(item.mean_exec_time * item.calls for item in counter_rows)
+                        / calls
+                        if calls
+                        else 0.0
                     )
-                except ValueError:
-                    logger.debug(
-                        "Skipping an invalid query returned by discovery",
-                        exc_info=True,
-                    )
-                    # An alias minted from this cycle's rejected text must
-                    # not persist as resolved; drop it so text is retried.
-                    for engine_key in [
-                        key
-                        for key, value in new_aliases.items()
-                        if value == normalized
-                    ]:
-                        del new_aliases[engine_key]
-                        self._alias_map.pop(engine_key, None)
-                    continue
-                if query_hash not in previously_observed:
-                    new_hashes.append(query_hash)
-                    previously_observed.add(query_hash)
-                    changed = True
-
-            # Known entries receive refreshed evidence, exactly as the legacy
-            # path re-adds every observed row: frequency mirrors the engine's
-            # cumulative calls and avg is the calls-weighted mean. Only first
-            # observations become New, so nothing here touches new_hashes.
-            added = set(new_hashes)
-            for normalized, counter_rows in identity_rows.items():
-                if normalized in added:
-                    continue
-                entry = registry.get_query(normalized)
-                if entry is None or not entry.original_sql:
-                    continue
-                calls = sum(item.calls for item in counter_rows)
-                avg_ms = (
-                    sum(item.mean_exec_time * item.calls for item in counter_rows)
-                    / calls
-                    if calls
-                    else 0.0
-                )
-                try:
-                    query_hash, _ = registry.add_query(
-                        sql=entry.original_sql,
-                        source="top-historical",
-                        frequency=calls,
-                        target=self.target,
-                        dialect=add_dialect,
-                        avg_duration_ms=avg_ms,
-                        observed_params_sql=self._sample_text_for(
-                            normalized, identity_rows, result.sample_texts
-                        ),
-                        observed=True,
-                        save_intent=False,
-                    )
-                except ValueError:
-                    logger.debug(
-                        "Skipping an evidence refresh for a known entry",
-                        exc_info=True,
-                    )
-                    continue
-                refreshed += 1
-                refreshed_entry = registry.get_query(query_hash)
-                if refreshed_entry is not None and prior_stats.get(query_hash) != (
-                    refreshed_entry.frequency,
-                    refreshed_entry.avg_duration_ms,
-                ):
-                    changed = True
-
-            # Parameter capture from the cycle's activity snapshot: a sampled
-            # literal-bearing text refreshes observed values for an identity
-            # already in the Library (including ones admitted above). Texts
-            # matching no Library entry are dropped: activity sampling is
-            # unrepresentative evidence for admission (research Q7), so this
-            # lane captures parameter values, never queries.
-            for identity, sampled in _activity_capture_map(activity_texts).items():
-                entry = registry.get_query(identity)
-                if entry is None or not entry.original_sql:
-                    continue
-                if _identity_slot_count(entry.sql):
-                    # An identity minted from engine-normalized text: the
-                    # sample's values are extracted against the stored slot
-                    # text so they key by textual slot position ($k / the
-                    # k-th '?' resolves as pk).
-                    extracted = extract_observed_params(
-                        sampled, entry.sql, add_dialect
-                    )
-                    add_sql, observed_sql = entry.original_sql, sampled
-                else:
-                    # An identity minted from literal-bearing SQL: re-adding
-                    # the fresh sample extracts values with the same :pN
-                    # numbering the entry's stored text carries.
                     try:
-                        _, extracted = normalize_and_extract(
-                            canonicalize_sql(sampled), add_dialect
+                        query_hash, _ = registry.add_query(
+                            sql=text,
+                            source="top-historical",
+                            frequency=calls,
+                            target=self.target,
+                            dialect=add_dialect,
+                            avg_duration_ms=avg_ms,
+                            observed_params_sql=self._sample_text_for(
+                                normalized, identity_rows, result.sample_texts
+                            ),
+                            observed=True,
+                            save_intent=False,
                         )
-                    except Exception:
-                        extracted = {}
-                    add_sql, observed_sql = sampled, None
-                if not extracted:
-                    # Values are written only when extraction succeeds; a
-                    # truncated or unmappable sample must not touch the entry.
-                    continue
-                prior_params = dict(entry.most_recent_params)
-                try:
-                    query_hash, _ = registry.add_query(
-                        sql=add_sql,
-                        source="top-historical",
-                        target=self.target,
-                        dialect=add_dialect,
-                        observed_params_sql=observed_sql,
-                        observed=True,
-                        save_intent=False,
-                    )
-                except ValueError:
-                    logger.debug(
-                        "Skipping parameter capture for a sampled text",
-                        exc_info=True,
-                    )
-                    continue
-                params_captured += 1
-                captured_entry = registry.get_query(query_hash)
-                if (
-                    captured_entry is not None
-                    and captured_entry.most_recent_params != prior_params
-                ):
-                    changed = True
-        persistence_ms = (time.monotonic() - persist_started) * 1000.0
+                    except ValueError:
+                        logger.debug(
+                            "Skipping an invalid query returned by discovery",
+                            exc_info=True,
+                        )
+                        # An alias minted from this cycle's rejected text must
+                        # not persist as resolved; drop it so text is retried.
+                        for engine_key in [
+                            key
+                            for key, value in new_aliases.items()
+                            if value == normalized
+                        ]:
+                            del new_aliases[engine_key]
+                            self._alias_map.pop(engine_key, None)
+                        continue
+                    if query_hash not in previously_observed:
+                        new_hashes.append(query_hash)
+                        previously_observed.add(query_hash)
+                        changed = True
 
-        self._record_identity_aliases(result.epoch_id, new_aliases)
-        self._record_recent_observations(
-            self._apply_rdst_attribution(
-                self._recent_observation_rows(deltas, incremental=result.incremental)
-            )
-        )
-        self._record_counter_rows(
-            result.rows, result.epoch_id, captured_at=captured_at
-        )
+                # Known entries receive a rotating evidence refresh: frequency
+                # mirrors cumulative calls and avg is the calls-weighted mean.
+                # Only first observations become New.
+                added = set(new_hashes)
+                for normalized, counter_rows in identity_rows.items():
+                    if normalized in added or normalized not in refresh_keys:
+                        continue
+                    entry = registry.get_query(normalized)
+                    if entry is None or not entry.original_sql:
+                        continue
+                    calls = sum(item.calls for item in counter_rows)
+                    avg_ms = (
+                        sum(item.mean_exec_time * item.calls for item in counter_rows)
+                        / calls
+                        if calls
+                        else 0.0
+                    )
+                    try:
+                        prior_stats = (entry.frequency, entry.avg_duration_ms)
+                        query_hash, _ = registry.add_query(
+                            sql=entry.original_sql,
+                            source="top-historical",
+                            frequency=calls,
+                            target=self.target,
+                            dialect=add_dialect,
+                            avg_duration_ms=avg_ms,
+                            observed_params_sql=self._sample_text_for(
+                                normalized, identity_rows, result.sample_texts
+                            ),
+                            observed=True,
+                            save_intent=False,
+                        )
+                    except ValueError:
+                        logger.debug(
+                            "Skipping an evidence refresh for a known entry",
+                            exc_info=True,
+                        )
+                        continue
+                    refreshed += 1
+                    refreshed_entry = registry.get_query(query_hash)
+                    if refreshed_entry is not None and prior_stats != (
+                        refreshed_entry.frequency,
+                        refreshed_entry.avg_duration_ms,
+                    ):
+                        changed = True
+
+                # Parameter capture from the cycle's activity snapshot: a sampled
+                # literal-bearing text refreshes observed values for an identity
+                # already in the Library (including ones admitted above). Texts
+                # matching no Library entry are dropped: activity sampling is
+                # unrepresentative evidence for admission (research Q7), so this
+                # lane captures parameter values, never queries.
+                for identity, sampled in activity_captures.items():
+                    entry = registry.get_query(identity)
+                    if entry is None or not entry.original_sql:
+                        continue
+                    if _identity_slot_count(entry.sql):
+                        # An identity minted from engine-normalized text: the
+                        # sample's values are extracted against the stored slot
+                        # text so they key by textual slot position ($k / the
+                        # k-th '?' resolves as pk).
+                        extracted = extract_observed_params(
+                            sampled, entry.sql, add_dialect
+                        )
+                        add_sql, observed_sql = entry.original_sql, sampled
+                    else:
+                        # An identity minted from literal-bearing SQL: re-adding
+                        # the fresh sample extracts values with the same :pN
+                        # numbering the entry's stored text carries.
+                        try:
+                            _, extracted = normalize_and_extract(
+                                canonicalize_sql(sampled), add_dialect
+                            )
+                        except Exception:
+                            extracted = {}
+                        add_sql, observed_sql = sampled, None
+                    if not extracted:
+                        # Values are written only when extraction succeeds; a
+                        # truncated or unmappable sample must not touch the entry.
+                        continue
+                    prior_params = dict(entry.most_recent_params)
+                    try:
+                        query_hash, _ = registry.add_query(
+                            sql=add_sql,
+                            source="top-historical",
+                            target=self.target,
+                            dialect=add_dialect,
+                            observed_params_sql=observed_sql,
+                            observed=True,
+                            save_intent=False,
+                        )
+                    except ValueError:
+                        logger.debug(
+                            "Skipping parameter capture for a sampled text",
+                            exc_info=True,
+                        )
+                        continue
+                    params_captured += 1
+                    captured_entry = registry.get_query(query_hash)
+                    if (
+                        captured_entry is not None
+                        and captured_entry.most_recent_params != prior_params
+                    ):
+                        changed = True
+            persistence_ms = (time.monotonic() - persist_started) * 1000.0
+            return (new_hashes, changed, refreshed, params_captured, system_skipped,
+                    persistence_ms)
+
+        # Parsing and Library writes are CPU and SQLite work: they run off the event loop,
+        # so one wide statement never stalls every other request.
+        (new_hashes, changed, refreshed, params_captured, system_skipped,
+         persistence_ms) = await asyncio.to_thread(admit)
+
         capabilities: Dict[str, Any] = dict(result.capabilities)
+        capabilities["target_counter_reset"] = target_reset
         capabilities["cursor_state"] = result.next_cursor_state
         capabilities["incremental"] = result.incremental
-        self._record_collector_state(
-            state="watching",
-            last_attempt_at=attempted_at,
-            last_success_at=attempted_at,
-            duration_ms=int((time.monotonic() - collection_started) * 1000),
-            epoch_id=result.epoch_id,
-            source_capabilities=capabilities,
-        )
+
+        def record_evidence() -> None:
+            self._record_identity_aliases(result.epoch_id, new_aliases)
+            self._record_recent_observations(self._apply_rdst_attribution(
+                self._recent_observation_rows(deltas, incremental=result.incremental)))
+            self._record_collector_state(
+                state="watching",
+                last_attempt_at=attempted_at,
+                last_success_at=attempted_at,
+                duration_ms=int((time.monotonic() - collection_started) * 1000),
+                epoch_id=result.epoch_id,
+                source_capabilities=capabilities,
+            )
+
+        await asyncio.to_thread(record_evidence)
         self._snapshot = {
             "target": self.target,
             "state": "watching",
@@ -1620,6 +2006,7 @@ class QueryDiscoveryCollector:
                     (time.monotonic() - collection_started) * 1000.0, 3
                 ),
                 "db_fetch_duration_ms": round(fetch_ms, 3),
+                "db_touch_duration_ms": round(self._db_touch_seconds * 1000, 3),
                 "rows_returned": len(result.rows),
                 "new_identity_count": len(new_hashes),
                 "refreshed_identity_count": refreshed,
@@ -1631,11 +2018,223 @@ class QueryDiscoveryCollector:
                 "deltas_computed": len(deltas),
                 "epoch_id": result.epoch_id,
                 "epoch_changed": epoch_changed,
+                "target_counter_reset": target_reset,
                 "incremental": result.incremental,
             },
             "error": None,
         }
-        return self._publish("discovery_update", self._snapshot)
+        return await self.publish_async("discovery_update", self._snapshot)
+
+    def _record_monitor_cycle(
+        self, ts: int, deltas: list[DeltaResult], registry: QueryRegistry | None,
+        activity: list[dict[str, Any]],
+        current_rows: list[CounterRow] | None = None,
+        prior_rows: Dict[str, CounterRow] | None = None,
+        sample_texts: Dict[str, str] | None = None,
+        observed_texts: Dict[str, str] | None = None,
+        *, activity_sampled: bool = False, baseline: bool = False,
+        engine_delta: Optional[tuple[int, float]] = None,
+        contiguous_since: Optional[float] = None,
+    ) -> None:
+        """Map valid per-key deltas into one-minute history after identity resolution.
+
+        `engine_delta` is the engine-wide (calls, ms) since the previous reading; traffic of
+        statements outside the fetched slice is recorded under everything else from it.
+        `contiguous_since` drops pairs whose window opened before the previous reading.
+
+        A `baseline` cycle records texts, samples and the reading itself, but no calls or
+        database counters: its deltas span an unknown interval.
+        """
+        # Classify fetched texts first: relation-free and RDST self statements join the
+        # system identities before any of their deltas reach monitor history. The set
+        # is process-local, so after a restart this is where they are recognized again.
+        texts: Dict[str, str] = {}
+        known_texts = getattr(self, "_monitor_known_texts", set())
+        detailed_keys = {row["query_key"] for row in self._monitor.read(
+            "SELECT query_key FROM query_tier WHERE target=?", (self.target,))}
+        sample_keys = self._monitor.full_detail_keys(self.target)
+        if not detailed_keys:
+            sample_keys.update(self._alias_map.get(row.engine_key) for row in
+                               sorted(current_rows or [], key=lambda row: -row.total_exec_time)[:1000])
+            sample_keys.update(self._alias_map.get(delta.engine_key) for delta in
+                               sorted(deltas, key=lambda row: -(row.exec_time_delta or 0))[:1000])
+        system_keys: set[str] = set()
+        for engine_key, text in (observed_texts or {}).items():
+            key = self._alias_map.get(engine_key)
+            if key is None or key in self._system_identities or key in known_texts:
+                continue
+            if (not references_user_relations(
+                    text, dialect="postgres" if self._engine == "postgresql"
+                    else self._engine) or match_self_template(text)):
+                self._system_identities.add(key)
+                system_keys.add(key)
+                continue
+            texts[key] = text
+        if self._engine == "mysql":
+            # The sample, with its values masked, is the readable and runnable text; the
+            # digest text stays the identity.
+            for engine_key, sample in (sample_texts or {}).items():
+                key = self._alias_map.get(engine_key)
+                template = mysql_sample_template(sample) if key in texts else None
+                if template:
+                    texts[key] = template
+        statements: Dict[str, Dict[str, Any]] = {}
+        for delta in deltas:
+            key = self._alias_map.get(delta.engine_key)
+            if (key is None or key in self._system_identities or
+                    delta.completeness != COMPLETE or delta.is_baseline or
+                    not delta.calls_delta):
+                continue
+            if contiguous_since is not None and delta.window_start < contiguous_since:
+                continue
+            row = statements.setdefault(
+                key, {"query_key": key, "calls": 0, "total_ms": 0.0, "rows": 0,
+                      "blks_hit": 0, "blks_read": 0, "temp_blks": 0}
+            )
+            row["calls"] += delta.calls_delta
+            row["total_ms"] += delta.exec_time_delta or 0.0
+            current = self._baseline.get(delta.engine_key)
+            previous = prior_rows.get(delta.engine_key) if prior_rows is not None else getattr(
+                self, "_monitor_previous_rows", {}).get(delta.engine_key)
+            if current is not None and previous is not None and current.temp_blks >= previous.temp_blks:
+                row["temp_blks"] += current.temp_blks - previous.temp_blks
+            if current is not None and (not detailed_keys or key in detailed_keys):
+                # CounterRow rows is cumulative; use the prior snapshot when
+                # available, otherwise leave this optional metric at zero.
+                previous = (
+                    prior_rows.get(delta.engine_key) if prior_rows is not None
+                    else getattr(self, "_monitor_previous_rows", {}).get(delta.engine_key)
+                )
+                if previous is not None and current.rows >= previous.rows:
+                    row["rows"] += current.rows - previous.rows
+                block_previous = getattr(self, "_monitor_previous_rows", {}).get(delta.engine_key)
+                if block_previous is not None and current.blks_hit >= block_previous.blks_hit:
+                    row["blks_hit"] += current.blks_hit - block_previous.blks_hit
+                if block_previous is not None and current.blks_read >= block_previous.blks_read:
+                    row["blks_read"] += current.blks_read - block_previous.blks_read
+        self._monitor_previous_rows = dict(self._baseline)
+        if registry is not None:
+            current_keys = {
+                self._alias_map[row.engine_key]
+                for row in (current_rows or [])
+                if row.engine_key in self._alias_map
+            }
+            for key in set(statements) | current_keys:
+                if key in self._system_identities or key in known_texts:
+                    continue
+                entry = registry.get_query(key)
+                if entry is not None and entry.original_sql:
+                    texts.setdefault(key, entry.original_sql)
+        stuck = []
+        samples = []
+        if self._engine == "postgresql":
+            from features.query_registry.statement_stats import parse_pg_engine_key
+            by_query_id: Dict[int, set[str]] = {}
+            for engine_key, key in self._alias_map.items():
+                if key not in sample_keys:
+                    continue
+                try:
+                    by_query_id.setdefault(parse_pg_engine_key(engine_key)[2], set()).add(key)
+                except ValueError:
+                    continue
+            for row in activity:
+                if row.get("query_id") is not None:
+                    for key in by_query_id.get(row["query_id"], ()):
+                        if key in sample_keys and key not in self._system_identities:
+                            samples.append({"query_key": key, "text": row["query"]})
+        else:
+            for engine_key, text in (sample_texts or {}).items():
+                key = self._alias_map.get(engine_key)
+                if key in sample_keys and key not in self._system_identities:
+                    samples.append({"query_key": key, "text": text})
+        for row in activity:
+            if row["duration_s"] < 60:
+                continue
+            try:
+                key = hash_sql(row["query"])
+            except Exception:
+                key = None
+            stuck.append({
+                "pid": row["pid"], "query_key": key, "state": row["state"],
+                "duration_s": row["duration_s"],
+            })
+            if key is not None:
+                texts.setdefault(key, row["query"])
+        calls = sum(row["calls"] for row in statements.values())
+        total_ms = sum(row["total_ms"] for row in statements.values())
+        untracked = None
+        if engine_delta is not None and engine_delta[0] >= calls:
+            untracked = (engine_delta[0] - calls, max(0.0, engine_delta[1] - total_ms))
+            calls, total_ms = engine_delta[0], max(total_ms, engine_delta[1])
+        db = None
+        sample = self._monitor_db_sample
+        if sample is not None:
+            previous = self._monitor_db_previous
+            counters = [0, 0, 0, 0, 0]
+            if previous is not None and all(
+                int(sample[i]) >= int(previous[i]) for i in range(5)
+            ) and (
+                len(sample) < 8 or len(previous) < 8 or sample[7] == previous[7]
+            ):
+                counters = [int(sample[i]) - int(previous[i]) for i in range(5)]
+            reads = counters[3]
+            hits = (max(0, counters[2] - reads) if self._engine == "mysql"
+                    else counters[2])
+            db = {
+                "calls": calls, "total_ms": total_ms,
+                "active_conns": int(sample[5]), "max_conns": int(sample[6]),
+                "cache_hit_ratio": hits / (hits + reads) if hits + reads else None,
+                "blks_hit": hits, "blks_read": reads,
+                "xact_commit": counters[0], "xact_rollback": counters[1],
+                "deadlocks": counters[4],
+                "lock_waits": sample[8] if len(sample) > 8 else None,
+            }
+            self._monitor_db_previous = sample
+        seen = len(statements)
+        # The engine's running totals per identity: the long-run cost per call that steadies
+        # the ranking while live readings are few. A baseline reading has them too.
+        priors: Dict[str, list] = {}
+        for row in current_rows or []:
+            key = self._alias_map.get(row.engine_key)
+            if key is None or key in self._system_identities:
+                continue
+            entry = priors.setdefault(key, [0, 0.0])
+            entry[0] += int(row.calls or 0)
+            entry[1] += float(row.total_exec_time or 0.0)
+        if baseline:
+            statements, db, untracked = {}, None, None
+        # A minute that meets a locked file stays queued, in order, instead of leaving a gap.
+        self._monitor_pending.append((ts, list(statements.values()), texts, stuck, db, samples,
+                                      system_keys, seen, untracked,
+                                      {key: (calls, ms) for key, (calls, ms) in priors.items()}))
+        while self._monitor_pending:
+            (minute, rows, minute_texts, minute_stuck, minute_db, minute_samples, keys, read,
+             minute_untracked, minute_priors) = self._monitor_pending[0]
+            try:
+                self._monitor.record(self.target, minute, rows, minute_texts, minute_stuck,
+                                     minute_db, minute_samples, system_keys=keys,
+                                     queries_read=read, workload_checked=True,
+                                     untracked=minute_untracked, priors=minute_priors)
+            except Exception as exc:
+                if not is_locked(exc):
+                    self._monitor_pending.popleft()
+                raise
+            known_texts = {row["query_key"] for row in self._monitor.read(
+                "SELECT query_key FROM query_text WHERE target=?", (self.target,))}
+            self._monitor_known_texts = known_texts
+            self._monitor_pending.popleft()
+        if activity_sampled:
+            self._monitor.sync_stuck_items(self.target, ts, stuck)
+
+    def _name_new_queries(self) -> None:
+        """Give newly tracked queries their display names here, so page requests find them
+        named instead of parsing the queries' families while a person waits."""
+        from features.monitor.naming import target_names
+
+        try:
+            target_names(self._monitor, self.target)
+        except Exception:
+            logger.debug("Naming new queries failed for %s", self.target, exc_info=True)
 
     def _fallback_capabilities(self) -> Optional[Dict[str, Any]]:
         if self._source_unavailable is None:
@@ -1682,6 +2281,7 @@ class QueryDiscoveryCollector:
             self._store.prune(cutoff)
             self._store.prune_events(cutoff, keep=RETENTION_EVENT_KEEP)
             self._store.prune_rdst_executions(cutoff, now=now)
+            self._store.prune_observations(now - OBSERVATION_RETENTION_SECONDS)
         except Exception:
             logger.warning(
                 "Failed to compact observation retention for target %s",
@@ -1691,18 +2291,25 @@ class QueryDiscoveryCollector:
 
     async def collect_now(self) -> QueryDiscoveryEvent:
         """Collect one target snapshot and persist observations, never Saved intent."""
+        if default_monitor_db_path().exists():
+            settings = await asyncio.to_thread(MonitorStore().read,
+                "SELECT value FROM monitor_setting WHERE target=? AND key='enabled'", (self.target,))
+            if settings and settings[0]["value"] == "0":
+                self._monitor_enabled = self._monitor_baseline_set = False
+                self._monitor_pending.clear()
+                return QueryDiscoveryEvent(cursor=self._cursor, event="discovery_update", data=self._snapshot)
         if self._two_phase and not self._legacy_fallback:
             async with self._collect_lock:
                 event = await self._collect_two_phase()
             if event is not None:
                 if event.event == "discovery_update":
-                    self._maybe_run_retention()
+                    await asyncio.to_thread(self._maybe_run_retention)
                 return event
             # A capability gap switched this collector to the legacy path;
             # the same cycle continues through it immediately.
         event = await self._collect_legacy()
         if event.event == "discovery_update":
-            self._maybe_run_retention()
+            await asyncio.to_thread(self._maybe_run_retention)
         return event
 
     async def _collect_legacy(self) -> QueryDiscoveryEvent:
@@ -1768,7 +2375,7 @@ class QueryDiscoveryCollector:
                     "capture_warning": self._capture_warning(),
                     "error": error,
                 }
-                return self._publish("discovery_error", self._snapshot)
+                return await self.publish_async("discovery_error", self._snapshot)
 
             registry = self._registry()
             registry.load()
@@ -1851,7 +2458,7 @@ class QueryDiscoveryCollector:
                 "capture_warning": self._capture_warning(),
                 "error": None,
             }
-            return self._publish("discovery_update", self._snapshot)
+            return await self.publish_async("discovery_update", self._snapshot)
 
 
 class QueryDiscoveryCoordinator:
@@ -1958,6 +2565,12 @@ class QueryDiscoveryCoordinator:
         if collector is None or not collector.has_subscribers:
             return
         collector._publish("assessment_update", {"target": target, "changed": True})
+
+    async def publish_assessment_update_async(self, target: str) -> None:
+        collector = self._collectors.get(target)
+        if collector is None or not collector.has_subscribers:
+            return
+        await collector.publish_async("assessment_update", {"target": target, "changed": True})
 
     async def close(self) -> None:
         await asyncio.gather(

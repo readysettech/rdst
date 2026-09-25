@@ -30,6 +30,15 @@ class KeyResolution:
     extra_headers: dict[str, str] = field(default_factory=dict)
 
 
+def require_monitoring_session() -> None:
+    """Automatic monitoring requires a current session, including own-key inference."""
+    from .base import LLMError
+    from shared import account_session
+
+    if not account_session.access_token():
+        raise LLMError("Sign in to turn on AI monitoring (signed out)", code="LOGIN_REQUIRED")
+
+
 def resolve_api_key(provider: str = "auto") -> KeyResolution:
     """Resolve credentials using the saved provider preference when present.
 
@@ -49,6 +58,10 @@ def resolve_api_key(provider: str = "auto") -> KeyResolution:
         LLMError: If no key is found anywhere.
     """
     from .base import LLMError
+    from .inference_attribution import attribution_for
+
+    if attribution_for(None)["feature"] == "monitor":
+        require_monitoring_session()
 
     def _keyring_secret(name: str) -> str | None:
         """Read one secret from the OS keyring, swallowing backend errors."""

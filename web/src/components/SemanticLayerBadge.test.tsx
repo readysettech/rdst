@@ -16,7 +16,7 @@ describe('SemanticLayerBadge', () => {
   it('lets a sentence-length label wrap instead of painting out of the chip', () => {
     render(<SemanticLayerBadge target="e2e-guard" />)
 
-    const tag = screen.getByText('Live introspection — no semantic layer')
+    const tag = screen.getByText('Live introspection - no semantic layer')
     expect(tag.className).toContain('h-auto')
     expect(tag.className).toContain('min-h-6')
   })

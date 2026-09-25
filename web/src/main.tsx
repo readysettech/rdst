@@ -9,6 +9,7 @@ import { createRoot } from 'react-dom/client'
 import { installAnalysisRunInvalidation } from './features/queries/results/analysisRunInvalidation'
 import { initAnalytics } from './lib/analytics'
 import { fetchEnvRequirements } from './lib/api'
+import { preloadRouteCode } from './lib/preloadRouteCode'
 import { routeTree } from './routeTree.gen'
 
 import './style.css'
@@ -20,6 +21,9 @@ void fetchEnvRequirements()
   .catch(() => undefined)
 
 const router = createRouter({ routeTree })
+// Built chunks only: the dev server serves every module on its own, and fetching all
+// of them up front would slow each page load there.
+if (import.meta.env.PROD) preloadRouteCode(router)
 
 declare module '@tanstack/react-router' {
   interface Register {

@@ -12,3 +12,4 @@ anthropic==0.122.0
 botocore
 packaging>=26.0
 filelock>=3.32.2
+psutil>=7.2.2

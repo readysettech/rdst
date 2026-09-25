@@ -1,16 +1,23 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { useTarget } from '../../hooks/useTarget'
-import { fetchQueryRegistry, fetchSchemaStatus } from '../../lib/api'
+import { fetchQueryRegistry } from '../../lib/api'
 import { useBackgroundRuns } from '../../lib/backgroundRuns'
-import { formatTimestamp } from '../../lib/formatters'
-import { fetchAuditRuns } from '../../lib/useAudit'
-import { useEnvRequirements } from '../../lib/useEnvRequirements'
+import {
+  useInbox,
+  useMonitorHealth,
+  useMonitorQueries,
+  useMonitorSettings,
+} from '../../lib/monitor/hooks'
 import { useSystemStatus } from '../../lib/useSystemStatus'
+import { inboxSignals } from '../database/queries/queryStatus'
+import { useMonitorPulse } from '../monitor-kit/useMonitorPulse'
 import { continueItems, deriveHomeState, portfolioCounts } from './homeModel'
 
-export type AiKeyState = 'loading' | 'ready' | 'missing' | 'unknown'
 export type HomePhase = 'loading' | 'error' | 'degraded' | 'ready'
+
+/** The Database page's default range, so Home warms the same cache entries. */
+const HOME_RANGE = '1h'
 
 function detail(error: unknown) {
   return error instanceof Error ? error.message : String(error ?? '')
@@ -19,7 +26,6 @@ function detail(error: unknown) {
 export function useHomeController() {
   const { target: contextTarget } = useTarget()
   const statusQuery = useSystemStatus()
-  const envQuery = useEnvRequirements()
   const backgroundRuns = useBackgroundRuns()
 
   const status = statusQuery.data
@@ -27,20 +33,26 @@ export function useHomeController() {
   const hasTargets = targetCount > 0
   const target =
     contextTarget ?? status?.default_target ?? status?.targets?.[0]?.name ?? ''
+  const monitorTarget = hasTargets ? target : ''
 
-  const schemaQuery = useQuery({
-    queryKey: ['home', 'schema-status', target],
-    queryFn: ({ signal }) => fetchSchemaStatus(target, signal),
-    staleTime: 60_000,
-    enabled: hasTargets && Boolean(target),
+  const settingsQuery = useMonitorSettings(monitorTarget)
+  const healthQuery = useMonitorHealth(monitorTarget, HOME_RANGE)
+  const queriesQuery = useMonitorQueries(monitorTarget, HOME_RANGE)
+  const monitoring = settingsQuery.data?.enabled
+  const pulse = useMonitorPulse(monitoring ? monitorTarget : null)
+  // "Need attention" follows the Database page: queries with an open Inbox item.
+  const inboxQuery = useInbox({
+    state: 'open',
+    target: monitorTarget,
+    include_digest: true,
   })
-
-  const auditQuery = useQuery({
-    queryKey: ['audit-runs', target],
-    queryFn: () => fetchAuditRuns(target || undefined),
-    staleTime: 60_000,
-    enabled: hasTargets,
-  })
+  const attentionCount = useMemo(
+    () =>
+      inboxQuery.data
+        ? inboxSignals(inboxQuery.data.items, monitorTarget).size
+        : null,
+    [inboxQuery.data, monitorTarget]
+  )
 
   const registryQuery = useQuery({
     queryKey: ['home', 'registry'],
@@ -48,16 +60,6 @@ export function useHomeController() {
     staleTime: 60_000,
     enabled: hasTargets,
   })
-
-  const aiKeyState: AiKeyState = envQuery.isPending
-    ? 'loading'
-    : envQuery.isError
-      ? 'unknown'
-      : envQuery.data?.requirements.find(
-            (requirement) => requirement.kind === 'anthropic_api_key'
-          )?.satisfied
-        ? 'ready'
-        : 'missing'
 
   const comparedHashes = useMemo(
     () =>
@@ -79,13 +81,9 @@ export function useHomeController() {
   const entries = registryQuery.data?.queries ?? []
   const counts = portfolioCounts(entries, target || undefined, comparedHashes)
   const recents = continueItems(entries, target || undefined, comparedHashes)
-  const auditRuns = auditQuery.data?.runs ?? []
-  const lastAudit = auditRuns[0]
-  const oldestAudit = auditRuns[auditRuns.length - 1]
-  const retentionDays = oldestAudit
-    ? Math.floor(
-        (Date.now() - new Date(oldestAudit.started_at).getTime()) / 86_400_000
-      )
+  const history = healthQuery.data?.history
+  const historyDays = history?.first_ts
+    ? Math.floor((Date.now() / 1000 - history.first_ts) / 86_400)
     : null
 
   const statusFailure = statusQuery.error || status?.error
@@ -93,42 +91,36 @@ export function useHomeController() {
     ? 'loading'
     : statusQuery.isError || Boolean(status?.error)
       ? 'error'
-      : hasTargets && schemaQuery.isPending
-        ? 'loading'
-        : hasTargets && schemaQuery.isError
-          ? 'degraded'
+      : hasTargets && (settingsQuery.isError || healthQuery.isError)
+        ? 'degraded'
+        : hasTargets && (settingsQuery.isPending || healthQuery.isPending)
+          ? 'loading'
           : 'ready'
 
   return {
     phase,
-    state: deriveHomeState(targetCount, schemaQuery.data?.exists),
+    state: deriveHomeState(targetCount, monitoring, history),
     target,
-    aiKeyState,
+    health: healthQuery.data,
+    monitoringOn: Boolean(monitoring),
+    monitorQueries: queriesQuery.data,
+    attentionCount,
+    pulse,
     counts,
     recents,
-    retentionDays,
-    lastAuditLabel: lastAudit ? formatTimestamp(lastAudit.started_at) : null,
-    registryState: registryQuery.isPending
-      ? ('loading' as const)
-      : registryQuery.isError
-        ? ('error' as const)
-        : ('ready' as const),
-    auditState: auditQuery.isPending
-      ? ('loading' as const)
-      : auditQuery.isError
-        ? ('error' as const)
-        : ('ready' as const),
+    historyDays,
     errorDetail:
       phase === 'error'
         ? detail(statusFailure)
         : phase === 'degraded'
-          ? detail(schemaQuery.error)
+          ? detail(settingsQuery.error ?? healthQuery.error)
           : undefined,
     retryCore: () => {
       void statusQuery.refetch()
-      if (hasTargets) void schemaQuery.refetch()
+      if (hasTargets) {
+        void settingsQuery.refetch()
+        void healthQuery.refetch()
+      }
     },
-    retryRegistry: () => void registryQuery.refetch(),
-    retryAudit: () => void auditQuery.refetch(),
   }
 }

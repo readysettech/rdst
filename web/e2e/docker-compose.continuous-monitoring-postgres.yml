@@ -1,0 +1,51 @@
+# RDST Continuous Monitoring E2E (postgres shard): the ci-shop database and the
+# browser job that runs the test server, its load and the suite. See
+# scripts/run-continuous-monitoring-ci.sh.
+services:
+  db:
+    image: ${PUBLIC_REPO_BASE:-public.ecr.aws}/docker/library/postgres:16.13
+    # The flags of rdst/tests/integration/docker-compose.yml.
+    command: >
+      postgres
+      -c fsync=off
+      -c synchronous_commit=off
+      -c full_page_writes=off
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+    environment:
+      POSTGRES_DB: rdst_test
+      POSTGRES_USER: rdst_test
+      POSTGRES_PASSWORD: rdst_e2e_password
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U rdst_test -d rdst_test]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  browser:
+    image: mcr.microsoft.com/playwright:v1.61.0-noble
+    # Root so writes to the mounted checkout succeed, matching the pipeline's
+    # other docker steps.
+    user: "${RDST_E2E_BROWSER_USER:-0:0}"
+    working_dir: /workdir
+    environment:
+      CI: "${CI:-true}"
+      RDST_E2E_ENGINE: postgresql
+      RDST_CIM_DB_PORT: "5432"
+      RDST_CIM_ADMIN_USER: rdst_test
+      RDST_CIM_DB_HOST: db
+      RDST_CIM_ADMIN_PASSWORD: rdst_e2e_password
+      RDST_CIM_DB_PASSWORD: rdst_e2e_password
+      # Left empty in CI: the runner derives the preview URL from the CL id.
+      RDST_KEYSERVICE_URL: "${RDST_KEYSERVICE_URL:-}"
+      RDST_ATTESTATION_SECRET: "${RDST_ATTESTATION_SECRET}"
+      RDST_KEYSERVICE_ADMIN_SECRET: "${RDST_KEYSERVICE_ADMIN_SECRET}"
+      # Full-access Resend key: the suite reads the CI inbox.
+      RDST_CI_RESEND_API_KEY: "${RDST_CI_RESEND_API_KEY}"
+      GERRIT_CHANGE_ID: "${GERRIT_CHANGE_ID:-local}"
+      BUILDKITE_BUILD_NUMBER: "${BUILDKITE_BUILD_NUMBER:-0}"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ../../../..:/workdir

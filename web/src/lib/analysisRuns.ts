@@ -38,6 +38,8 @@ export type AnalyzeEventType = AnalyzeEvent['type']
 export interface AnalysisRunMeta {
   queryHash?: string
   queryLabel?: string
+  /** Run-owned completion work survives the view that started it. */
+  onComplete?: (results: CompleteEvent) => void
 }
 
 export interface AnalysisRun {
@@ -408,6 +410,12 @@ function applyFrame(key: string, event: string, data: unknown): void {
           runs.get(key)?.readysetCacheability ??
           undefined,
       })
+      const completed = runs.get(key)
+      const onComplete = completed?.meta.onComplete
+      if (completed && onComplete) {
+        completed.meta = { ...completed.meta, onComplete: undefined }
+        onComplete(payload)
+      }
       if (payload.query_hash) observer?.(payload.query_hash)
       break
     }

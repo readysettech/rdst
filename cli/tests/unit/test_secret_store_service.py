@@ -196,3 +196,95 @@ def test_is_available_caches_probe_result():
         service.service_name,
         "__rdst_probe__",
     )
+
+
+class _WindowsLikeKeyring:
+    """Credential Manager stand-in: an entry holds at most 1280 characters."""
+
+    def __init__(self):
+        self.entries = {}
+
+    def get_password(self, service, name):
+        return self.entries.get((service, name))
+
+    def set_password(self, service, name, value):
+        if len(value) > 1280:
+            raise OSError(1783, "CredWrite", "The stub received bad data.")
+        self.entries[(service, name)] = value
+
+    def delete_password(self, service, name):
+        if (service, name) not in self.entries:
+            raise KeyError(name)
+        del self.entries[(service, name)]
+
+
+def _windows_like_service():
+    service = SecretStoreService(service_name="rdst-test-chunks")
+    service._keyring = _WindowsLikeKeyring()
+    return service
+
+
+def test_long_secret_round_trips_through_entry_size_limit(monkeypatch):
+    service = _windows_like_service()
+    token = "eyJ" + "a" * 2400
+    os.environ.pop("RDST_TEST_LONG", None)
+
+    with patch.object(service, "is_available", return_value=True):
+        assert service.set_secret("RDST_TEST_LONG", token)["persisted"] is True
+        assert all(len(value) <= 1280 for value in service._keyring.entries.values())
+        assert service.get_secret("RDST_TEST_LONG") == token
+
+        # A shorter value replaces it and leaves no chunks behind.
+        assert service.set_secret("RDST_TEST_LONG", "short")["persisted"] is True
+        assert service.get_secret("RDST_TEST_LONG") == "short"
+        assert list(service._keyring.entries) == [("rdst-test-chunks", "RDST_TEST_LONG")]
+
+        service.set_secret("RDST_TEST_LONG", token)
+        assert service.clear_required(["RDST_TEST_LONG"])["cleared"] == ["RDST_TEST_LONG"]
+        assert service._keyring.entries == {}
+    os.environ.pop("RDST_TEST_LONG", None)
+
+
+def test_failed_chunk_write_keeps_the_previous_value(monkeypatch):
+    service = _windows_like_service()
+    os.environ.pop("RDST_TEST_LONG", None)
+
+    with patch.object(service, "is_available", return_value=True):
+        service.set_secret("RDST_TEST_LONG", "previous")
+        with patch.object(service, "_set", side_effect=[True, False]):
+            result = service.set_secret("RDST_TEST_LONG", "x" * 2500)
+        assert result["persisted"] is False
+        assert service.get_secret("RDST_TEST_LONG") == "previous"
+    os.environ.pop("RDST_TEST_LONG", None)
+
+
+def test_timed_out_probe_is_retried_later(monkeypatch):
+    SecretStoreService._probe_cache.clear()
+    SecretStoreService._probe_retry_at.clear()
+    service = SecretStoreService(service_name="rdst-test-retry")
+    service._keyring = Mock()
+    service._keyring.get_keyring.return_value = _build_backend("WinVaultKeyring", "keyring.backends.Windows")
+    service._keyring_call = Mock(side_effect=[secret_store_service._TIMEOUT, None])
+    clock = [100.0]
+    monkeypatch.setattr(secret_store_service.time, "monotonic", lambda: clock[0])
+
+    assert service.is_available() is False
+    assert service.is_available() is False
+    clock[0] += secret_store_service._PROBE_RETRY_SECONDS + 1
+    assert service.is_available() is True
+    assert service._keyring_call.call_count == 2
+
+
+def test_clearing_deletes_secrets_even_when_the_keyring_reads_slowly(monkeypatch):
+    # Signing out must not leave tokens behind for the next start to restore, even when
+    # reading the secret first times out.
+    service = SecretStoreService()
+    service._keyring = Mock()
+    service._keyring.get_password.side_effect = RuntimeError("slow Credential Manager")
+    monkeypatch.setenv("RDST_TEST_TOKEN", "x")
+    result = service.clear_required(["RDST_TEST_TOKEN"])
+    deleted = [call.args[1] for call in service._keyring.delete_password.call_args_list]
+    assert deleted[0] == "RDST_TEST_TOKEN"
+    assert "RDST_TEST_TOKEN#1" in deleted and "RDST_TEST_TOKEN#8" in deleted
+    assert result["cleared"] == ["RDST_TEST_TOKEN"]
+    assert "RDST_TEST_TOKEN" not in os.environ

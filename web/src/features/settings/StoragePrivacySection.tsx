@@ -39,9 +39,7 @@ export function StoragePrivacySection({
             <CopyButton text={dataDirectory} />
           </HStack>
           <Text level="caption" className="text-content-layout-3">
-            Contains connection configs, the query library, semantic layer, and
-            analysis history. Passwords are stored in your system keyring, never
-            in plain text.
+            RDST keeps its connection settings and query library here. It also saves schema descriptions and past analyses. Passwords stay in your system keyring.
           </Text>
           <HStack className="gap-3 items-center pt-2">
             <Button
@@ -68,9 +66,9 @@ export function StoragePrivacySection({
         notice={{
           accent: 'negative',
           icon: 'trash',
-          title: 'This cannot be undone',
+          title: 'This can\'t be undone',
           message:
-            'Deletes local configuration, history, semantic data, and stored RDST keys. Your ~/.ssh directory is unchanged.',
+            'This deletes RDST\'s local configuration and history. It also deletes schema descriptions and stored RDST keys. Your ~/.ssh directory is unchanged.',
         }}
       >
         {resetError ? (

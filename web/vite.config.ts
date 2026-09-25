@@ -90,6 +90,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
+    hookTimeout: 30000,
+    maxWorkers: 4,
     exclude: [...configDefaults.exclude, 'e2e/**'],
   },
 })

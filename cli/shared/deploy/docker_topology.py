@@ -48,6 +48,25 @@ class ContainerNetworkPlan:
         return "127.0.0.1" if self.host_network else "0.0.0.0"
 
 
+# Where Docker Desktop's WSL integration mounts its distro; its daemon then answers on the
+# default /var/run/docker.sock.
+_DESKTOP_WSL_MOUNT = Path("/mnt/wsl/docker-desktop")
+
+
+def _daemon_is_desktop(endpoint: str) -> bool:
+    """Whether the default local socket belongs to Docker Desktop.
+
+    WSL integration exposes Desktop's daemon on the default context, so the context name
+    doesn't show it. Desktop's "host" network is its VM's, which this machine can't reach.
+    """
+    if endpoint and not endpoint.startswith("unix://"):
+        return False
+    try:
+        return _DESKTOP_WSL_MOUNT.is_dir()
+    except OSError:
+        return False
+
+
 @lru_cache(maxsize=8)
 def _context_endpoint(context: str) -> str:
     docker = shutil.which("docker")
@@ -147,6 +166,7 @@ class DockerTopology:
                 and (
                     docker_context.startswith("desktop-")
                     or "/docker/desktop/" in endpoint
+                    or (discover_active_context and _daemon_is_desktop(endpoint))
                 )
             ),
             rootless=(

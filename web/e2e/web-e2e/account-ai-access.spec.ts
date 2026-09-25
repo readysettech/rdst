@@ -1,38 +1,16 @@
 import type { Page } from '@playwright/test'
-import { acceptBrowserError, clearTargets, expect, test } from '../fixtures'
-import { ciAddress, waitForEmail } from './mailbox'
+import {
+  acceptBrowserError,
+  clearTargets,
+  continueWhenMonitoringReady,
+  expect,
+  test,
+} from '../fixtures'
+import { signInWithEmail } from './sign-in'
 
 /** Live account enrollment, hosted inference, and sign-out coverage. */
 
-const KEYSERVICE = process.env.RDST_KEYSERVICE_URL!.replace(/\/$/, '')
 const TARGET = 'keyservice-e2e'
-
-const previewWorker =
-  /^https:\/\/keyservice-pr-[a-zA-Z0-9-]+\.readyset\.io$/.test(KEYSERVICE)
-const allowedLocalWorker =
-  process.env.RDST_ALLOW_LOCAL_KEYSERVICE_E2E === '1' &&
-  /^http:\/\/(127\.0\.0\.1|localhost):8788$/.test(KEYSERVICE)
-
-if (!previewWorker && !allowedLocalWorker) {
-  throw new Error(
-    'Refusing to run against a shared keyservice. Use a per-CL preview Worker, ' +
-      'or explicitly opt into the loopback-only local Worker with ' +
-      `RDST_ALLOW_LOCAL_KEYSERVICE_E2E=1; got ${KEYSERVICE}`
-  )
-}
-
-function supabaseMagicLink(html: string): string {
-  const links = [...html.matchAll(/href=["']([^"']+)["']/gi)].map((match) =>
-    match[1].replaceAll('&amp;', '&')
-  )
-  const link = links.find(
-    (value) =>
-      value.includes('/auth/v1/verify') || value.includes('/verify?token=')
-  )
-  if (!link)
-    throw new Error('The Supabase email contained no magic sign-in link')
-  return link
-}
 
 async function resetLocalState(page: Page): Promise<void> {
   // Playwright retries reuse the RDST backend process. Reset server-side
@@ -45,7 +23,7 @@ async function resetLocalState(page: Page): Promise<void> {
 
 /** Signed-out users must choose a provider before entering the app. */
 async function expectSignedOutAiAccess(page: Page): Promise<void> {
-  await page.goto('/configure?panel=ai')
+  await page.goto('/')
   await expect(
     page.getByRole('heading', { name: 'Choose how RDST uses AI' })
   ).toBeVisible()
@@ -54,46 +32,6 @@ async function expectSignedOutAiAccess(page: Page): Promise<void> {
     page.getByRole('button', { name: 'Sign up or sign in' })
   ).toBeVisible()
   await expect(page.getByText(/Signed in as/)).toHaveCount(0)
-}
-
-async function signInWithEmail(page: Page, emailLabel: string): Promise<Page> {
-  const email = ciAddress(emailLabel)
-  const requestedAt = new Date()
-
-  await page.goto('/configure?panel=ai')
-  await page.getByRole('button', { name: 'Sign up or sign in' }).click()
-  const dialog = page.getByRole('dialog')
-  await expect(
-    dialog.getByRole('heading', { name: 'Sign in to Readyset' })
-  ).toBeVisible()
-  await expect(
-    dialog.getByRole('button', { name: 'Continue with Google' })
-  ).toBeVisible()
-  await expect(
-    dialog.getByRole('button', { name: 'Continue with GitHub' })
-  ).toBeVisible()
-  await dialog.getByLabel('Email address').fill(email)
-  await dialog.getByRole('button', { name: 'Send sign-in link' }).click()
-  await expect(dialog.getByText('Check your email')).toBeVisible()
-
-  const mail = await waitForEmail(email, { newerThan: requestedAt })
-  const signedInPage = await page.context().newPage()
-  await signedInPage.goto(supabaseMagicLink(mail.html ?? ''))
-  await expect(async () => {
-    const response = await signedInPage.request.get('/api/account/status')
-    expect(response.ok()).toBe(true)
-    expect((await response.json()).signed_in).toBe(true)
-  }).toPass({ timeout: 60_000 })
-
-  // The card shows the account once the session exists. If the provider
-  // preference has not followed the sign-in yet, choose the included AI.
-  await signedInPage.goto('/configure?panel=ai')
-  await expect(signedInPage.getByText(`Signed in as ${email}`)).toBeVisible()
-  const useIncluded = signedInPage.getByRole('button', {
-    name: 'Use the included AI',
-  })
-  if (await useIncluded.isVisible()) await useIncluded.click()
-  return signedInPage
 }
 
 test('account login unlocks hosted Ask and sign-out restores the AI access choice', async ({
@@ -157,6 +95,7 @@ test('account login unlocks hosted Ask and sign-out restores the AI access choic
     })
     await expect(writableAccount).toBeVisible({ timeout: 60_000 })
     await writableAccount.getByRole('button', { name: 'Add target' }).click()
+    await continueWhenMonitoringReady(signedInPage, TARGET)
 
     // Ask is available as soon as the target is connected. Semantic-layer
     // discovery deliberately continues in the background, so waiting for it
@@ -290,13 +229,15 @@ test('account login unlocks hosted Ask and sign-out restores the AI access choic
     await signedInPage.goto(`/queries?q=${hash}`)
     await expect(
       signedInPage.getByText(
-        /Jev · (High|Medium|Low|Unranked) priority|Jev · Limited assessment/
+        /^((High|Medium|Low|Unranked) priority|Limited classification)$/
       )
     ).toBeVisible({ timeout: 30_000 })
-    await signedInPage.getByRole('button', { name: 'View Jev results' }).click()
+    await signedInPage
+      .getByRole('button', { name: 'View classification' })
+      .click()
     await expect(
       signedInPage.getByText(
-        /Jev classified this query from the structural risks|Jev could not assess this query/
+        /The classification comes from the SQL and schema|RDST couldn't classify this query/
       )
     ).toBeVisible()
   })

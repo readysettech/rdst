@@ -350,7 +350,7 @@ class SchemaService:
             if total_changes == 0:
                 message = f"Schema for '{target}' is up to date. No structural changes detected."
             else:
-                message = f"Refreshed schema for '{target}' — {total_changes} change(s), annotations preserved."
+                message = f"Refreshed schema for '{target}' - {total_changes} change(s), annotations preserved."
 
             return {
                 "ok": True,

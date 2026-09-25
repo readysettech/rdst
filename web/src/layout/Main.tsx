@@ -1,10 +1,20 @@
 import * as ScrollArea from '@rs/ui-new/scroll'
+import { useLayoutEffect, useRef } from 'react'
 
 interface MainProps {
   children: React.ReactNode
+  /** The page's path: a new page starts at the top; search params alone keep the place. */
+  scrollKey?: string
 }
 
-export function Main({ children }: MainProps) {
+export function Main({ children, scrollKey }: MainProps) {
+  const viewport = useRef<HTMLDivElement>(null)
+  const shownKey = useRef(scrollKey)
+  useLayoutEffect(() => {
+    if (shownKey.current === scrollKey) return
+    shownKey.current = scrollKey
+    if (viewport.current) viewport.current.scrollTop = 0
+  }, [scrollKey])
   return (
     <ScrollArea.Root asChild>
       <main
@@ -29,7 +39,10 @@ export function Main({ children }: MainProps) {
             with fixed table layout. That prevents wide descendants from
             shrink-wrapping it past the sidebar-narrowed viewport and clipping
             feature CTAs at 1280×720 (P21/P22/P23). */}
-        <ScrollArea.Viewport className="w-full h-full overflow-auto custom-scrollbar [&>div]:!w-full [&>div]:!table-fixed">
+        <ScrollArea.Viewport
+          ref={viewport}
+          className="w-full h-full overflow-auto custom-scrollbar [&>div]:!w-full [&>div]:!table-fixed"
+        >
           {/* Fluid content column: w-full + max-w + min-w-0, never the fixed
               `container` width (which computes off the viewport, ignoring the
               320px sidebar). Centered by mx-auto on wide screens. */}

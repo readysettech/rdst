@@ -38,6 +38,15 @@ class InitStatusResponse(BaseModel):
     llm_configured: bool
 
 
+class MonitoringUpgradeTarget(BaseModel):
+    name: str
+    engine: str
+
+
+class MonitoringUpgradeResponse(BaseModel):
+    targets: list[MonitoringUpgradeTarget]
+
+
 class InitValidateRequest(BaseModel):
     targets: list[str] | None = None
 
@@ -183,3 +192,15 @@ async def validate_init_stream(http_request: Request, request: InitValidateReque
             yield _event_to_sse(event)
 
     return EventSourceResponse(_generator())
+
+
+@router.get("/init/monitoring-upgrade")
+def monitoring_upgrade() -> MonitoringUpgradeResponse:
+    return MonitoringUpgradeResponse(**InitService().monitoring_upgrade())
+
+
+@router.post("/init/monitoring-upgrade/dismiss")
+def dismiss_monitoring_upgrade(http_request: Request) -> InitCompleteResponse:
+    require_local_request(http_request)
+    InitService().dismiss_monitoring_upgrade()
+    return InitCompleteResponse(success=True)

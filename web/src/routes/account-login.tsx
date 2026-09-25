@@ -1,5 +1,8 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { AccountLoginDialog } from '../components/TrialRegistrationDialog'
+import {
+  AccountLoginDialog,
+  takeLoginReturn,
+} from '../components/TrialRegistrationDialog'
 
 type AccountLoginSearch = {
   login_id?: string
@@ -21,6 +24,8 @@ function AccountLoginPage() {
       isOpen
       callbackLoginId={loginId}
       onClose={() => void navigate({ to: '/' })}
+      // Back to the page sign-in started on (the Database page, a dialog's page).
+      onSuccess={() => void navigate({ href: takeLoginReturn() })}
     />
   )
 }

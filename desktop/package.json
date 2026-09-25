@@ -18,12 +18,13 @@
     "dev:electron": "tsup && (tsup --watch & ELECTRON_RENDERER_URL=${ELECTRON_RENDERER_URL:-http://localhost:3001} electron .)",
     "lock:sidecar": "node ./scripts/lock-sidecar.mjs",
     "package": "electron-builder",
-    "package:linux": "pnpm prepackage && if [ -n \"${RDST_BUILD_VERSION:-}\" ]; then electron-builder --linux --x64 --publish never -c.extraMetadata.version=\"$RDST_BUILD_VERSION\" -c.extraMetadata.rdstUpdates=\"${RDST_DESKTOP_UPDATES:-disabled}\"; else electron-builder --linux --x64 --publish never; fi",
-    "package:mac": "pnpm prepackage && if [ -n \"${RDST_BUILD_VERSION:-}\" ]; then electron-builder --mac --publish never -c.extraMetadata.version=\"$RDST_BUILD_VERSION\" -c.extraMetadata.rdstUpdates=\"${RDST_DESKTOP_UPDATES:-disabled}\"; else electron-builder --mac --publish never; fi",
+    "package:linux": "pnpm prepackage && if [ -n \"${RDST_BUILD_VERSION:-}\" ]; then electron-builder --linux --x64 --publish never -c.extraMetadata.version=\"$RDST_BUILD_VERSION\" -c.extraMetadata.rdstUpdates=\"${RDST_DESKTOP_UPDATES:-disabled}\" -c.extraMetadata.rdstKeyservice=\"${RDST_DESKTOP_KEYSERVICE:-}\"; else electron-builder --linux --x64 --publish never; fi",
+    "package:mac": "pnpm prepackage && if [ -n \"${RDST_BUILD_VERSION:-}\" ]; then electron-builder --mac --publish never -c.extraMetadata.version=\"$RDST_BUILD_VERSION\" -c.extraMetadata.rdstUpdates=\"${RDST_DESKTOP_UPDATES:-disabled}\" -c.extraMetadata.rdstKeyservice=\"${RDST_DESKTOP_KEYSERVICE:-}\"; else electron-builder --mac --publish never; fi",
     "package:win": "node ./scripts/package-win.mjs",
     "prepackage": "pnpm build:web && pnpm build:sidecar && pnpm build",
     "start": "electron .",
     "test": "vitest run",
+    "test:e2e": "pnpm run build && node ./scripts/always-on.e2e.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

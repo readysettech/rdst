@@ -59,9 +59,11 @@ export function useAnalysisHistory(hash?: string, enabled = true) {
 export function useStoredAnalysis({
   hash,
   analysisId,
+  mode,
 }: {
   hash?: string
   analysisId?: string
+  mode?: string | null
 }): StoredAnalysisState {
   const isActive = Boolean(hash && analysisId)
 
@@ -96,7 +98,7 @@ export function useStoredAnalysis({
   }, [analysisId, createdAt, hash, isActive])
 
   const replayed: StoredAnalysisResults = record.data
-    ? storedAnalysisResults(record.data)
+    ? storedAnalysisResults(record.data, mode)
     : { hasBody: false }
 
   return {

@@ -189,3 +189,25 @@ def test_explicit_provider_overrides_saved_preference(monkeypatch):
 
     assert resolution.provider == "claude"
     assert resolution.api_key == "sk-ant-env"
+
+
+def test_own_anthropic_key_wins_over_a_signed_in_session(monkeypatch):
+    """The user's own key pays for the calls it can make, even when signed in."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env")
+    _patch_config(monkeypatch, None)
+    _patch_store(monkeypatch, {"ANTHROPIC_API_KEY": "sk-ant-keyring"})
+    monkeypatch.setattr(account_session, "access_token", lambda: "account-token")
+
+    resolution = key_resolution.resolve_api_key()
+
+    assert resolution.provider == "claude"
+    assert resolution.api_key == "sk-ant-env"
+
+
+def test_saved_readyset_preference_uses_the_session_over_an_own_key(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env")
+    _patch_config(monkeypatch, None, provider="readyset")
+    _patch_store(monkeypatch, {})
+    monkeypatch.setattr(account_session, "access_token", lambda: "account-token")
+
+    assert key_resolution.resolve_api_key().provider == "readyset"

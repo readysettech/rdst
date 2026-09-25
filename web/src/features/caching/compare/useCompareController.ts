@@ -60,7 +60,20 @@ function parameterKey(queryHash: string, placeholder: string, index: number) {
   return `${queryHash}:${placeholder === '?' ? `?${index}` : placeholder}`
 }
 
-export function useCompareController(initialQueryHash?: string) {
+export interface CompareSelectionOptions {
+  /**
+   * Controlled selection: the caller owns which queries are selected (the
+   * Database page's row checkboxes). Every change, including Run again's
+   * reselection, goes through `onSelectedIdsChange`.
+   */
+  selectedIds?: string[]
+  onSelectedIdsChange?: (ids: string[]) => void
+}
+
+export function useCompareController(
+  initialQueryHash?: string,
+  options?: CompareSelectionOptions
+) {
   const { target } = useTarget()
   // A comparison drives the same real traffic as a load test, so the run
   // confirmation needs the same answer about the destination.
@@ -71,7 +84,21 @@ export function useCompareController(initialQueryHash?: string) {
   )
   const registry = useQueryRegistry(250, target)
   const backgroundRuns = useBackgroundRuns()
-  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [ownSelectedIds, setOwnSelectedIds] = useState<string[]>([])
+  const controlled = options?.selectedIds !== undefined
+  const selectedIds = options?.selectedIds ?? ownSelectedIds
+  const selectedIdsRef = useRef(selectedIds)
+  selectedIdsRef.current = selectedIds
+  const onSelectedIdsChange = options?.onSelectedIdsChange
+  const setSelectedIds = useCallback(
+    (next: string[] | ((current: string[]) => string[])) => {
+      const value =
+        typeof next === 'function' ? next(selectedIdsRef.current) : next
+      if (controlled) onSelectedIdsChange?.(value)
+      else setOwnSelectedIds(value)
+    },
+    [controlled, onSelectedIdsChange]
+  )
   const [paramValues, setParamValues] = useState<Record<string, string>>({})
   const [parameterSources, setParameterSources] = useState<
     Record<string, string>
@@ -108,7 +135,8 @@ export function useCompareController(initialQueryHash?: string) {
     setBatch(latestCompareBatch(target))
     setHistory(listCompareBatches(target))
     setHistoryOpen(false)
-    setSelectedIds([])
+    // A controlled selection belongs to the caller, which scopes it per target.
+    if (!controlled) setOwnSelectedIds([])
     setParamValues({})
     setParameterSources({})
     setSuggestionMessage(null)
@@ -117,7 +145,7 @@ export function useCompareController(initialQueryHash?: string) {
     initializedSelectionKey.current = null
     steppedBatchId.current = null
     reportedOutcomes.current.clear()
-  }, [target])
+  }, [target, controlled])
 
   // A sandbox check that keeps failing settles on the error state: the poll
   // stops rather than re-entering "pending" every five seconds and flipping
@@ -175,7 +203,7 @@ export function useCompareController(initialQueryHash?: string) {
     if (!queries.some((entry) => entry.hash === initialQueryHash)) return
     initializedSelectionKey.current = key
     setSelectedIds([initialQueryHash])
-  }, [initialQueryHash, queries, target])
+  }, [initialQueryHash, queries, target, setSelectedIds])
   const selectedWithParams = useMemo(
     () =>
       selected.map((entry) => ({

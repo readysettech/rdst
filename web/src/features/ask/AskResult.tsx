@@ -128,7 +128,7 @@ export function AskResult({
                     variant="primary"
                     modifier="ghost"
                     size="small"
-                    label="Open in Queries"
+                    label="Open in Database"
                     icon="arrow-right"
                     iconPosition="right"
                   />
@@ -167,7 +167,7 @@ export function AskResult({
               Ask another question
             </Text>
             <Text level="caption" className="text-content-layout-3">
-              Start fresh — this answer stays in Queries.
+              Start fresh - this answer stays in Queries.
             </Text>
           </VStack>
           <Button

@@ -223,7 +223,7 @@ describe('useFleetAudit', () => {
         'error',
         {
           message:
-            'Audit up to 8 targets at once — filter by group or tag (12 targets selected)',
+            'Audit up to 8 targets at once - filter by group or tag (12 targets selected)',
           code: 'too_many_targets',
           stage: 'start',
         },

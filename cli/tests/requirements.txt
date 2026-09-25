@@ -2,6 +2,7 @@
 pytest>=7.0.0
 pytest-cov>=4.0.0
 pytest-xdist>=3.0.0  # Parallel test execution
+pytest-timeout>=2.3.1  # Bound each test, including fixture teardown
 pytest-asyncio>=0.21.0
 httpx>=0.28.0  # AsyncClient + ASGITransport for API integration tests
 pandas>=1.5.0
@@ -18,6 +19,7 @@ paramiko>=3.0.0
 pyyaml>=6.0.0
 sqlglot>=20.0.0
 sqlparse>=0.4.0
+psutil>=7.2.2  # Analysis lease owner liveness
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 sse-starlette>=2.0.0

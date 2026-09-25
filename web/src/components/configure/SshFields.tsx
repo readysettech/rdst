@@ -154,7 +154,7 @@ export function SshFields({
       ? [
           {
             value: `current:${displayValue.host}`,
-            label: `${displayValue.host}${displayValue.user ? ` (${displayValue.user})` : ''} — current`,
+            label: `${displayValue.host}${displayValue.user ? ` (${displayValue.user})` : ''} - current`,
           },
         ]
       : []),
@@ -168,7 +168,7 @@ export function SshFields({
       .filter((host) => !isCurrentHost(host))
       .map((host) => ({
         value: `config:${host.host}`,
-        label: `${host.label}${host.user ? ` (${host.user})` : ''} — from SSH config`,
+        label: `${host.label}${host.user ? ` (${host.user})` : ''} - from SSH config`,
       })),
   ]
   // The select's value must always exist in its options, even on renders where

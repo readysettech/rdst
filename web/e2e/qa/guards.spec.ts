@@ -192,7 +192,7 @@ test('guards: expanded detail and the editor explain themselves', async ({
   await expect(page.getByLabel('Name', { exact: true })).toBeDisabled()
   await expect(
     page.getByText(
-      "A guard's name is its identity, so it can't be changed after it is created."
+      "A guard's name is its identity, so it can't be changed after it's created."
     )
   ).toBeVisible()
 })
@@ -222,9 +222,7 @@ test('guards: deleting a guard is confirmed and typed', async ({
     dialog.getByText('Bound agents lose this protection')
   ).toBeVisible()
   // The consequence names where agents actually run now.
-  await expect(
-    dialog.getByText(/the MCP server or the Slack bot/)
-  ).toBeVisible()
+  await expect(dialog.getByText(/CLI, MCP server, or Slack bot/)).toBeVisible()
   await shot(page, 'guards/delete-dialog')
 
   // Escape cancels; it never deletes.
@@ -297,7 +295,9 @@ test('guards: the retired Agents workspace leaves nothing behind', async ({
 
   // Nothing in the shipped app navigates to the workspace.
   await page.goto('/')
-  await expect(page.getByRole('link', { name: /agents?/i })).toHaveCount(0)
+  await expect(
+    page.locator('a[href="/agents"], a[href^="/agents?"], a[href^="/agents/"]')
+  ).toHaveCount(0)
   // Its strings are not in the production bundle.
   const bundled = await page.evaluate(async () => {
     const html = await (await fetch('/')).text()

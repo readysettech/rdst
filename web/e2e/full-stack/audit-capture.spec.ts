@@ -1,4 +1,14 @@
-import { clearTargets, expect, test } from '../fixtures'
+import {
+  acceptBrowserError,
+  clearTargets,
+  continueWhenMonitoringReady,
+  expect,
+  test,
+} from '../fixtures'
+
+// A database with no report yet answers report/latest with 404, which the browser logs.
+const NO_REPORT_404 =
+  'Failed to load resource: the server responded with a status of 404 (Not Found)'
 
 /**
  * Runs a real capture against the live Postgres and holds the capture
@@ -13,7 +23,9 @@ import { clearTargets, expect, test } from '../fixtures'
  */
 test('capture window closes on schedule and reports phase timings', async ({
   page,
+  browserErrors,
 }) => {
+  acceptBrowserError(browserErrors, NO_REPORT_404)
   test.setTimeout(240_000)
   const host = process.env.RDST_E2E_DB_HOST ?? '127.0.0.1'
   const port = Number(process.env.RDST_E2E_DB_PORT ?? '15432')
@@ -38,6 +50,7 @@ test('capture window closes on schedule and reports phase timings', async ({
   })
   await expect(writableAccount).toBeVisible()
   await writableAccount.getByRole('button', { name: 'Add target' }).click()
+  await continueWhenMonitoringReady(page, 'postgres-e2e')
   await expect(page).toHaveURL('/')
 
   const started = await page.request.post('/api/audit/capture', {

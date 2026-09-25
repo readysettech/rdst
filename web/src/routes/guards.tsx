@@ -1,37 +1,38 @@
-import { cn } from '@rs/tailwind-base';
-import type { IconStrokeName } from '@rs/ui-icons/icon-name';
-import { BaseInputSelect } from '@rs/ui-new/base-input-select';
-import { BaseInputSwitch } from '@rs/ui-new/base-input-switch';
-import { BaseInputText } from '@rs/ui-new/base-input-text';
-import { BaseInputTextarea } from '@rs/ui-new/base-input-textarea';
-import { Button } from '@rs/ui-new/button';
-import { Card } from '@rs/ui-new/card';
-import { ConfirmDialog } from '@rs/ui-new/confirm-dialog';
-import { Disclosure } from '@rs/ui-new/disclosure';
-import { EmptyState } from '@rs/ui-new/empty-state';
-import { ErrorState, InlineNotice } from '@rs/ui-new/error-state';
-import { Field } from '@rs/ui-new/field';
-import { Icon } from '@rs/ui-new/icon';
-import { IconTile } from '@rs/ui-new/icon-tile';
-import { Label } from '@rs/ui-new/label';
-import { AnimatePresence, m } from '@rs/ui-new/motion';
-import { Pressable } from '@rs/ui-new/pressable';
+import { cn } from '@rs/tailwind-base'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
+import { BaseInputSelect } from '@rs/ui-new/base-input-select'
+import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
+import { BaseInputText } from '@rs/ui-new/base-input-text'
+import { BaseInputTextarea } from '@rs/ui-new/base-input-textarea'
+import { Button } from '@rs/ui-new/button'
+import { Card } from '@rs/ui-new/card'
+import { ConfirmDialog } from '@rs/ui-new/confirm-dialog'
+import { Disclosure } from '@rs/ui-new/disclosure'
+import { EmptyState } from '@rs/ui-new/empty-state'
+import { ErrorState, InlineNotice } from '@rs/ui-new/error-state'
+import { Field } from '@rs/ui-new/field'
+import { Icon } from '@rs/ui-new/icon'
+import { IconTile } from '@rs/ui-new/icon-tile'
+import { Label } from '@rs/ui-new/label'
+import { AnimatePresence, m } from '@rs/ui-new/motion'
+import { Pressable } from '@rs/ui-new/pressable'
 import {
   SegmentedControl,
   type SegmentedControlSegment,
-} from '@rs/ui-new/segmented-control';
-import { Show } from '@rs/ui-new/show';
-import { Skeleton } from '@rs/ui-new/skeleton';
-import { HStack, VStack } from '@rs/ui-new/stack';
-import { Tag } from '@rs/ui-new/tag';
-import { Text } from '@rs/ui-new/text';
-import { toast } from '@rs/ui-new/use-toast';
-import { createFileRoute } from '@tanstack/react-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ExperimentalBanner } from '../components/ExperimentalBanner';
-import { RoutableNotice } from '../components/RoutableNotice';
-import { useTarget } from '../hooks/useTarget';
-import { errorDetail } from '../lib/errorContract';
+} from '@rs/ui-new/segmented-control'
+import { Show } from '@rs/ui-new/show'
+import { Skeleton } from '@rs/ui-new/skeleton'
+import { HStack, VStack } from '@rs/ui-new/stack'
+import { Tag } from '@rs/ui-new/tag'
+import { Text } from '@rs/ui-new/text'
+import { toast } from '@rs/ui-new/use-toast'
+import { createFileRoute } from '@tanstack/react-router'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ExperimentalBanner } from '../components/ExperimentalBanner'
+import { RoutableNotice } from '../components/RoutableNotice'
+import { plural } from '../features/monitor-kit/format'
+import { useTarget } from '../hooks/useTarget'
+import { errorDetail } from '../lib/errorContract'
 import {
   checkGuardSql,
   deriveGuard,
@@ -41,19 +42,19 @@ import {
   useGuardDetail,
   useGuardsList,
   useUpdateGuard,
-} from '../lib/useGuards';
-import { useSystemStatus } from '../lib/useSystemStatus';
+} from '../lib/useGuards'
+import { useSystemStatus } from '../lib/useSystemStatus'
 import type {
   GuardCheckLevel,
   GuardCheckResponse,
   GuardDetail,
   GuardSummary,
-} from '../types/guards';
-import { MASK_TYPES } from '../types/guards';
+} from '../types/guards'
+import { MASK_TYPES } from '../types/guards'
 
 export const Route = createFileRoute('/guards')({
   component: GuardsPage,
-});
+})
 
 // ---------------------------------------------------------------------------
 // Editable form model
@@ -65,42 +66,42 @@ export const Route = createFileRoute('/guards')({
 // a GuardDetail on save.
 
 interface MaskRow {
-  pattern: string;
-  type: string;
+  pattern: string
+  type: string
 }
 
 interface FilterRow {
-  table: string;
-  columns: string; // comma-separated in the editor
+  table: string
+  columns: string // comma-separated in the editor
 }
 
 interface GuardForm {
-  name: string;
-  description: string;
-  intent: string;
-  derived: boolean;
-  masking: MaskRow[];
-  deniedColumns: string; // newline / comma separated
-  allowedTables: string;
-  requiredFilters: FilterRow[];
-  requireWhere: boolean;
-  requireLimit: boolean;
-  noSelectStar: boolean;
-  maxTables: string;
-  costLimit: string;
-  maxEstimatedRows: string;
-  maxRows: string;
-  timeoutSeconds: string;
+  name: string
+  description: string
+  intent: string
+  derived: boolean
+  masking: MaskRow[]
+  deniedColumns: string // newline / comma separated
+  allowedTables: string
+  requiredFilters: FilterRow[]
+  requireWhere: boolean
+  requireLimit: boolean
+  noSelectStar: boolean
+  maxTables: string
+  costLimit: string
+  maxEstimatedRows: string
+  maxRows: string
+  timeoutSeconds: string
 }
 
-const GUARD_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_-]*$/;
+const GUARD_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_-]*$/
 
 const MASK_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'redact', label: 'Redact' },
   { value: 'email', label: 'Email' },
   { value: 'partial:4', label: 'Partial (last N)' },
   { value: 'hash', label: 'Hash' },
-];
+]
 
 function emptyForm(): GuardForm {
   return {
@@ -120,29 +121,31 @@ function emptyForm(): GuardForm {
     maxEstimatedRows: '',
     maxRows: '1000',
     timeoutSeconds: '30',
-  };
+  }
 }
 
 function splitList(value: string): string[] {
   return value
     .split(/[\n,]/)
     .map((item) => item.trim())
-    .filter(Boolean);
+    .filter(Boolean)
 }
 
 function detailToForm(detail: GuardDetail): GuardForm {
-  const masking = Object.entries(detail.masking ?? {}).map(([pattern, type]) => ({
-    pattern,
-    type,
-  }));
-  const restrictions = detail.restrictions ?? {};
-  const requiredFilters = Object.entries(restrictions.required_filters ?? {}).map(
-    ([table, columns]) => ({ table, columns: columns.join(', ') }),
-  );
-  const rules = detail.guards ?? {};
-  const limits = detail.limits ?? {};
+  const masking = Object.entries(detail.masking ?? {}).map(
+    ([pattern, type]) => ({
+      pattern,
+      type,
+    })
+  )
+  const restrictions = detail.restrictions ?? {}
+  const requiredFilters = Object.entries(
+    restrictions.required_filters ?? {}
+  ).map(([table, columns]) => ({ table, columns: columns.join(', ') }))
+  const rules = detail.guards ?? {}
+  const limits = detail.limits ?? {}
   const numOrEmpty = (value: number | null | undefined) =>
-    value === null || value === undefined ? '' : String(value);
+    value === null || value === undefined ? '' : String(value)
   return {
     name: detail.name,
     description: detail.description ?? '',
@@ -160,37 +163,37 @@ function detailToForm(detail: GuardDetail): GuardForm {
     maxEstimatedRows: numOrEmpty(rules.max_estimated_rows),
     maxRows: numOrEmpty(limits.max_rows) || '1000',
     timeoutSeconds: numOrEmpty(limits.timeout_seconds) || '30',
-  };
+  }
 }
 
 function parseOptionalInt(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parsed = Number.parseInt(trimmed, 10);
-  return Number.isFinite(parsed) ? parsed : null;
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const parsed = Number.parseInt(trimmed, 10)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 function parseIntOr(value: string, fallback: number): number {
-  const parsed = parseOptionalInt(value);
-  return parsed === null ? fallback : parsed;
+  const parsed = parseOptionalInt(value)
+  return parsed === null ? fallback : parsed
 }
 
 function formToDetail(form: GuardForm): GuardDetail {
-  const masking: Record<string, string> = {};
+  const masking: Record<string, string> = {}
   for (const row of form.masking) {
-    const pattern = row.pattern.trim();
-    if (pattern) masking[pattern] = row.type;
+    const pattern = row.pattern.trim()
+    if (pattern) masking[pattern] = row.type
   }
 
-  const requiredFilters: Record<string, string[]> = {};
+  const requiredFilters: Record<string, string[]> = {}
   for (const row of form.requiredFilters) {
-    const table = row.table.trim();
-    const columns = splitList(row.columns);
-    if (table && columns.length > 0) requiredFilters[table] = columns;
+    const table = row.table.trim()
+    const columns = splitList(row.columns)
+    if (table && columns.length > 0) requiredFilters[table] = columns
   }
 
-  const deniedColumns = splitList(form.deniedColumns);
-  const allowedTables = splitList(form.allowedTables);
+  const deniedColumns = splitList(form.deniedColumns)
+  const allowedTables = splitList(form.allowedTables)
 
   return {
     name: form.name.trim(),
@@ -201,7 +204,8 @@ function formToDetail(form: GuardForm): GuardDetail {
     restrictions: {
       denied_columns: deniedColumns.length > 0 ? deniedColumns : null,
       allowed_tables: allowedTables.length > 0 ? allowedTables : null,
-      required_filters: Object.keys(requiredFilters).length > 0 ? requiredFilters : null,
+      required_filters:
+        Object.keys(requiredFilters).length > 0 ? requiredFilters : null,
     },
     guards: {
       require_where: form.requireWhere,
@@ -215,7 +219,7 @@ function formToDetail(form: GuardForm): GuardDetail {
       max_rows: parseIntOr(form.maxRows, 1000),
       timeout_seconds: parseIntOr(form.timeoutSeconds, 30),
     },
-  };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -225,25 +229,27 @@ function formToDetail(form: GuardForm): GuardDetail {
 function checkLevel(level: string): GuardCheckLevel {
   switch (level) {
     case 'block':
-      return 'block';
+      return 'block'
     case 'warn':
-      return 'warn';
+      return 'warn'
     default:
-      return 'info';
+      return 'info'
   }
 }
 
-function levelVariant(level: GuardCheckLevel): 'negative' | 'warning' | 'informative' {
+function levelVariant(
+  level: GuardCheckLevel
+): 'negative' | 'warning' | 'informative' {
   switch (level) {
     case 'block':
-      return 'negative';
+      return 'negative'
     case 'warn':
-      return 'warning';
+      return 'warning'
     case 'info':
-      return 'informative';
+      return 'informative'
     default: {
-      const exhaustive: never = level;
-      return exhaustive;
+      const exhaustive: never = level
+      return exhaustive
     }
   }
 }
@@ -251,14 +257,14 @@ function levelVariant(level: GuardCheckLevel): 'negative' | 'warning' | 'informa
 function levelIcon(level: GuardCheckLevel): IconStrokeName {
   switch (level) {
     case 'block':
-      return 'close';
+      return 'close'
     case 'warn':
-      return 'alert';
+      return 'alert'
     case 'info':
-      return 'info';
+      return 'info'
     default: {
-      const exhaustive: never = level;
-      return exhaustive;
+      const exhaustive: never = level
+      return exhaustive
     }
   }
 }
@@ -274,23 +280,29 @@ const RULE_LABELS: Record<string, string> = {
   est_rows: 'row cap',
   'no_select*': 'no SELECT *',
   no_select_star: 'no SELECT *',
-  cost: 'cost limit',
-};
+  cost: 'planner estimate limit',
+}
 
 function ruleLabel(rule: string): string {
-  const tblMatch = rule.match(/^(?:tbl:|max_tables=)(\d+)$/);
-  if (tblMatch) return `max ${tblMatch[1]} tables`;
-  const estMatch = rule.match(/^max_estimated_rows=(\d+)$/);
-  if (estMatch) return `row cap ${Number(estMatch[1]).toLocaleString()}`;
-  const costMatch = rule.match(/^cost_limit=(\d+)$/);
-  if (costMatch) return `cost limit ${costMatch[1]}`;
-  return RULE_LABELS[rule] ?? rule;
+  const tblMatch = rule.match(/^(?:tbl:|max_tables=)(\d+)$/)
+  if (tblMatch) return `max ${plural(Number(tblMatch[1]), 'table')}`
+  const estMatch = rule.match(/^max_estimated_rows=(\d+)$/)
+  if (estMatch) return `row cap ${Number(estMatch[1]).toLocaleString()}`
+  const costMatch = rule.match(/^cost_limit=(\d+)$/)
+  if (costMatch) return `planner estimate limit ${costMatch[1]}`
+  return RULE_LABELS[rule] ?? rule
 }
 
 function ruleTags(rules: string[] | undefined) {
   return (rules ?? []).map((rule) => (
-    <Tag key={rule} size="small" variant="informative" modifier="ghost" label={ruleLabel(rule)} />
-  ));
+    <Tag
+      key={rule}
+      size="small"
+      variant="informative"
+      modifier="ghost"
+      label={ruleLabel(rule)}
+    />
+  ))
 }
 
 function SectionCard({
@@ -299,10 +311,10 @@ function SectionCard({
   action,
   children,
 }: {
-  icon: IconStrokeName;
-  title: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
+  icon: IconStrokeName
+  title: string
+  action?: React.ReactNode
+  children: React.ReactNode
 }) {
   return (
     <Card className="w-full overflow-hidden">
@@ -310,8 +322,15 @@ function SectionCard({
         <div className="px-5 py-3 border-b border-border-layout-1 bg-surface-layout-2/50">
           <HStack className="gap-2 items-center justify-between">
             <HStack className="gap-2 items-center">
-              <Icon name={icon} label="" className="w-4 h-4 text-content-layout-3" />
-              <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+              <Icon
+                name={icon}
+                label=""
+                className="w-4 h-4 text-content-layout-3"
+              />
+              <Text
+                level="overline"
+                className="text-content-layout-3 uppercase tracking-wider"
+              >
                 {title}
               </Text>
             </HStack>
@@ -321,7 +340,7 @@ function SectionCard({
         {children}
       </Card.Content>
     </Card>
-  );
+  )
 }
 
 // The design system's own label, so the editor's fields read and associate the
@@ -330,10 +349,10 @@ function FieldLabel({
   htmlFor,
   children,
 }: {
-  htmlFor?: string;
-  children: React.ReactNode;
+  htmlFor?: string
+  children: React.ReactNode
 }) {
-  return <Label htmlFor={htmlFor}>{children}</Label>;
+  return <Label htmlFor={htmlFor}>{children}</Label>
 }
 
 // Segmented control that merges the former "New Guard" / "Describe Intent" heroes
@@ -341,14 +360,14 @@ function FieldLabel({
 const MODE_SEGMENTS: Array<SegmentedControlSegment<'manual' | 'intent'>> = [
   { value: 'manual', label: 'Build manually' },
   { value: 'intent', label: 'Describe with AI', icon: 'sparkles' },
-];
+]
 
 function ModeToggle({
   mode,
   onChange,
 }: {
-  mode: 'manual' | 'intent';
-  onChange: (mode: 'manual' | 'intent') => void;
+  mode: 'manual' | 'intent'
+  onChange: (mode: 'manual' | 'intent') => void
 }) {
   return (
     <SegmentedControl
@@ -359,38 +378,49 @@ function ModeToggle({
       onValueChange={onChange}
       className="self-start"
     />
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
 // Guard detail view (read-only expansion)
 // ---------------------------------------------------------------------------
 
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+function DetailRow({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
   return (
     <VStack className="gap-1 items-start">
-      <Text level="caption" className="text-content-layout-3 uppercase tracking-wider">
+      <Text
+        level="caption"
+        className="text-content-layout-3 uppercase tracking-wider"
+      >
         {label}
       </Text>
       {children}
     </VStack>
-  );
+  )
 }
 
 function GuardDetailView({ detail }: { detail: GuardDetail }) {
-  const masking = Object.entries(detail.masking ?? {});
-  const restrictions = detail.restrictions ?? {};
-  const requiredFilters = Object.entries(restrictions.required_filters ?? {});
-  const rules = detail.guards ?? {};
-  const limits = detail.limits ?? {};
+  const masking = Object.entries(detail.masking ?? {})
+  const restrictions = detail.restrictions ?? {}
+  const requiredFilters = Object.entries(restrictions.required_filters ?? {})
+  const rules = detail.guards ?? {}
+  const limits = detail.limits ?? {}
   const activeRuleFlags = [
     rules.require_where ? 'require_where' : null,
     rules.require_limit ? 'require_limit' : null,
     rules.no_select_star ? 'no_select_star' : null,
     rules.max_tables != null ? `max_tables=${rules.max_tables}` : null,
     rules.cost_limit != null ? `cost_limit=${rules.cost_limit}` : null,
-    rules.max_estimated_rows != null ? `max_estimated_rows=${rules.max_estimated_rows}` : null,
-  ].filter((flag): flag is string => flag !== null);
+    rules.max_estimated_rows != null
+      ? `max_estimated_rows=${rules.max_estimated_rows}`
+      : null,
+  ].filter((flag): flag is string => flag !== null)
 
   return (
     <div className="p-5">
@@ -411,8 +441,17 @@ function GuardDetailView({ detail }: { detail: GuardDetail }) {
                   <Text level="mono-small" className="text-content-layout-1">
                     {pattern}
                   </Text>
-                  <Icon name="arrow-right" label="maps to" className="w-3 h-3 text-content-layout-3" />
-                  <Tag size="small" variant="informative" modifier="ghost" label={type} />
+                  <Icon
+                    name="arrow-right"
+                    label="maps to"
+                    className="w-3 h-3 text-content-layout-3"
+                  />
+                  <Tag
+                    size="small"
+                    variant="informative"
+                    modifier="ghost"
+                    label={type}
+                  />
                 </HStack>
               ))}
             </VStack>
@@ -423,7 +462,13 @@ function GuardDetailView({ detail }: { detail: GuardDetail }) {
           <DetailRow label="Denied columns">
             <HStack className="gap-1.5 items-center flex-wrap">
               {(restrictions.denied_columns ?? []).map((col) => (
-                <Tag key={col} size="small" variant="informative" modifier="ghost" label={col} />
+                <Tag
+                  key={col}
+                  size="small"
+                  variant="informative"
+                  modifier="ghost"
+                  label={col}
+                />
               ))}
             </HStack>
           </DetailRow>
@@ -433,7 +478,13 @@ function GuardDetailView({ detail }: { detail: GuardDetail }) {
           <DetailRow label="Allowed tables">
             <HStack className="gap-1.5 items-center flex-wrap">
               {(restrictions.allowed_tables ?? []).map((table) => (
-                <Tag key={table} size="small" variant="informative" modifier="ghost" label={table} />
+                <Tag
+                  key={table}
+                  size="small"
+                  variant="informative"
+                  modifier="ghost"
+                  label={table}
+                />
               ))}
             </HStack>
           </DetailRow>
@@ -447,10 +498,20 @@ function GuardDetailView({ detail }: { detail: GuardDetail }) {
                   <Text level="mono-small" className="text-content-layout-1">
                     {table}
                   </Text>
-                  <Icon name="arrow-right" label="requires" className="w-3 h-3 text-content-layout-3" />
+                  <Icon
+                    name="arrow-right"
+                    label="requires"
+                    className="w-3 h-3 text-content-layout-3"
+                  />
                   <HStack className="gap-1 items-center flex-wrap">
                     {columns.map((col) => (
-                      <Tag key={col} size="small" variant="informative" modifier="ghost" label={col} />
+                      <Tag
+                        key={col}
+                        size="small"
+                        variant="informative"
+                        modifier="ghost"
+                        label={col}
+                      />
                     ))}
                   </HStack>
                 </HStack>
@@ -461,23 +522,31 @@ function GuardDetailView({ detail }: { detail: GuardDetail }) {
 
         <Show when={activeRuleFlags.length > 0}>
           <DetailRow label="Rules">
-            <HStack className="gap-1.5 items-center flex-wrap">{ruleTags(activeRuleFlags)}</HStack>
+            <HStack className="gap-1.5 items-center flex-wrap">
+              {ruleTags(activeRuleFlags)}
+            </HStack>
           </DetailRow>
         </Show>
 
         <DetailRow label="Limits">
           <HStack className="gap-4 items-center">
-            <Text level="body-small" className="text-content-layout-2 tabular-nums">
+            <Text
+              level="body-small"
+              className="text-content-layout-2 tabular-nums"
+            >
               max_rows: {limits.max_rows ?? 1000}
             </Text>
-            <Text level="body-small" className="text-content-layout-2 tabular-nums">
+            <Text
+              level="body-small"
+              className="text-content-layout-2 tabular-nums"
+            >
               timeout: {limits.timeout_seconds ?? 30}s
             </Text>
           </HStack>
         </DetailRow>
       </VStack>
     </div>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -490,30 +559,33 @@ function GuardEditor({
   nameEditable,
   showName,
 }: {
-  form: GuardForm;
-  setForm: React.Dispatch<React.SetStateAction<GuardForm>>;
-  nameEditable: boolean;
+  form: GuardForm
+  setForm: React.Dispatch<React.SetStateAction<GuardForm>>
+  nameEditable: boolean
   // Hidden in intent mode, where the name field lives above the derive button.
-  showName: boolean;
+  showName: boolean
 }) {
   const update = <K extends keyof GuardForm>(key: K, value: GuardForm[K]) =>
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((prev) => ({ ...prev, [key]: value }))
 
   const updateMask = (index: number, patch: Partial<MaskRow>) =>
     setForm((prev) => ({
       ...prev,
-      masking: prev.masking.map((row, i) => (i === index ? { ...row, ...patch } : row)),
-    }));
+      masking: prev.masking.map((row, i) =>
+        i === index ? { ...row, ...patch } : row
+      ),
+    }))
 
   const updateFilter = (index: number, patch: Partial<FilterRow>) =>
     setForm((prev) => ({
       ...prev,
       requiredFilters: prev.requiredFilters.map((row, i) =>
-        i === index ? { ...row, ...patch } : row,
+        i === index ? { ...row, ...patch } : row
       ),
-    }));
+    }))
 
-  const nameValid = !form.name.trim() || GUARD_NAME_PATTERN.test(form.name.trim());
+  const nameValid =
+    !form.name.trim() || GUARD_NAME_PATTERN.test(form.name.trim())
 
   return (
     <VStack className="gap-5 items-stretch p-5">
@@ -527,7 +599,9 @@ function GuardEditor({
                 id="guard-name"
                 name="guard-name"
                 value={form.name}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => update('name', e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  update('name', e.target.value)
+                }
                 placeholder="pii-guard"
                 disabled={!nameEditable}
                 error={!nameValid}
@@ -544,8 +618,8 @@ function GuardEditor({
                   }
                   infoMessage={
                     nameEditable
-                      ? 'This is how you will refer to the guard everywhere.'
-                      : "A guard's name is its identity, so it can't be changed after it is created."
+                      ? "You'll use this name to refer to the guard."
+                      : "A guard's name is its identity, so it can't be changed after it's created."
                   }
                 />
               </div>
@@ -576,7 +650,10 @@ function GuardEditor({
             modifier="ghost"
             size="small"
             onClick={() =>
-              update('masking', [...form.masking, { pattern: '', type: MASK_TYPES[0] }])
+              update('masking', [
+                ...form.masking,
+                { pattern: '', type: MASK_TYPES[0] },
+              ])
             }
           />
         </HStack>
@@ -616,7 +693,7 @@ function GuardEditor({
               onClick={() =>
                 update(
                   'masking',
-                  form.masking.filter((_, i) => i !== index),
+                  form.masking.filter((_, i) => i !== index)
                 )
               }
             />
@@ -625,212 +702,233 @@ function GuardEditor({
       </VStack>
 
       {/* Restrictions: denied columns + allowed tables — collapsed by default */}
-      <Disclosure title="Table & column restrictions" subtitle="denied columns · allowed tables">
-      <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4">
-        <VStack className="gap-1.5 items-start">
-          <FieldLabel>Denied columns</FieldLabel>
-          <BaseInputTextarea
-            name="denied-columns"
-            value={form.deniedColumns}
-            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-              update('deniedColumns', e.target.value)
-            }
-            placeholder={'users.password\nusers.ssn'}
-            rows={3}
-          />
-          <Text level="caption" className="text-content-layout-3">
-            One per line (or comma-separated).
-          </Text>
-        </VStack>
-        <VStack className="gap-1.5 items-start">
-          <FieldLabel>Allowed tables</FieldLabel>
-          <BaseInputTextarea
-            name="allowed-tables"
-            value={form.allowedTables}
-            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-              update('allowedTables', e.target.value)
-            }
-            placeholder={'orders\nline_items'}
-            rows={3}
-          />
-          <Text level="caption" className="text-content-layout-3">
-            Empty means all tables are allowed.
-          </Text>
-        </VStack>
-      </div>
+      <Disclosure
+        title="Table & column restrictions"
+        subtitle="denied columns · allowed tables"
+      >
+        <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4">
+          <VStack className="gap-1.5 items-start">
+            <FieldLabel>Denied columns</FieldLabel>
+            <BaseInputTextarea
+              name="denied-columns"
+              value={form.deniedColumns}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                update('deniedColumns', e.target.value)
+              }
+              placeholder={'users.password\nusers.ssn'}
+              rows={3}
+            />
+            <Text level="caption" className="text-content-layout-3">
+              One per line (or comma-separated).
+            </Text>
+          </VStack>
+          <VStack className="gap-1.5 items-start">
+            <FieldLabel>Allowed tables</FieldLabel>
+            <BaseInputTextarea
+              name="allowed-tables"
+              value={form.allowedTables}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                update('allowedTables', e.target.value)
+              }
+              placeholder={'orders\nline_items'}
+              rows={3}
+            />
+            <Text level="caption" className="text-content-layout-3">
+              Empty means all tables are allowed.
+            </Text>
+          </VStack>
+        </div>
       </Disclosure>
 
       {/* Required filters — collapsed by default */}
       <Disclosure title="Required filters">
-      <VStack className="gap-2 items-stretch">
-        <HStack className="justify-between items-center">
-          <FieldLabel>Required filters</FieldLabel>
-          <Button
-            label="Add filter"
-            icon="add"
-            iconPosition="left"
-            modifier="ghost"
-            size="small"
-            onClick={() =>
-              update('requiredFilters', [...form.requiredFilters, { table: '', columns: '' }])
-            }
-          />
-        </HStack>
-        <Show when={form.requiredFilters.length === 0}>
-          <Text level="caption" className="text-content-layout-3">
-            No required filters. Add a table plus the columns any query must filter on.
-          </Text>
-        </Show>
-        {form.requiredFilters.map((row, index) => (
-          <HStack key={index} className="gap-2 items-center">
-            <div className="w-48">
-              <BaseInputText
-                name={`filter-table-${index}`}
-                value={row.table}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  updateFilter(index, { table: e.target.value })
-                }
-                placeholder="orders"
-              />
-            </div>
-            <div className="flex-1">
-              <BaseInputText
-                name={`filter-columns-${index}`}
-                value={row.columns}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  updateFilter(index, { columns: e.target.value })
-                }
-                placeholder="tenant_id, region"
-              />
-            </div>
+        <VStack className="gap-2 items-stretch">
+          <HStack className="justify-between items-center">
+            <FieldLabel>Required filters</FieldLabel>
             <Button
-              label=""
-              icon="trash"
-              iconPosition="icon"
+              label="Add filter"
+              icon="add"
+              iconPosition="left"
               modifier="ghost"
-              variant="negative"
               size="small"
               onClick={() =>
-                update(
-                  'requiredFilters',
-                  form.requiredFilters.filter((_, i) => i !== index),
-                )
+                update('requiredFilters', [
+                  ...form.requiredFilters,
+                  { table: '', columns: '' },
+                ])
               }
             />
           </HStack>
-        ))}
-      </VStack>
+          <Show when={form.requiredFilters.length === 0}>
+            <Text level="caption" className="text-content-layout-3">
+              No required filters. Add a table plus the columns any query must
+              filter on.
+            </Text>
+          </Show>
+          {form.requiredFilters.map((row, index) => (
+            <HStack key={index} className="gap-2 items-center">
+              <div className="w-48">
+                <BaseInputText
+                  name={`filter-table-${index}`}
+                  value={row.table}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    updateFilter(index, { table: e.target.value })
+                  }
+                  placeholder="orders"
+                />
+              </div>
+              <div className="flex-1">
+                <BaseInputText
+                  name={`filter-columns-${index}`}
+                  value={row.columns}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    updateFilter(index, { columns: e.target.value })
+                  }
+                  placeholder="tenant_id, region"
+                />
+              </div>
+              <Button
+                label=""
+                icon="trash"
+                iconPosition="icon"
+                modifier="ghost"
+                variant="negative"
+                size="small"
+                onClick={() =>
+                  update(
+                    'requiredFilters',
+                    form.requiredFilters.filter((_, i) => i !== index)
+                  )
+                }
+              />
+            </HStack>
+          ))}
+        </VStack>
       </Disclosure>
 
       {/* Rule toggles — collapsed by default */}
-      <Disclosure title="Rules" subtitle="require WHERE / require LIMIT / no SELECT *">
-      <VStack className="gap-3 items-stretch">
-        <div className="grid grid-cols-1 tablet:grid-cols-3 gap-3">
-          <HStack className="gap-2 items-center">
-            <BaseInputSwitch
-              id="guard-require-where"
-              aria-label="Require WHERE"
-              name="require-where"
-              checked={form.requireWhere}
-              onCheckedChange={(checked) => update('requireWhere', checked === true)}
-            />
-            <Text level="label-small" className="text-content-layout-2">
-              Require WHERE
-            </Text>
-          </HStack>
-          <HStack className="gap-2 items-center">
-            <BaseInputSwitch
-              id="guard-require-limit"
-              aria-label="Require LIMIT"
-              name="require-limit"
-              checked={form.requireLimit}
-              onCheckedChange={(checked) => update('requireLimit', checked === true)}
-            />
-            <Text level="label-small" className="text-content-layout-2">
-              Require LIMIT
-            </Text>
-          </HStack>
-          <HStack className="gap-2 items-center">
-            <BaseInputSwitch
-              id="guard-no-select-star"
-              aria-label="No SELECT star"
-              name="no-select-star"
-              checked={form.noSelectStar}
-              onCheckedChange={(checked) => update('noSelectStar', checked === true)}
-            />
-            <Text level="label-small" className="text-content-layout-2">
-              No SELECT *
-            </Text>
-          </HStack>
-        </div>
-      </VStack>
+      <Disclosure
+        title="Rules"
+        subtitle="require WHERE / require LIMIT / no SELECT *"
+      >
+        <VStack className="gap-3 items-stretch">
+          <div className="grid grid-cols-1 tablet:grid-cols-3 gap-3">
+            <HStack className="gap-2 items-center">
+              <BaseInputSwitch
+                id="guard-require-where"
+                aria-label="Require WHERE"
+                name="require-where"
+                checked={form.requireWhere}
+                onCheckedChange={(checked) =>
+                  update('requireWhere', checked === true)
+                }
+              />
+              <Text level="label-small" className="text-content-layout-2">
+                Require WHERE
+              </Text>
+            </HStack>
+            <HStack className="gap-2 items-center">
+              <BaseInputSwitch
+                id="guard-require-limit"
+                aria-label="Require LIMIT"
+                name="require-limit"
+                checked={form.requireLimit}
+                onCheckedChange={(checked) =>
+                  update('requireLimit', checked === true)
+                }
+              />
+              <Text level="label-small" className="text-content-layout-2">
+                Require LIMIT
+              </Text>
+            </HStack>
+            <HStack className="gap-2 items-center">
+              <BaseInputSwitch
+                id="guard-no-select-star"
+                aria-label="No SELECT star"
+                name="no-select-star"
+                checked={form.noSelectStar}
+                onCheckedChange={(checked) =>
+                  update('noSelectStar', checked === true)
+                }
+              />
+              <Text level="label-small" className="text-content-layout-2">
+                No SELECT *
+              </Text>
+            </HStack>
+          </div>
+        </VStack>
       </Disclosure>
 
-      {/* Numeric limits — collapsed by default */}
-      <Disclosure title="Limits" subtitle="rows, tables, cost, est. rows">
-      <div className="grid grid-cols-2 tablet:grid-cols-5 gap-4">
-        <VStack className="gap-1.5 items-start">
-          <FieldLabel>Max tables</FieldLabel>
-          <BaseInputText
-            name="max-tables"
-            type="number"
-            value={form.maxTables}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              update('maxTables', e.target.value)
-            }
-            placeholder="—"
-          />
-        </VStack>
-        <VStack className="gap-1.5 items-start">
-          <FieldLabel>Cost limit</FieldLabel>
-          <BaseInputText
-            name="cost-limit"
-            type="number"
-            value={form.costLimit}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              update('costLimit', e.target.value)
-            }
-            placeholder="—"
-          />
-        </VStack>
-        <VStack className="gap-1.5 items-start">
-          <FieldLabel>Max est. rows</FieldLabel>
-          <BaseInputText
-            name="max-estimated-rows"
-            type="number"
-            value={form.maxEstimatedRows}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              update('maxEstimatedRows', e.target.value)
-            }
-            placeholder="—"
-          />
-        </VStack>
-        <VStack className="gap-1.5 items-start">
-          <FieldLabel>Max rows</FieldLabel>
-          <BaseInputText
-            name="max-rows"
-            type="number"
-            value={form.maxRows}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => update('maxRows', e.target.value)}
-            placeholder="1000"
-          />
-        </VStack>
-        <VStack className="gap-1.5 items-start">
-          <FieldLabel>Timeout (s)</FieldLabel>
-          <BaseInputText
-            name="timeout-seconds"
-            type="number"
-            value={form.timeoutSeconds}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              update('timeoutSeconds', e.target.value)
-            }
-            placeholder="30"
-          />
-        </VStack>
-      </div>
+      {/* Numeric limits, collapsed by default */}
+      <Disclosure
+        title="Limits"
+        subtitle="Set limits on what queries can read and how much work they can do."
+      >
+        <div className="grid grid-cols-2 tablet:grid-cols-5 gap-4">
+          <VStack className="gap-1.5 items-start">
+            <FieldLabel>Max tables</FieldLabel>
+            <BaseInputText
+              name="max-tables"
+              type="number"
+              value={form.maxTables}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                update('maxTables', e.target.value)
+              }
+              placeholder="-"
+            />
+          </VStack>
+          <VStack className="gap-1.5 items-start">
+            <FieldLabel>Planner estimate limit</FieldLabel>
+            <BaseInputText
+              name="cost-limit"
+              type="number"
+              value={form.costLimit}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                update('costLimit', e.target.value)
+              }
+              placeholder="-"
+            />
+          </VStack>
+          <VStack className="gap-1.5 items-start">
+            <FieldLabel>Max est. rows</FieldLabel>
+            <BaseInputText
+              name="max-estimated-rows"
+              type="number"
+              value={form.maxEstimatedRows}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                update('maxEstimatedRows', e.target.value)
+              }
+              placeholder="-"
+            />
+          </VStack>
+          <VStack className="gap-1.5 items-start">
+            <FieldLabel>Max rows</FieldLabel>
+            <BaseInputText
+              name="max-rows"
+              type="number"
+              value={form.maxRows}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                update('maxRows', e.target.value)
+              }
+              placeholder="1000"
+            />
+          </VStack>
+          <VStack className="gap-1.5 items-start">
+            <FieldLabel>Timeout (s)</FieldLabel>
+            <BaseInputText
+              name="timeout-seconds"
+              type="number"
+              value={form.timeoutSeconds}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                update('timeoutSeconds', e.target.value)
+              }
+              placeholder="30"
+            />
+          </VStack>
+        </div>
       </Disclosure>
     </VStack>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -839,55 +937,57 @@ function GuardEditor({
 
 // Radix Select forbids empty-string option values, so a sentinel stands in
 // for "no target"; it is mapped back to undefined before the check request.
-const NO_TARGET = '__none__';
+const NO_TARGET = '__none__'
 
 function TestSqlPanel({ guardNames }: { guardNames: string[] }) {
-  const { target: globalTarget } = useTarget();
-  const { data: status } = useSystemStatus();
+  const { target: globalTarget } = useTarget()
+  const { data: status } = useSystemStatus()
   const targetOptions = useMemo(
     () => [
       { value: NO_TARGET, label: 'No target (skip EXPLAIN checks)' },
       ...(status?.targets ?? []).map((t) => ({ value: t.name, label: t.name })),
     ],
-    [status?.targets],
-  );
+    [status?.targets]
+  )
 
-  const [guard, setGuard] = useState<string>('');
-  const [sql, setSql] = useState('');
-  const [selectedTarget, setSelectedTarget] = useState<string>(globalTarget ?? NO_TARGET);
+  const [guard, setGuard] = useState<string>('')
+  const [sql, setSql] = useState('')
+  const [selectedTarget, setSelectedTarget] = useState<string>(
+    globalTarget ?? NO_TARGET
+  )
   // The global target resolves asynchronously; follow it until the user
   // picks a target themselves, so EXPLAIN checks aren't silently skipped.
-  const userPickedTargetRef = useRef(false);
+  const userPickedTargetRef = useRef(false)
   useEffect(() => {
     if (!userPickedTargetRef.current && globalTarget) {
-      setSelectedTarget(globalTarget);
+      setSelectedTarget(globalTarget)
     }
-  }, [globalTarget]);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<GuardCheckResponse | null>(null);
+  }, [globalTarget])
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<GuardCheckResponse | null>(null)
 
-  const effectiveGuard = guard || guardNames[0] || '';
-  const guardOptions = guardNames.map((name) => ({ value: name, label: name }));
+  const effectiveGuard = guard || guardNames[0] || ''
+  const guardOptions = guardNames.map((name) => ({ value: name, label: name }))
 
   const handleRun = async () => {
-    if (!effectiveGuard || !sql.trim()) return;
-    setRunning(true);
-    setError(null);
-    setResult(null);
+    if (!effectiveGuard || !sql.trim()) return
+    setRunning(true)
+    setError(null)
+    setResult(null)
     try {
       const response = await checkGuardSql(
         effectiveGuard,
         sql,
-        selectedTarget === NO_TARGET ? undefined : selectedTarget,
-      );
-      setResult(response);
+        selectedTarget === NO_TARGET ? undefined : selectedTarget
+      )
+      setResult(response)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setRunning(false);
+      setRunning(false)
     }
-  };
+  }
 
   return (
     <SectionCard icon="play" title="Test SQL">
@@ -911,8 +1011,8 @@ function TestSqlPanel({ guardNames }: { guardNames: string[] }) {
               options={targetOptions}
               value={selectedTarget}
               onValueChange={(value) => {
-                userPickedTargetRef.current = true;
-                setSelectedTarget(value);
+                userPickedTargetRef.current = true
+                setSelectedTarget(value)
               }}
             />
           </VStack>
@@ -923,7 +1023,9 @@ function TestSqlPanel({ guardNames }: { guardNames: string[] }) {
           <BaseInputTextarea
             name="test-sql"
             value={sql}
-            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setSql(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+              setSql(e.target.value)
+            }
             placeholder="SELECT id FROM users WHERE id = 1"
             rows={4}
           />
@@ -948,7 +1050,11 @@ function TestSqlPanel({ guardNames }: { guardNames: string[] }) {
         <Show when={!!error}>
           <div className="px-4 py-3 bg-surface-negative-soft/30 border border-border-negative-soft rounded-panel">
             <HStack className="gap-2 items-center">
-              <Icon name="alert" label="Error" className="w-4 h-4 text-content-negative-soft" />
+              <Icon
+                name="alert"
+                label="Error"
+                className="w-4 h-4 text-content-negative-soft"
+              />
               <Text level="body-small" className="text-content-negative-soft">
                 {error}
               </Text>
@@ -961,7 +1067,7 @@ function TestSqlPanel({ guardNames }: { guardNames: string[] }) {
         </Show>
       </VStack>
     </SectionCard>
-  );
+  )
 }
 
 // The verdict banner surfaces severity with icon + label + count (never color
@@ -970,13 +1076,13 @@ function TestSqlPanel({ guardNames }: { guardNames: string[] }) {
 // result for clean. [VIS-117, USE-005]
 function ResultBanner({ result }: { result: GuardCheckResponse }) {
   const warnCount = result.results.filter(
-    (r) => !r.passed && checkLevel(r.level) === 'warn',
-  ).length;
+    (r) => !r.passed && checkLevel(r.level) === 'warn'
+  ).length
   const severity: 'clean' | 'warn' | 'blocked' = !result.passed
     ? 'blocked'
     : warnCount > 0
       ? 'warn'
-      : 'clean';
+      : 'clean'
   const banner: Record<
     'clean' | 'warn' | 'blocked',
     { surface: string; text: string; icon: IconStrokeName; label: string }
@@ -991,7 +1097,7 @@ function ResultBanner({ result }: { result: GuardCheckResponse }) {
       surface: 'bg-surface-warning-soft/20 border-border-warning-soft',
       text: 'text-content-warning-soft',
       icon: 'alert',
-      label: `ALLOWED — ${warnCount} warning${warnCount === 1 ? '' : 's'} · ${result.guard}`,
+      label: `ALLOWED: ${warnCount} warning${warnCount === 1 ? '' : 's'} · ${result.guard}`,
     },
     blocked: {
       surface: 'bg-surface-negative-soft/30 border-border-negative-soft',
@@ -999,18 +1105,23 @@ function ResultBanner({ result }: { result: GuardCheckResponse }) {
       icon: 'close',
       label: `BLOCKED by ${result.guard}`,
     },
-  };
-  const { surface, text, icon, label } = banner[severity];
+  }
+  const { surface, text, icon, label } = banner[severity]
   return (
     <output className={cn('block px-4 py-3 rounded-panel border', surface)}>
       <HStack className="gap-2 items-center">
-        <Icon name={icon} label="" aria-hidden="true" className={cn('w-5 h-5 shrink-0', text)} />
+        <Icon
+          name={icon}
+          label=""
+          aria-hidden="true"
+          className={cn('w-5 h-5 shrink-0', text)}
+        />
         <Text level="label-medium" className={text}>
           {label}
         </Text>
       </HStack>
     </output>
-  );
+  )
 }
 
 function CheckResultView({ result }: { result: GuardCheckResponse }) {
@@ -1026,7 +1137,7 @@ function CheckResultView({ result }: { result: GuardCheckResponse }) {
 
       <VStack className="gap-2 items-stretch">
         {result.results.map((finding, index) => {
-          const level = checkLevel(finding.level);
+          const level = checkLevel(finding.level)
           return (
             <div
               key={`${finding.guard_name}-${index}`}
@@ -1050,7 +1161,9 @@ function CheckResultView({ result }: { result: GuardCheckResponse }) {
                   <HStack className="gap-2 items-center">
                     <Tag
                       size="small"
-                      variant={finding.passed ? 'positive' : levelVariant(level)}
+                      variant={
+                        finding.passed ? 'positive' : levelVariant(level)
+                      }
                       modifier="ghost"
                       label={finding.passed ? 'PASS' : level.toUpperCase()}
                     />
@@ -1069,11 +1182,11 @@ function CheckResultView({ result }: { result: GuardCheckResponse }) {
                 </VStack>
               </HStack>
             </div>
-          );
+          )
         })}
       </VStack>
     </VStack>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -1099,7 +1212,7 @@ function GuardListSkeleton() {
         </div>
       ))}
     </div>
-  );
+  )
 }
 
 function GuardListRow({
@@ -1110,16 +1223,16 @@ function GuardListRow({
   onDelete,
   deleting,
 }: {
-  guard: GuardSummary;
-  expanded: boolean;
-  onToggle: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  deleting: boolean;
+  guard: GuardSummary
+  expanded: boolean
+  onToggle: () => void
+  onEdit: () => void
+  onDelete: () => void
+  deleting: boolean
 }) {
   // A row whose delete is in flight stops asking for its detail, so the read
   // never chases a name the server has just dropped. [F-16]
-  const detailQuery = useGuardDetail(expanded && !deleting ? guard.name : null);
+  const detailQuery = useGuardDetail(expanded && !deleting ? guard.name : null)
 
   return (
     <div className={expanded ? 'bg-surface-primary-soft/5' : ''}>
@@ -1137,7 +1250,10 @@ function GuardListRow({
             />
             <VStack className="gap-0.5 items-start min-w-0">
               <HStack className="gap-2 items-center">
-                <Text level="label-medium" className="text-content-layout-1 truncate">
+                <Text
+                  level="label-medium"
+                  className="text-content-layout-1 truncate"
+                >
                   {guard.name}
                 </Text>
                 <Tag
@@ -1148,7 +1264,10 @@ function GuardListRow({
                 />
               </HStack>
               <Show when={!!guard.description}>
-                <Text level="caption" className="text-content-layout-3 line-clamp-1">
+                <Text
+                  level="caption"
+                  className="text-content-layout-3 line-clamp-1"
+                >
                   {guard.description}
                 </Text>
               </Show>
@@ -1166,7 +1285,10 @@ function GuardListRow({
                 label={`${guard.mask_count} mask${guard.mask_count === 1 ? '' : 's'}`}
               />
             )}
-            <Text level="mono-small" className="text-content-layout-3 tabular-nums">
+            <Text
+              level="mono-small"
+              className="text-content-layout-3 tabular-nums"
+            >
               max {(guard.max_rows ?? 1000).toLocaleString()} rows
             </Text>
           </HStack>
@@ -1187,17 +1309,23 @@ function GuardListRow({
               fallback={
                 <div className="p-5">
                   <HStack className="gap-2 items-center">
-                    <Show when={!detailQuery.isError} fallback={
-                      <InlineNotice
-                        errorClass="rdst-service"
-                        title="This guard couldn't be loaded"
-                        message="RDST couldn't read the rules behind this guard."
-                        detail={errorDetail(detailQuery.error)}
-                        onRetry={() => void detailQuery.refetch()}
-                        className="w-full"
-                      />
-                    }>
-                      <VStack aria-busy="true" className="gap-2 items-stretch w-full">
+                    <Show
+                      when={!detailQuery.isError}
+                      fallback={
+                        <InlineNotice
+                          errorClass="rdst-service"
+                          title="This guard couldn't be loaded"
+                          message="RDST couldn't read the rules behind this guard."
+                          detail={errorDetail(detailQuery.error)}
+                          onRetry={() => void detailQuery.refetch()}
+                          className="w-full"
+                        />
+                      }
+                    >
+                      <VStack
+                        aria-busy="true"
+                        className="gap-2 items-stretch w-full"
+                      >
                         <span className="sr-only">Loading guard</span>
                         <Skeleton className="h-3.5 w-48 rounded-md" />
                         <Skeleton className="h-3 w-full rounded-md" />
@@ -1208,7 +1336,9 @@ function GuardListRow({
                 </div>
               }
             >
-              {detailQuery.data && <GuardDetailView detail={detailQuery.data} />}
+              {detailQuery.data && (
+                <GuardDetailView detail={detailQuery.data} />
+              )}
             </Show>
             <div className="px-5 py-3 border-t border-border-layout-1 bg-surface-layout-2/30">
               <HStack className="gap-2 justify-end">
@@ -1237,7 +1367,7 @@ function GuardListRow({
         )}
       </AnimatePresence>
     </div>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -1249,16 +1379,16 @@ function GuardListRow({
 // feeds the confirm notice so a deleter sees the precise security boundary they
 // are about to remove.
 function guardProtectionSummary(guard: GuardSummary): string {
-  const parts: string[] = [];
-  const maskCount = guard.mask_count ?? 0;
+  const parts: string[] = []
+  const maskCount = guard.mask_count ?? 0
   if (maskCount > 0) {
-    parts.push(`masks ${maskCount} column${maskCount === 1 ? '' : 's'}`);
+    parts.push(`masks ${maskCount} column${maskCount === 1 ? '' : 's'}`)
   }
-  const ruleParts = (guard.rules ?? []).map(ruleLabel);
+  const ruleParts = (guard.rules ?? []).map(ruleLabel)
   if (ruleParts.length > 0) {
-    parts.push(`enforces ${ruleParts.join(', ')}`);
+    parts.push(`enforces ${ruleParts.join(', ')}`)
   }
-  return parts.join(' and ');
+  return parts.join(' and ')
 }
 
 // Deleting a guard is a SECURITY-boundary change (audit HIGH): every CLI agent,
@@ -1277,15 +1407,15 @@ export function GuardDeleteDialog({
   onConfirm,
   onClose,
 }: {
-  guard: GuardSummary | null;
-  isOpen: boolean;
-  loading?: boolean;
-  onConfirm: () => void;
-  onClose: () => void;
+  guard: GuardSummary | null
+  isOpen: boolean
+  loading?: boolean
+  onConfirm: () => void
+  onClose: () => void
 }) {
-  const name = guard?.name ?? '';
-  const summary = guard ? guardProtectionSummary(guard) : '';
-  const protection = summary ? `This guard ${summary}. ` : '';
+  const name = guard?.name ?? ''
+  const summary = guard ? guardProtectionSummary(guard) : ''
+  const protection = summary ? `This guard ${summary}. ` : ''
   return (
     <ConfirmDialog
       isOpen={isOpen}
@@ -1297,7 +1427,7 @@ export function GuardDeleteDialog({
         accent: 'negative',
         icon: 'alert',
         title: 'Bound agents lose this protection',
-        message: `${protection}Every rdst agent bound to this guard — through the CLI, the MCP server or the Slack bot — loses that protection the moment it is deleted. This cannot be undone.`,
+        message: `${protection}Every rdst agent bound to this guard loses that protection when you delete it. This applies to agents running through the CLI, MCP server, or Slack bot. This can't be undone.`,
       }}
       requireTyped={name || undefined}
       confirmLabel="Delete guard"
@@ -1306,144 +1436,151 @@ export function GuardDeleteDialog({
       loading={loading}
       blockCloseWhileLoading
     />
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
-type EditorMode = 'closed' | 'intent' | 'manual' | 'edit';
+type EditorMode = 'closed' | 'intent' | 'manual' | 'edit'
 
 function GuardsPage() {
-  const guardsQuery = useGuardsList();
-  const createGuard = useCreateGuard();
-  const updateGuard = useUpdateGuard();
-  const deleteGuard = useDeleteGuard();
+  const guardsQuery = useGuardsList()
+  const createGuard = useCreateGuard()
+  const updateGuard = useUpdateGuard()
+  const deleteGuard = useDeleteGuard()
 
-  const guards = guardsQuery.data?.guards ?? [];
-  const guardNames = guards.map((g) => g.name);
+  const guards = guardsQuery.data?.guards ?? []
+  const guardNames = guards.map((g) => g.name)
 
-  const [expandedName, setExpandedName] = useState<string | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [expandedName, setExpandedName] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   // The guard awaiting delete confirmation (null = dialog closed). Holding the
   // whole summary lets the confirm name the guard + the protection it removes.
-  const [confirmDelete, setConfirmDelete] = useState<GuardSummary | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<GuardSummary | null>(null)
 
-  const [editorMode, setEditorMode] = useState<EditorMode>('closed');
-  const [form, setForm] = useState<GuardForm>(emptyForm);
-  const [deriving, setDeriving] = useState(false);
-  const [deriveError, setDeriveError] = useState<string | null>(null);
+  const [editorMode, setEditorMode] = useState<EditorMode>('closed')
+  const [form, setForm] = useState<GuardForm>(emptyForm)
+  const [deriving, setDeriving] = useState(false)
+  const [deriveError, setDeriveError] = useState<string | null>(null)
   // Holds the hero CTA back until the editor's exit animation finishes, so the
   // single CTA never flashes back in mid-collapse (former doubled-CTA flash).
-  const [panelExiting, setPanelExiting] = useState(false);
+  const [panelExiting, setPanelExiting] = useState(false)
 
-  const isEditing = editorMode === 'edit';
-  const editorOpen = editorMode !== 'closed';
-  const createMode = editorMode === 'manual' || editorMode === 'intent';
+  const isEditing = editorMode === 'edit'
+  const editorOpen = editorMode !== 'closed'
+  const createMode = editorMode === 'manual' || editorMode === 'intent'
 
   // One create entry point, opening in manual mode; the in-editor ModeToggle
   // switches to the AI "Describe with AI" path without discarding form input.
   const openCreate = () => {
-    setForm(emptyForm());
-    setDeriveError(null);
-    setEditorMode('manual');
-  };
+    setForm(emptyForm())
+    setDeriveError(null)
+    setEditorMode('manual')
+  }
   const switchMode = (mode: 'manual' | 'intent') => {
-    setDeriveError(null);
-    setEditorMode(mode);
-  };
+    setDeriveError(null)
+    setEditorMode(mode)
+  }
   const closeEditor = () => {
-    setPanelExiting(true);
-    setEditorMode('closed');
-    setForm(emptyForm());
-    setDeriveError(null);
-  };
+    setPanelExiting(true)
+    setEditorMode('closed')
+    setForm(emptyForm())
+    setDeriveError(null)
+  }
 
   const handleEdit = async (name: string) => {
     try {
       // Fetch fresh detail so the editor loads current config before editing.
-      const detail = await fetchGuard(name);
-      setForm(detailToForm(detail));
-      setEditorMode('edit');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      const detail = await fetchGuard(name)
+      setForm(detailToForm(detail))
+      setEditorMode('edit')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (err) {
       toast({
         title: 'Failed to load guard',
         description: err instanceof Error ? err.message : String(err),
         variant: 'negative',
-      });
+      })
     }
-  };
+  }
 
   const handleDerive = async () => {
-    if (!form.name.trim() || !form.intent.trim()) return;
-    setDeriving(true);
-    setDeriveError(null);
+    if (!form.name.trim() || !form.intent.trim()) return
+    setDeriving(true)
+    setDeriveError(null)
     try {
-      const detail = await deriveGuard(form.name.trim(), form.intent.trim());
+      const detail = await deriveGuard(form.name.trim(), form.intent.trim())
       // Keep the user's name/intent, fill the rest from the derived preview.
-      setForm({ ...detailToForm(detail), name: form.name.trim(), intent: form.intent.trim() });
-      toast({ title: 'Guard derived', description: 'Review the rules below, then save.' });
+      setForm({
+        ...detailToForm(detail),
+        name: form.name.trim(),
+        intent: form.intent.trim(),
+      })
+      toast({
+        title: 'Guard derived',
+        description: 'Review the rules below, then save.',
+      })
     } catch (err) {
-      setDeriveError(err instanceof Error ? err.message : String(err));
+      setDeriveError(err instanceof Error ? err.message : String(err))
     } finally {
-      setDeriving(false);
+      setDeriving(false)
     }
-  };
+  }
 
   const handleSave = async () => {
-    const detail = formToDetail(form);
+    const detail = formToDetail(form)
     if (!detail.name || !GUARD_NAME_PATTERN.test(detail.name)) {
       toast({
         title: 'Invalid name',
         description: 'Provide a valid guard name before saving.',
         variant: 'negative',
-      });
-      return;
+      })
+      return
     }
     try {
       if (isEditing) {
-        await updateGuard.mutateAsync({ name: detail.name, detail });
-        toast({ title: 'Guard updated', description: detail.name });
+        await updateGuard.mutateAsync({ name: detail.name, detail })
+        toast({ title: 'Guard updated', description: detail.name })
       } else {
-        await createGuard.mutateAsync(detail);
-        toast({ title: 'Guard created', description: detail.name });
+        await createGuard.mutateAsync(detail)
+        toast({ title: 'Guard created', description: detail.name })
       }
-      closeEditor();
+      closeEditor()
     } catch (err) {
       toast({
         title: isEditing ? 'Failed to update guard' : 'Failed to create guard',
         description: err instanceof Error ? err.message : String(err),
         variant: 'negative',
-      });
+      })
     }
-  };
+  }
 
   // Runs only from the confirm dialog's confirm button — never straight off the
   // row's Delete trigger (which just opens the dialog). On success the dialog
   // closes; on failure it stays open with the error toast so the user can retry.
   const handleConfirmDelete = async () => {
-    const guard = confirmDelete;
-    if (!guard) return;
-    setPendingDelete(guard.name);
+    const guard = confirmDelete
+    if (!guard) return
+    setPendingDelete(guard.name)
     try {
-      await deleteGuard.mutateAsync(guard.name);
-      toast({ title: 'Guard deleted', description: guard.name });
-      if (expandedName === guard.name) setExpandedName(null);
-      setConfirmDelete(null);
+      await deleteGuard.mutateAsync(guard.name)
+      toast({ title: 'Guard deleted', description: guard.name })
+      if (expandedName === guard.name) setExpandedName(null)
+      setConfirmDelete(null)
     } catch (err) {
       toast({
         title: 'Failed to delete guard',
         description: err instanceof Error ? err.message : String(err),
         variant: 'negative',
-      });
+      })
     } finally {
-      setPendingDelete(null);
+      setPendingDelete(null)
     }
-  };
+  }
 
-  const saving = createGuard.isPending || updateGuard.isPending;
+  const saving = createGuard.isPending || updateGuard.isPending
 
   return (
     <div className="space-y-6 w-full">
@@ -1459,12 +1596,16 @@ function GuardsPage() {
           <HStack className="gap-4 items-start min-w-0">
             <IconTile icon="user-shield" />
             <VStack className="gap-1 items-start min-w-0">
-              <Text as="h1" level="headline-3" className="text-content-layout-1">
+              <Text
+                as="h1"
+                level="headline-3"
+                className="text-content-layout-1"
+              >
                 Guards
               </Text>
               <Text level="body-small" className="text-content-layout-2">
-                Rules for what an agent may read and what it must hide, enforced
-                wherever an rdst agent runs: the CLI, the MCP server and the
+                Set what an agent can read and what it must hide. RDST enforces
+                these rules when the agent runs through the CLI, MCP server, or
                 Slack bot.
               </Text>
             </VStack>
@@ -1511,7 +1652,10 @@ function GuardsPage() {
                   heroes into one create flow (hidden while editing). */}
               <Show when={createMode}>
                 <div className="px-5 pt-5">
-                  <ModeToggle mode={editorMode === 'intent' ? 'intent' : 'manual'} onChange={switchMode} />
+                  <ModeToggle
+                    mode={editorMode === 'intent' ? 'intent' : 'manual'}
+                    onChange={switchMode}
+                  />
                 </div>
               </Show>
 
@@ -1541,7 +1685,10 @@ function GuardsPage() {
                         name="intent-text"
                         value={form.intent}
                         onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                          setForm((prev) => ({ ...prev, intent: e.target.value }))
+                          setForm((prev) => ({
+                            ...prev,
+                            intent: e.target.value,
+                          }))
                         }
                         placeholder="Mask all email and SSN columns, and never allow unbounded reads."
                         rows={3}
@@ -1550,8 +1697,15 @@ function GuardsPage() {
                     <HStack className="justify-between items-center">
                       <Show when={!!deriveError}>
                         <HStack className="gap-2 items-center">
-                          <Icon name="alert" label="Error" className="w-4 h-4 text-content-negative-soft" />
-                          <Text level="body-small" className="text-content-negative-soft">
+                          <Icon
+                            name="alert"
+                            label="Error"
+                            className="w-4 h-4 text-content-negative-soft"
+                          />
+                          <Text
+                            level="body-small"
+                            className="text-content-negative-soft"
+                          >
                             {deriveError}
                           </Text>
                         </HStack>
@@ -1567,7 +1721,9 @@ function GuardsPage() {
                           modifier="outline"
                           onClick={handleDerive}
                           loading={deriving}
-                          disabled={deriving || !form.name.trim() || !form.intent.trim()}
+                          disabled={
+                            deriving || !form.name.trim() || !form.intent.trim()
+                          }
                         />
                       </div>
                     </HStack>
@@ -1587,7 +1743,11 @@ function GuardsPage() {
 
               <div className="px-5 py-4 border-t border-border-layout-1 bg-surface-layout-2/30">
                 <HStack className="justify-end gap-2">
-                  <Button label="Cancel" modifier="ghost" onClick={closeEditor} />
+                  <Button
+                    label="Cancel"
+                    modifier="ghost"
+                    onClick={closeEditor}
+                  />
                   <Button
                     label={isEditing ? 'Save changes' : 'Create guard'}
                     icon="tick"
@@ -1615,22 +1775,22 @@ function GuardsPage() {
             : `Guards (${guards.length})`
         }
       >
-        <Show
-          when={!guardsQuery.isLoading}
-          fallback={<GuardListSkeleton />}
-        >
-          <Show when={!guardsQuery.isError} fallback={
-            <div className="p-5">
-              <ErrorState
-                errorClass="rdst-service"
-                title="Guards couldn't be loaded"
-                message="RDST couldn't read the guards for this install."
-                trustworthy="No guard was changed; running agents are still held to the guards already in force."
-                detail={errorDetail(guardsQuery.error)}
-                onRetry={() => void guardsQuery.refetch()}
-              />
-            </div>
-          }>
+        <Show when={!guardsQuery.isLoading} fallback={<GuardListSkeleton />}>
+          <Show
+            when={!guardsQuery.isError}
+            fallback={
+              <div className="p-5">
+                <ErrorState
+                  errorClass="rdst-service"
+                  title="Guards couldn't be loaded"
+                  message="RDST couldn't read the guards for this install."
+                  trustworthy="No guard was changed; running agents are still held to the guards already in force."
+                  detail={errorDetail(guardsQuery.error)}
+                  onRetry={() => void guardsQuery.refetch()}
+                />
+              </div>
+            }
+          >
             <Show
               when={guards.length > 0}
               fallback={
@@ -1641,7 +1801,11 @@ function GuardsPage() {
                   action={
                     editorOpen
                       ? undefined
-                      : { label: 'Create a guard', icon: 'add', onClick: openCreate }
+                      : {
+                          label: 'Create a guard',
+                          icon: 'add',
+                          onClick: openCreate,
+                        }
                   }
                 />
               }
@@ -1653,7 +1817,9 @@ function GuardsPage() {
                     guard={guard}
                     expanded={expandedName === guard.name}
                     onToggle={() =>
-                      setExpandedName((prev) => (prev === guard.name ? null : guard.name))
+                      setExpandedName((prev) =>
+                        prev === guard.name ? null : guard.name
+                      )
                     }
                     onEdit={() => handleEdit(guard.name)}
                     onDelete={() => setConfirmDelete(guard)}
@@ -1681,5 +1847,5 @@ function GuardsPage() {
         onClose={() => setConfirmDelete(null)}
       />
     </div>
-  );
+  )
 }

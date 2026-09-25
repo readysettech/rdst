@@ -65,6 +65,9 @@ SIDE_EFFECT_FUNCTIONS = {
     "LO_IMPORT", "LO_EXPORT", "DBLINK", "DBLINK_EXEC", "QUERY_TO_XML",
     "PG_SLEEP", "PG_TERMINATE_BACKEND", "PG_CANCEL_BACKEND",
     "LOAD_FILE", "SLEEP", "BENCHMARK", "SYS_EXEC", "SYS_EVAL",
+    "NEXTVAL", "SETVAL", "PG_NOTIFY", "PG_ADVISORY_LOCK", "PG_ADVISORY_XACT_LOCK",
+    "GET_LOCK", "RELEASE_LOCK", "RELEASE_ALL_LOCKS", "SOURCE_POS_WAIT", "MASTER_POS_WAIT",
+    "WAIT_FOR_EXECUTED_GTID_SET",
 }
 
 # Allowed keywords for read-only operations
@@ -79,6 +82,18 @@ ALLOWED_KEYWORDS = {
     "CHECK",
     "CHECKSUM",
 }
+
+
+def is_plain_explainable_write(sql: str) -> bool:
+    """Allow a single DML statement to be planned without executing it."""
+    try:
+        from sqlglot import exp, parse
+
+        statements = [statement for statement in parse(sql) if statement is not None]
+        return len(statements) == 1 and isinstance(statements[0],
+                                                     (exp.Insert, exp.Update, exp.Delete))
+    except Exception:
+        return False
 
 
 def validate_query_safety(sql: str, **kwargs) -> Dict[str, Any]:
@@ -199,6 +214,7 @@ def _validate_query_patterns(sql: str) -> List[str]:
             issues.append(f"{func}() reaches outside the queried tables")
 
     dangerous_patterns = [
+        (r"\bINTO\b", "SELECT INTO may write or assign values"),
         (r"\bINTO\s+OUTFILE\b", "INTO OUTFILE operations not allowed"),
         (r"\bLOAD_FILE\s*\(", "LOAD_FILE function not allowed"),
         (r"\bSYSTEM\s*\(", "SYSTEM function calls not allowed"),

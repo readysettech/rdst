@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Optional
 
 from shared.cli.types import RdstResult
@@ -15,6 +16,7 @@ from ..service import ConfigureService
 from .renderer import ConfigureRenderer
 from .wizard import ConfigurationWizard
 
+logger = logging.getLogger(__name__)
 
 class ConfigureCommand:
     """Owns non-LLM configure command execution."""
@@ -193,6 +195,20 @@ class ConfigureCommand:
                     renderer.cleanup()
 
             asyncio.run(_run())
+
+            if subcmd == "test" and result is not None:
+                # A working connection: show whether monitoring can see its queries.
+                tested = kwargs.get("target") or kwargs.get("name") or cfg.get_default()
+                tested_config = cfg.get(tested) if tested else None
+                if tested_config:
+                    try:
+                        from features.configure.cli.prerequisites_renderer import (
+                            render_prerequisites,
+                        )
+
+                        render_prerequisites(console or get_console(), tested, dict(tested_config))
+                    except Exception as exc:  # the connection test already passed
+                        logger.debug("prerequisite check failed: %s", exc)
 
             if result is None and error is None and subcmd in ("add", "edit"):
                 wizard = ConfigurationWizard(console=console or get_console())

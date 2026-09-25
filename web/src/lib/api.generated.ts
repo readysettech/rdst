@@ -143,6 +143,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agent-activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Agent Activity */
+        get: operations["agent_activity_api_agent_activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-activity/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Agent Activity Export
+         * @description Every entry in the range, one row each, attention checks included.
+         */
+        get: operations["agent_activity_export_api_agent_activity_export_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-activity/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Agent Activity Entry */
+        get: operations["agent_activity_entry_api_agent_activity__entry_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/allowlist/add": {
         parameters: {
             query?: never;
@@ -532,7 +586,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Compare Runs
+         * @description In-flight and recent Compare and Benchmark runs for a target, newest first.
+         *
+         *     Runs are process-local; each finished Compare also records its outcome on the query
+         *     (`last_compare` on monitor rows), which survives restarts.
+         */
+        get: operations["list_compare_runs_api_cache_compare_runs_get"];
         put?: never;
         /**
          * Start Cache Compare Run
@@ -692,6 +753,29 @@ export interface paths {
          * @description Remove a database target.
          */
         delete: operations["remove_target_api_configure_targets__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/configure/targets/{name}/prerequisites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Prerequisites
+         * @description Check that RDST can see the target's queries (monitoring prerequisites).
+         *
+         *     Safe to poll every few seconds: each call opens two short sessions and runs
+         *     read-only catalog queries plus one tagged probe statement.
+         */
+        get: operations["get_prerequisites_api_configure_targets__name__prerequisites_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1428,6 +1512,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/init/monitoring-upgrade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Monitoring Upgrade */
+        get: operations["monitoring_upgrade_api_init_monitoring_upgrade_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/init/monitoring-upgrade/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Dismiss Monitoring Upgrade */
+        post: operations["dismiss_monitoring_upgrade_api_init_monitoring_upgrade_dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/init/status": {
         parameters: {
             query?: never;
@@ -1539,6 +1657,682 @@ export interface paths {
         };
         /** Get Conversation Status */
         get: operations["get_conversation_status_api_interactive__query_hash__status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/inbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inbox
+         * @description Tabs (open, muted, done) newest first; a raw item state keeps the classic filter.
+         *
+         *     Digest items only reach the daily report, so every view leaves them out unless
+         *     `include_digest` is set. Open also lists recoveries from the last 24 h until seen.
+         *     Incident windows are measured only when `incidents` is set (the Inbox page).
+         */
+        get: operations["inbox_api_monitor_inbox_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/inbox/mark-all-seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark All Seen
+         * @description Marks new items seen and acknowledges recent recoveries.
+         */
+        post: operations["mark_all_seen_api_monitor_inbox_mark_all_seen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/inbox/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inbox Stream */
+        get: operations["inbox_stream_api_monitor_inbox_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/inbox/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inbox Item
+         * @description One item in any state, for a page opened from it (the Database page's context).
+         */
+        get: operations["inbox_item_api_monitor_inbox__item_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/inbox/{item_id}/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Inbox Action */
+        post: operations["inbox_action_api_monitor_inbox__item_id___action__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/limit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Monitoring Limit
+         * @description AI monitoring on `in_use` of `limit` databases for the signed-in account.
+         *
+         *     The Key Service owns the limit: 3 databases, or 10 when the user's own Anthropic key
+         *     pays for deep analysis and reports. `limit` is null when it couldn't be asked and
+         *     hasn't answered before. `targets` lists this machine's monitored databases with
+         *     their AI state.
+         */
+        get: operations["monitoring_limit_api_monitor_limit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/limit/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release Monitoring Slot
+         * @description Free a slot held for a database this computer doesn't have.
+         */
+        post: operations["release_monitoring_slot_api_monitor_limit_release_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/mute-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Mute Rules */
+        get: operations["mute_rules_api_monitor_mute_rules_get"];
+        put?: never;
+        /** Create Mute Rule */
+        post: operations["create_mute_rule_api_monitor_mute_rules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/mute-rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Mute Rule */
+        delete: operations["delete_mute_rule_api_monitor_mute_rules__rule_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/ai-monitoring": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Claim Ai Monitoring
+         * @description Ask again for AI monitoring on a database that's monitored locally.
+         */
+        post: operations["claim_ai_monitoring_api_monitor_targets__target__ai_monitoring_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/analyze-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Analyze Jobs */
+        get: operations["analyze_jobs_api_monitor_targets__target__analyze_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/collect-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Collect Now */
+        post: operations["collect_now_api_monitor_targets__target__collect_now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Health
+         * @description Health over a range. `window=` is the pre-contract name, kept for one release.
+         */
+        get: operations["health_api_monitor_targets__target__health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/index-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Index Changes */
+        get: operations["index_changes_api_monitor_targets__target__index_changes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/judge-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Judge Runs */
+        get: operations["judge_runs_api_monitor_targets__target__judge_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/load": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Load
+         * @description Recorded execution time and calls per bucket, split by the top queries in the range.
+         *
+         *     `from` and `to` (epoch seconds) scope it to a brushed window instead of `range`.
+         */
+        get: operations["load_api_monitor_targets__target__load_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/load/latency": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Load Latency
+         * @description Average latency per bucket for up to eight queries, with the overall average.
+         */
+        get: operations["load_latency_api_monitor_targets__target__load_latency_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/pulse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pulse */
+        get: operations["pulse_api_monitor_targets__target__pulse_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/queries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Queries
+         * @description The query list over a range, or over an explicit [from, to] window when both are set.
+         *
+         *     `locate=<key>` adds `located`: that query's 0-based place in the whole filtered, sorted
+         *     list (null when the filters leave it out), so a client can open the page it's on.
+         */
+        get: operations["queries_api_monitor_targets__target__queries_get"];
+        put?: never;
+        /**
+         * Add Query
+         * @description Put a query analyzed from "Analyze a query" in the list, with its analysis attached.
+         */
+        post: operations["add_query_api_monitor_targets__target__queries_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/queries/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Query
+         * @description One query row, the same as its row in the list, even if it didn't run in the range.
+         */
+        get: operations["query_api_monitor_targets__target__queries__key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/queries/{key}/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Query Analysis
+         * @description The latest finished deep analysis of a query, in the report card's shape.
+         */
+        get: operations["query_analysis_api_monitor_targets__target__queries__key__analysis_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/queries/{key}/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enqueue Analysis */
+        post: operations["enqueue_analysis_api_monitor_targets__target__queries__key__analyze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/queries/{key}/analyze-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Query Analyze Jobs */
+        get: operations["query_analyze_jobs_api_monitor_targets__target__queries__key__analyze_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/queries/{key}/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ensure Library Entry
+         * @description Give a monitored query its Query Library row, so Compare can select it.
+         *
+         *     Library admission is capped per collector pass, so a quiet monitored query may have
+         *     no row yet. Monitor keys are Library hashes; the row is created from monitor text.
+         */
+        post: operations["ensure_library_entry_api_monitor_targets__target__queries__key__library_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/queries/{key}/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Series */
+        get: operations["series_api_monitor_targets__target__queries__key__series_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Report */
+        post: operations["start_report_api_monitor_targets__target__report_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/report/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Report History
+         * @description Finished reports only, newest day first; every run counts, sample days included.
+         */
+        get: operations["report_history_api_monitor_targets__target__report_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/report/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Latest Report */
+        get: operations["latest_report_api_monitor_targets__target__report_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/report/{report_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Report */
+        get: operations["get_report_api_monitor_targets__target__report__report_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/report/{report_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Report */
+        post: operations["cancel_report_api_monitor_targets__target__report__report_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/report/{report_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Report Events
+         * @description Progress as unnamed SSE frames; `id` is the event sequence, replayed from the start.
+         */
+        get: operations["report_events_api_monitor_targets__target__report__report_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Settings */
+        get: operations["settings_api_monitor_targets__target__settings_get"];
+        /** Put Settings */
+        put: operations["put_settings_api_monitor_targets__target__settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream
+         * @description `pulse` after every collector tick and monitor pass; `tick` for the classic page.
+         */
+        get: operations["stream_api_monitor_targets__target__stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Usage
+         * @description Billable work per local day, newest last, with the caps that bound it.
+         */
+        get: operations["usage_api_monitor_targets__target__usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/work": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Monitor Work
+         * @description Monitoring's real work across every monitored database, for the app-wide list.
+         *
+         *     Deep analyses running or queued (in the order each database starts them), how many
+         *     finished today and the latest of those with their scores, and reports being written.
+         *     Collection, checks and other background chores aren't work here.
+         */
+        get: operations["monitor_work_api_monitor_work_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2156,6 +2950,26 @@ export interface paths {
          * @description Start or attach to the target's detached benchmark.
          */
         post: operations["start_load_test_run_api_query_registry_load_test_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/query-registry/queries/{query_hash}/benchmarks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Query Benchmark History
+         * @description Past benchmarks of one query on one database, newest first, from the activity log.
+         */
+        get: operations["query_benchmark_history_api_query_registry_queries__query_hash__benchmarks_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2951,6 +3765,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/telemetry/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Client Events
+         * @description Forward allowlisted desktop events to PostHog, if this install sends telemetry.
+         */
+        post: operations["post_client_events_api_telemetry_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/telemetry/identity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Telemetry Identity
+         * @description Local identity shared by the renderer and backend telemetry.
+         */
+        get: operations["get_telemetry_identity_api_telemetry_identity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/top": {
         parameters: {
             query?: never;
@@ -3400,13 +4254,6 @@ export interface components {
              */
             unit?: string;
         };
-        /** AddQueryRequest */
-        AddQueryRequest: {
-            /** Sql */
-            sql: string;
-            /** Target */
-            target?: string | null;
-        };
         /** AddQueryResponse */
         AddQueryResponse: {
             /** Error */
@@ -3473,6 +4320,226 @@ export interface components {
             /** Term */
             term: string;
         };
+        /**
+         * AddedQuery
+         * @description A query added to the list from "Analyze a query", keyed like monitored queries.
+         */
+        AddedQuery: {
+            /** Created */
+            created: boolean;
+            job?: components["schemas"]["AnalyzeJob"] | null;
+            /** Key */
+            key: string;
+        };
+        /** AgentActivityDetail */
+        AgentActivityDetail: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "deep_analysis" | "ask" | "classification" | "attention_check" | "daily_snapshot" | "benchmark";
+            /** Ai Call Count */
+            ai_call_count: number;
+            /** Ai Calls */
+            ai_calls: components["schemas"]["AgentAiCall"][];
+            /** Cost Usd */
+            cost_usd: number;
+            /** Decision */
+            decision?: string | null;
+            /** Details */
+            details: {
+                [key: string]: unknown;
+            };
+            /** Finished At */
+            finished_at?: number | null;
+            /** Id */
+            id: number;
+            /** Items Filed */
+            items_filed: number;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "done" | "failed" | "skipped" | "cancelled";
+            /** Run Ref */
+            run_ref?: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "live" | "backfill";
+            /** Statement Count */
+            statement_count: number;
+            /** Statements */
+            statements: components["schemas"]["AgentStatement"][];
+            /** Subject */
+            subject: string;
+            /** Summary */
+            summary: string;
+            /** Target */
+            target: string;
+            /** Tokens In */
+            tokens_in: number;
+            /** Tokens Out */
+            tokens_out: number;
+            /** Ts */
+            ts: number;
+        };
+        /**
+         * AgentActivityItem
+         * @description One line of the log: a single agent decision, or the attention checks,
+         *     classifications or skipped deep analyses of one database folded into one line per
+         *     day or hour (`kind: rollup`).
+         */
+        AgentActivityItem: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "deep_analysis" | "ask" | "classification" | "attention_check" | "daily_snapshot" | "benchmark";
+            /** Ai Call Count */
+            ai_call_count: number;
+            /** Analysis Ref */
+            analysis_ref?: string | null;
+            /** Bucket End */
+            bucket_end?: number | null;
+            /** Bucket Start */
+            bucket_start?: number | null;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Count */
+            count: number;
+            /** Decision */
+            decision?: string | null;
+            /** Done */
+            done: number;
+            /** Failed */
+            failed: number;
+            /**
+             * Finding
+             * @description A finished deep analysis's key finding, such as 'suggested an index on events(event_type, created_at)'
+             */
+            finding?: string | null;
+            /** First Ts */
+            first_ts: number;
+            /** Fold */
+            fold?: ("attention_check" | "classification" | "skipped_analysis") | null;
+            /** Group */
+            group?: ("day" | "hour" | "none") | null;
+            /** Id */
+            id: number;
+            /** Items Filed */
+            items_filed: number;
+            /** Key */
+            key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "entry" | "rollup";
+            /** Note */
+            note?: string | null;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "done" | "failed" | "skipped" | "cancelled";
+            /** Parameters */
+            parameters?: string | null;
+            /** Period End */
+            period_end?: number | null;
+            /**
+             * Period Start
+             * @description The day a daily report covers
+             */
+            period_start?: number | null;
+            /** Query Key */
+            query_key?: string | null;
+            /** Question */
+            question?: string | null;
+            /** Report Id */
+            report_id?: number | null;
+            /** Skipped */
+            skipped: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "live" | "backfill";
+            /** Statement Count */
+            statement_count: number;
+            /** Subject */
+            subject: string;
+            /** Summary */
+            summary: string;
+            /** Target */
+            target: string;
+            /** Tokens In */
+            tokens_in: number;
+            /** Tokens Out */
+            tokens_out: number;
+            /** Ts */
+            ts: number;
+        };
+        /** AgentActivityPage */
+        AgentActivityPage: {
+            /** Items */
+            items: components["schemas"]["AgentActivityItem"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /** Targets */
+            targets: string[];
+        };
+        /** AgentAiCall */
+        AgentAiCall: {
+            /** Cost Estimated */
+            cost_estimated: boolean;
+            /** Cost Usd */
+            cost_usd?: number | null;
+            /** Data Kinds */
+            data_kinds: string[];
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Model */
+            model: string;
+            /** Operation */
+            operation: string;
+            /** Provider */
+            provider: string;
+            /** Purpose */
+            purpose: string;
+            /** Request Id */
+            request_id?: string | null;
+            /** Tokens In */
+            tokens_in?: number | null;
+            /** Tokens Out */
+            tokens_out?: number | null;
+            /** Ts */
+            ts?: number | null;
+        };
+        /**
+         * AgentStatement
+         * @description A statement RDST ran on the database. Literals are replaced by `?`; parameters
+         *     and results are never kept.
+         */
+        AgentStatement: {
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Executions */
+            executions: number;
+            /** Kind */
+            kind: string;
+            /** Max Ms */
+            max_ms?: number | null;
+            /** Sql */
+            sql: string;
+            /** Timeout Ms */
+            timeout_ms?: number | null;
+        };
         /** AiProviderSetRequest */
         AiProviderSetRequest: {
             /**
@@ -3490,6 +4557,47 @@ export interface components {
             provider: "claude" | "readyset";
             /** Success */
             success: boolean;
+        };
+        /**
+         * AlertMeasurement
+         * @description What an alert measured, which way it moved and by how much.
+         */
+        AlertMeasurement: {
+            /** After */
+            after: number | null;
+            /** Before */
+            before: number | null;
+            /** Change */
+            change: number | null;
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "up" | "down";
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "latency" | "calls" | "load" | "share" | "rollbacks" | "cache_hit_ratio" | "connections" | "running_time";
+            /** Text */
+            text: string;
+            /** Unit */
+            unit: string;
+        };
+        /** AlertMember */
+        AlertMember: {
+            /** After */
+            after: number | null;
+            /** Before */
+            before: number | null;
+            /** Change */
+            change: number | null;
+            /** Display Name */
+            display_name: string;
+            /** Impact Ms */
+            impact_ms: number;
+            /** Query Key */
+            query_key: string;
         };
         /** AllowlistAddRequest */
         AllowlistAddRequest: {
@@ -3529,6 +4637,21 @@ export interface components {
             provider: string;
             /** Signed In */
             signed_in: boolean;
+        };
+        /** AnalysisFix */
+        AnalysisFix: {
+            expected_gain: components["schemas"]["ExpectedGain"] | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "index" | "rewrite" | "config" | "none";
+            /** Sql */
+            sql: string | null;
+            /** Title */
+            title: string;
+            /** Why */
+            why: string;
         };
         /**
          * AnalysisHistoryEntry
@@ -3616,6 +4739,133 @@ export interface components {
             [key: string]: unknown;
         };
         AnalyzeEvent: components["schemas"]["ProgressEvent"] | components["schemas"]["ExplainCompleteEvent"] | components["schemas"]["RewritesTestedEvent"] | components["schemas"]["ReadysetCheckedEvent"] | components["schemas"]["CompleteEvent"] | components["schemas"]["ErrorEvent"];
+        /** AnalyzeJob */
+        AnalyzeJob: {
+            /** Already Queued */
+            already_queued?: boolean | null;
+            /** Analysis Ref */
+            analysis_ref: string | null;
+            /** Enqueued At */
+            enqueued_at: number;
+            /** Error */
+            error: string | null;
+            /** Estimated Start At */
+            estimated_start_at?: number | null;
+            /** Finished At */
+            finished_at: number | null;
+            /** Id */
+            id: number;
+            /** Mode */
+            mode: ("analyze" | "explain") | null;
+            /** Param Source */
+            param_source: ("sampled" | "table_sampled" | "none") | null;
+            /** Priority */
+            priority: number;
+            /** Query Key */
+            query_key: string;
+            /** Queue Position */
+            queue_position?: number | null;
+            /** Queue State */
+            queue_state?: ("running" | "today" | "held") | null;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "new" | "top15_stale" | "user" | "report";
+            /** Reason Text */
+            reason_text: string | null;
+            /** Started At */
+            started_at: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "done" | "failed" | "skipped";
+            /** Target */
+            target: string;
+        };
+        /** AnalyzeJobPage */
+        AnalyzeJobPage: {
+            /** Jobs */
+            jobs: components["schemas"]["AnalyzeJob"][];
+            queue?: components["schemas"]["AnalyzeQueueSummary"] | null;
+        };
+        /** AnalyzeQueueEntry */
+        AnalyzeQueueEntry: {
+            /** Already Queued */
+            already_queued?: boolean | null;
+            /** Analysis Ref */
+            analysis_ref: string | null;
+            /** Display Name */
+            display_name: string;
+            /** Enqueued At */
+            enqueued_at: number;
+            /** Error */
+            error: string | null;
+            /** Estimated Start At */
+            estimated_start_at?: number | null;
+            /** Finished At */
+            finished_at: number | null;
+            /** Id */
+            id: number;
+            /** Mode */
+            mode: ("analyze" | "explain") | null;
+            /** Param Source */
+            param_source: ("sampled" | "table_sampled" | "none") | null;
+            /** Priority */
+            priority: number;
+            /** Query Key */
+            query_key: string;
+            /** Queue Position */
+            queue_position?: number | null;
+            /** Queue State */
+            queue_state?: ("running" | "today" | "held") | null;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "new" | "top15_stale" | "user" | "report";
+            /** Reason Text */
+            reason_text: string | null;
+            /** Started At */
+            started_at: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "done" | "failed" | "skipped";
+            /** Target */
+            target: string;
+        };
+        /** AnalyzeQueueSummary */
+        AnalyzeQueueSummary: {
+            /** Automatic Enabled */
+            automatic_enabled: boolean;
+            /** Automatic Left */
+            automatic_left: number;
+            /** Average Run S */
+            average_run_s: number;
+            /** Cap */
+            cap: number;
+            first_hour?: components["schemas"]["FirstHourRamp"] | null;
+            /** Held */
+            held: number;
+            /** Left */
+            left: number;
+            /** Next */
+            next: components["schemas"]["AnalyzeQueueEntry"][];
+            /** Recent */
+            recent: components["schemas"]["AnalyzeQueueEntry"][];
+            /** Reserved */
+            reserved: number;
+            /** Reset At */
+            reset_at: number;
+            running: components["schemas"]["AnalyzeQueueEntry"] | null;
+            /** Used */
+            used: number;
+            /** Waiting Today */
+            waiting_today: number;
+        };
         /** AnalyzeRequest */
         AnalyzeRequest: {
             /**
@@ -3649,6 +4899,28 @@ export interface components {
             skip_storage?: boolean;
             /** Target */
             target?: string | null;
+        };
+        /** AnalyzedQuery */
+        AnalyzedQuery: {
+            /** Db Time Share */
+            db_time_share: number;
+            /** Display Name */
+            display_name: string;
+            /** Error Kind */
+            error_kind?: string | null;
+            /** Headline */
+            headline?: string | null;
+            /** Key */
+            key: string;
+            /** Reason */
+            reason: string | null;
+            /** Result Line */
+            result_line: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "done" | "skipped" | "failed" | "provisional";
         };
         /**
          * AnnotateCompleteEvent
@@ -4011,6 +5283,17 @@ export interface components {
              * @constant
              */
             type: "status";
+        };
+        /** AssessmentFinding */
+        AssessmentFinding: {
+            /** Confidence */
+            confidence?: number | null;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Verdict */
+            verdict: string;
         };
         /** AuditCaptureRequest */
         AuditCaptureRequest: {
@@ -4376,6 +5659,35 @@ export interface components {
             target: string;
         };
         /**
+         * BenchmarkLaneNumbers
+         * @description One lane's measurement of one query in a benchmark.
+         */
+        BenchmarkLaneNumbers: {
+            /** Avg Ms */
+            avg_ms?: number | null;
+            /**
+             * Executions
+             * @default 0
+             */
+            executions?: number;
+            /**
+             * Failures
+             * @default 0
+             */
+            failures?: number;
+            /** P50 Ms */
+            p50_ms?: number | null;
+            /** P95 Ms */
+            p95_ms?: number | null;
+            /** Qps */
+            qps?: number | null;
+            /**
+             * Successes
+             * @default 0
+             */
+            successes?: number;
+        };
+        /**
          * BenchmarkQueryInput
          * @description A query to benchmark - either by identifier or raw SQL.
          */
@@ -4640,6 +5952,32 @@ export interface components {
             /** Sql */
             sql: string;
         };
+        /** ChartMarker */
+        ChartMarker: {
+            /** Analysis Ref */
+            analysis_ref?: string | null;
+            /** Inbox Id */
+            inbox_id?: number | null;
+            /** Index Name */
+            index_name?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "index_added" | "index_dropped" | "fix_confirmed" | "fix_no_effect" | "analysis" | "inbox" | "report";
+            /** Label */
+            label: string;
+            /** Matches Recommendation */
+            matches_recommendation?: boolean | null;
+            /** Report Id */
+            report_id?: number | null;
+            /** Severity */
+            severity?: number | null;
+            /** Table */
+            table?: string | null;
+            /** Ts */
+            ts: number;
+        };
         /** ClearKeyringResponse */
         ClearKeyringResponse: {
             /** Cleared */
@@ -4652,6 +5990,34 @@ export interface components {
             missing: string[];
             /** Success */
             success: boolean;
+        };
+        /** ClientEvent */
+        ClientEvent: {
+            /** Event */
+            event: string;
+            /** Properties */
+            properties?: {
+                [key: string]: boolean | number | string | null;
+            };
+        };
+        /** ClientEventsRequest */
+        ClientEventsRequest: {
+            /** Events */
+            events?: components["schemas"]["ClientEvent"][];
+            /**
+             * Source
+             * @default desktop
+             */
+            source?: string;
+        };
+        /** ClientEventsResponse */
+        ClientEventsResponse: {
+            /** Accepted */
+            accepted: number;
+            /** Rejected */
+            rejected?: string[] | null;
+            /** Telemetry Enabled */
+            telemetry_enabled: boolean;
         };
         /** CloseTunnelRequest */
         CloseTunnelRequest: {
@@ -4667,6 +6033,13 @@ export interface components {
         CloseTunnelResponse: {
             /** Message */
             message: string;
+            /** Ok */
+            ok: boolean;
+        };
+        /** CollectNowResult */
+        CollectNowResult: {
+            /** Detail */
+            detail: string;
             /** Ok */
             ok: boolean;
         };
@@ -4713,6 +6086,59 @@ export interface components {
             /** Target */
             target: string;
         };
+        /** CompareRunPage */
+        CompareRunPage: {
+            /** Runs */
+            runs: components["schemas"]["CompareRunSummary"][];
+            sandbox?: components["schemas"]["SandboxStatusResponse"] | null;
+        };
+        /** CompareRunResult */
+        CompareRunResult: {
+            /** Origin Ms */
+            origin_ms?: number | null;
+            /** Readyset Ms */
+            readyset_ms?: number | null;
+            /** Speedup */
+            speedup?: number | null;
+            /** Speedup Label */
+            speedup_label?: string | null;
+            /** Winner */
+            winner?: string | null;
+        };
+        /** CompareRunSummary */
+        CompareRunSummary: {
+            /** Error */
+            error?: string | null;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Percent */
+            percent?: number | null;
+            /** Query Hash */
+            query_hash?: string | null;
+            /** Queue Position */
+            queue_position?: number | null;
+            result?: components["schemas"]["CompareRunResult"] | null;
+            /** Run Id */
+            run_id: string;
+            /** Stage */
+            stage: string;
+            /** Stage Label */
+            stage_label: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Status */
+            status: string;
+            /** Target */
+            target: string;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Waiting For */
+            waiting_for?: string | null;
+        };
         /** CompleteEvent */
         CompleteEvent: {
             /**
@@ -4737,6 +6163,11 @@ export interface components {
             readyset_cacheability?: components["schemas"]["ReadysetCacheability"] | null;
             /** @default null */
             rewrite_testing?: components["schemas"]["RewriteTesting"] | null;
+            /**
+             * Stored Analysis Id
+             * @default null
+             */
+            stored_analysis_id?: string | null;
             /** Success */
             success: boolean;
             /**
@@ -4744,6 +6175,15 @@ export interface components {
              * @constant
              */
             type: "complete";
+        };
+        /** CompositionSlice */
+        CompositionSlice: {
+            /** Db Time Ms */
+            db_time_ms: number;
+            /** Key */
+            key: string;
+            /** Share */
+            share: number;
         };
         /**
          * ConversationHistoryResponse
@@ -4775,6 +6215,153 @@ export interface components {
             /** Total Exchanges */
             total_exchanges?: number | null;
         };
+        /** DatabaseReport */
+        DatabaseReport: {
+            /** Finished At */
+            finished_at?: number | null;
+            /** Id */
+            id: number;
+            /** Period End */
+            period_end?: number | null;
+            /**
+             * Period Partial
+             * @default false
+             */
+            period_partial?: boolean;
+            /** Period Start */
+            period_start?: number | null;
+            progress: components["schemas"]["ReportProgress"] | null;
+            /** Provisional */
+            provisional: boolean;
+            /**
+             * Queries
+             * @default []
+             */
+            queries?: components["schemas"]["AnalyzedQuery"][];
+            /** Refs */
+            refs: {
+                [key: string]: components["schemas"]["QueryRef"];
+            };
+            report_json: components["schemas"]["ReportBody"] | null;
+            /**
+             * Sample
+             * @default false
+             */
+            sample?: boolean;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "running" | "done" | "failed" | "cancelled";
+            /** Target */
+            target: string;
+            /**
+             * Trigger
+             * @enum {string}
+             */
+            trigger: "user" | "nightly";
+            /** Ts */
+            ts: number;
+        };
+        /**
+         * DaySnapshot
+         * @description The daily snapshot (report version 3): one local day, frozen when written.
+         */
+        DaySnapshot: {
+            /**
+             * Actions
+             * @default []
+             */
+            actions?: components["schemas"]["SnapshotAction"][];
+            /** Brief */
+            brief: string[];
+            /**
+             * Brief Items
+             * @default []
+             */
+            brief_items?: components["schemas"]["SnapshotBriefItem"][];
+            /**
+             * Brief Source
+             * @enum {string}
+             */
+            brief_source: "model" | "facts";
+            chart: components["schemas"]["SnapshotChart"] | null;
+            /**
+             * Engine
+             * @default postgresql
+             */
+            engine?: string;
+            /** Events */
+            events: components["schemas"]["SnapshotEvent"][];
+            /** Facts */
+            facts: components["schemas"]["SnapshotFact"][];
+            health: components["schemas"]["SnapshotHealth"];
+            /**
+             * Legacy
+             * @default false
+             */
+            legacy?: boolean;
+            /** Look At */
+            look_at: components["schemas"]["SnapshotQuery"][];
+            /** Names */
+            names: {
+                [key: string]: string;
+            };
+            /** Numbers */
+            numbers: components["schemas"]["SnapshotNumber"][];
+            overview?: components["schemas"]["SnapshotOverview"] | null;
+            /** Peak */
+            peak: {
+                [key: string]: number | null;
+            };
+            period: components["schemas"]["SnapshotPeriod"];
+            /** Queries */
+            queries: components["schemas"]["SnapshotQuery"][];
+            /**
+             * Spikes
+             * @default []
+             */
+            spikes?: components["schemas"]["SnapshotSpike"][];
+            /** Version */
+            version: number;
+            vitals?: components["schemas"]["SnapshotVitals"] | null;
+        };
+        /**
+         * DeepAnalysisDigest
+         * @description One stored deep analysis, as the query row and the report card show it.
+         */
+        DeepAnalysisDigest: {
+            /** Analysis Ref */
+            analysis_ref: string | null;
+            /** Analyzed At */
+            analyzed_at: number | null;
+            /** Efficiency Score */
+            efficiency_score: number | null;
+            /** Findings */
+            findings: string[];
+            fix: components["schemas"]["AnalysisFix"] | null;
+            /**
+             * Fix Ready
+             * @default false
+             */
+            fix_ready?: boolean;
+            /** Headline */
+            headline: string;
+            /** Mode */
+            mode: ("analyze" | "explain") | null;
+            /** Mode Label */
+            mode_label: string | null;
+            /**
+             * Other Fixes
+             * @default []
+             */
+            other_fixes?: components["schemas"]["AnalysisFix"][];
+            plan_summary: components["schemas"]["PlanSummary"] | null;
+            /** Query Key */
+            query_key: string;
+            /** Rating */
+            rating: string | null;
+        };
         /**
          * DeleteResponse
          * @description Response for delete operations.
@@ -4782,6 +6369,36 @@ export interface components {
         DeleteResponse: {
             /** Success */
             success: boolean;
+        };
+        /** DeletedMuteRule */
+        DeletedMuteRule: {
+            /** Deleted */
+            deleted: number;
+        };
+        /**
+         * DigestEntry
+         * @description A finding that waited for the report: digest level, or over the daily push limit.
+         */
+        DigestEntry: {
+            /** Id */
+            id: number;
+            /** Query Keys */
+            query_keys: string[];
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "digest" | "push_limit";
+            /** Subject Label */
+            subject_label: string;
+            /** Summary */
+            summary: string;
+            /** Title */
+            title: string;
+            /** Ts */
+            ts: number;
+            /** Type */
+            type: string;
         };
         /** DirectoryEntry */
         DirectoryEntry: {
@@ -4995,6 +6612,19 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** ExpectedGain */
+        ExpectedGain: {
+            /** After Ms */
+            after_ms?: number | null;
+            /** Before Ms */
+            before_ms?: number | null;
+            /** Cost Reduction Pct */
+            cost_reduction_pct?: number | null;
+            /** Measured */
+            measured: boolean;
+            /** Text */
+            text: string;
+        };
         /** ExplainCompleteEvent */
         ExplainCompleteEvent: {
             /** Cost Estimate */
@@ -5078,6 +6708,57 @@ export interface components {
         FingerprintBody: {
             /** Fingerprint */
             fingerprint: string;
+        };
+        /** FirstHourRamp */
+        FirstHourRamp: {
+            /** Analyzed */
+            analyzed: number;
+            /** Ends At */
+            ends_at: number;
+            /** Failed */
+            failed?: number | null;
+            /** First Queries At */
+            first_queries_at?: number | null;
+            /** First Reading At */
+            first_reading_at?: number | null;
+            /** Max */
+            max: number;
+            /** Next Check At */
+            next_check_at: number | null;
+            /**
+             * Readings
+             * @default 0
+             */
+            readings?: number;
+            /** Scheduled */
+            scheduled?: number | null;
+            /** Started At */
+            started_at: number;
+            /** Top */
+            top: number;
+        };
+        /** FixMeasurement */
+        FixMeasurement: {
+            /** Mean Ms */
+            mean_ms: number;
+            /** Qps */
+            qps: number;
+        };
+        /** FixVerdict */
+        FixVerdict: {
+            after: components["schemas"]["FixMeasurement"] | null;
+            before: components["schemas"]["FixMeasurement"];
+            /** Detected At */
+            detected_at: number;
+            /** Index Name */
+            index_name: string;
+            /** Sentence */
+            sentence: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "measuring" | "confirmed" | "no_effect" | "regressed" | "reverted";
         };
         /** FleetAuditRequest */
         FleetAuditRequest: {
@@ -5687,10 +7368,82 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** HealthNow */
+        HealthNow: {
+            /** Active Conns */
+            active_conns: number | null;
+            /** Cache Hit Ratio */
+            cache_hit_ratio: number | null;
+            /** Lock Waits */
+            lock_waits?: number | null;
+            /** Max Conns */
+            max_conns: number | null;
+            /** Mean Ms */
+            mean_ms: number;
+            /** Qps */
+            qps: number;
+            /** Rollbacks Per Min */
+            rollbacks_per_min: number | null;
+            /** Ts */
+            ts: number;
+        };
+        /** HealthPeriod */
+        HealthPeriod: {
+            /** Active Conns Peak */
+            active_conns_peak: number | null;
+            /** Cache Hit Ratio Min */
+            cache_hit_ratio_min: number | null;
+            /** Db Time Ms */
+            db_time_ms: number;
+            /** Deadlocks */
+            deadlocks: number;
+            /** Lock Waits Peak */
+            lock_waits_peak?: number | null;
+            /** Mean Ms */
+            mean_ms: number;
+            /** Qps */
+            qps: number;
+            /** Xact Rollback */
+            xact_rollback: number;
+        };
+        /** HealthPoint */
+        HealthPoint: {
+            /** Active Conns */
+            active_conns: number | null;
+            /** Cache Hit Ratio */
+            cache_hit_ratio: number | null;
+            /** Deadlocks */
+            deadlocks: number | null;
+            /** Lock Waits */
+            lock_waits?: number | null;
+            /** Max Conns */
+            max_conns: number | null;
+            /** Mean Ms */
+            mean_ms: number | null;
+            /** Qps */
+            qps: number | null;
+            /** Ts */
+            ts: number;
+            /** Xact Rollback */
+            xact_rollback: number | null;
+        };
         /** HealthResponse */
         HealthResponse: {
             /** Status */
             status: string;
+        };
+        /** HistorySpan */
+        HistorySpan: {
+            /** First Ts */
+            first_ts: number | null;
+            /** Last Ts */
+            last_ts: number | null;
+            /** Resolutions */
+            resolutions: {
+                [key: string]: components["schemas"]["ResolutionStart"];
+            };
+            /** Span Seconds */
+            span_seconds: number;
         };
         /** ImportQueriesRequest */
         ImportQueriesRequest: {
@@ -5743,6 +7496,208 @@ export interface components {
         ImportSshKeyResponse: {
             /** Key Path */
             key_path: string;
+        };
+        /** InboxAction */
+        InboxAction: {
+            /** Until */
+            until?: number | null;
+        };
+        /**
+         * InboxAdvice
+         * @description Steps for work RDST can't do itself, or facts it can't see.
+         */
+        InboxAdvice: {
+            /** Steps */
+            steps: string[];
+            /** Summary */
+            summary: string;
+        };
+        /** InboxItem */
+        InboxItem: {
+            advice?: components["schemas"]["InboxAdvice"] | null;
+            /**
+             * Band Reason
+             * @default
+             */
+            band_reason?: string;
+            /** Body Json */
+            body_json: string;
+            /** Created At */
+            created_at: number;
+            /**
+             * Delivery
+             * @default inbox
+             * @enum {string}
+             */
+            delivery?: "digest" | "inbox" | "notify";
+            /** Group Key */
+            group_key: string;
+            /** Id */
+            id: number;
+            incident?: components["schemas"]["Incident"] | null;
+            link: components["schemas"]["InboxLink"];
+            measurement?: components["schemas"]["AlertMeasurement"] | null;
+            /** Median Change */
+            median_change?: number | null;
+            /**
+             * Members
+             * @default []
+             */
+            members?: components["schemas"]["AlertMember"][];
+            /** Muted By */
+            muted_by: number | null;
+            /** Notified At */
+            notified_at?: number | null;
+            /**
+             * Occurrences
+             * @default []
+             */
+            occurrences?: components["schemas"]["Occurrence"][];
+            /** Query Keys */
+            query_keys: string[];
+            /**
+             * Query Labels
+             * @default {}
+             */
+            query_labels?: {
+                [key: string]: string;
+            };
+            recurring?: components["schemas"]["RecurringNote"] | null;
+            /** Relevance Rule */
+            relevance_rule?: ("top_10_24h" | "top_10_1h" | "share_24h" | "share_1h" | "top_10_calls_24h" | "top_10_calls_1h" | "big_change" | "new_heavy") | null;
+            /** Reopened Count */
+            reopened_count: number;
+            /** Resolved At */
+            resolved_at: number | null;
+            /** Resolved By */
+            resolved_by: ("user" | "code" | "jev") | null;
+            /** Seen Count */
+            seen_count: number;
+            /** Severity */
+            severity: number;
+            /**
+             * Severity Band
+             * @enum {string}
+             */
+            severity_band: "act_now" | "watch" | "fyi" | "recovered";
+            /**
+             * Smaller Moved
+             * @default 0
+             */
+            smaller_moved?: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "new" | "seen" | "snoozed" | "dismissed" | "resolved";
+            /**
+             * Status
+             * @default unknown
+             * @enum {string}
+             */
+            status?: "ongoing" | "back_to_normal" | "closed" | "unknown";
+            /** Status At */
+            status_at?: number | null;
+            /** Subject */
+            subject: string;
+            /** Subject Label */
+            subject_label: string;
+            /** Summary */
+            summary: string;
+            /** Target */
+            target: string;
+            /** Title */
+            title: string;
+            /**
+             * Tone
+             * @enum {string}
+             */
+            tone: "negative" | "warning" | "positive" | "neutral";
+            /** Trend */
+            trend: components["schemas"]["TrendPoint"][];
+            /** Type */
+            type: string;
+            /** Updated At */
+            updated_at: number;
+        };
+        /**
+         * InboxLink
+         * @description Where an item opens: a query row and tab, the Database page, a report or a setting.
+         */
+        InboxLink: {
+            /** Filter */
+            filter?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "query" | "database" | "report" | "settings" | "configure" | "sign_in" | "setup";
+            /** Label */
+            label: string;
+            /** Query Key */
+            query_key?: string | null;
+            /** Query Keys */
+            query_keys?: string[] | null;
+            /** Report Id */
+            report_id?: number | null;
+            /** Tab */
+            tab?: ("performance" | "analysis" | "readyset") | null;
+            /** Target */
+            target: string;
+        };
+        /** InboxPage */
+        InboxPage: {
+            /** Items */
+            items: components["schemas"]["InboxItem"][];
+        };
+        /**
+         * Incident
+         * @description When the item's change began and ended, measured from the per-query minute series
+         *     (`measured`) or taken from the item's own times.
+         */
+        Incident: {
+            /** Change */
+            change: number | null;
+            /** End */
+            end: number | null;
+            /** Measured */
+            measured: boolean;
+            /** Metric */
+            metric: ("latency" | "calls") | null;
+            /** Ongoing */
+            ongoing: boolean;
+            /**
+             * Queries
+             * @default []
+             */
+            queries?: components["schemas"]["IncidentQuery"][];
+            /** Start */
+            start: number;
+        };
+        /**
+         * IncidentQuery
+         * @description One member of a group item: when its own change began and ended.
+         */
+        IncidentQuery: {
+            /** After */
+            after: number | null;
+            /** Before */
+            before: number | null;
+            /** Change */
+            change: number | null;
+            /** End */
+            end: number | null;
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "latency" | "calls";
+            /** Query Key */
+            query_key: string;
+            /** Spark */
+            spark: components["schemas"]["TrendPoint"][];
+            /** Start */
+            start: number | null;
         };
         /** IndexPlannerResult */
         IndexPlannerResult: {
@@ -6026,6 +7981,54 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** LastAnalysis */
+        LastAnalysis: {
+            /** Analysis Ref */
+            analysis_ref: string | null;
+            /** Attempts */
+            attempts?: number | null;
+            /** Error Kind */
+            error_kind?: string | null;
+            /** Finished At */
+            finished_at: number | null;
+            /** Mode */
+            mode: string;
+            /** Mode Label */
+            mode_label?: string | null;
+            /** Param Source */
+            param_source: string | null;
+            /** Phase */
+            phase?: ("sample" | "plan" | "run" | "schema" | "advise" | "verify") | null;
+            /** Queue Position */
+            queue_position?: number | null;
+            /** Queue State */
+            queue_state?: ("running" | "today" | "held") | null;
+            /** Reason */
+            reason: string | null;
+            /** Retry At */
+            retry_at?: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "done" | "failed" | "skipped";
+            summary?: components["schemas"]["LatestAnalysisSummary"] | null;
+        };
+        /** LastCompare */
+        LastCompare: {
+            /** Origin Ms */
+            origin_ms?: number | null;
+            /** Readyset Ms */
+            readyset_ms?: number | null;
+            /** Speedup */
+            speedup: number | null;
+            /** Speedup Label */
+            speedup_label?: string | null;
+            /** Ts */
+            ts: number;
+            /** Verdict */
+            verdict: string;
+        };
         /**
          * LastCompareOutcome
          * @description What the query's most recent Compare run found, as stored.
@@ -6049,6 +8052,34 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** LatencyBreakdown */
+        LatencyBreakdown: {
+            /** Keys */
+            keys: string[];
+            /** Points */
+            points: components["schemas"]["LatencyPoint"][];
+            /**
+             * Range
+             * @enum {string}
+             */
+            range: "5m" | "15m" | "1h" | "24h" | "7d" | "30d" | "90d" | "all" | "custom";
+            /**
+             * Res
+             * @enum {integer}
+             */
+            res: 60 | 300 | 3600 | 86400;
+            /** Target */
+            target: string;
+        };
+        /** LatencyPoint */
+        LatencyPoint: {
+            /** Mean Ms */
+            mean_ms: (number | null)[];
+            /** Overall Mean Ms */
+            overall_mean_ms: number | null;
+            /** Ts */
+            ts: number;
+        };
         /**
          * LatestAnalysisResponse
          * @description Latest stored analysis summary for one query hash, when any exists.
@@ -6063,12 +8094,61 @@ export interface components {
              */
             found?: boolean;
         };
+        /**
+         * LatestAnalysisSummary
+         * @description The latest finished analysis: a header line and where the complete record is.
+         */
+        LatestAnalysisSummary: {
+            /** Analysis Id */
+            analysis_id: string;
+            /** Analysis Ref */
+            analysis_ref: string;
+            /** Analyzed At */
+            analyzed_at: number | null;
+            /** Efficiency Score */
+            efficiency_score?: number | null;
+            /** Fix Kind */
+            fix_kind: ("index" | "rewrite" | "config" | "none") | null;
+            /**
+             * Fix Ready
+             * @default false
+             */
+            fix_ready?: boolean;
+            /** Headline */
+            headline: string;
+            /** Mode */
+            mode: string | null;
+            /** Mode Label */
+            mode_label: string | null;
+            /** Rating */
+            rating: string | null;
+        };
+        /** LibraryEntry */
+        LibraryEntry: {
+            /** Created */
+            created: boolean;
+            /** Hash */
+            hash: string;
+        };
         /** LlmInfo */
         LlmInfo: {
-            /** Cost */
-            cost: number;
+            /**
+             * Cost
+             * @default null
+             */
+            cost?: number | null;
+            /**
+             * Cost Estimated
+             * @default false
+             */
+            cost_estimated?: boolean;
             /** Model */
             model: string;
+            /**
+             * Provider
+             * @default null
+             */
+            provider?: string | null;
             /** Tokens */
             tokens: number;
         } & {
@@ -6082,6 +8162,78 @@ export interface components {
             model?: string | null;
             /** Success */
             success: boolean;
+        };
+        /** LoadBand */
+        LoadBand: {
+            /** Calls */
+            calls: number;
+            /** Color Index */
+            color_index: number | null;
+            /** Display Name */
+            display_name: string;
+            /** Key */
+            key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "query" | "other";
+            /** Mean Ms */
+            mean_ms: number | null;
+            /** Share */
+            share: number;
+            /** Total Ms */
+            total_ms: number;
+        };
+        /**
+         * LoadBreakdown
+         * @description Recorded execution time per bucket, split by the top queries of the range.
+         */
+        LoadBreakdown: {
+            /** Bands */
+            bands: components["schemas"]["LoadBand"][];
+            /** Calls */
+            calls: number;
+            /** Detail Note */
+            detail_note?: string | null;
+            /** End */
+            end: number;
+            history: components["schemas"]["HistorySpan"];
+            /** Points */
+            points: components["schemas"]["LoadPoint"][];
+            /**
+             * Range
+             * @enum {string}
+             */
+            range: "5m" | "15m" | "1h" | "24h" | "7d" | "30d" | "90d" | "all" | "custom";
+            /** Ranges */
+            ranges: components["schemas"]["RangeAvailability"][];
+            /** Recorded Label */
+            recorded_label: string;
+            /**
+             * Res
+             * @enum {integer}
+             */
+            res: 60 | 300 | 3600 | 86400;
+            /** Start */
+            start: number;
+            /** Target */
+            target: string;
+            /** Total Ms */
+            total_ms: number;
+        };
+        /** LoadPoint */
+        LoadPoint: {
+            /** Calls */
+            calls: (number | null)[] | null;
+            /** Mean Ms */
+            mean_ms: number | null;
+            /** Seconds */
+            seconds: number;
+            /** Total Ms */
+            total_ms: (number | null)[] | null;
+            /** Ts */
+            ts: number;
         };
         /** LoadTestRunStartResponse */
         LoadTestRunStartResponse: {
@@ -6111,6 +8263,608 @@ export interface components {
             role: string;
             /** Timestamp */
             timestamp: string;
+        };
+        /** MiniSeriesPoint */
+        MiniSeriesPoint: {
+            /** Mean Ms */
+            mean_ms: number | null;
+            /** Qps */
+            qps: number | null;
+            /** Ts */
+            ts: number;
+        };
+        /** MonitorHealth */
+        MonitorHealth: {
+            /** Delay Reason */
+            delay_reason?: string | null;
+            /** Detail Note */
+            detail_note?: string | null;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "postgresql" | "mysql";
+            /** Engine Version */
+            engine_version: string | null;
+            /**
+             * First Reading
+             * @default false
+             */
+            first_reading?: boolean;
+            history: components["schemas"]["HistorySpan"];
+            /** Last Reading At */
+            last_reading_at?: number | null;
+            /** Markers */
+            markers: components["schemas"]["ChartMarker"][];
+            /** Next Reading At */
+            next_reading_at?: number | null;
+            now: components["schemas"]["HealthNow"];
+            /**
+             * Outages
+             * @default []
+             */
+            outages?: components["schemas"]["MonitorOutage"][];
+            period: components["schemas"]["HealthPeriod"];
+            prior: components["schemas"]["HealthPeriod"] | null;
+            /**
+             * Range
+             * @enum {string}
+             */
+            range: "5m" | "15m" | "1h" | "24h" | "7d" | "30d" | "90d" | "all";
+            /**
+             * Res
+             * @enum {integer}
+             */
+            res: 60 | 300 | 3600 | 86400;
+            /** Series */
+            series: components["schemas"]["HealthPoint"][];
+            /**
+             * Setup Blocked
+             * @default false
+             */
+            setup_blocked?: boolean;
+            /** Sparkline */
+            sparkline?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Target */
+            target: string;
+            /** Tiles */
+            tiles?: {
+                [key: string]: unknown;
+            } | null;
+            /** Window */
+            window?: string | null;
+        };
+        /**
+         * MonitorOutage
+         * @description A lost-connection episode: from the last reading to when monitoring resumed.
+         */
+        MonitorOutage: {
+            /**
+             * Cause
+             * @constant
+             */
+            cause: "unreachable";
+            /** End */
+            end: number | null;
+            /** Item Id */
+            item_id: number;
+            /** Start */
+            start: number;
+        };
+        /** MonitorPulse */
+        MonitorPulse: {
+            /** Delay Reason */
+            delay_reason?: string | null;
+            /** Detail */
+            detail: string;
+            /**
+             * First Reading
+             * @default false
+             */
+            first_reading?: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "collect" | "index_scan" | "attention" | "analyze" | "report";
+            /** Last Reading At */
+            last_reading_at?: number | null;
+            /** Next Collect At */
+            next_collect_at: number;
+            /** Next Reading At */
+            next_reading_at?: number | null;
+            /** Ok */
+            ok: boolean;
+            /**
+             * Setup Blocked
+             * @default false
+             */
+            setup_blocked?: boolean;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "live" | "late" | "paused" | "connection_lost" | "ai_paused";
+            /** Ts */
+            ts: number;
+        };
+        /** MonitorPulsePage */
+        MonitorPulsePage: {
+            /** Delay Reason */
+            delay_reason?: string | null;
+            /**
+             * First Reading
+             * @default false
+             */
+            first_reading?: boolean;
+            /** Last Reading At */
+            last_reading_at?: number | null;
+            /** Next Reading At */
+            next_reading_at?: number | null;
+            /** Pulses */
+            pulses: components["schemas"]["MonitorPulse"][];
+            /**
+             * Setup Blocked
+             * @default false
+             */
+            setup_blocked?: boolean;
+        };
+        /** MonitorQuery */
+        MonitorQuery: {
+            /** Analysis Note */
+            analysis_note?: string | null;
+            /**
+             * Analyzable
+             * @default true
+             */
+            analyzable?: boolean;
+            /**
+             * Analyzable Code
+             * @default ok
+             * @enum {string}
+             */
+            analyzable_code?: "ok" | "write" | "ddl" | "maintenance" | "utility" | "unsafe_function" | "no_text";
+            assessment?: components["schemas"]["QueryAssessment"] | null;
+            /** Badges */
+            badges?: string[] | null;
+            change: components["schemas"]["QueryChange"];
+            /** Change Vs Prior */
+            change_vs_prior?: {
+                [key: string]: unknown;
+            } | null;
+            /** Color Index */
+            color_index?: number | null;
+            /** Db Time Ms */
+            db_time_ms: number;
+            /** Db Time Share */
+            db_time_share: number;
+            /** Display Name */
+            display_name: string;
+            family?: components["schemas"]["QueryFamily"] | null;
+            fix: components["schemas"]["FixVerdict"] | null;
+            /**
+             * Impact Ms
+             * @default 0
+             */
+            impact_ms?: number;
+            /** Key */
+            key: string;
+            last_analysis: components["schemas"]["LastAnalysis"] | null;
+            last_compare: components["schemas"]["LastCompare"] | null;
+            /** Mean Ms */
+            mean_ms: number;
+            /** Not Analyzable Reason */
+            not_analyzable_reason?: string | null;
+            /** Qps */
+            qps: number;
+            /** Series */
+            series: components["schemas"]["MiniSeriesPoint"][];
+            /** Sparkline */
+            sparkline?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** State */
+            state: ("attention" | "new" | "fixed" | "fix_no_effect" | "stuck" | "muted")[];
+            /** Tables */
+            tables: string[];
+            /** Text */
+            text: string;
+            /** Text Reason */
+            text_reason: string | null;
+            /**
+             * Text Status
+             * @enum {string}
+             */
+            text_status: "ok" | "truncated" | "unavailable";
+        };
+        /** MonitorQueryPage */
+        MonitorQueryPage: {
+            /** Composition */
+            composition: components["schemas"]["CompositionSlice"][];
+            counts: components["schemas"]["QueryCounts"];
+            history: components["schemas"]["HistorySpan"];
+            /** Limit */
+            limit?: number | null;
+            /** Located */
+            located?: number | null;
+            /** Offset */
+            offset?: number | null;
+            /** Queries */
+            queries: components["schemas"]["MonitorQuery"][];
+            /** Range */
+            range?: ("5m" | "15m" | "1h" | "24h" | "7d" | "30d" | "90d" | "all" | "custom") | null;
+            /** Target */
+            target?: string | null;
+            /** Total */
+            total: number;
+            /** Window */
+            window?: string | null;
+        };
+        /** MonitorSettings */
+        MonitorSettings: {
+            /**
+             * Ai Monitoring
+             * @default off
+             * @enum {string}
+             */
+            ai_monitoring?: "off" | "on" | "local" | "pending" | "paused";
+            /** Ai Reason */
+            ai_reason?: ("signed_out" | "unreachable" | "service_error" | "limit" | "quota") | null;
+            /** Ai Since */
+            ai_since?: number | null;
+            /** Analysis Daily Cap */
+            analysis_daily_cap: number;
+            /**
+             * Analysis Mode
+             * @enum {string}
+             */
+            analysis_mode: "plans_only" | "execute";
+            /**
+             * Attention Every Min
+             * @enum {integer}
+             */
+            attention_every_min: 5 | 15 | 60;
+            /** Auto Analyze New */
+            auto_analyze_new: boolean;
+            /** Budget Bytes */
+            budget_bytes: number;
+            /**
+             * Configured
+             * @default false
+             */
+            configured?: boolean;
+            /** Deep Analysis */
+            deep_analysis: boolean;
+            /** Dev Learning Period S */
+            dev_learning_period_s?: number | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Enabled At */
+            enabled_at?: number | null;
+            /** Execute */
+            execute: boolean;
+            /** First Hour Started At */
+            first_hour_started_at?: number | null;
+            /**
+             * Newcomer Daily Cap
+             * @default 25
+             */
+            newcomer_daily_cap?: number;
+            /** Nightly Hour */
+            nightly_hour: number;
+            /** Nightly Report */
+            nightly_report: boolean;
+            notify_events: components["schemas"]["NotifyEvents"];
+            /** Push Daily Cap */
+            push_daily_cap: number;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Unavailable Reason */
+            unavailable_reason?: string | null;
+        };
+        /** MonitorSettingsUpdate */
+        MonitorSettingsUpdate: {
+            /** Analysis Daily Cap */
+            analysis_daily_cap?: number | null;
+            /** Analysis Mode */
+            analysis_mode?: ("plans_only" | "execute") | null;
+            /** Attention Every Min */
+            attention_every_min?: (5 | 15 | 60) | null;
+            /** Auto Analyze New */
+            auto_analyze_new?: boolean | null;
+            /** Deep Analysis */
+            deep_analysis?: boolean | null;
+            /** Dev Learning Period S */
+            dev_learning_period_s?: number | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Execute */
+            execute?: boolean | null;
+            /** Newcomer Daily Cap */
+            newcomer_daily_cap?: number | null;
+            /** Nightly Hour */
+            nightly_hour?: number | null;
+            /** Nightly Report */
+            nightly_report?: boolean | null;
+            /** Notify Events */
+            notify_events?: {
+                [key: string]: boolean;
+            } | null;
+            /** Push Daily Cap */
+            push_daily_cap?: number | null;
+        };
+        /** MonitorUsage */
+        MonitorUsage: {
+            caps: components["schemas"]["UsageCaps"];
+            /** Days */
+            days: components["schemas"]["UsageDay"][];
+        };
+        /**
+         * MonitorWork
+         * @description Monitoring's real work across every monitored database.
+         */
+        MonitorWork: {
+            /** Done Today */
+            done_today: components["schemas"]["MonitorWorkAnalysis"][];
+            /** Done Today Count */
+            done_today_count: number;
+            /** Queued */
+            queued: components["schemas"]["MonitorWorkAnalysis"][];
+            /** Reports */
+            reports: components["schemas"]["MonitorWorkReport"][];
+            /** Retrying */
+            retrying: components["schemas"]["MonitorWorkRetry"][];
+            /** Running */
+            running: components["schemas"]["MonitorWorkAnalysis"][];
+        };
+        /**
+         * MonitorWorkAnalysis
+         * @description One deep analysis in the all-databases work list.
+         */
+        MonitorWorkAnalysis: {
+            /** Display Name */
+            display_name: string;
+            /** Efficiency Score */
+            efficiency_score?: number | null;
+            /** Enqueued At */
+            enqueued_at: number;
+            /** Estimated Start At */
+            estimated_start_at?: number | null;
+            /** Finished At */
+            finished_at: number | null;
+            /** Id */
+            id: number;
+            /** Query Key */
+            query_key: string;
+            /** Queue Position */
+            queue_position?: number | null;
+            /** Queue State */
+            queue_state?: "today" | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "you" | "monitoring";
+            /** Started At */
+            started_at: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "done" | "failed" | "skipped";
+            /** Target */
+            target: string;
+        };
+        /** MonitorWorkReport */
+        MonitorWorkReport: {
+            /** Id */
+            id: number;
+            /** Message */
+            message?: string | null;
+            /** Started At */
+            started_at: number;
+            /** Target */
+            target: string;
+            /**
+             * Trigger
+             * @enum {string}
+             */
+            trigger: "nightly" | "user";
+        };
+        /**
+         * MonitorWorkRetry
+         * @description An analysis the AI service failed; RDST queues it again at `retry_at`.
+         */
+        MonitorWorkRetry: {
+            /** Attempts */
+            attempts: number;
+            /** Display Name */
+            display_name: string;
+            /** Query Key */
+            query_key: string;
+            /** Retry At */
+            retry_at: number;
+            /** Target */
+            target: string;
+        };
+        /**
+         * MonitoringLimit
+         * @description AI monitoring on `in_use` of `limit` databases for the signed-in account.
+         */
+        MonitoringLimit: {
+            /**
+             * Allowance
+             * @default []
+             */
+            allowance?: ("jev" | "hosted")[];
+            /**
+             * Contact
+             * @default
+             */
+            contact?: string;
+            /**
+             * Elsewhere
+             * @default []
+             */
+            elsewhere?: components["schemas"]["MonitoringSlotElsewhere"][];
+            /** Full */
+            full: boolean;
+            /** In Use */
+            in_use: number;
+            /** Known */
+            known: boolean;
+            /** Limit */
+            limit: number | null;
+            /** Own Key */
+            own_key: boolean;
+            /**
+             * Signed In
+             * @default false
+             */
+            signed_in?: boolean;
+            /** Target Fits */
+            target_fits?: boolean | null;
+            /** Targets */
+            targets: components["schemas"]["MonitoringLimitTarget"][];
+        };
+        /** MonitoringLimitTarget */
+        MonitoringLimitTarget: {
+            /**
+             * Ai
+             * @enum {string}
+             */
+            ai: "off" | "on" | "local" | "pending" | "paused";
+            /** Reason */
+            reason?: ("signed_out" | "unreachable" | "service_error" | "limit" | "quota") | null;
+            /** Since */
+            since?: number | null;
+            /** Target */
+            target: string;
+        };
+        /**
+         * MonitoringSlotElsewhere
+         * @description A slot the account holds for a database this computer doesn't have.
+         */
+        MonitoringSlotElsewhere: {
+            /** Fingerprint */
+            fingerprint: string;
+            /** Label */
+            label?: string | null;
+            /** Last Seen At */
+            last_seen_at?: number | null;
+            /**
+             * Tier
+             * @default hosted
+             * @enum {string}
+             */
+            tier?: "hosted" | "own_key";
+        };
+        /** MonitoringSlotRelease */
+        MonitoringSlotRelease: {
+            /** Fingerprint */
+            fingerprint: string;
+        };
+        /** MonitoringUpgradeResponse */
+        MonitoringUpgradeResponse: {
+            /** Targets */
+            targets: components["schemas"]["MonitoringUpgradeTarget"][];
+        };
+        /** MonitoringUpgradeTarget */
+        MonitoringUpgradeTarget: {
+            /** Engine */
+            engine: string;
+            /** Name */
+            name: string;
+        };
+        /** MuteRule */
+        MuteRule: {
+            /** Created At */
+            created_at: number;
+            /** Id */
+            id: number;
+            /** Matched Count */
+            matched_count: number;
+            /** Note */
+            note: string | null;
+            /** Query Key */
+            query_key: string | null;
+            /** Target */
+            target: string | null;
+            /** Type */
+            type: string | null;
+            /** Until */
+            until: number | null;
+        };
+        /** MuteRuleInput */
+        MuteRuleInput: {
+            /** Note */
+            note?: string | null;
+            /** Query Key */
+            query_key?: string | null;
+            /** Target */
+            target?: string | null;
+            /** Type */
+            type?: string | null;
+            /** Until */
+            until?: number | null;
+        };
+        /** MuteRulePage */
+        MuteRulePage: {
+            /** Rules */
+            rules: components["schemas"]["MuteRule"][];
+        };
+        /** NotifyEvents */
+        NotifyEvents: {
+            /**
+             * Database Events
+             * @default true
+             */
+            database_events?: boolean;
+            /**
+             * Database Recovered
+             * @default false
+             */
+            database_recovered?: boolean;
+            /**
+             * Database Unreachable
+             * @default true
+             */
+            database_unreachable?: boolean;
+            /**
+             * Monitoring Setup
+             * @default true
+             */
+            monitoring_setup?: boolean;
+            /**
+             * Query Changes
+             * @default true
+             */
+            query_changes?: boolean;
+            /**
+             * Stuck Query
+             * @default true
+             */
+            stuck_query?: boolean;
+        };
+        /**
+         * Occurrence
+         * @description One occurrence of a repeating burst: its time frame, size and query count.
+         */
+        Occurrence: {
+            /** End */
+            end: number | null;
+            /** Query Count */
+            query_count: number;
+            /** Quiet */
+            quiet: boolean;
+            /** Size */
+            size: number | null;
+            /** Start */
+            start: number;
+            /** Verdict */
+            verdict: ("usual" | "bigger") | null;
         };
         /** OptimizationInsights */
         OptimizationInsights: {
@@ -6210,6 +8964,19 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** PlanSummary */
+        PlanSummary: {
+            /** Execution Ms */
+            execution_ms: number | null;
+            /** Root Node */
+            root_node: string | null;
+            /** Rows Examined */
+            rows_examined: number | null;
+            /** Rows Returned */
+            rows_returned: number | null;
+            /** Text */
+            text: string;
+        };
         /**
          * ProgressEvent
          * @description Progress update during a multi-step operation.
@@ -6250,6 +9017,36 @@ export interface components {
             overall_rating?: string;
             /** Target */
             target: string;
+        };
+        /**
+         * QueryAssessment
+         * @description The latest per-query Jev quick assessment (the Query Library's rating).
+         */
+        QueryAssessment: {
+            /** Assessed At */
+            assessed_at: string | null;
+            /** Band */
+            band: string | null;
+            /** Confidence */
+            confidence: number | null;
+            /** Error Code */
+            error_code: string | null;
+            /** Findings */
+            findings: components["schemas"]["AssessmentFinding"][];
+            /** Model */
+            model: string | null;
+            /** Priority Score */
+            priority_score: number | null;
+            /** Rubric Version */
+            rubric_version: string | null;
+            /** Schema Collected At */
+            schema_collected_at?: string | null;
+            /** Schema Coverage */
+            schema_coverage?: string | null;
+            /** Status */
+            status: string;
+            /** Waiting Reason */
+            waiting_reason?: string | null;
         };
         /**
          * QueryBenchmarkCompleteEvent
@@ -6325,6 +9122,48 @@ export interface components {
             type: "error";
         };
         QueryBenchmarkEvent: components["schemas"]["QueryBenchmarkProgressEvent"] | components["schemas"]["QueryBenchmarkCompleteEvent"] | components["schemas"]["QueryBenchmarkErrorEvent"];
+        /** QueryBenchmarkHistory */
+        QueryBenchmarkHistory: {
+            /** Runs */
+            runs: components["schemas"]["QueryBenchmarkRun"][];
+        };
+        /**
+         * QueryBenchmarkNumbers
+         * @description The query's numbers on the database, and through Readyset when that lane ran.
+         */
+        QueryBenchmarkNumbers: {
+            /** Avg Ms */
+            avg_ms?: number | null;
+            /**
+             * Executions
+             * @default 0
+             */
+            executions?: number;
+            /**
+             * Failures
+             * @default 0
+             */
+            failures?: number;
+            /** Hash */
+            hash: string;
+            /**
+             * Name
+             * @default
+             */
+            name?: string;
+            /** P50 Ms */
+            p50_ms?: number | null;
+            /** P95 Ms */
+            p95_ms?: number | null;
+            /** Qps */
+            qps?: number | null;
+            readyset?: components["schemas"]["BenchmarkLaneNumbers"] | null;
+            /**
+             * Successes
+             * @default 0
+             */
+            successes?: number;
+        };
         /**
          * QueryBenchmarkProgressEvent
          * @description Benchmark progress tick.
@@ -6374,6 +9213,32 @@ export interface components {
              * @default 0
              */
             warmup_executions?: number;
+        };
+        /** QueryBenchmarkRun */
+        QueryBenchmarkRun: {
+            /** Concurrency */
+            concurrency?: number | null;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /** Elapsed Seconds */
+            elapsed_seconds?: number | null;
+            /** Id */
+            id: number;
+            /** Interval Ms */
+            interval_ms?: number | null;
+            /** Lanes */
+            lanes?: string[];
+            /** Mode */
+            mode?: string | null;
+            /** Outcome */
+            outcome: string;
+            query: components["schemas"]["QueryBenchmarkNumbers"];
+            /** Readyset Setup */
+            readyset_setup?: {
+                [key: string]: string;
+            } | null;
+            /** Ts */
+            ts: number;
         };
         /**
          * QueryBenchmarkStats
@@ -6426,6 +9291,37 @@ export interface components {
              * @default 1
              */
             variant_count?: number;
+        };
+        /** QueryChange */
+        QueryChange: {
+            /** Latency */
+            latency: number | null;
+            /** Qps */
+            qps: number | null;
+            /** Significant */
+            significant: boolean;
+            /** Verdict */
+            verdict: ("regressed" | "improved" | "steady" | "new") | null;
+        };
+        /** QueryCounts */
+        QueryCounts: {
+            /** All */
+            all: number;
+            /** Attention */
+            attention: number;
+            /** Fixed */
+            fixed: number;
+            /** Muted */
+            muted: number;
+            /** New */
+            new: number;
+        };
+        /** QueryFamily */
+        QueryFamily: {
+            /** Name */
+            name: string;
+            /** Size */
+            size: number;
         };
         /**
          * QueryLibraryFacetCounts
@@ -6492,6 +9388,13 @@ export interface components {
         QueryPilotBody: {
             /** Enabled */
             enabled: boolean;
+        };
+        /** QueryRef */
+        QueryRef: {
+            /** Display Name */
+            display_name: string;
+            /** Text Snippet */
+            text_snippet: string;
         };
         /** QueryRegistryEntry */
         QueryRegistryEntry: {
@@ -6639,6 +9542,47 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** QuerySeries */
+        QuerySeries: {
+            /** Detail Note */
+            detail_note?: string | null;
+            fix: components["schemas"]["FixVerdict"] | null;
+            history: components["schemas"]["HistorySpan"];
+            /** Key */
+            key?: string | null;
+            /** Markers */
+            markers: components["schemas"]["ChartMarker"][];
+            /** Points */
+            points: components["schemas"]["QuerySeriesPoint"][];
+            /** Range */
+            range?: ("5m" | "15m" | "1h" | "24h" | "7d" | "30d" | "90d" | "all") | null;
+            /**
+             * Res
+             * @enum {integer}
+             */
+            res: 60 | 300 | 3600 | 86400;
+            /** Resolution */
+            resolution?: number | null;
+            /** Target */
+            target?: string | null;
+        };
+        /** QuerySeriesPoint */
+        QuerySeriesPoint: {
+            /** Calls */
+            calls: number | null;
+            /** Mean Ms */
+            mean_ms: number | null;
+            /** Qps */
+            qps: number | null;
+            /** Res */
+            res?: number | null;
+            /** Temp Blks */
+            temp_blks?: number | null;
+            /** Total Ms */
+            total_ms: number | null;
+            /** Ts */
+            ts: number;
+        };
         /**
          * QuerySkip
          * @description One query left out of a run, and the reason it was left out.
@@ -6660,6 +9604,23 @@ export interface components {
             query_name: string;
             /** Reason */
             reason: string;
+        };
+        /** RangeAvailability */
+        RangeAvailability: {
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Range
+             * @enum {string}
+             */
+            range: "5m" | "15m" | "1h" | "24h" | "7d" | "30d" | "90d" | "all";
+            /** Reason */
+            reason: string | null;
+            /**
+             * Res
+             * @enum {integer}
+             */
+            res: 60 | 300 | 3600 | 86400;
         };
         /** ReadysetCacheability */
         ReadysetCacheability: {
@@ -6765,12 +9726,175 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /**
+         * RecurringNote
+         * @description How a query's bursts usually recur: every `period_s`, or daily ("daily").
+         */
+        RecurringNote: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "period" | "daily";
+            /** Last Onset */
+            last_onset: number;
+            /** Period S */
+            period_s: number;
+            /** Repeats */
+            repeats: number;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "bigger" | "longer";
+        };
         /** RemoveQueryResponse */
         RemoveQueryResponse: {
             /** Error */
             error?: string | null;
             /** Success */
             success: boolean;
+        };
+        /** ReportBody */
+        ReportBody: {
+            /** Changed Since Yesterday */
+            changed_since_yesterday: string[];
+            /**
+             * Digest
+             * @default []
+             */
+            digest?: components["schemas"]["DigestEntry"][];
+            /** Fix First */
+            fix_first: components["schemas"]["ReportFixFirst"][];
+            /** Health */
+            health: components["schemas"]["ReportHealthCheck"][];
+            /** Narrative Error */
+            narrative_error: string | null;
+            /** Narrative Retry At */
+            narrative_retry_at?: number | null;
+            /** One Fix Several Queries */
+            one_fix_several_queries: components["schemas"]["ReportOneFix"][];
+            /** Provisional Query Keys */
+            provisional_query_keys: string[];
+            /**
+             * Since Yesterday
+             * @default []
+             */
+            since_yesterday?: components["schemas"]["SinceYesterday"][];
+            snapshot?: components["schemas"]["DaySnapshot"] | null;
+            /** Summary */
+            summary: string;
+            verdict?: components["schemas"]["ReportVerdict"] | null;
+            /**
+             * Version
+             * @default 1
+             */
+            version?: number;
+        };
+        /** ReportFixFirst */
+        ReportFixFirst: {
+            /** Action */
+            action: string;
+            analysis?: components["schemas"]["DeepAnalysisDigest"] | null;
+            /** Analysis Ref */
+            analysis_ref?: string | null;
+            /**
+             * Calls
+             * @default 0
+             */
+            calls?: number;
+            /**
+             * Db Time Ms
+             * @default 0
+             */
+            db_time_ms?: number;
+            /**
+             * Display Name
+             * @default
+             */
+            display_name?: string;
+            /** Expected Gain */
+            expected_gain?: string | null;
+            fix?: components["schemas"]["AnalysisFix"] | null;
+            /** Fix Sql */
+            fix_sql?: string | null;
+            /** Mean Ms */
+            mean_ms?: number | null;
+            /** Query Key */
+            query_key: string;
+            /**
+             * Share
+             * @default 0
+             */
+            share?: number;
+            /** Title */
+            title: string;
+            /** Why */
+            why: string;
+        };
+        /** ReportHealthCheck */
+        ReportHealthCheck: {
+            /** Action */
+            action?: string | null;
+            /** Check */
+            check: string;
+            /** Label */
+            label: string;
+            /**
+             * Matters
+             * @default false
+             */
+            matters?: boolean;
+            /** Note */
+            note: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "warn" | "bad" | "info";
+            /** Value */
+            value: string;
+        };
+        /** ReportHistory */
+        ReportHistory: {
+            /** Reports */
+            reports: components["schemas"]["ReportSummary"][];
+        };
+        /** ReportOneFix */
+        ReportOneFix: {
+            /** Action */
+            action: string;
+            /** Columns */
+            columns: string[];
+            /**
+             * Kind
+             * @default other
+             * @enum {string}
+             */
+            kind?: "index" | "rewrite" | "config" | "other";
+            /** Query Keys */
+            query_keys: string[];
+            /**
+             * Share
+             * @default 0
+             */
+            share?: number;
+            /** Table */
+            table: string;
+            /**
+             * Title
+             * @default
+             */
+            title?: string;
+        };
+        /** ReportProgress */
+        ReportProgress: {
+            /** Done */
+            done: number;
+            /** Message */
+            message: string;
+            /** Total */
+            total: number;
         };
         /**
          * ReportRequest
@@ -6810,12 +9934,95 @@ export interface components {
             /** Success */
             success: boolean;
         };
+        /** ReportSummary */
+        ReportSummary: {
+            counts: components["schemas"]["ReportSummaryCounts"];
+            /**
+             * Day
+             * @default
+             */
+            day?: string;
+            /** Duration S */
+            duration_s: number;
+            /** Events */
+            events?: number | null;
+            /** Headline */
+            headline: string;
+            /** Health Problems */
+            health_problems?: number | null;
+            /** Id */
+            id: number;
+            /** Look At */
+            look_at?: number | null;
+            /** Open Events */
+            open_events?: number | null;
+            /** Period End */
+            period_end?: number | null;
+            /**
+             * Period Partial
+             * @default false
+             */
+            period_partial?: boolean;
+            /** Period Start */
+            period_start?: number | null;
+            /** Provisional Count */
+            provisional_count: number;
+            /** Qps */
+            qps?: number | null;
+            /**
+             * Sample
+             * @default false
+             */
+            sample?: boolean;
+            /**
+             * Trigger
+             * @enum {string}
+             */
+            trigger: "user" | "nightly";
+            /** Ts */
+            ts: number;
+            /**
+             * Verdict
+             * @default
+             */
+            verdict?: string;
+        };
+        /** ReportSummaryCounts */
+        ReportSummaryCounts: {
+            /** Fix First */
+            fix_first: number;
+            /** Health Ok */
+            health_ok: number;
+            /** Health Warn */
+            health_warn: number;
+            /** One Fix */
+            one_fix: number;
+        };
+        /** ReportVerdict */
+        ReportVerdict: {
+            /** Query Key */
+            query_key: string | null;
+            /** Sentence */
+            sentence: string;
+            /** Share */
+            share: number | null;
+            /**
+             * Tone
+             * @enum {string}
+             */
+            tone: "negative" | "warning" | "positive" | "neutral";
+        };
         /** ResetLocalDataResponse */
         ResetLocalDataResponse: {
             /** Removed Path */
             removed_path: string;
             /** Success */
             success: boolean;
+        };
+        /** ResolutionStart */
+        ResolutionStart: {
+            /** First Ts */
+            first_ts: number | null;
         };
         /** RewriteImprovement */
         RewriteImprovement: {
@@ -7012,6 +10219,8 @@ export interface components {
             phase: string;
             /** Queued Requests */
             queued_requests: number;
+            /** Readiness Note */
+            readiness_note?: string | null;
         };
         /**
          * ScanCompleteEvent
@@ -7558,6 +10767,486 @@ export interface components {
              */
             target?: string;
         };
+        /** SinceYesterday */
+        SinceYesterday: {
+            /** After */
+            after: number;
+            /** Before */
+            before: number;
+            /** Change */
+            change: number | null;
+            /** Label */
+            label: string;
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "load" | "calls" | "latency" | "share";
+            /** Query Key */
+            query_key: string | null;
+            /**
+             * Unit
+             * @enum {string}
+             */
+            unit: "ms" | "calls" | "ms_per_call" | "ratio";
+        };
+        /**
+         * SnapshotAction
+         * @description A database-level change (settings, vacuum, indexes, connections), with its evidence.
+         */
+        SnapshotAction: {
+            /** Caveat */
+            caveat?: string | null;
+            /** Check */
+            check: string;
+            /** Evidence */
+            evidence: components["schemas"]["SnapshotEvidence"][];
+            /** Finding */
+            finding: string;
+            /** Id */
+            id: string;
+            /** Model Why */
+            model_why?: string | null;
+            /** Pick */
+            pick?: number | null;
+            /**
+             * Query Keys
+             * @default []
+             */
+            query_keys?: string[];
+            /**
+             * Restart
+             * @default false
+             */
+            restart?: boolean;
+            /**
+             * Rows
+             * @default []
+             */
+            rows?: components["schemas"]["SnapshotHealthRow"][];
+            setting?: components["schemas"]["SnapshotSetting"] | null;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "bad" | "warn" | "info";
+            /** Sql */
+            sql?: string | null;
+            /** Steps */
+            steps: string;
+            /** Title */
+            title: string;
+            /** Why */
+            why: string;
+        };
+        /** SnapshotBand */
+        SnapshotBand: {
+            /** Calls */
+            calls: number;
+            /** Color Index */
+            color_index: number | null;
+            /** Display Name */
+            display_name: string;
+            /** Key */
+            key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "query" | "other";
+            /** Mean Ms */
+            mean_ms: number | null;
+            /** Qps */
+            qps: number;
+            /** Share */
+            share: number;
+        };
+        /** SnapshotBriefItem */
+        SnapshotBriefItem: {
+            /** Text */
+            text: string;
+            /** Topic */
+            topic?: string | null;
+            /** Why */
+            why?: string | null;
+        };
+        /**
+         * SnapshotChart
+         * @description Queries per second by query, frozen when the report was written.
+         */
+        SnapshotChart: {
+            /** Bands */
+            bands: components["schemas"]["SnapshotBand"][];
+            /** End */
+            end: number;
+            /** Markers */
+            markers: components["schemas"]["SnapshotMarker"][];
+            /** Mean Ms */
+            mean_ms?: (number | null)[][] | null;
+            /** Ms */
+            ms?: (number | null)[][] | null;
+            /** Overall Mean Ms */
+            overall_mean_ms?: (number | null)[] | null;
+            /** Qps */
+            qps: (number | null)[][];
+            /** Res */
+            res: number;
+            /** Start */
+            start: number;
+            /** Xs */
+            xs: number[];
+        };
+        /** SnapshotCheck */
+        SnapshotCheck: {
+            /** Check */
+            check: string;
+            /** Label */
+            label: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "warn" | "bad" | "unknown";
+            /** Value */
+            value: string;
+        };
+        /** SnapshotEvent */
+        SnapshotEvent: {
+            /** Definition */
+            definition?: string | null;
+            /** Delivery */
+            delivery?: string | null;
+            /** Detail */
+            detail: string;
+            /** Item Id */
+            item_id: number | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "created" | "worse" | "reopened" | "resolved" | "index";
+            /** Query Keys */
+            query_keys: string[];
+            /** Resolved At */
+            resolved_at?: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "open" | "resolved" | "dismissed" | "done" | "unknown";
+            /** Title */
+            title: string;
+            /** Tone */
+            tone?: string | null;
+            /** Ts */
+            ts: number;
+            /** Type */
+            type: string;
+            /** What */
+            what: string;
+        };
+        /** SnapshotEvidence */
+        SnapshotEvidence: {
+            /** Label */
+            label: string;
+            /** Value */
+            value: string;
+        };
+        /** SnapshotFact */
+        SnapshotFact: {
+            /** Keys */
+            keys: string[];
+            /** Kind */
+            kind: string;
+            /** Text */
+            text: string;
+        };
+        /** SnapshotFix */
+        SnapshotFix: {
+            /** Kind */
+            kind: string;
+            /** Sql */
+            sql?: string | null;
+            /** Title */
+            title: string;
+        };
+        /** SnapshotHealth */
+        SnapshotHealth: {
+            /** Fine */
+            fine: string[];
+            /** Problems */
+            problems: components["schemas"]["SnapshotHealthProblem"][];
+            /** Unavailable */
+            unavailable: components["schemas"]["SnapshotHealthGap"][];
+        };
+        /** SnapshotHealthGap */
+        SnapshotHealthGap: {
+            /** Check */
+            check: string;
+            /** Label */
+            label: string;
+            /** Reason */
+            reason: string;
+        };
+        /** SnapshotHealthProblem */
+        SnapshotHealthProblem: {
+            /** Action */
+            action: string | null;
+            /** Check */
+            check: string;
+            /** Label */
+            label: string;
+            /** Rows */
+            rows: components["schemas"]["SnapshotHealthRow"][];
+            /** Sql */
+            sql: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "warn" | "bad";
+            /** Summary */
+            summary: string;
+        };
+        /** SnapshotHealthRow */
+        SnapshotHealthRow: {
+            /** Detail */
+            detail: string;
+            /** Name */
+            name: string;
+            /** Value */
+            value: string;
+        };
+        /** SnapshotMarker */
+        SnapshotMarker: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "event" | "index";
+            /** Label */
+            label: string;
+            /**
+             * Query Keys
+             * @default []
+             */
+            query_keys?: string[];
+            /** Tone */
+            tone?: string | null;
+            /** Ts */
+            ts: number;
+        };
+        /** SnapshotNumber */
+        SnapshotNumber: {
+            /** Better */
+            better: ("up" | "down") | null;
+            /** Change */
+            change: number | null;
+            /** Label */
+            label: string;
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "qps" | "mean_ms" | "active_conns_peak" | "cache_hit_ratio_min" | "xact_rollback" | "deadlocks";
+            /** Prior */
+            prior: number | null;
+            /**
+             * Unit
+             * @enum {string}
+             */
+            unit: "qps" | "ms" | "count" | "ratio";
+            /** Value */
+            value: number | null;
+        };
+        /** SnapshotOverview */
+        SnapshotOverview: {
+            /** Checks */
+            checks: components["schemas"]["SnapshotCheck"][];
+            /** Headline */
+            headline: string;
+            /** Label */
+            label: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "warn" | "bad";
+        };
+        /** SnapshotPeriod */
+        SnapshotPeriod: {
+            /** Day */
+            day: string;
+            /** End */
+            end: number;
+            /** Observed From */
+            observed_from?: number | null;
+            /** Observed To */
+            observed_to?: number | null;
+            /** Partial */
+            partial: boolean;
+            /** Prior End */
+            prior_end?: number | null;
+            /** Prior Observed From */
+            prior_observed_from?: number | null;
+            /** Prior Start */
+            prior_start?: number | null;
+            /**
+             * Rolling
+             * @default false
+             */
+            rolling?: boolean;
+            /** Start */
+            start: number;
+        };
+        /** SnapshotQuery */
+        SnapshotQuery: {
+            /** Analysis Mode */
+            analysis_mode: string | null;
+            /** Analysis Ref */
+            analysis_ref: string | null;
+            /** Analyzed At */
+            analyzed_at: number | null;
+            /** Calls */
+            calls: number | null;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Findings
+             * @default []
+             */
+            findings?: string[];
+            fix: components["schemas"]["SnapshotFix"] | null;
+            /** Grade */
+            grade: ("A" | "B" | "C" | "D" | "F") | null;
+            /** Headline */
+            headline: string | null;
+            /** Latency Change */
+            latency_change: number | null;
+            /** Mean Ms */
+            mean_ms: number | null;
+            /** New */
+            new: boolean;
+            note?: components["schemas"]["SnapshotQueryNote"] | null;
+            /** Prior Calls */
+            prior_calls: number | null;
+            /** Prior Mean Ms */
+            prior_mean_ms: number | null;
+            /** Provisional */
+            provisional: boolean;
+            /** Qps */
+            qps: number | null;
+            /** Query Key */
+            query_key: string;
+            /** Score */
+            score: number | null;
+            /** Share */
+            share: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "needs_attention" | "watch" | "fix_ready" | "healthy" | "not_analyzed";
+            /** Status Reason */
+            status_reason: string | null;
+            /** Text */
+            text?: string | null;
+            /** Total Ms */
+            total_ms: number;
+        };
+        /** SnapshotQueryNote */
+        SnapshotQueryNote: {
+            /**
+             * Action
+             * @default
+             */
+            action?: string;
+            /** Query Key */
+            query_key: string;
+            /** Title */
+            title: string;
+            /** Why */
+            why: string;
+        };
+        /** SnapshotSetting */
+        SnapshotSetting: {
+            /** Current */
+            current: string;
+            /** Name */
+            name: string;
+            /** Target */
+            target: string;
+        };
+        /** SnapshotSpike */
+        SnapshotSpike: {
+            /** End */
+            end: number;
+            /** Events */
+            events: components["schemas"]["SnapshotSpikeEvent"][];
+            /** Id */
+            id: string;
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "traffic" | "latency";
+            /** Peak */
+            peak: number;
+            /** Peak Ts */
+            peak_ts: number;
+            /** Queries */
+            queries: components["schemas"]["SnapshotSpikeQuery"][];
+            /** Ratio */
+            ratio: number | null;
+            /** Start */
+            start: number;
+            /** Summary */
+            summary: string;
+            /** Usual */
+            usual: number;
+        };
+        /** SnapshotSpikeEvent */
+        SnapshotSpikeEvent: {
+            /** Title */
+            title: string;
+            /** Ts */
+            ts: number;
+            /** What */
+            what: string;
+        };
+        /** SnapshotSpikeQuery */
+        SnapshotSpikeQuery: {
+            /** Before */
+            before: number;
+            /** During */
+            during: number;
+            /** Query Key */
+            query_key: string;
+            /** Ratio */
+            ratio: number | null;
+        };
+        /**
+         * SnapshotVitals
+         * @description Database-wide readings over the day, one per x.
+         */
+        SnapshotVitals: {
+            /** Active Conns */
+            active_conns: (number | null)[];
+            /** Cache Hit Ratio */
+            cache_hit_ratio: (number | null)[];
+            /** Deadlocks */
+            deadlocks: (number | null)[];
+            /** Mean Ms */
+            mean_ms: (number | null)[];
+            /** Qps */
+            qps: (number | null)[];
+            /** Res */
+            res: number;
+            /** Xact Rollback */
+            xact_rollback: (number | null)[];
+            /** Xs */
+            xs: number[];
+        };
         /** SshAuthOptionResponse */
         SshAuthOptionResponse: {
             /** Host */
@@ -7866,12 +11555,27 @@ export interface components {
         };
         /** TokenUsage */
         TokenUsage: {
+            /**
+             * Cost Usd
+             * @default null
+             */
+            cost_usd?: number | null;
             /** Estimated Cost Usd */
             estimated_cost_usd: number;
             /** Input */
             input: number;
+            /**
+             * Model
+             * @default null
+             */
+            model?: string | null;
             /** Output */
             output: number;
+            /**
+             * Provider
+             * @default null
+             */
+            provider?: string | null;
             /** Total */
             total: number;
         } & {
@@ -8143,6 +11847,13 @@ export interface components {
              */
             type: "status";
         };
+        /** TrendPoint */
+        TrendPoint: {
+            /** Ts */
+            ts: number;
+            /** Value */
+            value: number;
+        };
         /** TrialActivateRequest */
         TrialActivateRequest: {
             /** Email */
@@ -8300,6 +12011,36 @@ export interface components {
          */
         UpdateTargetRequest: {
             target: components["schemas"]["TargetData"];
+        };
+        /** UsageCaps */
+        UsageCaps: {
+            /** Analysis Daily */
+            analysis_daily: number;
+            /** Jev Daily */
+            jev_daily: number;
+            /**
+             * Push Daily
+             * @default 3
+             */
+            push_daily?: number;
+        };
+        /** UsageDay */
+        UsageDay: {
+            /** Analyses */
+            analyses: number;
+            /** Billable Calls */
+            billable_calls: number;
+            /** Date */
+            date: string;
+            /** Jev Calls */
+            jev_calls: number;
+            /**
+             * Notifications
+             * @default 0
+             */
+            notifications?: number;
+            /** Reports */
+            reports: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -8498,6 +12239,24 @@ export interface components {
              * @constant
              */
             type: "status";
+        };
+        /** AddQueryRequest */
+        features__monitor__api__routes__AddQueryRequest: {
+            /** Analysis Id */
+            analysis_id?: string | null;
+            /** Mode */
+            mode?: ("analyze" | "explain") | null;
+            /** Query Hash */
+            query_hash?: string | null;
+            /** Sql */
+            sql: string;
+        };
+        /** AddQueryRequest */
+        features__query_registry__api__routes__AddQueryRequest: {
+            /** Sql */
+            sql: string;
+            /** Target */
+            target?: string | null;
         };
     };
     responses: never;
@@ -8737,6 +12496,118 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccountStatusResponse"];
+                };
+            };
+        };
+    };
+    agent_activity_api_agent_activity_get: {
+        parameters: {
+            query?: {
+                target?: string | null;
+                action?: ("deep_analysis" | "ask" | "classification" | "attention_check" | "daily_snapshot" | "benchmark") | null;
+                outcome?: ("done" | "failed" | "skipped" | "cancelled") | null;
+                /** @description Epoch seconds, inclusive */
+                since?: number | null;
+                /** @description Epoch seconds, exclusive */
+                until?: number | null;
+                cursor?: string | null;
+                limit?: number;
+                /** @description Fold attention checks, classifications and skipped deep analyses per database and day or hour; 'none' lists every entry */
+                group?: "day" | "hour" | "none";
+                /** @description Minutes east of UTC that set local days and hours */
+                utc_offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentActivityPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    agent_activity_export_api_agent_activity_export_csv_get: {
+        parameters: {
+            query?: {
+                target?: string | null;
+                action?: ("deep_analysis" | "ask" | "classification" | "attention_check" | "daily_snapshot" | "benchmark") | null;
+                /** @description From, epoch seconds, inclusive */
+                since?: number | null;
+                /** @description To, epoch seconds, exclusive */
+                until?: number | null;
+                /** @description Minutes east of UTC that name the file's days */
+                utc_offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    agent_activity_entry_api_agent_activity__entry_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentActivityDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -9335,6 +13206,38 @@ export interface operations {
             };
         };
     };
+    list_compare_runs_api_cache_compare_runs_get: {
+        parameters: {
+            query: {
+                target: string;
+                query_hash?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompareRunPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     start_cache_compare_run_api_cache_compare_runs_post: {
         parameters: {
             query?: never;
@@ -9659,6 +13562,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TargetResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_prerequisites_api_configure_targets__name__prerequisites_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -10857,6 +14793,46 @@ export interface operations {
             };
         };
     };
+    monitoring_upgrade_api_init_monitoring_upgrade_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitoringUpgradeResponse"];
+                };
+            };
+        };
+    };
+    dismiss_monitoring_upgrade_api_init_monitoring_upgrade_dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InitCompleteResponse"];
+                };
+            };
+        };
+    };
     get_init_status_api_init_status_get: {
         parameters: {
             query?: never;
@@ -11067,6 +15043,1241 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inbox_api_monitor_inbox_get: {
+        parameters: {
+            query?: {
+                state?: string | null;
+                target?: string | null;
+                include_muted?: boolean;
+                include_digest?: boolean;
+                incidents?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_all_seen_api_monitor_inbox_mark_all_seen_post: {
+        parameters: {
+            query?: {
+                target?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inbox_stream_api_monitor_inbox_stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    inbox_item_api_monitor_inbox__item_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inbox_action_api_monitor_inbox__item_id___action__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+                action: "seen" | "snooze" | "dismiss" | "resolve" | "reopen";
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["InboxAction"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    monitoring_limit_api_monitor_limit_get: {
+        parameters: {
+            query?: {
+                target?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitoringLimit"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    release_monitoring_slot_api_monitor_limit_release_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MonitoringSlotRelease"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitoringLimit"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mute_rules_api_monitor_mute_rules_get: {
+        parameters: {
+            query?: {
+                target?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MuteRulePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_mute_rule_api_monitor_mute_rules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MuteRuleInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MuteRule"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_mute_rule_api_monitor_mute_rules__rule_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedMuteRule"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    claim_ai_monitoring_api_monitor_targets__target__ai_monitoring_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitorSettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    analyze_jobs_api_monitor_targets__target__analyze_jobs_get: {
+        parameters: {
+            query?: {
+                state?: string | null;
+            };
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzeJobPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    collect_now_api_monitor_targets__target__collect_now_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectNowResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    health_api_monitor_targets__target__health_get: {
+        parameters: {
+            query?: {
+                range?: ("5m" | "15m" | "1h" | "24h" | "7d" | "30d" | "90d" | "all") | null;
+                window?: string | null;
+                from?: number | null;
+                to?: number | null;
+            };
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitorHealth"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    index_changes_api_monitor_targets__target__index_changes_get: {
+        parameters: {
+            query?: {
+                since?: number;
+            };
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    judge_runs_api_monitor_targets__target__judge_runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    load_api_monitor_targets__target__load_get: {
+        parameters: {
+            query?: {
+                range?: "5m" | "15m" | "1h" | "24h" | "7d" | "30d" | "90d" | "all";
+                top?: number;
+                from?: number | null;
+                to?: number | null;
+            };
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadBreakdown"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    load_latency_api_monitor_targets__target__load_latency_get: {
+        parameters: {
+            query: {
+                keys: string;
+                range?: "5m" | "15m" | "1h" | "24h" | "7d" | "30d" | "90d" | "all";
+                from?: number | null;
+                to?: number | null;
+            };
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LatencyBreakdown"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pulse_api_monitor_targets__target__pulse_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitorPulsePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    queries_api_monitor_targets__target__queries_get: {
+        parameters: {
+            query?: {
+                range?: ("5m" | "15m" | "1h" | "24h" | "7d" | "30d" | "90d" | "all") | null;
+                window?: string | null;
+                sort?: string;
+                filter?: string;
+                q?: string;
+                limit?: number;
+                offset?: number;
+                from?: number | null;
+                to?: number | null;
+                keys?: string | null;
+                locate?: string | null;
+            };
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitorQueryPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_query_api_monitor_targets__target__queries_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["features__monitor__api__routes__AddQueryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddedQuery"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    query_api_monitor_targets__target__queries__key__get: {
+        parameters: {
+            query?: {
+                range?: ("5m" | "15m" | "1h" | "24h" | "7d" | "30d" | "90d" | "all") | null;
+                from?: number | null;
+                to?: number | null;
+            };
+            header?: never;
+            path: {
+                target: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitorQuery"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    query_analysis_api_monitor_targets__target__queries__key__analysis_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeepAnalysisDigest"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enqueue_analysis_api_monitor_targets__target__queries__key__analyze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzeJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    query_analyze_jobs_api_monitor_targets__target__queries__key__analyze_jobs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                target: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzeJobPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ensure_library_entry_api_monitor_targets__target__queries__key__library_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryEntry"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    series_api_monitor_targets__target__queries__key__series_get: {
+        parameters: {
+            query?: {
+                range?: "5m" | "15m" | "1h" | "24h" | "7d" | "30d" | "90d" | "all";
+                from?: number | null;
+                to?: number | null;
+            };
+            header?: never;
+            path: {
+                target: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuerySeries"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_report_api_monitor_targets__target__report_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatabaseReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_history_api_monitor_targets__target__report_history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportHistory"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    latest_report_api_monitor_targets__target__report_latest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatabaseReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_report_api_monitor_targets__target__report__report_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+                report_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatabaseReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_report_api_monitor_targets__target__report__report_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+                report_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatabaseReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_events_api_monitor_targets__target__report__report_id__events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+                report_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    settings_api_monitor_targets__target__settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitorSettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_settings_api_monitor_targets__target__settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MonitorSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitorSettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_api_monitor_targets__target__stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    usage_api_monitor_targets__target__usage_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitorUsage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    monitor_work_api_monitor_work_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitorWork"];
                 };
             };
         };
@@ -11797,7 +17008,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AddQueryRequest"];
+                "application/json": components["schemas"]["features__query_registry__api__routes__AddQueryRequest"];
             };
         };
         responses: {
@@ -11942,6 +17153,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LoadTestRunStartResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    query_benchmark_history_api_query_registry_queries__query_hash__benchmarks_get: {
+        parameters: {
+            query: {
+                target: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                query_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueryBenchmarkHistory"];
                 };
             };
             /** @description Validation Error */
@@ -13207,6 +18452,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+        };
+    };
+    post_client_events_api_telemetry_events_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientEventsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientEventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_telemetry_identity_api_telemetry_identity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };

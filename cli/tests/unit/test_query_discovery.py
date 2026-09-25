@@ -17,6 +17,7 @@ import pytest
 
 from features.query_registry import discovery
 from features.query_registry.discovery import (
+    OBSERVATION_RETENTION_SECONDS,
     RESYNC_GAP_THRESHOLD,
     RETENTION_EVENT_KEEP,
     RETENTION_MIN_INTERVAL_SECONDS,
@@ -34,6 +35,7 @@ from shared.query_registry.observation_store import (
     LeaseLostError,
     ObservationStore,
 )
+from shared.monitor.monitor_store import MonitorStore
 
 
 @pytest.fixture(autouse=True)
@@ -312,7 +314,7 @@ class BrokenStore:
     append_event = upsert_collector_state = record_counter_snapshots = _fail
     get_collector_state = get_identity_aliases = record_identity_aliases = _fail
     record_recent_observations = latest_counter_snapshots = _fail
-    prune = prune_events = prune_rdst_executions = _fail
+    prune = prune_events = prune_rdst_executions = prune_observations = _fail
 
 
 @pytest.mark.asyncio
@@ -400,6 +402,10 @@ class RetentionSpyStore:
         self.retention_calls.append(("prune_rdst_executions", cutoff, now))
         return self._inner.prune_rdst_executions(cutoff, chunk, now=now)
 
+    def prune_observations(self, cutoff, **kwargs):
+        self.retention_calls.append(("prune_observations", cutoff))
+        return self._inner.prune_observations(cutoff, **kwargs)
+
     def __getattr__(self, name):
         return getattr(self._inner, name)
 
@@ -414,6 +420,9 @@ class RetentionFailureStore(RetentionSpyStore):
         raise RuntimeError("retention down")
 
     def prune_rdst_executions(self, cutoff, chunk=10000, *, now=None):
+        raise RuntimeError("retention down")
+
+    def prune_observations(self, cutoff, **kwargs):
         raise RuntimeError("retention down")
 
 
@@ -438,17 +447,18 @@ async def test_retention_runs_only_on_the_gated_cadence(tmp_path):
             ("prune", 10_000 - RETENTION_WINDOW_SECONDS),
             ("prune_events", 10_000 - RETENTION_WINDOW_SECONDS, RETENTION_EVENT_KEEP),
             ("prune_rdst_executions", 10_000 - RETENTION_WINDOW_SECONDS, 10_000),
+            ("prune_observations", 10_000 - OBSERVATION_RETENTION_SECONDS),
         ]
 
         # Inside the gate a successful cycle skips retention entirely.
         clock["now"] += RETENTION_MIN_INTERVAL_SECONDS - 1
         await collector.collect_now()
-        assert len(spy.retention_calls) == 3
+        assert len(spy.retention_calls) == 4
 
         # Once the gate elapses the next successful cycle compacts again.
         clock["now"] += 1
         await collector.collect_now()
-        assert len(spy.retention_calls) == 6
+        assert len(spy.retention_calls) == 8
     finally:
         store.close()
 
@@ -824,6 +834,63 @@ def recent_observation_rows(store):
     return {row[0]: row[1:] for row in rows}
 
 
+@pytest.mark.asyncio
+async def test_monitor_records_before_library_refresh(tmp_path, monkeypatch):
+    monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
+    monitor = MonitorStore()
+    monitor.set_settings("demo", {"enabled": True})
+    registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+    original_load = registry.load
+    text = "SELECT * FROM users WHERE id = $1"
+
+    def checked_load():
+        assert monitor.read("SELECT text FROM query_text WHERE target=?", ("demo",)) == [
+            {"text": text}]
+        original_load()
+
+    monkeypatch.setattr(registry, "load", checked_load)
+    connection = FakeConnection(pg_rules(
+        2000.0, [pg_stat_row(111, calls=5, total=100.0)],
+        text_rows=[pg_text_row(111, text)],
+    ))
+    collector = two_phase_collector(
+        tmp_path, lambda target: (connection, "postgresql"), registry=registry,
+    )
+
+    event = await collector.collect_now()
+
+    assert event.event == "discovery_update"
+    assert event.data["stats"]["db_touch_duration_ms"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_known_library_refresh_rotates_with_bounded_work(tmp_path, monkeypatch):
+    monkeypatch.setattr(discovery, "LIBRARY_REFRESH_LIMIT", 1)
+    registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+    texts = ["SELECT * FROM users", "SELECT * FROM orders", "SELECT * FROM invoices"]
+    connection = FakeConnection(pg_rules(
+        2000.0, [pg_stat_row(i, calls=5, total=100.0) for i in (111, 222, 333)],
+        text_rows=[pg_text_row(i, text) for i, text in zip((111, 222, 333), texts)],
+    ))
+    collector = two_phase_collector(
+        tmp_path, lambda target: (connection, "postgresql"), registry=registry,
+    )
+    first = await collector.collect_now()
+    assert len(first.data["new_hashes"]) == 3
+
+    for cycle in range(1, 4):
+        connection.rules = pg_rules(
+            2000.0 + 60 * cycle,
+            [pg_stat_row(i, calls=5 + cycle, total=100.0 + cycle)
+             for i in (111, 222, 333)],
+        )
+        event = await collector.collect_now()
+        assert event.data["stats"]["refreshed_identity_count"] == 1
+
+    registry.load()
+    assert all(registry.get_query(key).frequency > 5 for key in first.data["new_hashes"])
+
+
 def test_two_phase_flag_semantics(monkeypatch):
     monkeypatch.delenv("RDST_TWO_PHASE_DISCOVERY", raising=False)
     assert two_phase_discovery_enabled() is True
@@ -951,7 +1018,8 @@ async def test_two_phase_pg_two_cycles_baseline_then_deltas(tmp_path):
         assert admitted.frequency == 2
         # Phase B ran once for the fresh keys and once for late admission.
         assert (
-            len([sql for sql, _ in connection.executed if "queryid = ANY" in sql]) == 2
+            len([sql for sql, _ in connection.executed
+                 if "queryid = ANY(%s) AND dbid" in sql]) == 2
         )
 
         observed = recent_observation_rows(store)
@@ -1428,6 +1496,64 @@ async def test_two_phase_epoch_change_resets_baseline_and_writes_no_deltas(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_pg_target_scoped_reset_rebaselines_without_global_epoch_change(tmp_path):
+    store = ObservationStore(tmp_path / "cache.db")
+    try:
+        sql = "SELECT * FROM users WHERE id = 1"
+        connection = FakeConnection(pg_rules(
+            2000.0, [pg_stat_row(i, calls=40, total=800.0) for i in range(150)],
+            text_rows=[pg_text_row(i, sql) for i in range(150)]))
+        collector = two_phase_collector(
+            tmp_path, lambda target: (connection, "postgresql"), store=store)
+        first = await collector.collect_now()
+        epoch = first.data["stats"]["epoch_id"]
+
+        connection.rules = pg_rules(
+            2060.0, [pg_stat_row(i, calls=2, total=40.0) for i in range(30)])
+        second = await collector.collect_now()
+        assert second.data["stats"]["epoch_id"] == epoch
+        assert second.data["stats"]["target_counter_reset"] is True
+        assert second.data["stats"]["deltas_computed"] == 0
+        assert recent_observation_rows(store) == {}
+        assert len(store.latest_counter_snapshots("demo", epoch)) == 30
+
+        connection.rules = pg_rules(
+            2120.0, [pg_stat_row(i, calls=5, total=100.0) for i in range(30)])
+        third = await collector.collect_now()
+        assert third.data["stats"]["target_counter_reset"] is False
+        assert third.data["stats"]["deltas_computed"] == 30
+    finally:
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_absent_pg_keys_do_not_starve_library_admission(tmp_path):
+    store = ObservationStore(tmp_path / "cache.db")
+    try:
+        texts = [pg_text_row(i, f"SELECT p{i} FROM users WHERE id = 1")
+                 for i in (1, 2, 3)]
+        connection = FakeConnection(pg_rules(
+            2000.0, [pg_stat_row(i, calls=1, total=total)
+                     for i, total in ((1, 300.0), (2, 200.0), (3, 100.0))],
+            text_rows=texts))
+        collector = two_phase_collector(
+            tmp_path, lambda target: (connection, "postgresql"), store=store,
+            limit=1)
+        first = await collector.collect_now()
+        assert first.data["stats"]["new_identity_count"] == 1
+
+        # The highest-ranked unseen identity disappeared. Its old baseline
+        # must not hide a lower-ranked identity that is still in the view.
+        connection.rules = pg_rules(
+            2060.0, [pg_stat_row(3, calls=2, total=110.0)],
+            text_rows=[texts[2]])
+        second = await collector.collect_now()
+        assert second.data["stats"]["new_identity_count"] == 1
+    finally:
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_two_phase_refreshes_known_entry_without_readding(tmp_path, monkeypatch):
     registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
     connection = FakeConnection(
@@ -1643,7 +1769,7 @@ def mysql_digest_row(digest, text, calls, total_ps, first_seen, last_seen,
                      schema="app", sample=None):
     row = (
         schema, digest, text, calls, total_ps, 1e9, 1e12, 2e12,
-        calls * 2, calls * 3, 0, first_seen, last_seen,
+        calls * 2, calls * 3, 0, first_seen, last_seen, 0,
     )
     if sample is not None:
         row += (sample,)
@@ -1706,7 +1832,9 @@ async def test_two_phase_mysql_inline_texts_and_cursor_restore(tmp_path):
         incremental = [
             params for sql, params in conn2.executed if "LAST_SEEN >=" in sql
         ]
-        assert incremental == [("2026-08-10 10:00:00.500000",)]
+        # Both engine-side slices resume from the restored cursor.
+        cursor = "2026-08-10 10:00:00.500000"
+        assert incremental == [(cursor, cursor)]
     finally:
         store.close()
 
@@ -2385,7 +2513,7 @@ async def test_unusable_text_stays_unresolved_and_is_retried(tmp_path, bad_text)
             "10:16384:111:t": second.data["new_hashes"][0]
         }
         assert (
-            len([sql for sql, _ in connection.executed if "queryid = ANY" in sql])
+            len([sql for sql, _ in connection.executed if "queryid = ANY(%s) AND dbid" in sql])
             == 2
         )
     finally:
@@ -2499,6 +2627,9 @@ class SpyObservationStore:
         return 0
 
     def prune_rdst_executions(self, cutoff, chunk=10000, *, now=None):
+        return 0
+
+    def prune_observations(self, cutoff, **kwargs):
         return 0
 
 
@@ -2687,3 +2818,39 @@ async def test_legacy_lane_admits_only_user_workload(tmp_path):
     registry.load()
     assert [entry.original_sql for entry in registry.list_queries()] == [user_sql]
     assert event.data["new_hashes"] == [hash_sql(user_sql)]
+
+
+@pytest.mark.asyncio
+async def test_first_monitored_reading_sets_the_baseline_without_a_rate(tmp_path, monkeypatch):
+    """Library discovery's snapshot predates monitoring: the delta to it covers calls from
+    before monitoring started, so the first monitored reading charts nothing."""
+    monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
+    monitor = MonitorStore()
+    text = "SELECT * FROM users WHERE id = $1"
+    clock = iter([1000.0, 1010.0, 1020.0, 1030.0])
+    connection = FakeConnection(pg_rules(1000.0, [pg_stat_row(111, calls=5, total=100.0)],
+                                         text_rows=[pg_text_row(111, text)]))
+    collector = two_phase_collector(tmp_path, lambda target: (connection, "postgresql"),
+                                    local_clock=lambda: next(clock))
+    await collector.collect_now()
+    monitor.set_settings("demo", {"enabled": True})
+    # Monitoring turns on long after the snapshot: 900 calls piled up since it.
+    for now, calls in ((1010.0, 905), (1020.0, 1005)):
+        connection.rules = {"pg_stat_database": [(calls, 0, 100, 1, 0, 3, 100, 555.0)],
+                            **pg_rules(now, [pg_stat_row(111, calls=calls, total=calls * 20.0)],
+                                       text_rows=[pg_text_row(111, text)])}
+        await collector.collect_now()
+    assert monitor.read("SELECT SUM(calls) n FROM stmt_series WHERE target='demo'")[0]["n"] \
+        == 100
+    db = monitor.read("SELECT calls,xact_commit FROM db_series WHERE target='demo'")
+    assert db == [{"calls": 100, "xact_commit": 100}]
+    pulses = monitor.read("SELECT ts,detail FROM monitor_pulse WHERE target='demo' "
+                          "AND kind='collect' ORDER BY ts")
+    assert pulses == [{"ts": 1010, "detail": "Read 1 query"},
+                      {"ts": 1020, "detail": "Read 1 query"}]
+    assert monitor.read("SELECT query_key FROM query_text WHERE target='demo'")
+    # Turned off and on again, the next reading is a baseline once more.
+    monitor.set_settings("demo", {"enabled": False})
+    connection.rules = pg_rules(1030.0, [pg_stat_row(111, calls=2000, total=40000.0)])
+    await collector.collect_now()
+    assert collector._monitor_baseline_set is False

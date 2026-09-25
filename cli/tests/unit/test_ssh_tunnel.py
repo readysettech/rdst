@@ -146,7 +146,10 @@ class _SshServer:
         except (EOFError, OSError):
             pass
         finally:
-            channel.close()
+            try:
+                channel.close()
+            except (OSError, EOFError):
+                pass
             if remote is not None:
                 remote.close()
 
@@ -334,15 +337,14 @@ def test_ensure_waits_for_accept_loop_readiness(tunnel_environment):
         manager.close_all()
 
 
-def test_forwarder_retries_a_transient_channel_open_failure():
+def test_forwarder_stops_after_a_channel_open_failure():
     transport = MagicMock()
     transport.open_channel.side_effect = [
         paramiko.SSHException("transport not ready"),
         None,
     ]
-    stop_event = MagicMock()
-    stop_event.is_set.return_value = False
-    stop_event.wait.return_value = False
+    stop_event = threading.Event()
+    failure = MagicMock()
     client = MagicMock()
     tunnel = SimpleNamespace(
         target="db",
@@ -350,6 +352,8 @@ def test_forwarder_retries_a_transient_channel_open_failure():
         stop_event=stop_event,
         clients={client},
         clients_lock=threading.Lock(),
+        channel_lock=threading.Lock(),
+        on_failure=failure,
     )
 
     TunnelManager._forward_connection(
@@ -360,8 +364,9 @@ def test_forwarder_retries_a_transient_channel_open_failure():
         5432,
     )
 
-    assert transport.open_channel.call_count == 2
-    stop_event.wait.assert_called_once_with(0.25)
+    assert transport.open_channel.call_count == 1
+    assert stop_event.is_set()
+    failure.assert_called_once()
     client.close.assert_called_once()
 
 
@@ -772,6 +777,12 @@ def test_successful_tunnel_remembers_host_without_key(
         def set_keepalive(self, seconds):
             self.keepalive = seconds
 
+        def set_log_channel(self, name):
+            pass
+
+        def open_channel(self, *args, **kwargs):
+            return MagicMock()
+
         def close(self):
             self.active = False
 
@@ -810,7 +821,7 @@ def test_successful_tunnel_remembers_host_without_key(
         def bind(self, address):
             pass
 
-        def listen(self):
+        def listen(self, backlog):
             pass
 
         def settimeout(self, timeout):

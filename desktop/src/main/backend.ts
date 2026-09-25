@@ -5,10 +5,18 @@ import { createServer } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 
+import { type BackendLog, LineSplitter } from './backend-log.js'
+
 const BACKEND_NAME = 'rdst'
 const DEFAULT_HOST = '127.0.0.1'
 const READY_PATH = '/api/init/status'
-const STARTUP_TIMEOUT_MS = 30_000
+// How long the backend may go without answering or reporting progress before it counts as
+// hung. A cold start of the bundled backend with an integrity check of a large cache.db can
+// take most of a minute on a Windows machine with Defender scanning the data folder.
+const STARTUP_TIMEOUT_MS = 120_000
+// On quit, how long to let an interrupted data migration finish before stopping it anyway.
+const MIGRATION_STOP_GRACE_MS = 10 * 60_000
+const STARTUP_MARKER = 'RDST_STARTUP '
 const READINESS_INTERVAL_MS = 250
 const READINESS_REQUEST_TIMEOUT_MS = 1_000
 const SHUTDOWN_TIMEOUT_MS = 3_000
@@ -68,21 +76,105 @@ export interface BackendHandle {
   process: ChildProcess
   apiBaseUrl: string
   binaryPath: string
+  /** True while the backend reports a data migration in progress. */
+  migrating: () => boolean
+}
+
+export type StartupPhase = 'starting' | 'migrating'
+
+export interface StartupMarker {
+  state: string
+  store?: string
+  pending?: number
 }
 
 export interface StartBackendOptions {
   resourcesPath: string
   host?: string
   port?: number
+  sourceDir?: string
+  /** Runs this instead of the bundled backend; tests use it for a stand-in process. */
+  command?: { file: string; args: string[] }
+  log?: BackendLog
+  /** The keyservice a change build was packaged for; RDST_KEYSERVICE_URL still wins. */
+  keyservice?: string
+  onPhase?: (phase: StartupPhase, store?: string) => void
+  /** Called once the process exists, so a quit during startup can stop it. */
+  onSpawn?: (handle: BackendHandle) => void
+  startupTimeoutMs?: number
+}
+
+/** Reads a `RDST_STARTUP {...}` line from the backend's stdout. */
+export function parseStartupMarker(line: string): StartupMarker | null {
+  if (!line.startsWith(STARTUP_MARKER)) return null
+  try {
+    const value = JSON.parse(line.slice(STARTUP_MARKER.length)) as unknown
+    if (
+      value &&
+      typeof value === 'object' &&
+      typeof (value as StartupMarker).state === 'string'
+    ) {
+      return value as StartupMarker
+    }
+  } catch {
+    // Not a marker after all.
+  }
+  return null
+}
+
+/**
+ * What the startup markers say so far. A start that is migrating never times out; otherwise
+ * the timeout counts from the last sign of progress (spawn or a marker).
+ */
+export class StartupWatch {
+  private active = false
+  private lastProgress: number
+
+  constructor(
+    private readonly timeoutMs: number = STARTUP_TIMEOUT_MS,
+    private readonly now: () => number = Date.now
+  ) {
+    this.lastProgress = now()
+  }
+
+  get migrating(): boolean {
+    return this.active
+  }
+
+  /** Apply one marker; returns the phase it moves to, if it changes. */
+  apply(marker: StartupMarker): StartupPhase | null {
+    this.lastProgress = this.now()
+    if (marker.state === 'migrating' && !this.active) {
+      this.active = true
+      return 'migrating'
+    }
+    if (
+      marker.state === 'migrated' &&
+      this.active &&
+      (marker.pending ?? 0) === 0
+    ) {
+      this.active = false
+      return 'starting'
+    }
+    return null
+  }
+
+  timedOut(): boolean {
+    return !this.active && this.now() - this.lastProgress > this.timeoutMs
+  }
 }
 
 export function backendEnvironment(
-  base: NodeJS.ProcessEnv = process.env
+  base: NodeJS.ProcessEnv = process.env,
+  keyservice?: string
 ): NodeJS.ProcessEnv {
   return {
     ...base,
     PATH: backendExecutablePath(base.PATH),
     RDST_DESKTOP: '1',
+    ...(keyservice && !base.RDST_KEYSERVICE_URL
+      ? { RDST_KEYSERVICE_URL: keyservice }
+      : {}),
   }
 }
 
@@ -156,9 +248,8 @@ function validateExecutable(binaryPath: string): void {
   accessSync(binaryPath, constants.X_OK)
 }
 
-function appendOutput(lines: string[], chunk: Buffer): void {
-  const text = chunk.toString().replace(/\r/g, '')
-  for (const line of text.split('\n')) {
+function appendOutput(lines: string[], newLines: string[]): void {
+  for (const line of newLines) {
     if (!line.trim()) continue
     lines.push(line)
     if (lines.length > MAX_OUTPUT_LINES) {
@@ -203,6 +294,7 @@ export async function findAvailablePort(host: string): Promise<number> {
 
 async function waitForBackend(
   apiBaseUrl: string,
+  watch: StartupWatch,
   getExitStatus: () => {
     code: number | null
     signal: NodeJS.Signals | null
@@ -211,10 +303,9 @@ async function waitForBackend(
   getStdout: () => string[],
   getStderr: () => string[]
 ): Promise<void> {
-  const deadline = Date.now() + STARTUP_TIMEOUT_MS
   let lastError = 'not checked yet'
 
-  while (Date.now() < deadline) {
+  while (!watch.timedOut()) {
     const spawnError = getSpawnError()
     if (spawnError) {
       throw new Error(`Unable to start RDST backend: ${spawnError.message}`)
@@ -255,8 +346,12 @@ export async function startBackend(
   const host = options.host ?? DEFAULT_HOST
   const port = options.port ?? (await findAvailablePort(host))
   const apiBaseUrl = `http://${host}:${port}`
-  const binaryPath = resolveBackendBinaryPath(options.resourcesPath)
-  validateExecutable(binaryPath)
+  const binaryPath =
+    options.command?.file ??
+    (options.sourceDir ? 'uv' : resolveBackendBinaryPath(options.resourcesPath))
+  if (!options.sourceDir && !options.command) validateExecutable(binaryPath)
+  const log = options.log
+  const watch = new StartupWatch(options.startupTimeoutMs)
 
   const stdoutLines: string[] = []
   const stderrLines: string[] = []
@@ -268,49 +363,105 @@ export async function startBackend(
 
   const child = spawn(
     binaryPath,
-    ['web', '--ui', 'none', '--host', host, '--port', String(port)],
+    [
+      ...(options.command?.args ?? []),
+      ...(options.sourceDir && !options.command
+        ? [
+            'run',
+            '--offline',
+            '--no-sync',
+            '--directory',
+            options.sourceDir,
+            'rdst',
+          ]
+        : []),
+      'web',
+      '--no-browser',
+      '--ui',
+      'none',
+      '--host',
+      host,
+      '--port',
+      String(port),
+    ],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      env: backendEnvironment(),
+      env: backendEnvironment(process.env, options.keyservice),
     }
   )
 
+  log?.write('shell', [
+    `starting backend: ${binaryPath} (pid ${child.pid ?? 'none'}, ${apiBaseUrl})`,
+  ])
+  const stdoutSplitter = new LineSplitter()
+  const stderrSplitter = new LineSplitter()
+  const onStdoutLines = (lines: string[]) => {
+    appendOutput(stdoutLines, lines)
+    log?.write('stdout', lines)
+    for (const line of lines) {
+      const marker = parseStartupMarker(line)
+      if (!marker) continue
+      const phase = watch.apply(marker)
+      if (phase) options.onPhase?.(phase, marker.store)
+    }
+  }
+  const onStderrLines = (lines: string[]) => {
+    appendOutput(stderrLines, lines)
+    log?.write('stderr', lines)
+  }
   child.stdout.on('data', (chunk: Buffer) => {
-    appendOutput(stdoutLines, chunk)
+    onStdoutLines(stdoutSplitter.push(chunk.toString()))
     process.stdout.write(`[rdst] ${chunk.toString()}`)
   })
   child.stderr.on('data', (chunk: Buffer) => {
-    appendOutput(stderrLines, chunk)
+    onStderrLines(stderrSplitter.push(chunk.toString()))
     process.stderr.write(`[rdst] ${chunk.toString()}`)
   })
+  child.stdout.once('end', () => onStdoutLines(stdoutSplitter.flush()))
+  child.stderr.once('end', () => onStderrLines(stderrSplitter.flush()))
   child.once('exit', (code, signal) => {
     exitStatus = { code, signal }
+    log?.write('shell', [`backend exited (code=${code}, signal=${signal})`])
   })
   child.once('error', (error) => {
     spawnError = error
+    log?.write('shell', [`backend could not start: ${error.message}`])
   })
+
+  const handle: BackendHandle = {
+    process: child,
+    apiBaseUrl,
+    binaryPath,
+    migrating: () => watch.migrating,
+  }
+  options.onSpawn?.(handle)
 
   try {
     await waitForBackend(
       apiBaseUrl,
+      watch,
       () => exitStatus,
       () => spawnError,
       () => stdoutLines,
       () => stderrLines
     )
   } catch (error) {
+    log?.write('shell', [errorText(error)])
+    // Only a start that stopped making progress gets here while the process runs, and
+    // never mid-migration: StartupWatch doesn't time out while one is reported.
     if (!spawnError) {
       await terminateProcess(child)
     }
     throw error
   }
 
-  return {
-    process: child,
-    apiBaseUrl,
-    binaryPath,
-  }
+  log?.write('shell', ['backend is ready'])
+  return handle
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function processHasExited(child: ChildProcess): boolean {
@@ -393,7 +544,29 @@ async function terminateProcess(child: ChildProcess): Promise<void> {
   }
 }
 
-export async function stopBackend(handle: BackendHandle | null): Promise<void> {
+/** Wait for a reported migration to finish (or the process to exit), up to `timeoutMs`. */
+export async function waitForMigration(
+  handle: BackendHandle,
+  timeoutMs: number = MIGRATION_STOP_GRACE_MS,
+  intervalMs = 250
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (
+    handle.migrating() &&
+    !processHasExited(handle.process) &&
+    Date.now() < deadline
+  ) {
+    await wait(intervalMs)
+  }
+}
+
+export async function stopBackend(
+  handle: BackendHandle | null,
+  migrationGraceMs: number = MIGRATION_STOP_GRACE_MS
+): Promise<void> {
   if (!handle) return
+  // A forced stop mid-migration leaves each store at its last committed step, which is safe
+  // but means a second, partial upgrade on the next launch. Let a running one finish.
+  if (handle.migrating()) await waitForMigration(handle, migrationGraceMs)
   await terminateProcess(handle.process)
 }

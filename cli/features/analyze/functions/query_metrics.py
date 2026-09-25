@@ -21,6 +21,7 @@ try:
 except ImportError:
     pymysql = None
 
+from shared import analysis_lane
 from shared.db_connection import (
     create_mysql_connection_from_params,
     postgres_connection_kwargs,
@@ -28,6 +29,7 @@ from shared.db_connection import (
 )
 
 
+@analysis_lane.connection_budget()
 def collect_query_metrics(
     sql: str, target: str = None, query_hash: str = None, **kwargs
 ) -> Dict[str, Any]:
@@ -541,9 +543,11 @@ def _get_mysql_global_status(cursor) -> Dict[str, Any]:
     metrics = {}
 
     try:
+        # performance_schema holds global status since MySQL 5.7; the old
+        # information_schema table is gone in 8.0.
         cursor.execute("""
             SELECT VARIABLE_NAME, VARIABLE_VALUE
-            FROM information_schema.GLOBAL_STATUS
+            FROM performance_schema.global_status
             WHERE VARIABLE_NAME IN (
                 'Connections', 'Threads_connected', 'Threads_running',
                 'Queries', 'Slow_queries', 'Com_select', 'Com_insert',
@@ -553,9 +557,9 @@ def _get_mysql_global_status(cursor) -> Dict[str, Any]:
         """)
 
         for row in cursor.fetchall():
-            var_name = row['VARIABLE_NAME'].lower()
-            var_value = int(row['VARIABLE_VALUE'])
-            metrics[f'mysql_status_{var_name}'] = var_value
+            name, value = ((row['VARIABLE_NAME'], row['VARIABLE_VALUE'])
+                           if isinstance(row, dict) else (row[0], row[1]))
+            metrics[f'mysql_status_{name.lower()}'] = int(value)
 
     except Exception:
         pass

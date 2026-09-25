@@ -150,7 +150,7 @@ class TestBenchmarkSandbox:
         async with benchmark_sandbox(
             target="demo",
             owner_id="run",
-            lanes=["readyset"],
+            lanes=["origin", "readyset"],
             manager=manager,
         ) as endpoint:
             endpoint.note_cache("rdst_tmp_run_abc")
@@ -173,7 +173,7 @@ class TestBenchmarkSandbox:
         async with benchmark_sandbox(
             target="demo",
             owner_id="run",
-            lanes=["readyset"],
+            lanes=["origin", "readyset"],
             manager=manager,
         ) as endpoint:
             endpoint.note_cache("rdst_tmp_run_abc")
@@ -192,7 +192,7 @@ class TestBenchmarkSandbox:
             async with benchmark_sandbox(
                 target="demo",
                 owner_id="run",
-                lanes=["readyset"],
+                lanes=["origin", "readyset"],
                 manager=manager,
             ) as endpoint:
                 endpoint.note_cache("rdst_tmp_run_abc")
@@ -285,3 +285,25 @@ def test_the_module_names_one_traffic_tag_per_lane():
         "origin": "rdst/loadtest",
         "readyset": "rdst/loadtest-readyset",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cache_config", [SANDBOX_CONFIG, None, {"target_type": "database"}])
+async def test_readyset_only_leases_sandbox_without_deployed_cache(monkeypatch, cache_config):
+    from unittest.mock import Mock
+
+    config = Mock()
+    config.get.return_value = cache_config
+    monkeypatch.setattr("shared.config.targets.create_targets_config", lambda: config)
+    manager = _Manager()
+    async with benchmark_sandbox(
+        target="demo", owner_id="run", lanes=["readyset"], manager=manager
+    ) as endpoint:
+        assert endpoint.available
+        assert endpoint.config == SANDBOX_CONFIG
+        assert endpoint.lease is manager.lease_obj
+    config.get.assert_not_called()
+    assert manager.leases == [
+        {"target": "demo", "owner_id": "run", "purpose": "load_test"}
+    ]
+    assert manager.reservations == []

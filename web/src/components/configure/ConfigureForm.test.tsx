@@ -241,9 +241,7 @@ describe('ConfigureForm sandbox behavior', () => {
         name: 'Use this database account?',
       })
     ).toBeTruthy()
-    fireEvent.click(
-      within(dialog).getByRole('button', { name: 'Add target' })
-    )
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add target' }))
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
         database: 'app_db',
@@ -292,9 +290,7 @@ describe('ConfigureForm sandbox behavior', () => {
       within(dialog).getByRole('button', { name: 'View read-only setup' })
     ).toBeTruthy()
 
-    fireEvent.click(
-      within(dialog).getByRole('button', { name: 'Add target' })
-    )
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add target' }))
 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -468,6 +464,64 @@ describe('ConfigureForm SSH jump host', () => {
         host: 'db.example.com',
         password: 'secret',
       })
+    )
+  })
+})
+
+describe('ConfigureForm duplicate target names', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('refuses a taken name while typing and never submits it', () => {
+    const onSubmit = vi.fn()
+    const onTest = vi.fn()
+    render(
+      <ConfigureForm
+        onSubmit={onSubmit}
+        onTest={onTest}
+        existingNames={['demoshop']}
+      />
+    )
+    fireEvent.change(
+      screen.getByPlaceholderText('postgresql://user@host:5432/database'),
+      { target: { value: connectionUri() } }
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
+    fireEvent.change(screen.getByLabelText('Target name'), {
+      target: { value: 'demoshop ' },
+    })
+
+    expect(screen.getByTestId('cfg-name-error').textContent).toBe(
+      'A target named demoshop already exists.'
+    )
+    const add = screen.getByRole('button', { name: 'Add target' })
+    expect((add as HTMLButtonElement).disabled).toBe(true)
+    expect(
+      (
+        screen.getByRole('button', {
+          name: 'Test connection',
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(true)
+    fireEvent.submit(add.closest('form') as HTMLFormElement)
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText('Target name'), {
+      target: { value: 'demoshop-2' },
+    })
+    expect(screen.queryByTestId('cfg-name-error')).toBeNull()
+  })
+
+  it('shows why the last save failed', () => {
+    render(
+      <ConfigureForm
+        onSubmit={vi.fn()}
+        submitError="A target named prod already exists."
+      />
+    )
+    expect(screen.getByTestId('cfg-submit-error').textContent).toBe(
+      'A target named prod already exists.'
     )
   })
 })

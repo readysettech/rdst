@@ -10,6 +10,7 @@ import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useState } from 'react'
+import { plural } from '../../monitor-kit/format'
 import { QueryLibrarySortMenu } from './QueryLibrarySortMenu'
 import {
   QUERY_LIBRARY_DEFAULT_DISPLAY_PROPERTIES,
@@ -75,7 +76,7 @@ const FILTER_CATEGORIES: FilterCategory[] = [
   },
   { key: 'impact', label: 'Database time', icon: 'speedometer' },
   { key: 'activity', label: 'Last activity', icon: 'observe' },
-  { key: 'finding', label: 'Jev concern', icon: 'sparkles' },
+  { key: 'finding', label: 'Classification concern', icon: 'sparkles' },
 ]
 
 const FILTER_DEFAULTS: QueryLibraryFilters = {
@@ -525,7 +526,7 @@ export function QueryLibraryControlBar({
               data-testid="query-library-result-count"
             >
               {typeof totalCount === 'number' && totalCount > (resultCount ?? 0)
-                ? `${resultCount} of ${totalCount} queries`
+                ? `${resultCount} of ${plural(totalCount, 'query', 'queries')}`
                 : `${resultCount} ${resultCount === 1 ? 'query' : 'queries'}`}
             </Text>
           </Show>

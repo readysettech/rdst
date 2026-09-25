@@ -741,7 +741,7 @@ export async function registerTrial(
       body: { email },
     }
   )
-  throwIfApiError(response, error, 'Failed to register trial')
+  throwIfApiError(response, error, 'Failed to register AI access')
   if (!data) throw new Error('Missing response body')
   return data
 }
@@ -764,14 +764,14 @@ export async function activateTrial(
       remaining_cents: opts.remainingCents ?? null,
     },
   })
-  await throwIfNotOk(response, 'Failed to activate trial')
+  await throwIfNotOk(response, 'Failed to activate AI access')
   if (!data) throw new Error('Missing response body')
   return data
 }
 
 export async function fetchTrialStatus(): Promise<TrialStatusResponse> {
   const { data, response } = await typedClient.GET('/api/trial/status', {})
-  await throwIfNotOk(response, 'Failed to fetch trial status')
+  await throwIfNotOk(response, 'Failed to fetch AI access status')
   if (!data) throw new Error('Missing response body')
   return data
 }
@@ -896,7 +896,7 @@ export async function simulateTrialExhausted(): Promise<TrialSimulationResponse>
     '/api/trial/simulate/exhaust',
     {}
   )
-  await throwIfNotOk(response, 'Failed to simulate trial exhaustion')
+  await throwIfNotOk(response, 'Failed to simulate the AI limit')
   if (!data) throw new Error('Missing response body')
   return data
 }

@@ -6,9 +6,8 @@ the process's managed Readyset sandbox, and the two are reported side by
 side. Everything the second lane needs and the origin lane does not — the
 sandbox lease, a cache per query, the tag its traffic carries — lives here.
 
-The Readyset lane is an addition to a run, never a precondition for one: a
-sandbox that cannot be leased, or a query the sandbox refuses to cache,
-costs that measurement rather than the run.
+A comparison retains its origin measurements when the sandbox is unavailable.
+Readyset-only runs lease the same sandbox and measure only the Readyset lane.
 """
 
 from __future__ import annotations
@@ -61,7 +60,7 @@ def normalize_lanes(lanes: Iterable[str] | None) -> tuple[str, ...]:
 
 @dataclass
 class ReadysetEndpoint:
-    """The sandbox a run's Readyset lane measures, or why it has none.
+    """The endpoint a run's Readyset lane measures, or why it has none.
 
     The caches the run creates are recorded here as they are created, from
     the benchmark's worker thread, so the lease holder can drop them once the

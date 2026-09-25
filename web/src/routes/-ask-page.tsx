@@ -6,7 +6,6 @@ import { Text } from '@rs/ui-new/text'
 import { useState } from 'react'
 import { AiSetupNotice, useAiBlocked } from '../components/AiSetupNotice'
 import { AskPanel } from '../components/AskPanel'
-import { SemanticLayerBadge } from '../components/SemanticLayerBadge'
 import { TargetConnectivityNotice } from '../components/TargetConnectivityNotice'
 import { TargetDropdown } from '../components/TargetDropdown'
 import { TargetLockNotice } from '../components/TargetLockNotice'
@@ -14,7 +13,13 @@ import { useTargetResolution } from '../hooks/useTarget'
 import { useTargetConnectivityGate } from '../lib/useTargetConnectivityGate'
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
 
-export function AskPage({ movedFrom }: { movedFrom?: 'agents' } = {}) {
+export function AskPage({
+  movedFrom,
+  initialQuestion,
+}: {
+  movedFrom?: 'agents'
+  initialQuestion?: string
+} = {}) {
   const [movedNoticeOpen, setMovedNoticeOpen] = useState(movedFrom === 'agents')
   const { target, setTarget, isResolving, isUnavailable, refetch } =
     useTargetResolution()
@@ -44,7 +49,6 @@ export function AskPage({ movedFrom }: { movedFrom?: 'agents' } = {}) {
                 >
                   Ask
                 </Text>
-                <SemanticLayerBadge target={target} />
               </HStack>
               <Text level="body-small" className="text-content-layout-3">
                 Turn a database question into a verified answer and reusable
@@ -104,6 +108,7 @@ export function AskPage({ movedFrom }: { movedFrom?: 'agents' } = {}) {
           />
         ) : (
           <AskPanel
+            initialQuestion={initialQuestion}
             target={target}
             targetResolving={isResolving}
             disabled={

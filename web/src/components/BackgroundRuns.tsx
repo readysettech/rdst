@@ -7,10 +7,16 @@ import { Text } from '@rs/ui-new/text'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useState } from 'react'
 import {
+  analysisSummary,
+  MonitorWorkList,
+  workCount,
+} from '../features/monitor-kit/MonitorWorkList'
+import {
   isQueuedRun,
   reattachBackgroundRuns,
   useBackgroundRuns as useBackgroundRunsStore,
 } from '../lib/backgroundRuns'
+import { useMonitoringLimit, useMonitorWork } from '../lib/monitor/hooks'
 import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
 import { resumeAuditSessions } from '../lib/useAudit'
 import {
@@ -25,7 +31,11 @@ import {
 } from './BackgroundJobs'
 import { TrialRegistrationDialog } from './TrialRegistrationDialog'
 
-/** Process-wide background tasks survive route changes and browser reloads. */
+/**
+ * The app's Analyses chip: monitoring's deep analyses and reports across every database,
+ * plus the runs the user started (which survive route changes and browser reloads). The
+ * count is what's running or queued; finished work never counts.
+ */
 export function BackgroundRuns() {
   const allRuns = useBackgroundRunsStore()
   // Health checks list here like every other kind; the banner is an additional
@@ -40,13 +50,76 @@ export function BackgroundRuns() {
   const closeJobs = useCallback(() => setJobsOpen(false), [])
   const openRun = useOpenBackgroundRun(closeJobs)
   const stopJob = useStopJobConfirm()
+  const monitored = (useMonitoringLimit().data?.targets.length ?? 0) > 0
+  const work = useMonitorWork(monitored).data
+  const monitorPending = monitored ? workCount(work) : 0
 
   useEffect(() => {
     reattachBackgroundRuns()
     resumeAuditSessions()
   }, [])
 
-  if (!latestRun || !triggerRun) return null
+  if (!latestRun || !triggerRun) {
+    if (!monitored) return null
+    return (
+      <Popover open={jobsOpen} onOpenChange={setJobsOpen}>
+        <PopoverTrigger asChild>
+          <Pressable
+            type="button"
+            className="group flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium text-content-layout-2 transition-all duration-150 hover:bg-surface-layout-2 hover:text-content-layout-1"
+            aria-label={`Open analyses: ${analysisSummary(work)}`}
+            data-testid="jobs-trigger"
+          >
+            <span className="relative grid h-4 w-4 shrink-0 place-items-center">
+              <Icon
+                name="sparkles"
+                label=""
+                className="h-4 w-4 text-content-layout-3"
+              />
+              {work?.running.length ? (
+                <span
+                  aria-hidden="true"
+                  className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-content-rising-plain mk-breathe"
+                />
+              ) : null}
+            </span>
+            <Text level="caption" className="text-content-layout-1">
+              Analyses
+            </Text>
+            <Text
+              level="caption"
+              className="min-w-0 flex-1 truncate text-content-layout-3"
+            >
+              {monitorPending
+                ? analysisSummary(work)
+                : work?.done_today_count
+                  ? `${work.done_today_count} done today`
+                  : null}
+            </Text>
+            {monitorPending ? (
+              <span
+                className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-surface-primary-soft px-1.5 py-0.5 text-[11px] leading-none text-content-primary-soft"
+                aria-hidden="true"
+              >
+                {monitorPending > 99 ? '99+' : monitorPending}
+              </span>
+            ) : null}
+          </Pressable>
+        </PopoverTrigger>
+        <PopoverContent
+          side="top"
+          align="start"
+          sideOffset={8}
+          collisionPadding={12}
+          className="max-h-[var(--radix-popover-content-available-height,80vh)] w-80 max-w-[calc(100vw-1.5rem)] flex-col overflow-y-auto p-0"
+          aria-label="Analyses"
+        >
+          <AnalysesHeading summary={analysisSummary(work)} />
+          <MonitorWorkList onOpened={closeJobs} defaultOpen />
+        </PopoverContent>
+      </Popover>
+    )
+  }
 
   const queuedCount = runs.filter(isQueuedRun).length
   const activeCount = runs.filter(isActive).length
@@ -134,7 +207,9 @@ export function BackgroundRuns() {
               }`}
               aria-hidden="true"
             >
-              {runs.length > 99 ? '99+' : runs.length}
+              {runs.length + monitorPending > 99
+                ? '99+'
+                : runs.length + monitorPending}
             </span>
           </Pressable>
         </PopoverTrigger>
@@ -146,9 +221,15 @@ export function BackgroundRuns() {
           align="start"
           sideOffset={8}
           collisionPadding={12}
-          className="w-80 max-w-[calc(100vw-1.5rem)] flex-col p-0"
+          className="max-h-[var(--radix-popover-content-available-height,80vh)] w-80 max-w-[calc(100vw-1.5rem)] flex-col overflow-y-auto p-0"
           aria-label="Background jobs"
         >
+          {monitored ? (
+            <div className="border-b border-border-layout-1">
+              <AnalysesHeading summary={analysisSummary(work)} />
+              <MonitorWorkList onOpened={closeJobs} />
+            </div>
+          ) : null}
           <BackgroundJobList
             runs={runs}
             onNeedsKey={() => {
@@ -173,5 +254,18 @@ export function BackgroundRuns() {
         }}
       />
     </>
+  )
+}
+
+function AnalysesHeading({ summary }: { summary: string }) {
+  return (
+    <div className="border-b border-border-layout-1 px-4 py-3">
+      <Text level="label-small" className="text-content-layout-1">
+        Analyses
+      </Text>
+      <Text level="caption" className="block text-content-layout-3">
+        {summary} across all your databases
+      </Text>
+    </div>
   )
 }

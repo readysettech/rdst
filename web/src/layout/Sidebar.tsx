@@ -14,11 +14,11 @@ import { BackgroundRuns } from '../components/BackgroundRuns'
 import { DesktopUpdateControl } from '../components/DesktopUpdateControl'
 import { ReportDialog } from '../components/ReportDialog'
 import { TargetDropdown } from '../components/TargetDropdown'
+import { useInboxUnread } from '../features/inbox/useInboxUnread'
 import { SetupGuideHelpEntry } from '../features/setup/SetupGuideHelpEntry'
 import { SetupSteps } from '../features/setup/SetupSteps'
 import { useTarget } from '../hooks/useTarget'
 import { trackEvent } from '../lib/analytics'
-import { useAuditSessionActive } from '../lib/auditSession'
 import type { DesktopUpdateState } from '../lib/desktop'
 import { useSystemStatus } from '../lib/useSystemStatus'
 import { VALUE_PROPOSITION } from '../lib/valueProposition'
@@ -107,17 +107,19 @@ interface NavItem {
 
 const homeItem: NavItem = { label: 'Home', icon: 'dashboard', to: '/' }
 
-// The daily nav is a single flat list, top to bottom: Home, Ask, the Queries
-// workspace, Benchmarks, Health check, Schema, then the demo.
+// The daily nav, top to bottom: Home, Database (always shown; it follows the
+// global target), Inbox, Agent activity, Ask, then the demo. Benchmarking runs
+// from the Database page's query list. The classic Queries, Schema, Health check and Benchmarks
+// pages are off the nav; their routes still answer direct links. A running health check shows in
+// the footer's background runs.
 // Experimental surfaces (/scan, /guards) stay off the nav until they
 // ship for real; their routes remain reachable by URL and keep their on-page
 // Experimental banners.
 const primaryItems: NavItem[] = [
+  { label: 'Database', icon: 'database', to: '/database' },
+  { label: 'Inbox', icon: 'notification', to: '/inbox' },
+  { label: 'Agent activity', icon: 'user-shield', to: '/agent-activity' },
   { label: 'Ask', icon: 'sparkles', to: '/ask' },
-  { label: 'Queries', icon: 'folder-file', to: '/queries' },
-  { label: 'Benchmarks', icon: 'speedometer', to: '/cache' },
-  { label: 'Health check', icon: 'document-validation', to: '/audit' },
-  { label: 'Schema', icon: 'layers', to: '/schema' },
   { label: 'Try the demo', icon: 'querypilot', to: '/demo' },
 ]
 
@@ -151,12 +153,17 @@ function NavLink({
   item,
   active,
   running = false,
+  badge,
+  badgeUrgent = false,
   size = 'nav',
   onNavigate,
 }: {
   item: NavItem
   active: boolean
   running?: boolean
+  badge?: number
+  /** Red when something needs action now; neutral otherwise (color is for state). */
+  badgeUrgent?: boolean
   size?: 'nav' | 'footer'
   onNavigate?: () => void
 }) {
@@ -178,6 +185,18 @@ function NavLink({
         }`}
       />
       <span>{item.label}</span>
+      {!!badge && (
+        <span
+          className={`ml-auto rounded-pill px-2 text-xs tabular-nums ${
+            badgeUrgent
+              ? 'bg-surface-negative-soft text-content-negative-soft'
+              : 'bg-surface-layout-2 text-content-layout-2'
+          }`}
+          title={`${badge} unread`}
+        >
+          {badge}
+        </span>
+      )}
       {running && (
         <span className="ml-auto">
           <ActivityPulse label={`${item.label} is running`} />
@@ -207,10 +226,10 @@ export function Sidebar({
   const router = useRouterState()
   const currentPath = router.location.pathname
   const { target: selectedTarget, setTarget: setSelectedTarget } = useTarget()
-  const auditRunning = useAuditSessionActive()
   const [reportOpen, setReportOpen] = useState(false)
 
   const { data: status } = useSystemStatus()
+  const inboxUnread = useInboxUnread()
 
   // Dismiss the off-canvas mobile drawer after any navigation (stable ref so
   // the effect keys only on the path, not the callback identity; skip the
@@ -307,6 +326,7 @@ export function Sidebar({
 
   const isActive = (item: NavItem) =>
     currentPath === item.to ||
+    (item.to === '/database' && currentPath.startsWith('/database/')) ||
     // The Queries workspace owns the analysis result route.
     (item.to === '/queries' && currentPath === '/results') ||
     // `/benchmark` remains as a compatibility route, but its navigation owner
@@ -387,7 +407,8 @@ export function Sidebar({
                   key={item.to}
                   item={item}
                   active={isActive(item)}
-                  running={item.to === '/audit' && auditRunning}
+                  badge={item.to === '/inbox' ? inboxUnread.count : undefined}
+                  badgeUrgent={item.to === '/inbox' && inboxUnread.actNow > 0}
                 />
               ))}
             </div>

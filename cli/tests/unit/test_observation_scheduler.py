@@ -9,8 +9,15 @@ import sys
 import threading
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from features.monitor.api import routes as monitor_routes
+from features.monitor.connection import ConnectionWatch
+from shared.monitor.monitor_store import MonitorStore
 
 from features.query_registry import scheduler as scheduler_module
 from features.query_registry.scheduler import (
@@ -49,6 +56,7 @@ class FakeCollector:
         self.clock = clock
         self.collects = 0
         self.duration = 0.0
+        self.db_touch_ms = None
         self.fail_with: Exception | None = None
         self.gate: asyncio.Event | None = None
         self.fences: list[tuple[str, int]] = []
@@ -68,7 +76,9 @@ class FakeCollector:
             raise self.fail_with
         if self.clock is not None and self.duration:
             self.clock.advance(self.duration)
-        return SimpleNamespace(event="discovery_update", data={})
+        stats = ({"db_touch_duration_ms": self.db_touch_ms}
+                 if self.db_touch_ms is not None else {})
+        return SimpleNamespace(event="discovery_update", data={"stats": stats})
 
 
 class FakeCoordinator:
@@ -131,7 +141,8 @@ def make_scheduler(targets, *, store=None, clock=None, rand=lambda: 0.5):
 
 
 async def run_tick(scheduler, schedule, clock):
-    """Force one target due, launch it, and wait for the collection task."""
+    """Advance to the retry slot, launch it, and wait for the collection task."""
+    clock.now = max(clock.now, schedule.next_due)
     schedule.next_due = clock.now
     scheduler._launch_due(clock.now)
     if schedule.task is not None:
@@ -182,7 +193,9 @@ class RecordingScheduler:
 @pytest.fixture
 def stub_lifespan(monkeypatch):
     import shared.deploy.sandbox_manager as sandbox_module
-
+    monkeypatch.setattr("features.query_registry.assessment.query_assessment_worker",
+                        SimpleNamespace(start=AsyncMock(), stop=AsyncMock(),
+                                        set_background_targets=lambda targets: None))
     monkeypatch.setattr(sandbox_module, "sandbox_manager", StubSandbox())
     monkeypatch.setattr(scheduler_module, "ObservationScheduler", RecordingScheduler)
     RecordingScheduler.instances = []
@@ -206,6 +219,15 @@ async def test_lifespan_flag_on_starts_and_stops_scheduler(monkeypatch, stub_lif
         from features.query_registry.discovery import query_discovery
 
         assert instance.coordinator is query_discovery
+    assert instance.stopped
+
+
+async def test_lifespan_monitored_target_starts_without_flag(monkeypatch, stub_lifespan):
+    monkeypatch.delenv(scheduler_module.SCHEDULER_ENV, raising=False)
+    monkeypatch.setattr(scheduler_module, "monitored_targets", lambda: {"demo"})
+    async with stub_lifespan(None):
+        (instance,) = RecordingScheduler.instances
+        assert instance.started
     assert instance.stopped
 
 
@@ -426,7 +448,21 @@ async def test_slow_collection_backs_off_next_due():
     assert clock.now < schedule.next_due <= clock.now + stretched
 
 
-async def test_failure_backoff_uses_full_jitter_then_degraded_class():
+async def test_local_library_work_does_not_charge_database_duty():
+    scheduler, coordinator, clock = make_scheduler(["demo"])
+    scheduler._monitored.add("demo")
+    collector = coordinator.collector_for("demo")
+    collector.duration = 30.0
+    collector.db_touch_ms = 40.0
+    schedule = scheduler._schedules["demo"]
+
+    await run_tick(scheduler, schedule, clock)
+
+    assert schedule.last_duration_s == pytest.approx(0.04)
+    assert schedule.next_due - clock.now <= ACTIVE_INTERVAL_SECONDS
+
+
+async def test_failure_backoff_is_shared_and_retains_degraded_class():
     jitter = 0.5
     scheduler, coordinator, clock = make_scheduler(["demo"], rand=lambda: jitter)
     collector = coordinator.collector_for("demo")
@@ -435,21 +471,17 @@ async def test_failure_backoff_uses_full_jitter_then_degraded_class():
 
     await run_tick(scheduler, schedule, clock)
     assert schedule.consecutive_failures == 1
-    ceiling = min(BACKOFF_CAP_SECONDS, BACKOFF_BASE_SECONDS * 2)
-    assert schedule.next_due == clock.now + jitter * ceiling
+    assert schedule.next_due == clock.now + BACKOFF_BASE_SECONDS
     assert clock.now < schedule.next_due <= clock.now + BACKOFF_CAP_SECONDS
 
     await run_tick(scheduler, schedule, clock)
     assert schedule.consecutive_failures == 2
-    ceiling = min(BACKOFF_CAP_SECONDS, BACKOFF_BASE_SECONDS * 4)
-    assert schedule.next_due == clock.now + jitter * ceiling
+    assert schedule.next_due == clock.now + BACKOFF_BASE_SECONDS * 2
 
     await run_tick(scheduler, schedule, clock)
     assert schedule.consecutive_failures == DEGRADED_AFTER_FAILURES
     assert scheduler._base_interval("demo", schedule) == DEGRADED_INTERVAL_SECONDS
-    assert schedule.next_due % DEGRADED_INTERVAL_SECONDS == _stable_hash("demo") % int(
-        DEGRADED_INTERVAL_SECONDS
-    )
+    assert schedule.next_due == clock.now + BACKOFF_BASE_SECONDS * 4
 
     collector.fail_with = None
     await run_tick(scheduler, schedule, clock)
@@ -499,13 +531,16 @@ async def test_global_concurrency_cap():
         scheduler._schedules[name].next_due = clock.now
 
     scheduler._launch_due(clock.now)
-    tasks = [scheduler._schedules[name].task for name in targets]
+    tasks = [scheduler._schedules[name].task for name in targets
+             if scheduler._schedules[name].task is not None]
     for _ in range(10):
         await asyncio.sleep(0)
     assert tracker.active == GLOBAL_CONCURRENCY
 
     tracker.gate.set()
     await asyncio.gather(*tasks)
+    scheduler._launch_due(clock.now)
+    await asyncio.gather(*(s.task for s in scheduler._schedules.values() if s.task is not None))
     assert tracker.max_active == GLOBAL_CONCURRENCY
 
 
@@ -725,3 +760,264 @@ async def test_target_added_on_refresh_gets_aligned_slot():
     interval = BACKGROUND_INTERVAL_SECONDS
     assert schedule.next_due % interval == _stable_hash("b") % int(interval)
     assert clock.now < schedule.next_due <= clock.now + interval
+
+
+async def test_collection_outcomes_reach_the_listener_and_recovery_collects_soon():
+    scheduler, coordinator, clock = make_scheduler(["demo"])
+    seen = []
+    scheduler.set_outcome_listener(lambda *args: seen.append(args))
+    collector = coordinator.collector_for("demo")
+    collector.fail_with = RuntimeError("connection refused")
+    schedule = scheduler._schedules["demo"]
+
+    await run_tick(scheduler, schedule, clock)
+    collector.fail_with = None
+    await run_tick(scheduler, schedule, clock)
+    assert [(name, ok, error) for name, ok, _, error in seen] == [
+        ("demo", False, "connection refused"), ("demo", True, None)]
+
+    schedule.next_due = clock.now + DEGRADED_INTERVAL_SECONDS
+    scheduler.collect_soon("demo")
+    assert schedule.next_due == clock.now
+
+
+async def test_scheduler_handoff_deadline_preserves_previous_reader(monkeypatch):
+    scheduler, coordinator, clock = make_scheduler(["demo"], store=FakeLeaseStore())
+    collector = coordinator.collector_for("demo")
+    gate = asyncio.Event()
+    collector.task = asyncio.create_task(gate.wait())
+    monkeypatch.setattr(scheduler_module, "COLLECTION_DEADLINE_SECONDS", 0)
+    schedule = scheduler._schedules["demo"]
+    try:
+        await asyncio.wait_for(run_tick(scheduler, schedule, clock), 2)
+        assert collector.collects == 0
+        assert collector.fences == []
+        assert not collector.task.done()
+        assert schedule.task is None
+        assert schedule.error == "Waiting for the previous reader to finish"
+        assert schedule.next_due > clock.now
+        gate.set()
+        await asyncio.wait_for(collector.task, 2)
+        monkeypatch.setattr(scheduler_module, "COLLECTION_DEADLINE_SECONDS", 120)
+        await asyncio.wait_for(run_tick(scheduler, schedule, clock), 2)
+        assert collector.collects == 1
+    finally:
+        gate.set()
+        await asyncio.wait_for(collector.task, 2)
+        await asyncio.wait_for(scheduler.stop(), 2)
+
+
+@pytest.mark.parametrize("interval", [60.0, 3.0])
+async def test_monitored_connection_recovers_on_next_reading(tmp_path, monkeypatch, interval):
+    monkeypatch.setattr(scheduler_module, "ACTIVE_INTERVAL_SECONDS", interval)
+    scheduler, coordinator, clock = make_scheduler(["demo"])
+    scheduler._monitored.add("demo")
+    store = MonitorStore(tmp_path / "monitor.db", clock=clock.time)
+    store.set_settings("demo", {"enabled": True})
+    watch = ConnectionWatch(store, clock=clock.time)
+    scheduler.set_outcome_listener(watch.collection)
+    collector = coordinator.collector_for("demo")
+    collector.fail_with = ConnectionError("connection refused")
+    schedule = scheduler._schedules["demo"]
+    first_failure = None
+    for _ in range(6):
+        await asyncio.wait_for(run_tick(scheduler, schedule, clock), 2)
+        if first_failure is None:
+            first_failure = clock.now
+        if schedule.consecutive_failures == 2:
+            assert clock.now - first_failure <= 60
+            assert store.read("SELECT state FROM inbox_item WHERE subject='lost_connection'")
+        assert 0 < schedule.next_due - clock.now <= interval
+        assert 0 < scheduler._backoff.retry_after("demo") <= interval
+        assert not scheduler._backoff.acquire("demo")
+    query = "SELECT id, state FROM inbox_item WHERE subject='lost_connection'"
+    lost = store.read(query)[0]
+    assert lost["state"] != "resolved"
+
+    # The index scan shares admission and can fail between scheduled readings.
+    clock.now = schedule.next_due
+    assert scheduler._backoff.acquire("demo")
+    scheduler._backoff.finish("demo", success=False)
+    assert scheduler._backoff.retry_after("demo") > interval
+    collector.fail_with = None
+    restored = clock.now
+    await asyncio.wait_for(run_tick(scheduler, schedule, clock), 2)
+    clock.advance(interval)
+    await asyncio.wait_for(run_tick(scheduler, schedule, clock), 2)
+    assert clock.now - restored <= interval
+    assert store.read(query) == [{"id": lost["id"], "state": "resolved"}]
+    assert not scheduler._backoff.failed("demo")
+    await scheduler.stop()
+
+
+@pytest.mark.parametrize("recovered", [True, False])
+async def test_timed_out_collection_reports_one_check_and_preserves_recovery(
+    tmp_path, monkeypatch, recovered,
+):
+    scheduler, coordinator, clock = make_scheduler(["demo"])
+    scheduler._monitored.add("demo")
+    store = MonitorStore(tmp_path / "monitor.db", clock=clock.time)
+    store.set_settings("demo", {"enabled": True})
+    watch = ConnectionWatch(store, clock=clock.time)
+    failed = asyncio.Event()
+    def outcome(name, ok, ts, error):
+        watch.collection(name, ok, ts, error)
+        if not ok:
+            failed.set()
+    scheduler.set_outcome_listener(outcome)
+    collector = coordinator.collector_for("demo")
+    collector.gate = asyncio.Event()
+    collect = collector.collect_now
+    async def reading():
+        event = await collect()
+        if not recovered:
+            event.event = "discovery_error"
+            event.data = {"error": "connection refused"}
+        return event
+    monkeypatch.setattr(collector, "collect_now", reading)
+    monkeypatch.setattr(scheduler_module, "COLLECTION_DEADLINE_SECONDS", 0)
+    schedule = scheduler._schedules["demo"]
+    task = asyncio.create_task(run_tick(scheduler, schedule, clock))
+    try:
+        await asyncio.wait_for(failed.wait(), 2)
+        clock.advance(60)
+        collector.gate.set()
+        await asyncio.wait_for(task, 2)
+        assert schedule.latest_attempt_ok == recovered
+        assert schedule.consecutive_failures == (0 if recovered else 1)
+        clock.advance(120 if recovered else 59)
+        watch.tick()
+        assert store.inbox() == []
+    finally:
+        collector.gate.set()
+        await scheduler.stop()
+
+
+# -- first-run fast phase ----------------------------------------------------
+
+
+def _monitored_scheduler(monitored: set[str]):
+    clock = FakeClock()
+    coordinator = FakeCoordinator(store=FakeLeaseStore(), clock=clock)
+    scheduler = ObservationScheduler(
+        coordinator, targets_provider=lambda: ["orders", "other"], clock=clock.time,
+        rand=lambda: 0.5, owner_id="owner-a", monitored_provider=lambda: set(monitored))
+    scheduler._store = coordinator.store()
+    scheduler._refresh_targets(clock.now)
+    return scheduler, coordinator, clock
+
+
+async def test_fast_phase_reads_now_then_every_ten_seconds_for_five_minutes():
+    from features.query_registry.scheduler import (FIRST_RUN_FAST_SECONDS,
+                                                   FIRST_RUN_INTERVAL_SECONDS)
+
+    monitored: set[str] = set()
+    scheduler, coordinator, clock = _monitored_scheduler(monitored)
+    heard: list[tuple[str, bool]] = []
+    monitored.add("orders")
+    assert scheduler.start_fast_phase("orders", lambda name, first: heard.append((name, first)))
+    schedule = scheduler._schedules["orders"]
+    # The first reading launches right away, without waiting for the next slot.
+    assert schedule.task is not None
+    await schedule.task
+    assert coordinator.collectors["orders"].collects == 1
+    assert heard == [("orders", True)]
+    assert scheduler.in_fast_phase("orders")
+    assert schedule.next_due - clock.now <= FIRST_RUN_INTERVAL_SECONDS
+    assert scheduler._base_interval("orders", schedule) == FIRST_RUN_INTERVAL_SECONDS
+
+    clock.advance(20)
+    await run_tick(scheduler, schedule, clock)
+    assert heard[-1] == ("orders", False)
+
+    clock.advance(FIRST_RUN_FAST_SECONDS)
+    assert not scheduler.in_fast_phase("orders")
+    assert scheduler._base_interval("orders", schedule) == ACTIVE_INTERVAL_SECONDS
+    await run_tick(scheduler, schedule, clock)
+    assert schedule.fast_until == 0.0
+    assert len(heard) == 2
+    assert schedule.next_due - clock.now > FIRST_RUN_INTERVAL_SECONDS
+    # Other targets keep their own cadence.
+    assert scheduler._base_interval("other", scheduler._schedules["other"]) == \
+        BACKGROUND_INTERVAL_SECONDS
+
+
+async def test_fast_phase_respects_the_duty_cycle_ceiling():
+    scheduler, coordinator, clock = _monitored_scheduler({"orders"})
+    coordinator.collector_for("orders").db_touch_ms = 2000
+    assert scheduler.start_fast_phase("orders")
+    schedule = scheduler._schedules["orders"]
+    await schedule.task
+    # 2 s of database time at a 5% ceiling stretches the 10 s cadence to 40 s.
+    assert schedule.last_duration_s == 2.0
+    assert scheduler._next_interval(
+        scheduler._base_interval("orders", schedule), schedule.last_duration_s) == 40
+
+
+def test_fast_phase_for_an_unknown_target_is_refused():
+    scheduler, _, _ = _monitored_scheduler(set())
+    assert not scheduler.start_fast_phase("missing")
+
+
+@pytest.mark.parametrize("mode", ["active", "fast", "backoff", "duty_cycle"])
+async def test_api_reports_the_actual_scheduler_slot(mode, monkeypatch, tmp_path):
+    scheduler, coordinator, clock = make_scheduler({"orders"})
+    coordinator.subscribed.add("orders")
+    collector = coordinator.collector_for("orders")
+    schedule = scheduler._schedules["orders"]
+    if mode == "fast":
+        assert scheduler.start_fast_phase("orders")
+        await schedule.task
+    else:
+        if mode == "backoff":
+            collector.fail_with = RuntimeError("database unavailable")
+        if mode == "duty_cycle":
+            collector.db_touch_ms = 6000
+        await run_tick(scheduler, schedule, clock)
+    interval = {"fast": 10, "duty_cycle": 120}.get(mode, 60)
+    expected = (clock.now + 30 if mode == "backoff" else
+                scheduler._aligned_next("orders", clock.now, interval))
+    assert scheduler.next_reading_at("orders") == expected == schedule.next_due
+    store = MonitorStore(tmp_path / "monitor.db", clock=clock.time)
+    store.set_settings("orders", {"enabled": True})
+    monkeypatch.setattr(monitor_routes, "_store", lambda: store)
+    monkeypatch.setattr(monitor_routes, "_now", lambda: int(clock.now))
+    monkeypatch.setattr(monitor_routes.views, "registry_entries", lambda keys=None: {})
+    app = FastAPI()
+    app.state.monitor_scheduler = scheduler
+    app.include_router(monitor_routes.router)
+    with TestClient(app) as client:
+        page = client.get("/targets/orders/pulse").json()
+        assert page["pulses"] == []
+        assert page["next_reading_at"] == expected
+        # Opening a stream can insert an early reading; its gap is not the next interval.
+        store.record_pulse("orders", int(clock.now) - 5, "collect", True, "ok")
+        store.record_pulse("orders", int(clock.now), "collect", True, "ok")
+        page = client.get("/targets/orders/pulse").json()
+        assert page["next_reading_at"] == expected
+        assert page["pulses"][0]["next_reading_at"] == expected
+        assert client.get("/targets/orders/health").json()["next_reading_at"] == expected
+        store.set_settings("orders", {"enabled": False})
+        page = client.get("/targets/orders/pulse").json()
+        assert page["next_reading_at"] is None
+        assert page["pulses"][0]["next_reading_at"] is None
+
+
+def test_next_reading_includes_shared_backoff_and_unknown_targets():
+    scheduler, _, clock = make_scheduler({"orders"})
+    scheduler.collect_soon("orders")
+    scheduler._backoff.record_failure("orders")
+    assert scheduler.next_reading_at("orders") == clock.now + 30
+    assert scheduler.next_reading_at("missing") is None
+
+
+def test_configured_targets_skip_monitoring_off_and_resume_when_on(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("shared.config.targets.TargetsConfig", lambda: SimpleNamespace(
+        load=lambda: None, list_targets=lambda: ["orders"]))
+    store = MonitorStore()
+    store.set_settings("orders", {"enabled": False})
+    assert scheduler_module._configured_targets() == []
+    store.set_settings("orders", {"enabled": True})
+    assert scheduler_module._configured_targets() == ["orders"]

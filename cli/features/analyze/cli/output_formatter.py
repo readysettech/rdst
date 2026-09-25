@@ -350,15 +350,9 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
     )
 
     llm_analysis = _ensure_dict(workflow_result.get("llm_analysis") or {})
-    llm_info = None
-    token_usage = llm_analysis.get("token_usage")
-    if token_usage:
-        tokens_in = token_usage.get("input", 0)
-        tokens_out = token_usage.get("output", 0)
-        total = token_usage.get("total", tokens_in + tokens_out)
-        cost = token_usage.get("estimated_cost_usd", 0)
-        model = llm_analysis.get("llm_model", "claude")
-        llm_info = {"model": model, "tokens": total, "cost": cost}
+    from features.analyze.functions.workflow_integration import _llm_info
+
+    llm_info = _llm_info(llm_analysis)
 
     lines.append(
         _capture(

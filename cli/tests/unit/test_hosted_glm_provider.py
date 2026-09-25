@@ -7,6 +7,7 @@ import pytest
 
 from shared.llm_manager.base import LLMError, ProviderRequest
 from shared.llm_manager.hosted_glm_provider import HostedGLMProvider
+from shared.llm_manager.inference_attribution import count_billable_calls
 
 
 def _request(extra=None):
@@ -51,6 +52,7 @@ def test_calls_only_bounded_keyservice_protocol(monkeypatch):
         "prompt_tokens": 20,
         "completion_tokens": 8,
         "total_tokens": 28,
+        "served_model": "z-ai/glm-5.3-flash",
     }
     url = post.call_args.args[0]
     payload = post.call_args.kwargs["json"]
@@ -61,6 +63,19 @@ def test_calls_only_bounded_keyservice_protocol(monkeypatch):
     assert "provider" not in payload
     assert "reasoning" not in payload
     assert payload["schema_cache_key"] == "a" * 64
+
+
+def test_billable_count_tracks_successful_keyservice_responses(monkeypatch):
+    post = MagicMock(side_effect=[_response(429, {"code": "LIMIT"}), _response()])
+    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    with count_billable_calls() as calls:
+        with pytest.raises(LLMError):
+            HostedGLMProvider().complete(_request(), api_key="token",
+                                         base_url="https://keyservice.example")
+        assert calls.count == 0
+        HostedGLMProvider().complete(_request(), api_key="token",
+                                     base_url="https://keyservice.example")
+    assert calls.count == 1
 
 
 def test_preserves_provider_reported_cache_hits(monkeypatch):
@@ -302,3 +317,16 @@ def test_strict_contracts_from_real_callers_reach_the_keyservice_unchanged(monke
     )
     payload = post.call_args.kwargs["json"]
     assert payload["response_format"] == contract
+
+
+def test_usage_carries_the_served_model_and_keyservice_charge(monkeypatch):
+    body = {"model": "z-ai/glm-5.3-flash", "text": "ok",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "cost_microusd": 2100}}
+    post = MagicMock(return_value=_response(body=body))
+    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+
+    result = HostedGLMProvider().complete(
+        _request(), api_key="supabase-access", base_url="https://keyservice.example")
+
+    assert result.usage["served_model"] == "z-ai/glm-5.3-flash"
+    assert result.usage["cost_usd"] == 0.0021

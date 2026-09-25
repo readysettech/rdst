@@ -97,6 +97,18 @@ def test_create_direct_connection_bounds_postgres_queries():
     assert connect.call_args.kwargs["options"] == "-c statement_timeout=3000"
 
 
+def test_create_direct_connection_drops_timeout_for_pooler():
+    import psycopg2
+
+    pooled = MagicMock()
+    rejected = psycopg2.OperationalError("unsupported startup parameter in options: statement_timeout")
+    with patch("psycopg2.connect", side_effect=[rejected, pooled]) as connect:
+        conn = create_direct_connection(dict(PG_CONFIG), query_timeout_seconds=3)
+    assert conn is pooled
+    assert "options" not in connect.call_args.kwargs
+    pooled.cursor.assert_not_called()
+
+
 def test_create_direct_connection_tags_mysql_program_name():
     with patch("pymysql.connect", return_value=MagicMock()) as connect:
         create_direct_connection(dict(MYSQL_CONFIG), lane="rdst/audit")

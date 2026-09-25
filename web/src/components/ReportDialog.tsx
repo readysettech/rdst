@@ -346,7 +346,7 @@ export function ReportDialog({
                             level="body-small"
                             className="text-content-layout-3"
                           >
-                            None — General feedback
+                            None - General feedback
                           </Text>
                         </HStack>
                       )}

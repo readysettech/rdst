@@ -164,11 +164,17 @@ def _collect_pg(conn: Any) -> ReplicationHealthSection:
     return section
 
 
+def _yes(value: Any) -> bool:
+    return value in ("Yes", b"Yes")
+
+
 def _collect_mysql(conn: Any) -> ReplicationHealthSection:
+    """Replica side: every channel's lag, stopped if either the I/O or the SQL thread is.
+    Primary side: each connected replica (binlog dump threads) as a peer."""
     section = ReplicationHealthSection()
     try:
         with conn.cursor() as cur:
-            # Try MySQL 8.0.22+ syntax first, fall back to SHOW SLAVE STATUS
+            # MySQL 8.0.22+ syntax first, then the older spelling.
             for stmt in ("SHOW REPLICA STATUS", "SHOW SLAVE STATUS"):
                 try:
                     cur.execute(stmt)
@@ -179,24 +185,35 @@ def _collect_mysql(conn: Any) -> ReplicationHealthSection:
                 return section
 
             cols = [d[0] for d in cur.description] if cur.description else []
-            row = cur.fetchone()
-            if row:
-                data = dict(zip(cols, row))
+            channels = [dict(zip(cols, row)) for row in cur.fetchall()]
+            if channels:
                 section.is_replica = True
-                lag = data.get("Seconds_Behind_Source") or data.get(
-                    "Seconds_Behind_Master"
-                )
-                if lag is not None:
+                lags, running = [], True
+                for data in channels:
+                    io = data.get("Replica_IO_Running", data.get("Slave_IO_Running"))
+                    sql = data.get("Replica_SQL_Running", data.get("Slave_SQL_Running"))
+                    running = running and _yes(io) and _yes(sql)
+                    lag = data.get("Seconds_Behind_Source", data.get("Seconds_Behind_Master"))
                     try:
-                        section.upstream_lag_seconds = float(lag)
+                        if lag is not None:
+                            lags.append(float(lag))
                     except (TypeError, ValueError):
                         pass
-                section.wal_receiver_status = (
-                    "streaming"
-                    if data.get("Replica_IO_Running") in ("Yes", b"Yes")
-                    or data.get("Slave_IO_Running") in ("Yes", b"Yes")
-                    else "stopped"
-                )
+                    host = data.get("Source_Host") or data.get("Master_Host")
+                    if host and not section.primary_conninfo_host:
+                        section.primary_conninfo_host = str(host)
+                section.upstream_lag_seconds = max(lags) if lags else None
+                section.wal_receiver_status = "streaming" if running else "stopped"
+            try:
+                cur.execute(
+                    "SELECT PROCESSLIST_USER, PROCESSLIST_HOST, PROCESSLIST_STATE "
+                    "FROM performance_schema.threads "
+                    "WHERE PROCESSLIST_COMMAND IN ('Binlog Dump', 'Binlog Dump GTID')")
+                for user, host, state in cur.fetchall():
+                    section.peers.append(ReplicationPeer(
+                        application_name=user, client_addr=host, state=state or "streaming"))
+            except Exception:
+                pass
     except Exception:
         pass
     return section

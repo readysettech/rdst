@@ -18,6 +18,7 @@ import sqlglot
 from sqlglot import exp
 
 from features.schema.schema_collector import collect_target_schema
+from shared.query_registry.query_registry import parseable_mysql_digest
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,8 @@ def target_identity(target_config: dict[str, Any]) -> str:
 
 
 def referenced_tables(sql: str, dialect: str | None = None) -> list[str]:
+    if dialect == "mysql":
+        sql = parseable_mysql_digest(sql)
     expressions = sqlglot.parse(sql, read=dialect)
     tables: set[str] = set()
     for expression in expressions:

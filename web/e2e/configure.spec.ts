@@ -1,13 +1,21 @@
 import {
+  acceptBrowserError,
   configureTestTarget,
   expect,
+  mockPrerequisites,
   setBackendFixtures,
   test,
 } from './fixtures'
 
 test('adds, updates, defaults, and deletes a database target', async ({
   page,
+  browserErrors,
 }) => {
+  // The new database's page asks for its latest report, which it doesn't have yet.
+  acceptBrowserError(
+    browserErrors,
+    'Failed to load resource: the server responded with a status of 404 (Not Found)'
+  )
   setBackendFixtures()
   await configureTestTarget(page, { hasPassword: true })
 
@@ -99,9 +107,22 @@ test('adds, updates, defaults, and deletes a database target', async ({
     })
   ).toBeVisible()
   expect(connectionTestBodies).toHaveLength(1)
+  await mockPrerequisites(page, 'primary-db')
   await writableAccountDialog
     .getByRole('button', { name: 'Add target' })
     .click()
+
+  // The next step is turning on monitoring: the new database's page opens
+  // with that dialog and its prerequisites check.
+  await expect(page).toHaveURL(/\/database\?panel=enable/)
+  const turnOn = page.getByRole('dialog', {
+    name: 'Turn on monitoring for primary-db',
+  })
+  await expect(
+    turnOn.getByRole('heading', { name: 'Ready to monitor' })
+  ).toBeVisible()
+  await turnOn.getByRole('button', { name: 'Not now' }).click()
+  await page.goto('/configure')
 
   let targetRow = page
     .getByTestId('target-row')

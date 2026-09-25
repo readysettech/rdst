@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import atexit
+import copy
+import errno
 import getpass
 import logging
 import os
@@ -13,15 +15,28 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from shared.target_backoff import TargetBackoff, target_backoff
 
 
 MAX_TUNNELS = 10
 KEEPALIVE_SECONDS = 30
 ACCEPT_READY_TIMEOUT_SECONDS = 2.0
-CHANNEL_OPEN_RETRY_SECONDS = 0.25
+MAX_CHANNELS_PER_TUNNEL = 8
+CHANNEL_OPEN_TIMEOUT_SECONDS = 10
 
 logger = logging.getLogger(__name__)
+
+
+class _ChannelFailureFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Channel failures are reported with their target at the lifecycle boundary.
+        message = record.getMessage()
+        return not (message.startswith("Secsh channel ") and "open FAILED" in message)
+
+
+logging.getLogger("shared.ssh_tunnel.transport").addFilter(_ChannelFailureFilter())
 
 
 def _ensure_known_hosts_file() -> str:
@@ -63,7 +78,11 @@ class SshAuthenticationError(SshTunnelError):
 
 
 class SshConnectionError(SshTunnelError):
-    """Raised when the jump host cannot be reached."""
+    """Raised when a jump host or forwarded destination cannot be reached."""
+
+    def __init__(self, message: str, *, cause: str | None = None):
+        super().__init__(message)
+        self.cause = cause
 
 
 @dataclass
@@ -82,16 +101,30 @@ class _Tunnel:
     clients: set = field(default_factory=set)
     clients_lock: threading.Lock = field(default_factory=threading.Lock)
     accept_thread: Optional[threading.Thread] = None
+    channel_lock: threading.Lock = field(default_factory=threading.Lock)
+    on_failure: Callable[[SshTunnelError], None] | None = None
+
+
+@dataclass
+class _Failure:
+    error: SshTunnelError
+    fingerprint: tuple
+    due: float
 
 
 class TunnelManager:
     """Manage per-target SSH tunnels within the current process."""
 
-    def __init__(self, max_tunnels: int = MAX_TUNNELS):
+    def __init__(self, max_tunnels: int = MAX_TUNNELS, *, backoff: TargetBackoff | None = None):
         self._max_tunnels = max_tunnels
         self._tunnels: Dict[str, _Tunnel] = {}
         self._lock = threading.RLock()
         self._target_locks: Dict[str, threading.RLock] = {}
+        self.backoff = backoff if backoff is not None else target_backoff
+        # Lock order: target lifecycle, registry, failures. Channel workers hold their
+        # channel lock before the lifecycle lock; lifecycle operations never wait on it.
+        self._failures_lock = threading.Lock()
+        self._failures: dict[str, _Failure] = {}
 
     def _target_lock(self, target_name: str) -> threading.RLock:
         """Return the stable lifecycle lock for one target."""
@@ -105,6 +138,59 @@ class TunnelManager:
             yield
 
     def ensure_tunnel(
+        self,
+        target_name: str,
+        ssh_cfg: dict,
+        dest_host: str,
+        dest_port: int,
+        passphrase: Optional[str] = None,
+        force_fresh: bool = False,
+    ) -> Tuple[str, int]:
+        """Open on demand, sharing retry deadlines with background target workers."""
+        with self._target_lock(target_name):
+            fingerprint = self._raw_config_fingerprint(ssh_cfg) + (dest_host, dest_port)
+            with self._failures_lock:
+                failure = self._failures.get(target_name)
+            if (failure is not None and failure.fingerprint == fingerprint
+                    and not (passphrase is not None and isinstance(failure.error, SshPassphraseRequired))):
+                if (self.backoff.clock() < failure.due
+                        or self.backoff.retry_after(target_name) > 0):
+                    raise copy.copy(failure.error).with_traceback(None) from None
+            try:
+                endpoint = self._ensure_tunnel(
+                    target_name, ssh_cfg, dest_host, dest_port, passphrase, force_fresh
+                )
+            except SshTunnelError as exc:
+                self._record_failure(target_name, fingerprint, exc)
+                raise
+            with self._failures_lock:
+                recovered = self._failures.pop(target_name, None)
+            if recovered is not None:
+                logger.info("SSH tunnel for %s recovered", target_name)
+            return endpoint
+
+    def failure_reason(self, target_name: str) -> str | None:
+        with self._failures_lock:
+            failure = self._failures.get(target_name)
+            return str(failure.error) if failure else None
+
+    def raise_if_failed(self, target_name: str) -> None:
+        """Restore a forwarding failure hidden by the local database driver's error."""
+        with self._failures_lock:
+            failure = self._failures.get(target_name)
+        if failure is not None:
+            raise copy.copy(failure.error).with_traceback(None) from None
+
+    def _record_failure(self, target: str, fingerprint: tuple, error: SshTunnelError) -> None:
+        with self._failures_lock:
+            previous = self._failures.get(target)
+            self.backoff.record_failure(target)
+            due = self.backoff.clock() + max(30, self.backoff.retry_after(target))
+            self._failures[target] = _Failure(error, fingerprint, due)
+            if previous is None or str(previous.error) != str(error):
+                logger.warning("SSH tunnel for %s failed: %s", target, error)
+
+    def _ensure_tunnel(
         self,
         target_name: str,
         ssh_cfg: dict,
@@ -132,6 +218,7 @@ class TunnelManager:
                     not force_fresh
                     and fully_inline
                     and tunnel is not None
+                    and not tunnel.stop_event.is_set()
                     and tunnel.transport.is_active()
                     and tunnel.raw_config_fingerprint == raw_fingerprint
                     and tunnel.destination == destination
@@ -144,6 +231,7 @@ class TunnelManager:
                 if (
                     not force_fresh
                     and tunnel is not None
+                    and not tunnel.stop_event.is_set()
                     and tunnel.transport.is_active()
                     and tunnel.config_fingerprint == fingerprint
                     and tunnel.destination == destination
@@ -229,6 +317,9 @@ class TunnelManager:
                 tunnel = self._tunnels.pop(target_name, None)
             if tunnel is not None:
                 self._close_tunnel(tunnel)
+            with self._failures_lock:
+                self._failures.pop(target_name, None)
+            self.backoff.forget(target_name)
 
     def close_all(self) -> None:
         """Close and forget every managed tunnel."""
@@ -320,13 +411,7 @@ class TunnelManager:
             ) from exc
         except (paramiko.ssh_exception.NoValidConnectionsError, OSError) as exc:
             client.close()
-            raise SshConnectionError(
-                self._message(
-                    target_name,
-                    jump_host,
-                    f"Could not reach SSH jump host: {exc}",
-                )
-            ) from exc
+            raise self._connection_error(exc, jump_host, resolved["port"]) from exc
         except paramiko.SSHException as exc:
             client.close()
             if "authentication" in str(exc).lower():
@@ -352,12 +437,24 @@ class TunnelManager:
                 )
             )
         transport.set_keepalive(KEEPALIVE_SECONDS)
+        transport.set_log_channel("shared.ssh_tunnel.transport")
+        try:
+            probe = transport.open_channel(
+                "direct-tcpip", (dest_host, dest_port), ("127.0.0.1", 0),
+                timeout=CHANNEL_OPEN_TIMEOUT_SECONDS,
+            )
+            if probe is None:
+                raise EOFError("SSH connection closed")
+            probe.close()
+        except (OSError, EOFError, paramiko.SSHException) as exc:
+            client.close()
+            raise self._connection_error(exc, dest_host, dest_port) from exc
 
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             listener.bind(("127.0.0.1", 0))
-            listener.listen()
+            listener.listen(MAX_CHANNELS_PER_TUNNEL)
             listener.settimeout(0.5)
         except OSError as exc:
             listener.close()
@@ -377,7 +474,19 @@ class TunnelManager:
             transport=transport,
             listener=listener,
             last_used=time.time(),
+            destination=(dest_host, dest_port),
         )
+        fingerprint = self._raw_config_fingerprint(ssh_cfg) + (dest_host, dest_port)
+
+        def failed(error: SshTunnelError) -> None:
+            with self._target_lock(target_name):
+                with self._lock:
+                    current = self._tunnels.get(target_name)
+                if current is tunnel:
+                    self._record_failure(target_name, fingerprint, error)
+                    self._close_tunnel(tunnel)
+
+        tunnel.on_failure = failed
         tunnel.accept_thread = threading.Thread(
             target=self._accept_connections,
             args=(tunnel, dest_host, dest_port),
@@ -541,6 +650,9 @@ class TunnelManager:
                 break
 
             with tunnel.clients_lock:
+                if tunnel.stop_event.is_set() or len(tunnel.clients) >= MAX_CHANNELS_PER_TUNNEL:
+                    client.close()
+                    continue
                 tunnel.clients.add(client)
             threading.Thread(
                 target=TunnelManager._forward_connection,
@@ -561,25 +673,21 @@ class TunnelManager:
 
         channel = None
         try:
-            for attempt in range(2):
+            with tunnel.channel_lock:
+                if tunnel.stop_event.is_set():
+                    return
                 try:
                     channel = tunnel.transport.open_channel(
-                        "direct-tcpip",
-                        (dest_host, dest_port),
-                        address,
+                        "direct-tcpip", (dest_host, dest_port), address,
+                        timeout=CHANNEL_OPEN_TIMEOUT_SECONDS,
                     )
-                except (OSError, EOFError, paramiko.SSHException):
-                    if attempt > 0 or tunnel.stop_event.is_set():
-                        raise
-                if channel is not None:
-                    break
-                if attempt == 0 and not tunnel.stop_event.wait(
-                    CHANNEL_OPEN_RETRY_SECONDS
-                ):
-                    continue
-                break
-            if channel is None:
-                return
+                    if channel is None:
+                        raise EOFError("SSH connection closed")
+                except (OSError, EOFError, paramiko.SSHException) as exc:
+                    if tunnel.on_failure is not None:
+                        tunnel.on_failure(TunnelManager._connection_error(exc, dest_host, dest_port))
+                    tunnel.stop_event.set()
+                    return
 
             pumps = (
                 threading.Thread(
@@ -601,7 +709,10 @@ class TunnelManager:
             pass
         finally:
             if channel is not None:
-                channel.close()
+                try:
+                    channel.close()
+                except (OSError, EOFError):
+                    pass
             try:
                 client.close()
             finally:
@@ -663,6 +774,25 @@ class TunnelManager:
                 pass
             client.close()
         tunnel.transport.close()
+
+    @staticmethod
+    def _connection_error(error: Exception, host: str, port: int) -> SshConnectionError:
+        detail = str(error).lower()
+        if isinstance(error, socket.gaierror) or any(word in detail for word in (
+            "name or service not known", "nodename nor servname", "getaddrinfo failed",
+            "name does not resolve", "host not found", "temporary failure in name resolution",
+            "no such host is known",
+        )):
+            cause, message = "dns", f"SSH tunnel host not found: {host}"
+        elif isinstance(error, (TimeoutError, socket.timeout)) or "timed out" in detail or "timeout" in detail:
+            cause, message = "timeout", f"SSH tunnel connection timed out: {host}:{port}"
+        elif (getattr(error, "errno", None) == errno.ECONNREFUSED or "refused" in detail
+              or any(getattr(item, "errno", None) == errno.ECONNREFUSED
+                     for item in getattr(error, "errors", {}).values())):
+            cause, message = "refused", f"SSH tunnel connection refused: {host}:{port}"
+        else:
+            cause, message = "connection", f"SSH tunnel connection failed: {host}:{port}"
+        return SshConnectionError(message, cause=cause)
 
     @staticmethod
     def _message(target_name: str, jump_host: str, detail: str) -> str:

@@ -35,6 +35,7 @@ def collect_health_report(
     from features.audit.health.connection_analysis import collect_connection_analysis
     from features.audit.health.config_audit import collect_config_audit
     from features.audit.health.replication_health import collect_replication_health
+    from features.audit.health.sequential_scans import collect_sequential_scans
 
     report = HealthReport(engine=engine)
 
@@ -43,6 +44,11 @@ def collect_health_report(
     except Exception as e:
         report.collection_error = f"connection failed: {e}"
         return report
+    if engine == "mysql":
+        # The collectors read positional rows; the target connection defaults to dict rows.
+        import pymysql.cursors
+
+        conn.cursorclass = pymysql.cursors.Cursor
 
     try:
         for label, fn in (
@@ -54,6 +60,7 @@ def collect_health_report(
                 lambda c: collect_config_audit(c, engine, instance_ram_gb, instance_vcpus),
             ),
             ("replication", lambda c: collect_replication_health(c, engine)),
+            ("sequential_scans", lambda c: collect_sequential_scans(c, engine)),
         ):
             try:
                 result = fn(conn)
@@ -65,10 +72,12 @@ def collect_health_report(
                     report.connections = result
                 elif label == "config":
                     report.config_audit = result
+                elif label == "sequential_scans":
+                    report.sequential_scans = result
                 elif label == "replication":
                     report.replication = result
             except Exception as e:  # noqa: BLE001
-                report.section_errors[label] = str(e)
+                report.section_errors["config_audit" if label == "config" else label] = str(e)
     finally:
         try:
             conn.close()

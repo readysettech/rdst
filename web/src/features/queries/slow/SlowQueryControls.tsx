@@ -370,7 +370,7 @@ export function SlowQueryControls({
                             level="caption"
                             className="text-content-negative-plain"
                           >
-                            Invalid regex — {filterPatternError}
+                            Invalid regex - {filterPatternError}
                           </Text>
                         </div>
                       </Show>

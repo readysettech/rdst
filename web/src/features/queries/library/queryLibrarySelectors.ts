@@ -67,7 +67,7 @@ export const QUERY_LIBRARY_FINDING_LABELS: Record<
   string
 > = {
   all: 'Any assessment state',
-  any: 'Any Jev concern',
+  any: 'Any classification concern',
   index_coverage: 'Missing index',
   join_growth: 'Join growth',
   broad_work: 'Broad work',
@@ -92,9 +92,9 @@ export const QUERY_LIBRARY_FINDING_DEFINITIONS: Record<string, string> = {
     'A query that repeats a subquery for every row of its outer result.',
   access_expression_risk:
     'A query that wraps an indexed column in a function or cast, so the existing index cannot be used.',
-  priority: 'Queries Jev recommends deep analyzing first.',
-  any: 'A query where Jev flagged at least one structural risk.',
-  none: 'A query where Jev flagged no structural risk.',
+  priority: 'Queries RDST recommends deep analyzing first.',
+  any: 'A query where RDST flagged at least one structural risk.',
+  none: 'A query where RDST flagged no structural risk.',
   all: 'Every query, assessed or not.',
 }
 

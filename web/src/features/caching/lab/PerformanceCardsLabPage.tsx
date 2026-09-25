@@ -160,7 +160,7 @@ export function PerformanceCardsLabPage() {
   return (
     <WorkspaceLayout
       title="Performance cards"
-      description="Design prototype: the Benchmarks setup rendered with the canonical selectable QueryCard. Fixture data only — nothing on this page runs against a database."
+      description="Design prototype: the Benchmarks setup rendered with the canonical selectable QueryCard. Fixture data only - nothing on this page runs against a database."
       icon="test-tube"
       panelId="performance-cards-lab"
       titleMeta={
@@ -304,7 +304,7 @@ export function PerformanceCardsLabPage() {
 
         <Card.Footer className="flex-wrap justify-between">
           <Text level="caption" className="mr-auto text-content-layout-3">
-            Prototype only — the run action is inert.
+            Prototype only - the run action is inert.
           </Text>
           <Button
             variant="primary"

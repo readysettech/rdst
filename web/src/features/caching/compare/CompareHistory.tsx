@@ -53,7 +53,7 @@ export function CompareHistory({
             layout="compact"
             icon="observe"
             title="No comparisons yet"
-            body="Run a comparison to measure a query's speedup on Readyset — every paired run is saved here for this target."
+            body="Run a comparison to measure a query's speedup on Readyset - every paired run is saved here for this target."
             action={{
               label: 'New comparison',
               icon: 'add',

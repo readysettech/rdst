@@ -4,6 +4,7 @@ import { Card } from '@rs/ui-new/card-2'
 import { Skeleton } from '@rs/ui-new/skeleton'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
+import { plural } from '../../monitor-kit/format'
 import { type StatusTone, statusToneIcon } from '../shared/statusTone'
 import {
   type CompareBatchSnapshot,
@@ -188,7 +189,7 @@ export function compareBatchDurationEstimate(
 ): string | null {
   if (queryCount < 2) return null
   const minutes = Math.max(1, Math.round((queryCount * durationSeconds) / 60))
-  return `${queryCount} queries run one at a time · about ${minutes} ${
+  return `${plural(queryCount, 'query', 'queries')} run one at a time · about ${minutes} ${
     minutes === 1 ? 'minute' : 'minutes'
   }`
 }

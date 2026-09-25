@@ -1,8 +1,20 @@
-import { clearTargets, expect, test } from '../fixtures'
+import {
+  acceptBrowserError,
+  clearTargets,
+  continueWhenMonitoringReady,
+  expect,
+  test,
+} from '../fixtures'
+
+// A database with no report yet answers report/latest with 404, which the browser logs.
+const NO_REPORT_404 =
+  'Failed to load resource: the server responded with a status of 404 (Not Found)'
 
 test('configures Postgres and bootstraps its schema through the UI', async ({
   page,
+  browserErrors,
 }) => {
+  acceptBrowserError(browserErrors, NO_REPORT_404)
   const host = process.env.RDST_E2E_DB_HOST ?? '127.0.0.1'
   const port = Number(process.env.RDST_E2E_DB_PORT ?? '15432')
 
@@ -26,6 +38,7 @@ test('configures Postgres and bootstraps its schema through the UI', async ({
   })
   await expect(writableAccount).toBeVisible()
   await writableAccount.getByRole('button', { name: 'Add target' }).click()
+  await continueWhenMonitoringReady(page, 'postgres-e2e')
 
   await expect(page).toHaveURL('/')
 

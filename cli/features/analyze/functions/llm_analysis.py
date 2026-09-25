@@ -13,6 +13,9 @@ import re
 from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
+# The hosted inference limit (keyservice MAX_OUTPUT_TOKENS).
+ANALYZE_MAX_TOKENS = 8192
+ANALYZE_JSON_ATTEMPTS = 2
 
 
 def estimate_tokens(text: str) -> int:
@@ -751,15 +754,26 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
         # Store estimate in kwargs for progress display access
         kwargs["_estimated_input_tokens"] = estimated_input_tokens
 
-        llm_response = llm_manager.generate_response(
-            prompt=ANALYZE_PROMPT,
-            model=model_param,
-            system_message=system_msg,
-            max_tokens=2000,
-            temperature=0.0,
-            extra=extra_params if extra_params else None,
-            purpose="analyze_query",
-        )
+        # A model sometimes answers with malformed JSON (an object left unclosed). Its output
+        # varies from call to call, so one more call usually returns a readable answer.
+        for _attempt in range(ANALYZE_JSON_ATTEMPTS):
+            llm_response = llm_manager.generate_response(
+                prompt=ANALYZE_PROMPT,
+                provider="readyset" if kwargs.get("hosted_only") in (True, "True", "true", "1") else None,
+                model=model_param,
+                system_message=system_msg,
+                # Hosted models reason before answering and the reasoning counts against this
+                # budget. Wide statements need ~2,300 tokens; a smaller cap cuts the JSON off
+                # (unparseable) or leaves no answer at all (the host reports UPSTREAM_ERROR).
+                max_tokens=ANALYZE_MAX_TOKENS,
+                temperature=0.0,
+                extra=extra_params if extra_params else None,
+                purpose="analyze_query",
+            )
+            if not llm_response or "response" not in llm_response:
+                break
+            if _extract_json_from_response(llm_response["response"]) is not None:
+                break
 
         if not llm_response or "response" not in llm_response:
             return {
@@ -791,21 +805,37 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
 
             # Get detailed token usage
             tokens_used = llm_response.get("tokens_used") or 0
+            usage = llm_response.get("usage") or {}
             model_used = (
-                llm_response.get("model") or model_param or AnthropicModel.SONNET_4_5.value
+                usage.get("served_model") or llm_response.get("model") or model_param
+                or AnthropicModel.SONNET_4_5.value
             )
 
-            # Try to get actual token breakdown if available
-            # tokens_used is usually total, but we can estimate breakdown
-            actual_input = estimated_input_tokens  # Use estimate for input
-            actual_output = (
-                tokens_used - actual_input
-                if tokens_used > actual_input
-                else tokens_used // 2
-            )
+            # A charged cost only comes back from Readyset-hosted calls.
+            provider_used = llm_response.get("provider") or (
+                "readyset" if usage.get("cost_usd") is not None else None)
 
-            # Calculate cost
-            cost_usd = estimate_cost(actual_input, actual_output, model_used)
+            # The provider's own token counts when it reports them, else an estimate
+            if usage.get("prompt_tokens") and usage.get("completion_tokens") is not None:
+                actual_input = int(usage["prompt_tokens"])
+                actual_output = int(usage["completion_tokens"])
+            else:
+                actual_input = estimated_input_tokens
+                actual_output = (
+                    tokens_used - actual_input
+                    if tokens_used > actual_input
+                    else tokens_used // 2
+                )
+
+            # Readyset-hosted calls carry what Keyservice charged; Claude prices apply
+            # only to Claude calls.
+            charged_usd = llm_response.get("cost_usd", usage.get("cost_usd"))
+            if charged_usd is not None:
+                cost_usd = float(charged_usd)
+            elif provider_used in (None, "claude"):
+                cost_usd = estimate_cost(actual_input, actual_output, model_used)
+            else:
+                cost_usd = 0.0
 
             return {
                 "success": True,
@@ -825,6 +855,7 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
                 "rewrite_suggestions": rewrite_suggestions,
                 "index_recommendations": index_recommendations,
                 "llm_model": model_used,
+                "llm_provider": provider_used,
                 "tokens_used": tokens_used,
                 "token_usage": {
                     "input": actual_input,
@@ -833,6 +864,10 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
                     if tokens_used
                     else actual_input + actual_output,
                     "estimated_cost_usd": cost_usd,
+                    "provider": provider_used,
+                    "model": model_used,
+                    # What was charged, when the provider reported it; else null.
+                    "cost_usd": float(charged_usd) if charged_usd is not None else None,
                 },
             }
 
@@ -850,6 +885,9 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
         return {
             "success": False,
             "error": f"LLM analysis failed: {str(e)}",
+            "error_code": ("LOGIN_REQUIRED" if getattr(e, "status", None) == 401
+                           and getattr(e, "code", None) == "UNAUTHORIZED"
+                           else getattr(e, "code", None)),
             "analysis_results": {},
             "hotspots": [],
         }
@@ -956,6 +994,7 @@ def _get_rewrite_suggestions(
 
         llm_response = llm_manager.generate_response(
             prompt=prompt,
+            provider="readyset" if kwargs.get("hosted_only") else None,
             model=kwargs.get("model"),  # Use provider's default model
             system_message="You are an expert SQL optimization consultant.",
             max_tokens=1500,
@@ -1007,6 +1046,7 @@ def _get_index_suggestions(
 
         llm_response = llm_manager.generate_response(
             prompt=prompt,
+            provider="readyset" if kwargs.get("hosted_only") else None,
             model=kwargs.get("model"),  # Use provider's default model
             system_message="You are a database indexing expert.",
             max_tokens=1500,
@@ -1052,6 +1092,7 @@ def _get_caching_recommendations(
 
         llm_response = llm_manager.generate_response(
             prompt=prompt,
+            provider="readyset" if kwargs.get("hosted_only") else None,
             model=kwargs.get("model"),  # Use provider's default model
             system_message="You are a Readyset caching optimization expert.",
             max_tokens=1500,

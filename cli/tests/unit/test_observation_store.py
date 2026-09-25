@@ -45,6 +45,18 @@ def snapshot_row(engine_key, calls=10, total=1.5):
     }
 
 
+def test_scoped_counter_reset_clears_only_target_epoch(store):
+    store.record_counter_snapshots("t1", "epoch-1", [snapshot_row("q")], captured_at=60)
+    store.record_counter_snapshots("t1", "epoch-2", [snapshot_row("q")], captured_at=60)
+    store.record_counter_snapshots("t2", "epoch-1", [snapshot_row("q")], captured_at=60)
+
+    store.clear_counter_snapshots("t1", "epoch-1")
+
+    assert store.latest_counter_snapshots("t1", "epoch-1") == []
+    assert len(store.latest_counter_snapshots("t1", "epoch-2")) == 1
+    assert len(store.latest_counter_snapshots("t2", "epoch-1")) == 1
+
+
 class TestCreation:
     """Creation-time pragmas and schema versioning."""
 
@@ -1150,6 +1162,49 @@ class TestEventRetention:
 
     def test_prune_events_with_empty_log(self, store):
         assert store.prune_events(cutoff=150) == 0
+
+
+def observation_keys(store):
+    conn = sqlite3.connect(store.path)
+    try:
+        return sorted(conn.execute(
+            "SELECT target_id, normalized_hash, window_end FROM recent_observation"))
+    finally:
+        conn.close()
+
+
+class TestObservationRetention:
+    def test_prune_observations_drops_windows_before_cutoff(self, store):
+        for end in (100, 200, 300):
+            store.record_recent_observations(
+                "t1", [observation_row("h1", end), observation_row("h2", end)])
+        store.record_recent_observations("t2", [observation_row("h1", 100)])
+
+        assert store.prune_observations(250, chunk=1) == 5
+        assert observation_keys(store) == [("t1", "h1", 300), ("t1", "h2", 300)]
+
+    def test_prune_observations_caps_rows_per_target(self, store):
+        for end in range(10, 110, 10):
+            store.record_recent_observations("t1", [observation_row("h1", end)])
+        store.record_recent_observations(
+            "t2", [observation_row("h1", 5), observation_row("h2", 5)])
+
+        assert store.prune_observations(0, max_rows=3) == 7
+        assert observation_keys(store) == [
+            ("t1", "h1", 80), ("t1", "h1", 90), ("t1", "h1", 100),
+            ("t2", "h1", 5), ("t2", "h2", 5)]
+
+    def test_pruning_returns_the_freed_pages_to_the_filesystem(self, store):
+        rows = [observation_row(f"h{n:04d}", end) for n in range(200) for end in range(1, 30)]
+        store.record_recent_observations("t1", rows)
+        conn = sqlite3.connect(store.path)
+        try:
+            grown = conn.execute("PRAGMA page_count").fetchone()[0]
+            store.prune_observations(10**9)
+            assert conn.execute("PRAGMA freelist_count").fetchone()[0] == 0
+            assert conn.execute("PRAGMA page_count").fetchone()[0] < grown // 4
+        finally:
+            conn.close()
 
 
 class TestRecreate:

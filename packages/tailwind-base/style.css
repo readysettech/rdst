@@ -233,6 +233,13 @@
      contrast + label, not hue alone. */
   --color-content-viz-cache: var(--content-viz-cache);
   --color-content-viz-origin: var(--content-viz-origin);
+  /* Monitor series: identity colors for the database health metrics. */
+  --color-content-viz-throughput: var(--content-viz-throughput);
+  --color-content-viz-latency: var(--content-viz-latency);
+  --color-content-viz-connections: var(--content-viz-connections);
+  --color-content-viz-hit: var(--content-viz-hit);
+  --color-content-viz-rollback: var(--content-viz-rollback);
+  --color-content-viz-neutral: var(--content-viz-neutral);
   --color-content-primary-solid: var(--content-primary-solid);
   --color-content-primary-soft: var(--content-primary-soft);
   --color-content-primary-plain: var(--content-primary-plain);
@@ -769,6 +776,12 @@
        the light card (cache 5.18:1, origin 4.86:1). Latent (apps are dark). */
     --content-viz-cache: var(--green-light-11);
     --content-viz-origin: var(--amber-light-11);
+    --content-viz-throughput: var(--violet-light-11);
+    --content-viz-latency: var(--amber-light-11);
+    --content-viz-connections: var(--blue-light-11);
+    --content-viz-hit: var(--green-light-11);
+    --content-viz-rollback: var(--tomato-light-11);
+    --content-viz-neutral: var(--sand-light-9);
 
     --border-layout-1: var(--sand-light-5);
     --border-layout-2: var(--sand-light-6);
@@ -909,6 +922,12 @@
        VIS-011, USE-005] */
     --content-viz-cache: var(--green-dark-11);
     --content-viz-origin: var(--amber-dark-11);
+    --content-viz-throughput: var(--violet-dark-11);
+    --content-viz-latency: var(--amber-dark-11);
+    --content-viz-connections: var(--blue-dark-11);
+    --content-viz-hit: var(--green-dark-11);
+    --content-viz-rollback: var(--tomato-dark-11);
+    --content-viz-neutral: var(--sand-dark-9);
 
     --border-layout-1: var(--sand-dark-3);
     --border-layout-2: var(--sand-dark-4);

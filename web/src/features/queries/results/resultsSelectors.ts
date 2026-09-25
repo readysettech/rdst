@@ -1,10 +1,13 @@
 import { resolveRewriteTesting } from '../../../components/analysis/AnalysisSections'
+import { isPlanOnly } from '../../../lib/analysisPayload'
 import type {
   CompleteEvent,
   IndexPlannerResult,
   IndexRecommendation,
   IndexTesting,
+  OptimizationOpportunity,
   ReadysetCacheability,
+  RewriteSuggestion,
   RewriteTesting,
   TestedRewrite,
 } from '../../../lib/api'
@@ -35,12 +38,21 @@ export interface ReadysetVerdict {
 export type ResultNextStep =
   | {
       kind: 'rewrite'
-      evidence: 'Tested'
-      tone: 'positive'
+      evidence: 'Tested' | 'Suggested'
+      tone: 'positive' | 'informative'
       title: string
       body: string
       supportingText: string
       sql: string
+    }
+  | {
+      kind: 'opportunity'
+      evidence: 'Suggested'
+      tone: 'informative'
+      title: string
+      body: string
+      supportingText: string
+      sql?: string
     }
   | {
       kind: 'index'
@@ -63,7 +75,7 @@ export type ResultNextStep =
     }
   | {
       kind: 'none'
-      evidence: 'Measured'
+      evidence: 'Measured' | 'Estimated'
       tone: 'informative'
       title: string
       body: string
@@ -72,6 +84,7 @@ export type ResultNextStep =
 
 export interface ResultsViewModel {
   performance?: ResultPerformance
+  planOnly: boolean
   explainResults: CompleteEvent['explain_results']
   testing?: RewriteTesting
   cacheability?: ReadysetCacheability
@@ -329,16 +342,29 @@ export function getReadysetVerdict(
   }
 }
 
+const OPPORTUNITY_TITLES: Record<string, string> = {
+  configuration: 'Change a database setting',
+  caching: 'Precompute or cache the result',
+  schema: 'Change the schema',
+  query_structure: 'Restructure the query',
+}
+
 function getNextStep({
+  planOnly,
   testing,
   indexes,
   indexTesting,
   readyset,
+  rewrites,
+  opportunities,
 }: {
+  planOnly: boolean
   testing?: RewriteTesting
   indexes: IndexRecommendation[]
   indexTesting?: IndexTesting
   readyset?: ReadysetVerdict
+  rewrites: RewriteSuggestion[]
+  opportunities: OptimizationOpportunity[]
 }): ResultNextStep {
   const rewrite = findTestedImprovement(testing)
   if (rewrite) {
@@ -400,7 +426,7 @@ function getNextStep({
   if (readyset?.alreadyCached) {
     return {
       kind: 'none',
-      evidence: 'Measured',
+      evidence: planOnly ? 'Estimated' : 'Measured',
       tone: 'informative',
       title: 'No cache change needed',
       body: 'This query is already cached. Review its status in Queries when you need to manage it.',
@@ -418,12 +444,54 @@ function getNextStep({
     }
   }
 
+  // A rewrite the analysis suggested but nothing tested. Once tested without a gain,
+  // the measurement wins and it isn't recommended.
+  const suggested = testing?.tested
+    ? undefined
+    : rewrites.find((rewrite) => rewrite.rewritten_sql?.trim())
+  if (suggested) {
+    return {
+      kind: 'rewrite',
+      evidence: 'Suggested',
+      tone: 'informative',
+      title: 'Try the suggested rewrite',
+      body:
+        suggested.explanation ||
+        "The analysis suggests this rewrite. It wasn't tested against the database.",
+      supportingText: suggested.expected_improvement
+        ? `Estimated: ${suggested.expected_improvement}`
+        : 'Not tested yet',
+      sql: suggested.rewritten_sql.trim(),
+    }
+  }
+
+  const opportunity = opportunities.find(
+    (candidate) => candidate.priority === 'high'
+  )
+  if (opportunity) {
+    const example =
+      typeof opportunity.example === 'string' ? opportunity.example.trim() : ''
+    return {
+      kind: 'opportunity',
+      evidence: 'Suggested',
+      tone: 'informative',
+      title:
+        OPPORTUNITY_TITLES[opportunity.type?.toLowerCase()] ??
+        'Review the top recommendation',
+      body: opportunity.description,
+      supportingText: 'High priority · review before applying',
+      ...(example ? { sql: example } : {}),
+    }
+  }
+
   return {
     kind: 'none',
-    evidence: 'Measured',
+    evidence: planOnly ? 'Estimated' : 'Measured',
     tone: 'informative',
     title: 'No clear change recommended',
-    body: 'The analysis did not find a high-confidence next step. Review the measured plan before making a change.',
+    body: planOnly
+      ? "The analysis didn't find a high-confidence next step. Review the estimated plan before making a change."
+      : "The analysis didn't find a high-confidence next step. Review the measured plan before making a change.",
   }
 }
 
@@ -472,21 +540,27 @@ export function selectResultsViewModel(
         indexRecommendations.length
     )
 
+  const planOnly = isPlanOnly(results.explain_results)
+  const nextStep = getNextStep({
+    planOnly,
+    testing: planOnly ? undefined : testing,
+    indexes: indexRecommendations,
+    indexTesting,
+    readyset: readysetVerdict,
+    rewrites: modelAnalysis?.rewrite_suggestions ?? [],
+    opportunities: modelAnalysis?.optimization_opportunities ?? [],
+  })
   return {
     performance,
+    planOnly,
     explainResults: results.explain_results,
-    testing,
+    testing: planOnly ? undefined : testing,
     cacheability,
     readysetVerdict,
     indexRecommendations,
     indexTesting,
     additionalRecommendations: modelAnalysis?.optimization_opportunities ?? [],
     hasModelAnalysis,
-    nextStep: getNextStep({
-      testing,
-      indexes: indexRecommendations,
-      indexTesting,
-      readyset: readysetVerdict,
-    }),
+    nextStep,
   }
 }

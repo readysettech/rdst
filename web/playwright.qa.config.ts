@@ -1,11 +1,12 @@
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, devices } from '@playwright/test'
+import { webBuild } from './e2e/web-build'
 
 const appDir = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(appDir, '..', '..', '..')
 const rdstDir = resolve(repoRoot, 'rdst')
-const distDir = resolve(appDir, 'dist')
+const { distDir, command: buildCommand } = webBuild(appDir)
 const baseURL = process.env.RDST_E2E_BASE_URL ?? 'http://127.0.0.1:8787'
 const serverURL = new URL(baseURL)
 const serverPort =
@@ -47,7 +48,7 @@ export default defineConfig({
     // `python -m uvicorn` resolves inside the project interpreter, so a venv
     // whose console-script shebangs have gone stale (e.g. after the repo
     // moved on disk) still serves.
-    command: `pnpm run build && uv run --directory "${rdstDir}" python -m uvicorn tests.web_e2e.server:app --host ${serverURL.hostname} --port ${serverPort}`,
+    command: `${buildCommand} && uv run --directory "${rdstDir}" python -m uvicorn tests.web_e2e.server:app --host ${serverURL.hostname} --port ${serverPort}`,
     cwd: appDir,
     env: {
       ...process.env,

@@ -1,0 +1,19 @@
+/* A new alert arriving on the live stream flashes once, then settles. */
+@keyframes inbox-fresh {
+  from {
+    background-color: var(--color-surface-warning-soft);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+.inbox-fresh {
+  animation: inbox-fresh 1.2s var(--ease-out, ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inbox-fresh {
+    animation: none;
+  }
+}

@@ -8,6 +8,7 @@ without using DataManager infrastructure.
 import logging
 import select
 import socket
+import sqlite3
 import time
 from typing import Dict, Any, List, Literal, Optional, Tuple
 
@@ -139,7 +140,11 @@ def resolve_connection_params(
         real_port = port
         tunnel_target = target or target_config.get('name') or host
         ensure_kwargs = {"force_fresh": True} if force_fresh_tunnel else {}
-        host, port = get_tunnel_manager().ensure_tunnel(
+        manager = get_tunnel_manager()
+        if (lane == "rdst/observe" and manager.failure_reason(str(tunnel_target))
+                and not _tunnel_retry_monitored(str(tunnel_target))):
+            manager.raise_if_failed(str(tunnel_target))
+        host, port = manager.ensure_tunnel(
             str(tunnel_target),
             target_config['ssh'],
             str(real_host),
@@ -198,6 +203,27 @@ def resolve_connection_params(
     return result
 
 
+def _tunnel_retry_monitored(target: str) -> bool:
+    """Read monitoring eligibility without initializing or migrating its store."""
+    from shared.monitor.monitor_store import default_monitor_db_path
+
+    path = default_monitor_db_path()
+    if not path.exists():
+        return False
+    try:
+        connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)
+        try:
+            return connection.execute(
+                "SELECT 1 FROM monitor_setting WHERE target=? AND key='enabled' AND value='1'",
+                (target,),
+            ).fetchone() is not None
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        logger.debug("Could not read tunnel retry eligibility for %s", target, exc_info=True)
+        return False
+
+
 def create_direct_connection(
     target_config: Dict[str, Any],
     connect_timeout: int = 10,
@@ -254,32 +280,40 @@ def create_direct_connection(
     if password == "" and password_env:
         raise ValueError("Password not available for target")
 
-    if engine == 'postgresql':
-        conn = _create_postgres_connection(
-            host, port, user, password, database, use_tls,
-            tls_verify=tls_verify, tls_ca=tls_ca,
-            hostaddr=params.get('hostaddr'), connect_timeout=connect_timeout,
-            application_name=params['application_name'],
-            query_timeout_seconds=query_timeout_seconds,
-        )
-    elif engine == 'mysql':
-        query_timeouts = (
-            {}
-            if query_timeout_seconds is None
-            else {
-                'read_timeout': query_timeout_seconds,
-                'write_timeout': query_timeout_seconds,
-            }
-        )
-        conn = _create_mysql_connection(
-            host, port, user, password, database, use_tls,
-            tls_verify=tls_verify, tls_ca=tls_ca,
-            hostaddr=params.get('hostaddr'), connect_timeout=connect_timeout,
-            program_name=params['application_name'],
-            **query_timeouts,
-        )
-    else:
-        raise ValueError(f"Unsupported database engine: {engine}")
+    try:
+        if engine == 'postgresql':
+            conn = _create_postgres_connection(
+                host, port, user, password, database, use_tls,
+                tls_verify=tls_verify, tls_ca=tls_ca,
+                hostaddr=params.get('hostaddr'), connect_timeout=connect_timeout,
+                application_name=params['application_name'],
+                query_timeout_seconds=query_timeout_seconds,
+            )
+        elif engine == 'mysql':
+            query_timeouts = (
+                {}
+                if query_timeout_seconds is None
+                else {
+                    'read_timeout': query_timeout_seconds,
+                    'write_timeout': query_timeout_seconds,
+                }
+            )
+            conn = _create_mysql_connection(
+                host, port, user, password, database, use_tls,
+                tls_verify=tls_verify, tls_ca=tls_ca,
+                hostaddr=params.get('hostaddr'), connect_timeout=connect_timeout,
+                program_name=params['application_name'],
+                **query_timeouts,
+            )
+        else:
+            raise ValueError(f"Unsupported database engine: {engine}")
+    except Exception:
+        if "ssh" in target_config:
+            from shared.ssh_tunnel import get_tunnel_manager
+
+            tunnel_target = str(target or target_config.get('name') or target_config.get('host', 'localhost'))
+            get_tunnel_manager().raise_if_failed(tunnel_target)
+        raise
 
     if params.get('read_only'):
         apply_read_only_session(conn, engine)
@@ -460,7 +494,9 @@ def postgres_connection_kwargs(
         **postgres_ssl_kwargs(params),
     }
     result.update(overrides)
-    return result
+    from shared.agent_activity import pg_connection_kwargs
+
+    return pg_connection_kwargs(result)
 
 
 def create_mysql_connection_from_params(
@@ -535,7 +571,18 @@ def _create_postgres_connection(
             )
         )
 
-        conn = psycopg2.connect(**conn_params)
+        from shared.agent_activity import pg_connection_kwargs
+
+        try:
+            conn = psycopg2.connect(**pg_connection_kwargs(conn_params))
+        except psycopg2.OperationalError as e:
+            # Connection poolers (Neon, Supavisor, PgBouncer) reject startup options. A
+            # session SET would outlive this client on a transaction-mode pooler and cap the
+            # application's own queries, so pooled connections run without the timeout.
+            if 'options' not in conn_params or 'unsupported startup parameter' not in str(e):
+                raise
+            conn_params.pop('options')
+            conn = psycopg2.connect(**pg_connection_kwargs(conn_params))
         # Set autocommit for read-only queries
         conn.autocommit = True
         return conn
@@ -563,6 +610,7 @@ def _create_mysql_connection(
         import pymysql.cursors
     except ImportError:
         raise RuntimeError("pymysql not installed. Run: pip install pymysql")
+    from shared.agent_activity import instrument_mysql
 
     try:
         conn_params = {
@@ -608,13 +656,13 @@ def _create_mysql_connection(
                 raw_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                 conn = pymysql.connect(defer_connect=True, **conn_params)
                 conn.connect(sock=raw_socket)
-                return conn
+                return instrument_mysql(conn)
             except Exception:
                 if raw_socket is not None:
                     raw_socket.close()
                 raise
 
-        return pymysql.connect(**conn_params)
+        return instrument_mysql(pymysql.connect(**conn_params))
     except Exception as e:
         raise RuntimeError(f"Failed to connect to MySQL: {e}")
 

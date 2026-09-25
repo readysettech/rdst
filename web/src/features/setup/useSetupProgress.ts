@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useTarget } from '../../hooks/useTarget'
 import { type SetupGuideStep, trackEvent } from '../../lib/analytics'
+import { getSettings } from '../../lib/monitor/api'
+import { monitorKeys } from '../../lib/monitor/keys'
 import {
   hasSetupSignal,
-  isSetupComplete,
   SETUP_STEP_IDS,
   type SetupProgress,
   setupSteps,
@@ -28,13 +29,15 @@ export async function fetchSetupProgress(
 }
 
 /**
- * The five setup signals for the active target. Refetches on window focus so
- * a step completed in a terminal turns green on return, and polls only while
- * the guide is on screen with work left — a finished setup polls nothing.
+ * Setup signals for the active target: connected (server) plus whether monitoring
+ * is on (the monitor settings, sharing the Database page's cache so turning it on
+ * there ticks the step at once). Refetches on window focus so a step completed in
+ * a terminal turns green on return, and polls only while the guide is on screen
+ * with work left; a finished setup polls nothing.
  */
 export function useSetupProgress({ poll = false }: { poll?: boolean } = {}) {
   const { target } = useTarget()
-  return useQuery({
+  const server = useQuery({
     queryKey: setupProgressQueryKey(target),
     queryFn: () => fetchSetupProgress(target),
     staleTime: 30_000,
@@ -42,10 +45,33 @@ export function useSetupProgress({ poll = false }: { poll?: boolean } = {}) {
     refetchOnWindowFocus: true,
     refetchInterval: (query) => {
       const data = query.state.data
-      if (!poll || !hasSetupSignal(data) || isSetupComplete(data)) return false
+      if (!poll || !hasSetupSignal(data) || data.connected) return false
       return SETUP_POLL_MS
     },
   })
+  const active = server.data?.connected ? server.data.target : ''
+  const monitor = useQuery({
+    queryKey: monitorKeys.settings(active),
+    queryFn: () => getSettings(active),
+    enabled: Boolean(active),
+    staleTime: 30_000,
+    retry: 1,
+    refetchOnWindowFocus: true,
+    refetchInterval: (query) =>
+      poll && query.state.data?.enabled === false ? SETUP_POLL_MS : false,
+  })
+
+  const data = useMemo<SetupProgress | undefined>(() => {
+    const progress = server.data
+    if (!progress || !hasSetupSignal(progress) || !progress.connected)
+      return progress
+    if (monitor.isError)
+      return { ...progress, error: 'Monitoring status unavailable' }
+    if (!monitor.data) return undefined
+    return { ...progress, monitoring: monitor.data.enabled }
+  }, [server.data, monitor.data, monitor.isError])
+
+  return { data }
 }
 
 // Server state is the truth; the event marks the moment this client observed

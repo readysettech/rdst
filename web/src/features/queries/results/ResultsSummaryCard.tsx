@@ -19,25 +19,27 @@ import {
 } from './resultsSelectors'
 
 function formatDuration(value?: number) {
-  if (typeof value !== 'number') return '—'
+  if (typeof value !== 'number') return '-'
   if (value > 0 && value < 1) return '<1 ms'
   return `${value.toFixed(2)} ms`
 }
 
 function formatNumber(value?: number) {
-  return typeof value === 'number' ? value.toLocaleString() : '—'
+  return typeof value === 'number' ? value.toLocaleString() : '-'
 }
 
 function formatCost(value?: number) {
   return typeof value === 'number'
     ? value.toLocaleString(undefined, { maximumFractionDigits: 2 })
-    : '—'
+    : '-'
 }
 
 export function ResultsSummaryCard({
   performance,
   explainResults,
+  planOnly = false,
 }: {
+  planOnly?: boolean
   performance?: ResultPerformance
   explainResults?: ExplainResults | null
 }) {
@@ -46,7 +48,9 @@ export function ResultsSummaryCard({
   const ratingTitle = getRatingTitle(performance?.rating)
   const ratingLabel = performance?.rating
     ? `${performance.rating.charAt(0).toUpperCase()}${performance.rating.slice(1)}`
-    : 'Measured only'
+    : planOnly
+      ? 'Estimated'
+      : 'Measured only'
   const score = performance?.score
   const hasScore = typeof score === 'number'
   const scoreTone = getScoreTone(score)
@@ -64,12 +68,18 @@ export function ResultsSummaryCard({
           <ResultSectionIndex value={1} />
           <VStack className="min-w-0 items-start gap-1">
             <Card.Title>
-              {performance ? 'Performance score' : 'Measured performance'}
+              {planOnly
+                ? 'Estimated performance'
+                : performance
+                  ? 'Performance score'
+                  : 'Measured performance'}
             </Card.Title>
             <Card.Description>
-              {performance
-                ? 'Measured execution, plan data, and model assessment.'
-                : 'Execution-plan data is available without a model assessment.'}
+              {planOnly
+                ? "Review the planner's estimates. RDST didn't run the query."
+                : performance
+                  ? 'Review how long the query took and how the database ran it. See what the AI found.'
+                  : 'Execution-plan data is available without a model assessment.'}
             </Card.Description>
           </VStack>
         </HStack>
@@ -131,7 +141,9 @@ export function ResultsSummaryCard({
                   level="body-small"
                   className="max-w-xl leading-relaxed text-content-layout-2"
                 >
-                  {getRatingDescription(performance.rating)}
+                  {planOnly
+                    ? 'This assessment is based on planner estimates.'
+                    : getRatingDescription(performance.rating)}
                 </Text>
               </m.div>
 
@@ -191,7 +203,7 @@ export function ResultsSummaryCard({
                     No score
                   </Text>
                   <Text level="caption" className="text-content-layout-3">
-                    Measured plan only
+                    {planOnly ? 'Planner estimates only' : 'Measured plan only'}
                   </Text>
                 </VStack>
               </VStack>
@@ -200,14 +212,17 @@ export function ResultsSummaryCard({
             <VStack className="items-start justify-center gap-5 p-6 desktop:col-span-2">
               <VStack className="items-start gap-1">
                 <Text level="headline-2" className="text-content-layout-1">
-                  Execution data is ready
+                  {planOnly
+                    ? 'Planner estimates are ready'
+                    : 'Execution data is ready'}
                 </Text>
                 <Text
                   level="body-small"
                   className="max-w-xl leading-relaxed text-content-layout-2"
                 >
-                  The query was measured successfully, but the analysis model
-                  did not return a score.
+                  {planOnly
+                    ? "RDST read the plan, but the analysis model didn't return a score."
+                    : "The query was measured successfully, but the analysis model didn't return a score."}
                 </Text>
               </VStack>
 
@@ -226,8 +241,9 @@ export function ResultsSummaryCard({
                     Model assessment unavailable
                   </Text>
                   <Text level="body-small" className="text-content-layout-2">
-                    The execution metrics below are measured values and remain
-                    available for review.
+                    {planOnly
+                      ? "The row counts below are planner estimates. RDST didn't run the query."
+                      : 'The execution metrics below are measured values and remain available for review.'}
                   </Text>
                 </VStack>
               </div>
@@ -238,23 +254,29 @@ export function ResultsSummaryCard({
 
       {explainResults ? (
         <div className="grid gap-1 tablet:grid-cols-3">
+          {!planOnly && (
+            <Card.Content className="p-4">
+              <ResultFact
+                label="Execution time"
+                value={formatDuration(explainResults.execution_time_ms)}
+                icon="speedometer"
+              />
+            </Card.Content>
+          )}
           <Card.Content className="p-4">
             <ResultFact
-              label="Execution time"
-              value={formatDuration(explainResults.execution_time_ms)}
-              icon="speedometer"
-            />
-          </Card.Content>
-          <Card.Content className="p-4">
-            <ResultFact
-              label="Scanned → returned"
+              label={
+                planOnly
+                  ? 'Estimated rows scanned → returned'
+                  : 'Scanned → returned'
+              }
               value={`${formatNumber(explainResults.rows_examined)} → ${formatNumber(explainResults.rows_returned)}`}
               icon="layers"
             />
           </Card.Content>
           <Card.Content className="p-4">
             <ResultFact
-              label="Planner cost"
+              label="Planner estimate"
               value={formatCost(explainResults.cost_estimate)}
               icon="observe"
             />

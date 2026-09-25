@@ -591,7 +591,7 @@ test.describe('Load test', () => {
       timeout: 20_000,
     })
     await expect(
-      mainContent(page).getByText('The load test could not complete')
+      mainContent(page).getByText("The load test couldn't complete")
     ).toBeVisible()
     await expect(
       mainContent(page).getByText('Database connection closed unexpectedly.')

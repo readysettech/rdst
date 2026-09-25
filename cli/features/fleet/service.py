@@ -276,7 +276,7 @@ class FleetService:
                     target_name=name,
                     status="failed",
                     error=(
-                        f"No password is available for target '{name}' — open its "
+                        f"No password is available for target '{name}' - open its "
                         "connection settings and enter the database password."
                     ),
                     code="TARGET_PASSWORD_REQUIRED",

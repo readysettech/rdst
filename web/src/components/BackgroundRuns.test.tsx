@@ -35,6 +35,11 @@ vi.mock('../lib/backgroundRuns', () => ({
     kind === 'audit' || kind === 'audit_capture' || kind === 'fleet_audit',
 }))
 
+vi.mock('../lib/monitor/hooks', () => ({
+  useMonitoringLimit: () => ({ data: undefined }),
+  useMonitorWork: () => ({ data: undefined }),
+}))
+
 vi.mock('../lib/trialQueries', () => ({
   invalidateTrialRelatedQueries: vi.fn(),
 }))
@@ -379,6 +384,27 @@ describe('BackgroundRuns', () => {
     expect(backgroundRuns.acknowledgeBackgroundRun).toHaveBeenCalledWith(
       'load_test_imdb_done'
     )
+  })
+
+  it("opens a one-query benchmark on that query's Benchmarks section", () => {
+    useRuns.mockReturnValue([
+      run({
+        runId: 'load_test_imdb_one',
+        kind: 'load_test',
+        status: 'done',
+        message: 'Load test complete',
+        loadRequest: { queries: [{ identifier: 'abc123' }], target: 'imdb' },
+      }),
+    ])
+
+    render(<BackgroundRuns />)
+    openJobs()
+    fireEvent.click(screen.getByTitle('View results'))
+
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/database',
+      search: { query: 'abc123', tab: 'readyset' },
+    })
   })
 
   it('dismisses a terminal job without opening it', () => {

@@ -6,7 +6,13 @@
  */
 
 import type { Page, Route } from '@playwright/test'
-import { configureTestTarget, expect, sseBody, test } from './fixtures'
+import {
+  configureTestTarget,
+  expect,
+  mockPrerequisites,
+  sseBody,
+  test,
+} from './fixtures'
 
 type FleetMember = {
   name: string
@@ -603,7 +609,23 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
     },
   })
   expect(credentialChecks).toBeGreaterThanOrEqual(1)
-  await expect(page.getByRole('button', { name: 'Done' })).toBeVisible()
+
+  // Connected targets move on to the monitoring prerequisites check.
+  await mockPrerequisites(page, 'orders-writer')
+  await page.getByRole('button', { name: 'Continue' }).click()
+  const setupDrawer = page.getByRole('dialog', { name: 'Set up monitoring' })
+  await expect(
+    setupDrawer.getByRole('heading', { name: 'Ready to monitor' })
+  ).toBeVisible()
+  await expect(
+    setupDrawer.locator('[data-check="visibility_probe"][data-status="ok"]')
+  ).toBeVisible()
+  // A single new database offers to turn monitoring on; this test stays on the import.
+  await expect(
+    setupDrawer.getByRole('button', { name: 'Turn on monitoring' })
+  ).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(setupDrawer).toHaveCount(0)
 })
 
 test('CSV picker posts browser file content instead of a server path', async ({

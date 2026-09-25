@@ -1,5 +1,6 @@
 """Service for database target configuration with async event streaming."""
 
+import asyncio
 import logging
 from typing import AsyncGenerator, Any, Dict, Optional
 
@@ -298,6 +299,28 @@ class ConfigureService:
             from shared.deploy.sandbox_manager import sandbox_manager
             from shared.run_registry import run_registry
 
+            removed = cfg.get(name)
+            from features.monitor import database_limit
+            from shared import analysis_lane
+            from shared.monitor.monitor_store import MonitorStore, default_monitor_db_path
+
+            was_monitored = False
+            if default_monitor_db_path().exists():
+                monitor = MonitorStore()
+                was_monitored = name in await asyncio.to_thread(monitor.monitored_targets)
+                await asyncio.to_thread(monitor.set_settings, name,
+                                        {"enabled": False, "execute": False})
+                await asyncio.to_thread(monitor._write, lambda conn: conn.execute(
+                    "UPDATE analyze_job SET state='skipped',finished_at=strftime('%s','now'),"
+                    "error='Target removed' WHERE target=? AND state IN ('queued','running')",
+                    (name,)))
+                run = analysis_lane.active(name)
+                if run is not None:
+                    await asyncio.to_thread(analysis_lane.stop, run)
+                from features.monitor.run_guard import RunGuard
+
+                # Drain target-owned monitor threads while their credentials still exist.
+                await asyncio.to_thread(RunGuard().run, name, lambda: None)
             run_registry.cancel_target(name)
             await sandbox_manager.start()
             try:
@@ -309,6 +332,18 @@ class ConfigureService:
             from shared.ssh_tunnel import get_tunnel_manager
 
             get_tunnel_manager().close(name)
+
+            try:
+                if was_monitored:
+                    await asyncio.to_thread(database_limit.release, removed)
+            except Exception:
+                logger.warning("Failed to release the monitoring slot for %s", name, exc_info=True)
+
+            try:
+                if default_monitor_db_path().exists():
+                    await asyncio.to_thread(MonitorStore().forget_target, name)
+            except Exception:
+                logger.warning("Failed to remove monitoring data for %s", name, exc_info=True)
 
             try:
                 from shared.query_registry import QueryRegistry
@@ -712,7 +747,7 @@ class ConfigureService:
             "category": "target_password_required",
             "password_env": config.get("password_env", ""),
             "message": (
-                f"No password is available for target '{target_name}' — open its "
+                f"No password is available for target '{target_name}' - open its "
                 "connection settings and enter the database password."
             ),
         }

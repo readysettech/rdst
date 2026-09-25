@@ -41,21 +41,27 @@ import shutil
 import sqlite3
 import threading
 import time
+from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from itertools import count
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, Optional
+from typing import Any, Callable, Dict, Iterable, Iterator, Mapping, Optional
 
 import toml
 
 import shared.constants as shared_constants
+from shared import startup_status
 from shared.persistence import merge_mapping_changes
 from shared.query_registry.observation_store import (
+    StorageError,
     _apply_journal_mode,
+    _check_journal_headers,
     _check_sqlite_runtime,
     _connection_pragmas,
     _refuse_network_path,
+    _storage_guard,
+    _storage_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,7 +77,7 @@ __all__ = [
     "library_db_path_for",
 ]
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 18
 
 # Analyses kept per query. A re-run appends, and the oldest beyond this
 # many is dropped at insert, so the history stays bounded per query
@@ -571,6 +577,17 @@ _MIGRATIONS: Dict[int, Any] = {
     13: _schema_v13,
     14: _schema_v14,
     15: _schema_v15,
+    # Version 16 is a data migration with no DDL: hash_sql now derives identity from
+    # sql_normalizer.identity_text, so MySQL digest quoting and value
+    # lists of any length share one hash; see _rederive_identity_hashes.
+    16: lambda strict: (),
+    17: lambda strict: (
+        "ALTER TABLE query_assessment ADD COLUMN invalid_response_retries INTEGER NOT NULL DEFAULT 0",
+        "UPDATE query_assessment SET status='retry_wait',request_id='',next_attempt_at=0 "
+        "WHERE status='paused' AND error_code='jev_invalid_response'",
+    ),
+    # Re-derive surviving identities with case-sensitive relation names.
+    18: lambda strict: (),
 }
 
 # Data-cleanup versions: each runs _prune_system_only_entries inside its
@@ -1220,7 +1237,7 @@ def _read_model_values(
     }
 
 
-def _decode_identity(row: sqlite3.Row) -> Dict[str, Any]:
+def _decode_identity(row: sqlite3.Row | Mapping[str, Any]) -> Dict[str, Any]:
     entry: Dict[str, Any] = {"hash": row["hash"]}
     for column in _TEXT_COLUMNS:
         entry[column] = row[column]
@@ -1235,13 +1252,17 @@ def _decode_identity(row: sqlite3.Row) -> Dict[str, Any]:
     return entry
 
 
-def _decode_lifecycle(row: sqlite3.Row) -> Dict[str, Any]:
+def _decode_lifecycle(row: sqlite3.Row | Mapping[str, Any]) -> Dict[str, Any]:
     lifecycle: Dict[str, Any] = {}
     for column in _LIFECYCLE_TEXT_COLUMNS + _LIFECYCLE_INT_COLUMNS:
         lifecycle[column] = row[column]
     lifecycle["sources"] = json.loads(row["sources"])
     lifecycle.update(json.loads(row["extra"]))
     return lifecycle
+
+
+_integrity_lock = threading.Lock()
+_validated_files: OrderedDict[tuple[str, int, int, int], None] = OrderedDict()
 
 
 class LibraryStore:
@@ -1259,8 +1280,7 @@ class LibraryStore:
         self._lock = threading.Lock()
         self._opened = False
         self._read_only_reason: Optional[str] = None
-        # Identity re-keys this process's migrations performed, drained by
-        # _rekey_observation_history once the migration has committed.
+        # Pending cache re-keys are journaled in the library migration transaction.
         self._identity_moves: Dict[str, str] = {}
 
     @property
@@ -1274,12 +1294,19 @@ class LibraryStore:
             self._db_path, isolation_level=None, check_same_thread=False
         )
         conn.row_factory = sqlite3.Row
-        for pragma in _connection_pragmas():
-            conn.execute(pragma)
+        try:
+            for pragma in _connection_pragmas():
+                conn.execute(pragma)
+        except BaseException:
+            conn.close()
+            raise
         return conn
 
+    @_storage_guard
     def ensure_open(self) -> None:
         """Create, migrate, or first-run-import the store; idempotent."""
+        if self._opened:
+            return
         with self._lock:
             if self._opened:
                 return
@@ -1289,6 +1316,7 @@ class LibraryStore:
             _strict_mode()
             _refuse_network_path(str(self._db_path))
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            _check_journal_headers(self.path)
             conn = self._connect()
             try:
                 version = conn.execute("PRAGMA user_version").fetchone()[0]
@@ -1312,29 +1340,59 @@ class LibraryStore:
                 else:
                     # Existing files follow this runtime's journal strategy,
                     # in both directions (WAL upgrade and DELETE fallback).
-                    _apply_journal_mode(conn, self._db_path)
-                    check = conn.execute("PRAGMA quick_check").fetchone()[0]
-                    if check != "ok":
-                        raise RuntimeError(
-                            f"library.db at {self._db_path} failed integrity "
-                            f"check ({check}). It is never rebuilt "
-                            "automatically; restore the file from backup or "
-                            "re-import from the queries.toml backup beside it."
-                        )
-                    if version < SCHEMA_VERSION:
-                        backup = self._backup_before_migration(conn, version)
-                        try:
-                            self._migrate(conn, version)
-                        except BaseException as exc:
-                            raise LibraryMigrationError(
-                                self._migration_failure_message(
-                                    version, backup, exc
+                    identity = self._db_path.stat()
+                    generation = (str(self._db_path), identity.st_dev, identity.st_ino, version)
+                    # Instance lock precedes validation lock; validation never takes cache.db locks.
+                    with _integrity_lock:
+                        if generation not in _validated_files:
+                            check = conn.execute("PRAGMA quick_check").fetchone()[0]
+                            if check != "ok":
+                                raise StorageError(
+                                    f"library.db at {self._db_path} failed integrity "
+                                    f"check ({check}). It's never rebuilt automatically. "
+                                    "Restore this file from a backup, or re-import from the "
+                                    "queries.toml backup beside it."
                                 )
-                            ) from None
+                            _validated_files[generation] = None
+                            if len(_validated_files) > 1024:
+                                _validated_files.popitem(last=False)
+                    _apply_journal_mode(conn, self._db_path)
+                    if version < SCHEMA_VERSION:
+                        with startup_status.migrating("library.db"):
+                            backup = self._backup_before_migration(conn, version)
+                            try:
+                                self._migrate(conn, version)
+                            except BaseException as exc:
+                                message = _storage_message(self.path, exc)
+                                if message:
+                                    raise StorageError(message) from exc
+                                raise LibraryMigrationError(
+                                    self._migration_failure_message(
+                                        version, backup, exc
+                                    )
+                                ) from None
             finally:
                 conn.close()
-            self._rekey_observation_history()
+            pending = self._connect()
+            try:
+                if pending.execute("SELECT 1 FROM sqlite_master WHERE name='pending_identity_move'").fetchone():
+                    self._identity_moves.update(dict(pending.execute(
+                        "SELECT old_hash,new_hash FROM pending_identity_move")))
+            finally:
+                pending.close()
+            if self._identity_moves:
+                with startup_status.migrating("cache.db"):
+                    self._rekey_observation_history()
             self._opened = True
+
+    @staticmethod
+    def invalidate_integrity(db_path: Path) -> None:
+        """Require validation on the next open after an in-place file restore."""
+        path = os.path.realpath(db_path)
+        with _integrity_lock:
+            for generation in list(_validated_files):
+                if generation[0] == path:
+                    del _validated_files[generation]
 
     def _backup_before_migration(
         self, conn: sqlite3.Connection, version: int
@@ -1385,7 +1443,7 @@ class LibraryStore:
             f"rolled back, so the file still holds every query at schema "
             f"{stored:d}, and a copy of it as it stood before this upgrade is "
             f"at {backup}. Reinstall the previous rdst to keep working, and "
-            "report this message."
+            "report this message. " + (_storage_message(self.path, exc) or "")
         )
 
     def _migrate(self, conn: sqlite3.Connection, from_version: int) -> None:
@@ -1393,11 +1451,12 @@ class LibraryStore:
             conn.execute("BEGIN IMMEDIATE")
             try:
                 for statement in _MIGRATIONS[version](_strict_mode()):
-                    if statement.startswith("ALTER TABLE target_query ADD COLUMN"):
-                        column = statement.split()[5]
+                    if statement.startswith(("ALTER TABLE target_query ADD COLUMN",
+                                             "ALTER TABLE query_assessment ADD COLUMN")):
+                        table, column = statement.split()[2], statement.split()[5]
                         existing = {
                             row["name"]
-                            for row in conn.execute("PRAGMA table_info(target_query)")
+                            for row in conn.execute(f"PRAGMA table_info({table})")
                         }
                         if column in existing:
                             continue
@@ -1420,10 +1479,18 @@ class LibraryStore:
                     self._prune_system_statements(conn)
                 if version == 13:
                     self._import_analysis_toml(conn)
+                if version in (16, 18):
+                    self._rederive_identity_hashes(conn)
+                if self._identity_moves:
+                    conn.execute("CREATE TABLE IF NOT EXISTS pending_identity_move "
+                                 "(old_hash TEXT PRIMARY KEY,new_hash TEXT NOT NULL)")
+                    conn.executemany("INSERT OR REPLACE INTO pending_identity_move VALUES (?,?)",
+                                     self._identity_moves.items())
                 conn.execute(f"PRAGMA user_version = {version:d}")
                 conn.execute("COMMIT")
             except BaseException:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 raise
 
     def _create_and_import(self, conn: sqlite3.Connection) -> None:
@@ -1458,7 +1525,8 @@ class LibraryStore:
             # Another process may have migrated between our version read and
             # this write lock; re-check before creating anything.
             if conn.execute("PRAGMA user_version").fetchone()[0] != 0:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 return
             for statement in _MIGRATIONS[1](_strict_mode()):
                 conn.execute(statement)
@@ -1473,6 +1541,9 @@ class LibraryStore:
                 conn.execute(statement)
             for statement in _MIGRATIONS[15](_strict_mode()):
                 conn.execute(statement)
+            if SCHEMA_VERSION >= 17:
+                for statement in _MIGRATIONS[17](_strict_mode()):
+                    conn.execute(statement)
             for statement in _READ_MODEL_INDEXES:
                 conn.execute(statement)
             for query_hash, entry in entries.items():
@@ -1494,10 +1565,17 @@ class LibraryStore:
             self._prune_self_traffic(conn)
             self._prune_system_statements(conn)
             self._import_analysis_toml(conn)
+            self._rederive_identity_hashes(conn)
+            if self._identity_moves:
+                conn.execute("CREATE TABLE IF NOT EXISTS pending_identity_move "
+                             "(old_hash TEXT PRIMARY KEY,new_hash TEXT NOT NULL)")
+                conn.executemany("INSERT OR REPLACE INTO pending_identity_move VALUES (?,?)",
+                                 self._identity_moves.items())
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION:d}")
             conn.execute("COMMIT")
         except BaseException:
-            conn.execute("ROLLBACK")
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
             raise
         if entries:
             logger.info(
@@ -1607,6 +1685,23 @@ class LibraryStore:
                 (_json_dumps(payload), query_hash, analysis_id),
             )
             return bool(cursor.rowcount)
+
+    def latest_analysis_refs(self, target: str, keys: list[str]) -> list[Dict[str, Any]]:
+        """Latest analysis metadata for a bounded page of identities on one database."""
+        if not keys or not self._analyses_readable():
+            return []
+        conn = self._connect()
+        try:
+            return [dict(row) for row in conn.execute(
+                "SELECT a.query_hash, a.analysis_id, a.created_at FROM query_analysis a"
+                " WHERE a.target = ? AND a.query_hash IN (SELECT value FROM json_each(?))"
+                " AND a.id = (SELECT b.id FROM query_analysis b"
+                " WHERE b.target = a.target AND b.query_hash = a.query_hash"
+                " ORDER BY b.created_at DESC, b.id DESC LIMIT 1)",
+                (target, _json_dumps(keys)),
+            )]
+        finally:
+            conn.close()
 
     def analysis_payloads(self, query_hash: str) -> list[Dict[str, Any]]:
         """Every stored body for one query, newest first."""
@@ -1753,6 +1848,7 @@ class LibraryStore:
 
     # -- reads ----------------------------------------------------------------
 
+    @_storage_guard
     def load_all(self) -> Dict[str, Dict[str, Any]]:
         """Return every entry as {hash: entry_dict}, in insertion order.
 
@@ -1773,14 +1869,116 @@ class LibraryStore:
         finally:
             conn.close()
 
-    def _load_all(self, conn: sqlite3.Connection) -> Dict[str, Dict[str, Any]]:
-        entries: Dict[str, Dict[str, Any]] = {}
-        by_id: Dict[int, Dict[str, Any]] = {}
-        for row in conn.execute(_IDENTITY_SELECT + " ORDER BY id"):
+    @staticmethod
+    def _read_rows(conn: sqlite3.Connection, sql: str,
+                   params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+        """Materialize rows before decoding Library entries."""
+        conn.execute(f"CREATE TEMP TABLE library_read AS {sql}", params)
+        try:
+            names = [column[0] for column in
+                     conn.execute("SELECT * FROM temp.library_read LIMIT 0").description]
+            columns = ['"' + name.replace('"', '""') + '"' for name in names]
+            # Text preserves the full precision of SQLite REAL values during JSON transfer.
+            values = ",".join(f"CASE WHEN typeof({column})='real' THEN "
+                              f"printf('%!.26g',{column}) ELSE {column} END" for column in columns)
+            reals = ",".join(f"typeof({column})='real'" for column in columns)
+            try:
+                rows = json.loads(conn.execute(
+                    "SELECT json_group_array(json_array("
+                    f"json_array({values}),json_array({reals}))) "
+                    "FROM (SELECT * FROM temp.library_read ORDER BY rowid)").fetchone()[0])
+                return [{name: float(value) if real else value
+                         for name, value, real in zip(names, values, reals)} for values, reals in rows]
+            except (sqlite3.OperationalError, json.JSONDecodeError):
+                rows = conn.execute("SELECT * FROM temp.library_read ORDER BY rowid").fetchall()
+                return [dict(zip(names, row)) for row in rows]
+        finally:
+            conn.execute("DROP TABLE temp.library_read")
+
+    def load_keys(self, keys: list[str]) -> Dict[str, Dict[str, Any]]:
+        """Load a bounded set of identities and their lifecycle data."""
+        if not keys or not self._analyses_readable():
+            return {}
+        conn = self._connect()
+        try:
+            identities, lifecycles = self._read_keys(conn, keys)
+        finally:
+            conn.close()
+        # Decode after releasing SQLite readers so collection can commit in rollback mode.
+        return self._decode_entries(identities, lifecycles)
+
+    def target_page(self, target_key: str, limit: Optional[int],
+                    offset: int) -> tuple[list[str], int]:
+        """Hashes of the entries belonging to a target, ordered as list_queries orders
+        them (newest last_analyzed first, then insertion order), plus the total.
+
+        An entry belongs to a target when it has that target's lifecycle or the target
+        is its home (ask_target, else last_target).
+        """
+        if not self._analyses_readable():
+            return [], 0
+        scope = ("FROM query_identity qi WHERE EXISTS (SELECT 1 FROM target_query tq "
+                 "WHERE tq.identity_id = qi.id AND tq.target_key = ?) "
+                 "OR COALESCE(NULLIF(qi.ask_target, ''), qi.last_target) = ?")
+        conn = self._connect()
+        try:
+            total = conn.execute(f"SELECT COUNT(*) {scope}",
+                                 (target_key, target_key)).fetchone()[0]
+            rows = self._read_rows(
+                conn, f"SELECT qi.hash {scope} ORDER BY qi.last_analyzed DESC, qi.id "
+                "LIMIT ? OFFSET ?", (target_key, target_key, limit if limit else -1, offset))
+        finally:
+            conn.close()
+        return [row["hash"] for row in rows], total
+
+    def observed_hashes(self, target_key: str) -> set[str]:
+        """Hashes whose lifecycle on ``target_key`` records a first observation."""
+        if not self._analyses_readable():
+            return set()
+        conn = self._connect()
+        try:
+            rows = self._read_rows(
+                conn, "SELECT qi.hash FROM target_query tq JOIN query_identity qi "
+                "ON qi.id = tq.identity_id WHERE tq.target_key = ? "
+                "AND tq.first_observed_at IS NOT NULL AND tq.first_observed_at != ''",
+                (target_key,))
+        finally:
+            conn.close()
+        return {row["hash"] for row in rows}
+
+    def _read_keys(self, conn: sqlite3.Connection,
+                   keys: Iterable[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        identities = self._read_rows(conn, _IDENTITY_SELECT +
+                                     " WHERE hash IN (SELECT value FROM json_each(?))",
+                                     (json.dumps(sorted(keys)),))
+        lifecycles = self._read_rows(conn, _LIFECYCLE_SELECT +
+                                     " WHERE identity_id IN (SELECT value FROM json_each(?))",
+                                     (json.dumps([row["id"] for row in identities]),))
+        return identities, lifecycles
+
+    @staticmethod
+    def _decode_entries(identities: list[dict[str, Any]],
+                        lifecycles: list[dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        entries = {}
+        by_id = {}
+        for row in identities:
             entry = _decode_identity(row)
             entries[row["hash"]] = entry
             by_id[row["id"]] = entry
-        for row in conn.execute(_LIFECYCLE_SELECT):
+        for row in lifecycles:
+            by_id[row["identity_id"]]["target_lifecycle"][row["target_key"]] = _decode_lifecycle(row)
+        return entries
+
+    def _load_all(self, conn: sqlite3.Connection) -> Dict[str, Dict[str, Any]]:
+        entries: Dict[str, Dict[str, Any]] = {}
+        by_id: Dict[int, Dict[str, Any]] = {}
+        identities = self._read_rows(conn, _IDENTITY_SELECT + " ORDER BY id")
+        lifecycles = self._read_rows(conn, _LIFECYCLE_SELECT)
+        for row in identities:
+            entry = _decode_identity(row)
+            entries[row["hash"]] = entry
+            by_id[row["id"]] = entry
+        for row in lifecycles:
             entry = by_id.get(row["identity_id"])
             if entry is not None:
                 entry["target_lifecycle"][row["target_key"]] = _decode_lifecycle(row)
@@ -1788,8 +1986,9 @@ class LibraryStore:
 
     # -- Jev quick assessments ----------------------------------------------
 
-    def prepare_assessments(self, target: str, target_identity: str, *, limit: int = 200, now: Optional[float] = None) -> int:
+    def prepare_assessments(self, target: str, target_identity: str, *, limit: int = 200, now: Optional[float] = None, eligible_keys: Optional[list[str]] = None) -> int:
         at = time.time() if now is None else float(now)
+        eligibility = () if eligible_keys is None else (json.dumps(eligible_keys),)
         with self._write() as conn:
             conn.execute(
                 "UPDATE target_query SET rm_jev_priority = -1, rm_jev_findings = 0, "
@@ -1802,11 +2001,14 @@ class LibraryStore:
                 "(identity_id, target_key, target_identity, status, created_at, updated_at, next_attempt_at, claim_expiry) "
                 "SELECT tq.identity_id, tq.target_key, ?, 'pending', CAST(? AS REAL), "
                 "CAST(? AS REAL), CAST(0 AS REAL), CAST(0 AS REAL) "
-                "FROM target_query AS tq WHERE tq.target_key = ? AND NOT EXISTS ("
+                "FROM target_query AS tq JOIN query_identity qi ON qi.id=tq.identity_id "
+                "WHERE tq.target_key = ? " +
+                ("AND qi.hash IN (SELECT value FROM json_each(?)) " if eligible_keys is not None else "") +
+                "AND NOT EXISTS ("
                 "SELECT 1 FROM query_assessment AS qa WHERE qa.identity_id = tq.identity_id "
                 "AND qa.target_key = tq.target_key AND qa.target_identity = ?) "
                 "ORDER BY tq.identity_id DESC LIMIT ?",
-                (target_identity, at, at, target, target_identity, max(1, limit)),
+                (target_identity, at, at, target, *eligibility, target_identity, max(1, limit)),
             )
             return cursor.rowcount or 0
 
@@ -1834,19 +2036,22 @@ class LibraryStore:
             )
             return cursor.rowcount or 0
 
-    def claim_assessment(self, target: str, target_identity: str, *, owner: str, request_id: str, lease_seconds: float = 120.0, prefer_new: bool = True, now: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    def claim_assessment(self, target: str, target_identity: str, *, owner: str, request_id: str, lease_seconds: float = 120.0, prefer_new: bool = True, now: Optional[float] = None, eligible_keys: Optional[list[str]] = None) -> Optional[Dict[str, Any]]:
         at = time.time() if now is None else float(now)
         direction = "DESC" if prefer_new else "ASC"
+        eligible = "" if eligible_keys is None else "AND qi.hash IN (SELECT value FROM json_each(?)) "
+        eligibility = () if eligible_keys is None else (json.dumps(sorted(eligible_keys)),)
         with self._write() as conn:
             row = conn.execute(
-                f"SELECT qa.id, qa.generation, qa.request_id, qi.hash, qi.sql, qi.original_sql "
+                f"SELECT qa.id, qa.generation, qa.request_id, qa.invalid_response_retries, qi.hash, qi.sql, qi.original_sql "
                 "FROM query_assessment AS qa JOIN query_identity AS qi ON qi.id = qa.identity_id "
                 "JOIN target_query AS tq ON tq.identity_id = qa.identity_id AND tq.target_key = qa.target_key "
                 "WHERE qa.target_key = ? AND qa.target_identity = ? "
                 "AND qa.status IN ('pending','waiting_connection','waiting_schema','waiting_auth','retry_wait') "
-                f"AND qa.next_attempt_at <= ? ORDER BY qa.attempt_count ASC, qa.created_at {direction}, "
+                "AND qa.next_attempt_at <= ? " + eligible +
+                f"ORDER BY qa.attempt_count ASC, qa.created_at {direction}, "
                 f"qa.identity_id {direction} LIMIT 1",
-                (target, target_identity, at),
+                (target, target_identity, at, *eligibility),
             ).fetchone()
             if row is None:
                 return None
@@ -1861,20 +2066,23 @@ class LibraryStore:
             if claimed.rowcount != 1:
                 return None
             return {"id": int(row["id"]), "generation": generation, "request_id": stable_request_id,
+                    "invalid_response_retries": int(row["invalid_response_retries"]),
                     "hash": str(row["hash"]), "sql": str(row["sql"]),
                     "original_sql": str(row["original_sql"] or ""), "target": target,
                     "target_identity": target_identity}
 
-    def retry_assessment(self, assessment_id: int, generation: int, owner: str, *, error_code: str, next_attempt_at: float, status: str = "retry_wait", now: Optional[float] = None) -> bool:
+    def retry_assessment(self, assessment_id: int, generation: int, owner: str, *, error_code: str, next_attempt_at: float, status: str = "retry_wait", fresh_request: bool = False, now: Optional[float] = None) -> bool:
         if status not in {"retry_wait", "waiting_connection", "waiting_schema", "waiting_auth", "paused", "unsupported"}:
             raise ValueError(f"Unsupported retry state: {status}")
         at = time.time() if now is None else float(now)
         with self._write() as conn:
             cursor = conn.execute(
                 "UPDATE query_assessment SET status = ?, error_code = ?, next_attempt_at = ?, "
-                "claim_owner = '', claim_expiry = 0, updated_at = ? WHERE id = ? "
+                "claim_owner = '', claim_expiry = 0, updated_at = ?, "
+                "request_id = CASE WHEN ? THEN '' ELSE request_id END, "
+                "invalid_response_retries = invalid_response_retries + ? WHERE id = ? "
                 "AND generation = ? AND claim_owner = ? AND status = 'running'",
-                (status, error_code[:64], float(next_attempt_at), at, assessment_id, generation, owner),
+                (status, error_code[:64], float(next_attempt_at), at, fresh_request, fresh_request, assessment_id, generation, owner),
             )
             return cursor.rowcount == 1
 
@@ -1918,6 +2126,24 @@ class LibraryStore:
                 (query_hash, target, target_identity),
             ).fetchone()
             return self._decode_assessment(row) if row else None
+        finally:
+            conn.close()
+
+    def assessments_for_target(self, target: str, target_identity: str, keys: Optional[list[str]] = None) -> Dict[str, Dict[str, Any]]:
+        """Every query's latest assessment on one target, by query hash, in one read."""
+        if not self._db_path.exists():
+            return {}
+        self.ensure_open()
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT qi.hash, qa.* FROM query_assessment AS qa "
+                "JOIN query_identity AS qi ON qi.id = qa.identity_id "
+                "WHERE qa.target_key = ? AND qa.target_identity = ?" +
+                (" AND qi.hash IN (SELECT value FROM json_each(?))" if keys is not None else ""),
+                (target, target_identity, *((json.dumps(keys),) if keys is not None else ())),
+            ).fetchall()
+            return {row["hash"]: self._decode_assessment(row) for row in rows}
         finally:
             conn.close()
 
@@ -2206,6 +2432,79 @@ class LibraryStore:
                 merged_groups,
             )
         return merged_groups
+
+    def _rederive_identity_hashes(self, conn: sqlite3.Connection) -> int:
+        """Schema v16/v18 data migration: re-key identities onto the identity-text hash.
+
+        A row re-keys only when its stored hash equals the v15 or v16 derivation of its own
+        text, so hand-imported hashes stay as they are. Rows that now share a hash merge
+        with the v8 lifecycle union (see _apply_identity_moves), and every move is
+        replayed onto cache.db's observation history after commit. Idempotent.
+        """
+        from shared.query_registry.query_registry import (
+            _sql_digest,
+            canonicalize_sql,
+            hash_sql,
+            normalize_sql,
+        )
+        from shared.query_registry.sql_normalizer import (
+            canonicalize_placeholder_style,
+            identity_text,
+        )
+
+        # Pending observation moves follow the survivor through this re-derivation.
+        has_pending = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='pending_identity_move'").fetchone()
+        if has_pending:
+            self._identity_moves = {
+                **dict(conn.execute("SELECT old_hash,new_hash FROM pending_identity_move")),
+                **self._identity_moves,
+            }
+        dialect_of = _dialect_resolver()
+        entries: Dict[int, Dict[str, Any]] = {}
+        targets: Dict[int, str] = {}
+        old_hashes: Dict[int, str] = {}
+        for row in conn.execute(
+            "SELECT id, hash, sql, original_sql, last_target FROM query_identity"
+        ).fetchall():
+            text = row["original_sql"] or row["sql"]
+            if not text:
+                continue
+            try:
+                previous = _sql_digest(canonicalize_placeholder_style(normalize_sql(text)))
+                folded = _sql_digest(canonicalize_placeholder_style(
+                    identity_text(canonicalize_sql(text), preserve_table_case=False)))
+                current = hash_sql(text, dialect_of(row["last_target"]))
+            except Exception:
+                continue
+            if row["hash"] not in (previous, folded) or current == row["hash"]:
+                continue
+            entries[row["id"]] = self._load_entry_by_id(conn, row["id"])
+            targets[row["id"]] = current
+            old_hashes[row["id"]] = row["hash"]
+        rekeyed, merged_groups = self._apply_identity_moves(
+            conn, entries, targets, old_hashes
+        )
+        # Stored analyses name their query by hash; they follow it to the new identity.
+        for identity_id, old_hash in old_hashes.items():
+            conn.execute(
+                "UPDATE OR IGNORE query_analysis SET query_hash = ? WHERE query_hash = ?",
+                (targets[identity_id], old_hash),
+            )
+        # Observation moves apply only to history present during the upgrade.
+        if not (self._db_path.parent / "cache.db").exists():
+            self._identity_moves.clear()
+            if has_pending:
+                conn.execute("DELETE FROM pending_identity_move")
+        if entries:
+            logger.info(
+                "Identity-text re-derivation touched %d identities "
+                "(%d re-keyed, %d merged groups)",
+                len(entries),
+                rekeyed,
+                merged_groups,
+            )
+        return len(entries)
 
     def _repair_placeholder_artifacts(self, conn: sqlite3.Connection) -> int:
         """Schema v9 data migration: repair digit-lifting placeholder damage.
@@ -2650,7 +2949,8 @@ class LibraryStore:
         cache.db's write lock across its library.db write, so a migration
         must never take the two in the opposite order. cache.db is a
         rebuildable cache, so a failure here is logged and the migrated
-        library still stands.
+        library still stands. Pending moves remain durable until the cache commit,
+        so the next start can replay them idempotently.
         """
         moves, self._identity_moves = self._identity_moves, {}
         cache_path = self._db_path.parent / "cache.db"
@@ -2668,6 +2968,15 @@ class LibraryStore:
                 exc_info=True,
             )
             return
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='pending_identity_move'").fetchone():
+                conn.executemany("DELETE FROM pending_identity_move WHERE old_hash=? AND new_hash=?",
+                                 moves.items())
+            conn.execute("COMMIT")
+        finally:
+            conn.close()
         if moved:
             logger.info(
                 "Re-keyed %d observation rows in %s onto migrated query "
@@ -2759,6 +3068,7 @@ class LibraryStore:
             }
         return entry
 
+    @_storage_guard
     def query_library(
         self,
         *,
@@ -2942,7 +3252,8 @@ class LibraryStore:
                 rows = conn.execute(page_sql, values).fetchall()
                 conn.execute("COMMIT")
             except BaseException:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 raise
         finally:
             conn.close()
@@ -3015,10 +3326,14 @@ class LibraryStore:
                 conn.execute("BEGIN IMMEDIATE")
                 try:
                     yield conn
-                except BaseException:
-                    conn.execute("ROLLBACK")
+                    conn.execute("COMMIT")
+                except BaseException as exc:
+                    if conn.in_transaction:
+                        conn.execute("ROLLBACK")
+                    message = _storage_message(self.path, exc)
+                    if message:
+                        raise StorageError(message) from exc
                     raise
-                conn.execute("COMMIT")
             finally:
                 conn.close()
 
@@ -3028,6 +3343,7 @@ class LibraryStore:
         current: Dict[str, Dict[str, Any]],
         *,
         validate: Optional[Callable[[Dict[str, Dict[str, Any]]], None]] = None,
+        keys: Optional[Iterable[str]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """Merge one writer's baseline->current delta onto the stored state.
 
@@ -3035,10 +3351,12 @@ class LibraryStore:
         store is re-read inside the write transaction, this writer's
         changes are applied per key, ``validate`` sees the merged mapping
         before anything is written, and the merged mapping is returned so
-        the caller can adopt it as its new baseline.
+        the caller can adopt it as its new baseline. With ``keys`` only those
+        identities are re-read and merged, and only they are returned.
         """
         with self._write() as conn:
-            latest = self._load_all(conn)
+            latest = (self._load_all(conn) if keys is None
+                      else self._decode_entries(*self._read_keys(conn, keys)))
             merged = merge_mapping_changes(latest, baseline, current)
             if validate is not None:
                 validate(merged)

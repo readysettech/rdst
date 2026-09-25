@@ -15,6 +15,8 @@ from urllib.request import Request, urlopen
 
 from packaging.version import InvalidVersion, Version
 
+from shared.constants import rdst_data_dir
+
 from .models import InstallerState, UpdateOutcome, VersionCheck
 
 PYPI_JSON_URL = "https://pypi.org/pypi/rdst/json"
@@ -37,7 +39,7 @@ class UpdateService:
         config_dir: Path | None = None,
         runtime_prefix: Path | None = None,
     ):
-        self.config_dir = config_dir or Path.home() / ".rdst"
+        self.config_dir = config_dir or rdst_data_dir()
         if runtime_prefix is not None:
             self.runtime_prefix = runtime_prefix
         elif getattr(sys, "frozen", False):

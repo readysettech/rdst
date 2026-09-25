@@ -1,7 +1,10 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ReadysetCacheabilitySection } from './AnalysisSections'
+import {
+  PerformanceSummarySection,
+  ReadysetCacheabilitySection,
+} from './AnalysisSections'
 
 afterEach(cleanup)
 
@@ -84,4 +87,24 @@ describe('ReadysetCacheabilitySection', () => {
     fireEvent.click(screen.getByRole('button', { name: /Try with Readyset/ }))
     expect(tryReadyset).toHaveBeenCalledOnce()
   })
+})
+
+it('labels plan-only rows as estimates and omits execution timing in shared summaries', () => {
+  render(
+    <PerformanceSummarySection
+      perf={{ overall_rating: 'good' }}
+      explainResults={{
+        success: true,
+        database_engine: 'postgresql',
+        plan_format: 'explain',
+        execution_time_ms: 49,
+        rows_examined: 1000,
+        rows_returned: 10,
+        cost_estimate: 250,
+      }}
+    />
+  )
+  expect(screen.queryByText('Execution time')).toBeNull()
+  expect(screen.getByText('Estimated rows examined')).toBeTruthy()
+  expect(screen.getByText('Estimated rows returned')).toBeTruthy()
 })

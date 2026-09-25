@@ -16,6 +16,7 @@ import {
   formatSecondsShort,
   shortHash,
 } from '../../../lib/formatters'
+import { plural } from '../../monitor-kit/format'
 import {
   BenchmarkProgress,
   useElapsedSeconds,
@@ -174,8 +175,8 @@ function LaneStatCell({
         {stats.failures > 0 ? ` · ${formatNumber(stats.failures)} errors` : ''}
       </Text>
       <Text level="caption" className="text-content-layout-3 tabular-nums">
-        {hasSuccess ? formatMs(stats.avg_ms) : '—'} mean ·{' '}
-        {hasSuccess ? formatMs(stats.p95_ms) : '—'} p95
+        {hasSuccess ? formatMs(stats.avg_ms) : '-'} mean ·{' '}
+        {hasSuccess ? formatMs(stats.p95_ms) : '-'} p95
       </Text>
     </VStack>
   )
@@ -240,7 +241,7 @@ export function LoadTestResults({
   const runAgainBlockedReason = targetLocked
     ? 'Unlock this database to run the test again.'
     : !request
-      ? 'This run was restored without its settings, so it cannot be repeated. Adjust the load to configure a new one.'
+      ? "This run was restored without its settings, so it can't be repeated. Adjust the load to configure a new one."
       : null
   const tone: StatusTone = running
     ? 'informative'
@@ -306,9 +307,9 @@ export function LoadTestResults({
               value={preparation.preparedCount}
               max={preparation.prepareTotal}
               ariaLabel="Cache preparation"
-              label={`${preparation.preparedCount} of ${preparation.prepareTotal} queries cached`}
+              label={`${preparation.preparedCount} of ${plural(preparation.prepareTotal, 'query', 'queries')} cached`}
               timing={`${formatSecondsShort(preparingSeconds)} elapsed`}
-              detail="Measurement starts once every query is cached. On a cold sandbox that takes a few minutes; stopping the test here costs nothing."
+              detail="Measurement starts once every query is cached. On a cold sandbox that takes a few minutes; you can stop the test here."
             />
           ) : queued ? (
             <HStack className="items-start gap-3 rounded-xl border border-border-info-soft p-4">
@@ -341,7 +342,7 @@ export function LoadTestResults({
                   level="label-small"
                   className="text-content-negative-soft"
                 >
-                  The load test could not complete
+                  The load test couldn't complete
                 </Text>
                 <Text level="body-small" className="text-content-layout-3">
                   {error ||
@@ -388,7 +389,7 @@ export function LoadTestResults({
                 />
                 <LoadMetric
                   label="p95 latency"
-                  value={totalSuccesses > 0 ? formatMs(p95) : '—'}
+                  value={totalSuccesses > 0 ? formatMs(p95) : '-'}
                   detail="successful requests"
                 />
                 <LoadMetric
@@ -565,8 +566,8 @@ export function LoadTestResults({
           <Card.Header>
             <Card.Title>Per-query results</Card.Title>
             <Card.Description>
-              Origin and Readyset throughput, latency, and errors for each
-              query.
+              Compare how many requests each query completed on the origin and
+              Readyset. See how long they took and whether they failed.
             </Card.Description>
           </Card.Header>
           <Card.Content className="p-0">
@@ -635,7 +636,8 @@ export function LoadTestResults({
           <Card.Header>
             <Card.Title>Per-query results</Card.Title>
             <Card.Description>
-              Throughput coverage, latency, and errors for each query.
+              See how many requests each query completed, how long they took,
+              and whether they failed.
             </Card.Description>
           </Card.Header>
           <Card.Content className="p-0">
@@ -710,7 +712,7 @@ export function LoadTestResults({
                                 level="mono-small"
                                 className="text-content-layout-2"
                               >
-                                {hasSuccess ? formatMs(value) : '—'}
+                                {hasSuccess ? formatMs(value) : '-'}
                               </Text>
                             </td>
                           )
@@ -797,7 +799,7 @@ export function LoadTestResults({
                   level="label-small"
                   className="text-content-negative-soft"
                 >
-                  The load test could not complete
+                  The load test couldn't complete
                 </Text>
                 <Text level="body-small" className="text-content-layout-3">
                   {error}

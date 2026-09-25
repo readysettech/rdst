@@ -66,7 +66,6 @@ const TAB_CONTENT: Array<[string, string[], boolean]> = [
     false,
   ],
   ['Sizing', ['CloudWatch CPU', 'db.r6g.medium'], true],
-  ['Savings', ['$400.00/mo', '$650.00/mo', 'Cost breakdown'], true],
   ['Queries', ['Queries (1)'], true],
   ['Next steps', ['Tune the pool'], true],
 ]
@@ -75,7 +74,6 @@ const TAB_CONTENT: Array<[string, string[], boolean]> = [
 const EMPTY_TAB_MESSAGES: Array<[string, string]> = [
   ['Queries', 'No query data was collected for this run.'],
   ['Sizing', 'No sizing data was collected for this run.'],
-  ['Savings', 'No savings or cost data was collected for this run.'],
   [
     'Detailed analysis',
     'No detailed analysis data was collected for this run.',
@@ -691,7 +689,7 @@ describe('AuditReportView', () => {
       within(outerTabs).getByRole('tab', { name: 'Fleet summary' })
     ).toBeTruthy()
     expect(
-      within(outerTabs).getByRole('tab', { name: 'Fleet savings' })
+      within(outerTabs).getByRole('tab', { name: 'Fleet sizing' })
     ).toBeTruthy()
     expect(within(outerTabs).getAllByRole('tab')).toHaveLength(2)
     expect(
@@ -713,7 +711,6 @@ describe('AuditReportView', () => {
       'Overview',
       'Queries',
       'Sizing',
-      'Savings',
       'Detailed analysis',
       'Next steps',
     ]) {
@@ -730,15 +727,15 @@ describe('AuditReportView', () => {
     expect(window.location.search).toContain('fleetTab=target')
     expect(window.location.search).toContain('target=Fleet+Aurora+3')
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Fleet savings' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Fleet sizing' }))
     expect(
       screen.getByText(
-        'Review current and suggested monthly fleet costs, total potential savings, and the per-instance rollup.',
+        'Review current and suggested instance sizes across the fleet.',
         { exact: true }
       )
     ).toBeTruthy()
     expect(screen.getByRole('tablist', { name: 'Instances' })).toBeTruthy()
-    expect(screen.getByText('Current cluster total')).toBeTruthy()
+    expect(screen.getByText('Oversized nodes')).toBeTruthy()
     expect(screen.getAllByText('Per-node sizing rollup')).toHaveLength(1)
   })
 
@@ -790,13 +787,9 @@ describe('AuditReportView', () => {
     expect(screen.getByText('72/100', { exact: true })).toBeTruthy()
     expect(screen.queryByText('71.66666666666667/100')).toBeNull()
     expect(screen.queryByText('$194.18/mo', { exact: true })).toBeNull()
-    fireEvent.click(screen.getByRole('tab', { name: 'Fleet savings' }))
-    expect(
-      screen.getAllByText('$194.18/mo', { exact: true }).length
-    ).toBeGreaterThan(0)
-    expect(
-      screen.getAllByText('$97.82/mo', { exact: true }).length
-    ).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('tab', { name: 'Fleet sizing' }))
+    expect(screen.queryByText('$194.18/mo', { exact: true })).toBeNull()
+    expect(screen.queryByText('$97.82/mo', { exact: true })).toBeNull()
     expect(screen.getAllByText('Fleet sizing summary').length).toBeGreaterThan(
       0
     )
@@ -821,8 +814,8 @@ describe('AuditReportView', () => {
 
     selectInnerTab('Queries')
     expect(window.location.search).toContain('tab=queries')
-    selectInnerTab('Savings')
-    expect(window.location.search).toContain('tab=savings')
+    selectInnerTab('Sizing')
+    expect(window.location.search).toContain('tab=sizing')
 
     window.history.back()
     await waitFor(() =>

@@ -6,6 +6,9 @@ import {
   type ServerResponse,
 } from 'node:http'
 import path from 'node:path'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import type { ReadableStream } from 'node:stream/web'
 
 const MIME_TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
@@ -29,9 +32,16 @@ export interface StartStaticServerOptions {
   rootDir: string
   apiBaseUrl: string
   host?: string
+  /** Package CI supplies UI sign-in discovery without production account credentials. */
+  smokeAuth?: boolean
 }
 
 function sendText(res: ServerResponse, statusCode: number, text: string): void {
+  if (res.destroyed || res.writableEnded) return
+  if (res.headersSent) {
+    res.destroy()
+    return
+  }
   res.writeHead(statusCode, { 'content-type': 'text/plain; charset=utf-8' })
   res.end(text)
 }
@@ -68,31 +78,40 @@ async function proxyApi(
     return
   }
 
-  const target = new URL(req.url, apiBaseUrl)
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  req.once('aborted', abort)
+  res.once('close', abort)
   try {
+    const target = new URL(req.url, apiBaseUrl)
     const response = await fetch(target, {
+      signal: controller.signal,
       method: req.method,
       headers: req.headers as HeadersInit,
       body: req.method === 'GET' || req.method === 'HEAD' ? undefined : req,
       duplex: 'half',
     } as RequestInit)
 
+    if (controller.signal.aborted || res.destroyed) {
+      await response.body?.cancel()
+      return
+    }
     res.writeHead(response.status, Object.fromEntries(response.headers))
     if (response.body) {
-      const reader = response.body.getReader()
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        res.write(Buffer.from(value))
-      }
+      await pipeline(Readable.fromWeb(response.body as ReadableStream), res)
+    } else {
+      res.end()
     }
-    res.end()
   } catch (error) {
+    if (controller.signal.aborted) return
     sendText(
       res,
       502,
       error instanceof Error ? error.message : 'RDST API proxy failed'
     )
+  } finally {
+    req.off('aborted', abort)
+    res.off('close', abort)
   }
 }
 
@@ -111,7 +130,7 @@ function serveStatic(
   res.writeHead(200, {
     'content-type': MIME_TYPES[ext] ?? 'application/octet-stream',
   })
-  createReadStream(filePath).pipe(res)
+  void pipeline(createReadStream(filePath), res).catch(() => res.destroy())
 }
 
 export async function startStaticServer(
@@ -124,6 +143,28 @@ export async function startStaticServer(
   }
 
   const server = createServer((req, res) => {
+    if (
+      options.smokeAuth &&
+      req.url?.split('?')[0] === '/api/env/requirements'
+    ) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          requirements: [
+            {
+              kind: 'anthropic_api_key',
+              name: 'ANTHROPIC_API_KEY',
+              satisfied: true,
+              source: 'readyset_account',
+            },
+          ],
+          missing: [],
+          all_satisfied: true,
+          keyring_available: false,
+        })
+      )
+      return
+    }
     if (req.url?.startsWith('/api')) {
       void proxyApi(req, res, options.apiBaseUrl)
       return

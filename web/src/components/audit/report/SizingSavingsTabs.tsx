@@ -1,13 +1,11 @@
 import { VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import {
-  formatMoney,
   formatPercent,
   formatReportNumber,
   VERDICT_LABELS,
 } from '../../../lib/auditReportFormat'
 import type { AuditReport } from '../../../types/audit'
-import { TableHeaderCell } from '../../TableHeaderCell'
 import { HealthReportSections } from './HealthSections'
 import {
   InstanceClassValue,
@@ -95,103 +93,5 @@ export function SizingTabContent({ report }: { report: AuditReport }) {
 }
 
 export function SavingsTabContent({ report }: { report: AuditReport }) {
-  const sizing = report.sizing
-  const hasSavings =
-    sizing?.current_monthly_cost_usd != null ||
-    sizing?.suggested_monthly_cost_usd != null ||
-    sizing?.potential_savings_usd != null ||
-    sizing?.readyset_projected_cost_usd != null ||
-    sizing?.readyset_projected_savings_usd != null
-  if (!hasSavings) {
-    return (
-      <ReportEmptyState>
-        No savings or cost data was collected for this run.
-      </ReportEmptyState>
-    )
-  }
-  return (
-    <VStack className="gap-6 items-stretch">
-      <SectionCard
-        icon="adjustment-horizontal"
-        title="Projected monthly savings"
-      >
-        <div className="p-5 grid grid-cols-1 tablet:grid-cols-2 gap-4">
-          <StatCard
-            label="Right-sizing savings"
-            value={
-              sizing?.potential_savings_usd != null
-                ? `${formatMoney(sizing.potential_savings_usd)}/mo`
-                : '-'
-            }
-            hint={
-              sizing?.suggested_instance_class
-                ? `Move to ${sizing.suggested_instance_class}`
-                : 'No instance change was recommended'
-            }
-            valueClassName="text-content-positive-soft"
-          />
-          <StatCard
-            label="Readyset caching-projected savings"
-            value={
-              sizing?.readyset_projected_savings_usd != null
-                ? `${formatMoney(sizing.readyset_projected_savings_usd)}/mo`
-                : '-'
-            }
-            hint={
-              sizing?.readyset_projected_class
-                ? `Projected instance: ${sizing.readyset_projected_class}`
-                : 'Caching projection unavailable'
-            }
-            valueClassName="text-content-positive-soft"
-          />
-        </div>
-      </SectionCard>
-      <SectionCard icon="document-validation" title="Cost breakdown">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="bg-surface-layout-2/30">
-                <TableHeaderCell>Scenario</TableHeaderCell>
-                <TableHeaderCell>Instance class</TableHeaderCell>
-                <TableHeaderCell align="right">Monthly cost</TableHeaderCell>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-layout-1">
-              <tr>
-                <td className="px-4 py-3 text-content-layout-2">Current</td>
-                <td className="px-4 py-3 text-content-layout-2">
-                  <InstanceClassValue report={report} />
-                </td>
-                <td className="px-4 py-3 text-right text-content-layout-2">
-                  {formatMoney(sizing?.current_monthly_cost_usd)}/mo
-                </td>
-              </tr>
-              <tr>
-                <td className="px-4 py-3 text-content-layout-2">
-                  Suggested right-sized
-                </td>
-                <td className="px-4 py-3 text-content-layout-2">
-                  {sizing?.suggested_instance_class || '-'}
-                </td>
-                <td className="px-4 py-3 text-right text-content-layout-2">
-                  {formatMoney(sizing?.suggested_monthly_cost_usd)}/mo
-                </td>
-              </tr>
-              <tr>
-                <td className="px-4 py-3 text-content-layout-2">
-                  With Readyset caching
-                </td>
-                <td className="px-4 py-3 text-content-layout-2">
-                  {sizing?.readyset_projected_class || '-'}
-                </td>
-                <td className="px-4 py-3 text-right text-content-layout-2">
-                  {formatMoney(sizing?.readyset_projected_cost_usd)}/mo
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </SectionCard>
-    </VStack>
-  )
+  return <SizingTabContent report={report} />
 }

@@ -9,8 +9,9 @@ type StableOrder = {
 
 /**
  * Keep the rendered list still while discovery refreshes evidence underneath
- * it. New matching rows wait behind an explicit reveal action; changing a
- * filter or sort is itself an explicit reorder and adopts the new order.
+ * it. The first populated response establishes the order. Further matching
+ * rows wait behind an explicit reveal action; changing a filter or sort is
+ * itself an explicit reorder and adopts the new order.
  *
  * Rows served while `isPlaceholder` is set belong to the previous request
  * (kept on screen for continuity), so a signature change adopts them only as
@@ -36,11 +37,11 @@ export function useStableQueryList({
     () => queries.map((query) => query.hash),
     [queries]
   )
-  const settled = !isLoading && !isPlaceholder
+  const initialized = !isLoading && !isPlaceholder && currentHashes.length > 0
   const [order, setOrder] = useState<StableOrder>(() => ({
     signature,
     hashes: currentHashes,
-    initialized: settled,
+    initialized,
   }))
 
   const signatureChanged = order.signature !== signature
@@ -81,13 +82,13 @@ export function useStableQueryList({
     if (
       signatureChanged ||
       revealOrderChanged ||
-      (!order.initialized && settled)
+      (!order.initialized && initialized)
     ) {
-      setOrder({ signature, hashes: currentHashes, initialized: settled })
+      setOrder({ signature, hashes: currentHashes, initialized })
     }
   }, [
     currentHashes,
-    settled,
+    initialized,
     order.hashes,
     order.initialized,
     revealHash,

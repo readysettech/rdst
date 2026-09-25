@@ -13,10 +13,12 @@ import {
   configureTestTarget,
   expect,
   mainContent,
+  mockAiKeyReady,
+  mockPrerequisites,
   setBackendFixtures,
   test,
 } from '../fixtures'
-import { DESKTOP, shot } from './_helpers'
+import { DESKTOP, ROUTES, shot } from './_helpers'
 
 /** The console line a fake-backend 404 leaves behind on the demo surfaces. */
 const RESOURCE_404 =
@@ -68,7 +70,10 @@ async function fillConnectForm(page: Page, name: string) {
 /** A-01 - the first-run primary tests the connection before it saves a target. */
 test('the first-run primary tests the connection before it saves a target', async ({
   page,
+  browserErrors,
 }) => {
+  // The new database's page asks for its latest report, which it doesn't have yet.
+  acceptBrowserError(browserErrors, RESOURCE_404)
   await page.setViewportSize(DESKTOP)
   await clearTargets(page.request)
   setBackendFixtures()
@@ -112,20 +117,27 @@ test('the first-run primary tests the connection before it saves a target', asyn
   const before = await (await page.request.get('/api/configure/targets')).json()
   expect(before.targets).toEqual([])
 
-  // A reachable one is saved, promoted to default, and hands over to Home.
+  // A reachable one is saved, promoted to default, and the next step is the
+  // turn-on dialog on its Database page.
   reachable = true
+  await mockPrerequisites(page, 'qa-connect')
   await page.getByRole('button', { name: 'Test & connect' }).click()
-  await expect(page).toHaveURL('/')
+  await expect(page).toHaveURL(/\/database\?panel=enable/)
+  const turnOn = page.getByRole('dialog', {
+    name: 'Turn on monitoring for qa-connect',
+  })
+  await expect(
+    turnOn.getByTestId('prereq-checker').getByRole('heading', {
+      name: 'Ready to monitor',
+    })
+  ).toBeVisible()
   expect(attempts).toHaveLength(2)
   const after = await (await page.request.get('/api/configure/targets')).json()
   expect(after.default_target).toBe('qa-connect')
 })
 
-/**
- * MG-01 - a missing AI provider gates the AI features, not the router: the
- * credential chooser no longer replaces every route on a fresh install.
- */
-test('every route renders its own page when no AI provider is configured', async ({
+/** MG-01 - fresh installs choose AI access before opening a page. */
+test('every route shows the sign-in chooser until an AI provider is configured', async ({
   page,
   browserErrors,
 }) => {
@@ -135,22 +147,58 @@ test('every route renders its own page when no AI provider is configured', async
   setBackendFixtures()
   await blockAiProvider(page)
 
-  await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
+  // The sign-in callback stays reachable so account setup can complete, and
+  // target setup stays open for local monitoring.
+  for (const route of ROUTES.filter((route) => route.id !== 'account-login')) {
+    await page.goto(route.path)
+    if (route.id.startsWith('configure')) {
+      await expect(mainContent(page)).toBeVisible()
+      await expect(
+        page.getByRole('heading', {
+          name: 'Choose how RDST uses AI',
+          exact: true,
+        })
+      ).toHaveCount(0)
+      continue
+    }
+    await expect(
+      page.getByRole('heading', {
+        name: 'Choose how RDST uses AI',
+        exact: true,
+      })
+    ).toBeVisible()
+    await expect(
+      page.getByTestId('ai-access-sign-in').getByRole('button', {
+        name: 'Sign up or sign in',
+        exact: true,
+      })
+    ).toBeVisible()
+    await expect(
+      page.getByTestId('ai-access-own-key').getByRole('button', {
+        name: 'Add Anthropic key',
+        exact: true,
+      })
+    ).toBeVisible()
+    await expect(mainContent(page)).toHaveCount(0)
+  }
 
-  await page.goto('/onboarding')
-  await expect(
-    page.getByRole('heading', { name: 'Start with Readyset' })
-  ).toBeVisible()
-
-  await page.goto('/demo')
-  await expect(
-    page.getByRole('heading', { name: 'See Readyset Platform in action' })
-  ).toBeVisible()
-
-  await expect(
-    page.getByRole('heading', { name: /Choose how RDST uses AI/ })
-  ).toHaveCount(0)
+  await mockAiKeyReady(page)
+  for (const [path, heading] of [
+    ['/', 'Home'],
+    ['/onboarding', 'Start with Readyset'],
+    ['/demo', 'See Readyset Platform in action'],
+  ]) {
+    await page.goto(path)
+    await expect(
+      page.getByRole('heading', { name: heading, exact: true })
+    ).toBeVisible()
+    await expect(
+      page.getByRole('heading', {
+        name: 'Choose how RDST uses AI',
+        exact: true,
+      })
+    ).toHaveCount(0)
+  }
 })
 
 /**
@@ -183,7 +231,9 @@ test('the demo checklist names every requirement and never prints NaN', async ({
   const main = mainContent(page)
   await page.goto('/demo')
   await expect(main.getByText('Docker is running')).toBeVisible()
-  await expect(main.getByText(/the demo needs more free disk/)).toBeVisible()
+  await expect(
+    main.getByText('The demo needs more available disk space.')
+  ).toBeVisible()
   await expect(main).not.toContainText('NaN')
   await expect(
     page.getByRole('button', { name: 'Start the demo' })
@@ -220,7 +270,7 @@ test('the setup guide lives in the sidebar and never covers the page', async ({
   const block = page.locator('#app-sidebar').getByTestId('setup-steps')
   await expect(block).toBeVisible()
   await expect(block).toContainText('Setup')
-  await expect(block).toContainText('of 5')
+  await expect(block).toContainText('1 of 2')
 
   const geometry = await page.evaluate(() => {
     const aside = document.querySelector('#app-sidebar') as HTMLElement

@@ -7,10 +7,10 @@ import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { useNavigate } from '@tanstack/react-router'
 import { DemoCard, JobCard } from './HomeCards'
-import { ActiveHome, ConnectedHome, FirstRunHome } from './HomeStates'
+import { DatabaseHome, FirstRunHome } from './HomeStates'
 import { useHomeController } from './useHomeController'
 
-export { ActiveHome, ConnectedHome, FirstRunHome } from './HomeStates'
+export { DatabaseCard, DatabaseHome, FirstRunHome } from './HomeStates'
 
 function HomeLoading() {
   return (
@@ -24,9 +24,10 @@ function HomeLoading() {
           </VStack>
         </HStack>
       </Page.Header>
-      <Page.Content className="grid grid-cols-1 gap-4 desktop:grid-cols-12">
-        <Skeleton className="h-72 rounded-2xl desktop:col-span-7" />
-        <div className="desktop:col-span-5">
+      <Page.Content className="space-y-4">
+        <Skeleton className="h-64 rounded-2xl" />
+        <div className="grid grid-cols-1 gap-4 tablet:grid-cols-2">
+          <Skeleton className="h-36 rounded-2xl" />
           <DemoCard compact />
         </div>
       </Page.Content>
@@ -90,25 +91,21 @@ export function HomePage() {
           <VStack className="items-stretch gap-4">
             <ErrorState
               errorClass="database"
-              title="Schema readiness could not be confirmed"
-              message="RDST can still open the connected target, your queries, and the demo, but Home cannot safely decide whether discovery is complete."
+              title="Monitoring status didn't load"
+              message="RDST couldn't read this database's monitoring state. The Database page may still show it."
               trustworthy="The target remains configured."
               onRetry={controller.retryCore}
               detail={controller.errorDetail}
             />
-            <div className="grid grid-cols-1 gap-4 desktop:grid-cols-12">
-              <div className="desktop:col-span-7">
-                <JobCard
-                  to="/queries"
-                  icon="observe"
-                  title="Open queries"
-                  description="Continue reviewing the selected target while schema status recovers."
-                  chip={{ label: controller.target, variant: 'informative' }}
-                />
-              </div>
-              <div className="desktop:col-span-5">
-                <DemoCard compact />
-              </div>
+            <div className="grid grid-cols-1 gap-4 tablet:grid-cols-2">
+              <JobCard
+                to="/database"
+                icon="database"
+                title="Open database"
+                description="See live load and the queries worth fixing first."
+                chip={{ label: controller.target, variant: 'informative' }}
+              />
+              <DemoCard compact />
             </div>
           </VStack>
         </Show>
@@ -117,31 +114,29 @@ export function HomePage() {
             controller.phase === 'ready' && controller.state === 'first-run'
           }
         >
-          <FirstRunHome aiKeyState={controller.aiKeyState} />
+          <FirstRunHome />
         </Show>
         <Show
           when={
-            controller.phase === 'ready' && controller.state === 'connected'
+            controller.phase === 'ready' && controller.state !== 'first-run'
+              ? controller.state
+              : null
           }
         >
-          <ConnectedHome
-            target={controller.target}
-            aiKeyState={controller.aiKeyState}
-          />
-        </Show>
-        <Show
-          when={controller.phase === 'ready' && controller.state === 'active'}
-        >
-          <ActiveHome
-            target={controller.target}
-            counts={controller.counts}
-            recents={controller.recents}
-            registryState={controller.registryState}
-            auditState={controller.auditState}
-            lastAuditLabel={controller.lastAuditLabel}
-            retentionDays={controller.retentionDays}
-            retryRegistry={controller.retryRegistry}
-          />
+          {(state) => (
+            <DatabaseHome
+              state={state}
+              target={controller.target}
+              health={controller.health}
+              monitorQueries={controller.monitorQueries}
+              pulse={controller.pulse}
+              monitoringOn={controller.monitoringOn}
+              recents={controller.recents}
+              counts={controller.counts}
+              historyDays={controller.historyDays}
+              attentionCount={controller.attentionCount}
+            />
+          )}
         </Show>
       </Page.Content>
     </Page>

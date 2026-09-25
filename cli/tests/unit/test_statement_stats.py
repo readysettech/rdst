@@ -10,6 +10,8 @@ from shared.query_registry import hash_sql
 
 from features.query_registry.statement_stats import (
     ACTIVITY_SAMPLE_LIMIT,
+    COLLECT_ENTRANT_STATEMENTS,
+    COLLECT_HEAVY_STATEMENTS,
     ACTIVITY_SAMPLE_TIMEOUT_MS,
     MYSQL_ACTIVITY_SAMPLE_SQL,
     MYSQL_SERVER_START_TOLERANCE_S,
@@ -79,6 +81,16 @@ def pg_executor(version, stat_rows=(), *, now=2000.0, postmaster_start=1111.0,
 
 
 class TestPgSqlVariants:
+    def test_block_counters_are_collected(self):
+        row = pg_stat_row(150002) + (70, 3)
+        executor = pg_executor(150002, [row])
+        result = PgStatStatementsSource().collect(executor)
+        sql = executor.sql_containing("pg_stat_statements(false)")
+        assert "shared_blks_hit" in sql
+        assert "shared_blks_read" in sql
+        assert result.rows[0].blks_hit == 70
+        assert result.rows[0].blks_read == 3
+
     def test_pg13_variant(self):
         source = PgStatStatementsSource()
         executor = pg_executor(130005, [pg_stat_row(130005)])
@@ -88,9 +100,11 @@ class TestPgSqlVariants:
         assert "toplevel" not in lowered
         assert "stats_since" not in lowered
         assert "sum(" not in lowered
-        assert "order by" not in lowered
-        assert "limit" not in lowered
         assert "not like" not in lowered
+        # Only a slice leaves the engine: held queryids, the heaviest and the busiest.
+        assert "queryid = any(%s::bigint[])" in lowered
+        assert f"order by total_exec_time desc limit {COLLECT_HEAVY_STATEMENTS}" in lowered
+        assert f"order by calls desc limit {COLLECT_ENTRANT_STATEMENTS}" in lowered
         assert "where dbid = (select oid from pg_database" in lowered
         assert "queryid is not null" in lowered
         # Info view is PG 14+; below it the epoch is postmaster start only.
@@ -257,9 +271,9 @@ def mysql_digest_row(schema="app", digest="d1", text="SELECT ?", count=5,
                      sum_wait=5_000_000_000, min_wait=1_000_000_000,
                      avg_wait=1_000_000_000, max_wait=2_000_000_000,
                      rows_sent=50, first_seen=FIRST_SEEN, last_seen=NOW6,
-                     sample=_NO_SAMPLE):
+                     sample=_NO_SAMPLE, rows_affected=0):
     row = (schema, digest, text, count, sum_wait, min_wait, avg_wait, max_wait,
-           rows_sent, 60, 0, first_seen, last_seen)
+           rows_sent, 60, 0, first_seen, last_seen, rows_affected)
     if sample is not _NO_SAMPLE:
         row += (sample,)
     return row
@@ -295,6 +309,15 @@ class TestMysqlCursor:
         assert "DIGEST IS NOT NULL" in sweep
         assert result.incremental is True
 
+    @pytest.mark.parametrize("cursor", [None, {"last_seen": NOW6, "server_start": 1000.0}])
+    @pytest.mark.parametrize("sample_capable", [False, True])
+    def test_sweep_reads_only_the_target_database(self, cursor, sample_capable):
+        row = mysql_digest_row(sample="SELECT 1") if sample_capable else mysql_digest_row()
+        executor = mysql_executor([row], sample_capable=sample_capable)
+        MysqlDigestSource().collect(executor, cursor_state=cursor)
+        sweep = executor.sql_containing("events_statements_summary_by_digest WHERE")
+        assert "(DATABASE() IS NULL OR SCHEMA_NAME = DATABASE())" in sweep
+
     def test_cursor_comes_from_server_clock(self):
         executor = mysql_executor([mysql_digest_row()])
         result = MysqlDigestSource().collect(executor)
@@ -308,7 +331,8 @@ class TestMysqlCursor:
         sweep = executor.sql_containing("LAST_SEEN")
         assert "LAST_SEEN >= %s" in sweep
         assert "LAST_SEEN > %s" not in sweep
-        assert executor.params_for("LAST_SEEN") == ("2026-08-16 09:59:00.000000",)
+        # Both engine-side slices keep only rows changed since the cursor.
+        assert executor.params_for("LAST_SEEN") == ("2026-08-16 09:59:00.000000",) * 2
 
     def test_restart_discards_cursor(self):
         executor = mysql_executor([mysql_digest_row()],
@@ -361,6 +385,11 @@ class TestMysqlRows:
         assert row.max_exec_time == pytest.approx(2.0)
         assert row.first_seen == pytest.approx(FIRST_SEEN.timestamp())
         assert row.stats_since is None
+
+    def test_rows_count_written_rows_like_pg_stat_statements(self):
+        result = MysqlDigestSource().collect(
+            mysql_executor([mysql_digest_row(rows_sent=0, rows_affected=7)]))
+        assert result.rows[0].rows == 7
 
     def test_null_schema_row(self):
         result = MysqlDigestSource().collect(
@@ -415,6 +444,17 @@ class TestMysqlSampleText:
         sweep = executor.sql_containing("LAST_SEEN >=")
         assert "QUERY_SAMPLE_TEXT" in sweep
         assert result.sample_texts == {"app:d1": SAMPLE_TEXT}
+
+    def test_rdst_marked_sample_classifies_the_digest_as_self_traffic(self):
+        """DIGEST_TEXT drops comments; the sample keeps RDST's marker, so the digest's text
+        becomes the marked statement and never reads as user workload."""
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        marked = "/*rdst:analyze*/ EXPLAIN FORMAT=JSON SELECT * FROM `users` WHERE `id` = 42"
+        executor = mysql_executor([self.sample_row(sample=marked)], sample_capable=True)
+        result = MysqlDigestSource().collect(executor)
+        assert result.texts == {"app:d1": marked}
+        assert not references_user_relations(result.texts["app:d1"], dialect="mysql")
 
     def test_null_sample_is_omitted(self):
         executor = mysql_executor([self.sample_row(sample=None)], sample_capable=True)
@@ -494,12 +534,25 @@ class TestActivitySample:
             f"SET LOCAL statement_timeout = {ACTIVITY_SAMPLE_TIMEOUT_MS}"
         )
 
+    def test_pg14_activity_sample_keeps_query_id_for_monitor_history(self):
+        source = PgStatStatementsSource()
+        source.server_version = 140000
+        executor = FakeExecutor([
+            ("pg_stat_activity", [("SELECT * FROM t WHERE id=7", 12, "active", -987, 0.09)]),
+            ("SET LOCAL", []),
+        ])
+        assert source.activity_sample(executor) == ["SELECT * FROM t WHERE id=7"]
+        assert source.last_activity_details == [{
+            "query": "SELECT * FROM t WHERE id=7", "pid": 12, "state": "active",
+            "query_id": -987, "duration_s": 0.09}]
+        assert "SELECT query,pid,state,query_id," in executor.sql_containing("pg_stat_activity")
+
     def test_mysql_activity_sql_shape(self):
         assert MYSQL_ACTIVITY_SAMPLE_SQL.startswith(RDST_OBSERVE_MARKER)
-        assert "FROM information_schema.PROCESSLIST" in MYSQL_ACTIVITY_SAMPLE_SQL
-        assert "INFO IS NOT NULL" in MYSQL_ACTIVITY_SAMPLE_SQL
-        assert "COMMAND != 'Sleep'" in MYSQL_ACTIVITY_SAMPLE_SQL
-        assert "ID != CONNECTION_ID()" in MYSQL_ACTIVITY_SAMPLE_SQL
+        assert "FROM performance_schema.threads" in MYSQL_ACTIVITY_SAMPLE_SQL
+        assert "PROCESSLIST_INFO IS NOT NULL" in MYSQL_ACTIVITY_SAMPLE_SQL
+        assert "PROCESSLIST_COMMAND != 'Sleep'" in MYSQL_ACTIVITY_SAMPLE_SQL
+        assert "PROCESSLIST_ID != CONNECTION_ID()" in MYSQL_ACTIVITY_SAMPLE_SQL
         # The live top lane's RDST self-session exclusion, mirrored.
         assert (
             "performance_schema.session_account_connect_attrs"
@@ -543,3 +596,36 @@ class TestMysqlCapabilities:
         assert caps["digest_lost"] is None
         assert caps["digests_size"] is None
         assert caps["unattributed_executions"] == 17
+
+
+class TestMysqlSampleTemplate:
+    def test_values_become_placeholders_and_the_sql_stays_as_written(self):
+        from features.query_registry.statement_stats import mysql_sample_template
+
+        assert mysql_sample_template(
+            "/* app:checkout */ SELECT status, COUNT(*) FROM orders WHERE created_at > "
+            "NOW() - INTERVAL 3 DAY AND note = 'it''s' AND id IN (1, 2) GROUP BY 1 "
+            "ORDER BY 2 DESC LIMIT 10;"
+        ) == ("SELECT status, COUNT(*) FROM orders WHERE created_at > NOW() - INTERVAL ? DAY "
+              "AND note = ? AND id IN (?, ?) GROUP BY 1 ORDER BY 2 DESC LIMIT ?")
+        # Backticked names keep their digits; hints stay.
+        assert mysql_sample_template(
+            "SELECT /*+ MAX_EXECUTION_TIME(500) */ `c1` FROM `t2` WHERE x = 0x1F") == (
+            "SELECT /*+ MAX_EXECUTION_TIME(500) */ `c1` FROM `t2` WHERE x = ?")
+
+    def test_cut_or_empty_samples_have_no_template(self):
+        from features.query_registry.statement_stats import mysql_sample_template
+
+        assert mysql_sample_template("SELECT " + "a, " * 400 + "1") is None
+        assert mysql_sample_template("  ") is None
+
+
+def test_mysql_table_case_restores_digest_upper_cased_tables():
+    from features.query_registry.statement_stats import mysql_table_case
+
+    tables = ["events", "orders", "Orders2", "orders2"]
+    assert mysql_table_case("SELECT COUNT(*) FROM EVENTS JOIN orders o ON o.id = 1",
+                            tables) == "SELECT COUNT(*) FROM events JOIN orders o ON o.id = 1"
+    # Ambiguous or already exact names stay as written.
+    assert mysql_table_case("SELECT * FROM ORDERS2", tables) == "SELECT * FROM ORDERS2"
+    assert mysql_table_case("SELECT * FROM Orders2", tables) == "SELECT * FROM Orders2"

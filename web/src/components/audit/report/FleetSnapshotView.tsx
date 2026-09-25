@@ -2,7 +2,7 @@ import { InlineNotice } from '@rs/ui-new/error-state'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useEffect } from 'react'
-import { formatMoney, formatScore } from '../../../lib/auditReportFormat'
+import { formatScore } from '../../../lib/auditReportFormat'
 import type { FleetReportTab } from '../../../lib/auditReportLocation'
 import {
   currentSearchParams,
@@ -95,13 +95,6 @@ export function FleetSnapshotView({
     },
     { targets: 0, current: 0, suggested: 0, savings: 0, oversized: 0 }
   )
-  const fleetCurrentCost = detail.total_monthly_cost_usd ?? sizingTotals.current
-  const fleetPotentialSavings =
-    detail.potential_savings_usd ?? sizingTotals.savings
-  const fleetSuggestedCost =
-    sizingTotals.targets > 0
-      ? sizingTotals.suggested
-      : Math.max(0, fleetCurrentCost - fleetPotentialSavings)
   const hasFleetSizing =
     sizingTotals.targets > 0 ||
     detail.total_monthly_cost_usd != null ||
@@ -337,36 +330,9 @@ export function FleetSnapshotView({
             >
               <div className="p-6 grid grid-cols-1 tablet:grid-cols-2 desktop:grid-cols-4 gap-5">
                 <StatCard
-                  label="Current cluster total"
-                  value={`${formatMoney(fleetCurrentCost)}/mo`}
-                />
-                <StatCard
-                  label="Suggested cluster total"
-                  value={`${formatMoney(fleetSuggestedCost)}/mo`}
-                />
-                <StatCard
-                  label="Total potential cluster savings"
-                  value={`${formatMoney(fleetPotentialSavings)}/mo`}
-                />
-                <StatCard
                   label="Oversized nodes"
                   value={`${sizingTotals.oversized} / ${sizingTotals.targets}`}
                 />
-              </div>
-              <div className="px-6 pb-6">
-                <Text level="body-small" className="text-content-layout-2">
-                  Across the cluster
-                  {sizingTotals.targets > 0
-                    ? ` (${sizingTotals.targets} costed nodes)`
-                    : ''}
-                  , right-sizing could save approximately{' '}
-                  <span className="text-content-positive-soft">
-                    {formatMoney(fleetPotentialSavings)}/mo
-                  </span>
-                  ; {sizingTotals.oversized}{' '}
-                  {sizingTotals.oversized === 1 ? 'node is' : 'nodes are'}{' '}
-                  oversized.
-                </Text>
               </div>
             </SectionCard>
             <SectionCard icon="database" title="Per-node sizing rollup">
@@ -377,13 +343,6 @@ export function FleetSnapshotView({
                       <TableHeaderCell>Target</TableHeaderCell>
                       <TableHeaderCell>Current class</TableHeaderCell>
                       <TableHeaderCell>Suggested class</TableHeaderCell>
-                      <TableHeaderCell align="right">
-                        Current monthly
-                      </TableHeaderCell>
-                      <TableHeaderCell align="right">
-                        Suggested monthly
-                      </TableHeaderCell>
-                      <TableHeaderCell align="right">Savings</TableHeaderCell>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border-layout-1">
@@ -406,20 +365,6 @@ export function FleetSnapshotView({
                           <td className="px-4 py-3 text-content-layout-2">
                             {result.sizing?.suggested_instance_class ||
                               'No change'}
-                          </td>
-                          <td className="px-4 py-3 text-right text-content-layout-2">
-                            {formatMoney(
-                              result.sizing?.current_monthly_cost_usd
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-right text-content-layout-2">
-                            {formatMoney(
-                              result.sizing?.suggested_monthly_cost_usd ??
-                                result.sizing?.current_monthly_cost_usd
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-right text-content-positive-soft">
-                            {formatMoney(result.sizing?.potential_savings_usd)}
                           </td>
                         </tr>
                       ))}

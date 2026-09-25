@@ -50,7 +50,7 @@ export function analysisItemText(item: unknown): string {
     const record = item as Record<string, unknown>
     const main = [record.description, record.recommendation]
       .filter((part): part is string => typeof part === 'string' && part !== '')
-      .join(' — ')
+      .join(' - ')
     if (main) {
       const category =
         typeof record.category === 'string' ? `${record.category}: ` : ''
@@ -58,7 +58,7 @@ export function analysisItemText(item: unknown): string {
     }
     return Object.values(record)
       .filter((part) => typeof part === 'string')
-      .join(' — ')
+      .join(' - ')
   }
   return String(item)
 }
@@ -93,7 +93,7 @@ export function optimizationPriorityParts(item: unknown): {
     ]
       .filter((part): part is string => typeof part === 'string' && !!part)
       .filter((part, index, all) => all.indexOf(part) === index)
-      .join(' — ')
+      .join(' - ')
     return {
       text: text || analysisItemText(item),
       type:

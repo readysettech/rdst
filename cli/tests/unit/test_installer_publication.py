@@ -315,9 +315,15 @@ def test_live_hosted_inference_e2e_runs_against_the_preview(tmp_path: Path):
     assert steps["annotate-rdst-web-keyservice-e2e"]["depends_on"] == [
         "rdst-web-keyservice-e2e"
     ]
+    for engine in ("postgresql", "mysql"):
+        step = steps[f"rdst-continuous-monitoring-e2e-{engine}"]
+        assert step["depends_on"] == "keyservice-preview-deploy"
+        assert "run-continuous-monitoring-ci.sh" in step["command"]
     assert steps["keyservice-preview-teardown"]["depends_on"] == [
         "keyservice-preview-deploy",
         "rdst-web-keyservice-e2e",
+        "rdst-continuous-monitoring-e2e-postgresql",
+        "rdst-continuous-monitoring-e2e-mysql",
     ]
 
 

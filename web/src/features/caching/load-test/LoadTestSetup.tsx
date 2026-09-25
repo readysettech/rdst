@@ -14,7 +14,7 @@ import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
-import { useEffect } from 'react'
+import { type ReactNode, useEffect } from 'react'
 import { TargetConnectivityNotice, TargetLockNotice } from '../../../components'
 import { BenchmarkConfirmDialog } from '../../../components/BenchmarkConfirmDialog'
 import { formatMeta, shortHash } from '../../../lib/formatters'
@@ -87,9 +87,23 @@ function SummaryRow({
 export function LoadTestSetup({
   controller,
   onFindQueries,
+  layout = 'page',
+  heading,
+  onRemoveQuery,
 }: {
   controller: LoadTestController
   onFindQueries?: () => void
+  /**
+   * `selection` shows only the queries another page selected (the Database
+   * benchmark drawer), each removable, against the controller's destination,
+   * with the run settings below and the start button in a footer that stays in
+   * view. No destination picker, search or source filter.
+   */
+  layout?: 'page' | 'selection'
+  /** `selection` only: rendered above the selected queries. */
+  heading?: ReactNode
+  /** `selection` only: removes a query (by hash) from the caller's selection. */
+  onRemoveQuery?: (hash: string) => void
 }) {
   const {
     queries,
@@ -193,6 +207,228 @@ export function LoadTestSetup({
             runnableCount === 1 ? 'query' : 'queries'
           } against ${destinationTarget ?? 'the selected database'}.`
 
+  // The run's shape: Readyset lane, goal, clients, summary and advanced
+  // settings. Shared by the page layout and the Database drawer.
+  const loadControls = (
+    <>
+      <HStack className="items-center justify-between gap-3 rounded-xl border border-border-layout-soft px-4 py-3">
+        <VStack className="min-w-0 items-start gap-0.5">
+          <Text level="label-small" className="text-content-layout-1">
+            Compare against Readyset
+          </Text>
+          <Text level="caption" className="text-content-layout-3">
+            {dockerUnavailable
+              ? 'Readyset runs in a local Docker sandbox, and Docker is not running.'
+              : comparative
+                ? 'Run against your database and Readyset side by side.'
+                : 'Origin only. Readyset is skipped for this run.'}
+          </Text>
+        </VStack>
+        <BaseInputSwitch
+          name="load-test-comparative"
+          aria-label="Compare against Readyset"
+          checked={comparative && !dockerUnavailable}
+          disabled={dockerUnavailable}
+          onCheckedChange={setComparative}
+        />
+      </HStack>
+      {/* Said before the run, not after real traffic has already been
+          driven at the database for the configured duration. [D-11] */}
+      <Show when={dockerUnavailable}>
+        <InlineNotice
+          errorClass="local-dependency"
+          accent="warning"
+          title="Docker is required to compare against Readyset"
+          message="Start Docker so RDST can prepare its temporary Readyset sandbox, then try again. This run will measure the origin database only."
+          onRetry={() => void recheckSandbox()}
+        />
+      </Show>
+
+      <VStack className="items-start gap-0.5">
+        <Text level="label-small" className="text-content-layout-1">
+          Test goal
+        </Text>
+        <Text level="caption" className="text-content-layout-3">
+          Choose the signal you want this run to produce.
+        </Text>
+      </VStack>
+      <BaseInputRadioGroup
+        aria-label="Load test goal"
+        value={testProfile}
+        onValueChange={(value) => setTestProfile(value as LoadTestProfile)}
+        options={LOAD_TEST_PROFILE_OPTIONS}
+      />
+
+      {testProfile === 'capacity' && (
+        <VStack className="items-stretch gap-1">
+          <Text level="label-small" className="text-content-layout-2">
+            Concurrent clients
+          </Text>
+          <BaseInputSelect
+            name="capacity-clients"
+            options={CAPACITY_CLIENT_OPTIONS}
+            value={String(capacityClients)}
+            onValueChange={(value) => setCapacityClients(value === '4' ? 4 : 2)}
+          />
+          <Text level="caption" className="text-content-layout-3">
+            Bounded to 4 clients to protect this device and database.
+          </Text>
+        </VStack>
+      )}
+    </>
+  )
+  const loadSummary = (
+    <>
+      <VStack className="items-start gap-0.5">
+        <Text level="label-small" className="text-content-layout-1">
+          Run summary
+        </Text>
+        <Text level="caption" className="text-content-layout-3">
+          What this test will execute.
+        </Text>
+      </VStack>
+      <div className="rounded-xl border border-border-layout-soft px-4">
+        <SummaryRow
+          label="Database"
+          value={destinationTarget ?? 'Not selected'}
+        />
+        <SummaryRow
+          label="Comparison"
+          value={comparative ? 'Origin + Readyset' : 'Origin only'}
+        />
+        <SummaryRow label="Queries" value={`${runnableCount} selected`} />
+        <SummaryRow
+          label="Load profile"
+          value={testProfile === 'capacity' ? 'Capacity test' : 'Paced load'}
+        />
+        <SummaryRow
+          label="Clients"
+          value={
+            testProfile === 'capacity'
+              ? `${capacityClients} clients`
+              : '1 client'
+          }
+        />
+        <SummaryRow
+          label="Rest"
+          value={
+            testProfile === 'capacity'
+              ? 'No rest'
+              : intervalMs === 0
+                ? 'No rest'
+                : `${intervalMs} ms`
+          }
+          tone={
+            testProfile === 'paced' && intervalMs === 0 ? 'warning' : 'neutral'
+          }
+        />
+        <SummaryRow label="Duration" value={`${durationSeconds} seconds`} />
+        <SummaryRow
+          label="Parameters"
+          value={parameterSummary}
+          tone={missingParameterCount > 0 ? 'warning' : 'positive'}
+        />
+      </div>
+
+      <SuggestValuesPanel
+        hasParameters={queriesWithParameters.length > 0}
+        suggesting={suggestingParameters}
+        missingParameterCount={missingParameterCount}
+        message={suggestionMessage}
+        schemaUnavailable={suggestionSchemaUnavailable}
+        onSuggest={() => void suggestParameterValues()}
+      />
+    </>
+  )
+  const loadAdvanced = (
+    <div className="overflow-hidden rounded-xl border border-border-layout-soft">
+      <Pressable
+        type="button"
+        aria-expanded={loadSettingsOpen}
+        onClick={() => setLoadSettingsOpen(!loadSettingsOpen)}
+        className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 hover:bg-surface-layout-2/50"
+      >
+        <HStack className="items-center gap-2">
+          <Icon
+            name="settings"
+            label="Advanced load settings"
+            className="h-4 w-4 text-content-layout-3"
+          />
+          <Text level="label-small" className="text-content-layout-1">
+            Advanced load settings
+          </Text>
+        </HStack>
+        <Icon
+          name="chevron-down"
+          label=""
+          className={cn(
+            'h-4 w-4 text-content-layout-3 transition-transform',
+            loadSettingsOpen && 'rotate-180'
+          )}
+        />
+      </Pressable>
+      <AnimatePresence initial={false}>
+        {loadSettingsOpen && (
+          <m.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <VStack className="items-stretch gap-4 border-t border-border-layout-soft p-4">
+              {testProfile === 'paced' && (
+                <VStack className="items-stretch gap-1">
+                  <Text level="label-small" className="text-content-layout-2">
+                    Rest after each request (ms)
+                  </Text>
+                  <BaseInputText
+                    name="load-rest-ms"
+                    type="number"
+                    min="0"
+                    value={String(intervalMs)}
+                    onChange={(event) =>
+                      setIntervalMs(
+                        Math.max(0, Number(event.target.value) || 0)
+                      )
+                    }
+                  />
+                  <Text
+                    level="caption"
+                    className={cn(
+                      intervalMs === 0
+                        ? 'text-content-warning-soft'
+                        : 'text-content-layout-3'
+                    )}
+                  >
+                    {intervalMs === 0
+                      ? 'No rest: the next query starts immediately after completion.'
+                      : `Wait ${intervalMs}ms after a query completes before sending the next one.`}
+                  </Text>
+                </VStack>
+              )}
+              <VStack className="items-stretch gap-1">
+                <Text level="label-small" className="text-content-layout-2">
+                  Duration (seconds)
+                </Text>
+                <BaseInputText
+                  name="load-duration"
+                  type="number"
+                  min="1"
+                  value={String(durationSeconds)}
+                  onChange={(event) =>
+                    setDurationSeconds(
+                      Math.max(1, Number(event.target.value) || 30)
+                    )
+                  }
+                />
+              </VStack>
+            </VStack>
+          </m.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+
   // A parameter value that didn't apply cleanly must not run silently as
   // broken SQL; steer the user straight back to the offending query's
   // inline parameter fields instead.
@@ -205,6 +441,129 @@ export function LoadTestSetup({
     const input = card?.querySelector<HTMLInputElement>('input')
     input?.focus()
   }, [residualQueryHash])
+
+  if (layout === 'selection') {
+    const selectedQueries = [...selectedQueryById.values()]
+    return (
+      <VStack className="items-stretch gap-5">
+        {confirmDialog}
+        {destinationLock.isLocked ? (
+          <TargetLockNotice
+            message={destinationLock.message}
+            requirements={destinationLock.missingTargetRequirements}
+            keyringAvailable={destinationLock.keyringAvailable}
+          />
+        ) : connectivity.failure || connectivity.isChecking ? (
+          <TargetConnectivityNotice
+            target={destinationLock.targetName ?? destinationTarget}
+            failure={connectivity.failure}
+            isChecking={connectivity.isChecking}
+            onRetry={() => void connectivity.ensureReachable()}
+          />
+        ) : null}
+        {targetDetailsError ? (
+          <InlineNotice
+            accent="warning"
+            title="Target safety details are unavailable"
+            message="Load testing waits until RDST can confirm whether this database is local or remote."
+            onRetry={() => void refetchTargetDetails()}
+          />
+        ) : null}
+        {heading}
+        {selectedQueries.length > 0 ? (
+          <VStack
+            className="items-stretch gap-3"
+            aria-label="Queries to load test"
+            role="group"
+          >
+            {selectedQueries.map((query) => (
+              <PerformanceQueryCard
+                key={query.hash}
+                queryHash={query.hash}
+                selected
+                onSelect={() =>
+                  onRemoveQuery
+                    ? onRemoveQuery(query.hash)
+                    : toggleQuery(query.identifier)
+                }
+                title={query.name}
+                sql={query.sql}
+                parameterCount={query.parameters.length}
+                meta={
+                  <>
+                    <Text level="caption" className="text-content-layout-3">
+                      {`hash ${shortHash(query.hash)}`}
+                    </Text>
+                    <PerformanceCacheabilityNote
+                      readysetSupported={query.readyset_supported}
+                      checkedAt={query.readyset_last_observed_at}
+                    />
+                  </>
+                }
+                parameterContent={
+                  query.parameters.length > 0 ? (
+                    <PerformanceQueryParameters
+                      ownerId={query.identifier}
+                      inputPrefix="load"
+                      parameters={query.parameters}
+                      values={paramValues}
+                      sources={parameterSources}
+                      onValueChange={(parameter, value) => {
+                        const suffix =
+                          parameter.placeholder === '?'
+                            ? `?${parameter.index}`
+                            : parameter.placeholder
+                        updateParameter(`${query.identifier}:${suffix}`, value)
+                      }}
+                    />
+                  ) : undefined
+                }
+              />
+            ))}
+          </VStack>
+        ) : null}
+        <div className="grid items-start gap-5 laptop:grid-cols-2">
+          <VStack className="items-stretch gap-4 [&>*]:shrink-0">
+            {loadControls}
+            {loadAdvanced}
+          </VStack>
+          <VStack className="items-stretch gap-4 [&>*]:shrink-0">
+            {loadSummary}
+          </VStack>
+        </div>
+        <HStack className="sticky bottom-0 z-10 -mx-5 flex-wrap items-center justify-between gap-3 border-t border-border-layout-1 bg-surface-layout-2 px-5 py-4">
+          <VStack className="mr-auto min-w-0 items-start gap-1">
+            <Text
+              level="caption"
+              className={
+                residualQueryHash
+                  ? 'text-content-negative-soft'
+                  : 'text-content-layout-3'
+              }
+            >
+              {runnableCount === 0 && !residualQueryHash
+                ? 'Select at least one query.'
+                : readinessMessage}
+            </Text>
+            {missingTables.length > 0 && (
+              <Text level="caption" className="text-content-warning-soft">
+                Missing from {destinationTarget}: {missingTables.join(', ')}
+              </Text>
+            )}
+          </VStack>
+          <Button
+            variant="primary"
+            modifier="solid"
+            label="Run load test"
+            icon="play"
+            iconPosition="left"
+            onClick={handleStart}
+            disabled={!canStart}
+          />
+        </HStack>
+      </VStack>
+    )
+  }
 
   return (
     <VStack className="w-full items-stretch gap-6 desktop:h-full desktop:min-h-0">
@@ -556,237 +915,9 @@ export function LoadTestSetup({
                 Without this the advanced settings are simply unreachable, and
                 without `shrink-0` the flex column squashes them instead. */}
             <VStack className="min-h-0 items-stretch gap-4 overflow-y-auto [&>*]:shrink-0">
-              <HStack className="items-center justify-between gap-3 rounded-xl border border-border-layout-soft px-4 py-3">
-                <VStack className="min-w-0 items-start gap-0.5">
-                  <Text level="label-small" className="text-content-layout-1">
-                    Compare against Readyset
-                  </Text>
-                  <Text level="caption" className="text-content-layout-3">
-                    {dockerUnavailable
-                      ? 'Readyset runs in a local Docker sandbox, and Docker is not running.'
-                      : comparative
-                        ? 'Run against your database and Readyset side by side.'
-                        : 'Origin only. Readyset is skipped for this run.'}
-                  </Text>
-                </VStack>
-                <BaseInputSwitch
-                  name="load-test-comparative"
-                  aria-label="Compare against Readyset"
-                  checked={comparative && !dockerUnavailable}
-                  disabled={dockerUnavailable}
-                  onCheckedChange={setComparative}
-                />
-              </HStack>
-              {/* Said before the run, not after real traffic has already been
-                  driven at the database for the configured duration. [D-11] */}
-              <Show when={dockerUnavailable}>
-                <InlineNotice
-                  errorClass="local-dependency"
-                  accent="warning"
-                  title="Docker is required to compare against Readyset"
-                  message="Start Docker so RDST can prepare its temporary Readyset sandbox, then try again. This run will measure the origin database only."
-                  onRetry={() => void recheckSandbox()}
-                />
-              </Show>
-
-              <VStack className="items-start gap-0.5">
-                <Text level="label-small" className="text-content-layout-1">
-                  Test goal
-                </Text>
-                <Text level="caption" className="text-content-layout-3">
-                  Choose the signal you want this run to produce.
-                </Text>
-              </VStack>
-              <BaseInputRadioGroup
-                aria-label="Load test goal"
-                value={testProfile}
-                onValueChange={(value) =>
-                  setTestProfile(value as LoadTestProfile)
-                }
-                options={LOAD_TEST_PROFILE_OPTIONS}
-              />
-
-              {testProfile === 'capacity' && (
-                <VStack className="items-stretch gap-1">
-                  <Text level="label-small" className="text-content-layout-2">
-                    Concurrent clients
-                  </Text>
-                  <BaseInputSelect
-                    name="capacity-clients"
-                    options={CAPACITY_CLIENT_OPTIONS}
-                    value={String(capacityClients)}
-                    onValueChange={(value) =>
-                      setCapacityClients(value === '4' ? 4 : 2)
-                    }
-                  />
-                  <Text level="caption" className="text-content-layout-3">
-                    Bounded to 4 clients to protect this device and database.
-                  </Text>
-                </VStack>
-              )}
-
-              <VStack className="items-start gap-0.5">
-                <Text level="label-small" className="text-content-layout-1">
-                  Run summary
-                </Text>
-                <Text level="caption" className="text-content-layout-3">
-                  What this test will execute.
-                </Text>
-              </VStack>
-              <div className="rounded-xl border border-border-layout-soft px-4">
-                <SummaryRow
-                  label="Database"
-                  value={destinationTarget ?? 'Not selected'}
-                />
-                <SummaryRow
-                  label="Comparison"
-                  value={comparative ? 'Origin + Readyset' : 'Origin only'}
-                />
-                <SummaryRow
-                  label="Queries"
-                  value={`${runnableCount} selected`}
-                />
-                <SummaryRow
-                  label="Load profile"
-                  value={
-                    testProfile === 'capacity' ? 'Capacity test' : 'Paced load'
-                  }
-                />
-                <SummaryRow
-                  label="Clients"
-                  value={
-                    testProfile === 'capacity'
-                      ? `${capacityClients} clients`
-                      : '1 client'
-                  }
-                />
-                <SummaryRow
-                  label="Rest"
-                  value={
-                    testProfile === 'capacity'
-                      ? 'No rest'
-                      : intervalMs === 0
-                        ? 'No rest'
-                        : `${intervalMs} ms`
-                  }
-                  tone={
-                    testProfile === 'paced' && intervalMs === 0
-                      ? 'warning'
-                      : 'neutral'
-                  }
-                />
-                <SummaryRow
-                  label="Duration"
-                  value={`${durationSeconds} seconds`}
-                />
-                <SummaryRow
-                  label="Parameters"
-                  value={parameterSummary}
-                  tone={missingParameterCount > 0 ? 'warning' : 'positive'}
-                />
-              </div>
-
-              <SuggestValuesPanel
-                hasParameters={queriesWithParameters.length > 0}
-                suggesting={suggestingParameters}
-                missingParameterCount={missingParameterCount}
-                message={suggestionMessage}
-                schemaUnavailable={suggestionSchemaUnavailable}
-                onSuggest={() => void suggestParameterValues()}
-              />
-
-              <div className="overflow-hidden rounded-xl border border-border-layout-soft">
-                <Pressable
-                  type="button"
-                  aria-expanded={loadSettingsOpen}
-                  onClick={() => setLoadSettingsOpen(!loadSettingsOpen)}
-                  className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 hover:bg-surface-layout-2/50"
-                >
-                  <HStack className="items-center gap-2">
-                    <Icon
-                      name="settings"
-                      label="Advanced load settings"
-                      className="h-4 w-4 text-content-layout-3"
-                    />
-                    <Text level="label-small" className="text-content-layout-1">
-                      Advanced load settings
-                    </Text>
-                  </HStack>
-                  <Icon
-                    name="chevron-down"
-                    label=""
-                    className={cn(
-                      'h-4 w-4 text-content-layout-3 transition-transform',
-                      loadSettingsOpen && 'rotate-180'
-                    )}
-                  />
-                </Pressable>
-                <AnimatePresence initial={false}>
-                  {loadSettingsOpen && (
-                    <m.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="overflow-hidden"
-                    >
-                      <VStack className="items-stretch gap-4 border-t border-border-layout-soft p-4">
-                        {testProfile === 'paced' && (
-                          <VStack className="items-stretch gap-1">
-                            <Text
-                              level="label-small"
-                              className="text-content-layout-2"
-                            >
-                              Rest after each request (ms)
-                            </Text>
-                            <BaseInputText
-                              name="load-rest-ms"
-                              type="number"
-                              min="0"
-                              value={String(intervalMs)}
-                              onChange={(event) =>
-                                setIntervalMs(
-                                  Math.max(0, Number(event.target.value) || 0)
-                                )
-                              }
-                            />
-                            <Text
-                              level="caption"
-                              className={cn(
-                                intervalMs === 0
-                                  ? 'text-content-warning-soft'
-                                  : 'text-content-layout-3'
-                              )}
-                            >
-                              {intervalMs === 0
-                                ? 'No rest: the next query starts immediately after completion.'
-                                : `Wait ${intervalMs}ms after a query completes before sending the next one.`}
-                            </Text>
-                          </VStack>
-                        )}
-                        <VStack className="items-stretch gap-1">
-                          <Text
-                            level="label-small"
-                            className="text-content-layout-2"
-                          >
-                            Duration (seconds)
-                          </Text>
-                          <BaseInputText
-                            name="load-duration"
-                            type="number"
-                            min="1"
-                            value={String(durationSeconds)}
-                            onChange={(event) =>
-                              setDurationSeconds(
-                                Math.max(1, Number(event.target.value) || 30)
-                              )
-                            }
-                          />
-                        </VStack>
-                      </VStack>
-                    </m.div>
-                  )}
-                </AnimatePresence>
-              </div>
+              {loadControls}
+              {loadSummary}
+              {loadAdvanced}
             </VStack>
           </div>
         </Card.Content>

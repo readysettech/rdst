@@ -1,12 +1,10 @@
 import type { IconStrokeName } from '@rs/ui-icons/icon-name'
-import { Card } from '@rs/ui-new/card'
 import { Icon } from '@rs/ui-new/icon'
 import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { Link } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
 import { AnimatedSurfaceBackdrop } from '../../components/AnimatedSurfaceBackdrop'
 
 export interface JobCardProps {
@@ -102,8 +100,9 @@ export function DemoCard({ compact = false }: { compact?: boolean }) {
             level="body-small"
             className="max-w-xl text-content-rising-solid"
           >
-            Run the same workload through Postgres and Readyset, then inspect
-            the measured speedup. Sandboxed and disposable.
+            Run a sample workload against a demo Postgres, then through
+            Readyset, and see how much faster it gets. It runs in a sandbox and
+            cleans up after itself.
           </Text>
         </VStack>
         <HStack className="mt-auto items-center gap-2 text-content-rising-solid">
@@ -119,75 +118,56 @@ export function DemoCard({ compact = false }: { compact?: boolean }) {
   )
 }
 
-export function SetupCard({
-  number,
-  icon,
-  title,
-  description,
-  action,
-}: {
-  number: string
-  icon: IconStrokeName
-  title: string
-  description: string
-  action: ReactNode
-}) {
-  return (
-    <Card className="h-full">
-      <Card.Header className="flex-row items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-raised">
-          <Icon name={icon} label="" className="h-5 w-5" />
-        </div>
-        <VStack className="flex-1 items-start gap-0.5">
-          <Text level="caption" className="text-content-layout-3">
-            Step {number}
-          </Text>
-          <Card.Title>{title}</Card.Title>
-        </VStack>
-      </Card.Header>
-      <Card.Content>
-        <Text level="body-small" className="text-content-layout-3">
-          {description}
-        </Text>
-      </Card.Content>
-      <Card.Footer className="justify-start">{action}</Card.Footer>
-    </Card>
-  )
-}
-
-export function PortfolioTile({
-  label,
-  value,
-  unit,
-  to,
-  highlight = false,
-}: {
-  label: string
-  value: number
-  unit: string
-  to: string
-  highlight?: boolean
-}) {
+/**
+ * The demo as a wide strip near the top of Home: one line of what it is and a clear
+ * way in, short enough to keep the database card above the fold.
+ */
+export function DemoBanner() {
   return (
     <Link
-      to={to}
-      className={
-        highlight
-          ? 'rounded-xl border border-border-primary-soft bg-surface-primary-soft/30 p-4 transition-colors hover:bg-surface-primary-soft/50'
-          : 'rounded-xl bg-surface-layout-2/50 p-4 transition-colors hover:bg-surface-raised'
-      }
+      to="/demo"
+      data-testid="home-demo-banner"
+      className="group relative block overflow-hidden rounded-2xl bg-surface-rising-solid shadow-elevation-2"
     >
-      <VStack className="items-start gap-0.5">
-        <Text level="caption" className="text-content-layout-3">
-          {label}
-        </Text>
-        <Text level="headline-5" className="tabular-nums text-content-layout-1">
-          {value}
-        </Text>
-        <Text level="caption" className="text-content-layout-3">
-          {unit}
-        </Text>
-      </VStack>
+      <AnimatedSurfaceBackdrop palette="purple" />
+      <div className="relative flex flex-col items-stretch gap-4 px-5 py-4 tablet:flex-row tablet:items-center tablet:gap-5 tablet:px-6">
+        <div className="flex min-w-0 flex-1 items-start gap-4 tablet:items-center">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-surface-layout-1/20">
+            <Icon
+              name="querypilot"
+              label=""
+              className="h-6 w-6 text-content-rising-solid"
+            />
+          </div>
+          <VStack className="min-w-0 flex-1 items-start gap-0.5">
+            <HStack className="items-center gap-2">
+              <Text level="label-large" className="text-content-rising-solid">
+                Try the demo
+              </Text>
+              <Tag
+                size="small"
+                variant="rising"
+                modifier="solid"
+                label="No setup"
+              />
+            </HStack>
+            <Text level="body-small" className="text-content-rising-solid">
+              Run a sample workload against a demo Postgres database, then
+              through Readyset, and see how much more throughput it gets. It all
+              runs in a temporary sandbox that's removed when you're done.
+            </Text>
+          </VStack>
+        </div>
+        <span className="inline-flex shrink-0 items-center justify-center gap-2 rounded-pill bg-surface-layout-1 px-4 py-2 text-label-medium text-content-layout-1 shadow-elevation-1 transition-transform duration-fast group-hover:translate-x-0.5">
+          Launch the demo
+          <Icon
+            name="arrow-right"
+            label=""
+            aria-hidden="true"
+            className="h-4 w-4"
+          />
+        </span>
+      </div>
     </Link>
   )
 }

@@ -24,9 +24,9 @@ export const test = base.extend<BrowserErrors & AiAccess>({
     async ({ page }, use, testInfo) => {
       // Product browser suites exercise their own workflows, not account
       // enrollment. Make the provider prerequisite explicit for those runs.
-      // The dedicated live suite must see the real first-run gate so it can
+      // The dedicated live suites must see the real first-run gate so they can
       // prove Supabase sign-in and hosted inference end to end.
-      if (testInfo.project.name !== 'chromium-web-e2e') {
+      if (!testInfo.project.name.startsWith('chromium-web-e2e')) {
         await mockAiKeyReady(page)
       }
       await use(true)
@@ -225,4 +225,122 @@ export async function mockConnectivityOk(page: Page, target = 'e2e-guard') {
 export async function fillCodeMirror(editor: Locator, sql: string) {
   const content = editor.locator('.cm-content[contenteditable="true"]')
   await content.fill(sql)
+}
+
+/** A monitoring prerequisites answer for `target` (PostgreSQL, self-hosted). */
+export function prerequisitesResult(
+  target: string,
+  { ready = true }: { ready?: boolean } = {}
+) {
+  const check = (
+    id: string,
+    label: string,
+    ok: boolean,
+    fix: Record<string, unknown> | null = null
+  ) => ({
+    id,
+    label,
+    status: ok ? 'ok' : 'missing',
+    detail: ok ? '' : `${label} is missing.`,
+    blocking: true,
+    recommended: false,
+    fix: ok ? null : fix,
+    remediation: null,
+  })
+  return {
+    target,
+    engine: 'postgresql',
+    database: 'app',
+    checked_at: Math.floor(Date.now() / 1000),
+    provider: 'self_hosted',
+    provider_name: 'Self-hosted PostgreSQL',
+    ready,
+    blocking: ready ? 0 : 1,
+    attention: 0,
+    warnings: 0,
+    connection_error: null,
+    checks: [
+      check(
+        'pg_stat_statements_preload',
+        'pg_stat_statements is loaded at server start',
+        true
+      ),
+      check(
+        'pg_stat_statements',
+        'pg_stat_statements is created in app',
+        ready,
+        {
+          summary: 'Create pg_stat_statements in app.',
+          sql: ['CREATE EXTENSION IF NOT EXISTS pg_stat_statements;'],
+          steps: ['Connect to app as a superuser and run the SQL below.'],
+          commands: [],
+          after: [],
+          restart: false,
+          note: null,
+          docs_url:
+            'https://www.postgresql.org/docs/current/pgstatstatements.html',
+        }
+      ),
+      check(
+        'read_all_stats',
+        "Permission to read every user's statements and activity",
+        true
+      ),
+      check('visibility_probe', 'RDST sees new statements as they run', ready),
+    ],
+  }
+}
+
+/** Serve prerequisites for `target`; `answer(next)` changes what later checks see. */
+export async function mockPrerequisites(
+  page: Page,
+  target: string,
+  first: ReturnType<typeof prerequisitesResult> = prerequisitesResult(target)
+) {
+  let current = first
+  let calls = 0
+  await page.route(
+    `**/api/configure/targets/${target}/prerequisites`,
+    (route) => {
+      calls += 1
+      return route.fulfill({ json: current })
+    }
+  )
+  return {
+    calls: () => calls,
+    answer: (next: ReturnType<typeof prerequisitesResult>) => {
+      current = next
+    },
+  }
+}
+
+/**
+ * Finish onboarding once a database connects: the next step is the "Turn on
+ * monitoring" dialog on the new database's page, which checks the monitoring
+ * prerequisites itself (the e2e Postgres preloads and creates
+ * pg_stat_statements, and connects as a superuser).
+ *
+ * `monitor` leaves the dialog open to turn monitoring on; otherwise "Not now"
+ * closes it and the test goes Home.
+ */
+export async function continueWhenMonitoringReady(
+  page: Page,
+  target: string,
+  { monitor = false }: { monitor?: boolean } = {}
+) {
+  await expect(page).toHaveURL(/\/database\?panel=enable/, {
+    timeout: 60_000,
+  })
+  const dialog = page.getByRole('dialog', {
+    name: `Turn on monitoring for ${target}`,
+  })
+  await expect(dialog).toBeVisible({ timeout: 30_000 })
+  await expect(dialog.getByTestId('prereq-checker')).toHaveAttribute(
+    'data-phase',
+    'ready',
+    { timeout: 60_000 }
+  )
+  if (monitor) return
+  await dialog.getByRole('button', { name: 'Not now' }).click()
+  await page.goto('/')
 }

@@ -16,6 +16,8 @@ import { toast } from '@rs/ui-new/use-toast'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate, useRouter } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { SlotsElsewhere } from '@/features/monitor-kit/AiMonitoringStatus'
+import { useMonitoringLimit } from '@/lib/monitor/hooks'
 import {
   AddTargetsDrawer,
   ConfigureForm,
@@ -57,6 +59,8 @@ import type {
   ConfigureTarget,
   ConfigureTargetDetail,
 } from '../../types/configure'
+import { selectGlobalTarget } from '../database/targetSelection'
+import { AiKeyRouting } from './AiKeyRouting'
 import { SettingsHeader } from './SettingsHeader'
 import { StoragePrivacySection } from './StoragePrivacySection'
 
@@ -176,6 +180,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
   const deepLinkHandledRef = useRef(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerTab, setDrawerTab] = useState<AddTab | undefined>()
+  // A target the manual form just added: the drawer shows its monitoring check.
   const [moveTarget, setMoveTarget] = useState<ConfigureTarget | null>(null)
   const [view, setView] = useState<'list' | 'groups'>('groups')
 
@@ -541,10 +546,20 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
     }
     if (!editingTarget) {
       // New target: kick off the background bootstrap; it never throws, and
-      // the sidebar chip tracks it.
+      // the sidebar chip tracks it. The next step is turning on monitoring:
+      // the new database's page opens with that dialog, which checks the
+      // prerequisites itself.
       startBootstrapRun(data.name)
+      if (data.ssh) await tunnelStatusQuery.refetch()
+      cancelConfigure()
       setDrawerOpen(false)
       setDrawerTab(undefined)
+      selectGlobalTarget(data.name)
+      // The Database page sends a target-less install to onboarding, so it must
+      // see the new target before it opens.
+      await queryClient.refetchQueries({ queryKey: ['status'] })
+      void navigate({ to: '/database', search: { panel: 'enable' } })
+      return
     }
     if (data.ssh || editingTarget?.ssh) await tunnelStatusQuery.refetch()
     setShowForm(false)
@@ -699,7 +714,11 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
       connectivity={connectivity}
       checkableTargets={checkableTargets}
       testingTargetName={testingTarget}
-      onSetPassword={(target) => setPasswordDialogTarget(target.name)}
+      onSetPassword={(target) => {
+        // A target added since the last read has no requirement in the cached list yet.
+        void queryClient.invalidateQueries({ queryKey: ['env-requirements'] })
+        setPasswordDialogTarget(target.name)
+      }}
       onRetryConnection={async (target) => {
         const checked = await check(undefined, [target.name])
         await refreshTunnelStatuses()
@@ -767,6 +786,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
       >
         {/* ── Targets — primary section; Add moves in here ── */}
         <Show when={activePanel === 'connections'}>
+          <TargetsSlotsElsewhere />
           <SettingsSection
             id="connections"
             title="Targets"
@@ -813,7 +833,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
                   })}
                   title="Connectivity check failed"
                   message="Readyset could not check which of your targets are reachable right now."
-                  trustworthy="The target list is unaffected — only the live reachability of each row is stale."
+                  trustworthy="The target list is unaffected - only the live reachability of each row is stale."
                   detail={connectivityError ?? undefined}
                   onRetry={checkAll}
                 />
@@ -914,7 +934,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
           <SettingsSection
             id="ai"
             title="AI access"
-            description="Use the free AI included with a Readyset account, or your own Anthropic key, for Analyze, Ask, and Health check insights."
+            description="Use the AI included with a Readyset account, or your own Anthropic key, for Analyze, Ask, and Health check insights."
           >
             <m.div
               initial={{ opacity: 0, y: 10 }}
@@ -1036,6 +1056,12 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
                   ) : null}
                 </Show>
               </div>
+              <div className="mt-3">
+                <AiKeyRouting
+                  provider={activeAiProvider}
+                  signedIn={Boolean(readysetAccountAvailable)}
+                />
+              </div>
             </m.div>
           </SettingsSection>
         ) : null}
@@ -1111,6 +1137,8 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
             onSubmit={handleFormSubmit}
             onTest={handleFormTest}
             onCancel={handleManualFormCancel}
+            existingNames={targets.map((target) => target.name)}
+            submitError={error}
             isLoading={loading}
             isTesting={testingForm}
             testResult={connectionTestResult}
@@ -1177,4 +1205,10 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
       />
     </div>
   )
+}
+
+// Slots held for databases that aren't on this computer, so Manage databases can free them.
+function TargetsSlotsElsewhere() {
+  const limit = useMonitoringLimit()
+  return <SlotsElsewhere limit={limit.data} />
 }

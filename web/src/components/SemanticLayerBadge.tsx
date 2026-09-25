@@ -3,6 +3,7 @@ import { HStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
+import { plural } from '../features/monitor-kit/format'
 import { fetchSchemaStatus } from '../lib/api'
 
 /**
@@ -34,8 +35,8 @@ export function SemanticLayerBadge({ target }: { target?: string | null }) {
         className="h-auto min-h-6 text-left"
         label={
           hasSemanticLayer
-            ? `Semantic layer · ${schemaStatus?.tables ?? 0} tables`
-            : 'Live introspection — no semantic layer'
+            ? `Semantic layer · ${plural(schemaStatus?.tables ?? 0, 'table')}`
+            : 'Live introspection - no semantic layer'
         }
       />
       {!hasSemanticLayer && (

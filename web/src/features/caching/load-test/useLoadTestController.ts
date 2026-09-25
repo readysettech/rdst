@@ -5,6 +5,7 @@ import { useTarget } from '../../../hooks/useTarget'
 import type {
   BenchmarkQueryInput,
   BenchmarkRequest,
+  QueryRegistryEntry,
   TargetInfo,
 } from '../../../lib/api'
 import {
@@ -43,6 +44,8 @@ import { fetchSandboxDiagnostics } from '../sandbox'
 import { type LoadTestLane, readRequestLanes } from './loadTestModel'
 
 export type LoadTestProfile = 'paced' | 'capacity'
+export type BenchmarkRunChoice = 'source' | 'both' | 'readyset'
+const NO_EXTRA_QUERIES: QueryRegistryEntry[] = []
 
 /** `BenchmarkRequest` widened with the additive `lanes` field. */
 export type LoadTestBenchmarkRequest = BenchmarkRequest & {
@@ -61,11 +64,22 @@ function extractReferencedTables(sql: string) {
 export function useLoadTestController({
   selectedRunId,
   onClearSelectedRun,
+  registryLimit,
+  sourceTarget,
+  extraQueries = NO_EXTRA_QUERIES,
+  keepFilteredSelection = false,
 }: {
   selectedRunId?: string
   onClearSelectedRun?: () => void
+  /** How many Library rows to read; a caller selecting by hash needs them all. */
+  registryLimit?: number
+  sourceTarget?: string
+  extraQueries?: QueryRegistryEntry[]
+  keepFilteredSelection?: boolean
 }) {
-  const { target } = useTarget()
+  const { target: currentTarget } = useTarget()
+  const target = sourceTarget ?? currentTarget
+  const [runChoice, setRunChoice] = useState<BenchmarkRunChoice | null>(null)
   const {
     data: status,
     isLoading: statusLoading,
@@ -94,12 +108,28 @@ export function useLoadTestController({
   // otherwise switching Database left cross-target queries selectable even
   // though the run always executes against destinationTarget.
   const {
-    queries,
+    queries: registryQueries,
     isLoading: registryLoading,
     listError,
     refetch: refetchRegistry,
-  } = useQueryRegistry(undefined, destinationTarget)
+  } = useQueryRegistry(registryLimit, destinationTarget)
 
+  const queries = useMemo(() => {
+    const byHash = new Map(registryQueries.map((query) => [query.hash, query]))
+    for (const query of extraQueries)
+      if (!byHash.has(query.hash)) byHash.set(query.hash, query)
+    return Array.from(byHash.values())
+  }, [registryQueries, extraQueries])
+  const {
+    data: targetDetails,
+    isLoading: targetDetailsLoading,
+    error: targetDetailsError,
+    refetch: refetchTargetDetails,
+  } = useQuery({
+    queryKey: ['configure-targets-hosts'],
+    queryFn: fetchTargets,
+    staleTime: 60_000,
+  })
   const destinationLock = useTargetPasswordLock(destinationTarget)
   const connectivity = useTargetConnectivityGate(
     destinationLock.targetName ?? destinationTarget
@@ -118,6 +148,7 @@ export function useLoadTestController({
     reset,
   } = useBenchmark(selectedRunId, destinationTarget)
 
+  const [submittedRequest, setSubmittedRequest] = useState<BenchmarkRequest>()
   const [pageState, setPageState] = useState<'configure' | 'run'>('configure')
   useEffect(() => {
     if (state !== 'idle') setPageState('run')
@@ -183,16 +214,6 @@ export function useLoadTestController({
     ? sourceFilter
     : 'all'
 
-  const {
-    data: targetDetails,
-    isLoading: targetDetailsLoading,
-    error: targetDetailsError,
-    refetch: refetchTargetDetails,
-  } = useQuery({
-    queryKey: ['configure-targets-hosts'],
-    queryFn: fetchTargets,
-    staleTime: 60_000,
-  })
   const remoteTargetNames = useMemo(() => {
     const values = new Set<string>()
     for (const item of targetDetails ?? []) {
@@ -248,7 +269,10 @@ export function useLoadTestController({
           return {
             ...query,
             identifier,
-            name: queryDisplayName(query),
+            name:
+              query.source === 'monitor-benchmark'
+                ? query.question || queryDisplayName(query)
+                : queryDisplayName(query),
             parameters: detectParameters(query.sql),
           }
         })
@@ -269,10 +293,11 @@ export function useLoadTestController({
   )
   const runnableQueryObjects = useMemo(
     () =>
-      selectedQueryObjects.filter((query) =>
-        visibleIdentifiers.has(query.identifier)
+      selectedQueryObjects.filter(
+        (query) =>
+          keepFilteredSelection || visibleIdentifiers.has(query.identifier)
       ),
-    [selectedQueryObjects, visibleIdentifiers]
+    [selectedQueryObjects, visibleIdentifiers, keepFilteredSelection]
   )
   const selectedCount = selectedQueryObjects.length
   const runnableCount = runnableQueryObjects.length
@@ -459,9 +484,10 @@ export function useLoadTestController({
     return Array.from(missing).sort()
   }, [destinationSchema, runnableCount, runnableQueryObjects])
 
-  const runTarget = destinationLock.targetName
+  const runTarget = destinationTarget
   const canStart =
     Boolean(runTarget) &&
+    (!['both', 'readyset'].includes(runChoice ?? '') || !dockerUnavailable) &&
     !statusError &&
     !statusLoading &&
     !targetDetailsLoading &&
@@ -494,6 +520,9 @@ export function useLoadTestController({
             values: {},
             input: {
               identifier: query.identifier,
+              ...(query.source === 'monitor-benchmark'
+                ? { sql: query.sql }
+                : {}),
             } satisfies BenchmarkQueryInput,
           }
         }
@@ -529,7 +558,12 @@ export function useLoadTestController({
       interval_ms: capacityTest ? 0 : intervalMs,
       concurrency: capacityTest ? capacityClients : 1,
       duration_seconds: durationSeconds,
-      lanes: comparative ? ['origin', 'readyset'] : ['origin'],
+      lanes:
+        runChoice === 'readyset'
+          ? ['readyset']
+          : runChoice === 'both' || (runChoice === null && comparative)
+            ? ['origin', 'readyset']
+            : ['origin'],
     }
   }
 
@@ -564,6 +598,7 @@ export function useLoadTestController({
       )
     }
 
+    setSubmittedRequest(request)
     setPageState('run')
     void start(request)
   }
@@ -643,6 +678,7 @@ export function useLoadTestController({
     progress,
     timeline,
     activeRequest,
+    submittedRequest,
     runStatus,
     error,
     stop,
@@ -657,6 +693,8 @@ export function useLoadTestController({
     setTestProfile,
     comparative,
     setComparative,
+    runChoice,
+    setRunChoice,
     dockerUnavailable,
     recheckSandbox: sandboxQuery.refetch,
     intervalMs,

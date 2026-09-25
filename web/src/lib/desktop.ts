@@ -29,6 +29,24 @@ export interface DesktopUpdates {
   onStateChange: (callback: (state: DesktopUpdateState) => void) => () => void
 }
 
+/** Whether the OS will show RDST's notifications (the desktop app checks every few minutes). */
+export interface DesktopNotificationHealth {
+  blocked: boolean
+  reason: string | null
+  message: string | null
+  trayLabel: string | null
+  settingsUrl: string | null
+  checkedAt: number
+}
+
+export interface DesktopNotifications {
+  getHealth: () => Promise<DesktopNotificationHealth | null>
+  onHealthChange: (
+    callback: (health: DesktopNotificationHealth) => void
+  ) => () => void
+  openSettings: () => void
+}
+
 declare global {
   interface Window {
     rdstDesktop?: {
@@ -45,6 +63,10 @@ declare global {
       }
       windowControls?: DesktopWindowControls
       updates?: DesktopUpdates
+      notifications?: DesktopNotifications
+      /** The desktop app's own system notifications switch (the tray's Notifications). */
+      getNotificationsEnabled?: () => Promise<boolean>
+      setNotificationsEnabled?: (enabled: boolean) => Promise<boolean>
     }
   }
 }
@@ -89,4 +111,28 @@ export function registerDesktopOAuthProtocol(): Promise<boolean> | undefined {
 
 export function selectDesktopSshKey(): Promise<string | null> | undefined {
   return window.rdstDesktop?.files?.selectSshKey()
+}
+
+/** The desktop app's system notifications switch, when this page runs inside it. */
+export function getDesktopSystemNotifications():
+  | {
+      get: () => Promise<boolean>
+      set: (enabled: boolean) => Promise<boolean>
+    }
+  | undefined {
+  const desktop = window.rdstDesktop
+  if (
+    !desktop?.isDesktop ||
+    !desktop.getNotificationsEnabled ||
+    !desktop.setNotificationsEnabled
+  )
+    return undefined
+  return {
+    get: desktop.getNotificationsEnabled,
+    set: desktop.setNotificationsEnabled,
+  }
+}
+
+export function getDesktopNotifications(): DesktopNotifications | undefined {
+  return window.rdstDesktop?.notifications
 }

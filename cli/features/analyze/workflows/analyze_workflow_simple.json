@@ -36,7 +36,9 @@
                 "sql": "{{query}}",
                 "target": "{{target}}",
                 "target_config": "{{target_config}}",
-                "fast_mode": "{{fast_mode}}"
+                "fast_mode": "{{fast_mode}}",
+                "non_interactive": "{{non_interactive}}",
+                "statement_timeout_ms": "{{statement_timeout_ms}}"
             },
             "ResultPath": "$.explain_results",
             "Next": "CollectQueryMetrics",
@@ -84,7 +86,8 @@
                 "original_sql": "{{query}}",
                 "schema_info": "{{schema_collection.schema_info}}",
                 "target": "{{target}}",
-                "model": "{{llm_model}}"
+                "model": "{{llm_model}}",
+                "hosted_only": "{{hosted_only}}"
             },
             "ResultPath": "$.llm_analysis",
             "Next": "TestQueryRewrites",
@@ -103,7 +106,10 @@
                 "target": "{{target}}",
                 "original_sql_for_comparison": "{{query}}",
                 "fast_mode": "{{fast_mode}}",
-                "baseline_result": "{{explain_results}}"
+                "baseline_result": "{{explain_results}}",
+                "target_config": "{{target_config}}",
+                "non_interactive": "{{non_interactive}}",
+                "statement_timeout_ms": "{{statement_timeout_ms}}"
             },
             "ResultPath": "$.rewrite_test_results",
             "Next": "TestIndexRecommendations",

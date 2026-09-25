@@ -1,10 +1,31 @@
-"""Production FastAPI app with test-only Postgres/Jev boundary controls."""
+"""Production FastAPI app with test-only Postgres and optional Jev controls."""
 
 import os
 
 from shared.api.app import create_app
 from features.query_registry import assessment as assessment_module
 from features.query_registry.assessment_rubric import MODEL, RUBRIC_VERSION
+
+if os.environ.get("RDST_E2E_FAST_MONITOR") == "1":
+    from features.query_registry import scheduler
+    from features.monitor import analyze_queue, report
+
+    scheduler.ACTIVE_INTERVAL_SECONDS = 3.0
+    scheduler.MAX_DUTY_CYCLE = 1.0
+    # Monitored retries follow ACTIVE_INTERVAL_SECONDS on this compressed clock.
+    scheduler.DEGRADED_INTERVAL_SECONDS = 10.0
+    queue_init = analyze_queue.AnalyzeQueue.__init__
+
+    def fast_queue_init(self, *args, **kwargs):
+        kwargs.setdefault("interval_s", 2)
+        queue_init(self, *args, **kwargs)
+
+    analyze_queue.AnalyzeQueue.__init__ = fast_queue_init
+    # Classify monitored queries at the pace of an open Database page.
+    assessment_module.BACKGROUND_CONCURRENCY = assessment_module.CONCURRENCY
+    # A first nightly report can preempt the user-requested report on a fresh
+    # target. The separate E2E finding tracks that product behavior.
+    report.ReportScheduler.tick = lambda self: None
 
 
 class _ControlledJevClient:
@@ -38,6 +59,28 @@ if os.environ.get("RDST_E2E_CONTROLLED_JEV") == "1":
 
 
 app = create_app(static_dist_dir=os.environ.get("RDST_WEB_DIST_DIR"))
+
+if os.environ.get("RDST_CIM_ENGINE"):
+    from tests.web_e2e.ci_shop.routes import router as ci_shop_router
+
+    app.include_router(ci_shop_router)
+
+    import asyncio
+    from contextlib import asynccontextmanager
+    from tests.web_e2e.ci_shop.routes import _teardown
+
+    app_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def ci_shop_lifespan(app):
+        async with app_lifespan(app):
+            try:
+                yield
+            finally:
+                await asyncio.to_thread(_teardown)
+
+    app.router.lifespan_context = ci_shop_lifespan
+
 
 
 @app.post("/__test/execute/{target}")

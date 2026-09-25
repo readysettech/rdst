@@ -11,14 +11,22 @@ import { HStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { SchemaTable, SchemaTableColumn, SchemaTableRelationship } from '../../types/schema'
+import { plural } from '../../features/monitor-kit/format'
+import type {
+  SchemaTable,
+  SchemaTableColumn,
+  SchemaTableRelationship,
+} from '../../types/schema'
 
 interface SchemaTableTreeProps {
   tables: SchemaTable[]
   onEditColumn?: (tableName: string, column: SchemaTableColumn) => void
   onEditTable?: (table: SchemaTable) => void
   onEditEnum?: (tableName: string, column: SchemaTableColumn) => void
-  onEditRelationship?: (tableName: string, relationship: SchemaTableRelationship) => void
+  onEditRelationship?: (
+    tableName: string,
+    relationship: SchemaTableRelationship
+  ) => void
   /** Re-runs introspection; the way out of a layer that holds no tables. */
   onRefreshStructure?: () => void
 }
@@ -131,7 +139,11 @@ export function SchemaTableTree({
         body="Introspection found nothing to describe. Refresh the structure once the database has tables, or check that this target points at the schema you expect."
         action={
           onRefreshStructure
-            ? { label: 'Refresh structure', icon: 'observe', onClick: onRefreshStructure }
+            ? {
+                label: 'Refresh structure',
+                icon: 'observe',
+                onClick: onRefreshStructure,
+              }
             : undefined
         }
       />
@@ -182,7 +194,7 @@ export function SchemaTableTree({
           <Text level="body-small" className="text-content-layout-3">
             {matches.length === tables.length
               ? `${tables.length} ${tables.length === 1 ? 'table' : 'tables'}`
-              : `${matches.length} of ${tables.length} tables`}
+              : `${matches.length} of ${plural(tables.length, 'table')}`}
           </Text>
         </HStack>
       </div>
@@ -213,16 +225,30 @@ export function SchemaTableTree({
                 transition={{ duration: 0.2 }}
                 className="shrink-0"
               >
-                <Icon name="chevron-right" label="Expand" className="w-4 h-4 text-content-layout-3" />
+                <Icon
+                  name="chevron-right"
+                  label="Expand"
+                  className="w-4 h-4 text-content-layout-3"
+                />
               </m.div>
               <div className="flex-1 min-w-0 overflow-hidden">
                 <HStack className="gap-2 items-center flex-wrap">
                   <Text level="label-medium" className="text-content-layout-1">
                     {table.name}
                   </Text>
-                  <Tag size="small" variant="informative" modifier="ghost" label={`${table.columns.length} cols`} />
+                  <Tag
+                    size="small"
+                    variant="informative"
+                    modifier="ghost"
+                    label={`${table.columns.length} cols`}
+                  />
                   <Show when={table.relationships.length > 0}>
-                    <Tag size="small" variant="positive" modifier="ghost" label={`${table.relationships.length} rels`} />
+                    <Tag
+                      size="small"
+                      variant="positive"
+                      modifier="ghost"
+                      label={`${table.relationships.length} rels`}
+                    />
                   </Show>
                 </HStack>
               </div>
@@ -271,12 +297,22 @@ export function SchemaTableTree({
                     <Show when={!!table.business_context}>
                       <div className="py-3 mb-4 rounded-lg bg-surface-primary-soft/10 border border-border-primary-soft/30 px-4">
                         <HStack className="gap-2 items-center mb-1">
-                          <Icon name="info" label="Context" className="w-3.5 h-3.5 text-content-primary-soft" />
-                          <Text level="label-small" className="text-content-primary-soft">
+                          <Icon
+                            name="info"
+                            label="Context"
+                            className="w-3.5 h-3.5 text-content-primary-soft"
+                          />
+                          <Text
+                            level="label-small"
+                            className="text-content-primary-soft"
+                          >
                             Business context
                           </Text>
                         </HStack>
-                        <Text level="body-small" className="text-content-layout-2 break-words">
+                        <Text
+                          level="body-small"
+                          className="text-content-layout-2 break-words"
+                        >
                           {table.business_context}
                         </Text>
                       </div>
@@ -285,8 +321,15 @@ export function SchemaTableTree({
                     {/* Columns */}
                     <div className="mb-4">
                       <HStack className="gap-2 items-center mb-3">
-                        <Icon name="layers" label="Columns" className="w-3.5 h-3.5 text-content-layout-3" />
-                        <Text level="label-small" className="text-content-layout-3 uppercase tracking-wider">
+                        <Icon
+                          name="layers"
+                          label="Columns"
+                          className="w-3.5 h-3.5 text-content-layout-3"
+                        />
+                        <Text
+                          level="label-small"
+                          className="text-content-layout-3 uppercase tracking-wider"
+                        >
                           Columns
                         </Text>
                       </HStack>
@@ -306,22 +349,41 @@ export function SchemaTableTree({
                                     {col.name}
                                   </code>
                                   <Show when={!!col.data_type}>
-                                    <Text level="caption" className="text-content-layout-3">
+                                    <Text
+                                      level="caption"
+                                      className="text-content-layout-3"
+                                    >
                                       {col.data_type}
                                     </Text>
                                   </Show>
                                   <Show when={col.is_pii}>
-                                    <Tag size="small" label="PII" variant="negative" modifier="solid" />
+                                    <Tag
+                                      size="small"
+                                      label="PII"
+                                      variant="negative"
+                                      modifier="solid"
+                                    />
                                   </Show>
                                 </HStack>
                                 <Show when={!!col.description}>
-                                  <Text level="body-small" className="text-content-layout-2 break-words whitespace-pre-wrap mt-2">
+                                  <Text
+                                    level="body-small"
+                                    className="text-content-layout-2 break-words whitespace-pre-wrap mt-2"
+                                  >
                                     {col.description}
                                   </Text>
                                 </Show>
-                                <Show when={col.enum_values && Object.keys(col.enum_values).length > 0}>
+                                <Show
+                                  when={
+                                    col.enum_values &&
+                                    Object.keys(col.enum_values).length > 0
+                                  }
+                                >
                                   <div className="mt-3 pt-3 border-t border-border-layout-1">
-                                    <Text level="label-small" className="text-content-layout-3 mb-2">
+                                    <Text
+                                      level="label-small"
+                                      className="text-content-layout-3 mb-2"
+                                    >
                                       Enum values
                                     </Text>
                                     <div className="flex flex-wrap gap-1.5">
@@ -344,9 +406,14 @@ export function SchemaTableTree({
                                               label={value}
                                               title="Value meaning not documented yet"
                                             />
-                                          ),
+                                          )
                                         )}
-                                      <Show when={Object.keys(col.enum_values || {}).length > 8}>
+                                      <Show
+                                        when={
+                                          Object.keys(col.enum_values || {})
+                                            .length > 8
+                                        }
+                                      >
                                         <Tag
                                           size="small"
                                           modifier="ghost"
@@ -358,14 +425,23 @@ export function SchemaTableTree({
                                 </Show>
                               </div>
                               <HStack className="gap-1 shrink-0">
-                                <Show when={!!onEditEnum && (Object.keys(col.enum_values ?? {}).length > 0 || col.data_type === 'enum')}>
+                                <Show
+                                  when={
+                                    !!onEditEnum &&
+                                    (Object.keys(col.enum_values ?? {}).length >
+                                      0 ||
+                                      col.data_type === 'enum')
+                                  }
+                                >
                                   <Button
                                     modifier="ghost"
                                     size="small"
                                     icon="menu"
                                     iconPosition="icon"
                                     label="Enum"
-                                    onClick={() => onEditEnum?.(table.name, col)}
+                                    onClick={() =>
+                                      onEditEnum?.(table.name, col)
+                                    }
                                   />
                                 </Show>
                                 <Show when={!!onEditColumn}>
@@ -375,7 +451,9 @@ export function SchemaTableTree({
                                     icon="edit"
                                     iconPosition="icon"
                                     label="Edit"
-                                    onClick={() => onEditColumn?.(table.name, col)}
+                                    onClick={() =>
+                                      onEditColumn?.(table.name, col)
+                                    }
                                   />
                                 </Show>
                               </HStack>
@@ -389,8 +467,15 @@ export function SchemaTableTree({
                     <Show when={table.relationships.length > 0}>
                       <div className="pt-4 border-t border-border-layout-1">
                         <HStack className="gap-2 items-center mb-3">
-                          <Icon name="connect" label="Relationships" className="w-3.5 h-3.5 text-content-layout-3" />
-                          <Text level="label-small" className="text-content-layout-3 uppercase tracking-wider">
+                          <Icon
+                            name="connect"
+                            label="Relationships"
+                            className="w-3.5 h-3.5 text-content-layout-3"
+                          />
+                          <Text
+                            level="label-small"
+                            className="text-content-layout-3 uppercase tracking-wider"
+                          >
                             Relationships
                           </Text>
                         </HStack>
@@ -405,12 +490,23 @@ export function SchemaTableTree({
                             >
                               <HStack className="gap-3 items-center flex-wrap min-w-0 flex-1">
                                 <HStack className="gap-2 items-center">
-                                  <Icon name="arrow-right" label="To" className="w-4 h-4 text-content-layout-3" />
-                                  <Text level="label-small" className="text-content-layout-1">
+                                  <Icon
+                                    name="arrow-right"
+                                    label="To"
+                                    className="w-4 h-4 text-content-layout-3"
+                                  />
+                                  <Text
+                                    level="label-small"
+                                    className="text-content-layout-1"
+                                  >
                                     {rel.target_table}
                                   </Text>
                                 </HStack>
-                                <Tag size="small" label={rel.relationship_type} modifier="outline" />
+                                <Tag
+                                  size="small"
+                                  label={rel.relationship_type}
+                                  modifier="outline"
+                                />
                                 <code className="text-xs text-content-layout-3 font-mono break-all bg-surface-layout-2 px-2 py-0.5 rounded">
                                   {rel.join_pattern}
                                 </code>
@@ -422,7 +518,9 @@ export function SchemaTableTree({
                                   icon="edit"
                                   iconPosition="icon"
                                   label="Edit"
-                                  onClick={() => onEditRelationship?.(table.name, rel)}
+                                  onClick={() =>
+                                    onEditRelationship?.(table.name, rel)
+                                  }
                                 />
                               </Show>
                             </m.div>
@@ -444,7 +542,7 @@ export function SchemaTableTree({
             variant="primary"
             modifier="ghost"
             size="small"
-            label={`Show ${Math.min(remaining, TABLE_PAGE_SIZE)} more tables`}
+            label={`Show ${plural(Math.min(remaining, TABLE_PAGE_SIZE), 'more table')}`}
             onClick={() => setVisibleCount((count) => count + TABLE_PAGE_SIZE)}
           />
         </div>

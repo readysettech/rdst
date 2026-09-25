@@ -403,7 +403,7 @@ export function deriveLoadTestResultModel({
     running: 'Load test in progress',
     complete: `${formatQps(qps)} ${
       profile === 'capacity' ? 'sustained' : 'observed'
-    } QPS at ${p95 > 0 ? `${p95.toFixed(p95 >= 10 ? 0 : 1)}ms` : '—'} p95`,
+    } QPS at ${p95 > 0 ? `${p95.toFixed(p95 >= 10 ? 0 : 1)}ms` : ' - '} p95`,
     partial: `${formatQps(qps)} ${
       profile === 'capacity' ? 'sustained' : 'observed'
     } QPS with errors`,
@@ -454,7 +454,7 @@ export function deriveLoadTestResultModel({
       )
     ),
     title: preparation
-      ? `Preparing Readyset caches — ${preparation.preparedCount} of ${preparation.prepareTotal}`
+      ? `Preparing Readyset caches - ${preparation.preparedCount} of ${preparation.prepareTotal}`
       : title[outcome],
     description: preparation
       ? 'Readyset caches every query in this run before the first request. A cold sandbox can take a few minutes.'

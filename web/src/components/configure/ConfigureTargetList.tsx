@@ -25,6 +25,7 @@ import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { useState } from 'react'
+import { MonitoringSwitch } from '../../features/database/settings/MonitoringSwitch'
 import type { TunnelStatus } from '../../lib/tunnels'
 import type { ConfigureTarget } from '../../types/configure'
 import type { FleetConnectivityEvent } from '../../types/fleet'
@@ -56,6 +57,11 @@ interface ConfigureTargetListProps {
   tunnelStatuses?: Record<string, TunnelStatus>
   testingTunnelName?: string | null
   onTestTunnel?: (targetName: string) => void
+}
+
+/** Monitoring reads PostgreSQL and MySQL targets. */
+function isMonitorable(target: ConfigureTarget): boolean {
+  return /postgres|mysql/i.test(target.engine ?? '')
 }
 
 /** `engine · host:port` — the quiet identity line under the name. */
@@ -235,6 +241,20 @@ export function ConfigureTargetList({
                       </Text>
                     </Show>
                   </HStack>
+
+                  {/* One monitoring on/off per database, worded like the
+                      Database page and its settings. */}
+                  <Show when={isMonitorable(target)}>
+                    <HStack className="gap-3 items-center min-w-0 pt-1">
+                      <Text
+                        level="label-small"
+                        className="text-content-layout-3 shrink-0"
+                      >
+                        Monitoring
+                      </Text>
+                      <MonitoringSwitch target={target.name} />
+                    </HStack>
+                  </Show>
                 </VStack>
 
                 <HStack className="gap-2 items-center shrink-0">

@@ -290,6 +290,14 @@ def test_unusable_schema_defers_instead_of_assessing_without_evidence(
     assert store.load_schema_snapshot("shop", identity, "any-table-set") is None
 
 
+@pytest.mark.parametrize(("sql", "tables"), [
+    ("INSERT INTO EVENTS ( `id` , `kind` ) VALUES (...)", ["EVENTS"]),
+    ("SELECT `id` FROM `orders` WHERE `status` IN (...)", ["orders"]),
+])
+def test_mysql_digest_value_lists_name_their_tables(sql, tables):
+    assert assessment_context.referenced_tables(sql, "mysql") == tables
+
+
 def test_collected_structure_is_accepted_and_reused(tmp_path, monkeypatch):
     registry = _registry(tmp_path)
     registry.add_query("SELECT * FROM orders", source="web", target="shop")
@@ -537,3 +545,60 @@ def test_worker_keeps_eight_lanes_in_flight_and_isolates_failures():
     # Lanes refilled after the first batch returned, and the failing lane
     # did not stop the others from continuing.
     assert started > assessment.CONCURRENCY
+
+
+def test_only_monitored_targets_limit_assessments_to_the_detail_tier(monkeypatch):
+    from features.query_registry import assessment
+
+    monkeypatch.setattr(assessment.MonitorStore, "monitored_targets", lambda self: {"watched"})
+    monkeypatch.setattr(assessment.MonitorStore, "full_detail_keys", lambda self, target: {"b", "a"})
+    # A monitored target assesses its full-detail tier; an unmonitored one has no tiers, so
+    # every query in its library stays eligible.
+    assert assessment._eligible_keys("watched") == ["a", "b"]
+    assert assessment._eligible_keys("library-only") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("second_valid", [True, False])
+@pytest.mark.parametrize("invalid_kind", ["service", "validation"])
+async def test_invalid_response_gets_one_fresh_request(tmp_path, monkeypatch, second_valid, invalid_kind):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from features.query_registry import assessment as module
+    from shared.llm_manager.jev_client import JevClientError
+
+    monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
+    registry = _registry(tmp_path)
+    key, _ = registry.add_query("SELECT * FROM orders", target="shop")
+    store = registry.library_store
+    store.prepare_assessments("shop", "physical", now=1)
+    context = SimpleNamespace(payload={}, fingerprint="schema", collected_at="now",
+                              coverage="full", summary=lambda: "orders")
+    monkeypatch.setattr(module, "collect_assessment_context", lambda *a, **k: context)
+    monkeypatch.setattr(module, "_eligible_keys", lambda target: None)
+    monkeypatch.setattr(module, "validate_response", lambda body: body if body else
+                        (_ for _ in ()).throw(ValueError("Invalid response")))
+    requests = []
+    def assess(**kwargs):
+        requests.append(kwargs["request_id"])
+        if len(requests) == 2 and second_valid:
+            return {"priority_score": 25, "band": "Low", "confidence": 0.8, "findings": []}
+        if invalid_kind == "service":
+            raise JevClientError("JEV_INVALID_RESPONSE", 502)
+        return {}
+    worker = module.AssessmentWorker()
+    worker._client = SimpleNamespace(assess=assess)
+    monkeypatch.setattr(worker, "_still_active", lambda *args: True)
+    monkeypatch.setattr(worker, "_publish", AsyncMock())
+    act = SimpleNamespace(describe=lambda **kwargs: None)
+    for request in ("first", "fresh"):
+        claim = store.claim_assessment("shop", "physical", owner=worker._owner, request_id=request)
+        assert claim
+        await worker._assess_claim("shop", "physical", {}, store, claim, act)
+        # Reopening the store preserves the retry budget across process restarts.
+        store = type(store)(store.path, tmp_path / "queries.toml")
+    result = store.assessment_for(key, "shop", "physical")
+    assert result["status"] == ("complete" if second_valid else "paused")
+    assert result["attempt_count"] == 2
+    assert requests == ["first", "fresh"]
+    assert store.claim_assessment("shop", "physical", owner=worker._owner, request_id="third") is None

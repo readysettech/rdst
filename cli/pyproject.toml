@@ -37,6 +37,7 @@ dependencies = [
     "paramiko",
     "cryptography>=50.0.0",
     "py7zr",
+    "psutil>=7.2.2",
     "pandas",
     "rich",
     "toml",

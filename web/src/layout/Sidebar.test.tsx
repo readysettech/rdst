@@ -42,13 +42,20 @@ vi.mock('@tanstack/react-query', () => ({
         ? queryState.accountStatus
         : queryKey[0] === 'setup-progress'
           ? queryState.setupProgress
-          : null,
+          : queryKey[0] === 'monitor' && queryKey[2] === 'settings'
+            ? { enabled: false }
+            : null,
   }),
   useQueryClient: () => ({}),
   useMutation: ({ mutationFn }: { mutationFn: () => Promise<unknown> }) => ({
     mutate: () => void mutationFn(),
     isPending: false,
   }),
+}))
+
+const inboxUnread = vi.hoisted(() => ({ count: 0, actNow: 0, loading: false }))
+vi.mock('../features/inbox/useInboxUnread', () => ({
+  useInboxUnread: () => inboxUnread,
 }))
 
 vi.mock('../components/TargetDropdown', () => ({
@@ -253,7 +260,7 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
     expect(docs.className).toContain('focus-visible:ring-2')
   })
 
-  it('shows and clears the Health Check running indicator from audit session state', () => {
+  it('keeps a running health check off the nav (the page is off it too)', () => {
     const sessionId = beginAuditSession({
       kind: 'fleet',
       targetLabel: '2 targets',
@@ -267,13 +274,10 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
 
     render(<Sidebar />)
     expect(
-      screen.getByRole('status', { name: 'Health check is running' })
-    ).toBeTruthy()
-
-    act(() => finishAuditSession(sessionId!))
-    expect(
       screen.queryByRole('status', { name: 'Health check is running' })
     ).toBeNull()
+    expect(screen.queryByRole('link', { name: /Health check/ })).toBeNull()
+    act(() => finishAuditSession(sessionId!))
   })
 })
 
@@ -289,9 +293,37 @@ describe('Sidebar experimental surfaces (team decision: off the nav)', () => {
     expect(screen.queryByText('Advanced')).toBeNull()
   })
 
-  it('keeps Schema in the main nav', () => {
+  it('leads with Database and Inbox and lists no classic pages', () => {
     render(<Sidebar />)
-    expect(screen.getByRole('link', { name: /Schema/ })).toBeTruthy()
+    const links = screen.getAllByRole('link').map((link) => link.textContent)
+    expect(links.slice(0, 5)).toEqual([
+      'Home',
+      'Database',
+      'Inbox',
+      'Agent activity',
+      'Ask',
+    ])
+    expect(
+      screen.getByRole('link', { name: 'Database' }).getAttribute('href')
+    ).toBe('/database')
+    expect(screen.queryByRole('button', { name: 'Classic pages' })).toBeNull()
+    // Classic routes still answer deep links, but the nav never offers them.
+    for (const name of ['Queries', 'Schema', 'Health check', 'Benchmarks'])
+      expect(screen.queryByRole('link', { name })).toBeNull()
+  })
+
+  it.each([
+    { actNow: 0, tone: 'bg-surface-layout-2' },
+    { actNow: 1, tone: 'bg-surface-negative-soft' },
+  ])('tones the Inbox badge by act-now alerts ($actNow)', ({
+    actNow,
+    tone,
+  }) => {
+    Object.assign(inboxUnread, { count: 3, actNow })
+    render(<Sidebar />)
+    const badge = screen.getByTitle('3 unread')
+    expect(badge.className).toContain(tone)
+    Object.assign(inboxUnread, { count: 0, actNow: 0 })
   })
 })
 
@@ -369,14 +401,7 @@ describe('Sidebar setup checklist (MG-03)', () => {
     __resetSetupGuideStoreForTests()
   })
 
-  const outstanding = {
-    target: 'demo',
-    connected: true,
-    schema_built: false,
-    queries_found: false,
-    analyzed: false,
-    compared: false,
-  }
+  const outstanding = { target: 'demo', connected: true }
 
   it('docks the checklist in the footer above the utilities', () => {
     queryState.setupProgress = outstanding
@@ -394,7 +419,7 @@ describe('Sidebar setup checklist (MG-03)', () => {
     ).toBeTruthy()
     // Chrome, not an overlay: it displaces nothing on the page it describes.
     expect(steps.className).not.toContain('fixed')
-    expect(steps.textContent).toContain('1 of 5')
+    expect(steps.textContent).toContain('1 of 2')
   })
 
   it('carries the same checklist inside the open mobile drawer', () => {

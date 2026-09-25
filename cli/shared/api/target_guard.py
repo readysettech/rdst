@@ -86,7 +86,7 @@ def ensure_target_password(target: Optional[str] = None) -> TargetGuard:
 
     password_env = target_config.get("password_env")
     message = (
-        f"No password is available for target '{target_name}' — open its "
+        f"No password is available for target '{target_name}' - open its "
         "connection settings and enter the database password."
     )
 

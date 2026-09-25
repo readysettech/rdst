@@ -457,6 +457,23 @@ class ConfigurationWizard:
                 f"Target '{target_name}'", "has been added."
             )
 
+        # A new target: can monitoring see its queries?
+        prerequisites = None
+        if not is_edit and config_data.get("verified"):
+            from features.configure.cli.prerequisites_renderer import (
+                prerequisites_data,
+                run_prerequisite_flow,
+            )
+
+            json_mode = bool(kwargs.get("json") or kwargs.get("output_json"))
+            prerequisites = prerequisites_data(
+                run_prerequisite_flow(
+                    self.console,
+                    [(target_name, dict(cfg.get(target_name) or merged))],
+                    json_mode=json_mode,
+                )
+            )
+
         # Next steps — one clean block at the bottom
         if not is_edit:
             next_step_list = [
@@ -476,6 +493,7 @@ class ConfigurationWizard:
                 "target": target_name,
                 "config": config_data,
                 "default": cfg.get_default(),
+                **({"prerequisites": prerequisites} if prerequisites else {}),
             },
         )
 

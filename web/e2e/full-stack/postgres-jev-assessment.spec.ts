@@ -41,7 +41,7 @@ test('discovers a Postgres shape and assesses literal variants once', async ({
     true
   )
 
-  await expect(page.getByText('Jev · High priority')).toBeVisible({
+  await expect(page.getByText('High priority', { exact: true })).toBeVisible({
     timeout: 20_000,
   })
 

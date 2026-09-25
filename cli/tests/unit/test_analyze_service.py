@@ -1386,3 +1386,34 @@ class TestAnalyzeServiceNetworkFailures:
         # Should have error with partial results
         assert events[-1].type == "error"
         assert events[-1].partial_results is not None
+
+
+@pytest.mark.asyncio
+async def test_storage_failure_yields_specific_error_without_complete():
+    events = [event async for event in AnalyzeService()._process_results(
+        workflow_result={"success": True, "result": {
+            "explain_results": {"success": True},
+            "storage_result": {"success": False, "error": "Failed to store analysis results: disk full"},
+        }},
+        readyset_result=None,
+        input=AnalyzeInput(sql="SELECT 1", normalized_sql="SELECT ?", source="monitor", hash="monitor_hash"),
+    )]
+
+    assert events[-1].type == "error"
+    assert events[-1].stage == "storing_results"
+    assert events[-1].message == "Failed to store analysis results: disk full"
+    assert not any(event.type == "complete" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_interactive_run_still_completes_when_storage_fails():
+    events = [event async for event in AnalyzeService()._process_results(
+        workflow_result={"success": True, "result": {
+            "explain_results": {"success": True},
+            "storage_result": {"success": False, "error": "Failed to store analysis results: disk full"},
+        }},
+        readyset_result=None,
+        input=AnalyzeInput(sql="SELECT 1", normalized_sql="SELECT ?", source="web", hash="h"),
+    )]
+
+    assert events[-1].type == "complete"

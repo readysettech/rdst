@@ -75,6 +75,7 @@ Current feature-owned domains:
 
 - `account`
 - `agent`
+- `agent_activity`
 - `allowlist`
 - `analyze`
 - `ask`
@@ -87,6 +88,7 @@ Current feature-owned domains:
 - `guard`
 - `init`
 - `interactive`
+- `monitor`
 - `providers`
 - `qpdemo`
 - `qprouter`
@@ -104,6 +106,7 @@ Each slice should be readable from its `models.py` and `service.py` first. That 
 ### Feature map
 
 - `agent`: agent runtime and MCP-facing agent behavior
+- `agent_activity`: audit log of the RDST agent's actions (deep analyses, Ask, classification, reports, benchmarks) and the statements and AI calls behind them
 - `account`: Readyset account login, local session storage, and hosted-AI access
 - `allowlist`: provider IP-allowlist context and explicit one-click write-back (Supabase, Neon, DigitalOcean)
 - `analyze`: query analysis, explain flows, rewrite evaluation, analysis rendering
@@ -117,6 +120,7 @@ Each slice should be readable from its `models.py` and `service.py` first. That 
 - `guard`: guardrail configuration, masking, intent checks, guard CLI
 - `init`: first-run setup and environment/bootstrap validation
 - `interactive`: interactive query status and interactive command flow
+- `monitor`: continuous collection, attention, deep analysis queue, inbox, and reports
 - `providers`: cloud-provider sign-in and target discovery (AWS RDS, Supabase, Neon, DigitalOcean), OAuth broker client
 - `qpdemo`: QueryPilot web demo orchestration, dual-path load, demo API
 - `qprouter`: SQP router deploy and clients, pattern/reason engine

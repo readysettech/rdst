@@ -167,11 +167,14 @@ export function CompareQueryCard({
   queryHash,
   durationSeconds,
   onOpenQueries,
+  showQueryLink = true,
 }: {
   outcome: CompareQueryOutcome
   queryHash?: string
   durationSeconds: number
   onOpenQueries: () => void
+  /** Off where the card is embedded beside the query itself. */
+  showQueryLink?: boolean
 }) {
   const status = compareQueryStatusChip(outcome)
 
@@ -308,7 +311,12 @@ export function CompareQueryCard({
             </Text>
           )}
         </HStack>
-        <ViewQueryAction queryHash={queryHash} onOpenQueries={onOpenQueries} />
+        {showQueryLink ? (
+          <ViewQueryAction
+            queryHash={queryHash}
+            onOpenQueries={onOpenQueries}
+          />
+        ) : null}
       </Card.Content>
     </Card>
   )

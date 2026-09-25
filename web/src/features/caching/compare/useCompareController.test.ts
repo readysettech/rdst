@@ -345,3 +345,63 @@ describe('compare_run analytics (E1)', () => {
     )
   })
 })
+
+describe('controlled selection (Database benchmark drawer)', () => {
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  function renderControlled(initial: string[]) {
+    const onChange = vi.fn()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children)
+    const view = renderHook(
+      ({ ids }: { ids: string[] }) =>
+        useCompareController(undefined, {
+          selectedIds: ids,
+          onSelectedIdsChange: onChange,
+        }),
+      { wrapper, initialProps: { ids: initial } }
+    )
+    return { ...view, onChange }
+  }
+
+  it('reads the caller selection and never clears it on mount', () => {
+    mocks.useQueryRegistry.mockReturnValue(
+      registry([entry('a'), entry('b'), entry('c')])
+    )
+    const { result, onChange } = renderControlled(['b', 'c'])
+    expect(result.current.selectedIds).toEqual(['b', 'c'])
+    expect(
+      result.current.selectedWithParams.map((item) => item.entry.hash)
+    ).toEqual(['b', 'c'])
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('reports toggles to the caller instead of keeping its own copy', () => {
+    mocks.useQueryRegistry.mockReturnValue(registry([entry('a'), entry('b')]))
+    const { result, onChange, rerender } = renderControlled(['a'])
+    act(() => result.current.toggleQuery('b'))
+    expect(onChange).toHaveBeenLastCalledWith(['a', 'b'])
+    // Until the caller passes the new selection back, it is unchanged.
+    expect(result.current.selectedIds).toEqual(['a'])
+    rerender({ ids: ['a', 'b'] })
+    act(() => result.current.toggleQuery('a'))
+    expect(onChange).toHaveBeenLastCalledWith(['b'])
+  })
+
+  it('blocks a run over the compare limit with the reason', async () => {
+    mocks.useQueryRegistry.mockReturnValue(
+      registry(['a', 'b', 'c', 'd', 'e'].map((hash) => entry(hash)))
+    )
+    const { result } = renderControlled(['a', 'b', 'c', 'd', 'e'])
+    await waitFor(() =>
+      expect(result.current.blockedReason).toBe('Select at most 4 queries.')
+    )
+    expect(result.current.canReview).toBe(false)
+  })
+})

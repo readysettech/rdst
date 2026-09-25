@@ -1,6 +1,13 @@
 import type { QueryRegistryEntry } from '../../lib/api'
+import type { HistorySpan } from '../../lib/monitor/types'
+import { isFirstRun } from '../database/overview/firstReadingsModel'
 
-export type HomeState = 'first-run' | 'connected' | 'active'
+/**
+ * No database yet; connected but never monitored; monitoring on with too little
+ * history to chart; monitoring with history (including paused monitoring, whose
+ * history still reads).
+ */
+export type HomeState = 'first-run' | 'connected' | 'collecting' | 'active'
 
 export interface PortfolioCounts {
   asked: number
@@ -26,10 +33,12 @@ export interface ContinueItem {
 
 export function deriveHomeState(
   targetCount: number,
-  semanticLayerExists: boolean | undefined
+  monitoring: boolean | undefined,
+  history: HistorySpan | null | undefined
 ): HomeState {
   if (targetCount === 0) return 'first-run'
-  if (!semanticLayerExists) return 'connected'
+  if (!monitoring) return history?.first_ts ? 'active' : 'connected'
+  if (isFirstRun(true, history)) return 'collecting'
   return 'active'
 }
 

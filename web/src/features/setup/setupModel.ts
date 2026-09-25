@@ -1,18 +1,21 @@
 import type { SetupGuideStep } from '../../lib/analytics'
 
 /**
- * The five setup signals, as reported by `GET /api/setup-progress`. Every
- * field is derived server-side from real state — a database connected from
- * the CLI arrives with `connected` already true — so the guide never stores a
- * "user did this" flag of its own. [RDST UX plan, D]
+ * What setup needs to know about the active target. `connected` and `target` come
+ * from `GET /api/setup-progress`, derived server-side from real state, so a database
+ * connected from the CLI arrives already done. `monitoring` is the target's monitor
+ * `enabled` setting. Schema discovery runs on its own and is never a setup step.
+ * [RDST UX plan, D]
  */
 export interface SetupProgress {
   target: string
   connected: boolean
-  schema_built: boolean
-  queries_found: boolean
-  analyzed: boolean
-  compared: boolean
+  /** Monitoring is on for `target`; undefined until the setting has been read. */
+  monitoring?: boolean
+  schema_built?: boolean
+  queries_found?: boolean
+  analyzed?: boolean
+  compared?: boolean
   error?: string | null
 }
 
@@ -24,63 +27,27 @@ export interface SetupStep {
   why: string
   /** The surface that completes the step. */
   to: string
-  /** Search params the surface needs to land on the step itself. */
-  search?: Record<string, string>
   done: boolean
 }
 
-type SetupStepDefinition = Omit<SetupStep, 'done' | 'search'> & {
+type SetupStepDefinition = Omit<SetupStep, 'done'> & {
   isDone: (progress: SetupProgress) => boolean
-  /** The one query this step should act on, when the guide knows one. */
-  searchFor?: (context: SetupStepContext) => Record<string, string> | undefined
-}
-
-/** What the guide knows beyond the five booleans. */
-export interface SetupStepContext {
-  /** Highest-impact query to analyze, for step 4's deep link. */
-  analyzeHash?: string
 }
 
 const STEP_DEFINITIONS: SetupStepDefinition[] = [
   {
     id: 'connect-database',
     label: 'Connect a database',
-    why: 'Readyset watches this database for queries.',
+    why: 'RDST watches this database for slow queries.',
     to: '/onboarding',
     isDone: (progress) => progress.connected,
   },
   {
-    id: 'build-schema',
-    label: 'Build the schema',
-    why: 'Gives Readyset your tables and relationships.',
-    to: '/schema',
-    isDone: (progress) => progress.schema_built,
-  },
-  {
-    id: 'find-queries',
-    label: 'Find your queries',
-    why: 'Collects the queries this database actually runs.',
-    to: '/queries',
-    isDone: (progress) => progress.queries_found,
-  },
-  {
-    id: 'analyze-query',
-    label: 'Analyze a query',
-    why: 'Shows why one query is slow.',
-    // `/queries?analyze=<top hash>` opens the analyze drawer on the query with
-    // the most database time behind it. Without a query to name — nothing
-    // observed yet — the library itself is the honest destination.
-    to: '/queries',
-    searchFor: (context) =>
-      context.analyzeHash ? { analyze: context.analyzeHash } : undefined,
-    isDone: (progress) => progress.analyzed,
-  },
-  {
-    id: 'compare',
-    label: 'Compare origin vs Readyset',
-    why: 'Proves the speedup on real traffic.',
-    to: '/cache',
-    isDone: (progress) => progress.compared,
+    id: 'turn-on-monitoring',
+    label: 'Turn on monitoring',
+    why: 'Reads query statistics. Never writes.',
+    to: '/database',
+    isDone: (progress) => progress.monitoring === true,
   },
 ]
 
@@ -90,13 +57,9 @@ export const SETUP_STEP_IDS: SetupGuideStep[] = STEP_DEFINITIONS.map(
   (step) => step.id
 )
 
-export function setupSteps(
-  progress: SetupProgress,
-  context: SetupStepContext = {}
-): SetupStep[] {
-  return STEP_DEFINITIONS.map(({ isDone, searchFor, ...step }) => ({
+export function setupSteps(progress: SetupProgress): SetupStep[] {
+  return STEP_DEFINITIONS.map(({ isDone, ...step }) => ({
     ...step,
-    search: searchFor?.(context),
     done: isDone(progress),
   }))
 }
@@ -114,7 +77,7 @@ export function isSetupComplete(progress: SetupProgress): boolean {
 
 /**
  * A reported error means the signals are unknown, not that nothing is done.
- * Showing "0 of 5" on a failed read would be a lie and a nag, so the guide
+ * Showing "0 of 2" on a failed read would be a lie and a nag, so the guide
  * stays hidden until it has a real answer.
  */
 export function hasSetupSignal(

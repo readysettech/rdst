@@ -36,7 +36,7 @@ function NextStepEvidencePanel({
             isReadyset ? 'text-content-positive-soft' : 'text-content-info-soft'
           }
         >
-          {isReadyset ? 'Ready to continue' : 'Measured'}
+          {isReadyset ? 'Ready to continue' : step.evidence}
         </Text>
       </div>
 
@@ -73,24 +73,31 @@ export function ResultsNextStepCard({
   const style = resultToneStyles[step.tone]
   const rationaleSummary = getRationaleSummary(step.body)
   const sqlLabel =
-    step.kind === 'rewrite' ? 'Tested rewrite SQL' : 'Suggested index SQL'
-  const hasSql = 'sql' in step
+    step.kind === 'rewrite'
+      ? `${step.evidence} rewrite SQL`
+      : step.kind === 'opportunity'
+        ? 'Example'
+        : 'Suggested index SQL'
+  const sql = 'sql' in step ? step.sql : undefined
+  const needsReview =
+    step.kind === 'index' ||
+    step.kind === 'opportunity' ||
+    (step.kind === 'rewrite' && step.evidence === 'Suggested')
   const footerLabel =
     step.kind === 'index'
       ? 'Review before applying'
-      : step.kind === 'rewrite'
+      : step.kind === 'rewrite' || step.kind === 'opportunity'
         ? step.supportingText
         : step.kind === 'readyset'
           ? onSetUpCaching
             ? undefined
             : 'Readyset compatibility verified'
           : 'No high-confidence action'
-  const footerIcon =
-    step.kind === 'index'
-      ? ('alert' as const)
-      : step.kind === 'none'
-        ? ('info' as const)
-        : ('tick-double' as const)
+  const footerIcon = needsReview
+    ? ('alert' as const)
+    : step.kind === 'none'
+      ? ('info' as const)
+      : ('tick-double' as const)
 
   return (
     <Card className="h-full">
@@ -124,7 +131,7 @@ export function ResultsNextStepCard({
           </VStack>
         </HStack>
 
-        {hasSql ? (
+        {sql ? (
           <div className="mt-auto flex h-36 flex-col overflow-hidden rounded-xl border border-border-layout-1 bg-surface-layout-2/40">
             <div className="border-b border-border-layout-1 px-4 py-3">
               <Text level="label-extra-small" className="text-content-layout-3">
@@ -132,12 +139,12 @@ export function ResultsNextStepCard({
               </Text>
             </div>
             <div className="min-h-0 flex-1 overflow-auto p-4">
-              <SqlTokens sql={step.sql} title={step.sql} />
+              <SqlTokens sql={sql} title={sql} />
             </div>
           </div>
-        ) : (
+        ) : step.kind === 'readyset' || step.kind === 'none' ? (
           <NextStepEvidencePanel step={step} />
-        )}
+        ) : null}
         {step.kind === 'index' && step.plannerVerdict ? (
           <div className="overflow-hidden rounded-xl border border-border-layout-1">
             <PlannerVerdict result={step.plannerVerdict} />
@@ -159,22 +166,20 @@ export function ResultsNextStepCard({
               label=""
               aria-hidden="true"
               className={`h-3.5 w-3.5 shrink-0 ${
-                step.kind === 'index' ? 'text-content-warning-soft' : style.text
+                needsReview ? 'text-content-warning-soft' : style.text
               }`}
             />
             <Text
               level="caption"
-              className={
-                step.kind === 'index' ? 'text-content-layout-3' : style.text
-              }
+              className={needsReview ? 'text-content-layout-3' : style.text}
             >
               {footerLabel}
             </Text>
           </HStack>
         ) : null}
 
-        {hasSql ? (
-          <CopyButton text={step.sql} label="Copy SQL" />
+        {sql ? (
+          <CopyButton text={sql} label="Copy SQL" />
         ) : step.kind === 'readyset' && onSetUpCaching ? (
           <Button
             variant="primary"

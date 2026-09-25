@@ -5,6 +5,7 @@
  */
 import type { Page } from '@playwright/test'
 import {
+  acceptBrowserError,
   configureTestTarget,
   expect,
   mainContent,
@@ -158,12 +159,22 @@ test('a11y: a selectable target row is a single checkbox', async ({ page }) => {
 })
 
 /** F-32 - the active nav item says "you are here" beyond colour. */
-test('a11y: the active nav item carries aria-current', async ({ page }) => {
+test('a11y: the active nav item carries aria-current', async ({
+  page,
+  browserErrors,
+}) => {
+  // This fresh target has no daily report; the API returns 404 for that empty state.
+  acceptBrowserError(
+    browserErrors,
+    'Failed to load resource: the server responded with a status of 404 (Not Found)'
+  )
   await setup(page)
   for (const [path, label] of [
-    ['/queries', 'Queries'],
+    ['/', 'Home'],
+    ['/database', 'Database'],
+    ['/inbox', 'Inbox'],
+    ['/agent-activity', 'Agent activity'],
     ['/ask', 'Ask'],
-    ['/audit', 'Health check'],
   ] as const) {
     await page.goto(path)
     const current = page.locator('nav [aria-current="page"]')

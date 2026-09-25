@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 import uuid
 from collections.abc import Generator
 from typing import Any
@@ -40,6 +41,14 @@ def _client_version() -> str:
             return str(__version__)
         except Exception:
             return "0.1.0"
+
+
+def _audit(request: ProviderRequest, started: float, **result: Any) -> None:
+    """Add this call, with the cost Keyservice charged, to the running agent action."""
+    from shared.agent_activity import record_llm_call
+
+    operation = ((request.extra or {}).get("_rdst_attribution") or {}).get("operation")
+    record_llm_call("readyset", HOSTED_MODEL, operation, operation, started, **result)
 
 
 class HostedGLMProvider(Provider):
@@ -85,6 +94,9 @@ class HostedGLMProvider(Provider):
             body = {}
         code = str(body.get("code") or "HOSTED_INFERENCE_ERROR")
         detail = str(body.get("detail") or f"Hosted inference returned HTTP {response.status_code}")
+        from shared import product_telemetry
+
+        product_telemetry.refusal(code, feature="hosted")
         raise LLMError(detail, code=code, status=response.status_code)
 
     def complete(
@@ -97,13 +109,20 @@ class HostedGLMProvider(Provider):
         debug: bool = False,
     ) -> ProviderResponse:
         with _HOSTED_REQUEST_LOCK:
-            return self._complete_serialized(
-                request,
-                api_key=api_key,
-                base_url=base_url,
-                extra_headers=extra_headers,
-                debug=debug,
-            )
+            started = time.monotonic()
+            try:
+                response = self._complete_serialized(
+                    request,
+                    api_key=api_key,
+                    base_url=base_url,
+                    extra_headers=extra_headers,
+                    debug=debug,
+                )
+            except LLMError as exc:
+                _audit(request, started, error=exc.code)
+                raise
+            _audit(request, started, usage=response.usage, raw=response.raw)
+            return response
 
     def _complete_serialized(
         self,
@@ -153,6 +172,8 @@ class HostedGLMProvider(Provider):
             payload["stop"] = list(request.stop_sequences)
 
         endpoint = f"{(base_url or keyservice_base_url()).rstrip('/')}/v1/inference"
+        from .inference_attribution import monitor_database_headers
+
         token = api_key
         response = None
         for attempt in range(2):
@@ -163,6 +184,7 @@ class HostedGLMProvider(Provider):
                     headers={
                         "Authorization": f"Bearer {token}",
                         "Accept": "application/json",
+                        **monitor_database_headers(),
                     },
                     timeout=(
                         600 if payload.get("attribution", {}).get("feature") == "audit"
@@ -193,6 +215,10 @@ class HostedGLMProvider(Provider):
         assert response is not None
         if response.status_code != 200:
             self._raise_response_error(response)
+        # A successful Keyservice response represents one charged generation.
+        from .inference_attribution import record_billable_call
+
+        record_billable_call()
         try:
             body = response.json()
         except ValueError as exc:
@@ -232,7 +258,14 @@ class HostedGLMProvider(Provider):
             cache_write_tokens = prompt_details.get("cache_write_tokens")
             if type(cache_write_tokens) is int and cache_write_tokens >= 0:
                 normalized_usage["cache_creation_input_tokens"] = cache_write_tokens
-        raw = body if debug else {"quota": body.get("quota"), "usage": usage}
+        # What Keyservice charged and the model it served, for cost and labels downstream.
+        charged = usage.get("cost_microusd")
+        if isinstance(charged, (int, float)) and not isinstance(charged, bool):
+            normalized_usage["cost_usd"] = charged / 1e6
+        if isinstance(body.get("model"), str):
+            normalized_usage["served_model"] = body["model"]
+        raw = body if debug else {"quota": body.get("quota"), "usage": usage,
+                                  "model": body.get("model")}
         return ProviderResponse(text=text, usage=normalized_usage, raw=raw)
 
     def stream(

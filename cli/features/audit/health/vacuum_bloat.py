@@ -3,9 +3,10 @@
 PostgreSQL: pg_stat_user_tables, pg_database.age(datfrozenxid), pg_stat_activity
 (for active autovacuum workers), pg_settings for autovacuum + max_workers.
 
-MySQL: information_schema.TABLES provides DATA_FREE as a rough bloat proxy and
-UPDATE_TIME for recency, but MySQL doesn't have vacuum — autovacuum fields
-remain None.
+MySQL has no vacuum: InnoDB purges old row versions itself. Its equivalents are the free
+space a rebuild returns (information_schema.TABLES.DATA_FREE), rows changed since the last
+statistics update (INNODB_TABLESTATS.MODIFIED_COUNTER) and the purge backlog
+(INNODB_METRICS trx_rseg_history_len). The autovacuum fields remain None.
 """
 
 from __future__ import annotations
@@ -162,41 +163,87 @@ def _collect_pg(conn: Any) -> VacuumBloatSection:
     return section
 
 
+_MYSQL_TABLE_SQL = """
+SELECT t.TABLE_SCHEMA, t.TABLE_NAME, COALESCE(t.TABLE_ROWS, 0), COALESCE(t.DATA_FREE, 0),
+       COALESCE(t.DATA_LENGTH, 0) + COALESCE(t.INDEX_LENGTH, 0)
+FROM information_schema.TABLES t
+WHERE t.TABLE_SCHEMA NOT IN ('mysql','information_schema','performance_schema','sys')
+  AND t.TABLE_TYPE = 'BASE TABLE'
+  AND (DATABASE() IS NULL OR t.TABLE_SCHEMA = DATABASE())
+ORDER BY COALESCE(t.DATA_FREE, 0) DESC, COALESCE(t.TABLE_ROWS, 0) DESC
+LIMIT 50;
+"""
+# Rows changed since InnoDB last recalculated the table's statistics (NAME is schema/table).
+_MYSQL_TABLESTATS_SQL = """
+SELECT NAME, NUM_ROWS, MODIFIED_COUNTER FROM information_schema.INNODB_TABLESTATS;
+"""
+_MYSQL_STATS_UPDATED_SQL = """
+SELECT database_name, table_name, last_update FROM mysql.innodb_table_stats;
+"""
+_MYSQL_HISTORY_SQL = """
+SELECT COUNT FROM information_schema.INNODB_METRICS
+WHERE NAME = 'trx_rseg_history_len' AND STATUS = 'enabled';
+"""
+MYSQL_FREE_WARN_BYTES = 64 * 1024 * 1024
+MYSQL_FREE_CRIT_BYTES = 1024 * 1024 * 1024
+
+
+def _classify_mysql(free: int, size: int, rows: int, modified: int) -> str:
+    """Free space worth a rebuild, or statistics as stale as PostgreSQL's warn line."""
+    ratio = free / (free + size) if free + size > 0 else 0.0
+    if free >= MYSQL_FREE_CRIT_BYTES and ratio >= 0.5:
+        return "crit"
+    if (free >= MYSQL_FREE_WARN_BYTES and ratio >= 0.2) or modified > max(10_000, rows // 5):
+        return "warn"
+    return "healthy"
+
+
 def _collect_mysql(conn: Any) -> VacuumBloatSection:
     section = VacuumBloatSection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    TABLE_SCHEMA,
-                    TABLE_NAME,
-                    COALESCE(TABLE_ROWS, 0),
-                    COALESCE(DATA_FREE, 0),
-                    UPDATE_TIME,
-                    DATA_LENGTH + INDEX_LENGTH
-                FROM information_schema.TABLES
-                WHERE TABLE_SCHEMA NOT IN ('mysql','information_schema','performance_schema','sys')
-                  AND TABLE_TYPE = 'BASE TABLE'
-                ORDER BY COALESCE(DATA_FREE, 0) DESC
-                LIMIT 50;
-                """
+    with conn.cursor() as cur:
+        cur.execute(_MYSQL_TABLE_SQL)
+        rows = cur.fetchall()
+        modified: dict[tuple[str, str], tuple[int, int]] = {}
+        try:
+            cur.execute(_MYSQL_TABLESTATS_SQL)
+            for name, num_rows, counter in cur.fetchall():
+                schema, _, table = str(name or "").partition("/")
+                modified[(schema, table)] = (int(num_rows or 0), int(counter or 0))
+        except Exception:
+            pass
+        updated: dict[tuple[str, str], Any] = {}
+        try:
+            cur.execute(_MYSQL_STATS_UPDATED_SQL)
+            updated = {(schema, table): last for schema, table, last in cur.fetchall()}
+        except Exception:
+            pass
+        try:
+            cur.execute(_MYSQL_HISTORY_SQL)
+            row = cur.fetchone()
+            if row and row[0] is not None:
+                section.history_list_length = int(row[0])
+        except Exception:
+            pass
+
+    for schema, name, table_rows, data_free, size in rows:
+        free, used = int(data_free or 0), int(size or 0)
+        live, changed = modified.get((schema, name), (int(table_rows or 0), None))
+        analyzed = updated.get((schema, name))
+        section.tables.append(
+            TableHealth(
+                schema=schema,
+                table=name,
+                live_tuples=int(live or table_rows or 0),
+                dead_tuples=0,
+                dead_ratio_pct=round(free / (free + used) * 100, 1) if free + used else 0.0,
+                last_autoanalyze=analyzed.isoformat() if hasattr(analyzed, "isoformat") else None,
+                n_mod_since_analyze=changed,
+                size_bytes=used,
+                free_bytes=free,
+                status=_classify_mysql(free, used, int(live or 0), int(changed or 0)),
             )
-            for schema, name, rows, data_free, update_time, size in cur.fetchall():
-                total = (rows or 0) + 1
-                ratio = round((float(data_free or 0) / max(float(size or 1), 1.0)) * 100, 1)
-                section.tables.append(
-                    TableHealth(
-                        schema=schema,
-                        table=name,
-                        live_tuples=int(rows or 0),
-                        dead_tuples=int(data_free or 0),  # bytes, not tuples — MySQL proxy
-                        dead_ratio_pct=ratio,
-                        last_autoanalyze=update_time.isoformat() if update_time else None,
-                        size_bytes=int(size) if size is not None else None,
-                        status="warn" if ratio > 20 else "healthy",
-                    )
-                )
-    except Exception:
-        pass
+        )
+    crit = any(table.status == "crit" for table in section.tables)
+    warn = any(table.status == "warn" for table in section.tables)
+    section.summary_status = "crit" if crit else "warn" if warn else "healthy"
     return section

@@ -666,7 +666,7 @@ async def test_fleet_audit_more_than_eight_targets_streams_error(
 
     assert [event["event"] for event in events] == ["error"]
     assert events[0]["data"]["message"] == (
-        "Audit up to 8 targets at once — filter by group or tag "
+        "Audit up to 8 targets at once - filter by group or tag "
         "(9 targets selected)"
     )
     assert events[0]["data"]["code"] == "too_many_targets"

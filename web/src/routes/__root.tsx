@@ -8,6 +8,7 @@ import {
   type ErrorComponentProps,
   Outlet,
   useNavigate,
+  useRouterState,
 } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useState } from 'react'
 import { AiAccessBoundary } from '../components/AiAccessBoundary'
@@ -15,12 +16,15 @@ import { ActivityPulse } from '../components/audit/ActivityPulse'
 // Direct import: the components barrel re-exports the SQL editor stack,
 // which would statically pull CodeMirror into the eager entry chunk.
 import { ConfigWarning } from '../components/ConfigWarning'
+import { DesktopNotificationsBanner } from '../components/DesktopNotificationsBanner'
+import { MonitoringUpgradePrompt } from '../features/init/MonitoringUpgradePrompt'
 import { useTarget } from '../hooks/useTarget'
 import { Header } from '../layout/Header'
 import { Main } from '../layout/Main'
 import { Sidebar } from '../layout/Sidebar'
 import { setAnalyticsAccountId } from '../lib/analytics'
 import { fetchAccountStatus } from '../lib/api'
+import { reportAppError } from '../lib/appErrors'
 import {
   cancelActiveAudit,
   requestAuditRunView,
@@ -51,6 +55,9 @@ function AppShell({ children }: { children: ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const { state: desktopUpdateState, install: installDesktopUpdate } =
     useDesktopUpdates()
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  })
 
   return (
     <div className="relative h-dvh overflow-hidden bg-surface-layout-2">
@@ -75,14 +82,14 @@ function AppShell({ children }: { children: ReactNode }) {
         desktopUpdateState={desktopUpdateState}
         onInstallUpdate={installDesktopUpdate}
       />
-      <Main>{children}</Main>
+      <Main scrollKey={pathname}>{children}</Main>
     </div>
   )
 }
 
 function RootComponent() {
   return (
-    <AiAccessBoundary>
+    <AiAccessBoundary notice={<MonitoringUpgradePrompt />}>
       <ReadyRoot />
     </AiAccessBoundary>
   )
@@ -102,8 +109,10 @@ function ReadyRoot() {
 
   return (
     <AppShell>
+      <DesktopNotificationsBanner />
       <ConfigWarning />
       <AuditRunBanner />
+      <MonitoringUpgradePrompt />
       <Outlet />
     </AppShell>
   )
@@ -163,6 +172,7 @@ function AuditRunBanner() {
 
 function RootErrorBoundary({ error, reset }: ErrorComponentProps) {
   const navigate = useNavigate()
+  useEffect(() => reportAppError('error_boundary', error), [error])
   return (
     <AppShell>
       <ErrorState
@@ -171,7 +181,7 @@ function RootErrorBoundary({ error, reset }: ErrorComponentProps) {
         errorClass="database"
         icon="alert"
         title="Something went wrong"
-        message="This screen ran into an unexpected error. Your data is safe — try again, or head back home."
+        message="This screen ran into an unexpected error. Your data is safe - try again, or head back home."
         action={{
           label: 'Back to Home',
           onClick: () => navigate({ to: '/' }),

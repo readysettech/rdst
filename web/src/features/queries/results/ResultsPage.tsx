@@ -46,7 +46,7 @@ export function ResultsPage({ search }: { search: ResultsSearch }) {
               Query analysis
             </Text>
             <Text level="body-small" className="text-content-layout-3">
-              Measured performance, practical improvements, and Readyset fit.
+              See how this query performs and what could improve it. Check whether Readyset can cache it.
             </Text>
           </VStack>
         </VStack>

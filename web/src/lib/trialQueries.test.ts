@@ -39,7 +39,7 @@ describe('invalidateTrialRelatedQueries', () => {
 
     await invalidateTrialRelatedQueries(queryClient)
 
-    expect(invalidateSpy).toHaveBeenCalledTimes(7)
+    expect(invalidateSpy).toHaveBeenCalledTimes(8)
     expect(invalidateSpy).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: ['status'], refetchType: 'all' })
     )

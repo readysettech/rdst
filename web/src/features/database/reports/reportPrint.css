@@ -1,0 +1,45 @@
+/* Print / Save as PDF for the daily snapshot: only the snapshot prints, expanded, with
+   its colors. Everything that doesn't hold the snapshot is left out of the page. */
+@media print {
+  @page {
+    margin: 14mm 12mm;
+  }
+  html,
+  body {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+  body:has([data-print-root]) *:not(:has([data-print-root])):not([data-print-root]):not(
+      [data-print-root] *
+    ) {
+    display: none !important;
+  }
+  body:has([data-print-root]) *:has([data-print-root]) {
+    position: static !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    transform: none !important;
+  }
+  [data-print-root] {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  [data-print-root] tr,
+  [data-print-root] [data-testid='day-number'] {
+    break-inside: avoid;
+  }
+  [data-print-root] h2 {
+    break-after: avoid;
+  }
+  [data-print-root] [data-testid='day-chart'] {
+    overflow: hidden;
+  }
+}

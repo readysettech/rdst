@@ -33,13 +33,15 @@ from typing import (
     TypeVar,
 )
 
-from filelock import FileLock, Timeout as FileLockTimeout
+from filelock import FileLock
+from filelock import Timeout as FileLockTimeout
 
 from shared.config.targets import TargetsConfig
+from shared.constants import rdst_data_dir
 from shared.deploy import READYSET_IMAGE
 from shared.deploy.docker_topology import DockerTopology
-from shared.persistence import delete_file, update_json, write_text
 from shared.password_resolver import resolve_password_value
+from shared.persistence import delete_file, update_json, write_text
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +179,8 @@ class LocalDockerSandboxAdapter:
     """Production adapter around the local Docker deployment helpers."""
 
     def __init__(self, metadata_path: Path | None = None) -> None:
+        # What the current readiness wait is seeing, for progress and diagnostics.
+        self.readiness_note: str | None = None
         self.metadata_path = metadata_path
         self._legacy_reconciled_targets: set[str] = set()
 
@@ -403,11 +407,11 @@ class LocalDockerSandboxAdapter:
     async def wait_ready(
         self, sandbox: ProvisionedSandbox, timeout_seconds: float
     ) -> None:
+        from shared.db_connection import probe_readyset_status
         from shared.deploy.local_docker import (
             inspect_managed_sandbox,
             managed_sandbox_startup_failure,
         )
-        from shared.db_connection import probe_readyset_status
 
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout_seconds
@@ -462,6 +466,7 @@ class LocalDockerSandboxAdapter:
                         lambda metadata: _mark_metadata_ready(metadata, sandbox),
                     )
                 )
+                self.readiness_note = None
                 return
             except (
                 SandboxPortConflictError,
@@ -472,6 +477,9 @@ class LocalDockerSandboxAdapter:
             except Exception as exc:
                 last_error = str(exc) or type(exc).__name__
                 still_snapshotting = isinstance(exc, SandboxNotReadyError)
+                waited = int(timeout_seconds - (deadline - loop.time()))
+                self.readiness_note = (
+                    f"Readyset isn't answering yet after {waited} s: {last_error}")
                 if loop.time() >= next_log:
                     logger.info(
                         "Still waiting for the Readyset sandbox on %s: %s",
@@ -555,7 +563,7 @@ class ReadysetSandboxManager:
         metadata_path: Path | None = None,
     ) -> None:
         self._metadata_path = metadata_path or (
-            Path.home() / ".rdst" / "readyset-sandbox.json"
+            rdst_data_dir() / "readyset-sandbox.json"
         )
         ownership_path = self._metadata_path.with_name(
             f"{self._metadata_path.name}.lifecycle.lock"
@@ -1104,6 +1112,8 @@ class ReadysetSandboxManager:
                 "ownership_error": self._ownership_error,
                 "healthy": self._sandbox is not None
                 and self._state.dirty_reason is None,
+                "readiness_note": (getattr(self._adapter, "readiness_note", None)
+                                   if self._state.phase == "provisioning" else None),
             }
 
     def _may_own_target(self, target: str):

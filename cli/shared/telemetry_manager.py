@@ -159,8 +159,7 @@ class TelemetryManager:
 
     Features:
     - Installation ID (stored in ~/.rdst/device_id)
-    - Keyservice-minted pseudonymous account ID for signed-in events
-    - Rotating, personless process identity while signed out
+    - Account user ID for signed-in events and persistent install ID while signed out
     - PostHog for usage analytics
     - Sentry for crash reporting
     - Cumulative usage stats per device
@@ -184,7 +183,8 @@ class TelemetryManager:
 
     def __init__(self):
         self._device_id: Optional[str] = None
-        self._anonymous_session_id = f"rdst_anonymous_{uuid.uuid4()}"
+        self._identified_person: tuple[str, str] | None = None
+        self._identity_lock = threading.RLock()
         self._enabled: Optional[bool] = None
         self._initialized = False
         self._stats: Optional[Dict[str, int]] = None
@@ -347,7 +347,9 @@ class TelemetryManager:
                 # Determine install method
                 install_method = "unknown"
                 import shutil
-                if shutil.which("pipx") and "pipx" in sys.prefix:
+                if os.environ.get("RDST_DESKTOP") == "1":
+                    install_method = "desktop"
+                elif shutil.which("pipx") and "pipx" in sys.prefix:
                     install_method = "pipx"
                 elif shutil.which("uvx") and "uv" in sys.prefix:
                     install_method = "uvx"
@@ -519,6 +521,9 @@ class TelemetryManager:
             return
 
         try:
+            from shared import product_telemetry
+
+            person = product_telemetry.identity(self.device_id)
             all_props = self._get_base_properties()
             if properties:
                 all_props.update(properties)
@@ -526,22 +531,36 @@ class TelemetryManager:
             def send(internal_user: bool):
                 try:
                     all_props["internal_user"] = internal_user
-                    account_id = str(
-                        all_props.get("analytics_account_id") or ""
-                    )
-                    distinct_id = account_id or self._anonymous_session_id
-                    if account_id:
-                        pii_keys = {
-                            "email",
-                            "email_domain",
-                            "first_name",
-                            "last_name",
-                        }
-                        for key in list(all_props):
-                            if key in pii_keys or key.startswith("provider_email_"):
-                                all_props.pop(key, None)
-                    else:
-                        all_props["$process_person_profile"] = False
+                    distinct_id = person["distinct_id"]
+                    all_props["account_kind"] = person["account_kind"]
+                    trusted = {key: all_props[key] for key in ("admin_base_url", "admin_user_url")
+                               if event == "monitoring_limit_reached" and key in all_props}
+                    for key in list(all_props):
+                        if key in {"email_domain", "first_name", "last_name"} or key.startswith("provider_email_"):
+                            all_props.pop(key, None)
+                    clean_props = product_telemetry.safe_properties(all_props)
+                    all_props.clear()
+                    all_props.update(clean_props)
+                    all_props.update(trusted)
+                    with self._identity_lock:
+                        profile = (distinct_id, person["email"])
+                        if self._identified_person != profile:
+                            person_props = {"account_kind": person["account_kind"]}
+                            if person["email"]:
+                                person_props["email"] = person["email"]
+                            identify_props = {"$set": person_props, "internal_user": internal_user}
+                            if person["account_kind"] == "signed_in":
+                                binding_key = f"identity_account:{self.device_id}"
+                                binding = product_telemetry.state_value(binding_key)
+                                if binding is None or binding == distinct_id:
+                                    identify_props["$anon_distinct_id"] = self.device_id
+                                posthog.capture(distinct_id=distinct_id, event="$identify",
+                                                properties=identify_props)
+                                if binding is None:
+                                    product_telemetry.set_state_value(binding_key, distinct_id)
+                            else:
+                                all_props["$set_once"] = person_props
+                            self._identified_person = profile
                     posthog.capture(
                         distinct_id=distinct_id,
                         event=event,
@@ -899,9 +918,12 @@ class TelemetryManager:
     def track_installation(self, install_method: str = "unknown"):
         """Track a new installation."""
         self._increment_stat("installations", 1)
+        if install_method == "desktop":
+            self._increment_stat("desktop_installations", 1)
 
         properties = {
-            "display_name": "RDST Installed",
+            "display_name": "RDST Desktop Installed" if install_method == "desktop"
+            else "RDST Installed",
             "install_method": install_method,  # pipx, uvx, pip, source
             "shell": os.environ.get("SHELL", "unknown"),
             "terminal": os.environ.get("TERM", "unknown"),
@@ -1179,6 +1201,14 @@ class TelemetryManager:
         """Track LLM API usage and persist cumulative token counts locally."""
         # Always persist token usage locally (even if telemetry is disabled)
         self._persist_token_usage(model, tokens_in, tokens_out)
+        if provider != "readyset":
+            # Readyset-hosted calls are audited by their provider, with the charged cost.
+            from shared.agent_activity import record_llm_call
+
+            record_llm_call(provider, model, purpose, purpose,
+                            time.monotonic() - duration_ms / 1000,
+                            usage={"prompt_tokens": tokens_in,
+                                   "completion_tokens": tokens_out})
 
         # Send to PostHog (if enabled)
         properties = {

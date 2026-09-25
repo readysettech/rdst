@@ -10,6 +10,7 @@ import os
 import re
 from typing import Any, Dict, List, Set
 
+from shared import analysis_lane
 from shared.db_connection import (
     create_mysql_connection_from_params,
     postgres_connection_kwargs,
@@ -178,6 +179,7 @@ def build_schema_hint(target: str, has_semantic_layer: bool, has_column_stats: b
     return None
 
 
+@analysis_lane.connection_budget()
 def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, Any]:
     """
     Workflow step to collect schema information for tables in the query.
@@ -466,6 +468,10 @@ def collect_schema_for_query(
 def _extract_table_names_from_sql(sql: str) -> Set[str]:
     """Extract table names from SQL query using regex patterns."""
     table_names = set()
+    # Quoted and schema-qualified names (MySQL digest text: FROM `shop` . `orders`) reduce
+    # to the bare table name the patterns below read.
+    sql = re.sub(r"[`\"]", "", sql)
+    sql = re.sub(r"\b[A-Za-z_][\w$]*\s*\.\s*([A-Za-z_][\w$]*)", r"\1", sql)
     sql_upper = sql.upper()
 
     # Common patterns for table references

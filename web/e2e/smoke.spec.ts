@@ -14,9 +14,9 @@ test('loads the production application and backend', async ({ page }) => {
   await expect(health.json()).resolves.toEqual({ status: 'ok' })
 
   await page.goto('/')
-  // A configured target renders the connected home and its next actions.
+  // A configured target renders the connected home, led by its database card.
   await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
-  await expect(page.getByText('Run a health check')).toBeVisible()
+  await expect(page.getByTestId('home-database-card')).toBeVisible()
 })
 
 test('serves client-side routes directly', async ({ page }) => {

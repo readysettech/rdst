@@ -3,19 +3,26 @@ import type { ReactNode } from 'react'
 import { useAiGate } from '../lib/useAiGate'
 import { AiProviderGate } from './AiProviderGate'
 
-/** Require an AI provider before opening the app on a fresh installation. */
-export function AiAccessBoundary({ children }: { children: ReactNode }) {
+/** Keep local database monitoring available during AI setup. */
+export function AiAccessBoundary({
+  children,
+  notice,
+}: {
+  children: ReactNode
+  notice?: ReactNode
+}) {
   const path = useRouterState({ select: (state) => state.location.pathname })
   const gate = useAiGate()
 
-  // The browser callback must finish signing in before it can satisfy the gate.
-  if (path === '/account-login') return children
+  // Local monitoring, target setup and the account callback are available throughout AI setup.
+  if (['/database', '/inbox', '/configure', '/account-login'].includes(path))
+    return children
   if (
     gate.status === 'checking' ||
     gate.status === 'error' ||
     gate.status === 'blocked'
   ) {
-    return <AiProviderGate gate={gate} />
+    return <AiProviderGate gate={gate} notice={notice} />
   }
   return children
 }

@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
+import { renderWithClient } from '../../test-utils'
 import type { ConfigureTarget } from '../../types/configure'
 import { ConfigureTargetList } from './ConfigureTargetList'
 
@@ -37,9 +38,17 @@ describe('ConfigureTargetList', () => {
   })
 
   it('shows the rows it has even while a refresh is in flight', () => {
-    render(<ConfigureTargetList targets={[target]} isPending />)
+    renderWithClient(<ConfigureTargetList targets={[target]} isPending />)
 
     expect(screen.getByText('orders_db')).toBeTruthy()
     expect(screen.queryByText('Loading targets')).toBeNull()
+  })
+
+  it('gives each database one monitoring switch', () => {
+    renderWithClient(<ConfigureTargetList targets={[target]} />)
+
+    expect(
+      screen.getByRole('switch', { name: 'Monitoring for orders_db' })
+    ).toBeTruthy()
   })
 })

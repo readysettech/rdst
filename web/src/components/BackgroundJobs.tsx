@@ -16,6 +16,7 @@ import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useNavigate } from '@tanstack/react-router'
 import { type ReactNode, useCallback, useState } from 'react'
+import { plural } from '../features/monitor-kit/format'
 
 import { useTarget } from '../hooks/useTarget'
 import {
@@ -136,7 +137,7 @@ export function detailFor(run: BackgroundRunState): string {
   ) {
     return isOpenable(run)
       ? `${run.message} · ${run.current}%`
-      : `${run.current} of ${run.total} tables`
+      : `${run.current} of ${plural(run.total, 'table')}`
   }
   return isTerminal(run) ? terminalLabel(run) : run.message
 }
@@ -501,17 +502,32 @@ export function useOpenBackgroundRun(
           : navigate({ to: '/audit' }))
         return
       }
+      // A one-query benchmark opens that query's Benchmarks section; a larger one
+      // opens on the Benchmarks page, attached to the run.
       if (run.kind === 'load_test') {
         setTarget(run.target)
-        void navigate({
-          to: '/cache',
-          search: { view: 'load-test', run: run.runId },
-        })
+        const queries = run.loadRequest?.queries ?? []
+        const only = queries.length === 1 ? queries[0] : undefined
+        const key = typeof only === 'string' ? only : only?.identifier
+        void (key
+          ? navigate({
+              to: '/database',
+              search: { query: key, tab: 'readyset' },
+            })
+          : navigate({
+              to: '/cache',
+              search: { view: 'load-test', run: run.runId },
+            }))
         return
       }
       if (run.kind === 'cache_compare') {
         setTarget(run.target)
-        void navigate({ to: '/cache', search: { view: 'compare' } })
+        void navigate({
+          to: '/database',
+          search: run.queryHash
+            ? { query: run.queryHash, tab: 'readyset' }
+            : {},
+        })
         return
       }
       // The analyze drawer is URL-owned, so the job's own link reopens it --

@@ -47,7 +47,7 @@ function resultForQuery(query: string): CacheRunResult {
 type QuickComparison = ReturnType<typeof summarizeQuickComparison>
 
 function speedupLabel(upstream: number, readyset: number) {
-  if (readyset <= 0) return '—'
+  if (readyset <= 0) return '-'
   return `${(upstream / readyset).toFixed(1)}×`
 }
 
@@ -171,7 +171,7 @@ function BeforeAfterResult({ result }: { result: CacheRunResult }) {
             Latency before and after Readyset
           </Text>
           <Text level="caption" className="text-content-layout-3">
-            Same query, same sample count, one cache layer added.
+            Both lanes ran the same query with the same sample count. The Readyset lane added a cache.
           </Text>
         </VStack>
         <ResultStatus label="Paired test complete" />
@@ -411,7 +411,7 @@ function RangeTrack({
           positive ? 'text-content-positive-soft' : 'text-content-layout-2'
         )}
       >
-        {formatMs(min)}–{formatMs(max)}
+        {formatMs(min)} to {formatMs(max)}
       </Text>
     </div>
   )

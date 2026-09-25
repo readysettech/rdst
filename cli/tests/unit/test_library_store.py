@@ -8,6 +8,7 @@ newer build, the TOML export projection, and multi-instance visibility.
 import io
 import logging
 import math
+import os
 import sqlite3
 import tracemalloc
 from types import SimpleNamespace
@@ -584,8 +585,15 @@ class TestMultiInstance:
 
 
 class TestReadModelMigration:
-    def test_v6_backfill_streams_large_registry_in_bounded_memory(self, tmp_path):
-        row_count = 50_000
+    @pytest.mark.parametrize("row_count", [
+        3_000,
+        pytest.param(50_000, marks=[
+            pytest.mark.slow,
+            pytest.mark.skipif(os.getenv("RDST_RUN_MONITOR_SLOW") != "1",
+                               reason="set RDST_RUN_MONITOR_SLOW=1 for the 50k-row migration"),
+        ]),
+    ])
+    def test_v6_backfill_streams_large_registry_in_bounded_memory(self, tmp_path, row_count):
         toml_path = tmp_path / "queries.toml"
         db_path = library_db_path_for(toml_path)
         conn = sqlite3.connect(db_path)
@@ -629,7 +637,7 @@ class TestReadModelMigration:
         store = library_store.LibraryStore(db_path, toml_path)
         # A regression to load_all/N+1 fails immediately, while tracemalloc
         # verifies the streaming batch size rather than registry size controls
-        # Python memory during the real 50k-row migration.
+        # Python memory during the migration across multiple batches.
         store._load_all = lambda conn: (_ for _ in ()).throw(
             AssertionError("v7 migration must not load the full registry")
         )
@@ -1423,11 +1431,11 @@ class TestPlaceholderArtifactRepair:
         assert _user_version(db_path) == SCHEMA_VERSION
 
     def test_fresh_store_creates_at_current_version(self, tmp_path):
-        assert SCHEMA_VERSION == 15
+        assert SCHEMA_VERSION == 18
         toml_path = tmp_path / "queries.toml"
         registry = QueryRegistry(registry_path=str(toml_path))
         registry.add_query("SELECT 1", source="manual")
-        assert _user_version(library_db_path_for(toml_path)) == 15
+        assert _user_version(library_db_path_for(toml_path)) == SCHEMA_VERSION
 
     def test_toml_import_repairs_damaged_entries(self, tmp_path):
         from shared.query_registry.query_registry import hash_sql, normalize_sql

@@ -161,10 +161,8 @@ async def test_add_target_duplicate(client):
             },
         },
     )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is False
-    assert "already exists" in data["message"]
+    assert response.status_code == 409
+    assert response.json()["detail"] == "A target named existing already exists."
 
 
 async def test_add_target_validation_error(client):

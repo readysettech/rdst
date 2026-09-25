@@ -354,3 +354,26 @@ async def test_get_payload_can_be_put_back_without_losing_metadata(tmp_rdst_home
     assert saved["region"] == "us-east-2"
     assert saved["instance_class"] == "db.t4g.micro"
     assert saved["group"] == "payments"
+
+
+async def test_configure_add_rejects_a_duplicate_name_without_touching_its_password(
+    tmp_rdst_home,
+    monkeypatch,
+):
+    stored = []
+    monkeypatch.setattr(
+        routes.SecretStoreService,
+        "set_secret",
+        lambda self, name, value, persist=True: stored.append(name),
+    )
+    first = await _request("POST", "/api/configure/targets", _target_payload())
+    payload = _target_payload()
+    payload["target"].pop("password_env")
+    payload["target"]["password"] = "other-password"
+
+    duplicate = await _request("POST", "/api/configure/targets", payload)
+
+    assert first.json()["success"] is True
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == "A target named prod already exists."
+    assert stored == []

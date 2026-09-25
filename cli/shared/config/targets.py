@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 import toml
 
+from shared.constants import rdst_data_dir
 from shared.persistence import update_toml
 
 PROXY_TYPES = [
@@ -158,11 +159,11 @@ class TargetsConfig:
     """Simple TOML-based targets storage under ~/.rdst/config.toml."""
 
     def __init__(self, path: Optional[str] = None):
-        self.path = Path(path) if path else Path.home() / ".rdst" / "config.toml"
+        self.path = Path(path) if path else rdst_data_dir() / "config.toml"
         self._data: Dict[str, Any] = {
             "targets": {},
             "default": None,
-            "init": {"completed": False},
+            "init": {"completed": False, "monitoring_upgrade_targets": []},
         }
         self._baseline = copy.deepcopy(self._data)
 
@@ -178,7 +179,7 @@ class TargetsConfig:
             self._data = {
                 "targets": {},
                 "default": None,
-                "init": {"completed": False},
+                "init": {"completed": False, "monitoring_upgrade_targets": []},
                 "llm": {},
             }
 
@@ -187,6 +188,17 @@ class TargetsConfig:
         self._data.setdefault("default", None)
         self._data.setdefault("init", {"completed": False})
         self._baseline = copy.deepcopy(self._data)
+        # Capture eligibility before any target edits in this version.
+        self.monitoring_upgrade_migrated = "monitoring_upgrade_targets" not in self._data["init"]
+        if self.monitoring_upgrade_migrated:
+            self._data["init"]["monitoring_upgrade_targets"] = self.list_targets()
+
+    def monitoring_upgrade_targets(self) -> List[str]:
+        return [name for name in self._data["init"].get("monitoring_upgrade_targets", [])
+                if self.get(name) is not None]
+
+    def dismiss_monitoring_upgrade(self) -> None:
+        self._data["init"]["monitoring_upgrade_targets"] = []
 
     def save(self) -> None:
         """Merge this instance's changes and atomically persist the config."""

@@ -75,7 +75,7 @@ class _FakePosthog:
         self.capture_calls.append((distinct_id, event, properties))
 
 
-def test_track_does_not_identify_or_attach_stored_email(tmp_path, monkeypatch):
+def test_track_identifies_install_without_attaching_stored_email(tmp_path, monkeypatch):
     _write_config(
         tmp_path / "config.toml",
         '[[emails]]\nemail = "mike@company.com"\nprimary = true\nverified = false\n',
@@ -97,21 +97,22 @@ def test_track_does_not_identify_or_attach_stored_email(tmp_path, monkeypatch):
     assert fake.identify_calls == []
     assert fake.capture_calls, "expected posthog.capture to be called"
     cap_distinct, cap_event, cap_props = fake.capture_calls[0]
-    assert cap_distinct.startswith("rdst_anonymous_")
+    assert cap_distinct == "dev-telemetry-123"
     assert cap_event == "email_captured"
     assert "email" not in cap_props
     assert "email_domain" not in cap_props
     assert cap_props["installation_id"] == "dev-telemetry-123"
-    assert cap_props["$process_person_profile"] is False
+    assert cap_props["account_kind"] == "device_only"
 
 
-def test_track_uses_pseudonymous_account_id_when_signed_in(tmp_path, monkeypatch):
+def test_track_uses_account_user_id_and_joins_install_history(tmp_path, monkeypatch):
     fake = _FakePosthog()
     monkeypatch.setattr(tm_mod, "_get_posthog", lambda: fake)
     monkeypatch.setattr(tm_mod.threading, "Thread", _ImmediateThread)
     monkeypatch.setattr(
         "shared.account_session.account_metadata",
-        lambda: {"analytics_account_id": "rdst_account_hash"},
+        lambda: {"analytics_account_id": "rdst_account_hash", "user_id": "usr_42",
+                 "email": "person@example.com"},
     )
     monkeypatch.setattr(
         "shared.account_session.is_signed_in_locally", lambda: True
@@ -124,15 +125,24 @@ def test_track_uses_pseudonymous_account_id_when_signed_in(tmp_path, monkeypatch
     tm._initialized = True
     tm.POSTHOG_API_KEY = "phc_test_key"
 
-    tm.track("analyze_run", {"email": "person@example.com"})
+    tm.track("analyze_run", {"email": "person@example.com", "host": "db.example.com",
+                             "sql": "SELECT card_number FROM payments",
+                             "message": "Failed at db.example.com SELECT card_number FROM payments"})
 
     assert fake.identify_calls == []
-    distinct_id, _, properties = fake.capture_calls[0]
-    assert distinct_id == "rdst_account_hash"
+    identify_id, identify_event, identify_props = fake.capture_calls[0]
+    assert identify_id == "usr_42" and identify_event == "$identify"
+    assert identify_props["$anon_distinct_id"] == "dev-telemetry-123"
+    assert identify_props["$set"] == {"email": "person@example.com", "account_kind": "signed_in"}
+    distinct_id, _, properties = fake.capture_calls[1]
+    assert distinct_id == "usr_42"
     assert properties["analytics_account_id"] == "rdst_account_hash"
     assert properties["installation_id"] == "dev-telemetry-123"
     assert "email" not in properties
     assert "$process_person_profile" not in properties
+    assert "host" not in properties and "sql" not in properties
+    assert "db.example.com" not in properties["message"]
+    assert "card_number" not in properties["message"]
 
 
 def test_stale_account_metadata_is_not_used_after_session_is_cleared(

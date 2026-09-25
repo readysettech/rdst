@@ -1,4 +1,7 @@
 appId: com.readyset.rdst-desktop
+# Packaged package.json only: Electron on Linux reads desktopName for its app_id.
+extraMetadata:
+  desktopName: rdst-desktop.desktop
 productName: RDST Desktop
 protocols:
   - name: RDST
@@ -15,9 +18,18 @@ extraFiles:
     to: "sidecar"
     filter:
       - "**/*"
+# Tray state icons (problem, paused, offline) are drawn at runtime from these two.
+extraResources:
+  - from: resources/tray.png
+    to: icons/tray.png
+  - from: resources/iconTemplate.png
+    to: icons/iconTemplate.png
 mac:
   artifactName: "rdst-desktop-${version}-${arch}.${ext}"
   category: public.app-category.developer-tools
+  # Alerts (not banners) by default, so a lost database stays on screen until dismissed.
+  extendInfo:
+    NSUserNotificationAlertStyle: alert
   target:
     - dmg
     - zip
@@ -36,7 +48,16 @@ mac:
   publish:
     - provider: generic
       url: https://downloads.readyset.io/packages/rdst-desktop/macos/update
+# Uninstalling removes the app's data too (resources/installer.nsh adds the sidecar's data,
+# Credential Manager entries and the start-at-login value). An update keeps all of it:
+# the updater runs the old uninstaller with --updated, which both deletions check.
+nsis:
+  include: resources/installer.nsh
+  deleteAppDataOnUninstall: true
 win:
+  extraResources:
+    - from: resources/uninstall-cleanup.ps1
+      to: uninstall-cleanup.ps1
   artifactName: "rdst-desktop-${version}-${arch}.${ext}"
   target:
     - target: nsis
@@ -48,6 +69,14 @@ win:
 linux:
   artifactName: "rdst-desktop-${version}-${arch}.${ext}"
   category: Development
+  # Notifications (libnotify's desktop-entry hint) and window grouping find the app through
+  # its .desktop file: desktopName (set through extraMetadata below) is Electron's app_id and
+  # WM_CLASS, and the installed entry is named after executableName, so they agree.
+  executableName: rdst-desktop
+  desktop:
+    entry:
+      Comment: Watches your databases and tells you when a query starts hurting
+      StartupNotify: "true"
   target:
     - AppImage
     - deb

@@ -128,6 +128,15 @@ def canonicalize_sql(sql: str) -> str:
     return stripped.strip()
 
 
+_MYSQL_DIGEST_LIST = re.compile(r"\(\s*\.\.\.\s*\)")
+
+
+def parseable_mysql_digest(sql: str) -> str:
+    """MySQL's DIGEST_TEXT writes every value list (VALUES, IN) as `(...)`; with each one read
+    as a single placeholder list, the whole statement parses."""
+    return _MYSQL_DIGEST_LIST.sub("(?)", sql)
+
+
 def verify_query_completeness(
     sql: str, dialect: str = None
 ) -> Tuple[bool, Optional[str]]:
@@ -147,6 +156,8 @@ def verify_query_completeness(
     canonical_sql = canonicalize_sql(sql)
     if not canonical_sql:
         return False, "Empty query"
+    if dialect == "mysql":
+        canonical_sql = parseable_mysql_digest(canonical_sql)
 
     stripped = canonical_sql.strip()
     upper_sql = stripped.upper()
@@ -326,6 +337,9 @@ def hash_sql_deep(query: str) -> str:
     return hashlib.md5(normalized.encode('utf-8'), usedforsecurity=False).hexdigest()[:12]
 
 
+_HASH_LENGTH = 12
+
+
 def _sql_digest(normalized_sql: str) -> str:
     """Digest a normalized SQL text into the registry's 12-hex identity."""
     # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
@@ -337,25 +351,30 @@ def _sql_digest(normalized_sql: str) -> str:
     ]  # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
 
 
-def hash_sql(query: str) -> str:
+def hash_sql(query: str, dialect: str = None) -> str:
     """
     Generate a consistent hash for a SQL query.
 
-    Uses normalized SQL with every placeholder renumbered by textual
-    position in one canonical :pN form, so the same logical query always
-    produces the same hash regardless of formatting differences or the
+    Uses the identity text (sql_normalizer.identity_text) with every
+    placeholder renumbered by textual position in one canonical :pN form, so
+    the same logical query always produces the same hash regardless of
+    formatting, value-list length, MySQL digest quoting, or the
     placeholder style its source spells ($N, anonymous ?, or :pN; see
     sql_normalizer.canonicalize_placeholder_style).
 
     Args:
         query: SQL query string (will be normalized)
+        dialect: Target dialect. MySQL and unknown dialects preserve relation case.
 
     Returns:
         12-character hexadecimal hash string
     """
-    from .sql_normalizer import canonicalize_placeholder_style
+    from .sql_normalizer import canonicalize_placeholder_style, identity_text
 
-    return _sql_digest(canonicalize_placeholder_style(normalize_sql(query)))
+    canonical_query = canonicalize_sql(query)
+    if not canonical_query:
+        return _sql_digest("")
+    return _sql_digest(canonicalize_placeholder_style(identity_text(canonical_query, dialect)))
 
 
 # Stop words to filter out when generating query names
@@ -1060,6 +1079,11 @@ class QueryRegistry:
         # In-memory cache of queries
         self._queries: Dict[str, QueryEntry] = {}
         self._loaded = False
+        # A scoped registry holds only the identities its caller named; other exact
+        # hashes load on first use and whole-catalog reads load everything first.
+        self._scoped = False
+        # Hashes a scoped registry has already looked up, found or not.
+        self._scope: set[str] = set()
         self._baseline_data: Dict[str, Any] = {"queries": {}}
         self._defer_depth = 0
         self._deferred_dirty = False
@@ -1109,7 +1133,59 @@ class QueryRegistry:
             ) from exc
 
         self._loaded = True
+        self._scoped = False
         self._baseline_data = self._toml_data()
+
+    def load_keys(self, keys: Iterable[str]) -> None:
+        """Load only these identities, so a caller touching a few entries of a large
+        Library neither decodes nor re-merges the whole catalog on save."""
+        store = self.library_store
+        if store is None:
+            self.load()
+            return
+        scope = set(keys)
+        try:
+            loaded = store.load_keys(sorted(scope))
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load query registry at {self.registry_path}: {exc}"
+            ) from exc
+        self._queries = {key: QueryEntry.from_dict(data) for key, data in loaded.items()}
+        self._loaded = True
+        self._scoped = True
+        self._scope = scope
+        self._baseline_data = self._toml_data()
+
+    def observed_hashes(self, target: str) -> set[str]:
+        """Identities the collector has already observed on ``target``."""
+        store = self.library_store
+        if store is not None:
+            return store.observed_hashes(QueryEntry.target_key(target))
+        observed = set()
+        for entry in self.list_queries(limit=None):
+            lifecycle = entry.lifecycle_for(target)
+            if lifecycle and lifecycle.first_observed_at:
+                observed.add(entry.hash)
+        return observed
+
+    def _ensure_key(self, query_hash: str) -> None:
+        """Bring one stored identity into a scoped registry before it is read or changed."""
+        if not self._scoped or query_hash in self._queries or query_hash in self._scope:
+            return
+        self._scope.add(query_hash)
+        store = self.library_store
+        data = store.load_keys([query_hash]).get(query_hash) if store is not None else None
+        if data is not None:
+            entry = QueryEntry.from_dict(data)
+            self._queries[query_hash] = entry
+            self._baseline_data["queries"][query_hash] = entry.to_dict()
+
+    def _ensure_all(self) -> None:
+        """Whole-catalog reads need every identity, not a scoped subset."""
+        if not self._loaded or self._scoped:
+            if self._scoped and self._deferred_dirty:
+                self.save()
+            self.load()
 
     def _toml_data(self) -> Dict[str, Any]:
         return {
@@ -1133,6 +1209,12 @@ class QueryRegistry:
             if current_queries.get(query_hash) != baseline_queries.get(query_hash)
         }
 
+        if self._scoped:
+            current_queries = {key: current_queries[key] for key in dirty_hashes
+                               if key in current_queries}
+            baseline_queries = {key: baseline_queries[key] for key in dirty_hashes
+                                if key in baseline_queries}
+
         def validate(merged_queries: Dict[str, Any]) -> None:
             # Entries this writer never touched were either parsed from the
             # store or preserved verbatim by the merge; only the writer's own
@@ -1149,6 +1231,7 @@ class QueryRegistry:
                     baseline_queries,
                     current_queries,
                     validate=validate,
+                    **({"keys": dirty_hashes} if self._scoped else {}),
                 )
             except Exception as exc:
                 raise RuntimeError(f"Failed to save query registry: {exc}") from exc
@@ -1157,8 +1240,14 @@ class QueryRegistry:
         # form matches what this instance just serialized are already
         # materialized in memory; only entries another writer changed need
         # re-parsing.
-        queries: Dict[str, QueryEntry] = {}
-        baseline: Dict[str, Any] = {}
+        if self._scoped:
+            queries = {key: entry for key, entry in self._queries.items()
+                       if key not in dirty_hashes}
+            baseline = {key: value for key, value in self._baseline_data["queries"].items()
+                        if key not in dirty_hashes}
+        else:
+            queries = {}
+            baseline = {}
         for query_hash, query_data in merged_queries.items():
             existing = self._queries.get(query_hash)
             if existing is not None and current_queries.get(query_hash) == query_data:
@@ -1374,7 +1463,7 @@ class QueryRegistry:
                 params = extract_observed_params(
                     observed_params_sql, normalized_sql, dialect
                 )
-        query_hash = hash_sql(canonical_sql)
+        query_hash = hash_sql(canonical_sql, dialect)
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         # Convert new params format to simple values for auto-substitution
@@ -1382,6 +1471,7 @@ class QueryRegistry:
         for param_name, param_info in params.items():
             legacy_params[param_name] = param_info["value"]
 
+        self._ensure_key(query_hash)
         is_new_query = query_hash not in self._queries
 
         if query_hash in self._queries:
@@ -1415,6 +1505,11 @@ class QueryRegistry:
             # lack a literal-bearing sample must not erase observed values.
             if params:
                 entry.parameters = params
+                # One identity covers several spellings (digest text, literal SQL,
+                # value lists of any length); the values name this spelling's slots,
+                # so the stored text moves with them.
+                if normalized_sql and entry.sql != normalized_sql:
+                    entry.sql = normalized_sql
 
             # Update runtime stats if provided (keep max values)
             if max_duration_ms > entry.max_duration_ms:
@@ -1494,11 +1589,15 @@ class QueryRegistry:
             self.load()
 
         # Try exact match first
+        self._ensure_key(query_hash)
         if query_hash in self._queries:
             return self._queries[query_hash]
+        if self._scoped and len(query_hash) >= _HASH_LENGTH:
+            return None
 
         # Try prefix matching (minimum 4 characters)
         if len(query_hash) >= 4:
+            self._ensure_all()
             matches = [
                 entry
                 for hash_key, entry in self._queries.items()
@@ -1524,8 +1623,7 @@ class QueryRegistry:
         Returns:
             QueryEntry if found, None otherwise
         """
-        if not self._loaded:
-            self.load()
+        self._ensure_all()
 
         for entry in self._queries.values():
             if entry.tag == tag:
@@ -1543,8 +1641,7 @@ class QueryRegistry:
         Returns:
             List of QueryEntry objects, sorted by last_analyzed (newest first)
         """
-        if not self._loaded:
-            self.load()
+        self._ensure_all()
 
         queries = list(self._queries.values())
 
@@ -1569,6 +1666,7 @@ class QueryRegistry:
         if not self._loaded:
             self.load()
 
+        self._ensure_key(query_hash)
         if query_hash in self._queries:
             del self._queries[query_hash]
             self.save()
@@ -1618,6 +1716,7 @@ class QueryRegistry:
         """
         if not self._loaded:
             self.load()
+        self._ensure_key(query_hash)
         if query_hash not in self._queries:
             return False
         entry = self._queries[query_hash]
@@ -1632,8 +1731,7 @@ class QueryRegistry:
 
     def find_by_readyset_query_id(self, readyset_query_id: str) -> Optional["QueryEntry"]:
         """Reverse lookup: find a registry entry by its ReadySet q_<hash> id."""
-        if not self._loaded:
-            self.load()
+        self._ensure_all()
         for entry in self._queries.values():
             if entry.readyset_query_id == readyset_query_id:
                 return entry
@@ -1653,6 +1751,7 @@ class QueryRegistry:
         if not self._loaded:
             self.load()
 
+        self._ensure_key(query_hash)
         if query_hash in self._queries:
             self._queries[query_hash].tag = tag
             self.save()
@@ -1710,7 +1809,8 @@ class QueryRegistry:
             return None
 
         # Get placeholder names in the normalized SQL
-        placeholder_names = get_placeholder_names(entry.sql)
+        dialect = dialect_for_target(entry.last_target)
+        placeholder_names = get_placeholder_names(entry.sql, dialect)
 
         if not placeholder_names:
             # No placeholders - query is already executable
@@ -1730,7 +1830,7 @@ class QueryRegistry:
             # Interactive mode - prompt for missing values
             params = self._prompt_for_missing_params(params, sorted(missing))
 
-        return reconstruct_sql(entry.sql, params, dialect_for_target(entry.last_target))
+        return reconstruct_sql(entry.sql, params, dialect)
 
     def _prompt_for_missing_params(
         self, existing: Dict[str, dict], missing: list

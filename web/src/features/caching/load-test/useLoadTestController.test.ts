@@ -7,6 +7,9 @@ import type { QueryRegistryEntry } from '../../../lib/useQueryRegistry'
 const mocks = vi.hoisted(() => ({
   useQueryRegistry: vi.fn(),
   fetchSandboxDiagnostics: vi.fn(),
+  start: vi.fn(),
+  targets: [{ name: 'demo' }, { name: 'other' }],
+  fetchTargets: vi.fn().mockResolvedValue([]),
 }))
 
 vi.mock('../sandbox', async (importOriginal) => ({
@@ -19,7 +22,7 @@ vi.mock('../../../hooks/useTarget', () => ({
 }))
 vi.mock('../../../lib/useSystemStatus', () => ({
   useSystemStatus: () => ({
-    data: { targets: [{ name: 'demo' }, { name: 'other' }] },
+    data: { targets: mocks.targets },
     isLoading: false,
     error: null,
     refetch: vi.fn(),
@@ -52,12 +55,12 @@ vi.mock('../../../lib/useQueryRegistry', async (importOriginal) => ({
 }))
 vi.mock('../../../lib/api', () => ({
   fetchSchema: vi.fn().mockResolvedValue({ tables: {} }),
-  fetchTargets: vi.fn().mockResolvedValue([]),
+  fetchTargets: mocks.fetchTargets,
   updateQueryParameters: vi.fn(),
 }))
 vi.mock('../../../lib/sse', () => ({
   useBenchmark: () => ({
-    start: vi.fn(),
+    start: mocks.start,
     stop: vi.fn(),
     state: 'idle',
     stage: undefined,
@@ -114,13 +117,15 @@ function registry(queries: QueryRegistryEntry[]) {
   }
 }
 
-function renderController() {
+function renderController(
+  options: Parameters<typeof useLoadTestController>[0] = {}
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   const wrapper = ({ children }: { children: ReactNode }) =>
     createElement(QueryClientProvider, { client }, children)
-  return renderHook(() => useLoadTestController({}), { wrapper })
+  return renderHook(() => useLoadTestController(options), { wrapper })
 }
 
 describe('Load Test picker target scoping', () => {
@@ -215,5 +220,85 @@ describe('Load Test Readyset lane', () => {
       result.current.setComparative(true)
     })
     expect(result.current.confirmIncludesReadyset).toBe(true)
+  })
+})
+
+describe('Merged benchmark run choices', () => {
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+    mocks.targets = [{ name: 'demo' }, { name: 'other' }]
+    mocks.fetchTargets.mockResolvedValue([])
+  })
+
+  it.each([
+    ['source', ['origin']],
+    ['both', ['origin', 'readyset']],
+    ['readyset', ['readyset']],
+  ] as const)('runs two selected queries with %s', async (choice, lanes) => {
+    mocks.fetchTargets.mockResolvedValue([
+      { name: 'demo' },
+      { name: 'demo-cache' },
+    ])
+    mocks.useQueryRegistry.mockReturnValue(registry([entry('q1'), entry('q2')]))
+    mocks.fetchSandboxDiagnostics.mockResolvedValue({
+      docker_installed: true,
+      docker_running: true,
+    })
+    const { result } = renderController({ keepFilteredSelection: true })
+    act(() => {
+      result.current.setSelectedQueries(['q1', 'q2'])
+      result.current.setRunChoice(choice)
+      result.current.setSearchTerm('t_q1')
+    })
+    await waitFor(() => expect(result.current.canStart).toBe(true))
+    await act(async () => result.current.handleConfirmRun())
+    expect(mocks.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: 'demo',
+        queries: [{ identifier: 'q1' }, { identifier: 'q2' }],
+        lanes,
+      })
+    )
+    expect(result.current.destinationLock.targetName).toBe('demo')
+  })
+
+  it('runs Readyset only without a deployed cache when Docker works', async () => {
+    mocks.useQueryRegistry.mockReturnValue(registry([entry('q1')]))
+    mocks.fetchSandboxDiagnostics.mockResolvedValue({
+      docker_installed: true,
+      docker_running: true,
+    })
+    const { result } = renderController()
+    act(() => {
+      result.current.setSelectedQueries(['q1'])
+      result.current.setRunChoice('readyset')
+    })
+    await waitFor(() => expect(result.current.canStart).toBe(true))
+    await act(async () => result.current.handleConfirmRun())
+    expect(result.current.destinationLock.targetName).toBe('demo')
+    expect(mocks.start).toHaveBeenCalledWith(
+      expect.objectContaining({ target: 'demo', lanes: ['readyset'] })
+    )
+  })
+
+  it('runs a monitored query using its captured SQL and deduplicates saved queries', async () => {
+    mocks.useQueryRegistry.mockReturnValue(registry([entry('q1')]))
+    const { result } = renderController({
+      extraQueries: [entry('q1'), entry('q2', { source: 'monitor-benchmark' })],
+    })
+    expect(result.current.queries).toHaveLength(2)
+    act(() => {
+      result.current.setSelectedQueries(['q2'])
+      result.current.setRunChoice('source')
+    })
+    await waitFor(() => expect(result.current.canStart).toBe(true))
+    await act(async () => result.current.handleConfirmRun())
+    expect(mocks.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        queries: [{ identifier: 'q2', sql: 'SELECT * FROM t_q2' }],
+        lanes: ['origin'],
+      })
+    )
   })
 })

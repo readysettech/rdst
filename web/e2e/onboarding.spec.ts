@@ -1,8 +1,22 @@
-import { clearTargets, expect, setBackendFixtures, test } from './fixtures'
+import {
+  acceptBrowserError,
+  clearTargets,
+  expect,
+  mockPrerequisites,
+  prerequisitesResult,
+  setBackendFixtures,
+  test,
+} from './fixtures'
 
 test('completes first-run onboarding and persists the target', async ({
   page,
+  browserErrors,
 }) => {
+  // A database with no report yet answers its latest report with a 404.
+  acceptBrowserError(
+    browserErrors,
+    'Failed to load resource: the server responded with a status of 404 (Not Found)'
+  )
   await clearTargets(page.request)
   setBackendFixtures({
     init_validate: [
@@ -63,12 +77,53 @@ test('completes first-run onboarding and persists the target', async ({
   await page.locator('[name="database"]').fill('app')
   await page.locator('[name="user"]').fill('e2e')
   await page.locator('[name="password"]').fill('test-password')
+  // The check finds the extension missing until the user runs the fix in
+  // another window; the page re-checks on its own and finishes.
+  const prerequisites = await mockPrerequisites(
+    page,
+    'e2e-db',
+    prerequisitesResult('e2e-db', { ready: false })
+  )
   await page.getByRole('button', { name: 'Test & connect' }).click()
 
-  // Landing on the design-system home with the job launcher proves the
-  // target persisted (the launcher only renders when targets exist).
-  await expect(page).toHaveURL('/')
-  await expect(page.getByText('Run a health check')).toBeVisible()
+  // Connecting goes straight to the next step: the "Turn on monitoring" dialog
+  // on the new database's page, which runs the prerequisites check itself.
+  await expect(page).toHaveURL(/\/database\?panel=enable/)
+  const dialog = page.getByRole('dialog', {
+    name: 'Turn on monitoring for e2e-db',
+  })
+  await expect(dialog).toBeVisible()
+  const checker = dialog.getByTestId('prereq-checker')
+  await expect(checker).toHaveAttribute('data-phase', 'blocked')
+  await expect(
+    checker.locator('[data-check="pg_stat_statements"][data-status="missing"]')
+  ).toBeVisible()
+  await expect(
+    checker.getByText('CREATE EXTENSION IF NOT EXISTS pg_stat_statements;')
+  ).toBeVisible()
+  prerequisites.answer(prerequisitesResult('e2e-db'))
+  await expect(checker).toHaveAttribute('data-phase', 'ready', {
+    timeout: 10_000,
+  })
+  await expect(
+    dialog.getByRole('heading', { name: 'Ready to monitor' })
+  ).toBeVisible()
+  // Its button really turns monitoring on.
+  const enabled = page.waitForRequest(
+    (request) =>
+      request.method() === 'PUT' &&
+      request.url().endsWith('/api/monitor/targets/e2e-db/settings') &&
+      request.postDataJSON()?.enabled === true
+  )
+  await dialog.getByRole('button', { name: /^Turn on/ }).click()
+  await enabled
+  await expect(dialog).toHaveCount(0)
+  await expect(page).not.toHaveURL(/panel=enable/)
+
+  // Home's database card proves the target persisted (the card only renders
+  // when targets exist).
+  await page.goto('/')
+  await expect(page.getByTestId('home-database-card')).toBeVisible()
 
   // ConnectPage promotes the first target to default (addTarget →
   // setDefaultTarget → completeInit), unlike the retired wizard.
@@ -80,5 +135,5 @@ test('completes first-run onboarding and persists the target', async ({
   })
 
   await page.reload()
-  await expect(page.getByText('Run a health check')).toBeVisible()
+  await expect(page.getByTestId('home-database-card')).toBeVisible()
 })

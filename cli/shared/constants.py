@@ -7,6 +7,7 @@ every site, instead of only the modules that read the constant via
 attribute access.
 """
 
+import os
 from pathlib import Path
 
 __all__ = ["rdst_data_dir", "rdst_semantic_layer_dir"]
@@ -14,7 +15,8 @@ __all__ = ["rdst_data_dir", "rdst_semantic_layer_dir"]
 
 def rdst_data_dir() -> Path:
     """Return the RDST data directory (``~/.rdst`` by default)."""
-    return Path.home() / ".rdst"
+    configured = os.environ.get("RDST_DATA_DIR", "").strip()
+    return Path(configured).expanduser() if configured else Path.home() / ".rdst"
 
 
 def rdst_semantic_layer_dir() -> Path:

@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, StrictBool, StrictFloat, StrictInt, Stric
 from typing import Any, Optional, Literal, AsyncGenerator, Union
 from datetime import datetime, timezone
 from sse_starlette.sse import EventSourceResponse
+import asyncio
 import json
 import hashlib
 import logging
@@ -393,6 +394,20 @@ def _target_scoped_queries(target: Optional[str]) -> list:
     return all_queries
 
 
+def _target_page(target: Optional[str], limit: Optional[int], offset: int):
+    """One target's page, newest analysis first, selected in SQLite so only the page's
+    entries are decoded; None when the SQLite Library isn't serving."""
+    from shared.query_registry import QueryRegistry
+    from shared.query_registry.query_registry import QueryEntry
+
+    store = QueryRegistry().library_store
+    if not target or store is None:
+        return None
+    hashes, total = store.target_page(QueryEntry.target_key(target), limit, offset)
+    entries = store.load_keys(hashes)
+    return [QueryEntry.from_dict(entries[key]) for key in hashes if key in entries], total
+
+
 # Ceiling for one read-model page; the cursor covers anything longer.
 _LIBRARY_MAX_PAGE = 500
 
@@ -554,6 +569,19 @@ async def get_query_registry(
     shortlist composes with every other filter ("starred and not yet
     analyzed"). ``view=saved`` selects the same rows and keeps working.
     """
+    # Both paths decode Library rows in Python, which takes seconds on a large Library;
+    # they run in a worker so the event loop keeps serving every other request.
+    return await asyncio.to_thread(
+        _query_registry_page, limit, offset, target, search, view, starred, source,
+        params, activity, impact, finding, sort, cursor)
+
+
+def _query_registry_page(
+    limit: Optional[int], offset: int, target: Optional[str], search: Optional[str],
+    view: Optional[str], starred: Optional[bool], source: Optional[str],
+    params: Optional[str], activity: Optional[str], impact: Optional[str],
+    finding: Optional[str], sort: Optional[str], cursor: Optional[str],
+) -> Union[QueryLibraryResponse, QueryRegistryResponse]:
     if any(
         value is not None
         for value in (
@@ -577,20 +605,22 @@ async def get_query_registry(
         )
 
     try:
-        all_queries = _target_scoped_queries(target)
-        total = len(all_queries)
-
         if offset < 0:
             offset = 0
         if limit is not None and limit < 0:
             limit = None
-
-        if offset > 0:
-            all_queries = all_queries[offset:]
-        if limit:
-            queries = all_queries[:limit]
+        page = _target_page(target, limit, offset)
+        if page is not None:
+            queries, total = page
         else:
-            queries = all_queries
+            all_queries = _target_scoped_queries(target)
+            total = len(all_queries)
+            if offset > 0:
+                all_queries = all_queries[offset:]
+            if limit:
+                queries = all_queries[:limit]
+            else:
+                queries = all_queries
 
         entries: list[QueryRegistryEntry] = []
         for q in queries:
@@ -711,6 +741,8 @@ async def set_query_starred(
     registry = QueryRegistry()
     registry.load()
     entry = registry.get_query(query_hash)
+    if entry is None and request.target:
+        entry = _admit_monitored_query(registry, query_hash, request.target)
     if entry is None:
         raise HTTPException(status_code=404, detail="Query not found")
 
@@ -948,6 +980,30 @@ def _readyset_support_value(
     return readyset_support_text(verdict, reason or "")
 
 
+def _admit_monitored_query(registry, query_hash: str, target: str):
+    """Give a query that monitoring saw, but the Library never admitted, a registry row.
+
+    Monitor query keys are registry hashes, so the Compare outcome for a monitor-only
+    query lands on the same identity the Library would have given it.
+    """
+    from shared.config.targets import TargetsConfig
+    from shared.monitor.monitor_store import MonitorStore, default_monitor_db_path
+
+    if not default_monitor_db_path().exists():
+        return None
+    rows = MonitorStore().read(
+        "SELECT text FROM query_text WHERE target=? AND query_key=?", (target, query_hash))
+    if not rows or not rows[0]["text"]:
+        return None
+    config = TargetsConfig()
+    config.load()
+    engine = (config.get(target) or {}).get("engine", "postgresql")
+    admitted, _ = registry.add_query(
+        sql=rows[0]["text"], source="top-historical", target=target,
+        dialect="mysql" if engine == "mysql" else None, observed=True)
+    return registry.get_query(query_hash) if admitted == query_hash else None
+
+
 @router.post("/query-registry/queries/{query_hash}/compare-outcome")
 async def record_compare_outcome(
     query_hash: str,
@@ -1000,6 +1056,58 @@ async def record_compare_outcome(
         last_compare=outcome,
         readyset_supported=entry.readyset_supported,
     )
+
+
+class BenchmarkLaneNumbers(BaseModel):
+    """One lane's measurement of one query in a benchmark."""
+
+    executions: int = 0
+    successes: int = 0
+    failures: int = 0
+    p50_ms: Optional[float] = None
+    p95_ms: Optional[float] = None
+    avg_ms: Optional[float] = None
+    qps: Optional[float] = None
+
+
+class QueryBenchmarkNumbers(BenchmarkLaneNumbers):
+    """The query's numbers on the database, and through Readyset when that lane ran."""
+
+    hash: str
+    name: str = ""
+    readyset: Optional[BenchmarkLaneNumbers] = None
+
+
+class QueryBenchmarkRun(BaseModel):
+    id: int
+    ts: int
+    outcome: str
+    mode: Optional[str] = None
+    lanes: list[str] = Field(default_factory=list)
+    duration_seconds: Optional[int] = None
+    concurrency: Optional[int] = None
+    interval_ms: Optional[int] = None
+    elapsed_seconds: Optional[float] = None
+    readyset_setup: Optional[dict[str, str]] = None
+    query: QueryBenchmarkNumbers
+
+
+class QueryBenchmarkHistory(BaseModel):
+    runs: list[QueryBenchmarkRun]
+
+
+@router.get(
+    "/query-registry/queries/{query_hash}/benchmarks",
+    response_model=QueryBenchmarkHistory,
+)
+async def query_benchmark_history(
+    query_hash: str, target: str, limit: int = Query(10, ge=1, le=50)
+) -> QueryBenchmarkHistory:
+    """Past benchmarks of one query on one database, newest first, from the activity log."""
+    from shared.agent_activity.store import AgentActivityStore
+
+    runs = AgentActivityStore().benchmarks_for_query(target, query_hash, limit)
+    return QueryBenchmarkHistory(runs=[QueryBenchmarkRun(**run) for run in runs])
 
 
 class UpdateSqlRequest(BaseModel):
@@ -1128,9 +1236,8 @@ class BenchmarkRequest(BaseModel):
     concurrency: Optional[int] = 1  # For concurrency mode
     duration_seconds: Optional[int] = 30
     max_count: Optional[int] = None
-    # The endpoints the same workload runs against. The origin alone is the
-    # default and the fallback; asking for "readyset" adds a lane measured
-    # through the managed sandbox, reported beside the origin one.
+    # Both lanes compare through the managed sandbox. Readyset alone uses
+    # the deployed {target}-cache endpoint and requires that deployment.
     lanes: list[Literal["origin", "readyset"]] = ["origin"]
     # Concrete parameter sets each stored query rotates through, so a run is
     # not one value's cache profile. 1 keeps the stored values only.
@@ -1336,11 +1443,17 @@ def _benchmark_tuning(request: BenchmarkRequest) -> dict[str, int]:
     }
 
 
+async def require_benchmark_target(request: Request) -> TargetGuard:
+    """Check the source credentials used to prepare the benchmark sandbox."""
+    require_local_request(request)
+    return await require_target_body(request)
+
+
 @router.post("/query-registry/benchmark")
 async def run_benchmark(
     request: BenchmarkRequest,
     http_request: Request,
-    guard: TargetGuard = Depends(require_target_body),
+    guard: TargetGuard = Depends(require_benchmark_target),
 ):
     """
     Run benchmark on queries with live progress updates via SSE.
@@ -1375,7 +1488,7 @@ async def run_benchmark(
 async def start_load_test_run(
     request: BenchmarkRequest,
     http_request: Request,
-    guard: TargetGuard = Depends(require_target_body),
+    guard: TargetGuard = Depends(require_benchmark_target),
 ) -> LoadTestRunStartResponse:
     """Start or attach to the target's detached benchmark."""
     require_local_request(http_request)

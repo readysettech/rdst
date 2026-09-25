@@ -5,6 +5,7 @@ import { Text } from '@rs/ui-new/text'
 import { useDisclosure } from '@rs/ui-new/use-disclosure'
 import { useId } from 'react'
 import type { CompleteEvent } from '../../../lib/api'
+import { aiUsage } from './aiUsage'
 
 export function ResultsFooter({
   results,
@@ -21,22 +22,16 @@ export function ResultsFooter({
   const planId = useId()
 
   const metadata = results.formatted?.metadata
-  const tokenUsage = results.llm_analysis?.token_usage
-  const llmInfo = metadata?.llm_info
   const target = metadata?.target || targetProp
   const databaseEngine =
     metadata?.database_engine || results.explain_results?.database_engine
-  const model = llmInfo?.model || 'claude'
-  const tokens = llmInfo?.tokens || tokenUsage?.total || 0
-  const cost = llmInfo?.cost || tokenUsage?.estimated_cost_usd || 0
-  const hasModelMetadata = Boolean(llmInfo || tokenUsage)
+  const usage = aiUsage(results)
 
   const metaSegments = [
     target ? `Target ${target}` : null,
     databaseEngine?.toUpperCase(),
-    hasModelMetadata ? model : null,
-    hasModelMetadata ? `${tokens.toLocaleString()} tokens` : null,
-    hasModelMetadata ? `$${cost.toFixed(3)}` : null,
+    usage?.label,
+    usage ? `${usage.tokens.toLocaleString()} tokens` : null,
   ].filter(Boolean) as string[]
 
   const explainPlan = results.explain_results?.explain_plan

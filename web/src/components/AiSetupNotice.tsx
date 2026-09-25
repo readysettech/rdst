@@ -12,7 +12,7 @@ function reasonMessage(
   if (gate.reason === 'invalid') {
     return `Anthropic rejected the saved key, so ${feature} cannot run. Update the key or sign in to Readyset.`
   }
-  return `${feature} sends your question to an AI provider, so it needs one connected. Sign in to Readyset for the free included AI, or add your own Anthropic key.`
+  return `${feature} sends your question to an AI provider, so it needs one connected. Sign in to Readyset for the included AI, or add your own Anthropic key.`
 }
 
 /**

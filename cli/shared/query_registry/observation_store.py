@@ -34,20 +34,27 @@ are refused on Windows, Linux, macOS, and BSD before SQLite opens the file.
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
 import re
 import sqlite3
+import socket
 import subprocess
 import sys
 import threading
 import time
+import uuid
 from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional
 
+import psutil
+
 import shared.constants as shared_constants
+from shared import startup_status
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +77,82 @@ SCHEMA_VERSION = 2
 # otherwise one crash would mark every future window as containing RDST
 # traffic forever.
 OPEN_EXECUTION_MAX_AGE_SECONDS = 3600
+
+
+def collection_owner() -> str:
+    """Identify a process lifetime so abandoned local leases can be reclaimed."""
+    return "rdst-process:" + json.dumps([socket.gethostname(), os.getpid(),
+        psutil.Process().create_time(), uuid.uuid4().hex], separators=(",", ":"))
+
+
+def _dead_collection_owner(owner: str) -> bool:
+    if not owner.startswith("rdst-process:"):
+        return False
+    try:
+        host, pid, started, _ = json.loads(owner[len("rdst-process:"):])
+        if host != socket.gethostname():
+            return False
+        process = psutil.Process(pid)
+        return process.status() == psutil.STATUS_ZOMBIE or process.create_time() != started
+    except psutil.NoSuchProcess:
+        return True
+    except (ValueError, TypeError, OverflowError, psutil.AccessDenied):
+        return False
+
+# recent_observation keeps each collection cycle's per-identity windows. The history the
+# product reads lives in monitor.db, so these rows only need to outlive a few cycles. The row
+# cap bounds a target with thousands of distinct statements.
+RECENT_OBSERVATION_MAX_ROWS = 100_000
+# Freed pages go back to the filesystem this many at a time, one short transaction each.
+VACUUM_BATCH_PAGES = 1000
+
+
+class StorageError(RuntimeError):
+    """A local store needs disk space or an explicit restore."""
+
+
+def _is_corrupt(exc: BaseException) -> bool:
+    return (getattr(exc, "sqlite_errorcode", 0) & 255) in (11, 26) or (
+        isinstance(exc, sqlite3.DatabaseError) and str(exc) in (
+            "database disk image is malformed", "file is not a database"))
+
+
+def _storage_message(path: Path, exc: BaseException) -> str | None:
+    code = getattr(exc, "sqlite_errorcode", 0) & 255
+    if code == 13 or getattr(exc, "errno", None) == errno.ENOSPC or (
+            isinstance(exc, sqlite3.DatabaseError) and str(exc) == "database or disk is full"):
+        return f"Local storage full at {path}. Free disk space to resume writing."
+    if _is_corrupt(exc):
+        return f"Local storage damaged at {path}. Restore this file from a backup."
+    return None
+
+
+def _check_journal_headers(path: Path) -> None:
+    """Preserve damaged recovery files before SQLite can discard their contents."""
+    for suffix, magic in (("-wal", (b"\x37\x7f\x06\x82", b"\x37\x7f\x06\x83")),
+                          ("-journal", (b"\xd9\xd5\x05\xf9\x20\xa1\x63\xd7",))):
+        sidecar = Path(str(path) + suffix)
+        try:
+            with sidecar.open("rb") as source:
+                header = source.read(len(magic[0]))
+        except FileNotFoundError:
+            continue
+        # Rollback journals start with a zero header until their pages reach durable storage.
+        if header and any(header) and header not in magic:
+            raise sqlite3.DatabaseError("database disk image is malformed")
+
+
+def _storage_guard(method):
+    @wraps(method)
+    def run(self, *args, **kwargs):
+        try:
+            return method(self, *args, **kwargs)
+        except (sqlite3.DatabaseError, OSError) as exc:
+            message = _storage_message(self.path, exc)
+            if message:
+                raise StorageError(message) from exc
+            raise
+    return run
 
 
 class LeaseLostError(RuntimeError):
@@ -585,8 +668,10 @@ class ObservationStore:
     # -- lifecycle ----------------------------------------------------------
 
     def _open(self) -> None:
-        conn = self._connect()
+        conn = None
         try:
+            _check_journal_headers(self.path)
+            conn = self._connect()
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             if version == 0:
                 # Fresh file: auto_vacuum is a one-shot decision that must be
@@ -606,7 +691,6 @@ class ObservationStore:
             else:
                 # An existing file follows this runtime's journal strategy,
                 # in both directions (WAL upgrade and DELETE fallback).
-                _apply_journal_mode(conn, self._path)
                 check = conn.execute("PRAGMA quick_check").fetchone()[0]
                 if check != "ok":
                     logger.warning(
@@ -617,9 +701,26 @@ class ObservationStore:
                     conn.close()
                     self._rebuild()
                     return
-            self._migrate(conn, version)
+                _apply_journal_mode(conn, self._path)
+            if 0 < version < SCHEMA_VERSION:
+                with startup_status.migrating("cache.db"):
+                    self._migrate(conn, version)
+            else:
+                self._migrate(conn, version)
+        except sqlite3.DatabaseError as exc:
+            if conn is not None:
+                conn.close()
+            if _is_corrupt(exc):
+                logger.warning("Damaged cache at %s; rebuilding", self._path, exc_info=True)
+                self._rebuild()
+                return
+            message = _storage_message(self.path, exc)
+            if message:
+                raise StorageError(message) from exc
+            raise
         except BaseException:
-            conn.close()
+            if conn is not None:
+                conn.close()
             raise
         self._write_conn = conn
 
@@ -627,8 +728,12 @@ class ObservationStore:
         conn = sqlite3.connect(
             self._path, isolation_level=None, check_same_thread=False
         )
-        for pragma in _connection_pragmas():
-            conn.execute(pragma)
+        try:
+            for pragma in _connection_pragmas():
+                conn.execute(pragma)
+        except BaseException:
+            conn.close()
+            raise
         return conn
 
     def _migrate(self, conn: sqlite3.Connection, from_version: int) -> None:
@@ -641,16 +746,20 @@ class ObservationStore:
                 # value is an int from our own ladder.
                 conn.execute(f"PRAGMA user_version = {version:d}")
                 conn.execute("COMMIT")
-            except BaseException:
-                conn.execute("ROLLBACK")
+            except BaseException as exc:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                message = _storage_message(self.path, exc)
+                if message:
+                    raise StorageError(message) from exc
                 raise
 
     def _rebuild(self) -> None:
         """Rename the file (and any journal remnants) aside, then recreate."""
-        stamp = int(time.time())
+        stamp = time.time_ns()
         aside = self._path.with_name(f"{self._path.name}.corrupt-{stamp}")
         os.replace(self._path, aside)
-        for suffix in ("-wal", "-shm"):
+        for suffix in ("-wal", "-shm", "-journal"):
             leftover = Path(str(self._path) + suffix)
             if leftover.exists():
                 os.replace(leftover, Path(str(aside) + suffix))
@@ -694,10 +803,14 @@ class ObservationStore:
             conn.execute("BEGIN IMMEDIATE")
             try:
                 yield conn
-            except BaseException:
-                conn.execute("ROLLBACK")
+                conn.execute("COMMIT")
+            except BaseException as exc:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                message = _storage_message(self.path, exc)
+                if message:
+                    raise StorageError(message) from exc
                 raise
-            conn.execute("COMMIT")
 
     @contextmanager
     def _read(self) -> Iterator[sqlite3.Connection]:
@@ -843,6 +956,18 @@ class ObservationStore:
                 (target_id, epoch_id),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def clear_counter_snapshots(
+        self, target_id: str, epoch_id: str, *,
+        owner_id: Optional[str] = None,
+        fencing_token: Optional[int] = None,
+        now: Optional[int] = None,
+    ) -> None:
+        """Discard a target's stale baseline after a target-scoped stats reset."""
+        with self._write() as conn:
+            self._apply_fence(conn, target_id, owner_id, fencing_token, now)
+            conn.execute("DELETE FROM counter_snapshot WHERE target_id=? AND epoch_id=?",
+                         (target_id, epoch_id))
 
     # -- identity aliases -----------------------------------------------------
 
@@ -1315,6 +1440,12 @@ class ObservationStore:
         live process owns the lease.
         """
         with self._write() as conn:
+            previous = conn.execute(
+                "SELECT owner_id FROM collector_lease WHERE target_id=?", (target_id,)
+            ).fetchone()
+            if previous is not None and _dead_collection_owner(previous[0]):
+                conn.execute("UPDATE collector_lease SET expires_at=0 WHERE target_id=?",
+                             (target_id,))
             row = conn.execute(
                 """
                 INSERT INTO collector_lease (target_id, owner_id, fencing_token, expires_at)
@@ -1323,7 +1454,7 @@ class ObservationStore:
                   owner_id = :me,
                   fencing_token = collector_lease.fencing_token + 1,
                   expires_at = :now + :ttl
-                WHERE collector_lease.expires_at < :now
+                WHERE collector_lease.expires_at <= :now
                    OR collector_lease.owner_id = :me
                 RETURNING fencing_token
                 """,
@@ -1363,6 +1494,8 @@ class ObservationStore:
 
         counter_snapshot is WITHOUT ROWID, so the chunk is keyed on the
         primary key (row values, SQLite >= 3.15) rather than rowid.
+        Visit recent expired history before long-idle restart baselines,
+        which survive retention and can dominate repeated chunk scans.
         """
         deleted = 0
         while True:
@@ -1381,6 +1514,7 @@ class ObservationStore:
                             AND newer.epoch_id = victim.epoch_id
                             AND newer.captured_at > victim.captured_at
                         )
+                      ORDER BY captured_at DESC
                       LIMIT ?
                     )
                     """,
@@ -1493,11 +1627,69 @@ class ObservationStore:
         self._incremental_vacuum()
         return deleted
 
+    def prune_observations(
+        self,
+        cutoff: float,
+        *,
+        max_rows: int = RECENT_OBSERVATION_MAX_ROWS,
+        chunk: int = 10000,
+    ) -> int:
+        """Delete recent_observation windows ending before ``cutoff``, in chunks.
+
+        A target holding more than ``max_rows`` windows also loses its oldest
+        ones until it is back at the cap. The table is capped, so each chunk is
+        one bounded scan of the target's rows in its own short transaction; the
+        pass costs a few transactions rather than one per identity. Returns
+        rows deleted.
+        """
+        with self._read() as conn:
+            targets = [row[0] for row in conn.execute(
+                "SELECT DISTINCT target_id FROM recent_observation")]
+        deleted = 0
+        for target_id in targets:
+            target_cutoff = cutoff
+            with self._read() as conn:
+                row = conn.execute(
+                    "SELECT window_end FROM recent_observation WHERE target_id = ?"
+                    " ORDER BY window_end DESC LIMIT 1 OFFSET ?",
+                    (target_id, max_rows),
+                ).fetchone()
+            if row is not None:
+                target_cutoff = max(cutoff, row[0] + 1e-6)
+            while True:
+                with self._write() as conn:
+                    batch = conn.execute(
+                        """
+                        DELETE FROM recent_observation
+                        WHERE (target_id, normalized_hash, window_end) IN (
+                          SELECT target_id, normalized_hash, window_end
+                          FROM recent_observation
+                          WHERE target_id = ? AND window_end < ?
+                          LIMIT ?
+                        )
+                        """,
+                        (target_id, target_cutoff, chunk),
+                    ).rowcount
+                deleted += batch
+                if batch < chunk:
+                    break
+        self._incremental_vacuum()
+        return deleted
+
     def _incremental_vacuum(self) -> None:
-        with self._write_lock:
-            conn = self._write_conn
-            if conn is not None:
-                conn.execute("PRAGMA incremental_vacuum(1000)")
+        """Return free pages to the filesystem, a batch per short transaction."""
+        free = None
+        while True:
+            with self._write_lock:
+                conn = self._write_conn
+                if conn is None:
+                    return
+                # The pragma frees a page per step, so it has to be stepped to completion.
+                conn.execute(f"PRAGMA incremental_vacuum({VACUUM_BATCH_PAGES})").fetchall()
+                remaining = conn.execute("PRAGMA freelist_count").fetchone()[0]
+            if not remaining or (free is not None and remaining >= free):
+                return
+            free = remaining
 
 
 def _execution_evidence_rows(

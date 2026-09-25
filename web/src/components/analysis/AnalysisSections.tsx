@@ -16,6 +16,7 @@ import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { useDisclosure } from '@rs/ui-new/use-disclosure'
 import { useId } from 'react'
+import { isPlanOnly } from '../../lib/analysisPayload'
 import type {
   CompleteEvent,
   ExplainResults,
@@ -422,26 +423,36 @@ export function PerformanceSummarySection({
       <div className="p-6">
         {explainResults && (
           <div className="grid grid-cols-2 tablet:grid-cols-4 gap-4 mb-6">
+            {!isPlanOnly(explainResults) && (
+              <MetricCard
+                label="Execution time"
+                value={`${explainResults.execution_time_ms?.toFixed(2) || '0'}ms`}
+                icon="speedometer"
+                delay={0.1}
+              />
+            )}
             <MetricCard
-              label="Execution time"
-              value={`${explainResults.execution_time_ms?.toFixed(2) || '0'}ms`}
-              icon="speedometer"
-              delay={0.1}
-            />
-            <MetricCard
-              label="Rows examined"
+              label={
+                isPlanOnly(explainResults)
+                  ? 'Estimated rows examined'
+                  : 'Rows examined'
+              }
               value={explainResults.rows_examined?.toLocaleString() || '0'}
               icon="layers"
               delay={0.15}
             />
             <MetricCard
-              label="Rows returned"
+              label={
+                isPlanOnly(explainResults)
+                  ? 'Estimated rows returned'
+                  : 'Rows returned'
+              }
               value={explainResults.rows_returned?.toLocaleString() || '0'}
               icon="dashboard"
               delay={0.2}
             />
             <MetricCard
-              label="Cost estimate"
+              label="Planner estimate"
               value={explainResults.cost_estimate?.toFixed(2) || '0'}
               icon="observe"
               delay={0.25}
@@ -532,6 +543,22 @@ export function TestedOptimizationsSection({
             </VStack>
           </HStack>
         </m.div>
+      )
+    }
+    if (testing.skipped_reason === 'background_analysis') {
+      return (
+        <HStack className="gap-2 items-center">
+          <Icon
+            name="info"
+            label=""
+            aria-hidden="true"
+            className="w-4 h-4 shrink-0 text-content-layout-3"
+          />
+          <Text level="body-small" className="text-content-layout-3">
+            RDST didn't test the suggested rewrites in this automatic analysis.
+            Run Analyze on the query to test them against the database.
+          </Text>
+        </HStack>
       )
     }
     return null
@@ -769,7 +796,7 @@ export function PlannerVerdict({ result }: { result: IndexPlannerResult }) {
         />
         <Text level="body-small" className="text-content-layout-2">
           hypopg check: the planner uses this index ({result.scan_type}).
-          Estimated cost {formatCost(result.cost_before)} to{' '}
+          Planner estimate {formatCost(result.cost_before)} to{' '}
           {formatCost(result.cost_after)}
           {pct !== null && pct !== undefined ? ` (${pct}% lower)` : ''}. No
           index was created.
@@ -1149,7 +1176,7 @@ export function ReadysetCacheabilitySection({
       <SectionHeader
         icon="layers"
         title="Readyset compatibility"
-        subtitle="Static SQL screening — Docker is only needed for a comparison"
+        subtitle="Static SQL screening - Docker is only needed for a comparison"
       />
       <div
         className={`rounded-xl overflow-hidden border ${style.border} ${style.glow}`}

@@ -147,7 +147,8 @@ export function ConfirmDialog({
       <ModalContentContainer open={isOpen}>
         <ModalContent
           size={size}
-          className="gap-0 overflow-hidden bg-surface-layout-1 p-0 shadow-elevation-3"
+          // Never taller than the window: the body scrolls, and the actions stay in view.
+          className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden bg-surface-layout-1 p-0 shadow-elevation-3"
           // A confirm is a two-button decision: no third X affordance (which
           // would also silently no-op while blockCloseWhileLoading holds).
           // Escape/overlay dismissal still routes through handleOpenChange.
@@ -174,7 +175,7 @@ export function ConfirmDialog({
             cancelRef.current?.focus()
           }}
         >
-          <header className="border-b-(length:--border-base) border-border-layout-1 px-6 py-5">
+          <header className="shrink-0 border-b-(length:--border-base) border-border-layout-1 px-6 py-5">
             <HStack className="items-start gap-3">
               {identityIcon ? (
                 <IconTile
@@ -200,7 +201,7 @@ export function ConfirmDialog({
           </header>
 
           {notice || requireTyped != null || children ? (
-            <VStack className="items-stretch gap-4 p-6">
+            <VStack className="min-h-0 flex-1 items-stretch gap-4 overflow-y-auto p-6">
               {notice ? (
                 <InlineNotice
                   accent={notice.accent ?? 'warning'}
@@ -235,7 +236,7 @@ export function ConfirmDialog({
             </VStack>
           ) : null}
 
-          <footer className="border-t-(length:--border-base) border-border-layout-1 bg-surface-layout-1 px-6 py-4">
+          <footer className="shrink-0 border-t-(length:--border-base) border-border-layout-1 bg-surface-layout-1 px-6 py-4">
             <HStack className="flex-wrap items-center justify-end gap-2">
               {confirmDisabled && confirmDisabledReason ? (
                 <Text

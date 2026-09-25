@@ -57,7 +57,7 @@ describe('AskComposer target provenance', () => {
 
     expect(screen.queryByText(/Read-only on/)).toBeNull()
     expect(
-      screen.getByText('No database selected — choose one before asking')
+      screen.getByText('No database selected - choose one before asking')
     ).toBeTruthy()
   })
 

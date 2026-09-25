@@ -47,7 +47,7 @@ export function QueryLibraryPage({
             icon="alert"
             title="Historical query discovery needs setup"
             message={`${controller.library.discovery.capture_warning.source} is unavailable, so Readyset may miss queries that are not active during a live sample. ${controller.library.discovery.capture_warning.instructions.join(' ')}`}
-            trustworthy="Saved queries and completed Jev assessments remain available."
+            trustworthy="Saved queries and completed query classifications remain available."
           />
         ) : null}
         <QueryLibraryToolbar controller={controller} />

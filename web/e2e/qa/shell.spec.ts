@@ -7,6 +7,7 @@
  * the finding it protects.
  */
 import {
+  acceptBrowserError,
   clearTargets,
   configureTestTarget,
   expect,
@@ -26,12 +27,16 @@ import {
 
 /** Every daily nav destination, with the page title it must agree with. */
 const NAV = [
-  { path: '/', label: 'Home' },
+  { path: '/', label: 'Home', heading: 'Home' },
+  { path: '/database', label: 'Database', heading: 'e2e-guard' },
+  { path: '/inbox', label: 'Inbox', heading: 'Inbox' },
+  {
+    path: '/agent-activity',
+    label: 'Agent activity',
+    heading: 'Agent activity',
+  },
   { path: '/ask', label: 'Ask', heading: 'Ask' },
-  { path: '/queries', label: 'Queries' },
-  { path: '/cache', label: 'Benchmarks' },
-  { path: '/audit', label: 'Health check', heading: 'Health check' },
-  { path: '/schema', label: 'Schema', heading: 'Schema' },
+  { path: '/demo', label: 'Try the demo' },
   { path: '/configure', label: 'Settings', heading: 'Settings' },
 ] as const
 
@@ -123,7 +128,13 @@ test('the mobile drawer carries a close control and keeps its footer inside', as
  */
 test('every nav destination resolves, marks itself current, and keeps its name', async ({
   page,
+  browserErrors,
 }) => {
+  // This fresh target has no daily report; the API returns 404 for that empty state.
+  acceptBrowserError(
+    browserErrors,
+    'Failed to load resource: the server responded with a status of 404 (Not Found)'
+  )
   await page.setViewportSize(DESKTOP)
   shellFixtures()
   await configureTestTarget(page, { hasPassword: true })

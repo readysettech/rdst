@@ -76,7 +76,7 @@ function getWarningConfig(
     return {
       title: 'AI sign-in required',
       description:
-        'Sign in to Readyset for the free included AI, or add your own Anthropic API key.',
+        'Sign in to Readyset for the included AI, or add your own Anthropic API key.',
       severity: 'warning',
       actionLabel: 'Sign in to Readyset',
       actionType: 'open-trial-dialog',
@@ -243,7 +243,12 @@ export function ConfigWarning() {
   const [showSecretsDialog, setShowSecretsDialog] = useState(false)
   const [showTrialDialog, setShowTrialDialog] = useState(false)
 
-  const { data: status, isLoading, error } = useSystemStatus()
+  const {
+    data: status,
+    isLoading,
+    isFetching: statusFetching,
+    error,
+  } = useSystemStatus()
   const { data: initStatus, isLoading: initLoading } = useInitStatus()
   const { envRequirements, isTrialSource, trialStatus } = useTrialSource()
 
@@ -268,7 +273,9 @@ export function ConfigWarning() {
       : undefined
 
   useEffect(() => {
-    if (isLoading || initLoading || !status || !initStatus) return
+    // A refetch in flight may be about to report a target that was just added.
+    if (isLoading || statusFetching || initLoading || !status || !initStatus)
+      return
     if (
       location.pathname === '/' ||
       location.pathname === '/onboarding' ||
@@ -288,7 +295,15 @@ export function ConfigWarning() {
       // back there after connecting (configure-and-identity open-dep #4).
       navigate({ to: '/onboarding', search: { redirect: location.pathname } })
     }
-  }, [isLoading, initLoading, status, initStatus, location.pathname, navigate])
+  }, [
+    isLoading,
+    statusFetching,
+    initLoading,
+    status,
+    initStatus,
+    location.pathname,
+    navigate,
+  ])
 
   // Reset dismissed state when status changes
   useEffect(() => {
@@ -319,11 +334,16 @@ export function ConfigWarning() {
   // The home page stays welcome-clean (the Ask card carries its own "needs a
   // key" chip), and the demo runs entirely without an Anthropic key.
   // The audit page runs its own AI-key gate (preflight row + trial sign-up),
+  // and the monitoring pages carry sign-in on the database's monitoring state,
   // so the global banner would say the same thing twice there.
   if (
     location.pathname === '/' ||
     location.pathname.startsWith('/demo') ||
-    location.pathname.startsWith('/audit')
+    location.pathname.startsWith('/audit') ||
+    location.pathname.startsWith('/db') ||
+    location.pathname.startsWith('/database') ||
+    location.pathname.startsWith('/inbox') ||
+    location.pathname.startsWith('/agent-activity')
   ) {
     return null
   }

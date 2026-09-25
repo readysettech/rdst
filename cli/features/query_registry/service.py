@@ -411,6 +411,33 @@ def parameter_variants(
     return variants
 
 
+def _restore_mysql_table_case(queries: list[Any], target_config: dict[str, Any]) -> None:
+    """Library text from MySQL digests can carry upper-cased table names; match them to the
+    target's tables before running. Best effort: a failed catalog read leaves SQL as is."""
+    from features.query_registry.statement_stats import (
+        MYSQL_TABLE_NAMES_SQL,
+        mysql_table_case,
+    )
+    from shared.db_connection import close_connection, create_direct_connection
+
+    try:
+        conn = create_direct_connection(target_config, connect_timeout=5)
+    except Exception:
+        return
+    try:
+        cursor = conn.cursor()
+        cursor.execute(MYSQL_TABLE_NAMES_SQL)
+        tables = [next(iter(row.values())) if isinstance(row, dict) else row[0]
+                  for row in cursor.fetchall()]
+        cursor.close()
+    except Exception:
+        return
+    finally:
+        close_connection(conn)
+    for query in queries:
+        query.variants = tuple(mysql_table_case(sql, tables) for sql in query.variants)
+
+
 def _has_unresolved_placeholders(sql: str) -> bool:
     """True when ``sql`` still carries a placeholder rather than a value."""
     # Scan code only: a substituted value may legitimately spell `?` or `$1`
@@ -541,6 +568,13 @@ class QueryService:
                 readyset=readyset,
             )
 
+        def _audit_benchmark(event: QueryBenchmarkEvent) -> None:
+            from shared.agent_activity.recorder import record_benchmark
+
+            record_benchmark(target, event, mode=mode, lanes=lanes,
+                             duration_seconds=duration_seconds, concurrency=concurrency,
+                             interval_ms=interval_ms, statement_timeout_ms=statement_timeout_ms)
+
         loop = asyncio.get_event_loop()
         future = loop.run_in_executor(None, run_sync)
 
@@ -551,6 +585,7 @@ class QueryService:
                     yield progress
 
                     if progress.type in ("complete", "error"):
+                        _audit_benchmark(progress)
                         break
                 except Empty:
                     if future.done():
@@ -558,6 +593,8 @@ class QueryService:
                             try:
                                 progress = progress_queue.get_nowait()
                                 yield progress
+                                if progress.type in ("complete", "error"):
+                                    _audit_benchmark(progress)
                             except Empty:
                                 break
                         break
@@ -982,6 +1019,14 @@ class QueryService:
                     code="benchmark_target_not_found",
                 )
 
+            readyset_only = requested_lanes == (LANE_READYSET,)
+            if readyset_only and (readyset is None or not readyset.available):
+                raise BenchmarkValidationError(
+                    readyset.detail if readyset else "The Readyset sandbox isn't available.",
+                    code="benchmark_readyset_unavailable",
+                )
+            execution_config = readyset.config if readyset_only else target_config
+
             # With the target settled, a stored query can be scoped to it and
             # rotated across the values that target knows about. A request that
             # brought its own SQL is left exactly as it was sent.
@@ -1002,12 +1047,14 @@ class QueryService:
                         rq.entry,
                         rq.variants[0],
                         target,
-                        target_config,
+                        execution_config,
                         parameter_sets,
                     )
                 )
                 scoped_queries.append(rq)
             resolved_queries = scoped_queries
+            if str(execution_config.get("engine", "")).lower() == "mysql":
+                _restore_mysql_table_case(resolved_queries, execution_config)
 
             if not resolved_queries:
                 raise BenchmarkValidationError(
@@ -1119,17 +1166,9 @@ class QueryService:
                         )
                     )
             if not lane_runs:
-                # The Readyset lane is an addition to a run, never the whole
-                # of one: a run left with no lane measures the origin.
-                lane_runs.append(
-                    _LaneRun(
-                        LANE_ORIGIN,
-                        target_config,
-                        resolved_queries,
-                        _LoadTestEvidenceRecorder(
-                            target, LANE_TAGS[LANE_ORIGIN]
-                        ),
-                    )
+                raise BenchmarkValidationError(
+                    (readyset_setup or {}).get("detail") or "Readyset couldn't run these queries.",
+                    code="benchmark_readyset_unavailable",
                 )
             evidence_recorders.extend(run.evidence for run in lane_runs)
             # Back-compatible reporting: the top-level tallies and the
@@ -1159,7 +1198,7 @@ class QueryService:
                 # the headline QPS while latency is success-only.
                 qps = total_succ / elapsed if elapsed > 0 else 0
                 queries_list = list(models.values())
-                if len(lane_runs) > 1:
+                if len(lane_runs) > 1 or primary.lane == LANE_READYSET:
                     for model in queries_list:
                         model.lanes = {
                             lane: _lane_stats_payload(lane_models[model.query_hash])

@@ -646,7 +646,7 @@ async function probeAndStream(runId: string): Promise<void> {
       if (response.status === 404) {
         updateRun(runId, {
           status: 'interrupted',
-          message: 'Interrupted — run again.',
+          message: 'Interrupted - run again.',
         })
         return
       }
@@ -786,7 +786,7 @@ async function streamRun(runId: string): Promise<void> {
         if (response.status === 404) {
           updateRun(runId, {
             status: 'interrupted',
-            message: 'Interrupted — run again.',
+            message: 'Interrupted - run again.',
           })
           return
         }

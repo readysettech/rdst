@@ -298,11 +298,8 @@ test('states: a failed target list degrades loudly', async ({
   )
 })
 
-/**
- * MG-01 - the AI gate blocks the features that need a provider, not the
- * router: routes with no LLM in them still render themselves.
- */
-test('states: an unconnected AI provider blocks features, not routes', async ({
+/** MG-01 - feature routes open after the full-screen AI provider choice. */
+test('states: feature routes show the sign-in chooser until a provider is configured', async ({
   page,
 }) => {
   await setup(page)
@@ -323,23 +320,53 @@ test('states: an unconnected AI provider blocks features, not routes', async ({
     })
   )
 
-  for (const path of ['/guards', '/configure', '/cache', '/audit']) {
-    await page.goto(path)
+  for (const route of MAIN) {
+    await page.goto(route.path)
+    // Target setup stays open for local monitoring.
+    if (route.id === 'configure') {
+      await expect(mainContent(page)).toBeVisible()
+      await expect(
+        page.getByRole('heading', {
+          name: 'Choose how RDST uses AI',
+          exact: true,
+        })
+      ).toHaveCount(0)
+      continue
+    }
     await expect(
-      mainContent(page).locator('h1'),
-      `${path} was replaced by the provider chooser`
-    ).toHaveCount(1)
+      page.getByRole('heading', {
+        name: 'Choose how RDST uses AI',
+        exact: true,
+      })
+    ).toBeVisible()
+    await expect(
+      page.getByTestId('ai-access-sign-in').getByRole('button', {
+        name: 'Sign up or sign in',
+        exact: true,
+      })
+    ).toBeVisible()
+    await expect(
+      page.getByTestId('ai-access-own-key').getByRole('button', {
+        name: 'Add Anthropic key',
+        exact: true,
+      })
+    ).toBeVisible()
+    await expect(mainContent(page)).toHaveCount(0)
   }
 
-  // The one route that does need a provider asks for it inline, in place.
-  await page.goto('/ask')
-  await expect(
-    page.getByRole('heading', { name: 'Ask', level: 1 })
-  ).toBeVisible()
-  await expect(
-    page.getByText('Connect an AI provider to use this')
-  ).toBeVisible()
-
-  // Restore the satisfied gate for whatever runs next in this worker.
   await mockAiKeyReady(page)
+  for (const route of MAIN) {
+    await page.goto(route.path)
+    await expect(mainContent(page)).toBeVisible()
+    await expect(
+      mainContent(page).getByRole('heading', { level: 1 })
+    ).toBeVisible()
+    await expect(
+      page.getByRole('heading', {
+        name: 'Choose how RDST uses AI',
+        exact: true,
+      })
+    ).toHaveCount(0)
+    await expect(page).toHaveURL(new RegExp(`${route.path}$`))
+  }
 })

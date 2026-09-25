@@ -898,7 +898,7 @@ describe('background run store', () => {
     await waitFor(() =>
       expect(run('schema_annotation_gone')).toMatchObject({
         status: 'interrupted',
-        message: 'Interrupted — run again.',
+        message: 'Interrupted - run again.',
       })
     )
     expect(fetchMock).not.toHaveBeenCalled()

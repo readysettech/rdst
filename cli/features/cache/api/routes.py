@@ -104,6 +104,8 @@ class SandboxStatusResponse(BaseModel):
     healthy: bool
     docker_installed: bool
     docker_running: bool
+    # What a readiness wait currently sees ("Readyset isn't answering yet after 45 s: ...").
+    readiness_note: Optional[str] = None
 
 
 class SandboxPrewarmRequest(BaseModel):
@@ -333,3 +335,144 @@ async def update_cache_compare_load(
     return CacheCompareLoadResponse(
         run_id=run_id, concurrency=controller.concurrency
     )
+
+
+# Compare progress for the query row and the run list (CONTRACT.md "Compare against Readyset")
+
+COMPARE_STAGES = {
+    "queued": ("queued", "Waiting for the Readyset sandbox"),
+    "preparing_sandbox": ("preparing", "Checking the Readyset sandbox"),
+    "replacing_sandbox": ("preparing", "Replacing the Readyset sandbox"),
+    "downloading_readyset": ("image_pull", "Downloading the Readyset image"),
+    "starting_readyset": ("cache_start", "Starting Readyset"),
+    "waiting_for_readyset": ("cache_start", "Waiting for Readyset to accept SQL"),
+    "checking_query": ("cache_create", "Checking Readyset can cache the query"),
+    "creating_test_cache": ("cache_create", "Creating the cache"),
+    "warming": ("warm", "Warming the cache"),
+    "validating_results": ("warm", "Checking both sides return the same rows"),
+    "benchmarking_origin": ("run", "Running the database side"),
+    "benchmarking_readyset": ("run", "Running the Readyset side"),
+    "speed_test": ("run", "Running both sides"),
+    "cleaning_up": ("run", "Cleaning up"),
+}
+
+
+class CompareRunResult(BaseModel):
+    speedup: Optional[float] = None
+    speedup_label: Optional[str] = None
+    origin_ms: Optional[float] = None
+    readyset_ms: Optional[float] = None
+    winner: Optional[str] = None
+
+
+class CompareRunSummary(BaseModel):
+    run_id: str
+    kind: str
+    target: str
+    status: str
+    query_hash: Optional[str] = None
+    label: Optional[str] = None
+    started_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    stage: str
+    stage_label: str
+    message: Optional[str] = None
+    percent: Optional[int] = None
+    waiting_for: Optional[str] = None
+    # Queued runs only: how many runs are ahead (0 = next once the sandbox is free).
+    queue_position: Optional[int] = None
+    error: Optional[str] = None
+    result: Optional[CompareRunResult] = None
+
+
+class CompareRunPage(BaseModel):
+    runs: list[CompareRunSummary]
+    sandbox: Optional[SandboxStatusResponse] = None
+
+
+def speedup_label(speedup: Optional[float]) -> Optional[str]:
+    if not speedup:
+        return None
+    if speedup >= 1:
+        return f"{speedup:.1f}x faster"
+    return f"{1 / speedup:.1f}x slower"
+
+
+def _mean_ms(side: dict) -> Optional[float]:
+    for key in ("mean_ms", "p50_ms", "median_ms", "mean"):
+        if isinstance(side.get(key), (int, float)):
+            return float(side[key])
+    return None
+
+
+def summarize_compare_run(run: dict, sandbox: Optional[dict]) -> CompareRunSummary:
+    """One run's current stage, from its own events, plus what it waits for."""
+    events = run["events"]
+    progress = [event for event in events if event["event"] == "progress"]
+    last = progress[-1]["data"] if progress else {}
+    raw_stage = str(last.get("stage") or "queued")
+    stage, label = COMPARE_STAGES.get(raw_stage, ("run", str(last.get("message") or raw_stage)))
+    error = next((str(event["data"].get("message") or event["data"].get("error") or "")
+                  for event in reversed(events) if event["event"] == "error"), None)
+    result = None
+    for event in reversed(events):
+        data = event["data"]
+        if event["event"] in ("cache_compare_complete", "cache_run_complete"):
+            speedup = data.get("speedup_mean") or data.get("speedup_median")
+            origin = data.get("origin") or data.get("origin_stats") or {}
+            readyset = data.get("readyset") or data.get("cache_stats") or {}
+            result = CompareRunResult(speedup=speedup, speedup_label=speedup_label(speedup),
+                                      origin_ms=_mean_ms(origin), readyset_ms=_mean_ms(readyset),
+                                      winner=data.get("winner"))
+            break
+    status = run["status"]
+    if status in ("done", "partial"):
+        stage, label = "done", "Done"
+    elif status in ("failed", "cancelled"):
+        stage, label = status, "Failed" if status == "failed" else "Cancelled"
+    waiting_for = None
+    if stage == "queued" and sandbox:
+        purpose = sandbox.get("lease_purpose")
+        waiting_for = (
+            f"The sandbox is busy ({purpose or sandbox.get('phase')})"
+            + (f". {sandbox['readiness_note']}" if sandbox.get("readiness_note") else "")
+            if sandbox.get("lease_owner") else None)
+    elif stage == "cache_start" and sandbox and sandbox.get("readiness_note"):
+        waiting_for = sandbox["readiness_note"]
+    metadata = run["metadata"]
+    return CompareRunSummary(
+        run_id=run["run_id"], kind=run["kind"], target=run["target"], status=status,
+        query_hash=metadata.get("query_hash"), label=metadata.get("label"),
+        started_at=events[0]["ts"] if events else None,
+        updated_at=events[-1]["ts"] if events else None, stage=stage, stage_label=label,
+        message=last.get("message"), percent=last.get("percent"), waiting_for=waiting_for,
+        error=error or None, result=result)
+
+
+@compare_router.get("/compare-runs", response_model=CompareRunPage)
+async def list_compare_runs(target: str, query_hash: Optional[str] = None) -> CompareRunPage:
+    """In-flight and recent Compare and Benchmark runs for a target, newest first.
+
+    Runs are process-local; each finished Compare also records its outcome on the query
+    (`last_compare` on monitor rows), which survives restarts.
+    """
+    from shared.deploy.sandbox_manager import sandbox_manager
+
+    diagnostics, runtime = await asyncio.gather(
+        sandbox_manager.diagnostics(), _docker_runtime_status())
+    sandbox = {**diagnostics, "docker_installed": bool(runtime.get("installed")),
+               "docker_running": bool(runtime.get("running"))}
+    everywhere = [summarize_compare_run(run, sandbox)
+                  for run in _run_registry.list_runs(("cache_compare", "speed_test"))]
+    # One sandbox serves every target, so the queue is ordered across all of them.
+    queued = sorted((run for run in everywhere if run.stage == "queued"),
+                    key=lambda run: (run.started_at or "", run.run_id))
+    positions = {run.run_id: index for index, run in enumerate(queued)}
+    runs = []
+    for run in everywhere:
+        if run.target != target or (query_hash is not None and run.query_hash != query_hash):
+            continue
+        if run.run_id in positions:
+            run.queue_position = positions[run.run_id]
+        runs.append(run)
+    return CompareRunPage(runs=runs, sandbox=SandboxStatusResponse(**sandbox))

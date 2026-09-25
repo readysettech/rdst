@@ -270,3 +270,31 @@ describe('AnalysisResults', () => {
     expect(screen.queryByText('Verification incomplete')).toBeNull()
   })
 })
+
+it.each([
+  'explain',
+  'json',
+])('shows planner estimates for %s without measured claims', (plan_format) => {
+  const { container } = render(
+    <AnalysisResults
+      state="complete"
+      results={{
+        type: 'complete',
+        success: true,
+        explain_results: {
+          success: true,
+          database_engine: 'postgresql',
+          plan_format,
+          execution_time_ms: 49.44,
+          rows_examined: 1000,
+          rows_returned: 10,
+          cost_estimate: 250,
+        },
+      }}
+    />
+  )
+  expect(screen.getByText('Estimated performance')).toBeTruthy()
+  expect(screen.getByText('Estimated rows scanned → returned')).toBeTruthy()
+  expect(screen.queryByText('Execution time')).toBeNull()
+  expect(container.textContent).not.toMatch(/measured|49\.44/i)
+})

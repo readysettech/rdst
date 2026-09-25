@@ -82,7 +82,7 @@ export function AskComposer({
                     className="size-4 shrink-0 text-content-warning-soft"
                   />
                   <Text level="caption" className="text-content-warning-soft">
-                    No database selected — choose one before asking
+                    No database selected - choose one before asking
                   </Text>
                 </HStack>
               )

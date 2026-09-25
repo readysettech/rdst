@@ -1,0 +1,221 @@
+/* Monitor kit motion. Every animation collapses to opacity or nothing under
+   prefers-reduced-motion. */
+
+.mk-chart text {
+  font-family: var(--font-sans, system-ui), system-ui, sans-serif;
+}
+
+/* A chart never anchors the page's scroll. Hovering a row redraws the chart's bands,
+   and Chrome would move the page to keep a redrawn chart still; the rows then slide
+   under a parked pointer, the hover changes, the chart redraws, and the page shakes. */
+.mk-chart {
+  overflow-anchor: none;
+}
+
+@keyframes mk-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+.mk-draw {
+  stroke-dasharray: 1 1;
+  animation: mk-draw 600ms var(--ease-out) both;
+}
+
+@keyframes mk-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.mk-fade {
+  animation: mk-fade 300ms var(--ease-out) both;
+}
+
+@keyframes mk-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.mk-enter {
+  animation: mk-enter 300ms var(--ease-out) both;
+}
+
+/* One ring per collector pulse (heartbeat, chart end dot). */
+@keyframes mk-ring {
+  from { transform: scale(1); opacity: 0.6; }
+  to { transform: scale(3.2); opacity: 0; }
+}
+.mk-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mk-ring 500ms var(--ease-out) both;
+}
+
+@keyframes mk-dot-pulse {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.7); }
+  100% { transform: scale(1); }
+}
+.mk-dot-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mk-dot-pulse 500ms var(--ease-out) both;
+}
+
+/* Digit roll for live numbers. */
+@keyframes mk-roll-in {
+  from { transform: translateY(0.6em); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.mk-roll {
+  display: inline-block;
+  animation: mk-roll-in 300ms var(--ease-out) both;
+}
+
+/* Database glyph: particles stream into the cylinder mouth. */
+@keyframes mk-particle {
+  0% { transform: translateY(-14px); opacity: 0; }
+  20% { opacity: 1; }
+  85% { opacity: 0.9; }
+  100% { transform: translateY(12px); opacity: 0; }
+}
+.mk-particle {
+  animation-name: mk-particle;
+  animation-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  animation-iteration-count: infinite;
+}
+.mk-glyph-paused .mk-particle {
+  animation-play-state: paused;
+}
+
+@keyframes mk-glyph-beat {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+.mk-glyph-beat {
+  transform-origin: center;
+  animation: mk-glyph-beat 500ms var(--ease-out) both;
+}
+
+@keyframes mk-shimmer {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mk-draw { animation: mk-fade 300ms linear both; stroke-dasharray: none; }
+  .mk-enter, .mk-roll { animation: mk-fade 200ms linear both; }
+  .mk-ring, .mk-dot-pulse, .mk-glyph-beat { animation: none; }
+  .mk-particle { animation: none; opacity: 0; }
+}
+
+/* Load bands (StackedLoadChart, query rows). Identity colors for the top 8 only, each
+   distinct; everything else is neutral grey. No red: color here is identity. */
+:root {
+  --mk-band-1: var(--violet-light-11);
+  --mk-band-2: var(--blue-light-11);
+  --mk-band-3: var(--orange-light-11);
+  --mk-band-4: var(--plum-light-11);
+  --mk-band-5: var(--grass-light-11);
+  --mk-band-6: var(--yellow-light-11);
+  --mk-band-7: var(--brown-light-11);
+  --mk-band-8: var(--indigo-light-11);
+  --mk-band-other: var(--sand-light-9);
+}
+[data-color-mode="dark"] {
+  --mk-band-1: var(--violet-dark-11);
+  --mk-band-2: var(--blue-dark-11);
+  --mk-band-3: var(--orange-dark-11);
+  --mk-band-4: var(--plum-dark-11);
+  --mk-band-5: var(--grass-dark-11);
+  --mk-band-6: var(--yellow-dark-11);
+  --mk-band-7: var(--brown-dark-11);
+  --mk-band-8: var(--indigo-dark-11);
+  --mk-band-other: var(--sand-dark-9);
+}
+
+/* Left-to-right reveal for chart draw-in (a clip rect scales from 0). */
+@keyframes mk-reveal {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+.mk-reveal {
+  transform-box: fill-box;
+  transform-origin: left center;
+  animation: mk-reveal 700ms var(--ease-out) both;
+}
+
+/* Pulse halo: the countdown ring around the heartbeat glyph. */
+@keyframes mk-halo-ripple {
+  from { transform: scale(1); opacity: 0.55; }
+  to { transform: scale(1.32); opacity: 0; }
+}
+.mk-halo-ripple {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mk-halo-ripple 900ms var(--ease-out) both;
+}
+@keyframes mk-halo-flash {
+  0% { opacity: 1; stroke-width: 6; }
+  100% { opacity: 0; stroke-width: 3.5; }
+}
+.mk-halo-flash {
+  animation: mk-halo-flash 700ms var(--ease-out) both;
+}
+@keyframes mk-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.mk-breathe {
+  animation: mk-breathe 1.8s var(--ease-in-out) infinite;
+}
+
+/* Analyze run: shimmer across a card that is being analyzed. */
+.mk-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.mk-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    color-mix(in oklab, var(--color-content-layout-1) 7%, transparent) 50%,
+    transparent 80%
+  );
+  animation: mk-shimmer 1.6s var(--ease-in-out) infinite;
+  pointer-events: none;
+}
+@keyframes mk-caret {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.mk-caret {
+  display: inline-block;
+  width: 0.5ch;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: -0.12em;
+  background: currentColor;
+  animation: mk-caret 1s steps(1) infinite;
+}
+@keyframes mk-flow {
+  from { background-position: 0 0; }
+  to { background-position: 24px 0; }
+}
+.mk-flow {
+  background-image: repeating-linear-gradient(
+    90deg,
+    currentColor 0 8px,
+    transparent 8px 12px,
+    currentColor 12px 24px
+  );
+  background-size: 24px 100%;
+  animation: mk-flow 700ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mk-reveal { animation: mk-fade 300ms linear both; }
+  .mk-halo-ripple, .mk-halo-flash, .mk-breathe, .mk-caret, .mk-flow { animation: none; }
+  .mk-shimmer::after { animation: none; opacity: 0; }
+}

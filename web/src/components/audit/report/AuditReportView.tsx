@@ -5,7 +5,6 @@ import { Text } from '@rs/ui-new/text'
 import { useState } from 'react'
 import {
   formatDate,
-  formatMoney,
   formatReportNumber,
   formatSizeMb,
   formatStatisticsWindow,
@@ -218,42 +217,6 @@ export function AuditReportView({
                 />
                 <InstanceClassValue report={report} />
               </HStack>
-              {sizing.potential_savings_usd != null &&
-              sizing.potential_savings_usd > 0 ? (
-                <Text level="caption" className="text-content-positive-soft">
-                  Save ~{formatMoney(sizing.potential_savings_usd)}/mo
-                  {sizing.suggested_instance_class
-                    ? ` on ${sizing.suggested_instance_class}`
-                    : ''}
-                </Text>
-              ) : sizing.explanation ? (
-                <Text
-                  level="caption"
-                  className="text-content-layout-3 line-clamp-2"
-                >
-                  {sizing.explanation}
-                </Text>
-              ) : null}
-              {sizing.current_monthly_cost_usd != null && (
-                <Text level="caption" className="text-content-layout-2">
-                  Current {formatMoney(sizing.current_monthly_cost_usd)}/mo
-                  {sizing.suggested_monthly_cost_usd != null
-                    ? ` · Suggested ${formatMoney(sizing.suggested_monthly_cost_usd)}/mo`
-                    : ''}
-                </Text>
-              )}
-              {sizing.readyset_projected_savings_usd != null && (
-                <Text level="caption" className="text-content-positive-soft">
-                  Readyset projected savings{' '}
-                  {formatMoney(sizing.readyset_projected_savings_usd)}/mo
-                  {sizing.readyset_projected_class
-                    ? ` · ${sizing.readyset_projected_class}`
-                    : ''}
-                  {sizing.readyset_projected_cost_usd != null
-                    ? ` at ${formatMoney(sizing.readyset_projected_cost_usd)}/mo`
-                    : ''}
-                </Text>
-              )}
               {sizing.explanation && (
                 <Text level="caption" className="text-content-layout-3">
                   {sizing.explanation}

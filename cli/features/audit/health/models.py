@@ -22,6 +22,9 @@ class TableHealth:
     n_mod_since_analyze: Optional[int] = None
     size_bytes: Optional[int] = None
     status: str = "healthy"  # healthy | warn | crit
+    # MySQL: InnoDB purges old row versions itself, so there are no dead rows; what a
+    # rebuild (OPTIMIZE TABLE) returns is free space, and dead_ratio_pct is its share.
+    free_bytes: Optional[int] = None
 
 
 @dataclass
@@ -36,6 +39,9 @@ class VacuumBloatSection:
     autovacuum_max_workers: Optional[int] = None
     autovacuum_enabled: Optional[bool] = None
     summary_status: str = "healthy"
+    # MySQL: undo records InnoDB hasn't purged yet (trx_rseg_history_len); it grows while
+    # long transactions keep old row versions alive.
+    history_list_length: Optional[int] = None
 
 
 @dataclass
@@ -168,6 +174,7 @@ class HealthReport:
     connections: Optional[ConnectionAnalysisSection] = None
     config_audit: Optional[ConfigAuditSection] = None
     replication: Optional[ReplicationHealthSection] = None
+    sequential_scans: Optional[Dict[str, Any]] = None
     collection_error: Optional[str] = None
     section_errors: Dict[str, str] = field(default_factory=dict)
 

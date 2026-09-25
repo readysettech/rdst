@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import sqlite3
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -58,6 +61,26 @@ def register_error_handlers(app: FastAPI) -> None:
     working, while ``code`` and ``message`` are added for the shared contract.
     The catch-all handler never echoes ``str(exc)`` as the message.
     """
+    from shared.query_registry.observation_store import StorageError
+
+    @app.exception_handler(StorageError)
+    async def _storage_exception_handler(request: Request, exc: StorageError) -> JSONResponse:
+        return JSONResponse(status_code=503,
+                            content=_error_envelope("storage_unavailable", str(exc), str(exc)))
+
+    @app.exception_handler(sqlite3.OperationalError)
+    async def _sqlite_exception_handler(
+        request: Request, exc: sqlite3.OperationalError
+    ) -> JSONResponse:
+        # Lock contention outlasting the stores' retries is a transient overload, not a
+        # server fault: the client is told to retry instead of seeing an internal error.
+        if "locked" in str(exc) or "busy" in str(exc):
+            logging.getLogger("rdst.api").warning(
+                "Local storage busy on %s %s", request.method, request.url.path)
+            message = "Local storage is busy with a large write. Try again in a moment."
+            return JSONResponse(status_code=503, headers={"Retry-After": "2"},
+                                content=_error_envelope("storage_busy", message, message))
+        return await _unhandled_exception_handler(request, exc)
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_exception_handler(
@@ -103,14 +126,20 @@ def register_error_handlers(app: FastAPI) -> None:
         logging.getLogger("rdst.api").exception(
             "Unhandled %s on %s %s", type(exc).__name__, request.method, request.url.path
         )
+        # The route template, not the URL: paths carry target names.
+        route = getattr(request.scope.get("route"), "path", None)
         try:
             from shared.telemetry import telemetry
 
             telemetry.track_error(
-                "api", exc, context={"path": request.url.path, "method": request.method},
+                "api", exc, context={"path": route or "unmatched", "method": request.method},
             )
         except Exception:
             pass
+        from shared import product_telemetry
+
+        product_telemetry.report_error(
+            "api", exc, handled=False, extra={"route": route, "method": request.method})
         message = "An unexpected server error occurred."
         return JSONResponse(
             status_code=500,
@@ -126,18 +155,46 @@ async def lifespan(app: FastAPI):
 
     retire_legacy_trial_credentials()
 
-    # The observation scheduler starts here and only here (research Q5):
-    # the module is reachable from no CLI entry point's import graph, and
-    # the flag defaults off until the Fleet validation matrix passes.
+    # Logged errors and crashed tasks in this process become app_error events (when
+    # telemetry is on), and each monitored database sends a daily summary.
+    from features.monitor.telemetry import DailySummaries
+    from shared import product_telemetry
+
+    product_telemetry.install_error_capture()
+    product_telemetry.install_asyncio_capture(asyncio.get_running_loop())
+    daily_summaries = DailySummaries().start()
+
+    # A large cache.db from an older install is pruned and rewritten once, off the startup
+    # path, so later pruning can shrink it.
+    try:
+        from features.query_registry.discovery import OBSERVATION_RETENTION_SECONDS
+        from shared.query_registry.cache_compaction import start_background_compaction
+
+        start_background_compaction(keep_seconds=OBSERVATION_RETENTION_SECONDS)
+    except Exception:
+        logging.getLogger(__name__).warning("cache.db compaction didn't start", exc_info=True)
+
+    # Start observation for targets already opted in. The settings route
+    # starts it on first enable after startup; the legacy flag still enables
+    # scheduling for all configured targets.
     from features.query_registry.scheduler import (
         ObservationScheduler,
+        monitored_targets,
         observation_scheduler_enabled,
     )
     from shared.deploy.sandbox_manager import sandbox_manager
 
     await sandbox_manager.start()
     scheduler: ObservationScheduler | None = None
-    discovery_coordinator = None
+    monitor_loop = None
+    analyze_queue = None
+    report_scheduler = None
+    if app is not None:
+        app.state.monitor_scheduler = None
+        app.state.monitor_loop = None
+        app.state.analyze_queue = None
+        app.state.report_scheduler = None
+        app.state.report_tasks = set()
     from features.query_registry.assessment import query_assessment_worker
 
     await query_assessment_worker.start()
@@ -146,16 +203,66 @@ async def lifespan(app: FastAPI):
     # go through uvicorn's console logger to stay operator-visible.
     console = logging.getLogger("uvicorn.error")
     try:
-        if observation_scheduler_enabled():
+        if observation_scheduler_enabled() or monitored_targets():
             from features.query_registry.discovery import query_discovery
 
-            discovery_coordinator = query_discovery
-            scheduler = ObservationScheduler(discovery_coordinator)
+            scheduler = ObservationScheduler(query_discovery)
             await scheduler.start()
-            console.info("Observation scheduler enabled (RDST_OBSERVATION_SCHEDULER)")
+            if app is not None:
+                app.state.monitor_scheduler = scheduler
+            console.info("Observation scheduler enabled")
+        if monitored_targets():
+            from features.monitor.loop import start_monitor_loop
+            from features.monitor.analyze_queue import start_analyze_queue
+            from features.monitor.report import ReportScheduler
+
+            monitor_loop = await start_monitor_loop(scheduler=scheduler)
+            analyze_queue = await start_analyze_queue()
+            report_scheduler = await ReportScheduler().start()
+            if app is not None:
+                app.state.monitor_loop = monitor_loop
+                app.state.analyze_queue = analyze_queue
+                app.state.report_scheduler = report_scheduler
+        if analyze_queue is None:
+            from features.monitor.analyze_queue import start_analyze_queue
+            from shared.monitor.monitor_store import MonitorStore
+
+            store = MonitorStore()
+            pending = []
+            if store.path.exists():
+                try:
+                    pending = await asyncio.to_thread(
+                        store.read,
+                        "SELECT 1 FROM analyze_job WHERE reason='user' "
+                        "AND (state IN ('queued','running') OR state='failed' AND finished_at>=?) "
+                        "LIMIT 1", (int(time.time()) - 86400,))
+                except Exception:
+                    console.warning("Pending deep analyses couldn't be restored: monitoring storage "
+                                    "is unavailable", exc_info=True)
+            if pending:
+                analyze_queue = await start_analyze_queue()
+                if app is not None:
+                    app.state.analyze_queue = analyze_queue
         yield
     finally:
+        if app is not None:
+            scheduler = app.state.monitor_scheduler
+            monitor_loop = app.state.monitor_loop
+            analyze_queue = app.state.analyze_queue
+            report_scheduler = app.state.report_scheduler
+            report_tasks = app.state.report_tasks
+            for task in list(report_tasks):
+                task.cancel()
+            if report_tasks:
+                await asyncio.gather(*report_tasks, return_exceptions=True)
+        if report_scheduler is not None:
+            await report_scheduler.stop()
+        if analyze_queue is not None:
+            await analyze_queue.stop()
+        if monitor_loop is not None:
+            await monitor_loop.stop()
         await query_assessment_worker.stop()
+        await daily_summaries.stop()
         # Shutdown order (research Q5): the scheduler stops admitting,
         # cancels in-flight collections, and releases its leases before
         # anything else is torn down.
@@ -164,7 +271,9 @@ async def lifespan(app: FastAPI):
             # Last-subscriber disconnects deliberately preserve scheduler
             # resources. Lifespan shutdown is therefore the owner that closes
             # collector connections and the process-wide observation store.
-            await discovery_coordinator.close()
+            from features.query_registry.discovery import query_discovery
+
+            await query_discovery.close()
             console.info("Observation scheduler stopped")
         await sandbox_manager.stop()
 
@@ -361,6 +470,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
 
     from features.account.api import routes as account
     from features.allowlist.api import routes as allowlist
+    from features.agent_activity.api import routes as agent_activity
     from features.analyze.api import routes as analyze
     from features.ask.api import routes as ask
     from features.audit.api import routes as audit
@@ -373,6 +483,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     from features.init.api import routes as init
     from features.interactive.api import routes as interactive
     from features.query_registry.api import routes as registry
+    from features.monitor.api import routes as monitor
     from features.scan.api import routes as scan
     from features.schema.api import routes as schema
     from features.top.api import routes as top
@@ -389,10 +500,12 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
         settings,
         setup_progress,
         status,
+        telemetry,
     )
 
     app.include_router(account.router, prefix="/api", tags=["account"])
     app.include_router(allowlist.router, prefix="/api")
+    app.include_router(agent_activity.router, prefix="/api", tags=["agent-activity"])
     app.include_router(analyze.router, prefix="/api")
     app.include_router(audit.router, prefix="/api", tags=["audit"])
     app.include_router(bootstrap.router, prefix="/api", tags=["bootstrap"])
@@ -410,6 +523,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     app.include_router(env.router, prefix="/api", tags=["env"])
     app.include_router(schema.router, prefix="/api")
     app.include_router(registry.router, prefix="/api")
+    app.include_router(monitor.router, prefix="/api/monitor", tags=["monitor"])
     app.include_router(top.router, prefix="/api", tags=["top"])
     app.include_router(tunnel.router, prefix="/api", tags=["tunnel"])
     app.include_router(init.router, prefix="/api", tags=["init"])
@@ -417,6 +531,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     app.include_router(report.router, prefix="/api", tags=["report"])
     app.include_router(runs.router, prefix="/api", tags=["runs"])
     app.include_router(settings.router, prefix="/api", tags=["settings"])
+    app.include_router(telemetry.router, prefix="/api", tags=["telemetry"])
     app.include_router(trial.router, prefix="/api", tags=["trial"])
     app.include_router(scan.router, prefix="/api", tags=["scan"])
     app.include_router(dev.router, prefix="/api", tags=["dev"])

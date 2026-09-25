@@ -8,6 +8,34 @@ function query(hash: string, isNew = false): QueryRegistryEntry {
 }
 
 describe('useStableQueryList', () => {
+  it.each([false, true])(
+    'reveals the first discovered rows after an empty response (loading: %s)',
+    (isLoading) => {
+      const { result, rerender } = renderHook(
+        ({ queries, isLoading }) =>
+          useStableQueryList({ queries, signature: 'all', isLoading }),
+        { initialProps: { queries: [] as QueryRegistryEntry[], isLoading } }
+      )
+
+      rerender({ queries: [], isLoading: false })
+      rerender({ queries: [query('discovered', true)], isLoading: false })
+
+      expect(result.current.visibleQueries.map((entry) => entry.hash)).toEqual([
+        'discovered',
+      ])
+      expect(result.current.pendingCount).toBe(0)
+
+      rerender({
+        queries: [query('later', true), query('discovered', true)],
+        isLoading: false,
+      })
+      expect(result.current.visibleQueries.map((entry) => entry.hash)).toEqual([
+        'discovered',
+      ])
+      expect(result.current.pendingCount).toBe(1)
+    }
+  )
+
   it('holds newly discovered rows until they are explicitly revealed', () => {
     const { result, rerender } = renderHook(
       ({ queries }) =>

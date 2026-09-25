@@ -41,7 +41,7 @@ export function DigitalOceanConnectionPanel({
       Logo={DigitalOceanLogo}
       client={client}
       pitch="Import your managed Postgres and MySQL databases"
-      blurb="Import your managed Postgres and MySQL databases — sign in and we list them as targets."
+      blurb="Import your managed Postgres and MySQL databases - sign in and we list them as targets."
       connectedLine={() => 'Connected to DigitalOcean with OAuth'}
       rejectedTitle="DigitalOcean rejected the saved credentials"
       enabled={enabled}

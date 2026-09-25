@@ -151,7 +151,7 @@ def _inject_password(script: str, password: str) -> str:
     if not injected:
         raise RuntimeError(
             "Could not inject password into deployment script. "
-            "Template may have changed — 'read -s' with DB_PASSWORD not found."
+            "Template may have changed - 'read -s' with DB_PASSWORD not found."
         )
 
     return '\n'.join(new_lines)

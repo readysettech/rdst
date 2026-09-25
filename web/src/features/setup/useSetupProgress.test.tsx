@@ -12,15 +12,7 @@ vi.mock('../../lib/analytics', () => ({ trackEvent: vi.fn() }))
 const tracked = vi.mocked(trackEvent)
 
 function progress(overrides: Partial<SetupProgress> = {}): SetupProgress {
-  return {
-    target: 'orders',
-    connected: false,
-    schema_built: false,
-    queries_found: false,
-    analyzed: false,
-    compared: false,
-    ...overrides,
-  }
+  return { target: 'orders', connected: false, ...overrides }
 }
 
 beforeEach(() => {
@@ -44,16 +36,16 @@ describe('useSetupStepCompletionEvents', () => {
       { initialProps: { value: progress({ connected: true }) } }
     )
 
-    rerender({ value: progress({ connected: true, schema_built: true }) })
+    rerender({ value: progress({ connected: true, monitoring: true }) })
 
     expect(tracked).toHaveBeenCalledTimes(1)
     expect(tracked).toHaveBeenCalledWith('setup_step_completed', {
-      step: 'build-schema',
+      step: 'turn-on-monitoring',
     })
 
     // Flipping back and forth (a target switch) must not inflate the funnel.
     rerender({ value: progress({ connected: true }) })
-    rerender({ value: progress({ connected: true, schema_built: true }) })
+    rerender({ value: progress({ connected: true, monitoring: true }) })
     expect(tracked).toHaveBeenCalledTimes(1)
   })
 
@@ -65,7 +57,11 @@ describe('useSetupStepCompletionEvents', () => {
     )
 
     rerender({
-      value: progress({ connected: true, analyzed: true, error: 'no config' }),
+      value: progress({
+        connected: true,
+        monitoring: true,
+        error: 'no config',
+      }),
     })
 
     expect(tracked).not.toHaveBeenCalled()

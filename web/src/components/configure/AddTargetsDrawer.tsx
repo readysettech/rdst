@@ -36,6 +36,7 @@ import {
   TooltipTrigger,
 } from '@rs/ui-new/tooltip'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import {
   type ComponentType,
   type ReactNode,
@@ -44,7 +45,13 @@ import {
   useRef,
   useState,
 } from 'react'
+import { selectGlobalTarget } from '../../features/database/targetSelection'
+import {
+  PrerequisitesChecker,
+  TargetsPrerequisites,
+} from '../../features/prerequisites'
 import { fetchEnvRequirements } from '../../lib/api'
+import { useMonitoringLimit } from '../../lib/monitor/hooks'
 import {
   bulkAddFleetTargets,
   type DiscoveredFleetMember,
@@ -115,6 +122,14 @@ const ENGINE_LABELS: Record<string, string> = {
 }
 const engineLabel = (engine: string | null | undefined) =>
   engine ? (ENGINE_LABELS[engine.toLowerCase()] ?? engine) : '-'
+
+/** An Aurora reader: RDST monitors a cluster through its writer, so readers wait. */
+const isAuroraReader = (member: DiscoveredFleetMember) =>
+  (member.tags ?? []).includes('role:reader')
+
+/** A discovered database that can be checked for import. */
+const selectable = (member: DiscoveredFleetMember) =>
+  !member.already_exists && !isAuroraReader(member)
 
 /** "role:writer" -> "writer"; other tags return null. */
 const roleOfTag = (tag: string): string | null =>
@@ -344,6 +359,11 @@ export interface AddTargetsDrawerProps {
   onCredentialsClosed: () => void
   /** Re-run the page's own connectivity check for exactly these targets. */
   onRecheckTargets?: (names: string[]) => void
+  /**
+   * A target the manual form just saved: the drawer switches to its monitoring
+   * prerequisites check. Closing the drawer finishes the add.
+   */
+  checkTarget?: string | null
 }
 
 export function AddTargetsDrawer({
@@ -354,9 +374,12 @@ export function AddTargetsDrawer({
   onTargetsAdded,
   onCredentialsClosed,
   onRecheckTargets,
+  checkTarget = null,
 }: AddTargetsDrawerProps) {
   const queryClient = useQueryClient()
-  const [step, setStep] = useState<'source' | 'credentials'>('source')
+  const [step, setStep] = useState<'source' | 'credentials' | 'prereqs'>(
+    'source'
+  )
   const [setupMode, setSetupMode] =
     useState<ConnectionSetupMode>('integrations')
   const [integrationView, setIntegrationView] = useState<IntegrationView>(
@@ -486,7 +509,7 @@ export function AddTargetsDrawer({
     [previewMembers]
   )
   const selectablePreviewNames = (previewMembers ?? [])
-    .filter((member) => !member.already_exists)
+    .filter((member) => selectable(member))
     .map((member) => member.name)
   const allPreviewSelected =
     selectablePreviewNames.length > 0 &&
@@ -494,7 +517,7 @@ export function AddTargetsDrawer({
 
   const selectedNewCount = previewMembers
     ? previewMembers.filter(
-        (member) => selectedNames.has(member.name) && !member.already_exists
+        (member) => selectedNames.has(member.name) && selectable(member)
       ).length
     : 0
 
@@ -545,7 +568,7 @@ export function AddTargetsDrawer({
       setSelectedNames(
         new Set(
           preview.members
-            .filter((member) => !member.already_exists)
+            .filter((member) => selectable(member))
             .map((member) => member.name)
         )
       )
@@ -558,16 +581,29 @@ export function AddTargetsDrawer({
     }
   }
 
+  // A connected account discovers on its own, once per visit, so signing in leads
+  // straight to the database list.
+  const autoDiscovered = useRef<AccountTab | null>(null)
+  useEffect(() => {
+    if (!open) autoDiscovered.current = null
+    if (!open || !accountTab || !accountConnected) return
+    if (previewMembers !== null || previewLoading) return
+    if (autoDiscovered.current === accountTab) return
+    autoDiscovered.current = accountTab
+    void handleDiscoverPreview({ provider: accountTab })
+  })
+
   const handleAddSelected = async () => {
     if (!previewMembers) return
     const chosen = previewMembers.filter(
-      (member) => selectedNames.has(member.name) && !member.already_exists
+      (member) => selectedNames.has(member.name) && selectable(member)
     )
     if (chosen.length === 0) return
     setAddingTargets(true)
     try {
       const added = await bulkAddFleetTargets(chosen)
       await publishNewTargets()
+      void queryClient.invalidateQueries({ queryKey: ['env-requirements'] })
       setPreviewMembers(null)
       if (added.target_names.length > 0) {
         setCredentialTargetNames(added.target_names)
@@ -646,8 +682,23 @@ export function AddTargetsDrawer({
     }
   }, [discoverProfile])
 
+  const navigate = useNavigate()
+  // A single new database ends on its Database page with the turn-on dialog open, the
+  // same place the manual onboarding form leads.
+  const turnOnMonitoring = (target: string) => {
+    closeDrawer()
+    selectGlobalTarget(target)
+    void navigate({ to: '/database', search: { panel: 'enable' } })
+  }
+  // Several new databases end on the first one monitoring was turned on for.
+  const finishImport = (monitored?: string) => {
+    closeDrawer()
+    if (!monitored) return
+    selectGlobalTarget(monitored)
+    void navigate({ to: '/database' })
+  }
   const closeDrawer = () => {
-    const leftCredentials = step === 'credentials'
+    const leftCredentials = step === 'credentials' || step === 'prereqs'
     setStep('source')
     setSetupMode('integrations')
     setIntegrationView(initialTab ? 'provider' : 'picker')
@@ -668,6 +719,24 @@ export function AddTargetsDrawer({
   const credentialTargets = (fleetTargets?.members ?? []).filter((member) =>
     credentialTargetNames.includes(member.name)
   )
+  // Imported targets that connected move on to the prerequisites check; the
+  // manual form's saved target does the same through `checkTarget`.
+  const prereqTargets =
+    step === 'prereqs'
+      ? credentialTargetNames
+      : checkTarget
+        ? [checkTarget]
+        : null
+  const title = prereqTargets
+    ? 'Set up monitoring'
+    : step === 'credentials'
+      ? 'Set credentials'
+      : 'Add target'
+  const description = prereqTargets
+    ? 'RDST checks that it can see every query your database runs.'
+    : step === 'credentials'
+      ? 'Enter credentials and test the imported databases.'
+      : 'Connect manually or import databases from a supported provider.'
 
   return (
     <Drawer
@@ -679,15 +748,9 @@ export function AddTargetsDrawer({
         {open && (
           <DrawerContent size="XLarge" direction="right" className="p-0">
             <DrawerHeader className="p-5 border-b border-border-layout-1">
-              <DrawerTitle>
-                {step === 'credentials' ? 'Set credentials' : 'Add target'}
-              </DrawerTitle>
-              <DrawerDescription>
-                {step === 'credentials'
-                  ? 'Enter credentials and test the imported databases.'
-                  : 'Connect manually or import databases from a supported provider.'}
-              </DrawerDescription>
-              {step === 'source' && (
+              <DrawerTitle>{title}</DrawerTitle>
+              <DrawerDescription>{description}</DrawerDescription>
+              {step === 'source' && !prereqTargets && (
                 <SegmentedControl
                   aria-label="Connection setup method"
                   className="mt-4 w-full"
@@ -713,13 +776,29 @@ export function AddTargetsDrawer({
 
             <div id="connection-setup-panel" className="flex min-h-0 flex-1">
               <Scrollable className="flex-1 p-5">
-                {step === 'credentials' ? (
+                {prereqTargets && prereqTargets.length === 1 ? (
+                  <PrerequisitesChecker
+                    target={prereqTargets[0]}
+                    layout="panel"
+                    onContinue={() => turnOnMonitoring(prereqTargets[0])}
+                    continueLabel="Turn on monitoring"
+                    onSkip={closeDrawer}
+                    skipLabel="Set up later"
+                  />
+                ) : prereqTargets ? (
+                  <TargetsPrerequisites
+                    targets={prereqTargets}
+                    onDone={finishImport}
+                    onSkip={closeDrawer}
+                  />
+                ) : step === 'credentials' ? (
                   <CredentialsStep
                     targets={credentialTargets}
                     keyringAvailable={
                       envRequirements?.keyring_available ?? false
                     }
                     onClose={closeDrawer}
+                    onDone={() => setStep('prereqs')}
                     onSaved={publishSavedCredentials}
                     privateTargetGroups={privateTargetGroups}
                   />
@@ -746,7 +825,7 @@ export function AddTargetsDrawer({
                         className="text-content-layout-3"
                       >
                         Import databases from an account or a prepared CSV. You
-                        can review everything before it is added.
+                        can review everything before it's added.
                       </Text>
                     </VStack>
                     <div className="grid grid-cols-1 tablet:grid-cols-2 gap-3">
@@ -853,8 +932,8 @@ export function AddTargetsDrawer({
                             level="caption"
                             className="text-content-layout-3 mb-2 block"
                           >
-                            Example — columns: name, host, engine (plus optional
-                            port, database, user)
+                            Include name, host, and engine in each row. You can
+                            also set port, database, and user.
                           </Text>
                           <pre className="text-xs text-content-layout-2 overflow-x-auto leading-relaxed">
                             {'name,host,port,database,user,engine\n' +
@@ -989,9 +1068,18 @@ export function AddTargetsDrawer({
                                         key={region}
                                         type="button"
                                         label={region}
+                                        aria-pressed={selectedRegions.includes(
+                                          region
+                                        )}
+                                        // Selected regions read as chosen: filled, not just bordered.
+                                        variant={
+                                          selectedRegions.includes(region)
+                                            ? 'primary'
+                                            : undefined
+                                        }
                                         modifier={
                                           selectedRegions.includes(region)
-                                            ? 'ghost'
+                                            ? 'solid'
                                             : 'outline'
                                         }
                                         onClick={() => toggleRegion(region)}
@@ -1059,8 +1147,8 @@ export function AddTargetsDrawer({
                                     .emptyMessage
                                 : 'Choose which databases to add to your fleet.'}
                             </Text>
-                            {previewMembers.some(
-                              (member) => !member.already_exists
+                            {previewMembers.some((member) =>
+                              selectable(member)
                             ) && (
                               <HStack className="gap-3 items-center">
                                 <Button
@@ -1082,6 +1170,10 @@ export function AddTargetsDrawer({
                                 />
                               </HStack>
                             )}
+                            <SelectionNotes
+                              members={previewMembers}
+                              selected={selectedNames}
+                            />
                             <VStack className="gap-4 items-stretch">
                               {previewGroups.map(({ group, targets: rows }) => (
                                 <VStack
@@ -1109,8 +1201,8 @@ export function AddTargetsDrawer({
                                         ? '1 instance'
                                         : `${rows.length} instances`}
                                     </Text>
-                                    {rows.some(
-                                      (member) => !member.already_exists
+                                    {rows.some((member) =>
+                                      selectable(member)
                                     ) && (
                                       <HStack className="ml-auto gap-1 items-center">
                                         <Button
@@ -1119,9 +1211,8 @@ export function AddTargetsDrawer({
                                           size="small"
                                           label={
                                             rows
-                                              .filter(
-                                                (member) =>
-                                                  !member.already_exists
+                                              .filter((member) =>
+                                                selectable(member)
                                               )
                                               .every((member) =>
                                                 selectedNames.has(member.name)
@@ -1133,9 +1224,8 @@ export function AddTargetsDrawer({
                                             setSelectedNames((current) => {
                                               const updated = new Set(current)
                                               const selectableRows =
-                                                rows.filter(
-                                                  (member) =>
-                                                    !member.already_exists
+                                                rows.filter((member) =>
+                                                  selectable(member)
                                                 )
                                               const allSelected =
                                                 selectableRows.every((member) =>
@@ -1164,8 +1254,8 @@ export function AddTargetsDrawer({
                                       <label
                                         key={member.name}
                                         className={`flex items-start gap-3 rounded-lg border border-border-layout-1 px-3 py-2 ${
-                                          member.already_exists
-                                            ? 'bg-surface-layout-2/20'
+                                          !selectable(member)
+                                            ? `bg-surface-layout-2/20${member.already_exists ? '' : ' opacity-60'}`
                                             : 'bg-surface-layout-2/40 cursor-pointer hover:bg-surface-layout-2/70'
                                         }`}
                                       >
@@ -1175,6 +1265,12 @@ export function AddTargetsDrawer({
                                               name="tick"
                                               label="Already imported"
                                               className="w-4 h-4 text-content-positive-soft"
+                                            />
+                                          ) : !selectable(member) ? (
+                                            <Icon
+                                              name="minus"
+                                              label="Not available yet"
+                                              className="w-4 h-4 text-content-layout-3"
                                             />
                                           ) : (
                                             <BaseInputCheckbox
@@ -1236,6 +1332,15 @@ export function AddTargetsDrawer({
                                                 label="already imported"
                                               />
                                             )}
+                                            {!member.already_exists &&
+                                              isAuroraReader(member) && (
+                                                <Tag
+                                                  size="small"
+                                                  variant="neutral"
+                                                  modifier="outline"
+                                                  label="coming soon"
+                                                />
+                                              )}
                                           </HStack>
                                           <Text
                                             level="caption"
@@ -1247,14 +1352,20 @@ export function AddTargetsDrawer({
                                         </VStack>
                                       </label>
                                     )
-                                    if (!member.already_exists) return body
+                                    if (selectable(member)) return body
                                     return (
                                       <TooltipProvider key={member.name}>
                                         <Tooltip>
                                           <TooltipTrigger asChild>
                                             {body}
                                           </TooltipTrigger>
-                                          <TooltipContent label="This database is already a target." />
+                                          <TooltipContent
+                                            label={
+                                              member.already_exists
+                                                ? 'This database is already a target.'
+                                                : 'RDST will monitor an Aurora cluster as one database, readers included. For now, add the writer.'
+                                            }
+                                          />
                                         </Tooltip>
                                       </TooltipProvider>
                                     )
@@ -1308,5 +1419,40 @@ export function AddTargetsDrawer({
         )}
       </DrawerContentContainer>
     </Drawer>
+  )
+}
+
+/** Why Aurora readers can't be added yet, and when the selection outgrows AI monitoring. */
+function SelectionNotes({
+  members,
+  selected,
+}: {
+  members: DiscoveredFleetMember[]
+  selected: Set<string>
+}) {
+  const limit = useMonitoringLimit()
+  const readers = members.filter(
+    (member) => !member.already_exists && isAuroraReader(member)
+  )
+  const room =
+    limit.data?.known && limit.data.limit != null
+      ? Math.max(0, limit.data.limit - limit.data.in_use)
+      : null
+  const over = room != null && selected.size > room
+  if (!readers.length && !over) return null
+  return (
+    <VStack className="gap-1 items-stretch">
+      {readers.length > 0 && (
+        <Text level="caption" className="text-content-layout-3">
+          Aurora readers are coming soon. RDST will monitor a cluster as one
+          database; for now, add its writer.
+        </Text>
+      )}
+      {over && (
+        <Text level="caption" className="text-content-warning-plain">
+          {`You've selected ${selected.size} databases, and AI monitoring has room for ${room} more. The rest can run locally without AI.`}
+        </Text>
+      )}
+    </VStack>
   )
 }

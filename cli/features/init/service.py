@@ -36,6 +36,21 @@ class InitService:
         cfg.load()
         return cfg
 
+    def monitoring_upgrade(self) -> dict[str, Any]:
+        cfg = self._load_config()
+        if cfg.monitoring_upgrade_migrated:
+            cfg.save()
+        from shared.monitor.monitor_store import MonitorStore
+
+        monitored = MonitorStore().monitored_targets()
+        return {"targets": [{"name": name, "engine": cfg.get(name).get("engine", "postgresql")}
+                            for name in cfg.monitoring_upgrade_targets() if name not in monitored]}
+
+    def dismiss_monitoring_upgrade(self) -> None:
+        cfg = self._load_config()
+        cfg.dismiss_monitoring_upgrade()
+        cfg.save()
+
     def _is_llm_configured(self, cfg: Any) -> bool:
         # Match runtime resolution: an explicit Anthropic key is BYOK even if
         # a Readyset account session also exists.

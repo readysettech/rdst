@@ -279,14 +279,14 @@ def fmt_int(n: Any) -> str:
     try:
         return f"{int(n):,}"
     except (TypeError, ValueError):
-        return "—"
+        return " - "
 
 
 def fmt_ms(n: Any) -> str:
     try:
         v = float(n)
     except (TypeError, ValueError):
-        return "—"
+        return " - "
     if v >= 1000:
         return f"{v/1000:.2f}s"
     if v >= 10:
@@ -298,14 +298,14 @@ def fmt_pct(n: Any) -> str:
     try:
         return f"{float(n):.1f}%"
     except (TypeError, ValueError):
-        return "—"
+        return " - "
 
 
 def fmt_mb(mb: Any) -> str:
     try:
         v = float(mb)
     except (TypeError, ValueError):
-        return "—"
+        return " - "
     if v >= 1024:
         return f"{v/1024:.1f} GB"
     return f"{v:.0f} MB"
@@ -567,15 +567,15 @@ def _render_topology_cards(results: List[Dict[str, Any]]) -> str:
         rows = [
             ("Engine", _engine_version(r)),
             ("Size", size_str),
-            ("QPS", f"{qps:.0f}" if qps else "—"),
+            ("QPS", f"{qps:.0f}" if qps else " - "),
             ("Conns", conn_str),
             ("R / W", rw_str),
         ]
         if role == "primary":
             storage = (m.get("storage_allocated_gb") or 0)
-            rows.append(("Storage", f"{storage:.0f} GB" if storage else "—"))
+            rows.append(("Storage", f"{storage:.0f} GB" if storage else " - "))
         else:
-            rows.append(("Lag", "—"))
+            rows.append(("Lag", " - "))
 
         grid = "".join(
             f'<span><span class="ml">{esc(label)}</span><span class="mv">{esc(val)}</span></span>'
@@ -739,7 +739,7 @@ def _render_section_1_overview(
             f'<div class="topo-role">{_role_label(role)}</div>'
             f'<div class="topo-name">{esc(r.get("target_name",""))}</div>'
             f'<div style="font-size:12px;color:var(--text-2);margin-top:4px;">'
-            f'{esc(_engine_version(r))} · {esc(r.get("instance_class") or "—")} · {esc(r.get("region") or "—")}'
+            f'{esc(_engine_version(r))} · {esc(r.get("instance_class") or " - ")} · {esc(r.get("region") or " - ")}'
             f'</div></div></div>'
         )
 
@@ -871,9 +871,9 @@ def _render_target_detailed(r: Dict[str, Any], skip_header: bool = False) -> str
 
     read_pct = m.get("read_pct") or 0
     if read_pct >= 90:
-        rw_note = " — Read-heavy — excellent caching candidate"
+        rw_note = " - Read-heavy - excellent caching candidate"
     elif read_pct >= 60:
-        rw_note = " — Moderately read-heavy"
+        rw_note = " - Moderately read-heavy"
     else:
         rw_note = ""
     # Per-target QPS from this target's own capture (sum(calls) / duration).
@@ -985,19 +985,19 @@ def _render_target_detailed(r: Dict[str, Any], skip_header: bool = False) -> str
                 if rs_avg:
                     row_cells.append(f'<td><strong style="color:#15803D">{fmt_ms(rs_avg)}</strong></td>')
                 else:
-                    row_cells.append('<td style="color:#9CA3AF">—</td>')
+                    row_cells.append('<td style="color:#9CA3AF"> - </td>')
                 if speedup and float(speedup) > 0:
                     sp = float(speedup)
                     sp_col = "#15803D" if sp >= 5 else ("#D97706" if sp >= 2 else "#334155")
                     row_cells.append(f'<td><strong style="color:{sp_col};font-size:14px">{sp:.1f}x</strong></td>')
                 else:
-                    row_cells.append('<td style="color:#9CA3AF">—</td>')
+                    row_cells.append('<td style="color:#9CA3AF"> - </td>')
             rows.append(f"<tr>{''.join(row_cells)}</tr>")
 
         cacheable_count = sum(1 for rr in rs_results if rr.get("cacheable"))
         intro = (
-            f"{len(captured)} queries captured"
-            + (f" — <strong>{cacheable_count}</strong> cacheable by Readyset." if has_rs else ".")
+            f"{len(captured)} {'query' if len(captured) == 1 else 'queries'} captured"
+            + (f" - <strong>{cacheable_count}</strong> cacheable by Readyset." if has_rs else ".")
         )
         queries_block = (
             '<h3 class="subhead">Captured Queries &amp; Performance</h3>'
@@ -1091,7 +1091,7 @@ def _render_section_2_detailed(results: List[Dict[str, Any]], is_single: bool) -
             engine_v = _engine_version(r)
             role_label = _role_label(role).upper()
             cap = len((r.get("workload") or {}).get("queries") or [])
-            meta = f"{cap} queries captured" if cap else "no capture"
+            meta = f"{cap} {'query' if cap == 1 else 'queries'} captured" if cap else "no capture"
             open_attr = ""
             parts.append(
                 f'<details class="target-section"{open_attr}>'
@@ -1187,25 +1187,25 @@ def _render_section_sizing(
         cur = s.get("current_monthly_cost_usd") or 0
         if not cur:
             continue
-        sugg_class = s.get("suggested_instance_class") or "—"
+        sugg_class = s.get("suggested_instance_class") or " - "
         sugg_cost = s.get("suggested_monthly_cost_usd")
         sugg_save = s.get("potential_savings_usd") or 0
-        rs_class = s.get("readyset_projected_class") or "—"
+        rs_class = s.get("readyset_projected_class") or " - "
         rs_cost = s.get("readyset_projected_cost_usd")
         rs_save = s.get("readyset_projected_savings_usd") or 0
 
         rows.append(
             f"<tr>"
             f'<td><b>{esc(r.get("target_name",""))}</b></td>'
-            f'<td style="font-family:monospace;font-size:12px;">{esc(r.get("instance_class") or "—")}</td>'
+            f'<td style="font-family:monospace;font-size:12px;">{esc(r.get("instance_class") or " - ")}</td>'
             f'<td>${int(cur):,}/mo</td>'
             f'<td style="font-family:monospace;font-size:12px;">{esc(sugg_class)}</td>'
             f'<td style="color:var(--ok-dark);font-weight:600;">'
-            + (f'-${int(sugg_save):,}/mo' if sugg_save else "—")
+            + (f'-${int(sugg_save):,}/mo' if sugg_save else " - ")
             + '</td>'
             f'<td style="font-family:monospace;font-size:12px;">{esc(rs_class)}</td>'
             f'<td style="color:var(--ok-dark);font-weight:600;">'
-            + (f'-${int(rs_save):,}/mo' if rs_save else "—")
+            + (f'-${int(rs_save):,}/mo' if rs_save else " - ")
             + '</td>'
             f"</tr>"
         )
@@ -1300,12 +1300,12 @@ def _build_hero_stats(
     elif total_qps > 0:
         qps_str = f"{total_qps:.2f} QPS combined"
     queries_tile = {
-        "value": fmt_int(total_queries) if total_queries else "—",
+        "value": fmt_int(total_queries) if total_queries else " - ",
         "label": "Queries Captured",
         "detail": qps_str if qps_str else ("no capture window" if total_queries == 0 else ""),
     }
     cache_tile = {
-        "value": f"{sum(cache_hits) / len(cache_hits):.0f}%" if cache_hits else "—",
+        "value": f"{sum(cache_hits) / len(cache_hits):.0f}%" if cache_hits else " - ",
         "label": "Buffer Cache Hit Rate",
         "detail": "Data fits in memory" if cache_hits and sum(cache_hits) / len(cache_hits) >= 99 else "",
     }
@@ -1357,7 +1357,7 @@ def _build_hero_stats(
                 "detail": fit_detail,
             }
         else:
-            savings_tile = {"value": "—", "label": "Read Traffic", "detail": ""}
+            savings_tile = {"value": " - ", "label": "Read Traffic", "detail": ""}
 
     return [queries_tile, cache_tile, savings_tile]
 
@@ -1381,13 +1381,13 @@ def render_report_html(
         r = results[0]
         hero_title = title or (r.get("target_name") or "target")
         engine_v = _engine_version(r)
-        cls = r.get("instance_class") or "—"
-        region = r.get("region") or "—"
+        cls = r.get("instance_class") or " - "
+        region = r.get("region") or " - "
         hero_sub = f"{engine_v} · {cls} · {region}"
     else:
         hero_title = title or "fleet"
         engines = set(_engine_version(r) for r in results)
-        classes = set((r.get("instance_class") or "—") for r in results)
+        classes = set((r.get("instance_class") or " - ") for r in results)
         hero_sub = f"{len(results)} × {' / '.join(sorted(engines))} · {' / '.join(sorted(classes))}"
 
     duration = None
@@ -1468,7 +1468,7 @@ def render_report_html(
         '<!DOCTYPE html><html lang="en"><head>'
         '<meta charset="UTF-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1.0">'
-        f'<title>{esc(hero_title)} — RDST Health Report</title>'
+        f'<title>{esc(hero_title)} - RDST Health Report</title>'
         '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">'
         f"{STYLE_BLOCK}"
         '</head><body><div class="container">'

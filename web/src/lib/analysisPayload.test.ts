@@ -81,3 +81,22 @@ describe('storedAnalysisResults', () => {
     ).toBeUndefined()
   })
 })
+
+it('preserves plan-only mode from the monitoring row when replaying an older payload', () => {
+  const replayed = storedAnalysisResults(
+    stored({
+      display_payload: {
+        explain_results: {
+          success: true,
+          database_engine: 'postgresql',
+          execution_time_ms: 49,
+          rows_examined: 1000,
+          rows_returned: 10,
+          cost_estimate: 250,
+        },
+      },
+    }),
+    'explain'
+  )
+  expect(replayed.results?.explain_results?.plan_format).toBe('explain')
+})

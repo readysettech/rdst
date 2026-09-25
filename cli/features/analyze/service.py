@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, Optional, Tuple
 
 from shared.config.targets import TargetsConfig
-from shared.query_safety import validate_query_safety
+from shared.query_safety import is_plain_explainable_write, validate_query_safety
 from shared.workflow_manager import get_workflow_components
 
 from .events import (
@@ -165,7 +165,9 @@ class AnalyzeService:
             # ANALYZE runs the statement rather than just planning it.
             if input.sql:
                 safety = validate_query_safety(input.sql)
-                if not safety.get("safe"):
+                if not safety.get("safe") and not (
+                    options.non_interactive and options.fast and is_plain_explainable_write(input.sql)
+                ):
                     issues = "; ".join(safety.get("issues") or []) or "failed safety validation"
                     yield ErrorEvent(
                         type="error",
@@ -371,6 +373,14 @@ class AnalyzeService:
             **DEFAULT_FUNCTIONS,
             **ANALYZE_WORKFLOW_FUNCTIONS,
         }
+        if options.non_interactive and not options.test_rewrites:
+            # Rewrites can execute additional candidate SQL. Background work
+            # only plans or runs the original statement under its timeout,
+            # unless the user asked for the run (then each rewrite runs under it too).
+            workflow_functions["test_query_rewrites"] = lambda **_kwargs: {
+                "success": True, "tested": False,
+                "skipped_reason": "background_analysis",
+            }
 
         mgr = WorkflowManager.from_file(
             str(workflow_path), resources=workflow_functions
@@ -386,6 +396,9 @@ class AnalyzeService:
             "save_as": input.save_as or "",
             "source": input.source,
             "fast_mode": options.fast,
+            "non_interactive": options.non_interactive,
+            "statement_timeout_ms": options.statement_timeout_ms,
+            "hosted_only": options.hosted_only,
         }
 
         workflow_id = mgr.run_async(initial_input=initial_input)
@@ -658,6 +671,18 @@ class AnalyzeService:
             if isinstance(formatted, dict):
                 formatted["readyset_analysis"] = readyset_result
 
+        storage_result = context.get("storage_result", {})
+        # Monitoring needs the stored result to show the analysis; an interactive run still
+        # shows what it found.
+        if storage_result.get("success") is False and input.source == "monitor":
+            yield ErrorEvent(
+                type="error",
+                message=storage_result.get("error") or "Couldn't store the analysis results",
+                stage="storing_results",
+                partial_results=_serialize_for_json(context),
+            )
+            return
+
         # Yield final progress
         yield ProgressEvent(
             type="progress",
@@ -670,7 +695,6 @@ class AnalyzeService:
         formatted = context.get("FormatFinalResults", {})
         if isinstance(formatted, dict):
             formatted["readyset_cacheability"] = cacheability_payload
-        storage_result = context.get("storage_result", {})
         # Deep links must use the identifier that was actually persisted
         # in the registry. Parameter normalization can intentionally
         # produce a different hash, which does not identify a Saved card.
@@ -696,6 +720,7 @@ class AnalyzeService:
             type="complete",
             success=True,
             analysis_id=storage_result.get("analysis_id"),
+            stored_analysis_id=storage_result.get("stored_analysis_id"),
             query_hash=query_hash,
             **results,
         )

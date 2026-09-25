@@ -30,6 +30,8 @@ export async function invalidateTrialRelatedQueries(queryClient: QueryClient) {
       queryKey: ['settings', 'email'],
       ...options,
     }),
+    // Sign-in resolves the monitor's sign-in alerts server-side.
+    queryClient.invalidateQueries({ queryKey: ['monitor'], ...options }),
   ])
 }
 

@@ -26,6 +26,8 @@ interface RouteConfig {
     | 'adjustment-horizontal'
     | 'building'
     | 'querypilot'
+    | 'database'
+    | 'notification'
   parent?: string
 }
 
@@ -39,6 +41,9 @@ const routeConfig: Record<string, RouteConfig> = {
     parent: '/queries',
   },
   '/ask': { label: 'Ask', icon: 'sparkles' },
+  '/database': { label: 'Database', icon: 'database' },
+  '/inbox': { label: 'Inbox', icon: 'notification' },
+  '/agent-activity': { label: 'Agent activity', icon: 'user-shield' },
   // Code scan is off the nav, so its crumb carries the way back: a scan's
   // output is queries, and the Query Library is where they land. [E-15]
   '/scan': { label: 'Code scan', icon: 'search', parent: '/queries' },
@@ -97,13 +102,20 @@ export function Header({
     }`,
     icon: 'speedometer',
   }
+  const databaseReportConfig: RouteConfig = {
+    label: 'Report',
+    icon: 'document-validation',
+    parent: '/database',
+  }
   const config =
     (currentPath === '/cache' ? cacheConfig : routeConfig[currentPath]) ??
-    (currentPath.startsWith('/audit/runs/')
-      ? auditRunConfig
-      : currentPath.startsWith('/lab/queries/')
-        ? queriesLabConfig
-        : undefined)
+    (currentPath.startsWith('/database/reports/')
+      ? databaseReportConfig
+      : currentPath.startsWith('/audit/runs/')
+        ? auditRunConfig
+        : currentPath.startsWith('/lab/queries/')
+          ? queriesLabConfig
+          : undefined)
   // An unknown path is a 404 (the branded notFoundComponent renders below the
   // breadcrumb). Show "Not found" rather than a redundant "RDST › RDST" (QW7).
   const currentLabel = config?.label || 'Not found'

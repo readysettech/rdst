@@ -13,6 +13,8 @@ export type QueryCardImpactProps = QueryCardProps & {
   railSize?: 'base' | 'wide'
   expansionPlacement?: 'before-footer' | 'after-footer'
   motionLayout?: boolean
+  /** Stretch the SQL band (editor slot) to the rail's height. */
+  sqlFill?: boolean
 }
 
 function LayoutRegion({
@@ -66,6 +68,7 @@ export function QueryCardImpact({
   railSize = 'base',
   expansionPlacement = 'after-footer',
   motionLayout = false,
+  sqlFill = false,
   className,
   highlighted = false,
   'data-testid': dataTestid,
@@ -132,7 +135,7 @@ export function QueryCardImpact({
               {rail}
             </div>
 
-            <div className="min-w-0">
+            <div className={cn('min-w-0', sqlFill && 'flex flex-col')}>
               <QueryCardHeader
                 leading={
                   selectable ? (
@@ -146,7 +149,14 @@ export function QueryCardImpact({
                 menu={menu}
               />
               {editor ? (
-                <div className="bg-surface-layout-1/50 p-4">{editor}</div>
+                <div
+                  className={cn(
+                    'bg-surface-layout-1/50 p-4',
+                    sqlFill && 'flex-1'
+                  )}
+                >
+                  {editor}
+                </div>
               ) : (
                 <QueryCardSql
                   sql={sql}

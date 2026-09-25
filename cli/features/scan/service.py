@@ -267,7 +267,7 @@ class ScanService:
                         phase="conversion",
                         current=batch_num,
                         total=total_batches,
-                        message=f"Converting batch {batch_num}/{total_batches} ({len(batch)} queries)",
+                        message=f"Converting batch {batch_num}/{total_batches} ({len(batch)} {'query' if len(batch) == 1 else 'queries'})",
                     )
 
                     await asyncio.to_thread(
@@ -403,7 +403,7 @@ class ScanService:
                     phase="analysis",
                     current=total_analyzed,
                     total=total_analyzed,
-                    message=f"Analyzed {total_analyzed} queries",
+                    message=f"Analyzed {total_analyzed} {'query' if total_analyzed == 1 else 'queries'}",
                 )
 
         # Build summary
@@ -828,9 +828,9 @@ Respond with ONLY this JSON (no markdown code blocks):
         sql_lower = (sql or "").lower()
 
         if q.get("imports_builder"):
-            return "Cross-file query — built in another module, can't trace statically"
+            return "Cross-file query - built in another module, can't trace statically"
         if "-- cross-file" in sql_lower:
-            return "Cross-file query — built in another module, can't trace statically"
+            return "Cross-file query - built in another module, can't trace statically"
         if "-- dynamic" in sql_lower:
             return "Dynamic arguments - variable contents only known at runtime"
         if "**" in orm_code:

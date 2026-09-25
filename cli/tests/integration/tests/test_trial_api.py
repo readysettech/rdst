@@ -117,7 +117,7 @@ async def test_simulate_exhaust_with_no_active_trial_returns_no_op(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["success"] is False
-    assert "No active trial" in (body.get("message") or "")
+    assert "No active AI access token" in (body.get("message") or "")
 
 
 async def test_register_accepts_remote_same_origin_browser(

@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook } from '@testing-library/react'
+import { act, cleanup, renderHook } from '@testing-library/react'
 import { createElement, type ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { resetSharedHub } from './sse/sharedEventSource'
 import {
   type QueryDiscoveryResync,
   type QueryDiscoverySnapshot,
@@ -89,6 +90,9 @@ function renderTransport(target = 'prod') {
 vi.stubGlobal('EventSource', MockEventSource)
 
 afterEach(() => {
+  cleanup()
+  resetSharedHub()
+  vi.useRealTimers()
   MockEventSource.instances = []
 })
 
@@ -136,6 +140,7 @@ describe('useQueryDiscoveryTransport registry invalidation', () => {
   })
 
   it('leaves other targets registry queries untouched on a change', () => {
+    vi.useFakeTimers()
     const { client, source } = renderTransport()
     client.setQueryData([...queryRegistryQueryKey('prod'), 150, 0], {
       queries: [],
@@ -150,10 +155,28 @@ describe('useQueryDiscoveryTransport registry invalidation', () => {
       source.emit('discovery_update', snapshot({ changed: true }))
     })
 
+    act(() => vi.advanceTimersByTime(5_000))
     const state = (key: readonly unknown[]) =>
       client.getQueryState(key as unknown[])?.isInvalidated
     expect(state([...queryRegistryQueryKey('prod'), 150, 0])).toBe(true)
     expect(state([...queryRegistryQueryKey('staging'), 150, 0])).toBe(false)
+  })
+
+  it('coalesces assessment bursts and cancels the trailing refresh on unmount', () => {
+    vi.useFakeTimers()
+    const { source, invalidate, unmount } = renderTransport()
+    act(() => {
+      source.emit('assessment_update', { target: 'prod' })
+      source.emit('assessment_update', { target: 'prod' })
+      vi.advanceTimersByTime(4_999)
+    })
+    expect(invalidate).toHaveBeenCalledTimes(1)
+    act(() => vi.advanceTimersByTime(1))
+    expect(invalidate).toHaveBeenCalledTimes(2)
+    act(() => source.emit('assessment_update', { target: 'prod' }))
+    unmount()
+    act(() => vi.advanceTimersByTime(5_000))
+    expect(invalidate).toHaveBeenCalledTimes(2)
   })
 
   it('does not invalidate while the collector is still starting', () => {
@@ -205,25 +228,23 @@ describe('useQueryDiscoveryTransport resync', () => {
     })
   })
 
-  it('adopts the resync cursor for the next stream connection', () => {
+  it('shares one stream per target and closes it when the target changes', () => {
     const client = new QueryClient()
     const wrapper = ({ children }: { children: ReactNode }) =>
       createElement(QueryClientProvider, { client }, children)
-    const { rerender } = renderHook(
+    const first = renderHook(
       ({ target }: { target: string }) => useQueryDiscoveryTransport(target),
       { wrapper, initialProps: { target: 'prod' } }
     )
-    const source = MockEventSource.instances.at(-1)
-    if (!source) throw new Error('transport did not open an EventSource')
+    renderHook(() => useQueryDiscoveryTransport('prod'), { wrapper })
+    expect(MockEventSource.instances).toHaveLength(1)
 
-    act(() => {
-      source.emit('resync', resyncPayload({ cursor: 42, latest_seq: 42 }))
-    })
-    rerender({ target: 'staging' })
-    rerender({ target: 'prod' })
-
-    const reopened = MockEventSource.instances.at(-1)
-    expect(reopened?.url).toContain('cursor=42')
+    first.rerender({ target: 'staging' })
+    expect(MockEventSource.instances.map((item) => item.url)).toEqual([
+      '/api/query-registry/discovery/stream?target=prod',
+      '/api/query-registry/discovery/stream?target=staging',
+    ])
+    expect(MockEventSource.instances[0].closed).toBe(false)
   })
 
   it('ignores unknown event types without disturbing the stream', () => {
@@ -239,6 +260,7 @@ describe('useQueryDiscoveryTransport resync', () => {
   })
 
   it('keeps processing discovery updates after a resync', () => {
+    vi.useFakeTimers()
     const { client, invalidate, source } = renderTransport()
     const update = snapshot({
       cursor: 43,
@@ -252,6 +274,8 @@ describe('useQueryDiscoveryTransport resync', () => {
     })
 
     expect(client.getQueryData(queryDiscoveryQueryKey('prod'))).toEqual(update)
+    expect(invalidate).toHaveBeenCalledTimes(1)
+    act(() => vi.advanceTimersByTime(5_000))
     expect(invalidate).toHaveBeenCalledTimes(2)
     expect(invalidate).toHaveBeenLastCalledWith({
       queryKey: queryRegistryQueryKey('prod'),

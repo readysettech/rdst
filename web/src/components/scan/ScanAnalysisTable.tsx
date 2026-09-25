@@ -478,7 +478,7 @@ function AnalysisRow({ query, idx, onViewDetail }: AnalysisRowProps) {
             </Text>
           )}
           <Text level="headline-4" className={getScoreColor(query.risk_score)}>
-            {query.risk_score ?? '—'}
+            {query.risk_score ?? ' - '}
           </Text>
         </HStack>
       </HStack>

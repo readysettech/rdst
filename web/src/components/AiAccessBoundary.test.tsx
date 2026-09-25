@@ -28,6 +28,24 @@ describe('AI startup boundary', () => {
     { status: 'blocked', reason: 'invalid' },
     { status: 'blocked', reason: 'exhausted' },
     { status: 'error', message: 'Backend unavailable' },
+  ])('opens local database monitoring for $status', (gate) => {
+    state.path = '/database'
+    state.gate = gate
+    render(
+      <AiAccessBoundary>
+        <div>Local database readings</div>
+      </AiAccessBoundary>
+    )
+    expect(screen.getByText('Local database readings')).toBeTruthy()
+    expect(screen.queryByText(`Setup ${gate.status}`)).toBeNull()
+  })
+
+  it.each<AiGate>([
+    { status: 'checking' },
+    { status: 'blocked', reason: 'missing' },
+    { status: 'blocked', reason: 'invalid' },
+    { status: 'blocked', reason: 'exhausted' },
+    { status: 'error', message: 'Backend unavailable' },
   ])('keeps the application hidden for $status', (gate) => {
     state.gate = gate
     render(
@@ -79,4 +97,33 @@ describe('AI startup boundary', () => {
     expect(screen.getByText('Application')).toBeTruthy()
     expect(screen.queryByText('Setup blocked')).toBeNull()
   })
+})
+
+it.each([
+  '/inbox',
+  '/configure',
+])('allows local operations on %s without AI access', (path) => {
+  state.path = path
+  state.gate = { status: 'blocked', reason: 'missing' }
+  render(
+    <AiAccessBoundary>
+      <div>Local operation</div>
+    </AiAccessBoundary>
+  )
+  expect(screen.getByText('Local operation')).toBeTruthy()
+})
+
+it.each([
+  '/',
+  '/onboarding',
+])('keeps the fresh-install chooser on %s', (path) => {
+  state.path = path
+  state.gate = { status: 'blocked', reason: 'missing' }
+  render(
+    <AiAccessBoundary>
+      <div>Application</div>
+    </AiAccessBoundary>
+  )
+  expect(screen.getByText('Setup blocked')).toBeTruthy()
+  expect(screen.queryByText('Application')).toBeNull()
 })

@@ -155,7 +155,7 @@ export function ConfigureConnectionTest({
               icon="alert"
               title={capture.title}
               message={`${capture.source} is required to find historical query shapes when no query is active. ${capture.instructions.join(' ')}`}
-              trustworthy="The target was not changed. Enable this before relying on automatic query discovery and Jev classification."
+              trustworthy="The target wasn't changed. Enable this before relying on automatic query discovery and query classification."
             />
           </div>
         )}

@@ -6,6 +6,7 @@ import { Spinner } from '@rs/ui-new/spinner'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import type { AskSchemaLoadedEvent, AskStatusEvent } from '../../lib/ask'
+import { plural } from '../monitor-kit/format'
 
 const STAGES = [
   {
@@ -114,7 +115,7 @@ export function AskProgress({
             })}
             {schemaLoaded && (
               <Text level="caption" className="px-1 pt-2 text-content-layout-3">
-                {schemaLoaded.table_count} tables loaded from{' '}
+                {plural(schemaLoaded.table_count, 'table')} loaded from{' '}
                 {sourceLabel(schemaLoaded.source)}.
               </Text>
             )}

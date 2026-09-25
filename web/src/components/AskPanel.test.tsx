@@ -501,11 +501,11 @@ describe('AskPanel', () => {
     })
 
     renderPanel(<AskPanel target="demo" />)
-    fireEvent.click(screen.getByRole('button', { name: 'Open in Queries' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open in Database' }))
 
     expect(navigateSpy).toHaveBeenCalledWith({
-      to: '/queries',
-      search: { hash: 'exact-query-hash' },
+      to: '/database',
+      search: { query: 'exact-query-hash' },
     })
   })
 

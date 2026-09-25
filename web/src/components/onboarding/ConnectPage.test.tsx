@@ -46,13 +46,19 @@ vi.mock('../configure', () => ({
     onTest,
     submitLabel,
     reviewWritePrivilegesOnSubmit,
+    existingNames,
+    submitError,
   }: {
     onSubmit: (data: Record<string, unknown>) => void
     onTest?: (data: Record<string, unknown>) => Promise<unknown>
     submitLabel?: string
     reviewWritePrivilegesOnSubmit?: boolean
+    existingNames?: string[]
+    submitError?: string | null
   }) => (
     <button
+      data-existing-names={(existingNames ?? []).join(',')}
+      data-submit-error={submitError ?? ''}
       type="button"
       data-tests-connection={String(
         Boolean(onTest && reviewWritePrivilegesOnSubmit)
@@ -76,6 +82,7 @@ const setDefaultTarget = vi.fn()
 const testConnection = vi.fn()
 const cancel = vi.fn()
 const completeInit = vi.fn()
+const listTargets = vi.fn()
 
 function renderPage(props: { redirectTo?: string; from?: string } = {}) {
   const queryClient = new QueryClient({
@@ -103,6 +110,9 @@ describe('ConnectPage', () => {
       cancel,
       connectionTestResult: null,
       loading: false,
+      listTargets,
+      targets: [{ name: 'existing' }],
+      error: null,
     } as unknown as ReturnType<typeof useConfigure>)
     vi.mocked(useOnboarding).mockReturnValue({
       completeInit,
@@ -142,15 +152,20 @@ describe('ConnectPage', () => {
     expect(screen.queryByRole('button', { name: 'Launch the demo' })).toBeNull()
   })
 
-  it('completes init and returns to the intended destination on connect', async () => {
+  it('opens the turn-on dialog for the new database right after it connects', async () => {
     const queryClient = renderPage({ redirectTo: '/queries' })
     queryClient.setQueryData(['init-status'], { initialized: false })
 
     fireEvent.click(screen.getByRole('button', { name: /Test & connect/i }))
 
     await waitFor(() => {
-      expect(mockHistoryPush).toHaveBeenCalledWith('/queries')
+      expect(mockNavigate).toHaveBeenCalledWith({
+        to: '/database',
+        search: { panel: 'enable' },
+      })
     })
+    expect(window.localStorage.getItem('rdst_selected_target')).toBe('mydb')
+    expect(mockHistoryPush).not.toHaveBeenCalled()
     expect(addTarget).toHaveBeenCalled()
     expect(setDefaultTarget).toHaveBeenCalledWith('mydb')
     expect(completeInit).toHaveBeenCalled()
@@ -158,6 +173,14 @@ describe('ConnectPage', () => {
     expect(queryClient.getQueryData(['init-status'])).toMatchObject({
       initialized: true,
     })
+  })
+
+  it('hands the form the names already taken, and the save error', () => {
+    renderPage()
+
+    expect(listTargets).toHaveBeenCalled()
+    const submit = screen.getByRole('button', { name: /Test & connect/i })
+    expect(submit.getAttribute('data-existing-names')).toBe('existing')
   })
 
   it('tests the connection before saving anything', async () => {

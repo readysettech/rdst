@@ -1,4 +1,6 @@
 import type { UpdateStatePayload } from '../main/update-policy.js'
+import type { LoginStatus } from '../main/login.js'
+import type { NotificationHealth } from '../main/notification-health.js'
 
 declare global {
   interface Window {
@@ -28,6 +30,21 @@ declare global {
           callback: (state: UpdateStatePayload) => void
         ) => () => void
       }
+      notifications: {
+        getHealth: () => Promise<NotificationHealth | null>
+        onHealthChange: (
+          callback: (health: NotificationHealth) => void
+        ) => () => void
+        openSettings: () => void
+      }
+      startup: {
+        openLogs: () => void
+        retry: () => void
+      }
+      getStartAtLogin: () => Promise<LoginStatus>
+      setStartAtLogin: (enabled: boolean) => Promise<LoginStatus>
+      getNotificationsEnabled: () => Promise<boolean>
+      setNotificationsEnabled: (enabled: boolean) => Promise<boolean>
     }
   }
 }

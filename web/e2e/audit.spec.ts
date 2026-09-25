@@ -441,7 +441,7 @@ test('opens a saved fleet report through its fleet and instance tab hierarchy', 
     fleetTabs.getByRole('tab', { name: 'Fleet summary' })
   ).toBeVisible()
   await expect(
-    fleetTabs.getByRole('tab', { name: 'Fleet Savings' })
+    fleetTabs.getByRole('tab', { name: 'Fleet sizing' })
   ).toBeVisible()
   await expect(fleetTabs.getByRole('tab')).toHaveCount(2)
 
@@ -453,16 +453,14 @@ test('opens a saved fleet report through its fleet and instance tab hierarchy', 
     instanceTabs.getByRole('tab', { name: 'aurora-reader' })
   ).toBeVisible()
 
-  await fleetTabs.getByRole('tab', { name: 'Fleet Savings' }).click()
+  await fleetTabs.getByRole('tab', { name: 'Fleet sizing' }).click()
   await expect(
     page.getByText(
-      'Review current and suggested monthly fleet costs, total potential savings, and the per-instance rollup.',
+      'Review current and suggested instance sizes across the fleet.',
       { exact: true }
     )
   ).toBeVisible()
-  await expect(
-    page.getByText('$160.00/mo', { exact: true }).first()
-  ).toBeVisible()
+  await expect(page.getByText('Oversized nodes', { exact: true })).toBeVisible()
   await expect(page.getByText('Per-node sizing rollup')).toBeVisible()
 
   await instanceTabs.getByRole('tab', { name: 'aurora-reader' }).click()

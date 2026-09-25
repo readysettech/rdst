@@ -37,7 +37,7 @@ interface ConfigureFormProps {
   isLoading?: boolean
   isTesting?: boolean
   testResult?: ConfigureConnectionStatus | null
-  /** Override the add-mode submit label (e.g. "Test & connect" on first run). */
+  /** Override the submit label (e.g. "Test & connect" on first run). */
   submitLabel?: string
   /** Size of the primary submit button; first run uses a large hero CTA
    *  [VIS-022, VIS-035]. Defaults to `base` so other callers are unchanged. */
@@ -50,6 +50,19 @@ interface ConfigureFormProps {
   /** Test unverified add-mode credentials before saving and confirm when the
    * connected role has write privileges. */
   reviewWritePrivilegesOnSubmit?: boolean
+  /** Names already taken; add mode refuses them while typing and on save. */
+  existingNames?: readonly string[]
+  /** Why the last save failed, shown above the actions so the flow never stalls. */
+  submitError?: string | null
+}
+
+export function duplicateNameError(
+  name: string,
+  existingNames: readonly string[] | undefined
+): string | null {
+  const trimmed = name.trim()
+  if (!trimmed || !existingNames?.includes(trimmed)) return null
+  return `A target named ${trimmed} already exists.`
 }
 
 const engineOptions = [
@@ -213,6 +226,8 @@ export function ConfigureForm({
   showHeader = true,
   stickyFooter = false,
   reviewWritePrivilegesOnSubmit = false,
+  existingNames,
+  submitError,
 }: ConfigureFormProps) {
   const isAddMode = !initialData?.name
   const [connectionUrl, setConnectionUrl] = useState('')
@@ -319,8 +334,15 @@ export function ConfigureForm({
   }
 
   const isAddModePasswordValid = !isAddMode || password.length > 0
+  const nameError = isAddMode ? duplicateNameError(name, existingNames) : null
   const isValid =
-    name && host && port && database && user && isAddModePasswordValid
+    name &&
+    !nameError &&
+    host &&
+    port &&
+    database &&
+    user &&
+    isAddModePasswordValid
 
   const currentData = (): ConfigureFormData => ({
     name,
@@ -502,7 +524,24 @@ export function ConfigureForm({
                   placeholder="my-database"
                   disabled={isLoading || !!initialData?.name}
                   required
+                  aria-invalid={nameError ? true : undefined}
+                  aria-describedby={nameError ? 'cfg-name-error' : undefined}
                 />
+                <Show when={!!nameError}>
+                  <div
+                    id="cfg-name-error"
+                    role="alert"
+                    className="mt-1"
+                    data-testid="cfg-name-error"
+                  >
+                    <Text
+                      level="body-small"
+                      className="text-content-negative-soft"
+                    >
+                      {nameError}
+                    </Text>
+                  </div>
+                </Show>
                 <Show when={!isAddMode}>
                   <Text level="caption" className="text-content-layout-3 mt-1">
                     The name can't be changed after a target is created.
@@ -515,7 +554,7 @@ export function ConfigureForm({
               <Disclosure
                 id="cfg-connection-details"
                 title="Connection details"
-                subtitle="Engine, host, port, database, user, password"
+                subtitle="Enter the database address and your connection credentials."
                 open={detailsOpen}
                 onToggle={setDetailsOpen}
               >
@@ -634,7 +673,7 @@ export function ConfigureForm({
               <Disclosure
                 id="cfg-ssh"
                 title="Connect via SSH jump host"
-                subtitle="For databases that are not directly reachable"
+                subtitle="For databases that aren't directly reachable"
                 open={sshOpen}
                 onToggle={setSshOpen}
               >
@@ -757,6 +796,17 @@ export function ConfigureForm({
               />
             </div>
           </Show>
+          <Show when={!!submitError && !nameError}>
+            <div
+              className="px-5 pb-2"
+              role="alert"
+              data-testid="cfg-submit-error"
+            >
+              <Text level="body-small" className="text-content-negative-soft">
+                {submitError}
+              </Text>
+            </div>
+          </Show>
           <Card.Footer
             className={
               stickyFooter
@@ -788,9 +838,8 @@ export function ConfigureForm({
                 modifier="solid"
                 size={submitSize}
                 label={
-                  initialData?.name
-                    ? 'Update target'
-                    : (submitLabel ?? 'Add target')
+                  submitLabel ??
+                  (initialData?.name ? 'Update target' : 'Add target')
                 }
                 type="submit"
                 loading={isLoading}

@@ -2,7 +2,7 @@
  * Developer settings — the tools formerly on the standalone `/dev-settings`
  * route, merged into the Settings page as its last section (owner decision:
  * "Dev Settings => Settings içine taşınmalı"). Two destructive-ish dev tools
- * (Simulate trial exhausted, Clear keyring), each an elevated card with an
+ * (Simulate AI limit reached, Clear keyring), each an elevated card with an
  * icon + label + description, matching the other Settings sections.
  *
  * DEV-only: the caller gates this behind `import.meta.env.DEV` (a compile-time
@@ -33,18 +33,16 @@ export function DevSettingsSection() {
     isTrialSource &&
     (trialStatus?.status === 'exhausted' || trialStatus?.active === false)
 
-  // --- Simulate trial exhausted ---
+  // --- Simulate AI limit reached ---
   const simulateTrialMutation = useMutation({
     mutationFn: async () => {
       const result = await simulateTrialExhausted()
       if (!result.success) {
-        throw new Error(
-          result.message || 'Failed to simulate trial exhaustion.'
-        )
+        throw new Error(result.message || 'Failed to simulate the AI limit.')
       }
       return {
         ...result,
-        message: result.message || 'Trial has been marked as exhausted.',
+        message: result.message || 'The AI limit has been reached.',
       }
     },
     onSuccess: () => {
@@ -91,17 +89,16 @@ export function DevSettingsSection() {
               <div className="w-9 h-9 rounded-xl bg-surface-negative-soft flex items-center justify-center">
                 <Icon
                   name="alert"
-                  label="Trial"
+                  label="AI access"
                   className="w-4 h-4 text-content-negative-soft"
                 />
               </div>
               <VStack className="gap-0.5 items-start">
                 <Text level="label-small" className="text-content-layout-1">
-                  Simulate trial exhausted
+                  Simulate AI limit reached
                 </Text>
                 <Text level="body-small" className="text-content-layout-3">
-                  Marks the current trial as exhausted for testing the exhausted
-                  state UI.
+                  Marks the AI limit as reached for testing the paused state UI.
                 </Text>
               </VStack>
             </HStack>
@@ -144,8 +141,8 @@ export function DevSettingsSection() {
                 Clear keyring
               </Text>
               <Text level="body-small" className="text-content-layout-3">
-                Removes stored secrets from the OS keychain, clears local trial
-                state, and reloads the page.
+                Removes stored secrets from the OS keychain, clears local AI
+                access state, and reloads the page.
               </Text>
             </VStack>
           </HStack>
@@ -178,7 +175,7 @@ export function DevSettingsSection() {
           icon: 'trash',
           title: 'Stored secrets will be removed',
           message:
-            'This removes RDST secrets from the OS keychain, clears local trial state, and reloads the app.',
+            'This removes RDST secrets from the OS keychain, clears local AI access state, and reloads the app.',
         }}
       >
         {clearKeyringError ? (

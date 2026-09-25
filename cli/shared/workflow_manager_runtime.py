@@ -5,6 +5,7 @@ from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from contextvars import copy_context
 
 from shared.llm_manager.llm_manager import LLMManager
 
@@ -159,8 +160,8 @@ class WorkflowManager:
 
         # Start execution in separate thread
         thread = threading.Thread(
-            target=self._run_workflow_thread,
-            args=(exec_id, initial_input),
+            target=copy_context().run,
+            args=(self._run_workflow_thread, exec_id, initial_input),
             daemon=True
         )
         thread.start()
@@ -312,7 +313,7 @@ class WorkflowManager:
                 return branch_ctx
 
             for i, br in enumerate(branches):
-                futures.append(self._executor.submit(run_branch, i, br))
+                futures.append(self._executor.submit(copy_context().run, run_branch, i, br))
 
             # Collect results (propagate first exception)
             for i, fut in enumerate(futures):
@@ -350,6 +351,7 @@ class WorkflowManager:
         if timeout:
             try:
                 future = self._executor.submit(
+                    copy_context().run,
                     lambda: func(**call_args) if isinstance(call_args, dict) else func(call_args)
                 )
                 return future.result(timeout=timeout)

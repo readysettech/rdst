@@ -216,7 +216,7 @@ export function ComparisonProfile({
               Upstream range
             </Text>
             <Text level="mono-small" className="text-content-layout-2">
-              {formatMs(result.origin_stats.min)}–
+              {formatMs(result.origin_stats.min)} {' - '}
               {formatMs(result.origin_stats.max)}
             </Text>
           </HStack>
@@ -232,7 +232,7 @@ export function ComparisonProfile({
                   : 'text-content-layout-2'
               )}
             >
-              {formatMs(result.cache_stats.min)}–
+              {formatMs(result.cache_stats.min)} {' - '}
               {formatMs(result.cache_stats.max)}
             </Text>
           </HStack>

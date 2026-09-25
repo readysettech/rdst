@@ -301,7 +301,7 @@ export function useSlowQueriesController({
   return {
     target: {
       name: target,
-      label: run.connectionInfo?.target ?? target ?? '—',
+      label: run.connectionInfo?.target ?? target ?? ' - ',
       canRun,
       passwordLock,
     },

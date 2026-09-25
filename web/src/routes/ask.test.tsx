@@ -118,7 +118,8 @@ describe('AskPage workspace', () => {
         'Turn a database question into a verified answer and reusable SQL.'
       )
     ).toBeTruthy()
-    expect(screen.getByTestId('semantic-layer-badge')).toBeTruthy()
+    expect(screen.queryByTestId('semantic-layer-badge')).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Discover schema' })).toBeNull()
     expect(screen.getByTestId('target-dropdown')).toBeTruthy()
 
     const panel = screen.getByTestId('ask-panel')

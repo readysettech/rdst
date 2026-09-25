@@ -1,0 +1,55 @@
+# RDST Continuous Monitoring E2E (mysql shard): the ci-shop database and the
+# browser job that runs the test server, its load and the suite. See
+# scripts/run-continuous-monitoring-ci.sh.
+services:
+  db:
+    image: ${PUBLIC_REPO_BASE:-public.ecr.aws}/docker/library/mysql:8.0
+    # The flags of rdst/tests/integration/docker-compose.yml.
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --innodb-flush-log-at-trx-commit=0
+      --innodb-flush-method=nosync
+      --sync-binlog=0
+      --innodb-doublewrite=0
+      --performance-schema=ON
+      --slow-query-log=ON
+      --slow-query-log-file=/var/log/mysql/slow.log
+      --long-query-time=0
+      --log-output=TABLE
+    environment:
+      MYSQL_ROOT_PASSWORD: rdst_e2e_password
+      MYSQL_DATABASE: rdst_test
+    healthcheck:
+      test: [CMD, mysqladmin, ping, -h, localhost, -uroot, -prdst_e2e_password]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  browser:
+    image: mcr.microsoft.com/playwright:v1.61.0-noble
+    # Root so writes to the mounted checkout succeed, matching the pipeline's
+    # other docker steps.
+    user: "${RDST_E2E_BROWSER_USER:-0:0}"
+    working_dir: /workdir
+    environment:
+      CI: "${CI:-true}"
+      RDST_E2E_ENGINE: mysql
+      RDST_CIM_DB_PORT: "3306"
+      RDST_CIM_ADMIN_USER: root
+      RDST_CIM_DB_HOST: db
+      RDST_CIM_ADMIN_PASSWORD: rdst_e2e_password
+      RDST_CIM_DB_PASSWORD: rdst_e2e_password
+      # Left empty in CI: the runner derives the preview URL from the CL id.
+      RDST_KEYSERVICE_URL: "${RDST_KEYSERVICE_URL:-}"
+      RDST_ATTESTATION_SECRET: "${RDST_ATTESTATION_SECRET}"
+      RDST_KEYSERVICE_ADMIN_SECRET: "${RDST_KEYSERVICE_ADMIN_SECRET}"
+      # Full-access Resend key: the suite reads the CI inbox.
+      RDST_CI_RESEND_API_KEY: "${RDST_CI_RESEND_API_KEY}"
+      GERRIT_CHANGE_ID: "${GERRIT_CHANGE_ID:-local}"
+      BUILDKITE_BUILD_NUMBER: "${BUILDKITE_BUILD_NUMBER:-0}"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ../../../..:/workdir

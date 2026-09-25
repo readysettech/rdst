@@ -6,6 +6,7 @@ import { Text } from '@rs/ui-new/text'
 import { useState } from 'react'
 import type { JevAssessmentSummary } from '../../../lib/api'
 import { formatTimestamp } from '../../../lib/formatters'
+import { schemaBasis } from '../../database/queries/jev'
 import {
   QUERY_LIBRARY_FINDING_DEFINITIONS,
   QUERY_LIBRARY_FINDING_LABELS,
@@ -14,22 +15,22 @@ import type { QueryLibraryFindingFilter } from '../library/queryLibraryState'
 import { InfoTip } from './InfoTip'
 
 const JEV_TAG_DEFINITION =
-  'Jev reads the SQL and schema to flag structural risks. It does not run the query; Deep Analyze measures the real plan.'
+  "RDST reads the SQL and schema to flag structural risks. It doesn't run the query. Deep Analyze measures the real plan."
 const JEV_PANEL_INTRO =
-  'Jev classified this query from the structural risks it found in the SQL and schema.'
-const JEV_PANEL_FOOTER = 'Run a deep analysis to measure the actual cost.'
+  'The classification comes from the SQL and schema, before deep analysis. RDST flags structural risks without running the query.'
+const JEV_PANEL_FOOTER = 'Run a deep analysis for measured facts.'
 const JEV_PANEL_FOOTER_ANALYZED =
-  'The deep analysis has measured the actual performance. See its results below.'
+  'The deep analysis has the measured facts. See its results below.'
 
 const STATUS_COPY: Record<string, string> = {
-  pending: 'Waiting for Jev assessment',
-  running: 'Jev assessment in progress',
-  waiting_connection: 'Jev assessment waiting for database connection',
-  waiting_schema: 'Jev assessment waiting for schema context',
-  waiting_auth: 'Sign in to Readyset for Jev assessment',
-  retry_wait: 'Jev assessment temporarily unavailable',
-  paused: 'Jev assessment temporarily unavailable',
-  unsupported: 'Jev assessment unavailable for this query',
+  pending: 'Waiting for query classification',
+  running: 'RDST is classifying this query',
+  waiting_connection: 'Classification waiting for database connection',
+  waiting_schema: 'Classification waiting for schema context',
+  waiting_auth: 'Sign in to Readyset for query classification',
+  retry_wait: 'Classification temporarily unavailable',
+  paused: 'Classification temporarily unavailable',
+  unsupported: "RDST can't classify this query",
 }
 
 /**
@@ -78,11 +79,12 @@ export function JevAssessment({
   const complete = status === 'complete'
   const limited = complete && assessment?.band === 'Limited'
   const findings = assessment?.findings ?? []
+  const basis = schemaBasis(assessment?.schema_coverage)
   const summary = complete
     ? limited
-      ? 'Jev · Limited assessment'
-      : `Jev · ${assessment?.band || 'Unranked'} priority`
-    : STATUS_COPY[status] || 'Assessment temporarily unavailable'
+      ? 'Limited classification'
+      : `${assessment?.band || 'Unranked'} priority`
+    : STATUS_COPY[status] || 'Classification temporarily unavailable'
 
   return (
     <VStack className="items-stretch gap-2" data-testid="jev-assessment">
@@ -139,7 +141,11 @@ export function JevAssessment({
             size="small"
             icon={open ? 'chevron-up' : 'chevron-down'}
             iconPosition="right"
-            label={open ? 'Hide Jev results' : 'View Jev results'}
+            label={
+              open
+                ? 'Hide classification details'
+                : 'View classification details'
+            }
             aria-expanded={open}
             onClick={() => setOpen((value) => !value)}
             className="shrink-0"
@@ -151,7 +157,7 @@ export function JevAssessment({
         <VStack className="w-full items-start gap-3 rounded border border-border-layout-1 bg-surface-layout-1 px-4 py-3">
           <Text level="body-small" className="text-content-layout-2">
             {limited
-              ? 'Jev could not assess this query from the available schema.'
+              ? "RDST couldn't classify this query from the available schema."
               : JEV_PANEL_INTRO}
           </Text>
           {findings.map((finding) => (
@@ -187,15 +193,25 @@ export function JevAssessment({
               {JEV_PANEL_FOOTER}
             </Text>
           )}
-          <Text level="caption" className="text-content-layout-3">
-            Schema context: {assessment?.schema_coverage || 'unknown'}
-            {assessment?.schema_collected_at
-              ? ` · collected ${formatTimestamp(assessment.schema_collected_at).toLowerCase()}`
-              : ''}
-            {assessment?.assessed_at
-              ? ` · assessed ${formatTimestamp(assessment.assessed_at).toLowerCase()}`
-              : ''}
-          </Text>
+          {basis || assessment?.assessed_at ? (
+            <Text
+              level="caption"
+              className="text-content-layout-3"
+              data-testid="jev-basis"
+            >
+              {[
+                basis,
+                basis && assessment?.schema_collected_at
+                  ? `schema read ${formatTimestamp(assessment.schema_collected_at).toLowerCase()}`
+                  : null,
+                assessment?.assessed_at
+                  ? `classified ${formatTimestamp(assessment.assessed_at).toLowerCase()}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </Text>
+          ) : null}
           <Button
             variant="primary"
             modifier="outline"

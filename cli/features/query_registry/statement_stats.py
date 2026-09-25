@@ -22,10 +22,14 @@ process_snapshot().
 from __future__ import annotations
 
 import abc
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Iterable, Optional, Sequence
 
+from sqlglot import exp, parse
+
+from shared.monitor.monitor_store import SERIES_QUERIES
 from shared.query_registry.delta_processor import (
     CounterRow,
     compute_mysql_epoch_id,
@@ -55,6 +59,12 @@ ACTIVITY_SAMPLE_LIMIT = 200
 ACTIVITY_SAMPLE_TIMEOUT_MS = 5_000
 # performance_schema TIMER_WAIT columns are picoseconds; CounterRow times are milliseconds.
 MYSQL_PICOSECONDS_PER_MS = 1e9
+# Each collection reads a bounded slice of the engine's statement view, selected inside the
+# engine: the statements RDST already holds counters for, the heaviest by total execution
+# time (as many as RDST tracks), and a small slice of the busiest by calls (Postgres) or most
+# recently run (MySQL) so newly hot statements can enter. Engines may hold far more.
+COLLECT_HEAVY_STATEMENTS = SERIES_QUERIES
+COLLECT_ENTRANT_STATEMENTS = 1_000
 
 Executor = Callable[[str, Optional[Sequence[object]]], Sequence[Sequence[object]]]
 
@@ -85,6 +95,9 @@ class CollectResult:
     texts: dict[str, str]
     incremental: bool
     sample_texts: dict[str, str] = field(default_factory=dict)
+    # Whole-view (statements, calls, total_exec_time ms) summed inside the engine, so database
+    # totals count every statement, not only the fetched slice. None when unavailable.
+    totals: Optional[tuple[int, int, float]] = None
 
 
 def pg_engine_key(userid: object, dbid: object, queryid: object, toplevel: str) -> str:
@@ -143,6 +156,7 @@ class StatementStatsSource(abc.ABC):
         executor: Executor,
         cursor_state: Optional[dict[str, object]] = None,
         known_text_keys: Iterable[str] = frozenset(),
+        tracked_keys: Iterable[str] = (),
     ) -> CollectResult:
         """Run Phase A: session setup, epoch/capability reads, and the counter sweep."""
 
@@ -189,7 +203,8 @@ PG_SETTINGS_SQL = (
 # evidence for "values running in production". RDST's own sessions are
 # excluded by pid and by the connection lane's application_name prefix.
 PG_ACTIVITY_SAMPLE_SQL = (
-    RDST_OBSERVE_MARKER + "SELECT query FROM pg_stat_activity"
+    RDST_OBSERVE_MARKER + "SELECT query,pid,state,"
+    "EXTRACT(EPOCH FROM (clock_timestamp()-query_start)) FROM pg_stat_activity"
     " WHERE state = 'active'"
     " AND pid != pg_backend_pid()"
     " AND COALESCE(application_name, '') NOT LIKE 'rdst/%'"
@@ -204,6 +219,10 @@ def pg_phase_a_sql(server_version_num: int) -> str:
     database's dbid; ranking and filtering happen in the store, so no SUM/ORDER BY/LIMIT/LIKE.
     stddev is selected so the SQL shape is final; the wiring wave surfaces it once the store
     carries its column.
+
+    The view is materialized once and only a slice leaves the engine: rows whose queryid is in
+    the %s array (statements RDST already holds counters for), the COLLECT_HEAVY_STATEMENTS
+    heaviest by total_exec_time and the COLLECT_ENTRANT_STATEMENTS busiest by calls.
     """
     if server_version_num < 130000:
         raise ValueError(
@@ -221,6 +240,9 @@ def pg_phase_a_sql(server_version_num: int) -> str:
         "min_exec_time",
         "max_exec_time",
         "stddev_exec_time",
+        "shared_blks_hit",
+        "shared_blks_read",
+        "temp_blks_written",
     ]
     if server_version_num >= 170000:
         columns += [
@@ -228,11 +250,35 @@ def pg_phase_a_sql(server_version_num: int) -> str:
             "extract(epoch FROM minmax_stats_since)::float8 AS minmax_stats_since",
         ]
     return (
-        RDST_OBSERVE_MARKER + "SELECT " + ", ".join(columns)
+        RDST_OBSERVE_MARKER + "WITH s AS MATERIALIZED (SELECT " + ", ".join(columns)
         + " FROM pg_stat_statements(false)"
         " WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())"
-        " AND queryid IS NOT NULL"
+        " AND queryid IS NOT NULL)"
+        " SELECT * FROM s WHERE queryid = ANY(%s::bigint[])"
+        f" UNION SELECT * FROM (SELECT * FROM s ORDER BY total_exec_time DESC"
+        f" LIMIT {COLLECT_HEAVY_STATEMENTS}) heavy"
+        f" UNION SELECT * FROM (SELECT * FROM s ORDER BY calls DESC"
+        f" LIMIT {COLLECT_ENTRANT_STATEMENTS}) busy"
     )
+
+
+# Whole-view totals for database-level history; showtext := false keeps texts in the engine.
+PG_TOTALS_SQL = (
+    RDST_OBSERVE_MARKER + "SELECT count(*), coalesce(sum(calls), 0),"
+    " coalesce(sum(total_exec_time), 0)::float8 FROM pg_stat_statements(showtext := false)"
+    " WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())"
+    " AND queryid IS NOT NULL"
+)
+
+
+def _totals(executor: Executor, sql: str, scale: float = 1.0) -> Optional[tuple[int, int, float]]:
+    """(statements, calls, total ms) summed inside the engine; None if unreadable."""
+    try:
+        rows = executor(sql, None)
+        count, calls, total = rows[0]
+        return int(count), int(calls), float(total) / scale  # type: ignore[arg-type]
+    except Exception:
+        return None
 
 
 class PgStatStatementsSource(StatementStatsSource):
@@ -259,7 +305,18 @@ class PgStatStatementsSource(StatementStatsSource):
     def activity_sample(self, executor: Executor) -> list[str]:
         for statement in self.activity_setup_statements:
             executor(statement, None)
-        rows = executor(PG_ACTIVITY_SAMPLE_SQL, None)
+        sql = PG_ACTIVITY_SAMPLE_SQL
+        if getattr(self, "server_version", 0) >= 140000:
+            sql = sql.replace("SELECT query,pid,state,", "SELECT query,pid,state,query_id,")
+        rows = executor(sql, None)
+        has_query_id = getattr(self, "server_version", 0) >= 140000
+        self.last_activity_details = [
+            {"query": str(row[0]), "pid": int(row[1]), "state": str(row[2]),
+             "query_id": int(row[3]) if has_query_id and row[3] is not None else None,
+             "duration_s": float(row[4] if has_query_id else row[3])}
+            for row in rows
+            if len(row) >= (5 if has_query_id else 4) and row[0] and row[1] is not None
+        ]
         return [str(row[0]) for row in rows if row and row[0]]
 
     def collect(
@@ -267,11 +324,13 @@ class PgStatStatementsSource(StatementStatsSource):
         executor: Executor,
         cursor_state: Optional[dict[str, object]] = None,
         known_text_keys: Iterable[str] = frozenset(),
+        tracked_keys: Iterable[str] = (),
     ) -> CollectResult:
         for statement in self.session_setup_statements:
             executor(statement, None)
 
         version = int(executor(PG_VERSION_SQL, None)[0][0])  # type: ignore[arg-type]
+        self.server_version = version
         phase_a = pg_phase_a_sql(version)  # validates the version floor
 
         if version >= 140000:
@@ -285,14 +344,21 @@ class PgStatStatementsSource(StatementStatsSource):
         has_toplevel = version >= 140000
         has_stats_since = version >= 170000
         counters_start = 4 if has_toplevel else 3
+        tracked = sorted({parse_pg_engine_key(key)[2] for key in tracked_keys})
         rows: list[CounterRow] = []
-        for raw in executor(phase_a, None):
+        for raw in executor(phase_a, (tracked,)):
             toplevel = _toplevel_flag(raw[3]) if has_toplevel else "t"
             calls, row_count, total, mean, minimum, maximum = raw[
                 counters_start : counters_start + 6
             ]
-            stats_since_raw = raw[counters_start + 7] if has_stats_since else None
-            minmax_since_raw = raw[counters_start + 8] if has_stats_since else None
+            # The newer block counters follow stddev. Older test fixtures
+            # model the pre-monitor column shape and leave them out.
+            extra = len(raw) - counters_start - 7 - (2 if has_stats_since else 0)
+            block_offset = 3 if extra >= 3 else 2 if extra >= 2 else 0
+            blks_hit = int(raw[counters_start + 7]) if block_offset else 0
+            blks_read = int(raw[counters_start + 8]) if block_offset else 0
+            stats_since_raw = raw[counters_start + 7 + block_offset] if has_stats_since else None
+            minmax_since_raw = raw[counters_start + 8 + block_offset] if has_stats_since else None
             rows.append(
                 CounterRow(
                     engine_key=pg_engine_key(raw[0], raw[1], raw[2], toplevel),
@@ -314,11 +380,16 @@ class PgStatStatementsSource(StatementStatsSource):
                         if minmax_since_raw is not None
                         else None
                     ),
+                    blks_hit=blks_hit,
+                    blks_read=blks_read,
+                    temp_blks=int(raw[counters_start + 9] or 0) if block_offset == 3 else 0,
                 )
             )
 
+        totals = _totals(executor, PG_TOTALS_SQL)
         capabilities: dict[str, object] = {
-            "statement_count": len(rows),
+            "statement_count": totals[0] if totals else len(rows),
+            "statements_fetched": len(rows),
             "dealloc": int(dealloc) if dealloc is not None else None,  # type: ignore[arg-type]
             # Below PG 14 the toplevel column does not exist: with track = all, nested and
             # top-level executions of the same statement are indistinguishable here.
@@ -343,6 +414,7 @@ class PgStatStatementsSource(StatementStatsSource):
             needs_text=needs_text,
             texts={},
             incremental=False,
+            totals=totals,
         )
 
     def text_fetch_sql(
@@ -389,14 +461,19 @@ MYSQL_SERVER_START_SQL = (
 _MYSQL_DIGEST_COLUMNS = (
     "SCHEMA_NAME, DIGEST, DIGEST_TEXT, COUNT_STAR,"
     " SUM_TIMER_WAIT, MIN_TIMER_WAIT, AVG_TIMER_WAIT, MAX_TIMER_WAIT,"
-    " SUM_ROWS_SENT, SUM_ROWS_EXAMINED, SUM_NO_INDEX_USED, FIRST_SEEN, LAST_SEEN"
+    " SUM_ROWS_SENT, SUM_ROWS_EXAMINED, SUM_NO_INDEX_USED, FIRST_SEEN, LAST_SEEN,"
+    " SUM_ROWS_AFFECTED, SUM_CREATED_TMP_DISK_TABLES"
 )
 _MYSQL_DIGEST_TABLE = "performance_schema.events_statements_summary_by_digest"
 
 # The catch-all NULL-digest row matches every incremental window once present (its LAST_SEEN
 # updates constantly), so it is excluded here and quantified separately (Q2 caveat 5).
+# The digest table is server-wide; like pg_stat_statements' current_database() filter, the sweep
+# keeps the target database's statements. A connection without a default database keeps all.
+_MYSQL_TARGET_SCHEMA = "(DATABASE() IS NULL OR SCHEMA_NAME = DATABASE())"
 MYSQL_SWEEP_SQL = (
-    f"{RDST_OBSERVE_MARKER}SELECT {_MYSQL_DIGEST_COLUMNS} FROM {_MYSQL_DIGEST_TABLE} WHERE DIGEST IS NOT NULL"
+    f"{RDST_OBSERVE_MARKER}SELECT {_MYSQL_DIGEST_COLUMNS} FROM {_MYSQL_DIGEST_TABLE}"
+    f" WHERE DIGEST IS NOT NULL AND {_MYSQL_TARGET_SCHEMA}"
 )
 # '>=' (never '>'): sub-second LAST_SEEN resolution is not guaranteed (MariaDB is 1 s), so '>'
 # silently drops rows updated later within the boundary second; overlap and dedupe instead.
@@ -412,21 +489,48 @@ MYSQL_SAMPLE_PROBE_SQL = (
 )
 MYSQL_SWEEP_SAMPLE_SQL = (
     f"{RDST_OBSERVE_MARKER}SELECT {_MYSQL_DIGEST_COLUMNS}, QUERY_SAMPLE_TEXT"
-    f" FROM {_MYSQL_DIGEST_TABLE} WHERE DIGEST IS NOT NULL"
+    f" FROM {_MYSQL_DIGEST_TABLE} WHERE DIGEST IS NOT NULL AND {_MYSQL_TARGET_SCHEMA}"
 )
 MYSQL_INCREMENTAL_SAMPLE_SQL = MYSQL_SWEEP_SAMPLE_SQL + " AND LAST_SEEN >= %s"
+
+
+def mysql_slice_sql(sample_capable: bool, incremental: bool) -> str:
+    """The digest rows one collection reads, selected inside the engine: the
+    COLLECT_HEAVY_STATEMENTS heaviest by SUM_TIMER_WAIT and the COLLECT_ENTRANT_STATEMENTS
+    most recently seen. An incremental read keeps only rows changed since the cursor (one %s
+    per branch), so every held digest that ran is read while fewer than that many changed;
+    a held digest outside the slice keeps its pair and is diffed when it is next read.
+    performance_schema has no index that serves a long DIGEST IN list, so held digests are
+    not named.
+    """
+    base = (MYSQL_SWEEP_SAMPLE_SQL if sample_capable else MYSQL_SWEEP_SQL)[
+        len(RDST_OBSERVE_MARKER):]
+    if incremental:
+        base += " AND LAST_SEEN >= %s"
+    return (f"{RDST_OBSERVE_MARKER}({base} ORDER BY SUM_TIMER_WAIT DESC"
+            f" LIMIT {COLLECT_HEAVY_STATEMENTS}) UNION ({base} ORDER BY LAST_SEEN DESC"
+            f" LIMIT {COLLECT_ENTRANT_STATEMENTS})")
+
+
+# Whole-table totals for the target database's digests, for database-level history.
+MYSQL_TOTALS_SQL = (
+    f"{RDST_OBSERVE_MARKER}SELECT COUNT(*), COALESCE(SUM(COUNT_STAR), 0),"
+    f" COALESCE(SUM(SUM_TIMER_WAIT), 0) FROM {_MYSQL_DIGEST_TABLE}"
+    f" WHERE DIGEST IS NOT NULL AND {_MYSQL_TARGET_SCHEMA}"
+)
 
 # PROCESSLIST equivalent of the PostgreSQL activity snapshot. The
 # connect-attrs subquery mirrors the live top lane's RDST self-session
 # exclusion; the optimizer hint is this SELECT's own short budget.
 MYSQL_ACTIVITY_SAMPLE_SQL = (
     RDST_OBSERVE_MARKER
-    + f"SELECT /*+ MAX_EXECUTION_TIME({ACTIVITY_SAMPLE_TIMEOUT_MS}) */ INFO"
-    " FROM information_schema.PROCESSLIST"
-    " WHERE INFO IS NOT NULL"
-    " AND COMMAND != 'Sleep'"
-    " AND ID != CONNECTION_ID()"
-    " AND ID NOT IN ("
+    + f"SELECT /*+ MAX_EXECUTION_TIME({ACTIVITY_SAMPLE_TIMEOUT_MS}) */ "
+    "PROCESSLIST_INFO,PROCESSLIST_ID,PROCESSLIST_STATE,PROCESSLIST_TIME"
+    " FROM performance_schema.threads"
+    " WHERE PROCESSLIST_INFO IS NOT NULL"
+    " AND PROCESSLIST_COMMAND != 'Sleep'"
+    " AND PROCESSLIST_ID != CONNECTION_ID()"
+    " AND PROCESSLIST_ID NOT IN ("
     "SELECT PROCESSLIST_ID FROM performance_schema.session_account_connect_attrs"
     " WHERE ATTR_NAME = 'program_name' AND ATTR_VALUE LIKE 'rdst/%')"
     f" LIMIT {ACTIVITY_SAMPLE_LIMIT}"
@@ -436,6 +540,91 @@ MYSQL_NULL_DIGEST_SQL = f"{RDST_OBSERVE_MARKER}SELECT COUNT_STAR FROM {_MYSQL_DI
 MYSQL_ROW_COUNT_SQL = f"{RDST_OBSERVE_MARKER}SELECT COUNT(*) FROM {_MYSQL_DIGEST_TABLE} WHERE DIGEST IS NOT NULL"
 MYSQL_DIGEST_LOST_SQL = "SHOW GLOBAL STATUS LIKE 'Performance_schema_digest_lost'"
 MYSQL_DIGESTS_SIZE_SQL = "SHOW VARIABLES LIKE 'performance_schema_digests_size'"
+
+
+# performance_schema cuts statement text at performance_schema_max_sql_text_length (1024 by
+# default); a cut sample isn't a whole statement.
+MYSQL_SAMPLE_TEXT_LIMIT = 1023
+_MYSQL_LITERAL = re.compile(
+    r"'(?:[^'\\]|\\.|'')*'"          # 'string', with \' and '' escapes
+    r'|"(?:[^"\\]|\\.|"")*"'          # "string" (MySQL's default quoting)
+    r"|`(?:[^`]|``)*`"                 # `identifier`, kept as written
+    r"|/\*.*?\*/"                       # /* comment */, dropped
+    r"|(?<![\w$.`])(?:0x[0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?![\w$])",
+    re.DOTALL,
+)
+
+_MYSQL_POSITION = re.compile(
+    r"\b(?:ORDER|GROUP)\s+BY\s+(?:\d+(?:\s+(?:ASC|DESC))?\s*,\s*)*$", re.IGNORECASE)
+
+
+def mysql_sample_template(sample: str) -> Optional[str]:
+    """The query a digest's QUERY_SAMPLE_TEXT ran, with its literals as `?`.
+
+    DIGEST_TEXT is a token stream, not SQL MySQL runs back: `COUNT ( * )`, backticked
+    built-ins, `(...)` for value lists, `SQL_TSI_DAY`, and keyword-like table names
+    upper-cased. The sample is a real execution, so with its values masked it is the
+    readable, runnable template PostgreSQL's pg_stat_statements text already is. None when
+    the sample is cut off or holds no statement.
+    """
+    text = (sample or "").strip()
+    if not text or len(text) >= MYSQL_SAMPLE_TEXT_LIMIT:
+        return None
+
+    def mask(match: "re.Match[str]") -> str:
+        token = match.group()
+        if token.startswith("`"):
+            return token
+        if token.startswith("/*"):
+            # Optimizer hints stay; other comments carry nothing the query needs.
+            return token if token.startswith("/*+") else " "
+        if token[0].isdigit() and _MYSQL_POSITION.search(match.string, 0, match.start()):
+            return token  # ORDER BY 2 names a column, it isn't a value
+        return "?"
+
+    template = " ".join(_MYSQL_LITERAL.sub(mask, text).split()).rstrip(";").strip()
+    return template or None
+
+
+MYSQL_TABLE_NAMES_SQL = (
+    RDST_OBSERVE_MARKER + "SELECT TABLE_NAME FROM information_schema.TABLES"
+    " WHERE TABLE_SCHEMA = DATABASE()"
+)
+
+
+def mysql_table_case(sql: str, tables: Iterable[str]) -> str:
+    """Restore the case of table names MySQL's digest upper-cased.
+
+    DIGEST_TEXT spells an unquoted table named like a keyword (events, status) in upper
+    case, and table names are case-sensitive on most servers, so the Query Library's text
+    for it doesn't run. A name that isn't a table as written but matches exactly one table
+    ignoring case becomes that table.
+    """
+    exact = set(tables)
+    folded: dict[str, list[str]] = {}
+    for name in exact:
+        folded.setdefault(name.lower(), []).append(name)
+
+    try:
+        trees = parse(sql, read="mysql")
+    except Exception:
+        return sql
+    replacements = {}
+    for tree in trees:
+        if tree is None:
+            continue
+        for table in tree.find_all(exp.Table):
+            identifier = table.this
+            if not isinstance(identifier, exp.Identifier) or identifier.quoted or table.db:
+                continue
+            name = identifier.name
+            options = folded.get(name.lower(), [])
+            start, end = identifier.meta.get("start"), identifier.meta.get("end")
+            if name not in exact and len(options) == 1 and start is not None and end is not None:
+                replacements[(start, end + 1)] = options[0]
+    for (start, end), name in sorted(replacements.items(), reverse=True):
+        sql = sql[:start] + name + sql[end:]
+    return sql
 
 
 class MysqlDigestSource(StatementStatsSource):
@@ -453,6 +642,11 @@ class MysqlDigestSource(StatementStatsSource):
 
     def activity_sample(self, executor: Executor) -> list[str]:
         rows = executor(MYSQL_ACTIVITY_SAMPLE_SQL, None)
+        self.last_activity_details = [
+            {"query": str(row[0]), "pid": int(row[1]),
+             "state": str(row[2] or "active"), "duration_s": float(row[3] or 0)}
+            for row in rows if len(row) >= 4 and row[0] and row[1] is not None
+        ]
         return [str(row[0]) for row in rows if row and row[0]]
 
     def _sample_capable(self, executor: Executor) -> bool:
@@ -471,6 +665,7 @@ class MysqlDigestSource(StatementStatsSource):
         executor: Executor,
         cursor_state: Optional[dict[str, object]] = None,
         known_text_keys: Iterable[str] = frozenset(),
+        tracked_keys: Iterable[str] = (),
     ) -> CollectResult:
         for statement in self.session_setup_statements:
             executor(statement, None)
@@ -499,14 +694,9 @@ class MysqlDigestSource(StatementStatsSource):
         # A restart empties the table and starts a new epoch; the old cursor belongs to the old
         # epoch, so re-baseline with a full sweep.
         last_seen = previous.get("last_seen") if not restarted else None
-        if last_seen is None:
-            sweep_sql = MYSQL_SWEEP_SAMPLE_SQL if sample_capable else MYSQL_SWEEP_SQL
-            raw_rows = executor(sweep_sql, None)
-        else:
-            incremental_sql = (
-                MYSQL_INCREMENTAL_SAMPLE_SQL if sample_capable else MYSQL_INCREMENTAL_SQL
-            )
-            raw_rows = executor(incremental_sql, (last_seen,))
+        window: tuple[object, ...] = () if last_seen is None else (last_seen,)
+        raw_rows = executor(mysql_slice_sql(sample_capable, last_seen is not None),
+                            (*window, *window) or None)
 
         rows: list[CounterRow] = []
         texts: dict[str, str] = {}
@@ -518,7 +708,8 @@ class MysqlDigestSource(StatementStatsSource):
                 CounterRow(
                     engine_key=key,
                     calls=int(raw[3]),  # type: ignore[arg-type]
-                    rows=int(raw[8]),  # type: ignore[arg-type]
+                    # Rows returned plus rows written: pg_stat_statements' rows counts both.
+                    rows=int(raw[8]) + int(raw[13] or 0),  # type: ignore[arg-type]
                     total_exec_time=float(raw[4]) / MYSQL_PICOSECONDS_PER_MS,  # type: ignore[arg-type]
                     mean_exec_time=float(raw[6]) / MYSQL_PICOSECONDS_PER_MS,  # type: ignore[arg-type]
                     min_exec_time=float(raw[5]) / MYSQL_PICOSECONDS_PER_MS,  # type: ignore[arg-type]
@@ -526,14 +717,20 @@ class MysqlDigestSource(StatementStatsSource):
                     captured_at=captured_at,
                     epoch_id=epoch_id,
                     first_seen=_to_epoch_seconds(raw[11]),
+                    temp_blks=int(raw[14] or 0) if len(raw) >= (16 if sample_capable else 15) else 0,
                 )
             )
             if digest_text is not None:
                 texts[key] = str(digest_text)
             if sample_capable:
-                sample = raw[13]
+                sample = raw[15] if len(raw) >= 16 else raw[14]
                 if sample:
                     sample_texts[key] = str(sample)
+                    # DIGEST_TEXT drops comments, so RDST's own statements (EXPLAIN, catalog
+                    # reads) are known by the marker their sample keeps; carrying that text
+                    # classifies the digest as self-traffic the way pg_stat_statements text does.
+                    if str(sample).lstrip().lower().startswith(RDST_OBSERVE_MARKER[:6]):
+                        texts[key] = str(sample)
 
         null_bucket = executor(MYSQL_NULL_DIGEST_SQL, None)
         capabilities: dict[str, object] = {
@@ -542,6 +739,7 @@ class MysqlDigestSource(StatementStatsSource):
             "digest_lost": self._show_value(executor, MYSQL_DIGEST_LOST_SQL),
             "digests_size": self._show_value(executor, MYSQL_DIGESTS_SIZE_SQL),
             "query_sample_text": sample_capable,
+            "statements_fetched": len(rows),
         }
 
         return CollectResult(
@@ -553,6 +751,7 @@ class MysqlDigestSource(StatementStatsSource):
             texts=texts,
             incremental=True,
             sample_texts=sample_texts,
+            totals=_totals(executor, MYSQL_TOTALS_SQL, MYSQL_PICOSECONDS_PER_MS),
         )
 
     @staticmethod

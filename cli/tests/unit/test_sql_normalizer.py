@@ -356,6 +356,16 @@ class TestPositionalPlaceholders:
     def test_slot_inside_string_literal_is_not_a_placeholder(self):
         assert get_placeholder_names("SELECT * FROM t WHERE s = '$1'") == set()
 
+    def test_mysql_digest_question_slots_name_parameters_in_order(self):
+        sql = "SELECT `id` FROM `orders` WHERE `customer_id` = ? AND note <> '?' LIMIT ?"
+        params = {"p1": {"value": "42", "type": "number"},
+                  "p2": {"value": "10", "type": "number"}}
+        assert get_placeholder_names(sql, "mysql") == {"p1", "p2"}
+        assert reconstruct_sql(sql, params, dialect="mysql") == (
+            "SELECT `id` FROM `orders` WHERE `customer_id` = 42 AND note <> '?' LIMIT 10")
+        # Other engines keep reading `?` as an operator, not a slot.
+        assert get_placeholder_names("SELECT * FROM t WHERE doc ? 'k'", "postgres") == set()
+
     def test_reconstruct_substitutes_dollar_slots(self):
         sql = "SELECT * FROM users WHERE id = $1 AND name = $2"
         params = {
@@ -837,6 +847,25 @@ class TestReferencesUserRelations:
             is False
         )
 
+    def test_unparseable_mysql_digest_text_reads_its_backticked_relations(self):
+        """DIGEST_TEXT (`DECIMAL (...)`, `a` . `b`) defeats the parser; the fallback still
+        finds the relation behind the spaced, backticked dot."""
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        system = ("SELECT `UNIX_TIMESTAMP` ( NOW (?) ) - CAST ( `variable_value` AS DECIMAL "
+                  "(...) ) FROM `performance_schema` . `global_status` WHERE `variable_name` = ?")
+        user = "SELECT CAST ( `total` AS DECIMAL (...) ) FROM `shop` . `orders`"
+        assert references_user_relations(system, dialect="mysql") is False
+        assert references_user_relations(user, dialect="mysql") is True
+
+    def test_describe_and_explain_are_not_workload(self):
+        from shared.query_registry.sql_normalizer import references_user_relations
+
+        assert references_user_relations("DESCRIBE `orders`", dialect="mysql") is False
+        assert references_user_relations("DESC orders", dialect="mysql") is False
+        assert references_user_relations(
+            "EXPLAIN FORMAT = JSON SELECT * FROM `orders` WHERE `id` = ?", dialect="mysql") is False
+
     def test_user_tables_are_user(self):
         from shared.query_registry.sql_normalizer import references_user_relations
 
@@ -953,16 +982,14 @@ class TestReferencesUserRelations:
             is False
         )
 
-    def test_mysql_describe_admits_as_user_but_marker_excludes_it(self):
+    def test_mysql_describe_is_never_admitted_marked_or_not(self):
         from shared.query_registry.sql_normalizer import references_user_relations
 
-        # Unmarked, MySQL's admission classifier fails open on DESCRIBE (the
-        # introspector's own bug): it looks like it touches a user table.
+        # MySQL's digest text drops the introspector's marker, so DESCRIBE itself is
+        # recognized as a statement about a table, not workload.
         assert (
-            references_user_relations("DESCRIBE `orders`", dialect="mysql") is True
+            references_user_relations("DESCRIBE `orders`", dialect="mysql") is False
         )
-        # The introspector prefixes its self-marker on this statement, which
-        # keeps it out of registry admission like every other profiling probe.
         assert (
             references_user_relations(
                 "/*rdst:profile*/ DESCRIBE `orders`", dialect="mysql"

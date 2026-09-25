@@ -16,10 +16,12 @@ import { Route as ResultsRouteImport } from './routes/results'
 import { Route as QueryRegistryRouteImport } from './routes/query-registry'
 import { Route as QueriesRouteImport } from './routes/queries'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as GuardsRouteImport } from './routes/guards'
 import { Route as FleetRouteImport } from './routes/fleet'
 import { Route as DevSettingsRouteImport } from './routes/dev-settings'
 import { Route as DemoRouteImport } from './routes/demo'
+import { Route as DatabaseRouteImport } from './routes/database'
 import { Route as ConfigureRouteImport } from './routes/configure'
 import { Route as CacheRouteImport } from './routes/cache'
 import { Route as BenchmarkRouteImport } from './routes/benchmark'
@@ -27,10 +29,14 @@ import { Route as AuditRouteImport } from './routes/audit'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as AnalyzeRouteImport } from './routes/analyze'
 import { Route as AgentsRouteImport } from './routes/agents'
+import { Route as AgentActivityRouteImport } from './routes/agent-activity'
 import { Route as AccountLoginRouteImport } from './routes/account-login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LabPerformanceCardsRouteImport } from './routes/lab.performance-cards'
+import { Route as DbTargetRouteImport } from './routes/db.$target'
 import { Route as LabQueriesVariantRouteImport } from './routes/lab.queries.$variant'
+import { Route as DbTargetReportRouteImport } from './routes/db.$target.report'
+import { Route as DatabaseReportsReportIdRouteImport } from './routes/database_.reports.$reportId'
 import { Route as AuditRunsRunIdRouteImport } from './routes/audit_.runs.$runId'
 
 const TopRoute = TopRouteImport.update({
@@ -68,6 +74,11 @@ const OnboardingRoute = OnboardingRouteImport.update({
   path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InboxRoute = InboxRouteImport.update({
+  id: '/inbox',
+  path: '/inbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const GuardsRoute = GuardsRouteImport.update({
   id: '/guards',
   path: '/guards',
@@ -86,6 +97,11 @@ const DevSettingsRoute = DevSettingsRouteImport.update({
 const DemoRoute = DemoRouteImport.update({
   id: '/demo',
   path: '/demo',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DatabaseRoute = DatabaseRouteImport.update({
+  id: '/database',
+  path: '/database',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConfigureRoute = ConfigureRouteImport.update({
@@ -123,6 +139,11 @@ const AgentsRoute = AgentsRouteImport.update({
   path: '/agents',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AgentActivityRoute = AgentActivityRouteImport.update({
+  id: '/agent-activity',
+  path: '/agent-activity',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AccountLoginRoute = AccountLoginRouteImport.update({
   id: '/account-login',
   path: '/account-login',
@@ -138,9 +159,24 @@ const LabPerformanceCardsRoute = LabPerformanceCardsRouteImport.update({
   path: '/lab/performance-cards',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DbTargetRoute = DbTargetRouteImport.update({
+  id: '/db/$target',
+  path: '/db/$target',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LabQueriesVariantRoute = LabQueriesVariantRouteImport.update({
   id: '/lab/queries/$variant',
   path: '/lab/queries/$variant',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DbTargetReportRoute = DbTargetReportRouteImport.update({
+  id: '/report',
+  path: '/report',
+  getParentRoute: () => DbTargetRoute,
+} as any)
+const DatabaseReportsReportIdRoute = DatabaseReportsReportIdRouteImport.update({
+  id: '/database_/reports/$reportId',
+  path: '/database/reports/$reportId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuditRunsRunIdRoute = AuditRunsRunIdRouteImport.update({
@@ -152,6 +188,7 @@ const AuditRunsRunIdRoute = AuditRunsRunIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/account-login': typeof AccountLoginRoute
+  '/agent-activity': typeof AgentActivityRoute
   '/agents': typeof AgentsRoute
   '/analyze': typeof AnalyzeRoute
   '/ask': typeof AskRoute
@@ -159,10 +196,12 @@ export interface FileRoutesByFullPath {
   '/benchmark': typeof BenchmarkRoute
   '/cache': typeof CacheRoute
   '/configure': typeof ConfigureRoute
+  '/database': typeof DatabaseRoute
   '/demo': typeof DemoRoute
   '/dev-settings': typeof DevSettingsRoute
   '/fleet': typeof FleetRoute
   '/guards': typeof GuardsRoute
+  '/inbox': typeof InboxRoute
   '/onboarding': typeof OnboardingRoute
   '/queries': typeof QueriesRoute
   '/query-registry': typeof QueryRegistryRoute
@@ -170,13 +209,17 @@ export interface FileRoutesByFullPath {
   '/scan': typeof ScanRoute
   '/schema': typeof SchemaRoute
   '/top': typeof TopRoute
+  '/db/$target': typeof DbTargetRouteWithChildren
   '/lab/performance-cards': typeof LabPerformanceCardsRoute
   '/audit/runs/$runId': typeof AuditRunsRunIdRoute
+  '/database/reports/$reportId': typeof DatabaseReportsReportIdRoute
+  '/db/$target/report': typeof DbTargetReportRoute
   '/lab/queries/$variant': typeof LabQueriesVariantRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/account-login': typeof AccountLoginRoute
+  '/agent-activity': typeof AgentActivityRoute
   '/agents': typeof AgentsRoute
   '/analyze': typeof AnalyzeRoute
   '/ask': typeof AskRoute
@@ -184,10 +227,12 @@ export interface FileRoutesByTo {
   '/benchmark': typeof BenchmarkRoute
   '/cache': typeof CacheRoute
   '/configure': typeof ConfigureRoute
+  '/database': typeof DatabaseRoute
   '/demo': typeof DemoRoute
   '/dev-settings': typeof DevSettingsRoute
   '/fleet': typeof FleetRoute
   '/guards': typeof GuardsRoute
+  '/inbox': typeof InboxRoute
   '/onboarding': typeof OnboardingRoute
   '/queries': typeof QueriesRoute
   '/query-registry': typeof QueryRegistryRoute
@@ -195,14 +240,18 @@ export interface FileRoutesByTo {
   '/scan': typeof ScanRoute
   '/schema': typeof SchemaRoute
   '/top': typeof TopRoute
+  '/db/$target': typeof DbTargetRouteWithChildren
   '/lab/performance-cards': typeof LabPerformanceCardsRoute
   '/audit/runs/$runId': typeof AuditRunsRunIdRoute
+  '/database/reports/$reportId': typeof DatabaseReportsReportIdRoute
+  '/db/$target/report': typeof DbTargetReportRoute
   '/lab/queries/$variant': typeof LabQueriesVariantRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/account-login': typeof AccountLoginRoute
+  '/agent-activity': typeof AgentActivityRoute
   '/agents': typeof AgentsRoute
   '/analyze': typeof AnalyzeRoute
   '/ask': typeof AskRoute
@@ -210,10 +259,12 @@ export interface FileRoutesById {
   '/benchmark': typeof BenchmarkRoute
   '/cache': typeof CacheRoute
   '/configure': typeof ConfigureRoute
+  '/database': typeof DatabaseRoute
   '/demo': typeof DemoRoute
   '/dev-settings': typeof DevSettingsRoute
   '/fleet': typeof FleetRoute
   '/guards': typeof GuardsRoute
+  '/inbox': typeof InboxRoute
   '/onboarding': typeof OnboardingRoute
   '/queries': typeof QueriesRoute
   '/query-registry': typeof QueryRegistryRoute
@@ -221,8 +272,11 @@ export interface FileRoutesById {
   '/scan': typeof ScanRoute
   '/schema': typeof SchemaRoute
   '/top': typeof TopRoute
+  '/db/$target': typeof DbTargetRouteWithChildren
   '/lab/performance-cards': typeof LabPerformanceCardsRoute
   '/audit_/runs/$runId': typeof AuditRunsRunIdRoute
+  '/database_/reports/$reportId': typeof DatabaseReportsReportIdRoute
+  '/db/$target/report': typeof DbTargetReportRoute
   '/lab/queries/$variant': typeof LabQueriesVariantRoute
 }
 export interface FileRouteTypes {
@@ -230,6 +284,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/account-login'
+    | '/agent-activity'
     | '/agents'
     | '/analyze'
     | '/ask'
@@ -237,10 +292,12 @@ export interface FileRouteTypes {
     | '/benchmark'
     | '/cache'
     | '/configure'
+    | '/database'
     | '/demo'
     | '/dev-settings'
     | '/fleet'
     | '/guards'
+    | '/inbox'
     | '/onboarding'
     | '/queries'
     | '/query-registry'
@@ -248,13 +305,17 @@ export interface FileRouteTypes {
     | '/scan'
     | '/schema'
     | '/top'
+    | '/db/$target'
     | '/lab/performance-cards'
     | '/audit/runs/$runId'
+    | '/database/reports/$reportId'
+    | '/db/$target/report'
     | '/lab/queries/$variant'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/account-login'
+    | '/agent-activity'
     | '/agents'
     | '/analyze'
     | '/ask'
@@ -262,10 +323,12 @@ export interface FileRouteTypes {
     | '/benchmark'
     | '/cache'
     | '/configure'
+    | '/database'
     | '/demo'
     | '/dev-settings'
     | '/fleet'
     | '/guards'
+    | '/inbox'
     | '/onboarding'
     | '/queries'
     | '/query-registry'
@@ -273,13 +336,17 @@ export interface FileRouteTypes {
     | '/scan'
     | '/schema'
     | '/top'
+    | '/db/$target'
     | '/lab/performance-cards'
     | '/audit/runs/$runId'
+    | '/database/reports/$reportId'
+    | '/db/$target/report'
     | '/lab/queries/$variant'
   id:
     | '__root__'
     | '/'
     | '/account-login'
+    | '/agent-activity'
     | '/agents'
     | '/analyze'
     | '/ask'
@@ -287,10 +354,12 @@ export interface FileRouteTypes {
     | '/benchmark'
     | '/cache'
     | '/configure'
+    | '/database'
     | '/demo'
     | '/dev-settings'
     | '/fleet'
     | '/guards'
+    | '/inbox'
     | '/onboarding'
     | '/queries'
     | '/query-registry'
@@ -298,14 +367,18 @@ export interface FileRouteTypes {
     | '/scan'
     | '/schema'
     | '/top'
+    | '/db/$target'
     | '/lab/performance-cards'
     | '/audit_/runs/$runId'
+    | '/database_/reports/$reportId'
+    | '/db/$target/report'
     | '/lab/queries/$variant'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountLoginRoute: typeof AccountLoginRoute
+  AgentActivityRoute: typeof AgentActivityRoute
   AgentsRoute: typeof AgentsRoute
   AnalyzeRoute: typeof AnalyzeRoute
   AskRoute: typeof AskRoute
@@ -313,10 +386,12 @@ export interface RootRouteChildren {
   BenchmarkRoute: typeof BenchmarkRoute
   CacheRoute: typeof CacheRoute
   ConfigureRoute: typeof ConfigureRoute
+  DatabaseRoute: typeof DatabaseRoute
   DemoRoute: typeof DemoRoute
   DevSettingsRoute: typeof DevSettingsRoute
   FleetRoute: typeof FleetRoute
   GuardsRoute: typeof GuardsRoute
+  InboxRoute: typeof InboxRoute
   OnboardingRoute: typeof OnboardingRoute
   QueriesRoute: typeof QueriesRoute
   QueryRegistryRoute: typeof QueryRegistryRoute
@@ -324,8 +399,10 @@ export interface RootRouteChildren {
   ScanRoute: typeof ScanRoute
   SchemaRoute: typeof SchemaRoute
   TopRoute: typeof TopRoute
+  DbTargetRoute: typeof DbTargetRouteWithChildren
   LabPerformanceCardsRoute: typeof LabPerformanceCardsRoute
   AuditRunsRunIdRoute: typeof AuditRunsRunIdRoute
+  DatabaseReportsReportIdRoute: typeof DatabaseReportsReportIdRoute
   LabQueriesVariantRoute: typeof LabQueriesVariantRoute
 }
 
@@ -380,6 +457,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OnboardingRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/inbox': {
+      id: '/inbox'
+      path: '/inbox'
+      fullPath: '/inbox'
+      preLoaderRoute: typeof InboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/guards': {
       id: '/guards'
       path: '/guards'
@@ -406,6 +490,13 @@ declare module '@tanstack/react-router' {
       path: '/demo'
       fullPath: '/demo'
       preLoaderRoute: typeof DemoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/database': {
+      id: '/database'
+      path: '/database'
+      fullPath: '/database'
+      preLoaderRoute: typeof DatabaseRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/configure': {
@@ -457,6 +548,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agent-activity': {
+      id: '/agent-activity'
+      path: '/agent-activity'
+      fullPath: '/agent-activity'
+      preLoaderRoute: typeof AgentActivityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/account-login': {
       id: '/account-login'
       path: '/account-login'
@@ -478,11 +576,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LabPerformanceCardsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/db/$target': {
+      id: '/db/$target'
+      path: '/db/$target'
+      fullPath: '/db/$target'
+      preLoaderRoute: typeof DbTargetRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/lab/queries/$variant': {
       id: '/lab/queries/$variant'
       path: '/lab/queries/$variant'
       fullPath: '/lab/queries/$variant'
       preLoaderRoute: typeof LabQueriesVariantRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/db/$target/report': {
+      id: '/db/$target/report'
+      path: '/report'
+      fullPath: '/db/$target/report'
+      preLoaderRoute: typeof DbTargetReportRouteImport
+      parentRoute: typeof DbTargetRoute
+    }
+    '/database_/reports/$reportId': {
+      id: '/database_/reports/$reportId'
+      path: '/database/reports/$reportId'
+      fullPath: '/database/reports/$reportId'
+      preLoaderRoute: typeof DatabaseReportsReportIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/audit_/runs/$runId': {
@@ -495,9 +614,22 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface DbTargetRouteChildren {
+  DbTargetReportRoute: typeof DbTargetReportRoute
+}
+
+const DbTargetRouteChildren: DbTargetRouteChildren = {
+  DbTargetReportRoute: DbTargetReportRoute,
+}
+
+const DbTargetRouteWithChildren = DbTargetRoute._addFileChildren(
+  DbTargetRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountLoginRoute: AccountLoginRoute,
+  AgentActivityRoute: AgentActivityRoute,
   AgentsRoute: AgentsRoute,
   AnalyzeRoute: AnalyzeRoute,
   AskRoute: AskRoute,
@@ -505,10 +637,12 @@ const rootRouteChildren: RootRouteChildren = {
   BenchmarkRoute: BenchmarkRoute,
   CacheRoute: CacheRoute,
   ConfigureRoute: ConfigureRoute,
+  DatabaseRoute: DatabaseRoute,
   DemoRoute: DemoRoute,
   DevSettingsRoute: DevSettingsRoute,
   FleetRoute: FleetRoute,
   GuardsRoute: GuardsRoute,
+  InboxRoute: InboxRoute,
   OnboardingRoute: OnboardingRoute,
   QueriesRoute: QueriesRoute,
   QueryRegistryRoute: QueryRegistryRoute,
@@ -516,8 +650,10 @@ const rootRouteChildren: RootRouteChildren = {
   ScanRoute: ScanRoute,
   SchemaRoute: SchemaRoute,
   TopRoute: TopRoute,
+  DbTargetRoute: DbTargetRouteWithChildren,
   LabPerformanceCardsRoute: LabPerformanceCardsRoute,
   AuditRunsRunIdRoute: AuditRunsRunIdRoute,
+  DatabaseReportsReportIdRoute: DatabaseReportsReportIdRoute,
   LabQueriesVariantRoute: LabQueriesVariantRoute,
 }
 export const routeTree = rootRouteImport

@@ -4,8 +4,9 @@ PostgreSQL: pg_stat_user_indexes + pg_index for uniqueness/primary + pg_indexes
 (or pg_attribute) for column lists. Duplicates detected when one index's column
 prefix is a subset of another's column list on the same table.
 
-MySQL: information_schema.STATISTICS for columns + performance_schema.
-table_io_waits_summary_by_index_usage for scan counts (COUNT_FETCH).
+MySQL: information_schema.STATISTICS for columns, performance_schema.
+table_io_waits_summary_by_index_usage for accesses (COUNT_STAR, as sys.schema_unused_indexes
+reads it) and mysql.innodb_index_stats for sizes.
 """
 
 from __future__ import annotations
@@ -164,61 +165,71 @@ def _collect_pg(conn: Any) -> IndexHealthSection:
     return section
 
 
+_MYSQL_INDEX_SQL = """
+SELECT
+    s.TABLE_SCHEMA,
+    s.TABLE_NAME,
+    s.INDEX_NAME,
+    MAX(s.NON_UNIQUE) = 0 AS is_unique,
+    s.INDEX_NAME = 'PRIMARY' AS is_primary,
+    GROUP_CONCAT(s.COLUMN_NAME ORDER BY s.SEQ_IN_INDEX) AS cols
+FROM information_schema.STATISTICS s
+WHERE s.TABLE_SCHEMA NOT IN ('mysql','information_schema','performance_schema','sys')
+  AND (DATABASE() IS NULL OR s.TABLE_SCHEMA = DATABASE())
+GROUP BY s.TABLE_SCHEMA, s.TABLE_NAME, s.INDEX_NAME;
+"""
+# Every access through the index since the server started (sys.schema_unused_indexes reads the
+# same COUNT_STAR), and its read-side counters for tuples_read / tuples_fetched.
+_MYSQL_USAGE_SQL = """
+SELECT OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, COUNT_STAR, COUNT_READ, COUNT_FETCH
+FROM performance_schema.table_io_waits_summary_by_index_usage
+WHERE INDEX_NAME IS NOT NULL;
+"""
+# InnoDB's persistent statistics carry each index's size in pages.
+_MYSQL_SIZE_SQL = """
+SELECT database_name, table_name, index_name, stat_value * @@innodb_page_size
+FROM mysql.innodb_index_stats
+WHERE stat_name = 'size';
+"""
+
+
 def _collect_mysql(conn: Any) -> IndexHealthSection:
     section = IndexHealthSection()
     all_rows: List[IndexRow] = []
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    s.TABLE_SCHEMA,
-                    s.TABLE_NAME,
-                    s.INDEX_NAME,
-                    MAX(s.NON_UNIQUE) = 0 AS is_unique,
-                    s.INDEX_NAME = 'PRIMARY' AS is_primary,
-                    GROUP_CONCAT(s.COLUMN_NAME ORDER BY s.SEQ_IN_INDEX) AS cols,
-                    NULL AS size_bytes
-                FROM information_schema.STATISTICS s
-                WHERE s.TABLE_SCHEMA NOT IN
-                    ('mysql','information_schema','performance_schema','sys')
-                GROUP BY s.TABLE_SCHEMA, s.TABLE_NAME, s.INDEX_NAME;
-                """
+    with conn.cursor() as cur:
+        cur.execute(_MYSQL_INDEX_SQL)
+        rows = cur.fetchall()
+        # Without usage counters every index would read as unused, so the section fails
+        # (reported as not checked) instead of guessing.
+        cur.execute(_MYSQL_USAGE_SQL)
+        usage: Dict[tuple, tuple] = {
+            (schema, table, index): (int(star or 0), read, fetched)
+            for schema, table, index, star, read, fetched in cur.fetchall()}
+        sizes: Dict[tuple, int] = {}
+        try:
+            cur.execute(_MYSQL_SIZE_SQL)
+            sizes = {(schema, table, index): int(size or 0)
+                     for schema, table, index, size in cur.fetchall()}
+        except Exception:
+            pass
+
+    for schema, table, index, is_unique, is_primary, cols_csv in rows:
+        cols = [c.strip() for c in (cols_csv or "").split(",") if c.strip()]
+        scans, read, fetched = usage.get((schema, table, index), (0, None, None))
+        all_rows.append(
+            IndexRow(
+                schema=schema,
+                table=table,
+                index=index,
+                is_unique=bool(is_unique),
+                is_primary=bool(is_primary),
+                columns=cols,
+                size_bytes=sizes.get((schema, table, index)),
+                scans=scans,
+                tuples_read=int(read) if read is not None else None,
+                tuples_fetched=int(fetched) if fetched is not None else None,
             )
-            rows = cur.fetchall()
-
-            # Scan counts from performance_schema if available
-            scan_by_index: Dict[tuple, int] = {}
-            try:
-                cur.execute(
-                    """
-                    SELECT OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, COUNT_FETCH
-                    FROM performance_schema.table_io_waits_summary_by_index_usage
-                    WHERE INDEX_NAME IS NOT NULL;
-                    """
-                )
-                for schema, table, index, fetches in cur.fetchall():
-                    scan_by_index[(schema, table, index)] = int(fetches or 0)
-            except Exception:
-                pass
-
-            for schema, table, index, is_unique, is_primary, cols_csv, size in rows:
-                cols = [c.strip() for c in (cols_csv or "").split(",") if c.strip()]
-                scans = scan_by_index.get((schema, table, index), 0)
-                all_rows.append(
-                    IndexRow(
-                        schema=schema,
-                        table=table,
-                        index=index,
-                        is_unique=bool(is_unique),
-                        is_primary=bool(is_primary),
-                        columns=cols,
-                        size_bytes=size,
-                        scans=scans,
-                    )
-                )
-    except Exception:
-        return section
+        )
 
     section.all_indexes = all_rows
     section.total_indexes = len(all_rows)

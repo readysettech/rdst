@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from shared import agent_activity
 from shared.api.guards import require_local_request
+from shared.monitor.statements import display_name
 from shared.api.models import AnalyzeRequest
 from shared.api.target_guard import TargetGuard, require_target_body
 from shared.telemetry import telemetry
@@ -109,6 +111,7 @@ def _event_to_sse(event: AnalyzeEvent) -> dict:
                     {
                         "success": event.success,
                         "analysis_id": event.analysis_id,
+                        "stored_analysis_id": event.stored_analysis_id,
                         "query_hash": event.query_hash,
                         "explain_results": event.explain_results,
                         "llm_analysis": event.llm_analysis,
@@ -149,6 +152,20 @@ async def _analyze_generator(
     target_engine: str,
 ) -> AsyncGenerator[dict, None]:
     mode = "fast" if options.fast else "standard"
+    with agent_activity.action("deep_analysis", options.target,
+                               subject=display_name(input_data.sql), requested="web",
+                               mode=mode) as activity:
+        async for item in _analyze_events(input_data, options, target_engine, mode, activity):
+            yield item
+
+
+async def _analyze_events(
+    input_data: AnalyzeInput,
+    options: AnalyzeOptions,
+    target_engine: str,
+    mode: str,
+    activity: agent_activity.Activity,
+) -> AsyncGenerator[dict, None]:
     async with telemetry.command_run(
         "analyze",
         source="web",
@@ -159,9 +176,12 @@ async def _analyze_generator(
         try:
             async for event in AnalyzeService().analyze(input_data, options):
                 run.observe(event)
+                if event.type == "error":
+                    activity.describe(outcome="failed", summary=str(event.message)[:300])
                 yield _event_to_sse(event)
         except Exception as e:
             run.error(e)
+            activity.describe(outcome="failed", summary="The analysis could not be completed.")
             # Do not stream the raw exception text to the UI (B7/T24); keep the
             # class name in ``detail`` for correlation only.
             yield {
