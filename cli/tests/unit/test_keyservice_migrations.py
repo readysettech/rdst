@@ -515,5 +515,5 @@ def test_worker_passes_execution_context_for_background_analytics():
     bridge_source = (source_dir / "asgi_bridge.py").read_text(encoding="utf-8")
 
     assert "execution_ctx.waitUntil(delivery)" in index_source
-    assert "asgi.fetch(app, request.js_object, self.env, self.ctx)" in index_source
+    assert "asgi.fetch(secured_app, request.js_object, self.env, self.ctx)" in index_source
     assert '"ctx": ctx' in bridge_source

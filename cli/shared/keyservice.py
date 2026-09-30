@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 
-DEFAULT_KEYSERVICE_URL = "https://rdst-keyservice.readysetio.workers.dev"
+DEFAULT_KEYSERVICE_URL = "https://keyservice.readyset.io"
 KEYSERVICE_URL_ENV_VAR = "RDST_KEYSERVICE_URL"
 
 

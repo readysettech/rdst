@@ -8,9 +8,7 @@ const KEYSERVICE = process.env.RDST_KEYSERVICE_URL!.replace(/\/$/, '')
 const TARGET = 'keyservice-e2e'
 
 const previewWorker =
-  /^https:\/\/rdst-keyservice-pr-[a-zA-Z0-9_-]+\.readysetio\.workers\.dev$/.test(
-    KEYSERVICE
-  )
+  /^https:\/\/keyservice-pr-[a-zA-Z0-9-]+\.readyset\.io$/.test(KEYSERVICE)
 const allowedLocalWorker =
   process.env.RDST_ALLOW_LOCAL_KEYSERVICE_E2E === '1' &&
   /^http:\/\/(127\.0\.0\.1|localhost):8788$/.test(KEYSERVICE)
