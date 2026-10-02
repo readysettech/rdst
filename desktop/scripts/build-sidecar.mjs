@@ -16,6 +16,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pythonScriptUrl, repoLayout } from "./repo-layout.mjs";
+import { versionBuildSource } from "./version-build.mjs";
 
 const { findSafePython } = await import(pythonScriptUrl("sqlite-runtime.mjs"));
 
@@ -75,7 +76,9 @@ const PYINSTALLER_ARGS = [
   "--hidden-import=uvicorn.loops.auto",
   "--hidden-import=uvicorn.protocols.http.auto",
   "--hidden-import=uvicorn.protocols.websockets.auto",
-  "--hidden-import=uvicorn.lifespan.on"
+  "--hidden-import=uvicorn.lifespan.on",
+  // Build metadata, including a CL build's keyservice URL; read only lazily.
+  "--hidden-import=_version_build"
 ];
 
 function run(command, args, options = {}) {
@@ -200,16 +203,12 @@ function prepareRdstPackageSources() {
   const version = requestedVersion ?? `${major}.${minor}.0`;
   writeFileSync(
     versionBuildPath,
-    [
-      '"""Generated version metadata for an RDST Desktop package build."""',
-      "",
-      `MAJOR = ${major}`,
-      `MINOR = ${minor}`,
-      "",
-      `__version__ = ${JSON.stringify(version)}`,
-      "__version_info__ = (MAJOR, MINOR)",
-      ""
-    ].join("\n")
+    versionBuildSource({
+      major,
+      minor,
+      version,
+      keyserviceUrl: process.env.RDST_BUILD_KEYSERVICE_URL
+    })
   );
 }
 

@@ -528,9 +528,14 @@ class RdstCLI:
             except Exception:
                 pkg_version = "unknown"
 
-        return RdstResult(
-            True, f"Readyset Data and SQL Toolkit (rdst) version {pkg_version}"
-        )
+        from shared.keyservice import DEFAULT_KEYSERVICE_URL, keyservice_base_url
+
+        message = f"Readyset Data and SQL Toolkit (rdst) version {pkg_version}"
+        # Name the backend when it is not production, e.g. a CL build or an override.
+        keyservice = keyservice_base_url()
+        if keyservice != DEFAULT_KEYSERVICE_URL:
+            message += f"\nKeyservice: {keyservice}"
+        return RdstResult(True, message)
 
     # rdst report
     def report(self, title: str, body: str = "", **kwargs) -> RdstResult:
