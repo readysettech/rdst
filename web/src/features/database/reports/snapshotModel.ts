@@ -154,18 +154,18 @@ export interface ReportSection {
 }
 
 /** The sections this snapshot shows, in page order, with a count where one helps. */
-export function reportSections(snapshot: DaySnapshot): ReportSection[] {
+/** `current` is false for a past day, which leaves out what to change now. */
+export function reportSections(
+  snapshot: DaySnapshot,
+  current = true
+): ReportSection[] {
   const sections: (ReportSection | null)[] = [
     { id: 'snapshot-health', label: 'Health' },
     { id: 'snapshot-numbers', label: 'Numbers' },
     briefItems(snapshot).length
       ? { id: 'snapshot-brief', label: 'Brief' }
       : null,
-    {
-      id: 'snapshot-actions',
-      label: 'Actions',
-      count: snapshot.actions?.length,
-    },
+    current ? { id: 'snapshot-actions', label: 'What to change' } : null,
     snapshot.chart ? { id: 'snapshot-chart', label: 'Chart' } : null,
     snapshot.chart
       ? {

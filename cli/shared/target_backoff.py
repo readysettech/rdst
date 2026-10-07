@@ -59,6 +59,12 @@ class TargetBackoff:
         state.failures = min(state.failures + 1, 6)
         state.due = self.clock() + min(30 * 2 ** (state.failures - 1), 900)
 
+    def busy(self, target: str) -> bool:
+        """Another reader holds admission and the database isn't waiting out a failure."""
+        with self._lock:
+            state = self._states.get(target)
+            return bool(state and state.active and self.clock() >= state.due)
+
     def failed(self, target: str) -> bool:
         with self._lock:
             state = self._states.get(target)

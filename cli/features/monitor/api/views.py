@@ -1179,7 +1179,21 @@ def inbox_items(store: MonitorStore, rows: list[dict[str, Any]], *,
         if measure:
             windows.update(incident_windows(store, target, measure, stats))
     settled = [settle_status(item, _body(item), windows.get(item["id"])) for item in presented]
-    return [item if incidents else {**item, "incident": None} for item in settled]
+    fixes = {target: store.actions(target, ("open",)) for target in by_target}
+    return [{**(item if incidents else {**item, "incident": None}),
+             "action": likely_fix(item, fixes[item["target"]])} for item in settled]
+
+
+def likely_fix(item: dict[str, Any], actions: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The best-scored open action covering one of an open item's queries, if any."""
+    keys = set(item.get("query_keys") or [])
+    if not keys or item["state"] in ("resolved", "dismissed"):
+        return None
+    for action in actions:
+        payload = action["payload"]
+        if payload.get("title") and keys.intersection(payload.get("queries") or []):
+            return {"id": action["id"], "title": payload["title"], "type": action["type"]}
+    return None
 
 
 def _body(item: dict[str, Any]) -> dict[str, Any]:

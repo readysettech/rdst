@@ -195,7 +195,7 @@ export function AiProviderGate({ gate, notice }: AiProviderGateProps) {
           </Card.Header>
           <Card.Content className="space-y-3">
             <Benefit>AI monitoring for your databases</Benefit>
-            <Benefit>Deep analysis, nightly reports and Ask</Benefit>
+            <Benefit>Deep analysis, nightly checkups and Ask</Benefit>
             <Benefit>No API key to manage</Benefit>
           </Card.Content>
           <Card.Footer className="border-border-primary-soft/60">

@@ -57,3 +57,50 @@ def index_columns(definition: str) -> list[str]:
     if not match:
         return []
     return [part.strip().split()[0].strip('`"').lower() for part in match.group(1).split(",")]
+
+
+def index_shape(definition: str) -> dict[str, Any]:
+    """Key columns, whether the index is partial, and its INCLUDE columns, from a definition.
+
+    Parentheses are balanced, so an expression such as lower((email)::text) stays whole.
+    """
+    text = definition or ""
+    using = re.search(r"\bUSING\s+\w+\s*\(", text, re.I)
+    start = using.end() - 1 if using else text.find("(")
+    if start < 0:
+        return {"columns": [], "partial": False, "include": []}
+
+    def group(at: int) -> tuple[list[str], int]:
+        depth, parts, current = 0, [], ""
+        for position in range(at, len(text)):
+            char = text[position]
+            if char == "(":
+                depth += 1
+                if depth == 1:
+                    continue
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    parts.append(current)
+                    return parts, position
+            elif char == "," and depth == 1:
+                parts.append(current)
+                current = ""
+                continue
+            current += char
+        return parts, len(text)
+
+    def column(part: str) -> str:
+        part = part.strip()
+        if "(" in part:
+            return re.sub(r"\s+(ASC|DESC)(\s+NULLS\s+(FIRST|LAST))?$", "", part, flags=re.I).lower()
+        return part.split()[0].strip('`"').lower()
+
+    keys, end = group(start)
+    rest = text[end + 1:]
+    include = []
+    included = re.match(r"\s*INCLUDE\s*\(([^)]*)\)", rest, re.I)
+    if included:
+        include = [part.strip().strip('"').lower() for part in included.group(1).split(",")]
+    return {"columns": [column(part) for part in keys if part.strip()],
+            "partial": bool(re.search(r"\bWHERE\b", rest, re.I)), "include": include}

@@ -137,11 +137,14 @@ export function StoredAnalysis({
   mode,
   target,
   onCompare,
+  condensed = false,
 }: {
   refParts: { hash: string; analysisId: string }
   mode?: string | null
   target: string
   onCompare: () => void
+  /** The query list's view: score and next step, the rest under Details. */
+  condensed?: boolean
 }) {
   const stored = useStoredAnalysis({ ...refParts, mode })
   const [slow, setSlow] = useState(false)
@@ -173,6 +176,7 @@ export function StoredAnalysis({
     )
   return (
     <AnalysisResults
+      condensed={condensed}
       state="complete"
       results={stored.results}
       rewriteTesting={stored.rewriteTesting}
@@ -390,6 +394,7 @@ export function AnalysisTab({
         mode={analysis?.mode}
         target={target}
         onCompare={onCompare}
+        condensed
       />
     )
   } else {

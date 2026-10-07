@@ -137,6 +137,10 @@ def _check_journal_headers(path: Path) -> None:
                 header = source.read(len(magic[0]))
         except FileNotFoundError:
             continue
+        except PermissionError:
+            # Windows refuses the read while another connection holds or is removing the
+            # file; one in live use isn't a leftover from a crash.
+            continue
         # Rollback journals start with a zero header until their pages reach durable storage.
         if header and any(header) and header not in magic:
             raise sqlite3.DatabaseError("database disk image is malformed")

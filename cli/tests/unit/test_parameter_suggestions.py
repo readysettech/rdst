@@ -505,3 +505,34 @@ def test_exact_live_interval_query_without_database(monkeypatch):
     assert "now() - $2::interval" in filled
     assert "NULL" not in filled and "7 days" not in filled
     assert source == "none"
+
+
+def test_a_placeholder_compared_to_a_function_of_a_column_binds_to_that_column():
+    from features.analyze.parameter_suggestions import (bind_placeholders_to_columns,
+                                                        enumerate_placeholders)
+
+    sql = ("SELECT readings.site_id FROM readings WHERE date_trunc('minute', "
+           "readings.recorded_at) >= $1 AND lower(readings.metric) = $2")
+    bound = bind_placeholders_to_columns(sql, "postgresql", enumerate_placeholders(sql))
+    assert bound["$1"]["column"] == "readings.recorded_at"
+    assert bound["$2"]["column"] == "readings.metric"
+
+
+def test_a_newer_than_comparison_on_a_time_column_is_marked_after():
+    from features.analyze.parameter_suggestions import (bind_placeholders_to_columns,
+                                                        enumerate_placeholders)
+
+    sql = ("SELECT id FROM readings WHERE recorded_at >= $1 AND $2 < received_at "
+           "AND device_id = $3")
+    bound = bind_placeholders_to_columns(sql, "postgresql", enumerate_placeholders(sql))
+    assert [bound[key]["after"] for key in ("$1", "$2", "$3")] == [True, True, False]
+
+
+def test_a_date_trunc_unit_placeholder_is_a_time_unit():
+    from features.analyze.parameter_suggestions import (bind_placeholders_to_columns,
+                                                        enumerate_placeholders)
+
+    sql = "SELECT 1 FROM readings WHERE date_trunc($1, readings.recorded_at) >= $2::timestamp"
+    bound = bind_placeholders_to_columns(sql, "postgresql", enumerate_placeholders(sql))
+    assert bound["$1"] == {"kind": "time_unit"}
+    assert bound["$2"]["column"] == "readings.recorded_at" and bound["$2"]["after"]

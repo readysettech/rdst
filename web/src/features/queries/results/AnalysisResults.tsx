@@ -14,6 +14,8 @@ import { ResultsSuccess } from './ResultsSuccess'
 
 export interface AnalysisResultsProps {
   state: AnalysisState
+  /** Score and the next step up front; everything else under Details. */
+  condensed?: boolean
   progress?: ProgressEvent
   results?: CompleteEvent
   rewriteTesting?: RewriteTesting
@@ -44,6 +46,7 @@ export interface AnalysisResultsProps {
 
 export function AnalysisResults({
   state,
+  condensed,
   progress,
   results,
   rewriteTesting,
@@ -114,6 +117,7 @@ export function AnalysisResults({
   if (state === 'complete' && results) {
     return (
       <ResultsSuccess
+        condensed={condensed}
         results={results}
         rewriteTesting={rewriteTesting}
         readysetCacheability={readysetCacheability}

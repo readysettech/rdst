@@ -509,15 +509,20 @@ def _calculate_improvement(baseline: Dict[str, Any], rewrite: Dict[str, Any]) ->
             "is_better": rewrite_rows <= baseline_rows
         }
 
-    # Overall improvement score (weighted average)
+    # Overall improvement score (weighted average). Each part counts at most 100% either way:
+    # rows examined can swing by thousands of percent when the rewrite takes a different plan
+    # (an index scan counts rows per loop), and must not outvote a measured speedup.
     time_weight = 0.6
     cost_weight = 0.3
     rows_weight = 0.1
 
+    def capped(part: str) -> float:
+        return max(-100.0, min(100.0, improvement[part]['improvement_pct']))
+
     overall_improvement = (
-        improvement['execution_time']['improvement_pct'] * time_weight +
-        improvement['cost_estimate']['improvement_pct'] * cost_weight +
-        improvement['rows_examined']['improvement_pct'] * rows_weight
+        capped('execution_time') * time_weight +
+        capped('cost_estimate') * cost_weight +
+        capped('rows_examined') * rows_weight
     )
 
     improvement['overall'] = {

@@ -264,7 +264,7 @@ async def test_llm_failure_ships_computed_sections_and_unique_summary(tmp_path):
     assert result["report_json"]["narrative_error"] == "LLM down"
     assert result["report_json"]["computed"]["deltas"]["24h"]["database"]["calls"]["current"] == 10
     assert result["report_json"]["narrative_retry_at"] == NOW + 900
-    # Only the nightly report files a "Daily report ready" item.
+    # Only the nightly report files a "Checkup ready" item.
     assert not [item for item in store.inbox(target="db") if item["type"] == "daily_summary"]
 
 
@@ -284,7 +284,7 @@ def test_nightly_report_files_one_daily_report_item_without_a_push(tmp_path):
                                    "nightly")
     items = store.inbox(target="db")
     assert [(item["type"], item["title"], item["delivery"]) for item in items] == [
-        ("daily_summary", "Daily report ready", "inbox")]
+        ("daily_summary", "Checkup ready", "inbox")]
     assert json.loads(items[0]["body_json"])["report_id"] == 8
     assert not [event for event in store.inbox_events() if event["kind"] == "notified"]
 

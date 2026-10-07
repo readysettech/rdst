@@ -12,13 +12,14 @@ from typing import Any, Callable
 
 from shared.target_backoff import TargetBackoff, target_backoff
 
-from features.monitor import database_limit
+from features.monitor import actions, database_limit
 from features.monitor.attention import baselines, shortlist
 from features.monitor.connection import ConnectionWatch
 from features.monitor.delivery import attention_gate, relevance
 from features.monitor.indexes import IndexesBusy, read_indexes
 from features.monitor.judge import AttentionJudge
 from features.monitor.recurring import RecurringCheck
+from features.monitor.table_stats import read_stats
 from features.monitor.run_guard import RunGuard
 from features.query_registry.discovery import _default_connection_factory, query_discovery
 from shared.monitor.monitor_store import MonitorStore
@@ -104,6 +105,31 @@ def _scan_indexes(target: str) -> list[dict[str, str]]:
             connection.close()
 
 
+def _scan_stats(target: str) -> dict[str, Any]:
+    connection, engine = _default_connection_factory(target)
+    try:
+        return read_stats(connection, engine)
+    finally:
+        try:
+            if engine == "postgresql":
+                connection.rollback()
+        finally:
+            connection.close()
+
+
+def _check_database(target: str) -> dict[str, Any]:
+    from features.monitor.report import collect_health
+
+    return collect_health(target)
+
+
+# How long a newly added database gets minute-by-minute retries for its first readings.
+SETTLING_S = 3600
+# How long a pass waits for the collector or sampler to finish with a database before
+# leaving its reads to the next pass.
+ADMIT_WAIT_S = 20
+
+
 def _assess_in_background(targets: set[str]) -> None:
     from features.query_registry.assessment import query_assessment_worker
 
@@ -113,6 +139,8 @@ def _assess_in_background(targets: set[str]) -> None:
 class MonitorLoop:
     def __init__(self, store: MonitorStore | None = None, *, clock: Callable[[], float] = time.time,
                  index_reader: Callable[[str], list[dict[str, str]]] = _scan_indexes,
+                 stats_reader: Callable[[str], dict[str, Any]] | None = None,
+                 health_reader: Callable[[str], dict[str, Any]] | None = None,
                  judge: Callable[[list[dict[str, Any]], dict[str, Any]], Any] | None = None,
                  scheduler: Any = None, interval: int | None = None,
                  setup_checker: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
@@ -125,6 +153,13 @@ class MonitorLoop:
         self.clock = clock
         self.backoff = backoff or (target_backoff if clock is time.time else TargetBackoff(clock))
         self.index_reader = index_reader
+        # Statistics come from the same database as the index list.
+        self.stats_reader = stats_reader or (_scan_stats if index_reader is _scan_indexes else None)
+        # Settings and maintenance findings come from SQL checks, no model, every 15 minutes.
+        self.health_reader = health_reader or (_check_database if index_reader is _scan_indexes
+                                               else None)
+        self.action_client = None
+        self._ranked_at: dict[str, int] = {}
         self.judge = judge or AttentionJudge(self.store, clock=clock)
         self.scheduler = scheduler
         self.interval = max(1, interval if interval is not None else
@@ -135,6 +170,8 @@ class MonitorLoop:
         self._wake = asyncio.Event()
         self._guard = RunGuard()
         self._threads: set[asyncio.Task] = set()
+        # Each database's cycle in flight, so a slow one isn't started twice.
+        self._cycling: dict[str, asyncio.Task] = {}
         self._thread_local = threading.local()
         # Shortlisted rows held between AI checks when a target's attention_every_min
         # lever is longer than the code-rule cycle.
@@ -160,6 +197,66 @@ class MonitorLoop:
         self._scheduler_wired = callable(getattr(scheduler, "set_outcome_listener", None))
         if self._scheduler_wired:
             scheduler.set_outcome_listener(self.watch.collection)
+
+    def _read_stats(self, target: str) -> None:
+        """Table, index and setting statistics; a failure here never marks the database down."""
+        if self.stats_reader is None:
+            return
+        try:
+            self.store.record_stats(target, self.stats_reader(target))
+        except Exception:
+            logger.warning("Statistics read failed for %s", target, exc_info=True)
+            return
+        now = int(self.clock())
+        try:
+            actions.refresh(self.store, target, now, database=self._database_check(target, now))
+        except Exception:
+            logger.exception("Action refresh failed for %s", target)
+            return
+        self._rank_actions(target)
+
+    def _database_check(self, target: str, now: int) -> list[dict[str, Any]] | None:
+        """Fresh settings and maintenance findings once they're due; None keeps the last."""
+        if self.health_reader is None:
+            return None
+        check = self.store.database_check(target)
+        if check is not None:
+            # The first checks run as soon as the database is added, the next once a few
+            # minutes of readings give rates, then every 15 minutes.
+            enabled = self.store.enabled_at(target) or 0
+            early = int(check["at"]) - enabled < actions.FIRST_DATABASE_CHECK_S
+            every = actions.FIRST_DATABASE_CHECK_S if early else actions.DATABASE_CHECK_S
+            if now - int(check["at"]) < every:
+                return None
+        from features.monitor import snapshot
+
+        health = self.health_reader(target)
+        if health.get("collection_error"):
+            logger.debug("Database checks failed for %s: %s", target, health["collection_error"])
+            return None
+        found = snapshot.database_check(self.store, target, now, health)
+        if health.get("section_errors") and check is not None:
+            # A check that failed can't clear a finding: earlier findings it would have
+            # confirmed stay until a complete pass.
+            fresh = {item.get("id") for item in found}
+            found += [item for item in check.get("actions") or [] if item.get("id") not in fresh]
+        self.store.save_database_check(target, now, found)
+        return found
+
+    def _rank_actions(self, target: str) -> None:
+        """Jev's read of the open actions, at the attention cadence while AI monitoring runs."""
+        now = int(self.clock())
+        interval = self.store.levers(target)["attention_every_min"] * 60
+        if now < self._ranked_at.get(target, 0) + interval or not signed_in() or \
+                database_limit.paused(self.store, target, now):
+            return
+        self._ranked_at[target] = now
+        try:
+            actions.jev_rank(self.store, target, now, self.action_client)
+        except Exception as exc:
+            # The rubric may not be served yet; the measured order stands until it is.
+            self._ranked_at[target] = now + 3600
+            logger.debug("Action ranking unavailable for %s: %s", target, exc)
 
     def _collect_soon(self, target: str) -> None:
         """After an outage, read the database now rather than at the degraded cadence."""
@@ -232,26 +329,45 @@ class MonitorLoop:
                     pass
                 self._wake.clear()
                 continue
+            # A database removed or turned off leaves nothing behind for one re-added under
+            # the same name.
+            for state in (self._pending, self._ranked_at, self._last_judged, self._setup_failure):
+                for gone in set(state) - set(targets):
+                    state.pop(gone, None)
             try:
                 self.assessments(targets)
             except Exception:
                 logger.debug("Background assessment admission failed", exc_info=True)
+            # Databases cycle side by side, so a slow or hung one only delays itself; one
+            # whose last cycle is still running sits this pass out.
+            started = []
             for target in targets:
+                if target in self._cycling:
+                    continue
+                guard = self._guard
+                thread = asyncio.create_task(asyncio.to_thread(
+                    guard.run, target, self._guarded_cycle, guard, target))
+                self._threads.add(thread)
+                self._cycling[target] = thread
+                def finished(done: asyncio.Task, target: str = target) -> None:
+                    self._threads.discard(done)
+                    self._cycling.pop(target, None)
+                    if not done.cancelled() and (error := done.exception()) is not None:
+                        logger.warning("Monitor cycle failed for %s", target, exc_info=error)
+                thread.add_done_callback(finished)
+                started.append(thread)
+            if started:
+                # A wake (a database added or turned on) starts its cycle without waiting for
+                # slow ones still running here.
+                finished_all = asyncio.ensure_future(
+                    asyncio.wait([asyncio.shield(thread) for thread in started]))
+                woken = asyncio.ensure_future(self._wake.wait())
                 try:
-                    guard = self._guard
-                    thread = asyncio.create_task(asyncio.to_thread(
-                        guard.run, target, self._guarded_cycle, guard, target))
-                    self._threads.add(thread)
-                    def finished(done: asyncio.Task) -> None:
-                        self._threads.discard(done)
-                        if not done.cancelled():
-                            done.exception()
-                    thread.add_done_callback(finished)
-                    await asyncio.shield(thread)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    logger.warning("Monitor cycle failed for %s", target, exc_info=True)
+                    await asyncio.wait({finished_all, woken}, timeout=self.interval,
+                                       return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    finished_all.cancel()
+                    woken.cancel()
             # The storage budget is kept here, between passes, in short transactions.
             try:
                 await asyncio.to_thread(self.store.maintain)
@@ -263,12 +379,33 @@ class MonitorLoop:
                 logger.debug("Monitoring slot refresh failed", exc_info=True)
             try:
                 timeout = self.interval
-                if any(target not in self._last_judged for target in targets):
+                # A database just added, or whose first statistics read failed, goes again
+                # within a minute rather than waiting out a whole pass.
+                settling = await asyncio.to_thread(self._settling, targets)
+                if settling or any(target not in self._last_judged for target in targets):
                     timeout = min(60, timeout)
                 await asyncio.wait_for(self._wake.wait(), timeout=timeout)
             except asyncio.TimeoutError:
                 pass
             self._wake.clear()
+
+    def _settling(self, targets: set[str]) -> bool:
+        """A database in its first hour without its first statistics or database checks yet;
+        one that stays unreadable past that waits for the normal pass."""
+        if self.stats_reader is None:
+            return False
+        now = int(self.clock())
+        read = {row["target"] for row in self.store.read("SELECT target FROM stats_meta")}
+
+        def unsettled(target: str) -> bool:
+            if target not in read or self.health_reader is None:
+                return target not in read
+            check = self.store.database_check(target)
+            # Only the check at add time has run: the next one, with rates, comes due soon.
+            return check is None or actions._measuring(self.store, target)
+
+        return any(now - (self.store.enabled_at(target) or 0) < SETTLING_S and unsettled(target)
+                   for target in targets)
 
     def _guarded_cycle(self, guard: RunGuard, target: str) -> None:
         self._thread_local.guard = guard
@@ -276,6 +413,21 @@ class MonitorLoop:
             self.cycle(target)
         finally:
             del self._thread_local.guard
+
+    def _admit(self, target: str) -> bool:
+        """Admission for this pass's reads. The collector and sampler hold it for a few seconds
+        at a time, so a busy database is waited for rather than skipped until the next pass."""
+        deadline = time.monotonic() + ADMIT_WAIT_S
+        while True:
+            if self.backoff.acquire(target):
+                return True
+            if not self.backoff.busy(target) or time.monotonic() >= deadline:
+                if self.backoff.busy(target):
+                    logger.info("Monitoring read for %s postponed: another read held the "
+                                "database for %ss", target, ADMIT_WAIT_S)
+                return False
+            self._check()
+            time.sleep(0.25)
 
     def _check(self) -> None:
         guard = getattr(self._thread_local, "guard", None)
@@ -290,12 +442,14 @@ class MonitorLoop:
         now = int(self.clock())
         changes = []
         connection_failed = self.backoff.failed(target)
-        if self.backoff.acquire(target):
+        read = self._admit(target)
+        if read:
             try:
                 indexes = self.index_reader(target)
                 self._check()
                 changes = self.store.sync_indexes(target, indexes, now)
                 connection_failed = False
+                self._read_stats(target)
             except IndexesBusy:
                 # The database answered; a held lock only postponed this index read.
                 changes = []
@@ -420,8 +574,9 @@ class MonitorLoop:
         self._check()
         self._monitoring_issues(target, now, connection_failed)
         self._check()
-        self._pulse(target, now, "index_scan", not connection_failed,
-                    "Couldn't read indexes" if connection_failed else _index_detail(changes))
+        if read or connection_failed:
+            self._pulse(target, now, "index_scan", not connection_failed,
+                        "Couldn't read indexes" if connection_failed else _index_detail(changes))
         context = {"target": target, "index_changes": changes, "database": db[0] if db else {},
                    "inbox": self.store.inbox(target=target), "measured": measured,
                    "relevance": rel, "gated": gated, "recurring": recurring_notes}
@@ -429,7 +584,9 @@ class MonitorLoop:
         if not signed_in:
             self._last_judged.pop(target, None)
         interval = self.store.levers(target)["attention_every_min"] * 60
-        if interval > self.interval and now - self._last_judged.get(target, 0) < interval - 30:
+        # The AI check keeps its own cadence however often passes run (a settling database
+        # shortens passes to a minute).
+        if now - self._last_judged.get(target, 0) < interval - 30:
             pending = self._pending.setdefault(target, {})
             pending.update({row["query_key"]: row for row in chosen})
             due = self._last_judged[target] + interval
@@ -445,6 +602,11 @@ class MonitorLoop:
             self._last_judged[target] = now
         self._check()
         self.judge(chosen, context)
+        # A check that failed retries on the client's own backoff, not the five-minute cadence.
+        last = self.store.read("SELECT outcome FROM judge_run WHERE target=? ORDER BY id DESC "
+                               "LIMIT 1", (target,))
+        if last and last[0]["outcome"] in ("error", "backoff"):
+            self._last_judged.pop(target, None)
         self._attention_pulse(target, now, len(measured))
 
     def _lock_contention(self, target: str, now: int) -> None:

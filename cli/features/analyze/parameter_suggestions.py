@@ -69,6 +69,10 @@ _SQL_TOKEN_RE = re.compile(
     r"[A-Za-z_][\w$]*|.", re.DOTALL)
 
 
+# The unit a date_trunc placeholder takes when no live run of the query shows the real one.
+TIME_UNIT = "minute"
+
+
 @analysis_lane.connection_budget()
 def suggest_parameter_values(
     sql: str,
@@ -117,6 +121,12 @@ def suggest_parameter_values(
                 if suggestions[placeholder["key"]]:
                     continue
                 binding = bindings.get(placeholder["key"])
+                if binding and binding.get("kind") == "time_unit":
+                    # Any unit plans and rewrites the same way; a rewrite still has to prove
+                    # itself faster before it's shown.
+                    suggestions[placeholder["key"]].append(
+                        {"value": TIME_UNIT, "provenance": "Sampled from date_trunc units"})
+                    continue
                 if not binding or not binding.get("column"):
                     continue
                 for value in _sample_column_values(conn, engine, binding):
@@ -394,6 +404,9 @@ def bind_placeholders_to_columns(
 
 
 def _describe_binding(node: exp.Expression, aliases: Dict[str, str], tables: List[str]) -> Dict[str, Any]:
+    if node.arg_key == "unit" and isinstance(node.parent, exp.Func):
+        # date_trunc('minute', col) normalizes the unit to a placeholder too.
+        return {"kind": "time_unit"}
     parent = node.parent
     while isinstance(parent, (exp.Paren, exp.Neg, exp.Cast)):
         parent = parent.parent
@@ -408,6 +421,10 @@ def _describe_binding(node: exp.Expression, aliases: Dict[str, str], tables: Lis
         # are whole documents, not candidate values.
         return {"kind": "json_path"}
     column = None
+    # `col >= $1` (or `$1 <= col`) asks for rows newer than the value.
+    after = (isinstance(parent, (exp.GTE, exp.GT)) and parent.args.get("expression") is not None
+             and node in parent.args["expression"].walk()) or (
+        isinstance(parent, (exp.LTE, exp.LT)) and node in parent.this.walk())
     if isinstance(parent, (exp.Binary, exp.In, exp.Between, exp.Like, exp.ILike)):
         for side in (parent.this, parent.args.get("expression"), parent.args.get("low"), parent.args.get("high")):
             while isinstance(side, (exp.Cast, exp.Paren)):
@@ -415,6 +432,13 @@ def _describe_binding(node: exp.Expression, aliases: Dict[str, str], tables: Lis
             if isinstance(side, exp.Column):
                 column = side
                 break
+            # A function of one column (date_trunc('minute', recorded_at), lower(name))
+            # compares against that column's values.
+            if isinstance(side, exp.Func):
+                inner = list(side.find_all(exp.Column))
+                if len(inner) == 1:
+                    column = inner[0]
+                    break
     if column is None:
         return {"kind": "unknown"}
     table = column.table
@@ -424,6 +448,7 @@ def _describe_binding(node: exp.Expression, aliases: Dict[str, str], tables: Lis
         "table": table,
         "column_name": column.name,
         "column": f"{table}.{column.name}" if table else column.name,
+        "after": bool(after),
     }
 
 
@@ -609,6 +634,22 @@ def _sample_column_values(conn, engine: str, binding: Dict[str, Any]) -> List[Di
                 result["column_type"] = column_type
             return result
 
+        recent = binding.get("after") and column_type and (
+            column_type.startswith("timestamp") or column_type in ("date", "datetime"))
+        if recent:
+            # Rows newer than a moment: an app asks for the latest few minutes, so the value
+            # sits just before the newest row, not at a common (often old) value.
+            qualified = ".".join((f'"{p}"' if engine == "postgresql" else f"`{p}`")
+                                 for p in (schema, table) if p)
+            quoted = f'"{column}"' if engine == "postgresql" else f"`{column}`"
+            back = ("max({c}) - interval '5 minutes'" if engine == "postgresql"
+                    else "DATE_SUB(MAX({c}), INTERVAL 5 MINUTE)").format(c=quoted)
+            if engine == "postgresql":
+                cur.execute(f"SET LOCAL statement_timeout = {SAMPLE_TIMEOUT_MS}")
+            cur.execute(f"{_SELF_MARKER}SELECT {back} FROM {qualified}")
+            row = cur.fetchone()
+            if row and row[0] is not None:
+                return [suggestion(_to_text(row[0]), f"Sampled from {label} (recent)")]
         if engine == "postgresql":
             cur.execute(
                 "SELECT (most_common_vals::text::text[])[1:%s] FROM pg_stats "

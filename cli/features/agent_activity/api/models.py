@@ -7,7 +7,7 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
 AgentAction = Literal["deep_analysis", "ask", "classification", "attention_check",
-                      "daily_snapshot", "benchmark"]
+                      "daily_snapshot", "explain_actions", "benchmark"]
 AgentOutcome = Literal["done", "failed", "skipped", "cancelled"]
 AgentFold = Literal["attention_check", "classification", "skipped_analysis"]
 AgentGroup = Literal["day", "hour", "none"]

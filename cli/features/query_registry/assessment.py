@@ -131,8 +131,12 @@ class AssessmentWorker:
         ordered = sorted(set(targets))
         if ordered == self._background:
             return
+        # Adding or removing a database keeps the rotation where it was, so the one being
+        # assessed isn't sent back to the front of the line.
+        current = (self._background[self._background_index % len(self._background)]
+                   if self._background else None)
         self._background = ordered
-        self._background_index = 0
+        self._background_index = ordered.index(current) if current in ordered else 0
         self._refresh_active()
         self._wake.set()
 

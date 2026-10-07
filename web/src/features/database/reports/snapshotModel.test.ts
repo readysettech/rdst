@@ -437,10 +437,16 @@ it('lists the sections in page order and marks the one being read', () => {
     'Health',
     'Numbers',
     'Brief',
-    'Actions',
+    'What to change',
     'What happened',
     'Queries',
   ])
+  // A past day leaves out what to change now.
+  expect(
+    reportSections(base, false).some(
+      (section) => section.id === 'snapshot-actions'
+    )
+  ).toBe(false)
   const full = {
     ...base,
     chart: {} as DaySnapshot['chart'],

@@ -638,6 +638,15 @@ class TestTopServiceCommandSets:
         mysql_slowlog_sql = TOP_COMMAND_SETS["rdst_top_mysql_slowlog"]["commands"]["mysql_slowlog_queries"]["query"]
         assert f", {MAX_QUERY_LENGTH}) as query_text" in mysql_slowlog_sql
 
+    def test_server_wide_sources_keep_only_the_target_database(self):
+        """Statement views span the server; top shows the connected database's statements."""
+        commands = {name: next(iter(cs["commands"].values()))["query"]
+                    for name, cs in TOP_COMMAND_SETS.items()}
+        assert "datname = current_database()" in commands["rdst_top_pg_stat"]
+        assert "SCHEMA_NAME = DATABASE()" in commands["rdst_top_mysql_digest"]
+        assert "DB = DATABASE()" in commands["rdst_top_mysql_activity"]
+        assert "db = DATABASE()" in commands["rdst_top_mysql_slowlog"]
+
     def test_process_top_data_preserves_multiline_query_text(self, service):
         """Top processing should keep raw multiline SQL intact."""
         import pandas as pd

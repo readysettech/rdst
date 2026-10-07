@@ -422,6 +422,8 @@ def test_a_used_up_jev_allowance_holds_checks_and_resumes_without_a_restart(
 @pytest.mark.asyncio
 async def test_a_used_up_hosted_allowance_pauses_the_analysis_queue(tmp_path, monkeypatch, targets):
     monkeypatch.setenv("RDST_MONITOR_ANALYZE_DAILY_CAP", "100")
+    # One analysis at a time, so exactly one meets the used-up allowance.
+    monkeypatch.setenv("RDST_MONITOR_ANALYSIS_LIMIT", "1")
     monkeypatch.setattr(database_limit, "limit_reached", lambda target, **kw: None)
     store = MonitorStore(tmp_path / "monitor.db", clock=lambda: NOW)
     store.set_settings("db", {"enabled": True, "deep_analysis": True, "execute": True})

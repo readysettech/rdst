@@ -447,7 +447,7 @@ export function MonitoringSettingsSheet({
                       />
                       <Row
                         title="Pushes a day"
-                        tip="Past this limit, alerts still land in the Inbox and the daily report."
+                        tip="Past this limit, alerts still land in the Inbox and the nightly checkup."
                         control={
                           <SegmentedControl
                             mode="radio"
@@ -462,7 +462,7 @@ export function MonitoringSettingsSheet({
                         }
                       />
                       <Row
-                        title="Nightly report"
+                        title="Nightly checkup"
                         control={
                           <>
                             <div
@@ -484,7 +484,7 @@ export function MonitoringSettingsSheet({
                             <BaseInputSwitch
                               name="monitor-nightly"
                               checked={data.nightly_report}
-                              aria-label="Nightly report"
+                              aria-label="Nightly checkup"
                               onCheckedChange={(checked) =>
                                 save({ nightly_report: checked })
                               }

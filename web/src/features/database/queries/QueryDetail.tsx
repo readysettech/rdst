@@ -20,6 +20,7 @@ import { MuteMenu } from '@/features/monitor-kit/MuteMenu'
 import { QueryTextBody } from '@/features/monitor-kit/QueryTextBody'
 import { JevAssessment } from '@/features/queries/saved/JevAssessment'
 import type { JevAssessmentSummary } from '@/lib/api'
+import { useMonitorQuery } from '@/lib/monitor/hooks'
 import type { MonitorQuery, MonitorRange } from '@/lib/monitor/types'
 import { AnalysisTab } from './AnalysisTab'
 import { analyzability, notAnalyzedLine } from './analyzability'
@@ -72,6 +73,49 @@ export interface QueryDetailProps {
   onTabChange: (tab: DetailTab) => void
 }
 
+const WRITE = /^\s*(?:\/\*.*?\*\/\s*)?(?:INSERT|UPDATE|DELETE)\b/is
+
+/** What every run of a write costs its table: the rows written and the indexes kept current. */
+function WriteCost({
+  target,
+  query,
+  range,
+}: {
+  target: string
+  query: MonitorQuery
+  range: MonitorRange
+}) {
+  const cost = useMonitorQuery(target, query.key, range).data?.write_cost
+  if (!cost) return null
+  const rate =
+    cost.table_writes_per_s < 0.05
+      ? 'almost no writes'
+      : `${cost.table_writes_per_s.toFixed(1)} rows written a second`
+  return (
+    <Section title="What each write costs">
+      <div
+        className="space-y-1 text-body-small text-content-layout-2"
+        data-testid="write-cost"
+      >
+        <p>
+          {cost.table} takes {rate}, and each write keeps{' '}
+          {cost.indexes_maintained}{' '}
+          {cost.indexes_maintained === 1 ? 'index' : 'indexes'} up to date.
+        </p>
+        {cost.hot_ratio != null ? (
+          <p>
+            {Math.round(cost.hot_ratio * 100)}% of its updates skip index
+            maintenance because they change no indexed column.
+          </p>
+        ) : null}
+        {cost.set_columns.length ? (
+          <p>It changes {cost.set_columns.join(', ')}.</p>
+        ) : null}
+      </div>
+    </Section>
+  )
+}
+
 export function QueryDetail({
   query,
   target,
@@ -84,6 +128,7 @@ export function QueryDetail({
 }: QueryDetailProps) {
   const navigate = useNavigate()
   const canAsk = query.text_status !== 'unavailable' && query.text.trim()
+  const isWrite = WRITE.test(query.text)
   const analysisRef = useRef<HTMLDivElement>(null)
   const benchmarksRef = useRef<HTMLDivElement>(null)
   const name = queryName(query)
@@ -226,7 +271,13 @@ export function QueryDetail({
 
       {analysisState === 'done' ? null : performance}
       <div ref={analysisRef} className="scroll-mt-24">
-        <Section id={`analysis-${query.key}`} title="Deep analysis">
+        {isWrite ? (
+          <WriteCost target={target} query={query} range={range} />
+        ) : null}
+        <Section
+          id={`analysis-${query.key}`}
+          title={isWrite ? 'How it finds its rows' : 'Deep analysis'}
+        >
           <AnalysisTab
             query={query}
             target={target}

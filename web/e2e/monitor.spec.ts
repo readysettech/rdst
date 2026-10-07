@@ -233,10 +233,10 @@ test('sidebar links leave the database page while its streams are open', async (
   await expect(
     page.getByRole('heading', { level: 1, name: 'e2e-guard' })
   ).toBeVisible()
-  const nav = page.getByRole('navigation')
+  const nav = page.locator('#app-sidebar')
   for (const [link, heading] of [
     ['Ask', 'Ask'],
-    ['Try the demo', 'See Readyset Platform in action'],
+    ['Readyset Caching', 'See Readyset Platform in action'],
     ['Inbox', 'Inbox'],
   ] as const) {
     await nav
@@ -254,7 +254,7 @@ test('inbox resolves, reopens and marks alerts seen', async ({ page }) => {
   await expect(
     page.getByRole('heading', { level: 1, name: 'Inbox' })
   ).toBeVisible()
-  const actNow = page.getByRole('region', { name: 'Act now' })
+  const actNow = page.getByRole('region', { name: 'Urgent' })
   const alertName = 'Orders lookup is 3x slower'
   const alert = page.getByRole('heading', { name: alertName })
   await expect(actNow.getByRole('heading', { level: 3 })).toHaveText([
@@ -289,7 +289,7 @@ test('inbox items say what to do and open the exact place', async ({
   page,
 }) => {
   await page.goto('/inbox')
-  const actNow = page.getByRole('region', { name: 'Act now' })
+  const actNow = page.getByRole('region', { name: 'Urgent' })
   const stuck = actNow
     .getByRole('article')
     .filter({ has: page.getByRole('heading', { name: 'Stuck query' }) })
@@ -315,7 +315,7 @@ test('inbox items say what to do and open the exact place', async ({
   if (await more.count()) await more.click()
   const report = watch
     .getByRole('article')
-    .filter({ has: page.getByRole('heading', { name: 'Daily report ready' }) })
+    .filter({ has: page.getByRole('heading', { name: 'Checkup ready' }) })
   await report.hover()
   await report.getByRole('button', { name: 'Open report' }).click()
   await expect(page).toHaveURL(/\/database\?.*view=report/)
@@ -346,13 +346,13 @@ test('the latest daily snapshot reads as one day, top to bottom', async ({
   await expect(
     page.getByRole('heading', { name: 'What happened' })
   ).toBeInViewport()
-  // Health comes first, then the day's numbers and the day in brief, then database-level
-  // actions, the chart, events and queries.
+  // Health comes first, then the day's numbers and the day in brief, then what to change,
+  // the chart, events and queries.
   const order = [
     'Database health',
     'The day in numbers',
     'The day in brief',
-    'Database actions',
+    'What to change',
     'Queries per second',
     'Spikes',
     'What happened',
@@ -370,14 +370,12 @@ test('the latest daily snapshot reads as one day, top to bottom', async ({
   await expect(page.getByTestId('snapshot-timeline')).toContainText(
     'Got slower'
   )
-  const action = page
-    .getByTestId('db-action')
-    .filter({ hasText: 'Vacuum 1 bloated table' })
-  // Actions start as one line; a click opens the evidence and the SQL.
-  await expect(action.getByTestId('db-action-detail')).toHaveCount(0)
-  await action.getByRole('button').first().click()
-  await expect(action).toContainText('18.0% dead')
-  await expect(action).toContainText('VACUUM (ANALYZE) public.orders;')
+  // What to change lives on Actions; the report points there.
+  await expect(
+    page
+      .getByTestId('report-actions-now')
+      .getByRole('button', { name: 'Open Actions' })
+  ).toBeVisible()
   await expect(page.getByTestId('health-overview')).toBeVisible()
   // A query in what happened opens in place; the Database page is secondary.
   await page
@@ -405,14 +403,9 @@ test('the latest daily snapshot reads as one day, top to bottom', async ({
   const download = page.waitForEvent('download')
   await page.getByTestId('download-csv').click()
   expect((await download).suggestedFilename()).toMatch(/-queries-.*\.csv$/)
-  // The day list and the menu that writes today's snapshot.
+  // The day list.
   await page.getByTestId('day-picker-trigger').click()
   await expect(page.getByRole('menuitem').first()).toBeVisible()
-  await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: 'Report menu' }).click()
-  await expect(
-    page.getByRole('menuitem', { name: "Run today's snapshot now" })
-  ).toBeVisible()
 })
 
 test('a query benchmarks from its detail, with Readyset as an option', async ({
@@ -487,7 +480,7 @@ test('agent activity reads as decisions, with statements behind technical detail
   page,
 }) => {
   await page.goto('/')
-  await page.getByRole('link', { name: 'Agent activity' }).click()
+  await page.getByRole('link', { name: 'Agent audit' }).click()
   await expect(page).toHaveURL(/\/agent-activity/)
   await expect(
     page.getByRole('region', { name: 'What RDST does on your database' })

@@ -11,7 +11,34 @@ import {
 } from '@/features/monitor-kit/charts'
 import { formatClock, formatDayDate } from '@/features/monitor-kit/format'
 
-export type DatabaseView = 'live' | 'report'
+/** `live` is the Queries tab; its value predates the tab's name and stays for old links. */
+export type DatabaseView = 'actions' | 'live' | 'report'
+
+/** The Actions tab's sections; 'all' is the ranked list. */
+export type ActionsSection =
+  | 'all'
+  | 'indexes'
+  | 'settings'
+  | 'maintenance'
+  | 'rewrites'
+  | 'caching'
+const SECTIONS: readonly ActionsSection[] = [
+  'all',
+  'indexes',
+  'settings',
+  'maintenance',
+  'rewrites',
+  'caching',
+]
+
+const VIEWS: Record<string, DatabaseView> = {
+  actions: 'actions',
+  // The index plan lives in Actions; old links to its own tab open it there.
+  indexes: 'actions',
+  live: 'live',
+  queries: 'live',
+  report: 'report',
+}
 export type HealthPanel = 'connections' | 'hit' | 'rollback'
 export type SidePanel = 'settings' | 'setup' | 'analyze' | 'enable'
 
@@ -86,6 +113,7 @@ const HEALTH: readonly HealthPanel[] = ['connections', 'hit', 'rollback']
 
 interface Patch {
   view?: DatabaseView
+  section?: ActionsSection | null
   report?: number | 'latest' | null
   range?: LiveRange
   metric?: LoadMetric
@@ -113,7 +141,25 @@ export function useDatabaseUrl() {
   const searchRef = useRef(search)
   searchRef.current = search
 
-  const view: DatabaseView = search.view === 'report' ? 'report' : 'live'
+  // A link to a query, a time frame or an Inbox item is about the Queries tab.
+  const pointsAtQueries = ['query', 'queries', 'focus', 'zoom', 'from'].some(
+    (name) => typeof search[name] === 'string' && search[name] !== ''
+  )
+  const requestedView: DatabaseView | null =
+    (typeof search.view === 'string' ? VIEWS[search.view] : undefined) ??
+    (pointsAtQueries ? 'live' : null)
+  const view: DatabaseView = requestedView ?? 'live'
+  const section: ActionsSection =
+    search.view === 'indexes'
+      ? 'indexes'
+      : SECTIONS.includes(search.section as ActionsSection)
+        ? (search.section as ActionsSection)
+        : 'all'
+  const actionRaw = search.action
+  const action =
+    typeof actionRaw === 'string' && /^\d+$/.test(actionRaw)
+      ? Number(actionRaw)
+      : null
   const reportRaw = search.report
   const report: number | 'latest' =
     typeof reportRaw === 'string' && /^\d+$/.test(reportRaw)
@@ -151,7 +197,8 @@ export function useDatabaseUrl() {
         if (value === null || value === fallback) delete next[name]
         else next[name] = String(value)
       }
-      set('view', patch.view, 'live')
+      set('view', patch.view)
+      set('section', patch.section, 'all')
       set('report', patch.report, 'latest')
       set('range', patch.range, DEFAULT_RANGE)
       set('metric', patch.metric, 'calls')
@@ -182,6 +229,10 @@ export function useDatabaseUrl() {
 
   return {
     view,
+    /** The tab the URL asks for; null lets the page pick (Actions once there's a plan). */
+    requestedView,
+    section,
+    action,
     report,
     range,
     metric,
@@ -198,6 +249,10 @@ export function useDatabaseUrl() {
     ),
     setView: useCallback(
       (value: DatabaseView) => write({ view: value }),
+      [write]
+    ),
+    setSection: useCallback(
+      (value: ActionsSection) => write({ view: 'actions', section: value }),
       [write]
     ),
     openReport: useCallback(

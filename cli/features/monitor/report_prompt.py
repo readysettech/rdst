@@ -31,7 +31,10 @@ add up or estimate a new number, percentage or ratio.
 list, an index definition or a setting's SQL; the report shows those in code blocks next \
 to your words.
 3. Plain words, short sentences, contractions. No em dashes or en dashes. No marketing \
-words, no exclamation marks, no filler.
+words, no exclamation marks, no filler. Never write "here's", "the whole plan", "the only \
+thing", "that's it", "not X but Y" or "not X, it's Y" reversals, two short sentences that \
+echo each other, or the words quietly, simply, somehow, crucial or seamless. One idea per \
+sentence; no semicolons.
 4. Say what was observed. RDST watches the database and changes nothing, so never say RDST \
 fixed or resolved anything. A problem that ended "went back to normal".
 5. Don't claim a cause the data doesn't show. Never blame an index change for a latency \
@@ -208,6 +211,48 @@ def model_input(day: dict[str, Any], target: str,
             "queries": queries, "indexes_added": added}
 
 
+def _span(seconds: int) -> str:
+    if seconds >= 2 * 86400:
+        return f"{seconds // 86400} days"
+    if seconds >= 2 * 3600:
+        return f"{seconds // 3600} hours"
+    return f"{max(1, seconds // 60)} minutes"
+
+
+def checkup_input(open_actions: list[dict[str, Any]], plan: dict[str, Any] | None,
+                  previous: list[dict[str, Any]]) -> dict[str, Any]:
+    """The checkup's view of what to change: open actions, the index plan and past outcomes."""
+    actions = []
+    for row in open_actions:
+        payload = row["payload"]
+        actions.append({"action_id": f"a{row['id']}", "type": row["type"],
+                        "title": payload["title"], "summary": payload["summary"],
+                        "note": payload.get("note"), "confidence": payload.get("confidence"),
+                        "queries": [_token(key) for key in payload.get("queries") or []]})
+    ids = {row["key"]: f"a{row['id']}" for row in open_actions}
+    index_plan = None
+    if plan is not None:
+        index_plan = {
+            "based_on": f"{_span(plan['observed_s'])} of RDST's readings and "
+                        f"{_span(plan['counter_age_s'])} of the database's own counters",
+            "indexes_kept": len(plan["keep"]),
+            "add": [{"action_id": ids.get(add["id"]), "table": add["table"], "label": add["label"],
+                     "table_writes_a_second": f"{add['write_cost']['writes_per_s']:.1f}",
+                     "indexes_on_table": add["write_cost"]["existing_indexes"],
+                     "helps": [_token(helped["key"]) for helped in add["helps"]]}
+                    for add in plan["add"]],
+            "drop": [{"action_id": ids.get(drop["id"]), "table": drop["table"],
+                      "reason": drop["reason"], "confidence": drop["confidence"],
+                      "table_writes_a_second": f"{drop['table_writes_per_s']:.1f}"}
+                     for drop in plan["drop"]],
+            "not_recommended": [{"table": add["table"], "reason": add["label_reason"]}
+                                for add in plan["skipped"]]}
+    past = [{"type": row["type"], "title": row["payload"]["title"], "outcome": row["state"],
+             "reason": row.get("dismiss_reason") or row.get("closed_reason")}
+            for row in previous]
+    return {"open_actions": actions, "index_plan": index_plan, "previous_actions": past}
+
+
 def minimal_input(context: dict[str, Any]) -> dict[str, Any]:
     """For a report stored before the day's model input was kept: its facts and queries."""
     return {"database": {"name": context.get("target"), "engine": "postgresql",
@@ -286,6 +331,24 @@ def parse_answer(raw: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     shared = [item for item in raw.get("one_fix_several_queries") or []
               if isinstance(item, dict) and isinstance(item.get("columns"), list) and
               isinstance(item.get("query_keys"), list) and item.get("table")]
+    action_ids = {row["action_id"] for row in data.get("open_actions") or []}
+    action_picks, picked = [], set()
+    for item in raw.get("actions") or []:
+        if isinstance(item, dict) and item.get("action_id") in action_ids - picked:
+            picked.add(item["action_id"])
+            action_picks.append({"action_id": item["action_id"],
+                                 "why": _clean(item.get("why"), allowed, keys)})
+    overlaps = []
+    for item in raw.get("overlaps") or []:
+        if not isinstance(item, dict):
+            continue
+        members = [value for value in item.get("action_ids") or [] if value in action_ids]
+        note = _clean(item.get("note"), allowed, keys)
+        if len(set(members)) >= 2 and note:
+            overlaps.append({"action_ids": sorted(set(members)), "note": note})
+    explanation = _clean(raw.get("index_plan_explanation"), allowed, keys) \
+        if (data.get("index_plan") or {}).get("add") or (data.get("index_plan") or {}).get("drop") \
+        else None
     return {"summary": " ".join(item["text"] for item in brief),
             "fix_first": [{"query_key": note["query_key"], "title": note["title"],
                            "why": note["why"], "action": note["action"] or note["title"]}
@@ -297,4 +360,5 @@ def parse_answer(raw: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
                                         for item in shared],
             "health": [], "changed_since_yesterday": [],
             "brief_items": brief, "database_recommendations": picks[:5],
-            "query_notes": notes[:5]}
+            "query_notes": notes[:5], "action_picks": action_picks[:5],
+            "index_plan_explanation": explanation, "overlaps": overlaps}

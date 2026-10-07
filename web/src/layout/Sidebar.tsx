@@ -3,6 +3,7 @@ import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { focusRing } from '@rs/ui-new/focus'
 import { Icon } from '@rs/ui-new/icon'
 import { IconButton } from '@rs/ui-new/icon-button'
+import { ReadysetLogo } from '@rs/ui-new/logo'
 import { Pressable } from '@rs/ui-new/pressable'
 import { Scrollable } from '@rs/ui-new/scrollable'
 import { HStack } from '@rs/ui-new/stack'
@@ -13,11 +14,11 @@ import { ActivityPulse } from '../components/audit/ActivityPulse'
 import { BackgroundRuns } from '../components/BackgroundRuns'
 import { DesktopUpdateControl } from '../components/DesktopUpdateControl'
 import { ReportDialog } from '../components/ReportDialog'
-import { TargetDropdown } from '../components/TargetDropdown'
+import { TargetSync } from '../components/TargetDropdown'
 import { useInboxUnread } from '../features/inbox/useInboxUnread'
 import { SetupGuideHelpEntry } from '../features/setup/SetupGuideHelpEntry'
 import { SetupSteps } from '../features/setup/SetupSteps'
-import { useTarget } from '../hooks/useTarget'
+import { useMonitoredTargets } from '../hooks/useMonitoredTargets'
 import { trackEvent } from '../lib/analytics'
 import type { DesktopUpdateState } from '../lib/desktop'
 import { useSystemStatus } from '../lib/useSystemStatus'
@@ -107,26 +108,21 @@ interface NavItem {
 
 const homeItem: NavItem = { label: 'Home', icon: 'dashboard', to: '/' }
 
-// The daily nav, top to bottom: Home, Database (always shown; it follows the
-// global target), Inbox, Agent activity, Ask, then the demo. Benchmarking runs
-// from the Database page's query list. The classic Queries, Schema, Health check and Benchmarks
-// pages are off the nav; their routes still answer direct links. A running health check shows in
-// the footer's background runs.
-// Experimental surfaces (/scan, /guards) stay off the nav until they
-// ship for real; their routes remain reachable by URL and keep their on-page
-// Experimental banners.
+// The daily nav, top to bottom: Database (it follows the global target), Inbox, Agent
+// audit, Ask, Readyset Caching (the demo). Home leads it only while 2+ databases are
+// monitored; with one, `/` opens the Database page. Other pages stay off the nav; their routes still answer direct
+// links, and a running health check shows in the footer's background runs.
 const primaryItems: NavItem[] = [
   { label: 'Database', icon: 'database', to: '/database' },
   { label: 'Inbox', icon: 'notification', to: '/inbox' },
-  { label: 'Agent activity', icon: 'user-shield', to: '/agent-activity' },
+  { label: 'Agent audit', icon: 'user-shield', to: '/agent-activity' },
   { label: 'Ask', icon: 'sparkles', to: '/ask' },
-  { label: 'Try the demo', icon: 'querypilot', to: '/demo' },
+  { label: 'Readyset Caching', icon: 'querypilot', to: '/demo' },
 ]
 
-// Configuration recedes off the daily nav: after first connect the only global
-// config control is the target switcher (top) plus a quiet footer "Settings"
-// utility, never a top-level or Experimental nav item (configure-and-identity
-// step 2 / T17). [USE-030, USE-034]
+// Configuration stays off the daily nav: Settings is a footer utility, never a
+// top-level or Experimental nav item (configure-and-identity step 2 / T17).
+// [USE-030, USE-034]
 const settingsItem: NavItem = {
   label: 'Settings',
   icon: 'settings',
@@ -225,11 +221,11 @@ export function Sidebar({
 }: SidebarProps) {
   const router = useRouterState()
   const currentPath = router.location.pathname
-  const { target: selectedTarget, setTarget: setSelectedTarget } = useTarget()
   const [reportOpen, setReportOpen] = useState(false)
 
   const { data: status } = useSystemStatus()
   const inboxUnread = useInboxUnread()
+  const showHome = useMonitoredTargets().monitored.length >= 2
 
   // Dismiss the off-canvas mobile drawer after any navigation (stable ref so
   // the effect keys only on the path, not the callback identity; skip the
@@ -352,41 +348,40 @@ export function Sidebar({
         className={sidebarStyles({ isElectronMac, mobileOpen })}
       >
         {/* On desktop mac the window traffic lights get their own draggable
-          strip above the target selector. */}
+          strip above the brand row. */}
         {isElectronMac && <div className="draggable-region h-8 shrink-0" />}
 
-        {/* Target selector, with the drawer's own dismiss beside it: below
-          tablet the scrim is a 70px strip, so touch needs an explicit
-          control [USE-090]. */}
-        <div className="border-b border-border-layout-1">
-          <div className="draggable-region h-14">
-            <HStack className="no-drag h-full min-w-0 items-center">
-              <div className="min-w-0 flex-1">
-                <TargetDropdown
-                  selectedTarget={selectedTarget}
-                  onSelectTarget={setSelectedTarget}
-                />
-              </div>
-              <div className="pr-2 tablet:hidden">
-                <IconButton
-                  icon="close"
-                  label="Close navigation"
-                  variant="primary"
-                  modifier="ghost"
-                  size="small"
-                  tooltip={false}
-                  onClick={onMobileClose}
-                />
-              </div>
-            </HStack>
-          </div>
+        {/* Brand row, with the drawer's own dismiss beside it: below tablet the scrim is a
+          70px strip, so touch needs an explicit control [USE-090]. */}
+        <TargetSync />
+        <div className="draggable-region h-14 shrink-0 border-b border-border-layout-1">
+          <HStack className="no-drag h-full min-w-0 items-center gap-2 px-4">
+            <Link
+              to="/"
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-lg text-content-layout-1 outline-none focus-visible:shadow-focus"
+            >
+              <ReadysetLogo width={20} height={20} />
+              <Text level="label-large" className="font-semibold">
+                RDST
+              </Text>
+            </Link>
+            <div className="tablet:hidden">
+              <IconButton
+                icon="close"
+                label="Close navigation"
+                variant="primary"
+                modifier="ghost"
+                size="small"
+                tooltip={false}
+                onClick={onMobileClose}
+              />
+            </div>
+          </HStack>
         </div>
 
-        {/* The one value-proposition line (C1 / D-5), sitting below the
-          switcher rather than inside its bordered block: the sidebar is the
-          single owner of "what is this app", not a caption on the current
-          database (USE-050). */}
-        <div className="no-drag px-3 pt-2 pb-3">
+        {/* The one value-proposition line (C1 / D-5): the sidebar is the single owner of
+          "what is this app" (USE-050). */}
+        <div className="no-drag px-4 pt-3 pb-2">
           <Text level="caption" className="text-content-layout-3">
             {VALUE_PROPOSITION}
           </Text>
@@ -397,11 +392,13 @@ export function Sidebar({
         <Scrollable className="min-h-0 flex-1" type="auto">
           <nav className="flex flex-col gap-2 p-2">
             <div className="flex flex-col gap-1">
-              <NavLink
-                key={homeItem.to}
-                item={homeItem}
-                active={isActive(homeItem)}
-              />
+              {showHome && (
+                <NavLink
+                  key={homeItem.to}
+                  item={homeItem}
+                  active={isActive(homeItem)}
+                />
+              )}
               {primaryItems.map((item) => (
                 <NavLink
                   key={item.to}

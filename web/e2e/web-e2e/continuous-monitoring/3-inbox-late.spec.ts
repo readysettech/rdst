@@ -250,7 +250,7 @@ test('a cut connection files at once, notifies, marks the chart and clears on re
     await page.goto('/inbox')
     await expect(
       page
-        .getByRole('region', { name: 'Act now' })
+        .getByRole('region', { name: 'Urgent' })
         .locator(`article[data-inbox-item="${item!.id}"]`)
     ).toBeVisible()
     // Hold the outage long enough to leave a gap in the minute readings.

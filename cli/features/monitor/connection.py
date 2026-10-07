@@ -45,20 +45,42 @@ def span_text(start: int, end: int) -> str:
     return f"{clock_time(start, meridiem=not same_half)} to {clock_time(end)}"
 
 
-# Common driver errors, in words a user can act on. The raw error stays on the item.
+# Common driver errors, in words a user can act on, each with what to check. The raw error
+# stays on the item.
 _REASONS = (
     (("password authentication failed", "access denied for user", "authentication failed"),
-     "The database rejected the password."),
-    (("timeout expired", "timed out", "connection timed out"), "The connection timed out."),
+     "The database rejected the password.",
+     "Update the password for this database in Settings."),
+    (("timeout expired", "timed out", "connection timed out"), "The connection timed out.",
+     "Check that the database is running and that this computer can reach its host and port."),
     (("could not translate host name", "name or service not known", "nodename nor servname",
-      "getaddrinfo failed"), "The host name didn't resolve."),
-    (("connection refused",), "The server refused the connection."),
+      "getaddrinfo failed"), "The host name didn't resolve.",
+     "Check the host name for this database in Settings."),
+    (("connection refused",), "The server refused the connection.",
+     "Check that the database is running and listening on that port."),
     (("no pg_hba.conf entry", "not allowed to connect"),
-     "The server doesn't allow connections from this machine."),
-    (("ssl", "certificate"), "The TLS connection failed."),
-    (("does not exist",), "The database or user doesn't exist."),
-    (("too many connections", "remaining connection slots"), "Every connection slot is in use."),
+     "The server doesn't allow connections from this machine.",
+     "Allow this computer in the server's access rules, then check again."),
+    (("ssl", "certificate"), "The TLS connection failed.",
+     "Check the TLS settings for this database in Settings."),
+    (("does not exist",), "The database or user doesn't exist.",
+     "Check the database and user names in Settings."),
+    (("too many connections", "remaining connection slots"), "Every connection slot is in use.",
+     "Close idle connections or raise the server's connection limit."),
 )
+UNKNOWN_FIX = ("Check that the database is running, that this computer can reach it, and that "
+               "its connection details in Settings are right.")
+
+
+def connection_problem(error: str | None) -> dict[str, str]:
+    """Why RDST can't connect, and what to check, in words a user can act on."""
+    lowered = (error or "").lower()
+    if (error or "").startswith("SSH "):
+        return {"reason": error[:300], "fix": "Check the SSH tunnel settings for this database."}
+    for needles, reason, fix in _REASONS:
+        if any(needle in lowered for needle in needles):
+            return {"reason": reason, "fix": fix}
+    return {"reason": "RDST couldn't connect.", "fix": UNKNOWN_FIX}
 
 
 def reason_text(error: str | None) -> str | None:
@@ -67,7 +89,7 @@ def reason_text(error: str | None) -> str | None:
     if error.startswith("SSH "):
         return error[:300]
     lowered = error.lower()
-    for needles, text in _REASONS:
+    for needles, text, _ in _REASONS:
         if any(needle in lowered for needle in needles):
             return text
     return None

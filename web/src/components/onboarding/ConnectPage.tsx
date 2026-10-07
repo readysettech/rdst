@@ -1,5 +1,6 @@
 import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
+import { Pressable } from '@rs/ui-new/pressable'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useQueryClient } from '@tanstack/react-query'
@@ -10,7 +11,6 @@ import { startBootstrapRun } from '../../lib/backgroundRuns'
 import { useConfigure } from '../../lib/useConfigure'
 import { useOnboarding } from '../../lib/useOnboarding'
 import type { ConfigureFormData } from '../../types/configure'
-import { AnimatedSurfaceBackdrop } from '../AnimatedSurfaceBackdrop'
 import { ConfigureForm } from '../configure'
 import type { AddTab } from '../configure/addTabs'
 import {
@@ -220,57 +220,6 @@ export function ConnectPage({
           </Text>
         </VStack>
 
-        {!fromDemo && (
-          <div className="relative mb-8 overflow-hidden rounded-2xl bg-surface-rising-solid shadow-elevation-2">
-            <AnimatedSurfaceBackdrop palette="purple" />
-            <div className="relative flex flex-col gap-6 p-6 tablet:flex-row tablet:items-end tablet:justify-between">
-              <VStack className="max-w-md items-start gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-surface-layout-1/20">
-                  <Icon
-                    name="querypilot"
-                    label=""
-                    className="h-6 w-6 text-content-rising-solid"
-                  />
-                </div>
-                <VStack className="items-start gap-1">
-                  <Text
-                    level="headline-4"
-                    className="text-content-rising-solid"
-                  >
-                    Try the live demo
-                  </Text>
-                  <Text
-                    level="body-small"
-                    className="text-content-rising-solid"
-                  >
-                    Run a guided comparison on a prepared workload and inspect
-                    the measured Readyset speedup. No database or setup needed.
-                  </Text>
-                </VStack>
-              </VStack>
-              <Button
-                variant="primary"
-                modifier="solid"
-                label="Launch the demo"
-                icon="arrow-right"
-                iconPosition="right"
-                className="shrink-0 bg-surface-layout-1 text-content-layout-1 hover:bg-surface-layout-2 active:bg-surface-layout-2"
-                onClick={() => navigate({ to: '/demo' })}
-              />
-            </div>
-          </div>
-        )}
-
-        {!fromDemo && (
-          <HStack className="mb-6 items-center gap-3">
-            <div className="h-px flex-1 bg-border-layout-1" />
-            <Text level="caption" className="text-content-layout-3">
-              Or connect your own database
-            </Text>
-            <div className="h-px flex-1 bg-border-layout-1" />
-          </HStack>
-        )}
-
         {/* Provider-first paths, compact: one click into the discovery drawer
             pre-selected on that provider, kept to two rows so the manual form
             below stays visible without scrolling. */}
@@ -315,6 +264,18 @@ export function ConnectPage({
           <Text level="caption" className="text-content-layout-3 text-center">
             You can add an AI key later, only when a feature needs it.
           </Text>
+          {/* The demo stays one quiet link away; connecting is the page's one job. */}
+          {!fromDemo && (
+            <Text level="caption" className="text-content-layout-3 text-center">
+              No database handy?{' '}
+              <Pressable
+                onClick={() => navigate({ to: '/demo' })}
+                className="text-content-layout-2 underline underline-offset-4 hover:text-content-layout-1"
+              >
+                Try the Readyset Caching demo
+              </Pressable>
+            </Text>
+          )}
         </VStack>
       </div>
     </div>

@@ -500,6 +500,20 @@ def test_group_alert_body_has_median_and_top_three(client, store):
                                       "2.0 ms -> 12 ms")
 
 
+def test_a_group_alert_is_urgent_only_when_it_costs_real_database_time(store):
+    def band(before_ms, after_ms, qps):
+        recovery = {key: {"kind": "latency_regression", "baseline_mean_ms": before_ms,
+                          "baseline_qps": qps, "at_filing": {"mean_ms": after_ms, "qps": qps},
+                          "filed_at": NOW} for key in KEYS[:2]}
+        item = store.upsert_item("db", "many_queries_changed", f"database-{after_ms}", 0.9, "x",
+                                 {"query_keys": KEYS[:2], "recovery_queries": recovery}, NOW)
+        return presentation.present_inbox_item(item, {}, [], set())["severity_band"]
+
+    # Sub-millisecond moves on busy inserts are worth watching, not dropping everything for.
+    assert band(0.04, 0.29, 5) == "watch"
+    assert band(10, 60, 5) == "act_now"
+
+
 def test_group_members_exclude_ddl_and_rdst_statements(client, store):
     _seed(store, minutes=5)
     store.upsert_item("db", "many_queries_changed", "database", 0.9, "x",

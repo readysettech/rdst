@@ -40,6 +40,7 @@ DATA_KINDS: dict[str, list[str]] = {
     "analyze_cache": _ANALYZE_KINDS,
     "monitor_report": ["SQL text", "query statistics", "schema", "health checks"],
     "monitor_attention": ["SQL text", "query statistics"],
+    "monitor_explain": ["proposed changes", "query statistics"],
     "query_registry_analysis": ["SQL text", "schema"],
     "sql_generation": _ASK_KINDS,
     "sql_generation_alternate": _ASK_KINDS,

@@ -31,6 +31,7 @@ TOP_COMMAND_SETS = {
                     WITH total_time_sum AS (
                         SELECT COALESCE(SUM(total_exec_time), 1) as total
                         FROM pg_stat_statements
+                        WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
                     )
                     SELECT
                         abs(queryid)::text as query_hash,
@@ -42,6 +43,7 @@ TOP_COMMAND_SETS = {
                         ROUND((total_exec_time * 100.0 / total_time_sum.total)::numeric, 2) as pct_load
                     FROM pg_stat_statements, total_time_sum
                     WHERE query IS NOT NULL
+                      AND dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
                       AND query NOT LIKE '%pg_stat_statements%'
                       AND query NOT LIKE '%information_schema%'
                       AND query NOT LIKE 'EXPLAIN%'
@@ -156,9 +158,11 @@ TOP_COMMAND_SETS = {
                         ROUND(SUM_TIMER_WAIT * 100.0 / (
                             SELECT COALESCE(SUM(SUM_TIMER_WAIT), 1)
                             FROM performance_schema.events_statements_summary_by_digest
+                            WHERE DATABASE() IS NULL OR SCHEMA_NAME = DATABASE()
                         ), 2) as pct_load
                     FROM performance_schema.events_statements_summary_by_digest
                     WHERE DIGEST_TEXT IS NOT NULL
+                      AND (DATABASE() IS NULL OR SCHEMA_NAME = DATABASE())
                       AND DIGEST_TEXT NOT LIKE '%performance_schema%'
                       AND DIGEST_TEXT NOT LIKE '%information_schema%'
                       AND DIGEST_TEXT NOT LIKE 'EXPLAIN%'
@@ -195,6 +199,7 @@ TOP_COMMAND_SETS = {
                         DB as db
                     FROM INFORMATION_SCHEMA.PROCESSLIST
                     WHERE INFO IS NOT NULL
+                      AND (DATABASE() IS NULL OR DB = DATABASE())
                       AND COMMAND != 'Sleep'
                       AND INFO NOT LIKE '%PROCESSLIST%'
                       AND INFO NOT LIKE '%information_schema%'
@@ -243,6 +248,7 @@ TOP_COMMAND_SETS = {
                         SUM(rows_examined) as total_rows_examined
                     FROM mysql.slow_log
                     WHERE sql_text IS NOT NULL
+                      AND (DATABASE() IS NULL OR db = DATABASE())
                       AND sql_text NOT LIKE '%slow_log%'
                       AND sql_text NOT LIKE '%information_schema%'
                       AND sql_text NOT LIKE '%performance_schema%'

@@ -242,6 +242,462 @@
         "title": "AccountStatusResponse",
         "type": "object"
       },
+      "ActionCard": {
+        "properties": {
+          "apply": {
+            "enum": [
+              "run_sql",
+              "setting",
+              "config_restart",
+              "app_change",
+              "readyset"
+            ],
+            "title": "Apply",
+            "type": "string"
+          },
+          "category": {
+            "enum": [
+              "indexes",
+              "settings",
+              "maintenance",
+              "rewrites",
+              "caching"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/ActionCard"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "evidence": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "jev": {
+            "title": "Jev",
+            "type": "number"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "opened_at": {
+            "title": "Opened At",
+            "type": "integer"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "queries": {
+            "items": {
+              "$ref": "#/components/schemas/ActionQuery"
+            },
+            "title": "Queries",
+            "type": "array"
+          },
+          "restart": {
+            "title": "Restart",
+            "type": "boolean"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "rows": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "severity": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "snoozed_until": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snoozed Until"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "snoozed",
+              "dismissed",
+              "applied",
+              "confirmed",
+              "no_effect",
+              "retired"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steps"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "add_index",
+              "drop_index",
+              "rewrite_query",
+              "change_setting",
+              "run_maintenance",
+              "try_caching",
+              "index_plan",
+              "settings",
+              "maintenance"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "integer"
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Why"
+          },
+          "window": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActionWindow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "type",
+          "state",
+          "score",
+          "title",
+          "summary",
+          "note",
+          "why",
+          "apply",
+          "sql",
+          "restart",
+          "confidence",
+          "queries",
+          "opened_at",
+          "updated_at",
+          "snoozed_until",
+          "children",
+          "detail",
+          "window",
+          "priority",
+          "jev",
+          "severity",
+          "category"
+        ],
+        "title": "ActionCard",
+        "type": "object"
+      },
+      "ActionQuery": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name"
+        ],
+        "title": "ActionQuery",
+        "type": "object"
+      },
+      "ActionVerb": {
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          }
+        },
+        "title": "ActionVerb",
+        "type": "object"
+      },
+      "ActionWindow": {
+        "properties": {
+          "counter_age_s": {
+            "title": "Counter Age S",
+            "type": "integer"
+          },
+          "observed_s": {
+            "title": "Observed S",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "observed_s",
+          "counter_age_s"
+        ],
+        "title": "ActionWindow",
+        "type": "object"
+      },
+      "ActionsPage": {
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/ActionCard"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "card_count": {
+            "title": "Card Count",
+            "type": "integer"
+          },
+          "change_count": {
+            "title": "Change Count",
+            "type": "integer"
+          },
+          "checkup": {
+            "$ref": "#/components/schemas/CheckupState"
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "coverage": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Coverage"
+            },
+            "title": "Coverage",
+            "type": "object"
+          },
+          "dismissed": {
+            "title": "Dismissed",
+            "type": "integer"
+          },
+          "more": {
+            "items": {
+              "$ref": "#/components/schemas/ActionCard"
+            },
+            "title": "More",
+            "type": "array"
+          },
+          "open_count": {
+            "title": "Open Count",
+            "type": "integer"
+          },
+          "recently_done": {
+            "items": {
+              "$ref": "#/components/schemas/ActionCard"
+            },
+            "title": "Recently Done",
+            "type": "array"
+          },
+          "sections": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SectionStory"
+            },
+            "title": "Sections",
+            "type": "object"
+          },
+          "set_aside": {
+            "items": {
+              "$ref": "#/components/schemas/ActionCard"
+            },
+            "title": "Set Aside",
+            "type": "array"
+          },
+          "snoozed": {
+            "title": "Snoozed",
+            "type": "integer"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "window": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActionWindow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "sections",
+          "coverage",
+          "target",
+          "computed_at",
+          "card_count",
+          "change_count",
+          "checkup",
+          "actions",
+          "more",
+          "open_count",
+          "recently_done",
+          "snoozed",
+          "dismissed",
+          "set_aside",
+          "window"
+        ],
+        "title": "ActionsPage",
+        "type": "object"
+      },
       "AddColumnRequest": {
         "properties": {
           "column_name": {
@@ -4979,6 +5435,71 @@
         "title": "ChartMarker",
         "type": "object"
       },
+      "CheckupState": {
+        "properties": {
+          "analyzed": {
+            "title": "Analyzed",
+            "type": "integer"
+          },
+          "due_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due By"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "report_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Id"
+          },
+          "state": {
+            "enum": [
+              "none",
+              "first_pass",
+              "running",
+              "done"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state",
+          "analyzed",
+          "total",
+          "due_by",
+          "report_id",
+          "finished_at"
+        ],
+        "title": "CheckupState",
+        "type": "object"
+      },
       "ClearKeyringResponse": {
         "properties": {
           "cleared": {
@@ -5680,6 +6201,25 @@
         "title": "CompositionSlice",
         "type": "object"
       },
+      "ConnectionProblem": {
+        "description": "Why RDST can't reach the database, and what to check.",
+        "properties": {
+          "fix": {
+            "title": "Fix",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "fix"
+        ],
+        "title": "ConnectionProblem",
+        "type": "object"
+      },
       "ConversationHistoryResponse": {
         "description": "Response for conversation history.",
         "properties": {
@@ -5786,6 +6326,66 @@
           "exists"
         ],
         "title": "ConversationStatusResponse",
+        "type": "object"
+      },
+      "Coverage": {
+        "description": "Where one kind of change stands: changes found, checked and clean, being checked, or\nwaiting on deep analysis.",
+        "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "next_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next At"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "found",
+              "checked",
+              "checking",
+              "waiting"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "waiting_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waiting On"
+          }
+        },
+        "required": [
+          "state",
+          "checked_at",
+          "note",
+          "next_at"
+        ],
+        "title": "Coverage",
         "type": "object"
       },
       "DatabaseReport": {
@@ -9237,6 +9837,16 @@
       },
       "InboxItem": {
         "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxLikelyFix"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "advice": {
             "anyOf": [
               {
@@ -9557,6 +10167,29 @@
         "title": "InboxItem",
         "type": "object"
       },
+      "InboxLikelyFix": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "type"
+        ],
+        "title": "InboxLikelyFix",
+        "type": "object"
+      },
       "InboxLink": {
         "description": "Where an item opens: a query row and tab, the Database page, a report or a setting.",
         "properties": {
@@ -9830,6 +10463,585 @@
           "spark"
         ],
         "title": "IncidentQuery",
+        "type": "object"
+      },
+      "IndexPlan": {
+        "properties": {
+          "add": {
+            "items": {
+              "$ref": "#/components/schemas/IndexPlanAdd"
+            },
+            "title": "Add",
+            "type": "array"
+          },
+          "computed_at": {
+            "title": "Computed At",
+            "type": "integer"
+          },
+          "counter_age_s": {
+            "title": "Counter Age S",
+            "type": "integer"
+          },
+          "covered": {
+            "items": {
+              "$ref": "#/components/schemas/IndexPlanCovered"
+            },
+            "title": "Covered",
+            "type": "array"
+          },
+          "defeated": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Defeated",
+            "type": "array"
+          },
+          "drop": {
+            "items": {
+              "$ref": "#/components/schemas/IndexPlanDrop"
+            },
+            "title": "Drop",
+            "type": "array"
+          },
+          "engine": {
+            "title": "Engine",
+            "type": "string"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation"
+          },
+          "keep": {
+            "items": {
+              "$ref": "#/components/schemas/IndexPlanKeep"
+            },
+            "title": "Keep",
+            "type": "array"
+          },
+          "later": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/IndexPlanAdd"
+            },
+            "title": "Later",
+            "type": "array"
+          },
+          "observed_s": {
+            "title": "Observed S",
+            "type": "integer"
+          },
+          "rollback_sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rollback Sql"
+          },
+          "set_aside": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Set Aside",
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/IndexPlanAdd"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "sql": {
+            "title": "Sql",
+            "type": "string"
+          },
+          "watch": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/IndexPlanDrop"
+            },
+            "title": "Watch",
+            "type": "array"
+          }
+        },
+        "required": [
+          "engine",
+          "computed_at",
+          "observed_s",
+          "counter_age_s",
+          "keep",
+          "add",
+          "drop",
+          "skipped",
+          "covered",
+          "sql"
+        ],
+        "title": "IndexPlan",
+        "type": "object"
+      },
+      "IndexPlanAdd": {
+        "properties": {
+          "benefit": {
+            "title": "Benefit",
+            "type": "number"
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "helps": {
+            "items": {
+              "$ref": "#/components/schemas/IndexPlanHelp"
+            },
+            "title": "Helps",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "enum": [
+              "safe",
+              "worth_it",
+              "skip"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "label_reason": {
+            "title": "Label Reason",
+            "type": "string"
+          },
+          "merged": {
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Merged",
+            "type": "array"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "replaces": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Replaces",
+            "type": "array"
+          },
+          "roles": {
+            "default": [],
+            "items": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "equality",
+                    "sort",
+                    "range"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "sql": {
+            "title": "Sql",
+            "type": "string"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          },
+          "undo_sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Undo Sql"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "boolean"
+          },
+          "write_cost": {
+            "$ref": "#/components/schemas/IndexWriteCost"
+          }
+        },
+        "required": [
+          "id",
+          "table",
+          "replaces",
+          "columns",
+          "method",
+          "merged",
+          "helps",
+          "benefit",
+          "verified",
+          "write_cost",
+          "label",
+          "label_reason",
+          "sql"
+        ],
+        "title": "IndexPlanAdd",
+        "type": "object"
+      },
+      "IndexPlanCovered": {
+        "properties": {
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "covered_by": {
+            "title": "Covered By",
+            "type": "string"
+          },
+          "queries": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Queries",
+            "type": "array"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "table",
+          "columns",
+          "covered_by",
+          "queries"
+        ],
+        "title": "IndexPlanCovered",
+        "type": "object"
+      },
+      "IndexPlanDrop": {
+        "properties": {
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "low"
+            ],
+            "title": "Confidence",
+            "type": "string"
+          },
+          "covered_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Covered By"
+          },
+          "evidence_age_s": {
+            "title": "Evidence Age S",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "index_name": {
+            "title": "Index Name",
+            "type": "string"
+          },
+          "last_scan_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Scan At"
+          },
+          "reason": {
+            "enum": [
+              "unused",
+              "duplicate",
+              "stale"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "replica_caveat": {
+            "title": "Replica Caveat",
+            "type": "boolean"
+          },
+          "restore_sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restore Sql"
+          },
+          "scans": {
+            "title": "Scans",
+            "type": "integer"
+          },
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "slows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/IndexPlanWrite"
+            },
+            "title": "Slows",
+            "type": "array"
+          },
+          "sql": {
+            "title": "Sql",
+            "type": "string"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          },
+          "table_writes_per_s": {
+            "title": "Table Writes Per S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "table",
+          "index_name",
+          "columns",
+          "reason",
+          "covered_by",
+          "size_bytes",
+          "scans",
+          "last_scan_at",
+          "evidence_age_s",
+          "confidence",
+          "table_writes_per_s",
+          "replica_caveat",
+          "sql"
+        ],
+        "title": "IndexPlanDrop",
+        "type": "object"
+      },
+      "IndexPlanHelp": {
+        "properties": {
+          "gain": {
+            "title": "Gain",
+            "type": "number"
+          },
+          "gain_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gain Pct"
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "share",
+          "gain",
+          "verified",
+          "gain_pct",
+          "impact"
+        ],
+        "title": "IndexPlanHelp",
+        "type": "object"
+      },
+      "IndexPlanKeep": {
+        "properties": {
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "index_name": {
+            "title": "Index Name",
+            "type": "string"
+          },
+          "primary": {
+            "title": "Primary",
+            "type": "boolean"
+          },
+          "scans": {
+            "title": "Scans",
+            "type": "integer"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          },
+          "unique": {
+            "title": "Unique",
+            "type": "boolean"
+          },
+          "window_scans": {
+            "title": "Window Scans",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "index_name",
+          "table",
+          "columns",
+          "unique",
+          "primary",
+          "scans",
+          "window_scans",
+          "size_bytes"
+        ],
+        "title": "IndexPlanKeep",
+        "type": "object"
+      },
+      "IndexPlanWrite": {
+        "properties": {
+          "calls_per_s": {
+            "title": "Calls Per S",
+            "type": "number"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          },
+          "verb": {
+            "enum": [
+              "insert",
+              "update",
+              "delete"
+            ],
+            "title": "Verb",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "verb",
+          "share",
+          "calls_per_s"
+        ],
+        "title": "IndexPlanWrite",
         "type": "object"
       },
       "IndexPlannerResult": {
@@ -10111,6 +11323,42 @@
           "tested"
         ],
         "title": "IndexTesting",
+        "type": "object"
+      },
+      "IndexWriteCost": {
+        "properties": {
+          "existing_indexes": {
+            "title": "Existing Indexes",
+            "type": "integer"
+          },
+          "hot_risk": {
+            "title": "Hot Risk",
+            "type": "boolean"
+          },
+          "peak_writes_per_s": {
+            "title": "Peak Writes Per S",
+            "type": "number"
+          },
+          "updated_columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Updated Columns",
+            "type": "array"
+          },
+          "writes_per_s": {
+            "title": "Writes Per S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "writes_per_s",
+          "peak_writes_per_s",
+          "existing_indexes",
+          "updated_columns",
+          "hot_risk"
+        ],
+        "title": "IndexWriteCost",
         "type": "object"
       },
       "InitCompleteResponse": {
@@ -11808,6 +13056,16 @@
       },
       "MonitorPulsePage": {
         "properties": {
+          "connection_problem": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConnectionProblem"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "delay_reason": {
             "anyOf": [
               {
@@ -12094,6 +13352,16 @@
             ],
             "title": "Text Status",
             "type": "string"
+          },
+          "write_cost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WriteCost"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -18097,6 +19365,44 @@
         "title": "SchemaUpdateResponse",
         "type": "object"
       },
+      "SectionStory": {
+        "description": "The explanation at the top of an Actions section, from what RDST measured.",
+        "properties": {
+          "details": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Details",
+            "type": "array"
+          },
+          "facts": {
+            "items": {
+              "$ref": "#/components/schemas/StoryFact"
+            },
+            "title": "Facts",
+            "type": "array"
+          },
+          "headline": {
+            "title": "Headline",
+            "type": "string"
+          },
+          "lead": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lead",
+            "type": "array"
+          }
+        },
+        "required": [
+          "headline",
+          "lead",
+          "details",
+          "facts"
+        ],
+        "title": "SectionStory",
+        "type": "object"
+      },
       "SetDefaultRequest": {
         "description": "Request body for setting default target.",
         "properties": {
@@ -20157,6 +21463,24 @@
           "analysis"
         ],
         "title": "StoredAnalysisResponse",
+        "type": "object"
+      },
+      "StoryFact": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "title": "StoryFact",
         "type": "object"
       },
       "TargetData": {
@@ -22447,6 +23771,59 @@
           "message"
         ],
         "title": "WorkloadStatusEvent",
+        "type": "object"
+      },
+      "WriteCost": {
+        "properties": {
+          "hot_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hot Ratio"
+          },
+          "indexes_maintained": {
+            "title": "Indexes Maintained",
+            "type": "integer"
+          },
+          "set_columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Set Columns",
+            "type": "array"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          },
+          "table_writes_per_s": {
+            "title": "Table Writes Per S",
+            "type": "number"
+          },
+          "verb": {
+            "enum": [
+              "insert",
+              "update",
+              "delete"
+            ],
+            "title": "Verb",
+            "type": "string"
+          }
+        },
+        "required": [
+          "table",
+          "verb",
+          "set_columns",
+          "table_writes_per_s",
+          "indexes_maintained",
+          "hot_ratio"
+        ],
+        "title": "WriteCost",
         "type": "object"
       },
       "features__monitor__api__routes__AddQueryRequest": {
@@ -27083,6 +28460,132 @@
         ]
       }
     },
+    "/api/monitor/targets/{target}/actions": {
+      "get": {
+        "operationId": "target_actions_api_monitor_targets__target__actions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "title": "Target",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionsPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Target Actions",
+        "tags": [
+          "monitor"
+        ]
+      }
+    },
+    "/api/monitor/targets/{target}/actions/{action_id}/{verb}": {
+      "post": {
+        "description": "Snooze, dismiss or reopen an action; `check` reads the database now to see if it's done.",
+        "operationId": "action_verb_api_monitor_targets__target__actions__action_id___verb__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "title": "Target",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "title": "Action Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "verb",
+            "required": true,
+            "schema": {
+              "enum": [
+                "snooze",
+                "dismiss",
+                "reopen",
+                "check"
+              ],
+              "title": "Verb",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ActionVerb"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionsPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Action Verb",
+        "tags": [
+          "monitor"
+        ]
+      }
+    },
     "/api/monitor/targets/{target}/ai-monitoring": {
       "post": {
         "description": "Ask again for AI monitoring on a database that's monitored locally.",
@@ -27388,6 +28891,49 @@
           }
         },
         "summary": "Index Changes",
+        "tags": [
+          "monitor"
+        ]
+      }
+    },
+    "/api/monitor/targets/{target}/index-plan": {
+      "get": {
+        "description": "The latest index plan; null until the first statistics read computes one.",
+        "operationId": "index_plan_api_monitor_targets__target__index_plan_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "title": "Target",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndexPlan"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Index Plan",
         "tags": [
           "monitor"
         ]
@@ -28427,7 +29973,7 @@
     },
     "/api/monitor/targets/{target}/report/history": {
       "get": {
-        "description": "Finished reports only, newest day first; every run counts, sample days included.",
+        "description": "Finished reports only, newest day first; sample days included. Every run counts, or\nwith `daily` only the ones the Reports tab shows.",
         "operationId": "report_history_api_monitor_targets__target__report_history_get",
         "parameters": [
           {
@@ -28447,6 +29993,16 @@
               "default": 10,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "daily",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Daily",
+              "type": "boolean"
             }
           }
         ],
@@ -28480,6 +30036,7 @@
     },
     "/api/monitor/targets/{target}/report/latest": {
       "get": {
+        "description": "The newest run of any kind, or with `daily` the newest one the Reports tab shows.",
         "operationId": "latest_report_api_monitor_targets__target__report_latest_get",
         "parameters": [
           {
@@ -28489,6 +30046,16 @@
             "schema": {
               "title": "Target",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "daily",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Daily",
+              "type": "boolean"
             }
           }
         ],

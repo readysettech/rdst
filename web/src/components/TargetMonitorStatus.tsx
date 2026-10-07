@@ -40,6 +40,7 @@ export function targetMonitorLine(
     now?: number
     firstReading?: boolean
     delayReason?: string | null
+    connectionReason?: string | null
   } = {}
 ): TargetMonitorLine | null {
   if (!settings)
@@ -75,7 +76,8 @@ export function targetMonitorLine(
       dot: 'still',
       tone: 'negative',
       label: status.reasonLabel ?? status.label,
-      reason: status.reasonLabel ? status.label : null,
+      reason:
+        options.connectionReason ?? (status.reasonLabel ? status.label : null),
       ai: false,
       monitored: true,
     }
@@ -148,6 +150,7 @@ export function useTargetMonitorLines(
             failed: settings[index]?.isError,
             firstReading: pulse?.first_reading,
             delayReason: pulse?.delay_reason,
+            connectionReason: pulse?.connection_problem?.reason,
           }
         )
       )

@@ -184,7 +184,6 @@ test('every route shows the sign-in chooser until an AI provider is configured',
 
   await mockAiKeyReady(page)
   for (const [path, heading] of [
-    ['/', 'Home'],
     ['/onboarding', 'Start with Readyset'],
     ['/demo', 'See Readyset Platform in action'],
   ]) {

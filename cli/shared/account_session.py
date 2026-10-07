@@ -18,6 +18,7 @@ import requests
 from shared.config.targets import TargetsConfig
 from shared.constants import rdst_data_dir
 from shared.keyservice import keyservice_url
+from shared.persistence import replace_with_retry
 from shared.secret_store_service import SecretStoreService
 
 ACCESS_TOKEN_NAME = "RDST_ACCOUNT_ACCESS_TOKEN"
@@ -81,7 +82,8 @@ def _save_file_session(values: dict[str, str]) -> None:
             json.dump(values, destination)
             destination.flush()
             os.fsync(destination.fileno())
-        os.replace(temporary, path)
+        # Windows refuses the swap while a reader has the file open; it retries briefly.
+        replace_with_retry(temporary, path)
     finally:
         if os.path.exists(temporary):
             os.remove(temporary)

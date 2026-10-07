@@ -1,5 +1,6 @@
 // Hard rule (DESIGN_V4): wherever a deep analysis is embedded (the query row and the
-// daily snapshot's query rows), it renders the full AnalysisResults with every section.
+// daily snapshot's query rows), it renders the full AnalysisResults with every section. The
+// query row leads with the score and next step and keeps the rest one click away, in Details.
 import { cleanup, fireEvent, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CompleteEvent, RewriteTesting } from '@/lib/api'
@@ -179,6 +180,8 @@ describe('embedded deep analysis keeps every section', () => {
     expect(
       await screen.findByLabelText('Performance score 65 out of 100')
     ).toBeTruthy()
+    expect(screen.queryByText('Tested optimizations')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Details/ }))
     expectEverySection()
     expect(
       screen.getByText('Measured with values from live traffic.')
@@ -195,8 +198,6 @@ describe('embedded deep analysis keeps every section', () => {
         target="localdev"
         days={[]}
         onPick={() => undefined}
-        onRunToday={() => undefined}
-        running={false}
       />
     )
     const analyzed = snapshot.look_at.find((query) => query.analysis_ref)!

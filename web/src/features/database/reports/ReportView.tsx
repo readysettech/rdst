@@ -1,19 +1,16 @@
 // The Report tab (DESIGN_V5 section 5): the daily snapshot. RDST writes one just after
-// midnight for the day that ended; "Run today's snapshot now" writes today's so far, and
-// while it runs the animated run fills this frame. Every state stays honest: loading,
-// none yet, failed, and past days from the day list.
+// midnight for the day that ended. Every state stays honest: loading, none yet, failed, and
+// past days from the day list.
 import { Button } from '@rs/ui-new/button'
 import { EmptyState } from '@rs/ui-new/empty-state'
 import { ErrorState } from '@rs/ui-new/error-state'
 import { Skeleton } from '@rs/ui-new/skeleton'
 import { useMemo } from 'react'
-import { AnalyzeRun } from '@/features/database/analyze/AnalyzeRun'
 import { DatabaseGlyph } from '@/features/monitor-kit/DatabaseGlyph'
 import { useReport, useReportHistory } from '@/lib/monitor/hooks'
 import { DaySnapshot } from './DaySnapshot'
 import { REPORT_HISTORY_LIMIT } from './reportNav'
 import { dayList } from './snapshotModel'
-import type { ReportRun } from './useReportRun'
 
 function ReportSkeleton() {
   return (
@@ -26,39 +23,23 @@ function ReportSkeleton() {
   )
 }
 
-/** True while the run view should own the Report tab. */
-export function showsRun(run: ReportRun): boolean {
-  return Boolean(run.view) && run.status !== 'idle'
-}
-
 export function ReportView({
   target,
   reportId,
-  run,
   onShowLatest,
   onPick,
+  onOpenActions,
 }: {
   target: string
   reportId: number | 'latest'
-  run: ReportRun
   onShowLatest: () => void
   onPick: (id: number) => void
+  onOpenActions?: () => void
 }) {
-  const report = useReport(target, reportId)
-  const history = useReportHistory(target, REPORT_HISTORY_LIMIT)
+  // Nightly reports only; a checkup feeds Actions.
+  const report = useReport(target, reportId === 'latest' ? 'daily' : reportId)
+  const history = useReportHistory(target, REPORT_HISTORY_LIMIT, true)
   const days = useMemo(() => dayList(history.data?.reports), [history.data])
-
-  if (showsRun(run))
-    return (
-      <AnalyzeRun
-        target={target}
-        run={run}
-        onShowReport={() => {
-          run.dismiss()
-          onShowLatest()
-        }}
-      />
-    )
 
   if (report.isPending) return <ReportSkeleton />
 
@@ -70,18 +51,21 @@ export function ReportView({
       <div className="rounded-card border border-border-layout-1 bg-surface-layout-1">
         <EmptyState
           media={<DatabaseGlyph size={96} tone="neutral" />}
-          title={reportId === 'latest' ? 'Today so far' : 'This day is gone'}
+          title={
+            reportId === 'latest'
+              ? 'Your first daily report arrives tonight'
+              : 'This day is gone'
+          }
           body={
             reportId === 'latest'
-              ? `RDST writes up ${target}'s day every night just after midnight: its activity on a chart, and the queries that need a look. Want a look at today so far? Write it up now.`
+              ? `Every night just after midnight, RDST writes up ${target}'s day: its activity on a chart, what changed, and the queries that need a look. What to change right now is on Actions.`
               : 'RDST keeps a limited history. Open the latest day instead.'
           }
           action={
             reportId === 'latest'
-              ? {
-                  label: 'See today so far',
-                  onClick: () => void run.start(),
-                }
+              ? onOpenActions
+                ? { label: 'Open Actions', onClick: onOpenActions }
+                : undefined
               : { label: 'Open the latest day', onClick: onShowLatest }
           }
         />
@@ -107,11 +91,12 @@ export function ReportView({
               ? "This snapshot didn't finish"
               : 'This snapshot was cancelled'
           }
-          body="It stopped before it was written. Nothing on your database was changed."
-          action={{
-            label: "Run today's snapshot now",
-            onClick: () => void run.start(),
-          }}
+          body="It stopped before it was written. Nothing on your database was changed. Tonight's report runs as usual."
+          action={
+            onOpenActions
+              ? { label: 'Open Actions', onClick: onOpenActions }
+              : undefined
+          }
         />
         {reportId !== 'latest' && (
           <div className="flex justify-center pb-6">
@@ -151,8 +136,6 @@ export function ReportView({
       target={target}
       days={days}
       onPick={onPick}
-      onRunToday={() => void run.start()}
-      running={run.active}
     />
   )
 }

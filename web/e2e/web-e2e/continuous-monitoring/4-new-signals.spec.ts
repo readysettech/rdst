@@ -50,7 +50,7 @@ test('held locks file a lock item that names the blocker, notifies once and reco
     const row = await revealRow(page, item.id)
     await expect(row).toContainText('Queries waiting on locks')
     await expect(
-      page.getByRole('region', { name: 'Act now', exact: true })
+      page.getByRole('region', { name: 'Urgent', exact: true })
     ).toContainText('Queries waiting on locks')
     await hold(10)
     expect(
@@ -122,7 +122,7 @@ test('a spilling sort records temp spills for its query and sends them to Jev', 
   ).toBeGreaterThan(0)
 })
 
-test('a nightly report files health findings and pushes once for a new bad finding', async ({
+test('a nightly checkup opens an action for a new bad finding and pushes once', async ({
   page,
   request,
 }, testInfo) => {
@@ -131,14 +131,19 @@ test('a nightly report files health findings and pushes once for a new bad findi
   await hook.bloat(request)
   const report = await hook.nightly(request)
   expect(report.state).toBe('done')
-  const all = await items(request)
-  const vacuum = all.find(
-    (item) => item.type === 'health_finding' && body(item).id === 'vacuum'
-  )!
+  type Card = { key: string; title: string; children?: Card[] }
+  const actions = await ok<{ actions: Card[]; more: Card[] }>(
+    request.get(`${base}/actions`)
+  )
+  const cards = [...actions.actions, ...actions.more].flatMap((card) => [
+    card,
+    ...(card.children ?? []),
+  ])
+  const vacuum = cards.find((card) => card.key === 'db:vacuum')!
   expect(vacuum).toBeTruthy()
-  expect(vacuum.severity_band).toBe('watch')
-  expect(vacuum.delivery).toBe('inbox')
-  expect(body(vacuum).severity).toBe('bad')
+  // Findings live on the Actions tab; the Inbox carries the checkup's notice.
+  const all = await items(request)
+  expect(all.some((item) => item.type === 'health_finding')).toBe(false)
   const summary = all.find(
     (item) =>
       item.type === 'daily_summary' && body(item).report_id === report.id
@@ -154,18 +159,13 @@ test('a nightly report files health findings and pushes once for a new bad findi
       events.filter((event) => event.kind === 'notified').length === 1,
     { timeout: 30_000 }
   )
-  // A notification's link opens the Inbox on its item, whichever tab or group holds it.
+  // The notification's link opens the Inbox on the notice.
   await selectTarget(page)
-  await page.goto(`/inbox?item=${vacuum.id}`)
-  const row = inboxRow(page, vacuum.id)
+  await page.goto(`/inbox?item=${summary.id}`)
+  const row = inboxRow(page, summary.id)
   await expect(row).toBeVisible({ timeout: 30_000 })
   await expect(row).toContainText(vacuum.title)
-  await expect(row).toContainText('Open report')
-  expect(
-    (await hook.events(request, vacuum.id)).filter(
-      (event) => event.kind === 'notified'
-    )
-  ).toHaveLength(0)
+  // The action was already open, so the next night's checkup doesn't push it again.
   expect((await hook.nightly(request)).state).toBe('done')
   await hold(10)
   expect(

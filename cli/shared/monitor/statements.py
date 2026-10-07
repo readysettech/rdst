@@ -164,6 +164,10 @@ def _classify(text: str) -> tuple[bool, str, str | None]:
     kind = statement_kind(text)
     first = verb(text)
     if kind == "write":
+        from shared.monitor.write_lookup import lookup_for
+
+        if lookup_for(text) is not None:
+            return True, "ok", None
         return False, "write", f"{first} changes data, so RDST doesn't run it."
     if kind == "ddl":
         what = "permissions" if first in PERMISSION_VERBS else "the schema"
@@ -194,6 +198,8 @@ def analyzability(text: str, *, mean_ms: float | None = None,
     """`analyzable`, `analyzable_code`, `not_analyzable_reason` and `analysis_note`."""
     ok, code, reason = _classify(text or "")
     note = None
+    if ok and statement_kind(text or "") == "write":
+        note = "RDST analyzes how it finds its rows, without running the write."
     if ok and execute and mean_ms is not None and mean_ms > EXECUTE_LIMIT_MS:
         note = (f"Runs longer than {EXECUTE_LIMIT_MS // 1000} s, so RDST reads its plan "
                 "without running it.")

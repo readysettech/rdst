@@ -1,114 +1,47 @@
-import type { QueryRegistryEntry } from '../../lib/api'
-import type { HistorySpan } from '../../lib/monitor/types'
-import { isFirstRun } from '../database/overview/firstReadingsModel'
+import type { InboxItem, MuteRule } from '../../lib/monitor/types'
+import { inboxCounts, itemPlace } from '../inbox/inboxModel'
+import { countsAsUnread } from '../monitor-kit/severity'
+
+/** A database card's health glow. Neutral is a database without monitoring. */
+export type HealthGlow = 'positive' | 'warning' | 'negative' | 'neutral'
+
+export interface DatabaseStanding {
+  monitored: boolean
+  /** Monitoring is on but failing: paused, or the database can't be reached. */
+  failing: boolean
+  urgent: number
+  watch: number
+  openActions: number
+}
 
 /**
- * No database yet; connected but never monitored; monitoring on with too little
- * history to chart; monitoring with history (including paused monitoring, whose
- * history still reads).
+ * Red when the database has an open Urgent Inbox item or monitoring is failing, orange
+ * when it has open actions or Watch items, green otherwise.
  */
-export type HomeState = 'first-run' | 'connected' | 'collecting' | 'active'
-
-export interface PortfolioCounts {
-  asked: number
-  analyzed: number
-  compared: number
-  /** Verified as supported by Readyset but not yet measured in Compare. */
-  candidates: number
+export function healthGlow(standing: DatabaseStanding): HealthGlow {
+  if (!standing.monitored) return 'neutral'
+  if (standing.failing || standing.urgent > 0) return 'negative'
+  if (standing.openActions > 0 || standing.watch > 0) return 'warning'
+  return 'positive'
 }
 
-export type ContinueKind = 'compared' | 'analyzed' | 'asked' | 'saved'
-
-export interface ContinueItem {
-  hash: string
-  label: string
-  kind: ContinueKind
-  nextAction: 'Analyze' | 'Review' | 'Compare'
-  sql: string
-  mostRecentParams?: Record<string, unknown>
-  lastActivity: string
-  avgDurationMs: number
-  frequency: number
+export const GLOW_LABEL: Record<HealthGlow, string> = {
+  negative: 'Urgent',
+  warning: 'Worth a look',
+  positive: 'All clear',
+  neutral: 'Monitoring off',
 }
 
-export function deriveHomeState(
-  targetCount: number,
-  monitoring: boolean | undefined,
-  history: HistorySpan | null | undefined
-): HomeState {
-  if (targetCount === 0) return 'first-run'
-  if (!monitoring) return history?.first_ts ? 'active' : 'connected'
-  if (isFirstRun(true, history)) return 'collecting'
-  return 'active'
-}
-
-function scoped(entries: QueryRegistryEntry[], target: string | undefined) {
-  if (!target) return entries
-  return entries.filter((entry) => entry.target === target)
-}
-
-export function portfolioCounts(
-  entries: QueryRegistryEntry[],
-  target: string | undefined,
-  comparedHashes: ReadonlySet<string> = new Set()
-): PortfolioCounts {
-  const targetEntries = scoped(entries, target)
-  return {
-    asked: targetEntries.filter((entry) => entry.source === 'ask').length,
-    analyzed: targetEntries.filter((entry) => Boolean(entry.last_analyzed))
-      .length,
-    compared: targetEntries.filter((entry) => comparedHashes.has(entry.hash))
-      .length,
-    candidates: targetEntries.filter(
-      (entry) =>
-        entry.readyset_supported === 'yes' && !comparedHashes.has(entry.hash)
-    ).length,
-  }
-}
-
-function kindOf(
-  entry: QueryRegistryEntry,
-  comparedHashes: ReadonlySet<string>
-): ContinueKind {
-  if (comparedHashes.has(entry.hash)) return 'compared'
-  if (entry.last_analyzed) return 'analyzed'
-  if (entry.source === 'ask') return 'asked'
-  return 'saved'
-}
-
-const NEXT_ACTION: Record<ContinueKind, ContinueItem['nextAction']> = {
-  compared: 'Compare',
-  analyzed: 'Review',
-  asked: 'Analyze',
-  saved: 'Analyze',
-}
-
-export function continueItems(
-  entries: QueryRegistryEntry[],
-  target: string | undefined,
-  comparedHashes: ReadonlySet<string> = new Set(),
-  limit = 3
-): ContinueItem[] {
-  return scoped(entries, target)
-    .slice()
-    .sort((a, b) =>
-      (b.last_analyzed || b.first_analyzed || '').localeCompare(
-        a.last_analyzed || a.first_analyzed || ''
-      )
-    )
-    .slice(0, limit)
-    .map((entry) => {
-      const kind = kindOf(entry, comparedHashes)
-      return {
-        hash: entry.hash,
-        label: entry.tag || entry.sql,
-        kind,
-        nextAction: NEXT_ACTION[kind],
-        sql: entry.sql,
-        mostRecentParams: entry.most_recent_params,
-        lastActivity: entry.last_analyzed || entry.first_analyzed || '',
-        avgDurationMs: entry.avg_duration_ms ?? 0,
-        frequency: entry.frequency ?? 0,
-      }
-    })
+/** One database's open Inbox numbers: the Inbox's own counts, and the unread ones. */
+export function inboxStanding(
+  items: InboxItem[],
+  rules: MuteRule[] | undefined,
+  target: string
+) {
+  const own = items.filter((item) => item.target === target)
+  const counts = inboxCounts(own, rules)
+  const fresh = own.filter(
+    (item) => countsAsUnread(item) && itemPlace(item) !== 'resolved'
+  ).length
+  return { urgent: counts.actNow, watch: counts.watch, fresh }
 }

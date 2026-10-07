@@ -23,6 +23,8 @@ import psutil
 import shared.constants as shared_constants
 from shared import startup_status
 from shared.analysis_lane import PLAN_ANALYSIS_CONCURRENCY
+from shared.persistence import replace_with_retry
+from shared.persistence import staging_file as _staging_file
 from shared.query_registry.observation_store import (
     StorageError,
     _apply_journal_mode,
@@ -40,7 +42,7 @@ OWNER_HOST = socket.gethostname()
 
 # Allow five seconds of scheduling jitter around the normal one-minute cadence.
 COLLECTION_GAP_SECONDS = 65
-SCHEMA_VERSION = 27
+SCHEMA_VERSION = 30
 SAMPLES_PER_QUERY = 5
 RESOLUTIONS = (60, 300, 3600, 86400)
 # Full detail follows the same retention for every query in the first tier.
@@ -239,6 +241,53 @@ CREATE TABLE IF NOT EXISTS system_query (target TEXT NOT NULL, query_key TEXT NO
  PRIMARY KEY (target,query_key))
 """
 
+
+# Table, index and setting statistics: the latest cumulative counters, hourly activity deltas
+# between readings, and the settings an action can name. Actions: what to change, one row each.
+_SCHEMA_V28 = """
+CREATE TABLE IF NOT EXISTS stats_meta (target TEXT PRIMARY KEY, engine TEXT NOT NULL,
+ counter_since INTEGER NOT NULL, observed_since INTEGER NOT NULL, taken_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS table_state (target TEXT NOT NULL, schema TEXT NOT NULL,
+ "table" TEXT NOT NULL, ins INTEGER NOT NULL, upd INTEGER NOT NULL, del INTEGER NOT NULL,
+ hot_upd INTEGER NOT NULL, seq_scan INTEGER NOT NULL, idx_scan INTEGER NOT NULL,
+ scan_rows INTEGER NOT NULL, live_rows INTEGER NOT NULL, dead_rows INTEGER NOT NULL,
+ size_bytes INTEGER NOT NULL, updated_at INTEGER NOT NULL, vacuumed_at INTEGER,
+ analyzed_at INTEGER, PRIMARY KEY (target,schema,"table"));
+CREATE TABLE IF NOT EXISTS table_activity (target TEXT NOT NULL, schema TEXT NOT NULL,
+ "table" TEXT NOT NULL, bucket_start INTEGER NOT NULL, ins INTEGER NOT NULL, upd INTEGER NOT NULL,
+ del INTEGER NOT NULL, hot_upd INTEGER NOT NULL, seq_scan INTEGER NOT NULL,
+ idx_scan INTEGER NOT NULL, scan_rows INTEGER NOT NULL, seconds INTEGER NOT NULL,
+ PRIMARY KEY (target,schema,"table",bucket_start));
+CREATE TABLE IF NOT EXISTS index_state (target TEXT NOT NULL, schema TEXT NOT NULL,
+ "table" TEXT NOT NULL, index_name TEXT NOT NULL, scans INTEGER NOT NULL,
+ size_bytes INTEGER NOT NULL, is_unique INTEGER NOT NULL, is_primary INTEGER NOT NULL,
+ last_scan_at INTEGER, first_seen INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+ PRIMARY KEY (target,schema,"table",index_name));
+CREATE TABLE IF NOT EXISTS index_activity (target TEXT NOT NULL, schema TEXT NOT NULL,
+ "table" TEXT NOT NULL, index_name TEXT NOT NULL, bucket_start INTEGER NOT NULL,
+ scans INTEGER NOT NULL, PRIMARY KEY (target,schema,"table",index_name,bucket_start));
+CREATE TABLE IF NOT EXISTS setting_state (target TEXT NOT NULL, name TEXT NOT NULL,
+ value TEXT NOT NULL, unit TEXT, pending_restart INTEGER NOT NULL, changed_at INTEGER,
+ read_at INTEGER NOT NULL, PRIMARY KEY (target,name));
+CREATE TABLE IF NOT EXISTS setting_change (id INTEGER PRIMARY KEY, target TEXT NOT NULL,
+ ts INTEGER NOT NULL, name TEXT NOT NULL, old_value TEXT NOT NULL, new_value TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS setting_change_target_ts ON setting_change(target,ts);
+CREATE TABLE IF NOT EXISTS action (id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL,
+ key TEXT NOT NULL, type TEXT NOT NULL CHECK (type IN ('add_index','drop_index','rewrite_query',
+ 'change_setting','run_maintenance','try_caching')),
+ state TEXT NOT NULL CHECK (state IN ('open','snoozed','dismissed','applied','confirmed',
+ 'no_effect','retired')),
+ score REAL NOT NULL, payload_json TEXT NOT NULL, why TEXT, opened_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL, closed_at INTEGER, closed_reason TEXT, snoozed_until INTEGER,
+ dismiss_reason TEXT, UNIQUE (target,key));
+CREATE TABLE IF NOT EXISTS action_event (id INTEGER PRIMARY KEY AUTOINCREMENT,
+ action_id INTEGER NOT NULL REFERENCES action(id), ts INTEGER NOT NULL, kind TEXT NOT NULL,
+ detail_json TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS action_event_action ON action_event(action_id,id);
+CREATE TABLE IF NOT EXISTS index_plan (target TEXT PRIMARY KEY, computed_at INTEGER NOT NULL,
+ plan_json TEXT NOT NULL)
+"""
+STATS_ACTIVITY_RETENTION_SECONDS = 8 * 86400
 
 def _tail_period_sql(alias: str, *, span: int | None = None) -> str:
     begin = f"{alias}.bucket_start" if span is None else f"{alias}.bucket_start/{span}*{span}"
@@ -765,14 +814,17 @@ class MonitorStore:
                         migration = startup_status.begin("monitor.db")
                         backup = self.path.with_name(f"monitor.db.pre-v{version}.bak")
                         if not backup.exists():
-                            staging = backup.with_suffix(backup.suffix + ".tmp")
-                            staging.unlink(missing_ok=True)
-                            dest = sqlite3.connect(staging)
+                            staging = _staging_file(backup)
                             try:
-                                conn.backup(dest)
+                                dest = sqlite3.connect(staging)
+                                try:
+                                    conn.backup(dest)
+                                finally:
+                                    dest.close()
+                                if not backup.exists():
+                                    replace_with_retry(str(staging), backup)
                             finally:
-                                dest.close()
-                            os.replace(staging, backup)
+                                staging.unlink(missing_ok=True)
                     conn.execute("BEGIN IMMEDIATE")
                     try:
                         if version == 0:
@@ -793,6 +845,26 @@ class MonitorStore:
                             conn.execute("CREATE TABLE IF NOT EXISTS query_prior (target TEXT NOT NULL, "
                                          "query_key TEXT NOT NULL, calls INTEGER NOT NULL, "
                                          "total_ms REAL NOT NULL, PRIMARY KEY(target,query_key))")
+                        if version < 28:
+                            for statement in _SCHEMA_V28.split(";"):
+                                if statement.strip():
+                                    conn.execute(statement)
+                            columns = {row[1] for row in conn.execute("PRAGMA table_info(report_run)")}
+                            if "origin" not in columns:
+                                # 'first' marks the checkup that follows monitoring's first pass.
+                                conn.execute("ALTER TABLE report_run ADD COLUMN origin TEXT")
+                        if version < 29:
+                            # A PostgreSQL index left invalid by a failed concurrent build.
+                            columns = {row[1] for row in conn.execute("PRAGMA table_info(index_state)")}
+                            if "is_valid" not in columns:
+                                conn.execute("ALTER TABLE index_state ADD COLUMN is_valid INTEGER "
+                                             "NOT NULL DEFAULT 1")
+                        if version < 30:
+                            # When PostgreSQL last vacuumed and analyzed each table, by anyone.
+                            columns = {row[1] for row in conn.execute("PRAGMA table_info(table_state)")}
+                            for column in ("vacuumed_at", "analyzed_at"):
+                                if column not in columns:
+                                    conn.execute(f"ALTER TABLE table_state ADD COLUMN {column} INTEGER")
                         if version < 2:
                             conn.execute("ALTER TABLE inbox_item ADD COLUMN snoozed_until INTEGER")
                         if version < 3:
@@ -1127,6 +1199,8 @@ class MonitorStore:
         def write(conn: sqlite3.Connection) -> None:
             conn.execute("DELETE FROM inbox_event WHERE item_id IN "
                          "(SELECT id FROM inbox_item WHERE target=?)", (target,))
+            conn.execute("DELETE FROM action_event WHERE action_id IN "
+                         "(SELECT id FROM action WHERE target=?)", (target,))
             tables = [row[0] for row in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
             for table in tables:
@@ -1214,6 +1288,21 @@ class MonitorStore:
             return (0, 0)
         return (start, start + FIRST_HOUR_S)
 
+    def save_database_check(self, target: str, at: int, actions: list[dict[str, Any]]) -> None:
+        """The latest database checks' findings, kept between checkups."""
+        value = json.dumps({"at": at, "actions": actions})
+        self._write(lambda conn: conn.execute(
+            "INSERT OR REPLACE INTO monitor_setting (target,key,value) VALUES (?,'database_check',?)",
+            (target, value)))
+
+    def database_check(self, target: str) -> dict[str, Any] | None:
+        rows = self.read("SELECT value FROM monitor_setting WHERE target=? AND key='database_check'",
+                         (target,))
+        try:
+            return json.loads(rows[0]["value"]) if rows else None
+        except ValueError:
+            return None
+
     def monitored_targets(self) -> set[str]:
         return {row["target"] for row in self.read(
             "SELECT target FROM monitor_setting WHERE key='enabled' AND value='1'"
@@ -1295,6 +1384,12 @@ class MonitorStore:
             return conn.execute("DELETE FROM report_run WHERE target=? AND sample=1",
                                 (target,)).rowcount
         return self._write(write)
+
+    def touch_report(self, report_id: int, now: int) -> bool:
+        """Keep a claimed run alive while it waits; False once it's no longer running."""
+        return self._write(lambda conn: conn.execute(
+            "UPDATE report_run SET heartbeat_at=? WHERE id=? AND state='running'",
+            (now, report_id)).rowcount) > 0
 
     def recover_reports(self, now: int, stale_seconds: int = 900) -> None:
         self._write(lambda conn: conn.execute(
@@ -1445,8 +1540,13 @@ class MonitorStore:
             execute = setting is not None and setting[0] == "1"
             running = conn.execute("SELECT mode FROM analyze_job WHERE target=? AND state='running'",
                                    (target,)).fetchall()
-            limit = 1 if execute else PLAN_ANALYSIS_CONCURRENCY
-            if len(running) >= limit or any(row["mode"] != "explain" for row in running):
+            # Queries run one at a time under EXPLAIN ANALYZE, except the first monitored
+            # hour's pass, which gets the first actions out within minutes.
+            hour_start, hour_end = first_hour_window(conn, target)
+            first_pass = hour_start <= now < hour_end
+            limit = 1 if execute and not first_pass else PLAN_ANALYSIS_CONCURRENCY
+            if len(running) >= limit or (not first_pass and
+                                         any(row["mode"] != "explain" for row in running)):
                 return None
             used = _started_in_day(conn, target, now, REANALYSIS_REASONS)
             newcomers = _started_in_day(conn, target, now, NEWCOMER_REASONS)
@@ -1609,6 +1709,146 @@ class MonitorStore:
                          (target, "index_seeded", "1"))
             return changes
         return self._write(write)
+
+    def record_stats(self, target: str, reading: dict[str, Any]) -> list[dict[str, Any]]:
+        """Store one statistics reading (features.monitor.table_stats) and return setting changes.
+
+        Activity between this reading and the last lands in the hour of this reading. A counter
+        below its last value means the engine reset its statistics; the new value is then the
+        activity since that reset.
+        """
+        ts = int(reading["taken_at"])
+        bucket = ts // 3600 * 3600
+
+        def delta(new: int, old: int | None) -> int:
+            return 0 if old is None else new if new < old else new - old
+
+        def write(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+            meta = conn.execute("SELECT * FROM stats_meta WHERE target=?", (target,)).fetchone()
+            seconds = max(0, ts - meta["taken_at"]) if meta else 0
+            since = int(reading["counter_since"])
+            # MySQL's counter age comes from its uptime, which drifts a second between readings.
+            reset = bool(meta) and since > meta["counter_since"] + 120
+            if meta and not reset:
+                since = meta["counter_since"]
+            counters = ("ins", "upd", "del", "hot_upd", "seq_scan", "idx_scan", "scan_rows")
+            old_tables = {(row["schema"], row["table"]): row for row in conn.execute(
+                "SELECT * FROM table_state WHERE target=?", (target,))}
+            conn.execute("DELETE FROM table_state WHERE target=?", (target,))
+            for table in reading["tables"]:
+                key = (table["schema"], table["table"])
+                old = old_tables.get(key)
+                # After a reset the counters hold the activity since it.
+                moved = ({name: table[name] for name in counters} if reset and old else
+                         {name: delta(table[name], old[name] if old else None) for name in counters})
+                if old is not None and any(old[name] > table[name] for name in counters):
+                    moved = {name: table[name] for name in counters}
+                    since = max(since, meta["taken_at"] if meta else ts)
+                conn.execute('INSERT INTO table_state VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                             (target, *key, *(table[name] for name in counters),
+                              table["live_rows"], table["dead_rows"], table["size_bytes"], ts,
+                              table.get("vacuumed_at"), table.get("analyzed_at")))
+                if seconds and any(moved.values()):
+                    conn.execute(
+                        'INSERT INTO table_activity VALUES (?,?,?,?,?,?,?,?,?,?,?,?) '
+                        'ON CONFLICT(target,schema,"table",bucket_start) DO UPDATE SET '
+                        'ins=ins+excluded.ins,upd=upd+excluded.upd,del=del+excluded.del,'
+                        'hot_upd=hot_upd+excluded.hot_upd,seq_scan=seq_scan+excluded.seq_scan,'
+                        'idx_scan=idx_scan+excluded.idx_scan,scan_rows=scan_rows+excluded.scan_rows,'
+                        'seconds=seconds+excluded.seconds',
+                        (target, *key, bucket, *(moved[name] for name in counters), seconds))
+            old_indexes = {(row["schema"], row["table"], row["index_name"]): row
+                           for row in conn.execute("SELECT * FROM index_state WHERE target=?",
+                                                   (target,))}
+            conn.execute("DELETE FROM index_state WHERE target=?", (target,))
+            for index in reading["indexes"]:
+                key = (index["schema"], index["table"], index["index_name"])
+                old = old_indexes.get(key)
+                scans = index["scans"] if reset and old else delta(index["scans"], old["scans"] if old else None)
+                first_seen = old_indexes[key]["first_seen"] if key in old_indexes else ts
+                conn.execute('INSERT INTO index_state (target,schema,"table",index_name,scans,'
+                             'size_bytes,is_unique,is_primary,last_scan_at,first_seen,updated_at,'
+                             'is_valid) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                             (target, *key, index["scans"], index["size_bytes"],
+                              int(index["unique"]), int(index["primary"]),
+                              index.get("last_scan_at"), first_seen, ts,
+                              int(index.get("valid", True))))
+                if seconds and scans:
+                    conn.execute('INSERT INTO index_activity VALUES (?,?,?,?,?,?) '
+                                 'ON CONFLICT(target,schema,"table",index_name,bucket_start) '
+                                 'DO UPDATE SET scans=scans+excluded.scans',
+                                 (target, *key, bucket, scans))
+            changes = []
+            old_settings = {row["name"]: row for row in conn.execute(
+                "SELECT * FROM setting_state WHERE target=?", (target,))}
+            for name, setting in reading["settings"].items():
+                old = old_settings.get(name)
+                changed_at = old["changed_at"] if old else None
+                if old is not None and old["value"] != setting["value"]:
+                    changed_at = ts
+                    conn.execute("INSERT INTO setting_change (target,ts,name,old_value,new_value) "
+                                 "VALUES (?,?,?,?,?)", (target, ts, name, old["value"], setting["value"]))
+                    changes.append({"name": name, "old": old["value"], "new": setting["value"],
+                                    "ts": ts})
+                conn.execute("INSERT OR REPLACE INTO setting_state VALUES (?,?,?,?,?,?,?)",
+                             (target, name, setting["value"], setting.get("unit"),
+                              int(bool(setting.get("pending_restart"))), changed_at, ts))
+            conn.execute("INSERT INTO stats_meta VALUES (?,?,?,?,?) ON CONFLICT(target) DO UPDATE "
+                         "SET engine=excluded.engine,counter_since=excluded.counter_since,"
+                         "taken_at=excluded.taken_at",
+                         (target, reading["engine"], since, ts, ts))
+            return changes
+        return self._write(write)
+
+    def actions(self, target: str, states: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
+        """A target's actions, best first, with their payloads decoded."""
+        rows = self.read("SELECT * FROM action WHERE target=? AND (? IS NULL OR state IN "
+                         "(SELECT value FROM json_each(?))) ORDER BY score DESC,id",
+                         (target, None if states is None else 1, json.dumps(list(states or ()))))
+        for row in rows:
+            row["payload"] = json.loads(row.pop("payload_json"))
+        return rows
+
+    def write_actions(self, target: str, now: int, rows: list[dict[str, Any]]) -> None:
+        """Insert or update actions by key in one transaction; each row may carry `events`."""
+        def write(conn: sqlite3.Connection) -> None:
+            for row in rows:
+                existing = conn.execute("SELECT id FROM action WHERE target=? AND key=?",
+                                        (target, row["key"])).fetchone()
+                values = (row["type"], row["state"], float(row["score"]),
+                          json.dumps(row["payload"], sort_keys=True), row.get("why"), now,
+                          row.get("closed_at"), row.get("closed_reason"), row.get("snoozed_until"),
+                          row.get("dismiss_reason"))
+                if existing:
+                    action_id = existing[0]
+                    conn.execute("UPDATE action SET type=?,state=?,score=?,payload_json=?,"
+                                 "why=COALESCE(?,why),updated_at=?,closed_at=?,closed_reason=?,"
+                                 "snoozed_until=?,dismiss_reason=? WHERE id=?", (*values, action_id))
+                else:
+                    action_id = conn.execute(
+                        "INSERT INTO action (target,key,type,state,score,payload_json,why,updated_at,"
+                        "closed_at,closed_reason,snoozed_until,dismiss_reason,opened_at) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (target, row["key"], *values, row.get("opened_at", now))).lastrowid
+                for kind, detail in row.get("events") or []:
+                    conn.execute("INSERT INTO action_event (action_id,ts,kind,detail_json) "
+                                 "VALUES (?,?,?,?)", (action_id, now, kind, json.dumps(detail)))
+        self._write(write)
+
+    def save_index_plan(self, target: str, plan: dict[str, Any]) -> None:
+        self._write(lambda conn: conn.execute(
+            "INSERT OR REPLACE INTO index_plan VALUES (?,?,?)",
+            (target, int(plan["computed_at"]), json.dumps(plan, sort_keys=True))))
+
+    def index_plan(self, target: str) -> dict[str, Any] | None:
+        rows = self.read("SELECT plan_json FROM index_plan WHERE target=?", (target,))
+        return json.loads(rows[0]["plan_json"]) if rows else None
+
+    def action_events(self, action_id: int) -> list[dict[str, Any]]:
+        rows = self.read("SELECT * FROM action_event WHERE action_id=? ORDER BY id", (action_id,))
+        for row in rows:
+            row["detail"] = json.loads(row.pop("detail_json"))
+        return rows
 
     def inbox(self, state: str | None = None, target: str | None = None) -> list[dict[str, Any]]:
         if state and state not in {"new", "seen", "snoozed", "dismissed", "resolved"}:
@@ -2415,6 +2655,11 @@ class MonitorStore:
                      "AND (progress_json IS NOT NULL OR (report_json IS NOT NULL "
                      "AND report_json!=" + kept + "))",
                      (target, now - REPORT_BODY_RETENTION_SECONDS))
+        for table in ("table_activity", "index_activity"):
+            conn.execute(f"DELETE FROM {table} WHERE target=? AND bucket_start<?",
+                         (target, now - STATS_ACTIVITY_RETENTION_SECONDS))
+        conn.execute("DELETE FROM setting_change WHERE target=? AND ts<?",
+                     (target, now - EVENT_RETENTION_SECONDS))
         conn.execute("DELETE FROM stuck_sample WHERE target=? AND ts<?",
                      (target, now - 48 * 3600))
         conn.execute("DELETE FROM query_sample WHERE target=? AND observed_at<?",

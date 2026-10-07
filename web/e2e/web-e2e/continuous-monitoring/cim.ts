@@ -222,7 +222,11 @@ export async function selectTarget(page: Page) {
 
 export async function openDatabase(page: Page, params = '') {
   await selectTarget(page)
-  await page.goto(`/database?target=${encodeURIComponent(target)}${params}`)
+  // Without a view the page picks Actions once there is a plan; these specs mean Queries.
+  const view = params.includes('view=') ? '' : '&view=queries'
+  await page.goto(
+    `/database?target=${encodeURIComponent(target)}${params}${view}`
+  )
   await expect(
     page.getByRole('tablist', { name: 'Database view' })
   ).toBeVisible()

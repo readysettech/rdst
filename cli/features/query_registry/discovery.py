@@ -319,6 +319,9 @@ def _counters_moved(previous: Optional[CounterRow], current: CounterRow) -> bool
           current.max_exec_time, current.stats_since, current.epoch_id)
 
 
+OBSERVE_QUERY_TIMEOUT_S = 30
+
+
 def _default_connection_factory(target: str) -> tuple[Any, str]:
     """Open the collector's own direct connection and report the target's engine."""
     from shared.config.targets import TargetsConfig, normalize_db_type
@@ -331,7 +334,10 @@ def _default_connection_factory(target: str) -> tuple[Any, str]:
     if not target_config:
         raise ValueError(f"Target {target!r} is not configured")
     engine = normalize_db_type(target_config.get("engine")) or ""
-    connection = create_direct_connection(target_config, target=name, lane="rdst/observe")
+    # Reads are catalog and statistics queries; a cap keeps one stuck database from holding
+    # its monitor cycle.
+    connection = create_direct_connection(target_config, target=name, lane="rdst/observe",
+                                          query_timeout_seconds=OBSERVE_QUERY_TIMEOUT_S)
     if engine == "postgresql":
         # SET LOCAL session setup needs a transaction block; the per-cycle
         # rollback returns the connection to idle between collections.

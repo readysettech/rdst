@@ -231,3 +231,14 @@ def test_a_missing_password_is_never_a_lost_connection(tmp_path, monkeypatch):
         watch.observe("db", False, T0 + offset, "password authentication failed")
     watch.tick()
     assert not store.inbox()
+
+
+def test_a_connection_problem_says_why_and_what_to_check():
+    from features.monitor.connection import connection_problem
+
+    assert connection_problem('FATAL: password authentication failed for user "x"') == {
+        "reason": "The database rejected the password.",
+        "fix": "Update the password for this database in Settings."}
+    refused = connection_problem("connection to server at 127.0.0.1 failed: Connection refused")
+    assert refused["fix"] == "Check that the database is running and listening on that port."
+    assert connection_problem("something odd")["reason"] == "RDST couldn't connect."

@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  acceptBrowserError,
   configureTestTarget,
   expect,
   mockPrerequisites,
@@ -9,15 +10,25 @@ import {
 
 test('invites existing installs once and retains the existing consent dialog', async ({
   page,
+  browserErrors,
 }) => {
+  // The Database page reads a checkup that doesn't exist yet; the API answers 404.
+  acceptBrowserError(
+    browserErrors,
+    'Failed to load resource: the server responded with a status of 404 (Not Found)'
+  )
   await configureTestTarget(page, { hasPassword: true })
   const fixtureHome = process.env.RDST_E2E_HOME
   if (!fixtureHome) throw new Error('RDST_E2E_HOME is required')
   const configPath = join(fixtureHome, '.rdst', 'config.toml')
   const freshConfig = readFileSync(configPath, 'utf8')
   expect(freshConfig).toContain('monitoring_upgrade_targets = []')
+  // One database: Home is its Database page.
   await page.goto('/')
-  await expect(page.getByTestId('home-database-card')).toBeVisible()
+  await expect(page).toHaveURL(/\/database/)
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'e2e-guard' })
+  ).toBeVisible()
   await expect(
     page.getByRole('region', { name: 'Monitoring is new' })
   ).toHaveCount(0)
@@ -57,7 +68,9 @@ test('invites existing installs once and retains the existing consent dialog', a
   await prompt.getByRole('button', { name: 'Not now' }).click()
   await expect(prompt).toHaveCount(0)
   await page.reload()
-  await expect(page.getByTestId('home-database-card')).toBeVisible()
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'e2e-guard' })
+  ).toBeVisible()
   await expect(prompt).toHaveCount(0)
   // A new browser's API read sees the persisted dismissal too.
   const state = await page.request.get('/api/init/monitoring-upgrade')

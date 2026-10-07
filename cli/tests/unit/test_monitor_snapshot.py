@@ -198,7 +198,8 @@ COLLECTORS = {
          "size_bytes": 1024, "scans": 0}], "duplicates": []},
     "vacuum_bloat": {"tables": [
         {"schema": "public", "table": "orders", "live_tuples": 8200, "dead_tuples": 1800,
-         "dead_ratio_pct": 18.0, "status": "warn", "n_mod_since_analyze": 5000}],
+         "dead_ratio_pct": 18.0, "status": "warn", "n_mod_since_analyze": 5000,
+         "size_bytes": 64 * 1024 * 1024}],
         "txid_age_pct": 1.0, "autovacuum_enabled": True},
     "connections": {"total_connections": 12, "max_connections": 100,
                     "idle_in_transaction_count": 1, "long_running_idle_in_tx": [
@@ -471,3 +472,38 @@ def test_a_sentence_must_move_the_way_its_numbers_do():
     assert clean_sentence("Latency rose from 1.2 s to 6.7 s a query.", allowed, set())
     assert clean_sentence("Calls fell from 9 to 3 a minute.", allowed, set())
     assert not clean_sentence("Calls rose from 9 to 3 a minute.", allowed, set())
+
+
+def test_a_quiet_database_with_a_few_misses_is_not_short_of_memory():
+    config = {"settings": [{"parameter": "shared_buffers", "current": "128 MB",
+                            "recommended": "4 GB", "status": "ok"}]}
+    quiet = {"cache_hit_ratio_min": 0.82, "cache_hit_weighted": 0.93, "disk_reads_per_s": 3}
+    busy = {**quiet, "disk_reads_per_s": 2000, "cache_hit_weighted": 0.4}
+    found = {mode: {action["id"]: action for action in db_actions.database_actions(
+        {"engine": "postgresql", "config_audit": config}, numbers)}
+        for mode, numbers in (("quiet", quiet), ("busy", busy))}
+    assert found["quiet"]["setting_shared_buffers"]["severity"] == "info"
+    assert "cache_hit" not in found["quiet"]
+    assert found["busy"]["setting_shared_buffers"]["severity"] == "warn"
+
+
+def test_a_transaction_caught_between_statements_is_not_an_action():
+    passing = {"total_connections": 12, "max_connections": 100, "idle_in_transaction_count": 1,
+               "long_running_idle_in_tx": []}
+    forgotten = {**passing, "long_running_idle_in_tx": [
+        {"pid": 7, "duration_seconds": 420, "application_name": "web", "query_preview": "BEGIN"}]}
+    ids = {name: {action["id"] for action in db_actions.database_actions(
+        {"engine": "postgresql", "connections": connections}, {})}
+        for name, connections in (("passing", passing), ("forgotten", forgotten))}
+    assert "idle_in_transaction" not in ids["passing"]
+    assert "idle_in_transaction" in ids["forgotten"]
+
+
+def test_a_relative_setting_comes_with_sql_to_size_and_numbered_steps():
+    sql = db_actions.setting_sql("shared_buffers", "25% of RAM", "postgresql")
+    assert sql.splitlines() == [
+        "-- 25% of the server's RAM: 4GB on a 16 GB server. Change it to fit yours.",
+        "ALTER SYSTEM SET shared_buffers = '4GB';"]
+    steps = db_actions.setting_steps("shared_buffers", "25% of RAM", "postgresql", True).splitlines()
+    assert steps[0] == "Pick a value near 25% of the server's RAM."
+    assert "parameter group" in steps[1] and steps[2].startswith("Restart PostgreSQL")

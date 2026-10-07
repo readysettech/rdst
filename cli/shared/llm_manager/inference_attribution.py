@@ -30,6 +30,7 @@ PURPOSE_FEATURES = {
     "audit_health": "audit",
     "monitor_report": "monitor",
     "monitor_analyze": "monitor",
+    "monitor_explain": "monitor",
     "audit_single_target_insights": "audit",
     "fleet_insights": "fleet",
     "guard_rule_derivation": "guard",

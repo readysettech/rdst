@@ -7,6 +7,7 @@ export type AgentAction =
   | 'classification'
   | 'attention_check'
   | 'daily_snapshot'
+  | 'explain_actions'
   | 'benchmark'
 
 export type AgentOutcome = 'done' | 'failed' | 'skipped' | 'cancelled'

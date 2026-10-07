@@ -55,7 +55,7 @@ test('ci-shop is monitored with two days of history', async ({
     "You're signed in, so turning on monitoring includes AI checks through Readyset."
   )
   await dialog.getByRole('button', { name: 'Turn on monitoring' }).click()
-  await expect(signedIn.getByRole('tab', { name: 'Report' })).toBeVisible()
+  await expect(signedIn.getByRole('tab', { name: 'Reports' })).toBeVisible()
   // The header says the database's state in the shared words.
   await expect(
     signedIn

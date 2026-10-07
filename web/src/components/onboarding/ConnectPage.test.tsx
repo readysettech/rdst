@@ -132,13 +132,16 @@ describe('ConnectPage', () => {
     expect(cancel).toHaveBeenCalled()
   })
 
-  it('presents the live demo as the primary zero-setup path', () => {
+  it('leads with connecting a database and keeps the demo to one quiet link', () => {
     renderPage()
 
     expect(
       screen.getByRole('heading', { name: 'Start with Readyset' })
     ).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Launch the demo' }))
+    expect(screen.queryByRole('button', { name: 'Launch the demo' })).toBeNull()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Try the Readyset Caching demo' })
+    )
 
     expect(mockNavigate).toHaveBeenCalledWith({ to: '/demo' })
   })
@@ -149,7 +152,9 @@ describe('ConnectPage', () => {
     expect(
       screen.getByRole('heading', { name: 'Connect your database' })
     ).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Launch the demo' })).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: 'Try the Readyset Caching demo' })
+    ).toBeNull()
   })
 
   it('opens the turn-on dialog for the new database right after it connects', async () => {

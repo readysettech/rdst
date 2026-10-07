@@ -28,15 +28,16 @@ export interface RowScore {
   rating: string | null
 }
 
+/** The analysis's score or rating; null until it has one, so a row never says "Analyzed"
+ *  over results that are still being written. */
 export function rowScore(query: MonitorQuery): RowScore | null {
   const summary = query.last_analysis?.summary
-  if (!summary && query.last_analysis?.state !== 'done') return null
   const rating = summary?.rating?.toLowerCase() ?? null
   const score =
     typeof summary?.efficiency_score === 'number'
       ? Math.round(summary.efficiency_score)
       : null
-  return { score, rating }
+  return score == null && !rating ? null : { score, rating }
 }
 
 /** The score the tile shows: the number, else the rating's midpoint. */

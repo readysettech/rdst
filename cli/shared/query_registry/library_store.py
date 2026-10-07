@@ -52,7 +52,8 @@ import toml
 
 import shared.constants as shared_constants
 from shared import startup_status
-from shared.persistence import merge_mapping_changes
+from shared.persistence import merge_mapping_changes, replace_with_retry
+from shared.persistence import staging_file as _staging_file
 from shared.query_registry.observation_store import (
     StorageError,
     _apply_journal_mode,
@@ -1409,14 +1410,18 @@ class LibraryStore:
         backup = self._db_path.with_name(f"{self._db_path.name}.pre-v{version}.bak")
         if backup.exists():
             return backup
-        staging = backup.with_name(backup.name + ".tmp")
-        staging.unlink(missing_ok=True)
-        target = sqlite3.connect(staging)
+        staging = _staging_file(backup)
         try:
-            conn.backup(target)
+            target = sqlite3.connect(staging)
+            try:
+                conn.backup(target)
+            finally:
+                target.close()
+            # Another opener may have finished the same backup first; theirs stands.
+            if not backup.exists():
+                replace_with_retry(str(staging), backup)
         finally:
-            target.close()
-        os.replace(staging, backup)
+            staging.unlink(missing_ok=True)
         logger.info("Backed up %s to %s before migrating", self._db_path, backup)
         return backup
 

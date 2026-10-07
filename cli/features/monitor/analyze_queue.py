@@ -20,6 +20,7 @@ from features.monitor import database_limit
 from features.monitor import telemetry as monitor_telemetry
 from features.monitor.analysis_digest import digest_for_ref, summary_for_job
 from features.monitor.presentation import analysis_error_kind, analysis_reason, display_name
+from shared.monitor.write_lookup import lookup_for
 from shared.llm_manager.inference_attribution import (count_billable_calls, inference_workflow,
                                                       monitoring_database)
 from shared.monitor.monitor_store import (ANALYSIS_CLAIM_ORDER, ANALYSIS_SPENDS_CAP,
@@ -27,6 +28,7 @@ from shared.monitor.monitor_store import (ANALYSIS_CLAIM_ORDER, ANALYSIS_SPENDS_
                                           REANALYSIS_REASONS, MonitorStore,
                                           default_analysis_daily_cap, local_day_bounds)
 from shared import agent_activity, analysis_lane
+from shared.monitor.statements import statement_kind
 from shared.query_safety import is_plain_explainable_write, validate_query_safety
 
 logger = logging.getLogger(__name__)
@@ -162,6 +164,29 @@ def current_phase(target: str, key: str) -> str | None:
     return _phases.get((target, key))
 
 
+class _PhaseTimer:
+    """Wall time per analysis phase: sampling values, planning or running the query, the AI
+    advice and the rewrite and index tests."""
+
+    def __init__(self) -> None:
+        self.started = self.since = time.monotonic()
+        self.phase: str | None = "sample"
+        self.spent: dict[str, float] = {}
+
+    def enter(self, phase: str | None) -> None:
+        now = time.monotonic()
+        if self.phase is not None:
+            self.spent[self.phase] = self.spent.get(self.phase, 0.0) + now - self.since
+        self.phase, self.since = phase, now
+
+    def describe(self, ai_calls: int) -> str:
+        total = time.monotonic() - self.started
+        parts = [f"{name} {seconds:.0f} s" for name, seconds in self.spent.items()
+                 if seconds >= 0.5]
+        calls = f", {ai_calls} AI calls" if ai_calls > 1 else ""
+        return f"in {total:.0f} s ({', '.join(parts)}{calls})"
+
+
 def _phase_for(stage: str, mode: str | None) -> str:
     if stage in _ADVISE_STAGES:
         return "advise"
@@ -172,6 +197,33 @@ def _phase_for(stage: str, mode: str | None) -> str:
     if stage == "executing_explain" and mode == "analyze":
         return "run"
     return "plan"
+
+
+# Room for two databases' first passes side by side; each database keeps its own cap.
+GLOBAL_ANALYSIS_LIMIT = 6
+
+# A new database's first pass tests rewrites for only this many of its busiest queries.
+FIRST_PASS_REWRITE_TESTS = 3
+
+
+def _tests_rewrites(store: MonitorStore, job: dict[str, Any]) -> bool:
+    """Whether this automatic analysis tests rewrites: always, except a first-pass job outside
+    the database's busiest few."""
+    start, end = store.first_hour(job["target"])
+    if not (start <= int(job["enqueued_at"] or 0) < end):
+        return True
+    heavier = store.read("SELECT COUNT(*) n FROM analyze_job WHERE target=? AND id!=? "
+                         f"AND {FIRST_HOUR_JOB} AND COALESCE(priority,0)>?",
+                         (job["target"], job["id"], start, end, float(job["priority"] or 0)))
+    return heavier[0]["n"] < FIRST_PASS_REWRITE_TESTS
+
+
+def global_limit() -> int:
+    """Deep analyses running at once across every monitored database."""
+    try:
+        return max(1, int(os.environ.get("RDST_MONITOR_ANALYSIS_LIMIT", GLOBAL_ANALYSIS_LIMIT)))
+    except ValueError:
+        return GLOBAL_ANALYSIS_LIMIT
 
 
 def daily_cap(target: str | None = None, store: MonitorStore | None = None) -> int:
@@ -376,6 +428,9 @@ _STATE_CHANGING_CALL = re.compile(
 def automatic_skip_reason(sql: str) -> str | None:
     from shared.monitor.statements import analyzability
 
+    if statement_kind(sql) == "write" and (lookup := lookup_for(sql)) is not None:
+        # A write is analyzed through the SELECT that finds its rows, never run or explained.
+        sql = lookup["sql"]
     verdict = analyzability(sql)
     if not verdict["analyzable"] and verdict["analyzable_code"] != "no_text":
         return verdict["not_analyzable_reason"]
@@ -860,12 +915,16 @@ class AnalyzeQueue:
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self._wake = asyncio.Event()
+        # Set by wake(): a running tick stops waiting on its jobs and claims again.
+        self._nudge = asyncio.Event()
         self._active_runs: dict[int, analysis_lane.AnalysisRun] = {}
         # While a pass is busy running jobs, a wake queues new work without waiting for it.
         self._busy = False
         self._refresh: asyncio.Task | None = None
         # The soonest transient-failure retry; the queue wakes for it before its next tick.
         self._retry_at: int | None = None
+        # Which database the next claim round starts with.
+        self._turn = 0
 
     async def start(self) -> "AnalyzeQueue":
         if self._task is None:
@@ -901,6 +960,7 @@ class AnalyzeQueue:
 
     def wake(self) -> None:
         self._wake.set()
+        self._nudge.set()
         if self._busy and self._task is not None and (
                 self._refresh is None or self._refresh.done()):
             self._refresh = asyncio.create_task(
@@ -932,15 +992,40 @@ class AnalyzeQueue:
             active: set[asyncio.Task] = set()
             try:
                 while not self._stop.is_set():
-                    for target in targets:
-                        while not self._stop.is_set():
-                            job = await asyncio.to_thread(self._claim, target)
-                            if not job:
+                    # A database added while this tick runs joins it at the next round
+                    # instead of waiting for every other database's queue to empty.
+                    monitored = await asyncio.to_thread(self.store.monitored_targets)
+                    if monitored - set(targets):
+                        targets = await asyncio.to_thread(self._prepare, int(self.clock()))
+                    # One claim per database per round, under a cap for the whole install, so
+                    # every database's first pass moves and the model isn't swamped.
+                    claimed = True
+                    while claimed and not self._stop.is_set() and len(active) < global_limit():
+                        claimed = False
+                        # Each round starts one database further on, so a freed slot doesn't
+                        # always go back to the first database in the list.
+                        start = self._turn % len(targets) if targets else 0
+                        for target in targets[start:] + targets[:start]:
+                            if len(active) >= global_limit():
                                 break
-                            active.add(asyncio.create_task(self._process_recorded(job)))
+                            job = await asyncio.to_thread(self._claim, target)
+                            if job:
+                                claimed = True
+                                self._turn += 1
+                                active.add(asyncio.create_task(self._process_recorded(job)))
                     if not active:
                         break
-                    done, active = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)
+                    nudged = asyncio.ensure_future(self._nudge.wait())
+                    try:
+                        done, _ = await asyncio.wait(active | {nudged},
+                                                     return_when=asyncio.FIRST_COMPLETED)
+                    finally:
+                        nudged.cancel()
+                    if nudged in done:
+                        # Cleared only once seen, so a wake during this round's claims counts.
+                        self._nudge.clear()
+                        done.discard(nudged)
+                    active -= done
                     for task in done:
                         await task
             finally:
@@ -1095,6 +1180,8 @@ class AnalyzeQueue:
         mode = None
         source = None
         billable_calls = 0
+        # Seconds spent in each phase, so the activity line says where an analysis's time went.
+        timings = _PhaseTimer()
         try:
             rows = await asyncio.to_thread(
                 self.store.read, "SELECT text FROM query_text WHERE target=? AND query_key=?",
@@ -1116,11 +1203,20 @@ class AnalyzeQueue:
             target_config = config.get(target) or {}
             if not await asyncio.to_thread(self.store.analysis_owned, job):
                 return
+            sample_key = key
+            lookup = lookup_for(sql, str(target_config.get("engine") or "postgresql").lower()) \
+                if statement_kind(sql) == "write" else None
+            if lookup is not None:
+                sql = lookup["sql"]
+                # Positional values sampled for the write start with its SET list.
+                sample_key = key if not lookup["skip_params"] else None
+                agent_activity.describe(subject=f"How {display_name(rows[0]['text'])} finds its rows")
             suggestions = await self.service.suggest_parameter_values(
-                sql, target, target_config, key)
+                sql, target, target_config, sample_key)
             if run.stopped.is_set():
                 return
             _phases[(target, key)] = "plan"
+            timings.enter("plan")
             sql, source = apply_suggestions(sql, suggestions)
             agent_activity.describe(parameters=parameter_note(suggestions, source))
             if (source == "none" and suggestions.get("placeholders")
@@ -1137,17 +1233,24 @@ class AnalyzeQueue:
             mode = analysis_mode(sql, mean_ms, execute)
             if source == "none" and suggestions.get("placeholders"):
                 mode = "explain"
+            if lookup is not None:
+                # A write's row search is only planned: its WHERE may call a function that writes.
+                mode = "explain"
             if not validate_query_safety(sql).get("safe") and not (
                 mode == "explain" and is_plain_explainable_write(sql)
             ):
                 raise ValueError("Query failed read-only safety validation")
             user_requested = job["reason"] == "user"
-            # A run the user asked for tests the suggested rewrites the same way it reads
-            # the query: planned only, or run under the same timeout. The user's own Anthropic
-            # key pays when set; otherwise the hosted service does.
+            # Analyses test the suggested rewrites the same way they read the query: planned
+            # only, or run under the same timeout. Testing roughly doubles an analysis, so a new
+            # database's first pass tests only its busiest few; the rest wait for their daily
+            # re-analysis. The user's own Anthropic key pays when set; otherwise the hosted
+            # service does.
+            test_rewrites = user_requested or await asyncio.to_thread(
+                _tests_rewrites, self.store, job)
             options = AnalyzeOptions(target=target, fast=mode == "explain",
                                      non_interactive=True, statement_timeout_ms=timeout_ms(mean_ms),
-                                     test_rewrites=user_requested)
+                                     test_rewrites=test_rewrites)
             final = None
             error = None
             fingerprint = None if user_requested else await asyncio.to_thread(
@@ -1183,6 +1286,7 @@ class AnalyzeQueue:
                                     return
                                 if event.type == "progress":
                                     _phases[(target, key)] = _phase_for(event.stage, mode)
+                                    timings.enter(_phases[(target, key)])
                                 elif event.type == "complete":
                                     final = event
                                 elif event.type == "error":
@@ -1231,8 +1335,10 @@ class AnalyzeQueue:
             summary = await asyncio.to_thread(digest_for_ref, target, job["query_key"], ref, mode)
             if summary:
                 await asyncio.to_thread(self.store.update_query_ui, target, job["query_key"], summary=summary)
+            timings.enter(None)
             await asyncio.to_thread(self._pulse, target, True,
-                                    f"Analyzed {display_name(rows[0]['text'])}")
+                                    f"Analyzed {display_name(rows[0]['text'])} "
+                                    f"{timings.describe(billable_calls)}")
             if run.stopped.is_set():
                 return
             await asyncio.to_thread(self.store.action_item_for_subject, target,

@@ -337,6 +337,9 @@ def test_budget_reclaims_file_pages_when_history_can_fit(tmp_path):
     store = MonitorStore(tmp_path / "monitor.db", budget_bytes=10**9,
                          clock=lambda: 100_000)
     store.ensure_open()
+    with sqlite3.connect(store.path) as conn:
+        empty = (conn.execute("PRAGMA page_count").fetchone()[0] *
+                 conn.execute("PRAGMA page_size").fetchone()[0])
 
     def seed(conn):
         conn.executemany("INSERT INTO query_text VALUES (?,?,?,?,?)",
@@ -348,7 +351,8 @@ def test_budget_reclaims_file_pages_when_history_can_fit(tmp_path):
                           for i in range(1000) for res in (60, 300)
                           for minute in (range(5) if res == 60 else range(1))])
     store._write(seed)
-    store.budget_bytes = 420_000
+    # Room for the empty schema plus part of the seeded history.
+    store.budget_bytes = empty + 157_856
     store.maintain()
     with sqlite3.connect(store.path) as conn:
         physical = (conn.execute("PRAGMA page_count").fetchone()[0] *

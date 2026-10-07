@@ -45,6 +45,14 @@ const HALO: Record<GlyphTone, string> = {
   neutral: 'border-border-layout-1',
 }
 
+// The liquid is the database's health at a glance; a neutral glyph keeps the series blue.
+const LIQUID: Record<GlyphTone, string> = {
+  positive: 'var(--color-content-positive-plain)',
+  warning: 'var(--color-content-warning-plain)',
+  negative: 'var(--color-content-negative-plain)',
+  neutral: SERIES_COLOR.connections,
+}
+
 // Fixed particle lanes so the stream reads as random but renders deterministically.
 const LANES = [
   { x: 20, delay: 0 },
@@ -158,7 +166,7 @@ export function DatabaseGlyph({
               y={liquidTop}
               width="28"
               height={42 - liquidTop}
-              fill={SERIES_COLOR.connections}
+              fill={LIQUID[tone]}
               opacity="0.28"
               style={{
                 transition:
@@ -170,7 +178,7 @@ export function DatabaseGlyph({
               cy={liquidTop}
               rx="12"
               ry="3.6"
-              fill={SERIES_COLOR.connections}
+              fill={LIQUID[tone]}
               opacity="0.4"
               style={{ transition: 'cy 500ms var(--ease-out)' }}
             />

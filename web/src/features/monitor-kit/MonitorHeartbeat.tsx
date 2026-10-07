@@ -279,7 +279,12 @@ export function MonitorHeartbeat({
   const { title, detail } =
     pulse.firstReading && monitoringEnabled
       ? { title: 'Taking the first reading', detail: pulse.delayReason ?? null }
-      : stateText(state, lastTs, pulse.now)
+      : state === 'connection_lost' && pulse.connectionProblem
+        ? {
+            title: "Can't reach the database",
+            detail: pulse.connectionProblem.reason,
+          }
+        : stateText(state, lastTs, pulse.now)
   const label = detail ? `${title} - ${detail}` : title
   const line = readingLine(pulse, monitoringEnabled)
   const nextIn = pulse.clock.remaining

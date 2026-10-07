@@ -13,6 +13,7 @@ export const ACTIONS: readonly AgentAction[] = [
   'deep_analysis',
   'ask',
   'daily_snapshot',
+  'explain_actions',
   'classification',
   'attention_check',
   'benchmark',
@@ -34,9 +35,14 @@ export const ACTION_META: Record<
   deep_analysis: { label: 'Deep analysis', icon: 'test-tube', tone: 'rising' },
   ask: { label: 'Ask', icon: 'message-multiple', tone: 'info' },
   daily_snapshot: {
-    label: 'Daily report',
+    label: 'Nightly checkup',
     icon: 'document-validation',
     tone: 'positive',
+  },
+  explain_actions: {
+    label: 'Action explanations',
+    icon: 'sparkles',
+    tone: 'primary',
   },
   classification: {
     label: 'Query classification',
@@ -219,10 +225,17 @@ function classificationSentence(item: AgentActivityItem): SentencePart[] {
 function reportSentence(item: AgentActivityItem): SentencePart[] {
   const { day, partial } = reportDay(item)
   if (item.outcome === 'failed' || item.outcome === 'cancelled')
-    return s`The agent couldn't finish the daily report for ${b(day)}.`
+    return s`The agent couldn't finish the nightly checkup for ${b(day)}.`
   return partial
-    ? s`The agent wrote a report for ${b(day)} so far, on request.`
-    : s`The agent wrote the daily report for ${b(day)}.`
+    ? s`The agent ran a checkup for ${b(day)} so far, on request.`
+    : s`The agent ran the nightly checkup for ${b(day)}.`
+}
+
+function explainSentence(item: AgentActivityItem): SentencePart[] {
+  const changes = b(item.subject || 'new changes')
+  return item.outcome === 'done'
+    ? s`The agent explained why ${changes} matter on Actions.`
+    : s`The agent couldn't explain ${changes} on Actions.`
 }
 
 function benchmarkSentence(item: AgentActivityItem): SentencePart[] {
@@ -263,6 +276,8 @@ function fullSentence(item: AgentActivityItem): SentencePart[] {
       return classificationSentence(item)
     case 'daily_snapshot':
       return reportSentence(item)
+    case 'explain_actions':
+      return explainSentence(item)
     case 'benchmark':
       return benchmarkSentence(item)
   }
@@ -569,7 +584,7 @@ const PURPOSE_LABEL: Record<string, string> = {
   analyze_cache: 'Caching advice',
   monitor_attention: 'Does anything need attention',
   query_registry_analysis: 'Classify the query',
-  monitor_report: 'Write the daily report',
+  monitor_report: 'Run the nightly checkup',
   sql_generation: 'Write SQL for your question',
   sql_generation_alternate: 'Write SQL for your question',
   sql_recovery: 'Fix SQL that failed',

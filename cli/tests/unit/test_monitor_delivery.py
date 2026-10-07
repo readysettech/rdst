@@ -369,7 +369,7 @@ def test_summaries_lead_with_the_finding():
     text = "On target 'localdev' (PostgreSQL), measured load is dominated by two queries."
     assert lead_with_finding(text) == "Measured load is dominated by two queries."
     assert lead_with_finding("Two queries carry the load.") == "Two queries carry the load."
-    item = {"type": "daily_summary", "subject": "d", "title": "Daily report ready",
+    item = {"type": "daily_summary", "subject": "d", "title": "Checkup ready",
             "state": "new"}
     assert inbox_summary(item, {"summary": text}, {}).startswith("Measured load")
 

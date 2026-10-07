@@ -256,3 +256,81 @@ def test_mysql_performance_schema_gap_is_a_monitoring_issue(monkeypatch, tmp_pat
     collector._snapshot = {"state": "watching"}
     active._monitoring_issues("db", 1060, False)
     assert store.inbox("resolved")[0]["subject"] == "performance_schema_missing"
+
+
+def test_database_checks_run_every_fifteen_minutes_without_a_model(monkeypatch, tmp_path):
+    from features.monitor import snapshot
+
+    store = MonitorStore(tmp_path / "monitor.db")
+    reads = []
+    monkeypatch.setattr(snapshot, "database_check",
+                        lambda store, target, now, health: [{"id": "vacuum", "at": now}])
+    loop = monitor_loop.MonitorLoop(store, clock=lambda: 1000, index_reader=lambda target: [],
+                                    health_reader=lambda target: reads.append(target) or {})
+    assert loop._database_check("db", 1000) == [{"id": "vacuum", "at": 1000}]
+    assert store.database_check("db") == {"at": 1000, "actions": [{"id": "vacuum", "at": 1000}]}
+    # Not due again until fifteen minutes on; the stored findings hold meanwhile.
+    assert loop._database_check("db", 1000 + 600) is None
+    assert loop._database_check("db", 1000 + 900) == [{"id": "vacuum", "at": 1900}]
+    assert reads == ["db", "db"]
+
+
+def test_failed_database_checks_keep_the_last_findings(tmp_path):
+    store = MonitorStore(tmp_path / "monitor.db")
+    store.save_database_check("db", 10, [{"id": "kept"}])
+    loop = monitor_loop.MonitorLoop(store, clock=lambda: 5000, index_reader=lambda target: [],
+                                    health_reader=lambda target: {"collection_error": "down"})
+    assert loop._database_check("db", 5000) is None
+    assert store.database_check("db")["actions"] == [{"id": "kept"}]
+
+
+def test_a_check_with_a_failed_section_keeps_what_it_couldnt_confirm(monkeypatch, tmp_path):
+    from features.monitor import snapshot
+
+    store = MonitorStore(tmp_path / "monitor.db")
+    store.save_database_check("db", 10, [{"id": "inactive_slots"}, {"id": "vacuum"}])
+    monkeypatch.setattr(snapshot, "database_check",
+                        lambda store, target, now, health: [{"id": "vacuum", "fresh": True}])
+    loop = monitor_loop.MonitorLoop(
+        store, clock=lambda: 5000, index_reader=lambda target: [],
+        health_reader=lambda target: {"section_errors": {"replication": "timeout"}})
+    assert loop._database_check("db", 5000) == [{"id": "vacuum", "fresh": True},
+                                                {"id": "inactive_slots"}]
+
+
+def test_the_first_database_checks_run_at_once_then_again_with_rates(monkeypatch, tmp_path):
+    from features.monitor import snapshot
+
+    store = MonitorStore(tmp_path / "monitor.db")
+    store._write(lambda conn: conn.execute(
+        "INSERT OR REPLACE INTO monitor_setting VALUES ('db','enabled_at','1000')"))
+    monkeypatch.setattr(snapshot, "database_check", lambda store, target, now, health: [])
+    loop = monitor_loop.MonitorLoop(store, clock=lambda: 1000, index_reader=lambda target: [],
+                                    health_reader=lambda target: {})
+    assert loop._database_check("db", 1000 + 10) == []
+    assert loop._database_check("db", 1000 + 100) is None
+    # Two minutes of readings give rates: the second check, then every 15 minutes.
+    assert loop._database_check("db", 1000 + 130) == []
+    assert loop._database_check("db", 1000 + 130 + 600) is None
+    assert loop._database_check("db", 1000 + 130 + 900) == []
+
+
+def test_a_database_without_its_first_statistics_is_settling(tmp_path):
+    store = MonitorStore(tmp_path / "monitor.db")
+    store._write(lambda conn: conn.execute(
+        "INSERT OR REPLACE INTO monitor_setting VALUES ('db','enabled_at','900')"))
+    loop = monitor_loop.MonitorLoop(store, clock=lambda: 1000, index_reader=lambda target: [],
+                                    stats_reader=lambda target: {}, health_reader=lambda t: {})
+    assert loop._settling({"db"})
+    # Past its first hour, an unreadable database waits for the normal pass.
+    loop.clock = lambda: 900 + monitor_loop.SETTLING_S
+    assert not loop._settling({"db"})
+    loop.clock = lambda: 1000
+    store._write(lambda conn: conn.execute(
+        "INSERT INTO stats_meta (target,engine,counter_since,observed_since,taken_at) "
+        "VALUES ('db','postgresql',1,1,1)"))
+    # The check at add time leaves it settling until the one with rates runs.
+    store.save_database_check("db", 910, [])
+    assert loop._settling({"db"})
+    store.save_database_check("db", 1000 + monitor_loop.actions.FIRST_DATABASE_CHECK_S, [])
+    assert not loop._settling({"db"})

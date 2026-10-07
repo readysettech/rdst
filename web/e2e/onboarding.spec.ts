@@ -120,10 +120,12 @@ test('completes first-run onboarding and persists the target', async ({
   await expect(dialog).toHaveCount(0)
   await expect(page).not.toHaveURL(/panel=enable/)
 
-  // Home's database card proves the target persisted (the card only renders
-  // when targets exist).
+  // With one database Home opens its Database page, which proves the target persisted.
   await page.goto('/')
-  await expect(page.getByTestId('home-database-card')).toBeVisible()
+  await expect(page).toHaveURL(/\/database/)
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'e2e-db' })
+  ).toBeVisible()
 
   // ConnectPage promotes the first target to default (addTarget →
   // setDefaultTarget → completeInit), unlike the retired wizard.
@@ -135,5 +137,7 @@ test('completes first-run onboarding and persists the target', async ({
   })
 
   await page.reload()
-  await expect(page.getByTestId('home-database-card')).toBeVisible()
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'e2e-db' })
+  ).toBeVisible()
 })

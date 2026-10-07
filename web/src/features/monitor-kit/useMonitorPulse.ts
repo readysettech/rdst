@@ -16,12 +16,18 @@ import { subscribePulse } from '@/lib/monitor/api'
 import { usePulses } from '@/lib/monitor/hooks'
 import { monitorKeys } from '@/lib/monitor/keys'
 import { serverOffset } from '@/lib/monitor/serverClock'
-import type { MonitorLiveState, MonitorPulse } from '@/lib/monitor/types'
+import type {
+  ConnectionProblem,
+  MonitorLiveState,
+  MonitorPulse,
+} from '@/lib/monitor/types'
 
 export interface MonitorPulseState {
   target?: string | null
   firstReading?: boolean
   delayReason?: string | null
+  /** Why the database can't be reached, while it can't. */
+  connectionProblem?: ConnectionProblem | null
   /** A setup problem blocks readings; the page offers Finish setup. */
   setupBlocked?: boolean
   /** Newest first, at most 10. */
@@ -183,6 +189,7 @@ export function useMonitorPulse(target: string | null): MonitorPulseState {
     const firstReading =
       seed.data?.first_reading ?? last?.first_reading ?? false
     const delayReason = seed.data?.delay_reason ?? last?.delay_reason ?? null
+    const connectionProblem = seed.data?.connection_problem ?? null
     const setupBlocked = Boolean(
       seed.data?.setup_blocked ?? last?.setup_blocked
     )
@@ -198,6 +205,7 @@ export function useMonitorPulse(target: string | null): MonitorPulseState {
       target,
       firstReading,
       delayReason,
+      connectionProblem,
       setupBlocked,
       pulses: merged,
       last,

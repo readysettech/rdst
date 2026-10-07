@@ -57,10 +57,10 @@ function band(name: string) {
 }
 
 describe('InboxPage', () => {
-  it('lists Act now then Watch as sections, with no tab bar', async () => {
+  it('lists Urgent then Watch as sections, with no tab bar', async () => {
     renderWithClient(<InboxPage />)
-    await screen.findByRole('region', { name: 'Act now' })
-    expect(within(band('Act now')).getByLabelText('2 alerts')).toBeTruthy()
+    await screen.findByRole('region', { name: 'Urgent' })
+    expect(within(band('Urgent')).getByLabelText('2 alerts')).toBeTruthy()
     // FYI items list at the bottom of Watch; there is no FYI or Recovered section.
     expect(within(band('Watch')).getByLabelText('7 alerts')).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'FYI' })).toBeNull()
@@ -84,14 +84,14 @@ describe('InboxPage', () => {
   it('shows one section for a link to it', async () => {
     routerState.search = { state: 'act_now' }
     renderWithClient(<InboxPage />)
-    await screen.findByRole('region', { name: 'Act now' })
+    await screen.findByRole('region', { name: 'Urgent' })
     expect(screen.queryByRole('region', { name: 'Watch' })).toBeNull()
   })
 
   it('resolves an item out of its band', async () => {
     renderWithClient(<InboxPage />)
     const title = await within(
-      await screen.findByRole('region', { name: 'Act now' })
+      await screen.findByRole('region', { name: 'Urgent' })
     ).findByText('Stuck query')
     const row = title.closest('article') as HTMLElement
     fireEvent.click(within(row).getByRole('button', { name: 'Resolve' }))
@@ -104,7 +104,7 @@ describe('InboxPage', () => {
     const recovered = () =>
       screen.findByRole('region', { name: 'Recovered in the last 24 hours' })
     const title = await within(
-      await screen.findByRole('region', { name: 'Act now' })
+      await screen.findByRole('region', { name: 'Urgent' })
     ).findByText('Stuck query')
     const row = title.closest('article') as HTMLElement
     fireEvent.click(within(row).getByRole('button', { name: 'Resolve' }))
@@ -118,7 +118,7 @@ describe('InboxPage', () => {
   it('shows what you can do as tiles, with the SQL ready to copy', async () => {
     renderWithClient(<InboxPage />)
     const title = await within(
-      await screen.findByRole('region', { name: 'Act now' })
+      await screen.findByRole('region', { name: 'Urgent' })
     ).findByText('Stuck query')
     const row = title.closest('article') as HTMLElement
     // Items start folded to one line; the title opens them.
@@ -177,13 +177,13 @@ describe('InboxPage', () => {
   it('lands old resolved and done links on Open', async () => {
     routerState.search = {}
     renderWithClient(<InboxPage />)
-    await screen.findByRole('region', { name: 'Act now' })
+    await screen.findByRole('region', { name: 'Urgent' })
     expect(screen.getByRole('region', { name: 'Watch' })).toBeTruthy()
   })
 
   it('shows muted alerts only with the filter on', async () => {
     renderWithClient(<InboxPage />)
-    await screen.findByRole('region', { name: 'Act now' })
+    await screen.findByRole('region', { name: 'Urgent' })
     expect(screen.queryByRole('region', { name: 'Muted' })).toBeNull()
     fireEvent.click(screen.getByRole('switch'))
     expect(routerState.navigate).toHaveBeenCalledWith(
@@ -231,7 +231,7 @@ it('reveals the sixth recent recovery when opened by a deep link', async () => {
 it('shows a snoozed alert and a later same-ID recurrence without remounting', async () => {
   const { client } = renderWithClient(<InboxPage />)
   const title = await within(
-    await screen.findByRole('region', { name: 'Act now' })
+    await screen.findByRole('region', { name: 'Urgent' })
   ).findByText('Stuck query')
   const row = title.closest('article') as HTMLElement
   const id = Number(row.dataset.inboxItem)
@@ -247,7 +247,7 @@ it('shows a snoozed alert and a later same-ID recurrence without remounting', as
   await client.invalidateQueries({ queryKey: monitorKeys.inboxAll })
   expect(
     await within(
-      await screen.findByRole('region', { name: 'Act now' })
+      await screen.findByRole('region', { name: 'Urgent' })
     ).findByText('Stuck query')
   ).toBeTruthy()
 })

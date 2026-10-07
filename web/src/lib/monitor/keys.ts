@@ -60,9 +60,9 @@ export const monitorKeys = {
   usage: (target: string, days: number) =>
     ['monitor', target, 'usage', days] as const,
   reports: (target: string) => ['monitor', target, 'reports'] as const,
-  reportHistory: (target: string, limit: number) =>
-    ['monitor', target, 'reports', 'history', limit] as const,
-  report: (target: string, id: number | 'latest') =>
+  reportHistory: (target: string, limit: number, daily = false) =>
+    ['monitor', target, 'reports', 'history', limit, daily] as const,
+  report: (target: string, id: number | 'latest' | 'daily') =>
     ['monitor', target, 'reports', id] as const,
   inboxAll: ['monitor', 'inbox'] as const,
   inboxItem: (id: number) => ['monitor', 'inbox', 'item', id] as const,

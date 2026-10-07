@@ -29,7 +29,7 @@ SCHEMA_VERSION = 1
 RETENTION_SECONDS = 90 * 86400
 PRUNE_EVERY_SECONDS = 3600
 ACTIONS = ("deep_analysis", "ask", "classification", "attention_check", "daily_snapshot",
-           "benchmark")
+           "explain_actions", "benchmark")
 # How the list folds: frequent, low-stakes actions become one line per database and day (or
 # hour). A deep analysis RDST chose not to run folds the same way.
 GROUPS = ("day", "hour", "none")

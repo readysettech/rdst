@@ -64,7 +64,7 @@ export function aiStateCopy(state: AiMonitoringState | undefined): AiStateCopy {
       return {
         label: 'AI monitoring',
         description:
-          'Charts, alerts, AI checks, deep analysis and nightly reports.',
+          'Charts, alerts, AI checks, deep analysis and nightly checkups.',
         tone: 'positive',
       }
   }
@@ -183,6 +183,8 @@ export interface MonitoringStatusInput {
   since?: number | null
   /** Monitoring is on but the database can't be reached. */
   connectionLost?: boolean
+  /** Why it can't be reached, and what to check, when known. */
+  connectionProblem?: { reason: string; fix: string } | null
   /** Epoch seconds; defaults to the wall clock. */
   now?: number
 }
@@ -214,7 +216,7 @@ const REASON_COPY: Record<
     reasonLabel: "you're signed out",
     headline: 'Sign in to turn on AI monitoring',
     detail:
-      'Sign in to get AI checks, deep analysis and nightly reports. Charts and alerts keep running.',
+      'Sign in to get AI checks, deep analysis and nightly checkups. Charts and alerts keep running.',
     action: { kind: 'sign_in', label: 'Sign in' },
   },
   limit: {
@@ -276,7 +278,7 @@ export function needsUserAction(status: MonitoringStatus): boolean {
 export function monitoringStatus(
   input: MonitoringStatusInput
 ): MonitoringStatus {
-  const { enabled, ai, connectionLost } = input
+  const { enabled, ai, connectionLost, connectionProblem } = input
   if (enabled === false || ai === 'off')
     return {
       kind: 'off',
@@ -298,8 +300,9 @@ export function monitoringStatus(
       reasonLabel: "Can't reach the database",
       reason: null,
       headline: null,
-      detail:
-        "RDST can't reach this database, so readings are paused. They pick back up by themselves once it answers.",
+      detail: connectionProblem
+        ? `${connectionProblem.reason} ${connectionProblem.fix} Readings pick back up by themselves once it answers.`
+        : "RDST can't reach this database, so readings are paused. Check that it's running and reachable from this computer. Readings pick back up by themselves once it answers.",
       action: { kind: 'check_connection', label: 'Check again' },
       tone: 'negative',
       busy: false,
@@ -313,7 +316,7 @@ export function monitoringStatus(
       reason: null,
       headline: null,
       detail:
-        'Charts, alerts, AI checks, deep analysis and nightly reports are running.',
+        'Charts, alerts, AI checks, deep analysis and nightly checkups are running.',
       action: null,
       tone: 'positive',
       busy: false,

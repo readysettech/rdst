@@ -127,8 +127,15 @@ class MonitorPulse(BaseModel):
     setup_blocked: bool = False
 
 
+class ConnectionProblem(BaseModel):
+    """Why RDST can't reach the database, and what to check."""
+    reason: str
+    fix: str
+
+
 class MonitorPulsePage(BaseModel):
     pulses: list[MonitorPulse]
+    connection_problem: ConnectionProblem | None = None
     last_reading_at: int | None = None
     next_reading_at: float | None = None
     first_reading: bool = False
@@ -251,6 +258,15 @@ class QueryFamily(BaseModel):
     size: int
 
 
+class WriteCost(BaseModel):
+    table: str
+    verb: Literal["insert", "update", "delete"]
+    set_columns: list[str]
+    table_writes_per_s: float
+    indexes_maintained: int
+    hot_ratio: float | None
+
+
 class MonitorQuery(BaseModel):
     key: str
     text: str
@@ -282,6 +298,8 @@ class MonitorQuery(BaseModel):
     # Queries sharing one base name ("COUNT on customers and orders by total"): the base
     # name and how many listed queries share it, so the list can group them.
     family: QueryFamily | None = None
+    # A write's cost on its table; on the single-query read only.
+    write_cost: WriteCost | None = None
     sparkline: list[dict] | None = None
     change_vs_prior: dict | None = None
     badges: list[str] | None = None
@@ -673,6 +691,12 @@ class Occurrence(BaseModel):
     verdict: Literal["usual", "bigger"] | None
 
 
+class InboxLikelyFix(BaseModel):
+    id: int
+    title: str
+    type: str
+
+
 class InboxItem(BaseModel):
     id: int
     target: str
@@ -726,6 +750,8 @@ class InboxItem(BaseModel):
     # Why it's in its section, one line: "Act now: latency up 3.2x on a top-10 query today,
     # still happening".
     band_reason: str = ""
+    # The open action that covers one of the item's queries, best score first.
+    action: InboxLikelyFix | None = None
 
 
 class InboxPage(BaseModel):
@@ -1297,3 +1323,210 @@ class AddedQuery(BaseModel):
 def documented(model: type[BaseModel]) -> dict:
     """Route kwargs that publish `model` in OpenAPI without filtering the response."""
     return {"responses": {200: {"model": model}}}
+
+
+ActionType = Literal["add_index", "drop_index", "rewrite_query", "change_setting",
+                     "run_maintenance", "try_caching", "index_plan", "settings", "maintenance"]
+ActionApply = Literal["run_sql", "setting", "config_restart", "app_change", "readyset"]
+
+
+class ActionQuery(BaseModel):
+    key: str
+    name: str
+
+
+class ActionWindow(BaseModel):
+    observed_s: int
+    counter_age_s: int
+
+
+class ActionCard(BaseModel):
+    id: int | None
+    key: str
+    type: ActionType
+    state: Literal["open", "snoozed", "dismissed", "applied", "confirmed", "no_effect", "retired"]
+    score: float
+    title: str
+    summary: str
+    note: str | None
+    why: str | None
+    apply: ActionApply
+    sql: str | None
+    restart: bool
+    confidence: str | None
+    queries: list[ActionQuery]
+    opened_at: int
+    updated_at: int
+    snoozed_until: int | None
+    children: list[ActionCard]
+    detail: dict | None
+    window: ActionWindow | None
+    steps: str | None = None
+    evidence: list[dict] = []
+    rows: list[dict] = []
+    priority: int | None
+    jev: float
+    # How much it matters, on one scale for every kind; colors the card.
+    severity: Literal["low", "medium", "high"]
+    category: Literal["indexes", "settings", "maintenance", "rewrites", "caching"]
+    # Average latency of the queries it served, before and after the fix, once measured.
+    result: dict[str, float] | None = None
+
+
+class Coverage(BaseModel):
+    """Where one kind of change stands: changes found, checked and clean, being checked, or
+    waiting on deep analysis."""
+    state: Literal["found", "checked", "checking", "waiting"]
+    checked_at: int | None
+    note: str
+    # When this kind is checked again.
+    next_at: int | None
+    # While checking, what it's waiting on, when that's worth saying.
+    waiting_on: str | None = None
+
+
+class CheckupState(BaseModel):
+    state: Literal["none", "first_pass", "running", "done"]
+    analyzed: int
+    total: int
+    due_by: int | None
+    report_id: int | None
+    finished_at: int | None
+
+
+class StoryFact(BaseModel):
+    label: str
+    value: str
+
+
+class SectionStory(BaseModel):
+    """The explanation at the top of an Actions section, from what RDST measured."""
+    headline: str
+    # What to do and why, in a sentence or two.
+    lead: list[str]
+    # The technical detail behind it: what RDST watched and measured.
+    details: list[str]
+    facts: list[StoryFact]
+
+
+class ActionsPage(BaseModel):
+    sections: dict[str, SectionStory]
+    coverage: dict[str, Coverage]
+    target: str
+    computed_at: int | None
+    card_count: int
+    change_count: int
+    checkup: CheckupState
+    actions: list[ActionCard]
+    more: list[ActionCard]
+    open_count: int
+    recently_done: list[ActionCard]
+    snoozed: int
+    dismissed: int
+    set_aside: list[ActionCard]
+    window: ActionWindow | None
+
+
+class IndexPlanHelp(BaseModel):
+    key: str
+    name: str | None
+    share: float
+    gain: float
+    verified: bool
+    gain_pct: float | None
+    impact: str | None
+
+
+class IndexWriteCost(BaseModel):
+    writes_per_s: float
+    peak_writes_per_s: float
+    existing_indexes: int
+    updated_columns: list[str]
+    hot_risk: bool
+
+
+class IndexPlanAdd(BaseModel):
+    id: str
+    table: str
+    replaces: list[str]
+    columns: list[str]
+    method: str
+    # How the queries use each column: equality, sort or range (None when unknown).
+    roles: list[Literal["equality", "sort", "range"] | None] = []
+    merged: list[list[str]]
+    helps: list[IndexPlanHelp]
+    benefit: float
+    verified: bool
+    write_cost: IndexWriteCost
+    label: Literal["safe", "worth_it", "skip"]
+    label_reason: str
+    sql: str
+    undo_sql: str | None = None
+
+
+class IndexPlanWrite(BaseModel):
+    key: str
+    name: str | None
+    verb: Literal["insert", "update", "delete"]
+    share: float
+    calls_per_s: float
+
+
+class IndexPlanDrop(BaseModel):
+    id: str
+    table: str
+    schema_: str | None = Field(default=None, alias="schema")
+    index_name: str
+    columns: list[str]
+    reason: Literal["unused", "duplicate", "stale"]
+    covered_by: str | None
+    size_bytes: int
+    scans: int
+    last_scan_at: int | None
+    evidence_age_s: int
+    confidence: Literal["high", "low"]
+    table_writes_per_s: float
+    replica_caveat: bool
+    # The write statements that keep the index up to date, busiest first.
+    slows: list[IndexPlanWrite] = []
+    sql: str
+    restore_sql: str | None = None
+
+
+class IndexPlanKeep(BaseModel):
+    index_name: str
+    table: str
+    columns: list[str]
+    unique: bool
+    primary: bool
+    scans: int
+    window_scans: int
+    size_bytes: int
+
+
+class IndexPlanCovered(BaseModel):
+    table: str
+    columns: list[str]
+    covered_by: str
+    queries: list[str]
+
+
+class IndexPlan(BaseModel):
+    engine: str
+    computed_at: int
+    observed_s: int
+    counter_age_s: int
+    keep: list[IndexPlanKeep]
+    add: list[IndexPlanAdd]
+    drop: list[IndexPlanDrop]
+    skipped: list[IndexPlanAdd]
+    later: list[IndexPlanAdd] = []
+    covered: list[IndexPlanCovered]
+    # Idle indexes whose leading column the queries filter on: they can't use them yet.
+    defeated: list[dict] = []
+    sql: str
+    # Unused indexes too small or too new to drop yet; RDST checks them again.
+    watch: list[IndexPlanDrop] = []
+    rollback_sql: str | None = None
+    explanation: str | None = None
+    set_aside: list[str] = []

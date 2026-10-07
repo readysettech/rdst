@@ -210,11 +210,10 @@ def _read_state() -> dict[str, Any]:
 
 def _write_state(state: dict[str, Any]) -> None:
     try:
-        path = _state_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
-        os.replace(temporary, path)
+        from shared.persistence import write_text
+
+        # Serialized and swapped under a lock: several monitored databases write this at once.
+        write_text(_state_path(), json.dumps(state, sort_keys=True))
     except Exception:
         logger.debug("telemetry state not saved", exc_info=True)
 

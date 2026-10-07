@@ -17,6 +17,7 @@ from shared.keyservice import keyservice_url
 MAX_REQUEST_BYTES = 384 * 1024
 REQUEST_TIMEOUT_SECONDS = 45
 ATTENTION_RUBRIC_VERSION = "query-attention-v1"
+ACTION_RUBRIC_VERSION = "action-priority-v1"
 ATTENTION_KINDS = {
     "latency_regression", "plan_change", "new_heavy_query", "traffic_spike",
     "query_stopped_running", "table_slowdown", "stuck_query",
@@ -158,6 +159,44 @@ class JevClient:
                 not isinstance(answer, dict)
                 or answer.get("id") != supplied.get("id")
                 or answer.get("status") not in {"still", "improving", "resolved"}
+            ):
+                raise JevClientError("JEV_INVALID_RESPONSE", 502)
+        return result
+
+    def action_priority(
+        self,
+        *,
+        request_id: str,
+        target_numbers: dict[str, Any],
+        actions: list[dict[str, Any]],
+        recent_changes: list[str],
+    ) -> dict[str, Any]:
+        """How urgent each open action is now, and whether its evidence went stale."""
+        payload = {
+            "request_id": request_id,
+            "rubric_version": ACTION_RUBRIC_VERSION,
+            "target_numbers": target_numbers,
+            "actions": actions,
+            "recent_changes": recent_changes,
+            "attribution": {"surface": "web", "operation": "monitor_actions"},
+        }
+        result = self._post("/v1/jev/actions", payload)
+        answers = result.get("actions")
+        if (
+            result.get("request_id") != request_id
+            or result.get("rubric_version") != ACTION_RUBRIC_VERSION
+            or not isinstance(answers, list)
+            or len(answers) != len(actions)
+        ):
+            raise JevClientError("JEV_INVALID_RESPONSE", 502)
+        for supplied, answer in zip(actions, answers):
+            if (
+                not isinstance(answer, dict)
+                or answer.get("id") != supplied.get("id")
+                or answer.get("relevance") not in {"relevant", "stale"}
+                or type(answer.get("priority")) not in (int, float)
+                or not 0 <= answer["priority"] <= 1
+                or type(answer.get("stale_probability")) not in (int, float)
             ):
                 raise JevClientError("JEV_INVALID_RESPONSE", 502)
         return result

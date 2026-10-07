@@ -1,7 +1,7 @@
 // Database page header (DESIGN_V4 section 1): identity and one live pulse. The glyph
 // heartbeat in its countdown ring is the only "is RDST watching" element; hover it
-// for when the next reading lands. Below: the Live / Report tabs, with the range control (Live)
-// or the report picker (Report) docked at the right.
+// for when the next reading lands. Below: the Actions, Indexes, Queries and Reports tabs, with
+// the range control (Queries) or the report picker (Reports) docked at the right.
 import { Button } from '@rs/ui-new/button'
 import { IconButton } from '@rs/ui-new/icon-button'
 import { Popover, PopoverContent, PopoverTrigger } from '@rs/ui-new/popover'
@@ -66,6 +66,14 @@ export interface DatabaseHeaderProps {
   teaser?: ReactNode
   /** A report is waiting that the user hasn't opened. */
   reportDot?: boolean
+  /** Open actions, shown on the Actions tab. */
+  openActions?: number
+  /** Something is happening on Actions: a checkup running, or a plan not yet opened. */
+  actionsLive?: boolean
+  /** Deep analyses are running or queued for this database. */
+  queriesLive?: boolean
+  /** Picks another database; docked with the header's controls. */
+  switcher?: ReactNode
   signInNeeded?: boolean
   onOpenSettings: () => void
   onEnable: () => void
@@ -83,6 +91,10 @@ export function DatabaseHeader({
   toolbar,
   teaser,
   reportDot = false,
+  openActions = 0,
+  actionsLive = false,
+  queriesLive = false,
+  switcher,
   signInNeeded = false,
   onOpenSettings,
   onEnable,
@@ -108,6 +120,7 @@ export function DatabaseHeader({
     reason: signInNeeded ? 'signed_out' : settings?.ai_reason,
     since: settings?.ai_since,
     connectionLost: state === 'connection_lost',
+    connectionProblem: pulse.connectionProblem,
     now,
   })
   const limit = useMonitoringLimit(undefined, enabled && Boolean(settings))
@@ -207,6 +220,7 @@ export function DatabaseHeader({
           {enabled ? null : (
             <Button label="Turn on monitoring" onClick={onEnable} />
           )}
+          {switcher}
           <IconButton
             icon="settings"
             label="Monitoring settings"
@@ -233,13 +247,21 @@ export function DatabaseHeader({
         >
           <TabItemButton
             layoutPrefix="database-view"
-            label="Live"
+            label={openActions ? `Actions ${openActions}` : 'Actions'}
+            active={view === 'actions'}
+            onClick={() => onViewChange('actions')}
+          />
+          {actionsLive ? <LiveDot label="Actions are on their way" /> : null}
+          <TabItemButton
+            layoutPrefix="database-view"
+            label="Queries"
             active={view === 'live'}
             onClick={() => onViewChange('live')}
           />
+          {queriesLive ? <LiveDot label="Analyses running" /> : null}
           <TabItemButton
             layoutPrefix="database-view"
-            label="Report"
+            label="Reports"
             active={view === 'report'}
             onClick={() => onViewChange('report')}
           />
@@ -263,6 +285,18 @@ export function DatabaseHeader({
         ) : null}
       </div>
     </header>
+  )
+}
+
+/** A breathing dot beside a tab: something there is in progress or new. */
+function LiveDot({ label }: { label: string }) {
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      data-testid="tab-live-dot"
+      className="-ml-5 mt-3 h-2 w-2 self-start rounded-full bg-content-rising-plain mk-breathe"
+    />
   )
 }
 

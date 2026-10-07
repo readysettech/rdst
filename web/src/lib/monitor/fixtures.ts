@@ -1413,7 +1413,7 @@ export function inboxItems(
     {
       type: 'daily_summary',
       severity: 0.4,
-      title: 'Daily report ready',
+      title: 'Checkup ready',
       summary:
         'Two range queries on orders.status carry most of the load; one query sleeps 180 s a call.',
       ago: 14 * HOUR + 20 * MIN,
@@ -1424,7 +1424,7 @@ export function inboxItems(
     {
       type: 'daily_summary',
       severity: 0.4,
-      title: 'Daily report ready',
+      title: 'Checkup ready',
       summary: 'The database is steady; one index would help three queries.',
       ago: 14 * HOUR + 25 * MIN,
       target: 'aurora-pg',
@@ -1520,7 +1520,7 @@ export function inboxItems(
     [
       'daily_summary',
       0.4,
-      'Daily report ready',
+      'Checkup ready',
       'The database is steady; nothing needs you.',
     ],
     [

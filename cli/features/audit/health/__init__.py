@@ -23,6 +23,7 @@ def collect_health_report(
     engine: str,
     instance_ram_gb: Optional[float] = None,
     instance_vcpus: Optional[int] = None,
+    target: Optional[str] = None,
 ) -> HealthReport:
     """Run all health collectors against a single target.
 
@@ -40,7 +41,10 @@ def collect_health_report(
     report = HealthReport(engine=engine)
 
     try:
-        conn = create_direct_connection(tc)
+        # The diagnostic lane caps each statement, so a slow catalog query can't hang the
+        # run; the target name keys an SSH tunnel to this database alone.
+        conn = create_direct_connection(tc, target=target, lane="rdst/audit",
+                                        query_timeout_seconds=60)
     except Exception as e:
         report.collection_error = f"connection failed: {e}"
         return report

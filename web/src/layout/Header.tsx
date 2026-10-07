@@ -33,7 +33,7 @@ interface RouteConfig {
 
 const routeConfig: Record<string, RouteConfig> = {
   '/': { label: 'Home', icon: 'dashboard' },
-  '/demo': { label: 'Demo', icon: 'querypilot' },
+  '/demo': { label: 'Readyset Caching', icon: 'querypilot' },
   '/queries': { label: 'Queries', icon: 'folder-file' },
   '/results': {
     label: 'Results',
@@ -43,7 +43,7 @@ const routeConfig: Record<string, RouteConfig> = {
   '/ask': { label: 'Ask', icon: 'sparkles' },
   '/database': { label: 'Database', icon: 'database' },
   '/inbox': { label: 'Inbox', icon: 'notification' },
-  '/agent-activity': { label: 'Agent activity', icon: 'user-shield' },
+  '/agent-activity': { label: 'Agent audit', icon: 'user-shield' },
   // Code scan is off the nav, so its crumb carries the way back: a scan's
   // output is queries, and the Query Library is where they land. [E-15]
   '/scan': { label: 'Code scan', icon: 'search', parent: '/queries' },

@@ -123,7 +123,7 @@ def test_reason_lines_for_other_kinds():
     assert band_reason(stuck, {}, "ongoing") == (
         "Act now: a query has been running for over a minute, still happening")
     report = presented(type="daily_summary", severity_band="fyi", query_keys=[])
-    assert band_reason(report, {}, "unknown") == "Watch: the daily report is ready"
+    assert band_reason(report, {}, "unknown") == "Watch: the checkup is ready"
     spike = presented(type="traffic_spike", severity_band="watch", query_keys=["a"],
                       relevance_rule="share_1h",
                       measurement={"metric": "calls", "direction": "up", "change": 0.4})

@@ -1,20 +1,19 @@
 // The Database page (DESIGN_V4): one question, "what is my database spending its time
 // on, and what should I fix first?". The header carries identity and the one live
-// pulse; the Live tab is the load-by-query hero with the query list as its legend;
-// the Report tab holds Analyze database runs and the reports they write. Switching
-// target crossfades the content; per-target query caches make switching back instant.
+// pulse. Actions lists the few changes worth making, by kind, with the whole index plan;
+// Queries is the load-by-query hero with the query list as its legend; Reports holds the
+// daily reports. Switching target crossfades the content; per-target query caches make
+// switching back instant.
 import { EmptyState } from '@rs/ui-new/empty-state'
 import { ErrorState } from '@rs/ui-new/error-state'
 import { AnimatePresence, m, useReducedMotion } from '@rs/ui-new/motion'
 import { Skeleton } from '@rs/ui-new/skeleton'
+import { Text } from '@rs/ui-new/text'
 import { useNavigate } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { DatabaseSwitcher } from '@/components/DatabaseSwitcher'
 import { QuerySection } from '@/features/database/queries'
-import {
-  ReportView,
-  useReportRun,
-  useRunCompletion,
-} from '@/features/database/reports'
+import { ReportView } from '@/features/database/reports'
 import { InboxContextBanner, incidentWindow } from '@/features/inbox'
 import { QueryContextBanner } from '@/features/inbox/InboxContextBanner'
 import {
@@ -32,9 +31,13 @@ import {
   RANGE_SECONDS,
   rangePhrase,
 } from '@/features/monitor-kit/charts'
-import { DatabaseGlyph } from '@/features/monitor-kit/DatabaseGlyph'
+import {
+  DatabaseGlyph,
+  type GlyphTone,
+} from '@/features/monitor-kit/DatabaseGlyph'
 import { useMonitorPulse } from '@/features/monitor-kit/useMonitorPulse'
 import { useTargetResolution } from '@/hooks/useTarget'
+import { useActions, useIndexPlan } from '@/lib/monitor/actions'
 import {
   useInboxItem,
   useLoad,
@@ -43,9 +46,16 @@ import {
   useMonitorQueriesIn,
   useMonitorQuery,
   useMonitorSettings,
+  useMonitorWork,
   useReport,
 } from '@/lib/monitor/hooks'
 import { useSystemStatus } from '@/lib/useSystemStatus'
+import {
+  ActionsTab,
+  buildingFirstPlan,
+  changeCount,
+} from './actions/ActionsTab'
+import { FirstPlanPointer } from './actions/FirstPlanPointer'
 import { AnalyzeQueryDialog } from './analyze/AnalyzeQueryDialog'
 import { DatabaseBenchmarksSection } from './benchmark/DatabaseBenchmarksSection'
 import { DatabaseHeader, useSignInNeeded } from './overview/DatabaseHeader'
@@ -65,6 +75,7 @@ import { EnableMonitoringDialog } from './settings/EnableMonitoringDialog'
 import { MonitoringSettingsSheet } from './settings/MonitoringSettingsSheet'
 import { MonitoringSetupDialog } from './settings/MonitoringSetupDialog'
 import {
+  type DatabaseView as DatabaseTab,
   fitZoom,
   frameLabel,
   useDatabaseUrl,
@@ -86,6 +97,31 @@ function useDelayed(active: boolean, ms = 100) {
 }
 
 const SEEN_KEY = 'rdst_report_seen'
+const PLAN_SEEN_KEY = 'rdst_actions_seen'
+
+/** Whether this viewer has opened Actions since the first plan arrived (per target). */
+function usePlanSeen(target: string, ready: boolean, viewing: boolean) {
+  const key = `${PLAN_SEEN_KEY}:${target}`
+  const read = useCallback(() => {
+    try {
+      return window.localStorage.getItem(key) === '1'
+    } catch {
+      return false
+    }
+  }, [key])
+  const [seen, setSeen] = useState(read)
+  useEffect(() => setSeen(read()), [read])
+  useEffect(() => {
+    if (!ready || !viewing || seen) return
+    try {
+      window.localStorage.setItem(key, '1')
+    } catch {
+      // Storage can be unavailable; the pointer then shows until the next visit.
+    }
+    setSeen(true)
+  }, [key, ready, viewing, seen])
+  return seen
+}
 
 const STRIP_TITLE = {
   calls: 'Queries per second',
@@ -186,14 +222,40 @@ function DatabaseView({ target }: { target: string }) {
   const queries = useMonitorQueries(target, fetchRange(page.range))
   const pulse = useMonitorPulse(target)
   const signInNeeded = useSignInNeeded(pulse.state)
-  const run = useReportRun(target)
-  const latest = useReport(target, 'latest')
+  // What the Reports tab shows: the nightly reports.
+  const latest = useReport(target, 'daily')
   const [hoverKey, setHoverKey] = useState<string | null>(null)
   const [enableOpen, setEnableOpen] = useState(false)
   const [queueFocus, setQueueFocus] = useState(false)
   const data = health.data
   const history = data?.history ?? queries.data?.history
-  const { range, setRange, view, setView, openReport } = page
+  const { range, setRange, setView, openReport } = page
+  // Queries carries the first run; Actions leads once the first plan is in.
+  const actions = useActions(target)
+  const indexPlan = useIndexPlan(target, true, actions.data?.computed_at).data
+  // Actions leads, the first run included: it shows the first plan being built, with the live
+  // load beside it. Queries leads only before monitoring has a checkup in sight.
+  const firstState = actions.data?.checkup?.state
+  const autoView: DatabaseTab =
+    (actions.data?.open_count ?? 0) > 0 ||
+    firstState === 'first_pass' ||
+    (firstState === 'done' && actions.data?.computed_at != null)
+      ? 'actions'
+      : 'live'
+  const view = page.requestedView ?? autoView
+  const navigate = useNavigate()
+  const showQuery = useCallback(
+    (key: string) =>
+      void navigate({
+        to: '/database',
+        search: (prev: Record<string, unknown>) => ({
+          ...prev,
+          view: 'live',
+          focus: key,
+        }),
+      } as never),
+    [navigate]
+  )
   // The first hour after turning monitoring on: timed steps above the live chart.
   const firstRunModel = useFirstRun({
     target,
@@ -310,10 +372,36 @@ function DatabaseView({ target }: { target: string }) {
   const scopeLabel = zoomed
     ? `from ${windowLabel(domain, now)}`
     : `in the ${rangePhrase(range, history)}`
-  const tone = useMemo(
+  // The glyph's color is the database's health: how much the open actions matter, or a vital
+  // gone critical.
+  const severities = [
+    ...(actions.data?.actions ?? []),
+    ...(actions.data?.more ?? []),
+  ].map((card) => card.severity)
+  // Until the first plan, health isn't known yet: the glyph stays neutral.
+  const actionTone: GlyphTone =
+    actions.data?.computed_at == null
+      ? 'neutral'
+      : severities.includes('high')
+        ? 'negative'
+        : severities.includes('medium')
+          ? 'warning'
+          : 'positive'
+  const vitalsTone = useMemo(
     () => (data ? overallTone(tileModels(data)) : 'positive'),
     [data]
   )
+  // A vital in warning alone doesn't color it: Actions says whether there's anything to do.
+  const tone = vitalsTone === 'negative' ? 'negative' : actionTone
+  const work = useMonitorWork().data
+  const analyzing = Boolean(
+    work?.running.some((job) => job.target === target) ||
+      work?.queued.some((job) => job.target === target)
+  )
+  const checkupState = actions.data?.checkup?.state
+  const planReady =
+    !buildingFirstPlan(actions.data) && actions.data?.computed_at != null
+  const planSeen = usePlanSeen(target, planReady, view === 'actions')
 
   // A link from the Inbox carries its item: a banner says why you're here and every
   // chart shades the incident window.
@@ -348,10 +436,6 @@ function DatabaseView({ target }: { target: string }) {
 
   const latestId = latest.data?.state === 'done' ? latest.data.id : null
   const reportDot = useReportSeen(target, latestId, view === 'report')
-  useRunCompletion(target, run, {
-    watching: view === 'report',
-    onOpen: (id) => openReport(id),
-  })
 
   // A link to a query outside the current range (a report opened on 15m) widens the
   // range to the report's day, then to everything, until the row is there.
@@ -500,13 +584,19 @@ function DatabaseView({ target }: { target: string }) {
           view === 'live' ? (
             <ReportTeaser
               target={target}
-              run={run}
               onOpen={() => setView('report')}
               className="max-w-xl"
             />
           ) : null
         }
         reportDot={reportDot}
+        openActions={changeCount(actions.data, indexPlan)}
+        actionsLive={
+          checkupState === 'first_pass' ||
+          (planReady && !planSeen && changeCount(actions.data) > 0)
+        }
+        queriesLive={analyzing}
+        switcher={<DatabaseSwitcher />}
         signInNeeded={signInNeeded}
         onOpenSettings={() => page.setPanel('settings')}
         onEnable={() => setEnableOpen(true)}
@@ -525,32 +615,69 @@ function DatabaseView({ target }: { target: string }) {
             <ReportView
               target={target}
               reportId={page.report}
-              run={run}
               onShowLatest={() => openReport('latest')}
               onPick={(id) => openReport(id)}
+              onOpenActions={() => setView('actions')}
             />
           ) : !enabled && neverRecorded ? (
             <div className="rounded-card border border-border-layout-1 bg-surface-layout-1">
               <EmptyState
                 media={<DatabaseGlyph size={96} tone="neutral" />}
                 title={`Turn on monitoring for ${target}`}
-                body="RDST reads query statistics every minute, spots new and changed queries, and writes a nightly report. It only reads."
+                body="RDST reads query statistics every minute, spots new and changed queries, and runs a nightly checkup. It only reads."
                 action={{
                   label: 'Turn on monitoring',
                   onClick: () => setEnableOpen(true),
                 }}
               />
             </div>
+          ) : view === 'actions' ? (
+            <ActionsTab
+              target={target}
+              section={page.section}
+              onSectionChange={page.setSection}
+              onShowQuery={showQuery}
+              onOpenQueries={() => setView('live')}
+              liveCard={
+                model ? (
+                  <LoadStrip
+                    model={model}
+                    metric="calls"
+                    domain={domain}
+                    res={model.res ?? data?.res ?? 60}
+                    title="Queries per second"
+                    hoverKey={hoverKey}
+                    onHoverKey={setHoverKey}
+                    focusKey={null}
+                    overlay={null}
+                    onSelectKey={showQuery}
+                    onShowChart={() => setView('live')}
+                  />
+                ) : (
+                  <Text
+                    as="p"
+                    level="body-small"
+                    className="text-content-layout-3"
+                  >
+                    Waiting for the first reading of your queries.
+                  </Text>
+                )
+              }
+            />
           ) : (
             <ChartHighlightContext.Provider value={highlight}>
               <QueryContextBanner.Provider value={queryBanner}>
                 <ReportTeaser
                   target={target}
-                  run={run}
                   onOpen={() => setView('report')}
                   className="laptop:hidden"
                 />
                 {!(queryBanner && detailBanner) && banner}
+                <FirstPlanPointer
+                  page={actions.data}
+                  seen={planSeen}
+                  onOpenActions={() => setView('actions')}
+                />
                 {firstRun || waiting || measuring ? (
                   <FirstRunStrip
                     model={firstRunModel}

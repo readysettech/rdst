@@ -97,7 +97,7 @@ export function AgentActivityPage() {
 
   return (
     <WorkspaceLayout
-      title="Agent activity"
+      title="Agent audit"
       description="What the RDST agent decided and did on your databases, newest first."
       icon="user-shield"
       panelId="agent-activity-panel"

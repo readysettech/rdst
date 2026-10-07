@@ -22,6 +22,7 @@ type Row = {
   analyzable: boolean
   analyzable_code: string
   not_analyzable_reason: string | null
+  analysis_note: string | null
   assessment: {
     status: string
     priority_score: number | null
@@ -234,16 +235,18 @@ test('the query list pages, switches metrics and highlights a page-3 query', asy
   }).toPass({ timeout: 15_000 })
   await expect(page.getByTestId('load-strip-highlight')).not.toBeEmpty()
 
-  // Writes are listed but never analyzed, with the reason given.
+  // A write is analyzed through the search for its rows, never run.
   const write = shapes.w1_set_order_status.key
   const writeRow = (await queryRows(request)).queries.find(
     (entry) => entry.key === write
   )!
-  expect(writeRow.analyzable).toBe(false)
-  expect(writeRow.not_analyzable_reason).toMatch(/changes data/)
+  expect(writeRow.analyzable).toBe(true)
+  expect(writeRow.analysis_note).toMatch(
+    /finds its rows, without running the write/
+  )
 })
 
-test("today's snapshot compares against yesterday and the day picker opens yesterday", async ({
+test('a checkup feeds Actions, and Reports keeps to the nightly days', async ({
   page,
   request,
 }, testInfo) => {
@@ -258,65 +261,73 @@ test("today's snapshot compares against yesterday and the day picker opens yeste
   )
   expect(nightly, 'the nightly report for yesterday').toBeTruthy()
 
-  await openDatabase(page, '&view=report')
-  await expect(page.getByTestId('day-snapshot')).toBeVisible()
-  await page.getByRole('button', { name: 'Report menu' }).click()
-  await page.getByRole('menuitem', { name: "Run today's snapshot now" }).click()
+  // Checkups run on their own, at setup and nightly; the API starts one here.
+  await ok(request.post(`${base}/report`))
   const today = await eventually(
     testInfo,
-    'todays-snapshot',
+    'todays-checkup',
     () => ok<Report>(request.get(`${base}/report/latest`)),
     (report) => report.trigger === 'user' && report.state === 'done',
     { timeout: 4 * 60_000, interval: 3_000 }
   )
   expect(today.period_start).toBe(localDayStart(0))
   expect(today.report_json?.snapshot?.period.partial).toBe(true)
-  // "The day in numbers" measures today against yesterday.
+  // The checkup measures today against yesterday.
   expect(today.report_json?.snapshot?.period.prior_start).toBe(yesterday)
   const qps = today.report_json!.snapshot!.numbers.find(
     (entry) => entry.metric === 'qps'
   )!
   expect(qps.value).toBeGreaterThan(0)
   expect(qps.prior).toBeGreaterThan(0)
+  await openDatabase(page, '&view=actions')
+  await expect(page.getByTestId('actions-status')).toContainText('Updated')
 
+  // Reports shows the nightly days only; the checkup fed Actions.
+  await openDatabase(page, '&view=report')
   const snapshot = page.getByTestId('day-snapshot')
-  await expect(snapshot).toHaveAttribute('data-report-id', String(today.id), {
-    timeout: 30_000,
-  })
+  await expect(snapshot).toHaveAttribute(
+    'data-report-id',
+    String(nightly!.id),
+    {
+      timeout: 30_000,
+    }
+  )
   const sections = page.getByRole('navigation', { name: 'Report sections' })
   await expect(sections).toBeVisible()
   await expect(sections.locator('[data-section]').first()).toHaveAttribute(
     'data-section',
     'snapshot-health'
   )
-  const weekday = new Date(yesterday * 1000).toLocaleDateString('en-US', {
-    weekday: 'long',
-  })
-  await expect(page.getByTestId('day-numbers-against')).toContainText(
-    `Against ${weekday}`
-  )
+  await expect(page.getByTestId('report-actions-now')).toBeVisible()
   const download = page.waitForEvent('download')
   await page.getByTestId('download-csv').first().click()
   expect((await download).suggestedFilename()).toMatch(/\.csv$/)
-
-  // The picker lists today and yesterday; picking yesterday loads it whole.
   await page.getByTestId('day-picker-trigger').click()
   const days = page.getByRole('menuitem')
-  await expect(days.filter({ hasText: /Today/ })).toHaveCount(1)
-  await days.filter({ hasText: /Yesterday/ }).click()
-  await expect(page).toHaveURL(
-    new RegExp(`report=(%22)?${nightly!.id}(%22)?(&|$)`)
-  )
-  await expect(snapshot).toHaveAttribute('data-report-id', String(nightly!.id))
-  await expect(page.getByTestId('snapshot-title')).toBeVisible()
-  await expect(page.getByTestId('day-numbers-against')).toBeVisible()
+  await expect(days.filter({ hasText: /Yesterday/ })).toHaveCount(1)
+  await expect(days.filter({ hasText: /Today/ })).toHaveCount(0)
+  await page.keyboard.press('Escape')
   await expect(
     page.getByText(/couldn.t load|something went wrong/i)
   ).toHaveCount(0)
-  await page.getByRole('button', { name: /^Next day, / }).click()
-  await expect(snapshot).toHaveAttribute('data-report-id', String(today.id))
-  await page.getByRole('button', { name: /^Previous day, / }).click()
-  await expect(snapshot).toHaveAttribute('data-report-id', String(nightly!.id))
+
+  // The checkup also refreshed the actions: the shop's heavy queries filter on columns
+  // with no index, so the index plan adds at least one and the Indexes tab explains it.
+  type Plan = { add: { table: string; columns: string[] }[] } | null
+  const plan = await eventually(
+    testInfo,
+    'index-plan',
+    () => ok<Plan>(request.get(`${base}/index-plan`)),
+    (body) => Boolean(body?.add.length),
+    { timeout: 6 * 60_000, interval: 5_000 }
+  )
+  expect(plan!.add.length).toBeGreaterThan(0)
+  await openDatabase(page, '&view=actions&section=indexes')
+  await expect(
+    page.getByRole('tablist', { name: 'Kinds of change' })
+  ).toContainText('Indexes')
+  await expect(page.getByTestId('action-story')).toContainText('Add')
+  await expect(page.getByTestId('index-plan-add').first()).toBeVisible()
 })
 
 test('agent activity lists the analyses, classifications, checks and reports', async ({

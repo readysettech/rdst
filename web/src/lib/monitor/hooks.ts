@@ -320,15 +320,15 @@ export function useMarkAllSeen() {
   })
 }
 
-export const useReportHistory = (target: string, limit = 10) =>
+export const useReportHistory = (target: string, limit = 10, daily = false) =>
   useQuery({
-    queryKey: monitorKeys.reportHistory(target, limit),
-    queryFn: () => getReportHistory(target, limit),
+    queryKey: monitorKeys.reportHistory(target, limit, daily),
+    queryFn: () => getReportHistory(target, limit, daily),
     enabled: Boolean(target),
   })
 
 /** One report, or null when there's none (no report yet, or one past the kept history). */
-export const useReport = (target: string, id: number | 'latest') =>
+export const useReport = (target: string, id: number | 'latest' | 'daily') =>
   useQuery({
     queryKey: monitorKeys.report(target, id),
     queryFn: async () => {
@@ -342,7 +342,7 @@ export const useReport = (target: string, id: number | 'latest') =>
     },
     enabled: Boolean(target),
     staleTime: MINUTE,
-    refetchInterval: id === 'latest' ? MINUTE : false,
+    refetchInterval: id === 'latest' || id === 'daily' ? MINUTE : false,
     retry: (count) => count < 2,
   })
 

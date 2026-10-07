@@ -143,6 +143,8 @@ def test_planted_incidents_file_expected_inbox(monkeypatch, tmp_path):
     assert heavy["extra_db_time_ms_per_5m_vs_1h"] == pytest.approx(75000)
     assert items["latency_regression"]["subject"] == "heavy_regression"
     assert store.read("SELECT outcome FROM judge_run") == [{"outcome": "filed"}]
+    # The AI check keeps its five-minute cadence.
+    clock.now += 300
     loop.cycle("db")
     assert len(client.requests) == 2
     # Still in the top 10 by last-hour load on the next check: the new query now notifies.

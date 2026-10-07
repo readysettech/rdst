@@ -1843,6 +1843,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/monitor/targets/{target}/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Target Actions */
+        get: operations["target_actions_api_monitor_targets__target__actions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/actions/{action_id}/{verb}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Action Verb
+         * @description Snooze, dismiss or reopen an action; `check` reads the database now to see if it's done.
+         */
+        post: operations["action_verb_api_monitor_targets__target__actions__action_id___verb__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/monitor/targets/{target}/ai-monitoring": {
         parameters: {
             query?: never;
@@ -1926,6 +1963,26 @@ export interface paths {
         };
         /** Index Changes */
         get: operations["index_changes_api_monitor_targets__target__index_changes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/index-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Index Plan
+         * @description The latest index plan; null until the first statistics read computes one.
+         */
+        get: operations["index_plan_api_monitor_targets__target__index_plan_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2177,7 +2234,8 @@ export interface paths {
         };
         /**
          * Report History
-         * @description Finished reports only, newest day first; every run counts, sample days included.
+         * @description Finished reports only, newest day first; sample days included. Every run counts, or
+         *     with `daily` only the ones the Reports tab shows.
          */
         get: operations["report_history_api_monitor_targets__target__report_history_get"];
         put?: never;
@@ -2195,7 +2253,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Latest Report */
+        /**
+         * Latest Report
+         * @description The newest run of any kind, or with `daily` the newest one the Reports tab shows.
+         */
         get: operations["latest_report_api_monitor_targets__target__report_latest_get"];
         put?: never;
         post?: never;
@@ -4205,6 +4266,149 @@ export interface components {
             /** User Id */
             user_id?: string | null;
         };
+        /** ActionCard */
+        ActionCard: {
+            /**
+             * Apply
+             * @enum {string}
+             */
+            apply: "run_sql" | "setting" | "config_restart" | "app_change" | "readyset";
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "indexes" | "settings" | "maintenance" | "rewrites" | "caching";
+            /** Children */
+            children: components["schemas"]["ActionCard"][];
+            /** Confidence */
+            confidence: string | null;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Evidence
+             * @default []
+             */
+            evidence?: {
+                [key: string]: unknown;
+            }[];
+            /** Id */
+            id: number | null;
+            /** Jev */
+            jev: number;
+            /** Key */
+            key: string;
+            /** Note */
+            note: string | null;
+            /** Opened At */
+            opened_at: number;
+            /** Priority */
+            priority: number | null;
+            /** Queries */
+            queries: components["schemas"]["ActionQuery"][];
+            /** Restart */
+            restart: boolean;
+            /** Result */
+            result?: {
+                [key: string]: number;
+            } | null;
+            /**
+             * Rows
+             * @default []
+             */
+            rows?: {
+                [key: string]: unknown;
+            }[];
+            /** Score */
+            score: number;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "low" | "medium" | "high";
+            /** Snoozed Until */
+            snoozed_until: number | null;
+            /** Sql */
+            sql: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "open" | "snoozed" | "dismissed" | "applied" | "confirmed" | "no_effect" | "retired";
+            /** Steps */
+            steps?: string | null;
+            /** Summary */
+            summary: string;
+            /** Title */
+            title: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "add_index" | "drop_index" | "rewrite_query" | "change_setting" | "run_maintenance" | "try_caching" | "index_plan" | "settings" | "maintenance";
+            /** Updated At */
+            updated_at: number;
+            /** Why */
+            why: string | null;
+            window: components["schemas"]["ActionWindow"] | null;
+        };
+        /** ActionQuery */
+        ActionQuery: {
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+        };
+        /** ActionVerb */
+        ActionVerb: {
+            /** Reason */
+            reason?: string | null;
+            /** Until */
+            until?: number | null;
+        };
+        /** ActionWindow */
+        ActionWindow: {
+            /** Counter Age S */
+            counter_age_s: number;
+            /** Observed S */
+            observed_s: number;
+        };
+        /** ActionsPage */
+        ActionsPage: {
+            /** Actions */
+            actions: components["schemas"]["ActionCard"][];
+            /** Card Count */
+            card_count: number;
+            /** Change Count */
+            change_count: number;
+            checkup: components["schemas"]["CheckupState"];
+            /** Computed At */
+            computed_at: number | null;
+            /** Coverage */
+            coverage: {
+                [key: string]: components["schemas"]["Coverage"];
+            };
+            /** Dismissed */
+            dismissed: number;
+            /** More */
+            more: components["schemas"]["ActionCard"][];
+            /** Open Count */
+            open_count: number;
+            /** Recently Done */
+            recently_done: components["schemas"]["ActionCard"][];
+            /** Sections */
+            sections: {
+                [key: string]: components["schemas"]["SectionStory"];
+            };
+            /** Set Aside */
+            set_aside: components["schemas"]["ActionCard"][];
+            /** Snoozed */
+            snoozed: number;
+            /** Target */
+            target: string;
+            window: components["schemas"]["ActionWindow"] | null;
+        };
         /** AddColumnRequest */
         AddColumnRequest: {
             /** Column Name */
@@ -4337,7 +4541,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "deep_analysis" | "ask" | "classification" | "attention_check" | "daily_snapshot" | "benchmark";
+            action: "deep_analysis" | "ask" | "classification" | "attention_check" | "daily_snapshot" | "explain_actions" | "benchmark";
             /** Ai Call Count */
             ai_call_count: number;
             /** Ai Calls */
@@ -4396,7 +4600,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "deep_analysis" | "ask" | "classification" | "attention_check" | "daily_snapshot" | "benchmark";
+            action: "deep_analysis" | "ask" | "classification" | "attention_check" | "daily_snapshot" | "explain_actions" | "benchmark";
             /** Ai Call Count */
             ai_call_count: number;
             /** Analysis Ref */
@@ -5978,6 +6182,24 @@ export interface components {
             /** Ts */
             ts: number;
         };
+        /** CheckupState */
+        CheckupState: {
+            /** Analyzed */
+            analyzed: number;
+            /** Due By */
+            due_by: number | null;
+            /** Finished At */
+            finished_at: number | null;
+            /** Report Id */
+            report_id: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "none" | "first_pass" | "running" | "done";
+            /** Total */
+            total: number;
+        };
         /** ClearKeyringResponse */
         ClearKeyringResponse: {
             /** Cleared */
@@ -6186,6 +6408,16 @@ export interface components {
             share: number;
         };
         /**
+         * ConnectionProblem
+         * @description Why RDST can't reach the database, and what to check.
+         */
+        ConnectionProblem: {
+            /** Fix */
+            fix: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
          * ConversationHistoryResponse
          * @description Response for conversation history.
          */
@@ -6214,6 +6446,26 @@ export interface components {
             started_at?: string | null;
             /** Total Exchanges */
             total_exchanges?: number | null;
+        };
+        /**
+         * Coverage
+         * @description Where one kind of change stands: changes found, checked and clean, being checked, or
+         *     waiting on deep analysis.
+         */
+        Coverage: {
+            /** Checked At */
+            checked_at: number | null;
+            /** Next At */
+            next_at: number | null;
+            /** Note */
+            note: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "found" | "checked" | "checking" | "waiting";
+            /** Waiting On */
+            waiting_on?: string | null;
         };
         /** DatabaseReport */
         DatabaseReport: {
@@ -7514,6 +7766,7 @@ export interface components {
         };
         /** InboxItem */
         InboxItem: {
+            action?: components["schemas"]["InboxLikelyFix"] | null;
             advice?: components["schemas"]["InboxAdvice"] | null;
             /**
              * Band Reason
@@ -7620,6 +7873,15 @@ export interface components {
             /** Updated At */
             updated_at: number;
         };
+        /** InboxLikelyFix */
+        InboxLikelyFix: {
+            /** Id */
+            id: number;
+            /** Title */
+            title: string;
+            /** Type */
+            type: string;
+        };
         /**
          * InboxLink
          * @description Where an item opens: a query row and tab, the Database page, a report or a setting.
@@ -7698,6 +7960,202 @@ export interface components {
             spark: components["schemas"]["TrendPoint"][];
             /** Start */
             start: number | null;
+        };
+        /** IndexPlan */
+        IndexPlan: {
+            /** Add */
+            add: components["schemas"]["IndexPlanAdd"][];
+            /** Computed At */
+            computed_at: number;
+            /** Counter Age S */
+            counter_age_s: number;
+            /** Covered */
+            covered: components["schemas"]["IndexPlanCovered"][];
+            /**
+             * Defeated
+             * @default []
+             */
+            defeated?: {
+                [key: string]: unknown;
+            }[];
+            /** Drop */
+            drop: components["schemas"]["IndexPlanDrop"][];
+            /** Engine */
+            engine: string;
+            /** Explanation */
+            explanation?: string | null;
+            /** Keep */
+            keep: components["schemas"]["IndexPlanKeep"][];
+            /**
+             * Later
+             * @default []
+             */
+            later?: components["schemas"]["IndexPlanAdd"][];
+            /** Observed S */
+            observed_s: number;
+            /** Rollback Sql */
+            rollback_sql?: string | null;
+            /**
+             * Set Aside
+             * @default []
+             */
+            set_aside?: string[];
+            /** Skipped */
+            skipped: components["schemas"]["IndexPlanAdd"][];
+            /** Sql */
+            sql: string;
+            /**
+             * Watch
+             * @default []
+             */
+            watch?: components["schemas"]["IndexPlanDrop"][];
+        };
+        /** IndexPlanAdd */
+        IndexPlanAdd: {
+            /** Benefit */
+            benefit: number;
+            /** Columns */
+            columns: string[];
+            /** Helps */
+            helps: components["schemas"]["IndexPlanHelp"][];
+            /** Id */
+            id: string;
+            /**
+             * Label
+             * @enum {string}
+             */
+            label: "safe" | "worth_it" | "skip";
+            /** Label Reason */
+            label_reason: string;
+            /** Merged */
+            merged: string[][];
+            /** Method */
+            method: string;
+            /** Replaces */
+            replaces: string[];
+            /**
+             * Roles
+             * @default []
+             */
+            roles?: (("equality" | "sort" | "range") | null)[];
+            /** Sql */
+            sql: string;
+            /** Table */
+            table: string;
+            /** Undo Sql */
+            undo_sql?: string | null;
+            /** Verified */
+            verified: boolean;
+            write_cost: components["schemas"]["IndexWriteCost"];
+        };
+        /** IndexPlanCovered */
+        IndexPlanCovered: {
+            /** Columns */
+            columns: string[];
+            /** Covered By */
+            covered_by: string;
+            /** Queries */
+            queries: string[];
+            /** Table */
+            table: string;
+        };
+        /** IndexPlanDrop */
+        IndexPlanDrop: {
+            /** Columns */
+            columns: string[];
+            /**
+             * Confidence
+             * @enum {string}
+             */
+            confidence: "high" | "low";
+            /** Covered By */
+            covered_by: string | null;
+            /** Evidence Age S */
+            evidence_age_s: number;
+            /** Id */
+            id: string;
+            /** Index Name */
+            index_name: string;
+            /** Last Scan At */
+            last_scan_at: number | null;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "unused" | "duplicate" | "stale";
+            /** Replica Caveat */
+            replica_caveat: boolean;
+            /** Restore Sql */
+            restore_sql?: string | null;
+            /** Scans */
+            scans: number;
+            /** Schema */
+            schema?: string | null;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Slows
+             * @default []
+             */
+            slows?: components["schemas"]["IndexPlanWrite"][];
+            /** Sql */
+            sql: string;
+            /** Table */
+            table: string;
+            /** Table Writes Per S */
+            table_writes_per_s: number;
+        };
+        /** IndexPlanHelp */
+        IndexPlanHelp: {
+            /** Gain */
+            gain: number;
+            /** Gain Pct */
+            gain_pct: number | null;
+            /** Impact */
+            impact: string | null;
+            /** Key */
+            key: string;
+            /** Name */
+            name: string | null;
+            /** Share */
+            share: number;
+            /** Verified */
+            verified: boolean;
+        };
+        /** IndexPlanKeep */
+        IndexPlanKeep: {
+            /** Columns */
+            columns: string[];
+            /** Index Name */
+            index_name: string;
+            /** Primary */
+            primary: boolean;
+            /** Scans */
+            scans: number;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Table */
+            table: string;
+            /** Unique */
+            unique: boolean;
+            /** Window Scans */
+            window_scans: number;
+        };
+        /** IndexPlanWrite */
+        IndexPlanWrite: {
+            /** Calls Per S */
+            calls_per_s: number;
+            /** Key */
+            key: string;
+            /** Name */
+            name: string | null;
+            /** Share */
+            share: number;
+            /**
+             * Verb
+             * @enum {string}
+             */
+            verb: "insert" | "update" | "delete";
         };
         /** IndexPlannerResult */
         IndexPlannerResult: {
@@ -7814,6 +8272,19 @@ export interface components {
             tested: boolean;
         } & {
             [key: string]: unknown;
+        };
+        /** IndexWriteCost */
+        IndexWriteCost: {
+            /** Existing Indexes */
+            existing_indexes: number;
+            /** Hot Risk */
+            hot_risk: boolean;
+            /** Peak Writes Per S */
+            peak_writes_per_s: number;
+            /** Updated Columns */
+            updated_columns: string[];
+            /** Writes Per S */
+            writes_per_s: number;
         };
         /** InitCompleteResponse */
         InitCompleteResponse: {
@@ -8392,6 +8863,7 @@ export interface components {
         };
         /** MonitorPulsePage */
         MonitorPulsePage: {
+            connection_problem?: components["schemas"]["ConnectionProblem"] | null;
             /** Delay Reason */
             delay_reason?: string | null;
             /**
@@ -8478,6 +8950,7 @@ export interface components {
              * @enum {string}
              */
             text_status: "ok" | "truncated" | "unavailable";
+            write_cost?: components["schemas"]["WriteCost"] | null;
         };
         /** MonitorQueryPage */
         MonitorQueryPage: {
@@ -10693,6 +11166,20 @@ export interface components {
             success: boolean;
         };
         /**
+         * SectionStory
+         * @description The explanation at the top of an Actions section, from what RDST measured.
+         */
+        SectionStory: {
+            /** Details */
+            details: string[];
+            /** Facts */
+            facts: components["schemas"]["StoryFact"][];
+            /** Headline */
+            headline: string;
+            /** Lead */
+            lead: string[];
+        };
+        /**
          * SetDefaultRequest
          * @description Request body for setting default target.
          */
@@ -11348,6 +11835,13 @@ export interface components {
             overall_rating?: string;
             /** Target */
             target: string;
+        };
+        /** StoryFact */
+        StoryFact: {
+            /** Label */
+            label: string;
+            /** Value */
+            value: string;
         };
         /**
          * TargetData
@@ -12240,6 +12734,24 @@ export interface components {
              */
             type: "status";
         };
+        /** WriteCost */
+        WriteCost: {
+            /** Hot Ratio */
+            hot_ratio: number | null;
+            /** Indexes Maintained */
+            indexes_maintained: number;
+            /** Set Columns */
+            set_columns: string[];
+            /** Table */
+            table: string;
+            /** Table Writes Per S */
+            table_writes_per_s: number;
+            /**
+             * Verb
+             * @enum {string}
+             */
+            verb: "insert" | "update" | "delete";
+        };
         /** AddQueryRequest */
         features__monitor__api__routes__AddQueryRequest: {
             /** Analysis Id */
@@ -12504,7 +13016,7 @@ export interface operations {
         parameters: {
             query?: {
                 target?: string | null;
-                action?: ("deep_analysis" | "ask" | "classification" | "attention_check" | "daily_snapshot" | "benchmark") | null;
+                action?: ("deep_analysis" | "ask" | "classification" | "attention_check" | "daily_snapshot" | "explain_actions" | "benchmark") | null;
                 outcome?: ("done" | "failed" | "skipped" | "cancelled") | null;
                 /** @description Epoch seconds, inclusive */
                 since?: number | null;
@@ -12547,7 +13059,7 @@ export interface operations {
         parameters: {
             query?: {
                 target?: string | null;
-                action?: ("deep_analysis" | "ask" | "classification" | "attention_check" | "daily_snapshot" | "benchmark") | null;
+                action?: ("deep_analysis" | "ask" | "classification" | "attention_check" | "daily_snapshot" | "explain_actions" | "benchmark") | null;
                 /** @description From, epoch seconds, inclusive */
                 since?: number | null;
                 /** @description To, epoch seconds, exclusive */
@@ -15359,6 +15871,74 @@ export interface operations {
             };
         };
     };
+    target_actions_api_monitor_targets__target__actions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    action_verb_api_monitor_targets__target__actions__action_id___verb__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+                action_id: number;
+                verb: "snooze" | "dismiss" | "reopen" | "check";
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ActionVerb"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     claim_ai_monitoring_api_monitor_targets__target__ai_monitoring_post: {
         parameters: {
             query?: never;
@@ -15510,6 +16090,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    index_plan_api_monitor_targets__target__index_plan_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexPlan"];
                 };
             };
             /** @description Validation Error */
@@ -15976,6 +16587,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                daily?: boolean;
             };
             header?: never;
             path: {
@@ -16007,7 +16619,9 @@ export interface operations {
     };
     latest_report_api_monitor_targets__target__report_latest_get: {
         parameters: {
-            query?: never;
+            query?: {
+                daily?: boolean;
+            };
             header?: never;
             path: {
                 target: string;

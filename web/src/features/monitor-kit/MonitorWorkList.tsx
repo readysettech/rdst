@@ -293,7 +293,7 @@ export function MonitorWorkList({
           />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-label-small text-content-layout-1">
-              {report.trigger === 'nightly' ? 'Nightly report' : 'Report'}
+              {report.trigger === 'nightly' ? 'Nightly checkup' : 'Checkup'}
               {target ? '' : ` for ${report.target}`}: running
             </span>
             {report.message ? (

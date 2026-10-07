@@ -44,9 +44,12 @@ def seed_monitor_fixture():
         conn.execute("DELETE FROM inbox_event WHERE item_id IN (SELECT id FROM inbox_item WHERE target=?)", (target,))
         conn.execute("DELETE FROM report_event WHERE report_id IN (SELECT id FROM report_run WHERE target=?)", (target,))
         # Settings go too: a removed target stays switched off, and its readings are refused.
+        conn.execute("DELETE FROM action_event WHERE action_id IN (SELECT id FROM action WHERE target=?)", (target,))
         for table in ("stmt_series", "db_series", "query_text", "index_change", "report_run",
                       "inbox_item", "mute_rule", "monitor_pulse", "fix_verdict", "analyze_job",
-                      "monitor_setting"):
+                      "monitor_setting", "action", "index_plan", "stats_meta", "table_state",
+                      "index_state", "setting_state", "table_activity", "index_activity",
+                      "index_snapshot"):
             conn.execute(f"DELETE FROM {table} WHERE target=?", (target,))
 
     store._write(clear)
@@ -125,7 +128,7 @@ def seed_monitor_fixture():
                           for key, base, share in (("orders-e2e", 20.0, 0.9),
                                                    ("count-e2e", 10.0, 0.09))}},
                       now - 300, delivery="inbox")
-    store.upsert_item(target, "daily_summary", "today", 0.4, "Daily report ready",
+    store.upsert_item(target, "daily_summary", "today", 0.4, "Checkup ready",
                       {"report_id": run["id"], "summary": "Orders lookup accounts for most "
                        "database time."}, now - 60, delivery="inbox")
     _seed_traffic_jump(store, target, now)
@@ -137,12 +140,76 @@ def seed_monitor_fixture():
     day = snapshot.build(store, target, start, now + 60, now + 60, partial=True, collectors={
         "vacuum_bloat": {"tables": [{"schema": "public", "table": "orders",
                                      "live_tuples": 8200, "dead_tuples": 1800,
-                                     "dead_ratio_pct": 18.0, "status": "warn"}]},
+                                     "dead_ratio_pct": 18.0, "status": "warn",
+                                     "size_bytes": 64 * 1024 * 1024}]},
         "connections": {"total_connections": 8, "max_connections": 100}})
     report = json.loads(store.report(run["id"])["report_json"])
     store.update_report(run["id"], report={**report, "version": 3, "snapshot": day},
                         period=(start, now + 60))
     _seed_agent_activity(target, now)
+    return {"target": target}
+
+
+@monitor_fake_router.post("/seed-actions")
+def seed_actions_fixture():
+    """Actions and an index plan for e2e-guard, computed by the real code from seeded facts."""
+    from features.monitor import actions
+    from features.monitor.index_plan import build_plan
+    from shared.monitor.monitor_store import MonitorStore
+
+    store = MonitorStore()
+    target, now = "e2e-guard", int(time.time())
+    store.sync_indexes(target, [
+        {"schema": "public", "table": "orders", "index_name": "orders_pkey",
+         "definition": "CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)"},
+        {"schema": "public", "table": "orders", "index_name": "idx_orders_status_old",
+         "definition": "CREATE INDEX idx_orders_status_old ON public.orders USING btree (status)"}],
+        now - 600)
+
+    def table(name, writes):
+        return {"schema": "public", "table": name, "ins": writes, "upd": 0, "del": 0, "hot_upd": 0,
+                "seq_scan": 0, "idx_scan": 0, "scan_rows": 0, "live_rows": 8200, "dead_rows": 0,
+                "size_bytes": 1 << 20}
+
+    for step, writes in ((0, 1000), (1, 4000)):
+        store.record_stats(target, {
+            "engine": "postgresql", "version": 160000, "counter_since": now - 40 * 86400,
+            "taken_at": now - 3600 + step * 3600, "tables": [table("orders", writes)],
+            "indexes": [{"schema": "public", "table": "orders", "index_name": name, "scans": scans,
+                         "size_bytes": 1 << 19, "unique": name.endswith("pkey"),
+                         "primary": name.endswith("pkey"), "last_scan_at": None}
+                        for name, scans in (("orders_pkey", 900), ("idx_orders_status_old", 0))],
+            "settings": {"work_mem": {"value": "4096", "unit": "kB", "pending_restart": False}}})
+    inputs = {"engine": "postgresql", "now": now, "observed_s": 3600, "counter_age_s": 40 * 86400,
+              "existing": [
+                  {"schema": "public", "table": "orders", "index_name": "orders_pkey",
+                   "columns": ["id"], "unique": True, "primary": True, "scans": 900,
+                   "window_scans": 900, "size_bytes": 1 << 19},
+                  {"schema": "public", "table": "orders", "index_name": "idx_orders_status_old",
+                   "columns": ["status"], "scans": 0, "window_scans": 0, "size_bytes": 4 << 20}],
+              "tables": {"orders": {"writes_per_s": 0.8, "peak_writes_per_s": 1.5}},
+              "queries": [{"key": "orders-e2e", "name": "SELECT on orders by customer_id",
+                           "share": 0.9, "kind": "select", "suggestions": [
+                               {"table": "orders", "columns": ["customer_id"], "gain_pct": 92.0,
+                                "verified": True, "sql": "CREATE INDEX ON orders (customer_id)"}]}]}
+    plan = build_plan(inputs)
+    plan["explanation"] = ("One index on orders speeds up the lookup that takes most of the "
+                           "database time, and dropping an unused index saves work on every insert.")
+    store.save_index_plan(target, plan)
+    database = [{"id": "setting_work_mem", "title": "Raise work_mem so sorts stay in memory",
+                 "severity": "bad", "finding": "work_mem is 4 MB.",
+                 "setting": {"name": "work_mem", "current": "4 MB", "target": "16 MB"},
+                 "sql": "ALTER SYSTEM SET work_mem = '16MB';", "restart": False},
+                {"id": "vacuum", "title": "Vacuum 1 bloated table", "severity": "warn",
+                 "finding": "orders is 18% dead rows.", "sql": "VACUUM (ANALYZE) public.orders;"}]
+    found = actions.candidates(store, target, plan, [], database)
+    actions.reconcile(store, target, now, found)
+    rows = {row["type"]: row for row in store.actions(target)}
+    actions.apply_explanations(store, target, now, {"action_picks": [
+        {"action_id": f"a{rows['add_index']['id']}",
+         "why": "The orders lookup takes most of the database time."},
+        {"action_id": f"a{rows['change_setting']['id']}", "why": "Sorts spill to disk."},
+        {"action_id": f"a{rows['run_maintenance']['id']}", "why": "orders has many dead rows."}]})
     return {"target": target}
 
 

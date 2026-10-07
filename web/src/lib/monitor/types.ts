@@ -152,8 +152,15 @@ export interface MonitorPulse {
   setup_blocked?: boolean
 }
 
+/** Why RDST can't reach a database, and what to check. */
+export interface ConnectionProblem {
+  reason: string
+  fix: string
+}
+
 export interface MonitorPulsePage {
   pulses: MonitorPulse[]
+  connection_problem?: ConnectionProblem | null
   last_reading_at?: number | null
   next_reading_at?: number | null
   first_reading?: boolean
@@ -343,7 +350,18 @@ export interface FixVerdict {
   sentence: string
 }
 
+/** A write's cost on its table (single-query read only). */
+export interface WriteCost {
+  table: string
+  verb: 'insert' | 'update' | 'delete'
+  set_columns: string[]
+  table_writes_per_s: number
+  indexes_maintained: number
+  hot_ratio: number | null
+}
+
 export interface MonitorQuery {
+  write_cost?: WriteCost | null
   key: string
   text: string
   text_status: QueryTextStatus
@@ -764,6 +782,14 @@ export interface InboxItem {
   status_at?: number | null
   /** Why it's in its section: 'Act now: latency up 3.2x on a top-10 query today, still happening'. */
   band_reason?: string
+  /** The open action that covers one of the item's queries. Absent from older backends. */
+  action?: InboxLikelyFix | null
+}
+
+export interface InboxLikelyFix {
+  id: number
+  title: string
+  type: string
 }
 
 export type ItemStatus = 'ongoing' | 'back_to_normal' | 'closed' | 'unknown'

@@ -63,7 +63,15 @@ def merge_mapping_changes(
     return merged
 
 
-def _replace_with_retry(source: str, destination: Path) -> None:
+def staging_file(destination: Path) -> Path:
+    """A fresh file beside ``destination``, unique to this writer, to build it in."""
+    fd, name = tempfile.mkstemp(dir=str(destination.parent), prefix=".",
+                                suffix=f".{destination.name}.tmp")
+    os.close(fd)
+    return Path(name)
+
+
+def replace_with_retry(source: str, destination: Path) -> None:
     for attempt in range(4):
         try:
             os.replace(source, destination)
@@ -83,7 +91,7 @@ def _atomic_write(path: Path, write) -> None:
             write(file_obj)
             file_obj.flush()
             os.fsync(file_obj.fileno())
-        _replace_with_retry(temp_path, path)
+        replace_with_retry(temp_path, path)
     except BaseException:
         try:
             os.unlink(temp_path)

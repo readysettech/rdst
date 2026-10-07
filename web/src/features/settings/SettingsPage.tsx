@@ -786,7 +786,6 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
       >
         {/* ── Targets — primary section; Add moves in here ── */}
         <Show when={activePanel === 'connections'}>
-          <TargetsSlotsElsewhere />
           <SettingsSection
             id="connections"
             title="Targets"
@@ -926,6 +925,9 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
               </Show>
             </VStack>
           </SettingsSection>
+          <div className="mt-8">
+            <TargetsSlotsElsewhere />
+          </div>
         </Show>
 
         {/* ── AI keys — its own section (owner #4: no "just-floating" key card;

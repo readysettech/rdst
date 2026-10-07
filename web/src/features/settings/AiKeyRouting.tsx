@@ -18,12 +18,12 @@ export function keyRoutingLines(
     : 'Quick checks and monitoring alerts always run through Readyset, so they need you signed in.'
   if (provider === 'claude')
     return [
-      'Your Anthropic key covers Analyze, Ask, deep analysis and nightly reports.',
+      'Your Anthropic key covers Analyze, Ask, deep analysis and nightly checkups.',
       jev,
     ]
   if (provider === 'readyset')
     return [
-      'Your Readyset account covers Analyze, Ask, deep analysis, nightly reports, quick checks and monitoring alerts.',
+      'Your Readyset account covers Analyze, Ask, deep analysis, nightly checkups, quick checks and monitoring alerts.',
       'With your own Anthropic key, it covers Analyze, Ask, deep analysis and reports instead, and you can use AI monitoring on more databases.',
     ]
   return [

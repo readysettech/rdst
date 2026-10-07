@@ -126,7 +126,7 @@ describe('limit words', () => {
 
   it('says which key covers what', () => {
     expect(keyRoutingLines('claude', true)).toEqual([
-      'Your Anthropic key covers Analyze, Ask, deep analysis and nightly reports.',
+      'Your Anthropic key covers Analyze, Ask, deep analysis and nightly checkups.',
       'Quick checks and monitoring alerts always run through Readyset and use your Readyset allowance.',
     ])
     expect(keyRoutingLines('readyset', true)[0]).toMatch(

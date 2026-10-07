@@ -133,7 +133,8 @@ test('a11y: the sign-in dialog opens safely and closes on Escape', async ({
 
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).toHaveCount(0)
-  expect(new URL(page.url()).pathname).toBe('/')
+  // Escape goes home, and home with a database configured is that database's page.
+  expect(['/', '/database']).toContain(new URL(page.url()).pathname)
 })
 
 /**
@@ -170,10 +171,9 @@ test('a11y: the active nav item carries aria-current', async ({
   )
   await setup(page)
   for (const [path, label] of [
-    ['/', 'Home'],
     ['/database', 'Database'],
     ['/inbox', 'Inbox'],
-    ['/agent-activity', 'Agent activity'],
+    ['/agent-activity', 'Agent audit'],
     ['/ask', 'Ask'],
   ] as const) {
     await page.goto(path)

@@ -7,13 +7,6 @@
 // blocks.
 import { Alert } from '@rs/ui-new/alert'
 import { Button } from '@rs/ui-new/button'
-import {
-  Dropdown,
-  DropdownContent,
-  DropdownItem,
-  DropdownTrigger,
-} from '@rs/ui-new/dropdown-rf'
-import { IconButton } from '@rs/ui-new/icon-button'
 import { Tag } from '@rs/ui-new/tag'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ChartHighlight } from '@/features/monitor-kit/charts'
@@ -21,11 +14,12 @@ import type {
   DatabaseReport,
   DaySnapshot as Snapshot,
 } from '@/lib/monitor/types'
+import { ActionsNow } from '../actions/ActionsNow'
 import { DayPicker } from './DayPicker'
 import { ReportSectionNav } from './ReportSectionNav'
 import { ChartSection, Spikes, Timeline } from './SnapshotDay'
 import { AllQueries, LookAt } from './SnapshotQueries'
-import { Actions, Brief, Health, Numbers } from './SnapshotTop'
+import { Brief, Health, Numbers } from './SnapshotTop'
 import type { SnapshotContext } from './snapshotKit'
 import {
   type ChartView,
@@ -45,16 +39,12 @@ function Header({
   days,
   onPick,
   onPrint,
-  onRunToday,
-  running,
 }: {
   report: DatabaseReport
   snapshot: Snapshot
   days: DayEntry[]
   onPick: (id: number) => void
   onPrint: () => void
-  onRunToday: () => void
-  running: boolean
 }) {
   const line = report.sample
     ? "Made up from this database's own queries to show what past days look like"
@@ -97,23 +87,6 @@ function Header({
           label="Print / Save as PDF"
           onClick={onPrint}
         />
-        <Dropdown>
-          <DropdownTrigger asChild>
-            <IconButton
-              icon="more"
-              label="Report menu"
-              modifier="ghost"
-              size="small"
-            />
-          </DropdownTrigger>
-          <DropdownContent align="end" className="w-64">
-            <DropdownItem disabled={running} onSelect={onRunToday}>
-              {running
-                ? "Today's snapshot is running"
-                : "Run today's snapshot now"}
-            </DropdownItem>
-          </DropdownContent>
-        </Dropdown>
       </div>
     </header>
   )
@@ -157,16 +130,12 @@ export function DaySnapshot({
   target,
   days,
   onPick,
-  onRunToday,
-  running,
 }: {
   report: DatabaseReport
   snapshot: Snapshot
   target: string
   days: DayEntry[]
   onPick: (id: number) => void
-  onRunToday: () => void
-  running: boolean
 }) {
   const { printing, print } = usePrinting()
   const colors = useMemo(() => chipColors(snapshot), [snapshot])
@@ -174,7 +143,12 @@ export function DaySnapshot({
   const [highlight, setHighlight] = useState<ChartHighlight | null>(null)
   // A new day starts on queries per second.
   useEffect(() => setView('calls'), [report.id])
-  const sections = useMemo(() => reportSections(snapshot), [snapshot])
+  // Only the latest day points at what to change now; a past day stays as it was.
+  const current = !days.length || days[0].id === report.id
+  const sections = useMemo(
+    () => reportSections(snapshot, current),
+    [snapshot, current]
+  )
   const context: SnapshotContext = { target, snapshot, colors, printing }
   return (
     <article
@@ -189,8 +163,6 @@ export function DaySnapshot({
         days={days}
         onPick={onPick}
         onPrint={print}
-        onRunToday={onRunToday}
-        running={running}
       />
       {snapshot.legacy ? (
         <Alert
@@ -205,7 +177,7 @@ export function DaySnapshot({
       <Health context={context} />
       <Numbers context={context} view={view} onView={setView} />
       <Brief context={context} />
-      <Actions context={context} />
+      {current ? <ActionsNow target={target} /> : null}
       <ChartSection
         context={context}
         view={view}

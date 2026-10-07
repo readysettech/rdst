@@ -13,6 +13,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { limitLine } from '../features/monitor-kit/aiMonitoring'
 import { useMonitorPulse } from '../features/monitor-kit/useMonitorPulse'
+import { useTarget } from '../hooks/useTarget'
 import type { TargetInfo } from '../lib/api'
 import { useMonitoringLimit, useMonitorSettings } from '../lib/monitor/hooks'
 import { useTargetSwitchLockState } from '../lib/targetSwitchLock'
@@ -63,16 +64,18 @@ export function switchDestination(
 interface TargetDropdownProps {
   selectedTarget: string | null
   onSelectTarget: (target: string | null) => void
+  /** `compact` is an inline trigger for a page header; the default fills a sidebar row. */
+  variant?: 'sidebar' | 'compact'
 }
 
-export function TargetDropdown({
-  selectedTarget,
-  onSelectTarget,
-}: TargetDropdownProps) {
-  const [open, setOpen] = useState(false)
-  const navigate = useNavigate()
-  const { isLocked, message: lockMessage } = useTargetSwitchLockState()
-
+/**
+ * The status read and the selected target it resolves to. A selection the target list
+ * doesn't hold falls back to the default target, once the list is known to be current.
+ */
+export function useTargetSelection(
+  selectedTarget: string | null,
+  onSelectTarget: (target: string | null) => void
+) {
   const {
     data: status,
     isLoading,
@@ -96,42 +99,6 @@ export function TargetDropdown({
   const currentTarget = isSelectedValid
     ? normalizedSelectedTarget
     : fallbackTarget
-  // Holding a monitored target's stream here keeps it open across page changes, so
-  // arriving on a page never restarts readings, and gives the switcher its live state.
-  const settings = useMonitorSettings(currentTarget ?? '')
-  const pulse = useMonitorPulse(settings.data?.enabled ? currentTarget : null)
-  const lines = useTargetMonitorLines(
-    targets.map((target) => target.name),
-    open,
-    { target: currentTarget, state: pulse.state }
-  )
-  const limit = useMonitoringLimit(undefined, open)
-  const summary = limitLine(limit.data)
-
-  /** Switches target. A per-database page stays put, for the new target; any other
-   * page (the Inbox, Home) opens the new target's Database page. */
-  const switchTo = (name: string) => {
-    onSelectTarget(name)
-    const destination = switchDestination(
-      window.location.pathname,
-      name === currentTarget
-    )
-    if (destination === 'open') {
-      void navigate({ to: '/database' })
-      return
-    }
-    if (destination !== 'stay') return
-    void navigate({
-      to: '/database',
-      search: ((previous: Record<string, unknown>) => {
-        const next = { ...previous }
-        for (const param of TARGET_SCOPED_PARAMS) delete next[param]
-        return next
-      }) as never,
-      replace: true,
-    })
-  }
-
   // Track the last invalid→fallback correction we applied so status refetches
   // do not loop, while still allowing new invalid parent selections to resync.
   const lastCorrectionRef = useRef<string | null>(null)
@@ -180,6 +147,66 @@ export function TargetDropdown({
     dataUpdatedAt,
   ])
 
+  return { status, isLoading, error, targets, currentTarget }
+}
+
+/**
+ * Keeps the global target valid and the selected target's monitor stream open across
+ * page changes, so arriving on a page never restarts readings. Renders nothing.
+ */
+export function TargetSync() {
+  const { target, setTarget } = useTarget()
+  const { currentTarget } = useTargetSelection(target, setTarget)
+  const settings = useMonitorSettings(currentTarget ?? '')
+  useMonitorPulse(settings.data?.enabled ? currentTarget : null)
+  return null
+}
+
+export function TargetDropdown({
+  selectedTarget,
+  onSelectTarget,
+  variant = 'sidebar',
+}: TargetDropdownProps) {
+  const [open, setOpen] = useState(false)
+  const navigate = useNavigate()
+  const { isLocked, message: lockMessage } = useTargetSwitchLockState()
+  const { status, isLoading, error, targets, currentTarget } =
+    useTargetSelection(selectedTarget, onSelectTarget)
+  const compact = variant === 'compact'
+  const settings = useMonitorSettings(currentTarget ?? '')
+  const pulse = useMonitorPulse(settings.data?.enabled ? currentTarget : null)
+  const lines = useTargetMonitorLines(
+    targets.map((target) => target.name),
+    open,
+    { target: currentTarget, state: pulse.state }
+  )
+  const limit = useMonitoringLimit(undefined, open)
+  const summary = limitLine(limit.data)
+
+  /** Switches target. A per-database page stays put, for the new target; any other
+   * page (the Inbox, Home) opens the new target's Database page. */
+  const switchTo = (name: string) => {
+    onSelectTarget(name)
+    const destination = switchDestination(
+      window.location.pathname,
+      name === currentTarget
+    )
+    if (destination === 'open') {
+      void navigate({ to: '/database' })
+      return
+    }
+    if (destination !== 'stay') return
+    void navigate({
+      to: '/database',
+      search: ((previous: Record<string, unknown>) => {
+        const next = { ...previous }
+        for (const param of TARGET_SCOPED_PARAMS) delete next[param]
+        return next
+      }) as never,
+      replace: true,
+    })
+  }
+
   useEffect(() => {
     if (isLocked) {
       setOpen(false)
@@ -190,8 +217,15 @@ export function TargetDropdown({
   // clears the internal open state so it stays closed after unlocking.
   const effectiveOpen = open && !isLocked
 
+  // The compact trigger sits inline in a page header; the sidebar one fills its row.
+  const frame = compact
+    ? 'h-9 max-w-xs px-2.5 rounded-lg border border-border-layout-1'
+    : 'p-2 pr-3 h-14 w-full rounded-lg'
+
   if (isLoading) {
-    return (
+    return compact ? (
+      <Skeleton className="h-9 w-40 rounded-lg" />
+    ) : (
       <div className="p-2 pr-3 h-14 w-full flex items-center gap-2">
         <Skeleton className="h-10 w-10 rounded-md" />
         <Skeleton className="h-4 w-24" />
@@ -201,7 +235,7 @@ export function TargetDropdown({
 
   if (error || !status) {
     return (
-      <div className="flex p-2 pr-3 h-14 w-full items-center gap-2">
+      <div className={`flex ${frame} items-center gap-2`}>
         <Icon
           name="alert"
           label="Error"
@@ -233,21 +267,31 @@ export function TargetDropdown({
       }`}
       aria-disabled={isLocked}
       title={isLocked ? lockMessage : undefined}
-      className={`flex justify-between items-center text-content-layout-1 p-2 pr-3 h-14 w-full rounded-lg ${
+      className={`flex justify-between items-center gap-2 text-content-layout-1 ${frame} ${
         isLocked
           ? 'cursor-not-allowed opacity-60 bg-surface-layout-2/50'
           : 'cursor-pointer hover:bg-surface-primary-soft-hover focus-visible:shadow-focus focus-visible:outline-none'
       }`}
     >
       <div className="flex min-w-0 gap-2 items-center">
-        <div className="w-8 h-8 shrink-0 rounded-md bg-surface-layout-2 flex items-center justify-center">
-          <Icon name="database" label="Database" size="small" />
-        </div>
+        {compact ? (
+          <Icon
+            name="database"
+            label=""
+            aria-hidden="true"
+            size="small"
+            className="shrink-0 text-content-layout-3"
+          />
+        ) : (
+          <div className="w-8 h-8 shrink-0 rounded-md bg-surface-layout-2 flex items-center justify-center">
+            <Icon name="database" label="Database" size="small" />
+          </div>
+        )}
         <div className="flex min-w-0 flex-col items-start">
           <Text level="label-medium" className="max-w-full truncate">
             {currentTarget}
           </Text>
-          {currentTarget ? (
+          {currentTarget && !compact ? (
             <TargetMonitorStatus
               line={lines.get(currentTarget)}
               compact
@@ -265,14 +309,19 @@ export function TargetDropdown({
             className="text-content-warning-soft"
           />
         )}
-        <Icon name="chevron-down" label="Target dropdown" />
+        <Icon
+          name="chevron-down"
+          label="Target dropdown"
+          size={compact ? 'small' : undefined}
+          className={compact ? 'text-content-layout-3' : undefined}
+        />
       </div>
     </Pressable>
   )
 
   if (targets.length === 0) {
     return (
-      <div className="flex p-2 pr-3 h-14 w-full items-center gap-2">
+      <div className={`flex ${frame} items-center gap-2`}>
         <Icon
           name="alert"
           label=""

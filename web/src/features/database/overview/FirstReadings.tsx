@@ -286,7 +286,7 @@ export function FirstRunStrip({
     // Its steps are done: one quiet line until the hour is up or the user hides it.
     const reportLine =
       report?.state === 'pending' && report.at != null
-        ? ` The nightly report comes ${when(report.at, now).toLowerCase()}.`
+        ? ` The nightly checkup runs ${when(report.at, now).toLowerCase()}.`
         : ''
     return (
       <section

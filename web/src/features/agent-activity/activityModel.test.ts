@@ -127,7 +127,7 @@ describe('activity sentences', () => {
       ts: MIDNIGHT + 60,
     })
     expect(activitySentence(nightly)).toBe(
-      'The agent wrote the daily report for Mon, Sep 28.'
+      'The agent ran the nightly checkup for Mon, Sep 28.'
     )
     const recorded = item({
       action: 'daily_snapshot',
@@ -137,7 +137,7 @@ describe('activity sentences', () => {
     })
     expect(reportDay(recorded)).toEqual({ day: 'Tue, Sep 29', partial: true })
     expect(activitySentence(recorded)).toBe(
-      'The agent wrote a report for Tue, Sep 29 so far, on request.'
+      'The agent ran a checkup for Tue, Sep 29 so far, on request.'
     )
   })
 

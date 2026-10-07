@@ -140,13 +140,19 @@ def test_safety_and_timeout_decisions():
 
 
 @pytest.mark.parametrize("sql", [
-    "INSERT INTO t SELECT 1", "UPDATE t SET x=1", "DELETE FROM t", "CREATE TABLE x(id int)",
+    "INSERT INTO t VALUES (1)", "UPDATE t SET x=1", "DELETE FROM t", "CREATE TABLE x(id int)",
     "DROP TABLE x", "VACUUM t", "SET work_mem='1MB'", "SHOW work_mem", "BEGIN",
     "COMMIT", "SELECT pg_sleep(1)", "SELECT * FROM t; DELETE FROM t",
     "SELECT * INTO new_table FROM t", "SELECT nextval('order_seq')",
 ])
 def test_automatic_queue_rejects_unsupported_statements(sql):
     assert automatic_skip_reason(sql)
+
+
+def test_automatic_queue_accepts_writes_through_their_row_search():
+    assert automatic_skip_reason("UPDATE sessions SET seen=$1 WHERE token=$2") is None
+    assert automatic_skip_reason("DELETE FROM carts WHERE expires_at < $1") is None
+    assert automatic_skip_reason("INSERT INTO archive SELECT * FROM orders WHERE day < $1") is None
 
 
 def test_automatic_queue_accepts_read_only_selects():
@@ -854,9 +860,8 @@ def test_analyze_jobs_endpoint_reports_the_queue(store, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reason", ["user", "new"])
-async def test_runs_the_user_asked_for_test_rewrites(store, monkeypatch, reason):
-    """A run the user asked for tests the suggested rewrites under its own timeout;
-    automatic runs only read the original statement."""
+async def test_every_run_tests_rewrites(store, monkeypatch, reason):
+    """User and automatic runs both test the suggested rewrites under the run's timeout."""
     add_query(store, "one", 100)
     monkeypatch.setattr("shared.config.targets.TargetsConfig.load", lambda self: None)
     monkeypatch.setattr("shared.config.targets.TargetsConfig.get", lambda self, target: {})
@@ -865,7 +870,7 @@ async def test_runs_the_user_asked_for_test_rewrites(store, monkeypatch, reason)
     service = FakeService()
     await AnalyzeQueue(store, service=service, clock=lambda: NOW).tick()
     options = service.calls[0][1]
-    assert options.test_rewrites is (reason == "user")
+    assert options.test_rewrites is True
     assert options.non_interactive and options.statement_timeout_ms == 1000
 
 
@@ -1301,3 +1306,101 @@ async def test_worker_missing_stored_result_keeps_detail(store, monkeypatch, det
     job = store.analyze_jobs("db")[0]
     assert job["state"] == "failed"
     assert job["error"] == f"Deep Analyze did not store a result: {expected}"
+
+
+@pytest.mark.asyncio
+async def test_a_write_is_analyzed_by_planning_its_row_search(store, monkeypatch):
+    store.record("db", NOW, [{"query_key": "touch", "calls": 10, "total_ms": 100}],
+                 {"touch": "UPDATE sessions SET seen = $1 WHERE token = $2"}, [], None)
+    monkeypatch.setattr("shared.config.targets.TargetsConfig.load", lambda self: None)
+    monkeypatch.setattr("shared.config.targets.TargetsConfig.get",
+                        lambda self, target: {"engine": "postgresql"})
+    store.set_settings("db", {"execute": True})
+    service = FakeService()
+    await AnalyzeQueue(store, service=service, clock=lambda: NOW).tick()
+    analyzed, options = service.calls[0][0], service.calls[0][1]
+    assert analyzed.sql.startswith("SELECT 1 FROM sessions WHERE token =")
+    assert options.fast is True
+
+
+@pytest.mark.asyncio
+async def test_a_database_added_mid_tick_gets_analyzed_in_that_tick(store, monkeypatch):
+    add_query(store, "one", 100)
+    monkeypatch.setattr("shared.config.targets.TargetsConfig.load", lambda self: None)
+    monkeypatch.setattr("shared.config.targets.TargetsConfig.get", lambda self, target: {})
+
+    class AddsADatabase(FakeService):
+        async def analyze(self, input, options):
+            if not self.calls:
+                # Someone adds a second database while the first one's analysis runs.
+                store.set_settings("late", {"enabled": True, "deep_analysis": True})
+                store.record("late", NOW, [{"query_key": "two", "calls": 10, "total_ms": 90}],
+                             {"two": "SELECT * FROM two"}, [], None)
+            async for event in super().analyze(input, options):
+                yield event
+
+    service = AddsADatabase()
+    await AnalyzeQueue(store, service=service, clock=lambda: NOW).tick()
+    assert [job["state"] for job in store.analyze_jobs("late")] == ["done"]
+    assert len(service.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_database_added_mid_tick_starts_while_slow_work_still_runs(store, monkeypatch):
+    add_query(store, "one", 100)
+    monkeypatch.setattr("shared.config.targets.TargetsConfig.load", lambda self: None)
+    monkeypatch.setattr("shared.config.targets.TargetsConfig.get", lambda self, target: {})
+    late_started = asyncio.Event()
+
+    class SlowFirst(FakeService):
+        async def analyze(self, input, options):
+            if "two" in input.sql:
+                late_started.set()
+            elif not self.calls:
+                store.set_settings("late", {"enabled": True, "deep_analysis": True})
+                store.record("late", NOW, [{"query_key": "two", "calls": 10, "total_ms": 90}],
+                             {"two": "SELECT * FROM two"}, [], None)
+                queue.wake()
+                # The first database's analysis only finishes once the late one has started.
+                await asyncio.wait_for(late_started.wait(), timeout=5)
+            async for event in super().analyze(input, options):
+                yield event
+
+    service = SlowFirst()
+    queue = AnalyzeQueue(store, service=service, clock=lambda: NOW)
+    queue._task = asyncio.current_task()
+    await queue.tick()
+    assert [job["state"] for job in store.analyze_jobs("late")] == ["done"]
+    assert [(job["state"], job.get("error")) for job in store.analyze_jobs("db")] == [("done", None)]
+
+
+@pytest.mark.asyncio
+async def test_freed_slots_rotate_across_databases(store, monkeypatch):
+    monkeypatch.setenv("RDST_MONITOR_ANALYSIS_LIMIT", "1")
+    monkeypatch.setattr("shared.config.targets.TargetsConfig.load", lambda self: None)
+    monkeypatch.setattr("shared.config.targets.TargetsConfig.get", lambda self, target: {})
+    store.set_settings("other", {"enabled": True, "deep_analysis": True})
+    for key, weight in (("a1", 300), ("a2", 200), ("a3", 100)):
+        add_query(store, key, weight)
+    store.record("other", NOW, [{"query_key": "b1", "calls": 10, "total_ms": 50}],
+                 {"b1": "SELECT * FROM b1"}, [], None)
+    service = FakeService()
+    await AnalyzeQueue(store, service=service, clock=lambda: NOW).tick()
+    order = [call[0].sql for call in service.calls]
+    # With one slot, the other database runs second rather than after all of db's queue.
+    assert order.index("SELECT * FROM b1") <= 1
+
+
+def test_a_first_pass_tests_rewrites_for_its_busiest_few(store):
+    from features.monitor.analyze_queue import FIRST_PASS_REWRITE_TESTS, _tests_rewrites
+
+    start = NOW - 60
+    store._write(lambda conn: conn.execute(
+        "INSERT OR REPLACE INTO monitor_setting VALUES ('db','enabled_at',?)", (str(start),)))
+    for index in range(5):
+        store._write(lambda conn, index=index: conn.execute(
+            "INSERT INTO analyze_job (target,query_key,reason,state,priority,enqueued_at) "
+            "VALUES ('db',?,'new','queued',?,?)", (f"q{index}", 100 - index, NOW)))
+    jobs = sorted(store.analyze_jobs("db"), key=lambda job: -job["priority"])
+    assert [_tests_rewrites(store, job) for job in jobs] == \
+        [True] * FIRST_PASS_REWRITE_TESTS + [False] * (5 - FIRST_PASS_REWRITE_TESTS)

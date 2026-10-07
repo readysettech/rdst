@@ -85,3 +85,16 @@ export function routeHref(route: LinkRoute): string {
   const search = new URLSearchParams(route.search).toString()
   return search ? `${route.to}?${search}` : route.to
 }
+
+/** The Database page's Actions view, opened on the item's likely fix. */
+export function fixRoute(item: InboxItem): LinkRoute | null {
+  if (!item.action) return null
+  return {
+    to: '/database',
+    search: {
+      target: item.target,
+      view: 'actions',
+      action: String(item.action.id),
+    },
+  }
+}

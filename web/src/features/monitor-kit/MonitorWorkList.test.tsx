@@ -87,7 +87,7 @@ describe('MonitorWorkList', () => {
       expect.stringContaining('you started it'),
     ])
     expect(screen.getByTestId('work-report').textContent).toContain(
-      'Nightly report for demoshop: running'
+      'Nightly checkup for demoshop: running'
     )
     // Finished work shows as a count until opened.
     expect(screen.getByTestId('work-done').textContent).toContain('6')

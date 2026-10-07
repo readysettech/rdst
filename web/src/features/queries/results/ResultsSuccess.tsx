@@ -1,5 +1,7 @@
 import { Alert } from '@rs/ui-new/alert'
+import { Disclosure } from '@rs/ui-new/disclosure'
 import { m } from '@rs/ui-new/motion'
+import type { ReactNode } from 'react'
 import {
   AdditionalRecommendationsSection,
   IndexRecommendationsSection,
@@ -17,6 +19,7 @@ import { ResultsSummaryCard } from './ResultsSummaryCard'
 import { selectResultsViewModel } from './resultsSelectors'
 
 export function ResultsSuccess({
+  condensed = false,
   results,
   rewriteTesting,
   readysetCacheability,
@@ -40,6 +43,7 @@ export function ResultsSuccess({
   isCaching?: boolean
   onAskFollowUp?: () => void
   hasExistingChat?: boolean
+  condensed?: boolean
 }) {
   const view = selectResultsViewModel(
     results,
@@ -77,7 +81,7 @@ export function ResultsSuccess({
           planOnly={view.planOnly}
           explainResults={view.explainResults}
         />
-        {view.cacheability && view.readysetVerdict ? (
+        {view.cacheability && view.readysetVerdict && !condensed ? (
           <div className="grid items-stretch gap-4 desktop:grid-cols-2">
             <ResultsNextStepCard
               step={view.nextStep}
@@ -103,44 +107,76 @@ export function ResultsSuccess({
         )}
       </div>
 
-      {!view.hasModelAnalysis ? (
-        <Alert
-          variant="warning"
-          modifier="outline"
-          icon="info"
-          iconPosition="left"
-          label={
-            view.planOnly
-              ? "The analysis model wasn't available. Planner estimates are still shown."
-              : "The analysis model wasn't available. Measured execution data is still shown."
-          }
+      <Details condensed={condensed}>
+        {condensed && view.cacheability && view.readysetVerdict ? (
+          <ResultsReadysetCard
+            verdict={view.readysetVerdict}
+            actionIsPrimary={view.nextStep.kind === 'readyset'}
+            cacheDeployed={cacheDeployed}
+            onCacheQuery={onCacheQuery}
+            onDeployNavigate={onDeployNavigate}
+            onSetUpCaching={onSetUpCaching}
+            isCaching={isCaching}
+          />
+        ) : null}
+        {!view.hasModelAnalysis ? (
+          <Alert
+            variant="warning"
+            modifier="outline"
+            icon="info"
+            iconPosition="left"
+            label={
+              view.planOnly
+                ? "The analysis model wasn't available. Planner estimates are still shown."
+                : "The analysis model wasn't available. Measured execution data is still shown."
+            }
+          />
+        ) : null}
+
+        {showTesting && view.testing ? (
+          <TestedOptimizationsSection testing={view.testing} />
+        ) : null}
+
+        {remainingIndexes.length > 0 ? (
+          <IndexRecommendationsSection
+            recommendations={remainingIndexes}
+            indexTesting={view.indexTesting}
+          />
+        ) : null}
+
+        {remainingOpportunities.length > 0 ? (
+          <AdditionalRecommendationsSection
+            opportunities={remainingOpportunities}
+            collapsible
+          />
+        ) : null}
+
+        <ResultsFooter
+          results={results}
+          target={target}
+          onAskFollowUp={onAskFollowUp}
+          hasExistingChat={hasExistingChat}
         />
-      ) : null}
-
-      {showTesting && view.testing ? (
-        <TestedOptimizationsSection testing={view.testing} />
-      ) : null}
-
-      {remainingIndexes.length > 0 ? (
-        <IndexRecommendationsSection
-          recommendations={remainingIndexes}
-          indexTesting={view.indexTesting}
-        />
-      ) : null}
-
-      {remainingOpportunities.length > 0 ? (
-        <AdditionalRecommendationsSection
-          opportunities={remainingOpportunities}
-          collapsible
-        />
-      ) : null}
-
-      <ResultsFooter
-        results={results}
-        target={target}
-        onAskFollowUp={onAskFollowUp}
-        hasExistingChat={hasExistingChat}
-      />
+      </Details>
     </m.div>
+  )
+}
+
+/** In the query list the score and next step lead; the rest of the analysis waits here. */
+function Details({
+  condensed,
+  children,
+}: {
+  condensed: boolean
+  children: ReactNode
+}) {
+  if (!condensed) return <>{children}</>
+  return (
+    <Disclosure
+      title="Details"
+      subtitle="Readyset fit, tested changes and every finding"
+    >
+      <div className="space-y-6 pt-2">{children}</div>
+    </Disclosure>
   )
 }

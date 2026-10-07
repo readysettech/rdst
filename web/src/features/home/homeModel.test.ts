@@ -1,102 +1,75 @@
 import { describe, expect, it } from 'vitest'
-import type { QueryRegistryEntry } from '../../lib/api'
-import { continueItems, deriveHomeState, portfolioCounts } from './homeModel'
+import type { InboxItem } from '../../lib/monitor/types'
+import { healthGlow, inboxStanding } from './homeModel'
 
-function entry(over: Partial<QueryRegistryEntry>): QueryRegistryEntry {
-  return {
-    sql: 'SELECT 1',
-    hash: 'h',
-    tag: '',
-    last_analyzed: '',
-    target: 'imdb',
-    frequency: 0,
-    source: 'manual',
-    most_recent_params: {},
-    first_analyzed: null,
-    max_duration_ms: 0,
-    avg_duration_ms: 0,
-    observation_count: 0,
-    readyset_supported: '',
-    ...over,
-  } as QueryRegistryEntry
+const calm = {
+  monitored: true,
+  failing: false,
+  urgent: 0,
+  watch: 0,
+  openActions: 0,
 }
 
-function history(firstTs: number | null, span = 0) {
-  return {
-    first_ts: firstTs,
-    last_ts: firstTs == null ? null : firstTs + span,
-    span_seconds: span,
-    resolutions: {
-      '60': { first_ts: firstTs },
-      '300': { first_ts: null },
-      '3600': { first_ts: null },
-      '86400': { first_ts: null },
-    },
-  }
-}
-
-describe('deriveHomeState', () => {
-  it('follows the setup: connect, turn on monitoring, collect, then monitor', () => {
-    expect(deriveHomeState(0, true, undefined)).toBe('first-run')
-    expect(deriveHomeState(2, false, history(null))).toBe('connected')
-    expect(deriveHomeState(1, true, history(null))).toBe('collecting')
-    expect(deriveHomeState(1, true, history(1000, 120))).toBe('collecting')
-    expect(deriveHomeState(1, true, history(1000, 3600))).toBe('active')
+describe('healthGlow', () => {
+  it('is green with nothing open', () => {
+    expect(healthGlow(calm)).toBe('positive')
   })
 
-  it('keeps paused monitoring with history on the active home', () => {
-    expect(deriveHomeState(1, false, history(1000, 86_400))).toBe('active')
+  it('is orange with open actions or Watch items', () => {
+    expect(healthGlow({ ...calm, openActions: 2 })).toBe('warning')
+    expect(healthGlow({ ...calm, watch: 1 })).toBe('warning')
+  })
+
+  it('is red with an Urgent item or failing monitoring, whatever else is open', () => {
+    expect(healthGlow({ ...calm, urgent: 1, openActions: 3 })).toBe('negative')
+    expect(healthGlow({ ...calm, failing: true })).toBe('negative')
+  })
+
+  it('stays neutral without monitoring', () => {
+    expect(healthGlow({ ...calm, monitored: false, urgent: 1 })).toBe('neutral')
   })
 })
 
-describe('portfolioCounts', () => {
-  const entries = [
-    entry({ hash: 'a', source: 'ask' }),
-    entry({ hash: 'b', source: 'ask', last_analyzed: '2026-07-01' }),
-    entry({
-      hash: 'c',
-      last_analyzed: '2026-07-02',
-      readyset_supported: 'yes',
-    }),
-    entry({
-      hash: 'd',
-      last_analyzed: '2026-07-03',
-      readyset_supported: 'yes',
-    }),
-    entry({ hash: 'e', readyset_supported: 'unsupported: joins' }),
-    entry({ hash: 'f', target: 'other', source: 'ask' }),
-  ]
+function item(fields: Partial<InboxItem>): InboxItem {
+  return {
+    id: 1,
+    target: 'orders',
+    type: 'latency_regression',
+    subject: 'q',
+    state: 'new',
+    severity: 0.7,
+    title: 'A query got slower',
+    body_json: '{}',
+    created_at: 0,
+    updated_at: 0,
+    resolved_at: null,
+    resolved_by: null,
+    seen_count: 0,
+    reopened_count: 0,
+    severity_band: 'watch',
+    tone: 'warning',
+    summary: '',
+    query_keys: ['q'],
+    subject_label: 'q',
+    group_key: 'q',
+    muted_by: null,
+    trend: [],
+    ...fields,
+  } as InboxItem
+}
 
-  it('counts completed comparisons separately from Readyset candidates', () => {
-    const counts = portfolioCounts(entries, 'imdb', new Set(['c']))
-    expect(counts).toEqual({
-      asked: 2,
-      analyzed: 3,
-      compared: 1,
-      candidates: 1,
+describe('inboxStanding', () => {
+  it("counts one database's urgent, watch and unread items", () => {
+    const items = [
+      item({ id: 1, severity: 0.9, severity_band: 'act_now' }),
+      item({ id: 2, state: 'seen' }),
+      item({ id: 3, target: 'billing' }),
+      item({ id: 4, status: 'back_to_normal' }),
+    ]
+    expect(inboxStanding(items, [], 'orders')).toEqual({
+      urgent: 1,
+      watch: 1,
+      fresh: 1,
     })
-  })
-
-  it('scopes the portfolio to the selected target', () => {
-    expect(portfolioCounts(entries, 'other').asked).toBe(1)
-  })
-})
-
-describe('continueItems', () => {
-  it('orders by recency and maps each state to an honest next action', () => {
-    const items = continueItems(
-      [
-        entry({ hash: 'old', source: 'ask', first_analyzed: '2026-01-01' }),
-        entry({ hash: 'an', last_analyzed: '2026-07-02', tag: 'slow_join' }),
-        entry({ hash: 'co', last_analyzed: '2026-07-03' }),
-      ],
-      'imdb',
-      new Set(['co'])
-    )
-    expect(items.map((item) => item.hash)).toEqual(['co', 'an', 'old'])
-    expect(items[0].nextAction).toBe('Compare')
-    expect(items[1].nextAction).toBe('Review')
-    expect(items[1].label).toBe('slow_join')
-    expect(items[2].nextAction).toBe('Analyze')
   })
 })

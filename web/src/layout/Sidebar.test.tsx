@@ -46,6 +46,9 @@ vi.mock('@tanstack/react-query', () => ({
             ? { enabled: false }
             : null,
   }),
+  // Monitoring stays off in these tests, so the nav never shows Home.
+  useQueries: ({ queries }: { queries: unknown[] }) =>
+    queries.map(() => ({ data: { enabled: false }, isPending: false })),
   useQueryClient: () => ({}),
   useMutation: ({ mutationFn }: { mutationFn: () => Promise<unknown> }) => ({
     mutate: () => void mutationFn(),
@@ -60,6 +63,7 @@ vi.mock('../features/inbox/useInboxUnread', () => ({
 
 vi.mock('../components/TargetDropdown', () => ({
   TargetDropdown: () => <button type="button">target</button>,
+  TargetSync: () => null,
 }))
 
 vi.mock('../components/ReportDialog', () => ({
@@ -134,7 +138,7 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
     rerender(<Harness open onClose={onClose} />)
     const active = document.activeElement as HTMLElement
     expect(active.tagName).toBe('A')
-    expect(active.getAttribute('href')).toBe('/')
+    expect(active.getAttribute('href')).toBe('/database')
 
     rerender(<Harness open={false} onClose={onClose} />)
     expect(document.activeElement).toBe(screen.getByTestId('hamburger'))
@@ -226,7 +230,7 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
 
   it('sizes footer utilities below the daily nav (F5)', () => {
     render(<Sidebar />)
-    const home = screen.getByRole('link', { name: /Home/ })
+    const home = screen.getByRole('link', { name: /^Inbox/ })
     const settings = screen.getByRole('link', { name: /Settings/ })
     const discord = screen.getByRole('link', { name: 'Join Discord' })
     expect(home.className).toContain('h-10')
@@ -254,7 +258,7 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
 
   it('gives nav links a focus-visible ring instead of the UA outline (F12)', () => {
     render(<Sidebar />)
-    const home = screen.getByRole('link', { name: /Home/ })
+    const home = screen.getByRole('link', { name: /^Inbox/ })
     const docs = screen.getByRole('link', { name: 'Docs' })
     expect(home.className).toContain('focus-visible:ring-2')
     expect(docs.className).toContain('focus-visible:ring-2')
@@ -295,12 +299,15 @@ describe('Sidebar experimental surfaces (team decision: off the nav)', () => {
 
   it('leads with Database and Inbox and lists no classic pages', () => {
     render(<Sidebar />)
-    const links = screen.getAllByRole('link').map((link) => link.textContent)
-    expect(links.slice(0, 5)).toEqual([
-      'Home',
+    // One monitored database or none: Home stays off the nav.
+    const links = screen
+      .getAllByRole('link')
+      .map((link) => link.textContent)
+      .filter((text) => !text?.includes('Logo'))
+    expect(links.slice(0, 4)).toEqual([
       'Database',
       'Inbox',
-      'Agent activity',
+      'Agent audit',
       'Ask',
     ])
     expect(

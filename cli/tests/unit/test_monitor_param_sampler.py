@@ -137,7 +137,7 @@ def test_interval_placeholders_keep_a_placeholder_a_generic_plan_reads():
 def test_automatic_skips_follow_the_analyzability_rules():
     assert automatic_skip_reason('ANALYZE "s".orders') == (
         "ANALYZE is a maintenance command, so there's no query plan to analyze.")
-    assert automatic_skip_reason("INSERT INTO t SELECT 1") == \
+    assert automatic_skip_reason("INSERT INTO t VALUES (1)") == \
         "INSERT changes data, so RDST doesn't run it."
     assert automatic_skip_reason("SELECT * FROM orders") is None
 

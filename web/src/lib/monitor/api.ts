@@ -754,10 +754,13 @@ export const cancelReport = (target: string, id: number) =>
     }
   )
 
-export const getReportHistory = (target: string, limit = 10) =>
+export const getReportHistory = (target: string, limit = 10, daily = false) =>
   pick<ReportHistory>(
     'reportHistory',
-    () => json(`${base(target)}/report/history${query({ limit })}`),
+    () =>
+      json(
+        `${base(target)}/report/history${query(daily ? { limit, daily: 'true' } : { limit })}`
+      ),
     () => {
       const history = reportHistoryFixture(scenario(), fixtureNow(), limit)
       const template = reportHistoryFixture('localdev', fixtureNow(), 1)
@@ -774,16 +777,25 @@ export const getReportHistory = (target: string, limit = 10) =>
     }
   )
 
-/** `id` may be 'latest'. Rejects with MonitorApiError(404) when there is no such report. */
-export const getReport = (target: string, id: number | 'latest') =>
+/**
+ * `id` may be 'latest' (the newest run of any kind) or 'daily' (the newest nightly report).
+ * Rejects with MonitorApiError(404) when there is no such report.
+ */
+export const getReport = (target: string, id: number | 'latest' | 'daily') =>
   pick<DatabaseReport>(
     'report',
-    () => json(`${base(target)}/report/${id}`),
+    () =>
+      json(
+        id === 'daily'
+          ? `${base(target)}/report/latest?daily=true`
+          : `${base(target)}/report/${id}`
+      ),
     () => {
       const newest = Math.max(0, ...stubState.finished.keys())
+      const latest = id === 'latest' || id === 'daily'
       const report =
-        finishedStubReport(id === 'latest' ? newest : id, target) ??
-        reportFixture(scenario(), id, fixtureNow(), target)
+        finishedStubReport(latest ? newest : id, target) ??
+        reportFixture(scenario(), latest ? 'latest' : id, fixtureNow(), target)
       if (!report) throw new MonitorApiError(404, 'Report not found')
       return report
     }

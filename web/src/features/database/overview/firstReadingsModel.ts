@@ -342,14 +342,14 @@ export function firstRun(input: FirstRunInput): FirstRunModel {
     reportAt == null
       ? {
           id: 'report',
-          label: 'Nightly report',
+          label: 'Nightly checkup',
           state: 'off',
           meta: 'Turned off',
           at: null,
         }
       : {
           id: 'report',
-          label: 'Nightly report',
+          label: 'Nightly checkup',
           state: 'pending',
           meta: null,
           at: reportAt,

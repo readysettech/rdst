@@ -95,7 +95,8 @@ test('dropping an index on a top query files a regression the open Inbox shows',
     await expect(row).not.toHaveAttribute('data-open', 'true')
     await row.getByRole('heading').getByRole('button').first().click()
     await expect(row).toHaveAttribute('data-open', 'true')
-    await row.locator('a[href*="/database"]').first().click()
+    // The time frame's link; a likely fix links to its action on the same page.
+    await row.locator('a[href*="/database"][href*="zoom="]').first().click()
     await expect(page).toHaveURL(/\/database/)
     await expect(page).toHaveURL(/zoom=\d+-\d+/)
     await expect(page.getByTestId('time-frame-chip')).toContainText('From your Inbox')

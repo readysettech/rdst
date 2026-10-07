@@ -81,8 +81,6 @@ vi.mock('@/features/database/reports', () => ({
   ReportView: () => <div data-testid="report-slot" />,
   ReportPicker: () => null,
   AnalyzeDatabaseButton: () => <button type="button">Analyze database</button>,
-  useReportRun: () => ({ active: false, status: 'idle', view: null }),
-  useRunCompletion: () => undefined,
 }))
 vi.mock('@/features/database/reports/reportNav', () => ({
   useOpenReport: () => vi.fn(),
@@ -182,9 +180,10 @@ describe('DatabasePage', () => {
     expect(within(health).getAllByRole('button')).toHaveLength(3)
     expect(screen.getByText('PostgreSQL 16.4')).toBeTruthy()
     expect(
-      screen.getByRole('tab', { name: 'Live' }).getAttribute('aria-selected')
+      screen.getByRole('tab', { name: 'Queries' }).getAttribute('aria-selected')
     ).toBe('true')
-    expect(screen.getByRole('tab', { name: 'Report' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Reports' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Actions' })).toBeTruthy()
     expect(screen.getByTestId('query-slot')).toBeTruthy()
     expect(screen.getByTestId('pulse-halo')).toBeTruthy()
   })
@@ -195,10 +194,10 @@ describe('DatabasePage', () => {
     const strip = await screen.findByTestId('first-run')
     // Collapsed to the step under way; Details shows all three.
     expect(strip.textContent).toContain('Finding your queries')
-    expect(strip.textContent).not.toContain('Nightly report')
+    expect(strip.textContent).not.toContain('Nightly checkup')
     fireEvent.click(within(strip).getByRole('button', { name: /Details/ }))
     expect(strip.textContent).toContain('Analyzing the most expensive queries')
-    expect(strip.textContent).toContain('Nightly report')
+    expect(strip.textContent).toContain('Nightly checkup')
     // The noisy counts and timers are gone.
     expect(strip.textContent).not.toMatch(/classified|First check|of 5 min/)
     // Readings are in and nothing has run: the waiting card stands in for chart and list.

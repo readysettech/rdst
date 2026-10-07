@@ -159,11 +159,13 @@ def test_settings_default_buffer_pool_merges_with_a_low_cache_hit():
     assert status["innodb_stats_auto_recalc"] == "crit"
     actions = {action["id"]: action for action in db_actions.database_actions(
         {"engine": "mysql", "config_audit": config},
-        {"cache_hit_ratio_min": 0.82, "deadlocks": 3})}
+        {"cache_hit_ratio_min": 0.82, "cache_hit_weighted": 0.9, "disk_reads_per_s": 400,
+         "deadlocks": 3})}
     buffers = actions["setting_innodb_buffer_pool_size"]
     # Like shared_buffers at its default: one story with the low cache hit.
     assert "cache_hit" not in actions and buffers["severity"] == "warn"
     assert "MySQL's out-of-the-box default" in buffers["finding"]
+    assert buffers["finding"].startswith("Only 90.0% of reads found their data in memory.")
     # The buffer pool resizes online, so no restart and SET PERSIST.
     assert buffers["restart"] is False
     assert actions["setting_innodb_io_capacity"]["sql"] == (

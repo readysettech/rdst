@@ -248,7 +248,13 @@ def query(target: str, key: str, range: RangeParam | None = None,
                          only=key)
     if not page["queries"]:
         raise HTTPException(404, "Query not found")
-    return page["queries"][0]
+    row = page["queries"][0]
+    meta = store.read("SELECT engine FROM stats_meta WHERE target=?", (target,))
+    if meta:
+        from features.monitor.plan_inputs import write_cost
+
+        row["write_cost"] = write_cost(store, target, row["text"], meta[0]["engine"], _now())
+    return row
 
 
 def _jobs_with_reasons(store: MonitorStore, target: str, jobs: list[dict],
@@ -656,6 +662,10 @@ def settings(target: str):
     return _settings(target)
 
 
+# Guards the lazy start of the monitor's background services.
+_SERVICES_LOCK = asyncio.Lock()
+
+
 @router.put("/targets/{target}/settings", **documented(models.MonitorSettings))
 async def put_settings(target: str, body: MonitorSettingsUpdate, request: Request):
     from features.monitor import database_limit
@@ -692,45 +702,48 @@ async def put_settings(target: str, body: MonitorSettingsUpdate, request: Reques
         loop = getattr(request.app.state, "monitor_loop", None)
         if loop is not None:
             loop.wake()
-    if values["enabled"] and hasattr(request.app.state, "monitor_scheduler"):
-        scheduler = request.app.state.monitor_scheduler
-        if scheduler is None:
-            from features.query_registry.scheduler import ObservationScheduler
+    # Two databases turned on together must not each start the background services.
+    async with _SERVICES_LOCK:
+        if values["enabled"] and hasattr(request.app.state, "monitor_scheduler"):
+            scheduler = request.app.state.monitor_scheduler
+            if scheduler is None:
+                from features.query_registry.scheduler import ObservationScheduler
 
-            scheduler = ObservationScheduler(query_discovery)
-            await scheduler.start()
-            request.app.state.monitor_scheduler = scheduler
-        else:
-            scheduler._refresh_targets(scheduler._clock())
+                scheduler = ObservationScheduler(query_discovery)
+                await scheduler.start()
+                request.app.state.monitor_scheduler = scheduler
+            else:
+                scheduler._refresh_targets(scheduler._clock())
+            if turned_on:
+                collect_soon = getattr(scheduler, "collect_soon", None)
+                if collect_soon is not None:
+                    collect_soon(target)
+        if values["enabled"] and hasattr(request.app.state, "monitor_loop"):
+            loop = request.app.state.monitor_loop
+            if loop is None:
+                from features.monitor.loop import start_monitor_loop
+
+                loop = await start_monitor_loop(
+                    scheduler=getattr(request.app.state, "monitor_scheduler", None))
+                request.app.state.monitor_loop = loop
+        if values["enabled"] and getattr(request.app.state, "analyze_queue", None) is None:
+            from features.monitor.analyze_queue import start_analyze_queue
+
+            request.app.state.analyze_queue = await start_analyze_queue()
         if turned_on:
-            collect_soon = getattr(scheduler, "collect_soon", None)
-            if collect_soon is not None:
-                collect_soon(target)
-    if values["enabled"] and hasattr(request.app.state, "monitor_loop"):
-        loop = request.app.state.monitor_loop
-        if loop is None:
-            from features.monitor.loop import start_monitor_loop
+            values["enabled_at"] = _now()
+            await asyncio.to_thread(_store().start_first_hour, target, values["enabled_at"])
+            values["first_hour_started_at"] = await asyncio.to_thread(
+                lambda: _store().first_hour(target)[0] or None)
+            _start_first_run(request.app.state, target)
+            queue = getattr(request.app.state, "analyze_queue", None)
+            if queue is not None and callable(getattr(queue, "wake", None)):
+                queue.wake()
+        if values["enabled"] and hasattr(request.app.state, "report_scheduler") and \
+                request.app.state.report_scheduler is None:
+            from features.monitor.report import ReportScheduler
 
-            loop = await start_monitor_loop(
-                scheduler=getattr(request.app.state, "monitor_scheduler", None))
-            request.app.state.monitor_loop = loop
-    if values["enabled"] and getattr(request.app.state, "analyze_queue", None) is None:
-        from features.monitor.analyze_queue import start_analyze_queue
-
-        request.app.state.analyze_queue = await start_analyze_queue()
-    if turned_on:
-        values["enabled_at"] = _now()
-        await asyncio.to_thread(_store().start_first_hour, target, values["enabled_at"])
-        values["first_hour_started_at"] = await asyncio.to_thread(
-            lambda: _store().first_hour(target)[0] or None)
-        _start_first_run(request.app.state, target)
-        queue = getattr(request.app.state, "analyze_queue", None)
-        if queue is not None and callable(getattr(queue, "wake", None)):
-            queue.wake()
-    if values["enabled"] and hasattr(request.app.state, "report_scheduler") and request.app.state.report_scheduler is None:
-        from features.monitor.report import ReportScheduler
-
-        request.app.state.report_scheduler = await ReportScheduler().start()
+            request.app.state.report_scheduler = await ReportScheduler().start()
     if not values["enabled"] and getattr(request.app.state, "monitor_loop", None):
         if not _store().monitored_targets():
             await request.app.state.monitor_loop.stop()
@@ -901,6 +914,53 @@ def inbox_action(item_id: int, action: Literal["seen", "snooze", "dismiss", "res
     return views.inbox_items(store, [item], incidents=True)[0]
 
 
+class ActionVerb(BaseModel):
+    until: int | None = None
+    reason: str | None = None
+
+
+@router.get("/targets/{target}/actions", **documented(models.ActionsPage))
+def target_actions(target: str):
+    from features.monitor import actions
+
+    return actions.present(_store(), target, _now())
+
+
+@router.post("/targets/{target}/actions/{action_id}/{verb}", **documented(models.ActionsPage))
+def action_verb(target: str, action_id: int, verb: Literal["snooze", "dismiss", "reopen", "check"],
+                body: ActionVerb | None = None):
+    """Snooze, dismiss or reopen an action; `check` reads the database now to see if it's done."""
+    from features.monitor import actions
+    from features.monitor.loop import _scan_stats
+
+    store, now = _store(), _now()
+    if not any(row["id"] == action_id for row in store.actions(target)):
+        raise HTTPException(404, "Action not found")
+    if verb == "check":
+        from features.monitor.loop import _scan_indexes
+
+        try:
+            store.sync_indexes(target, _scan_indexes(target), now)
+            store.record_stats(target, _scan_stats(target))
+        except Exception as exc:
+            raise HTTPException(503, f"Couldn't read the database: {exc}") from exc
+        actions.refresh(store, target, now)
+    else:
+        if verb == "snooze" and body is not None and body.until is not None and body.until <= now:
+            raise HTTPException(422, "A future snooze time is required")
+        actions.set_state(store, target, action_id, verb, now,
+                          until=body.until if body else None, reason=body.reason if body else None)
+    return actions.present(store, target, now)
+
+
+@router.get("/targets/{target}/index-plan", **documented(models.IndexPlan))
+def index_plan(target: str):
+    """The latest index plan; null until the first statistics read computes one."""
+    from features.monitor import actions
+
+    return actions.present_plan(_store(), target)
+
+
 @router.get("/targets/{target}/index-changes")
 def index_changes(target: str, since: int = 0):
     return {"changes": _store().read(
@@ -1027,6 +1087,26 @@ def _present_pulses(store: MonitorStore, target: str, rows: list[dict],
              **readings} for row in rows]
 
 
+def _connection_problem(store: MonitorStore, target: str) -> dict[str, str] | None:
+    """Why the database can't be reached right now, and what to check; None while it can."""
+    from features.monitor.connection import connection_problem
+
+    rows = store.read("SELECT subject,body_json FROM inbox_item WHERE target=? "
+                      "AND type='monitoring_issue' AND subject IN ('lost_connection',"
+                      "'password_missing') AND state NOT IN ('resolved','dismissed') "
+                      "ORDER BY id DESC LIMIT 1", (target,))
+    if not rows:
+        return None
+    if rows[0]["subject"] == "password_missing":
+        return {"reason": "No password is saved for this database.",
+                "fix": "Add the password for this database in Settings."}
+    try:
+        error = json.loads(rows[0]["body_json"] or "{}").get("error")
+    except ValueError:
+        error = None
+    return connection_problem(error)
+
+
 @router.get("/targets/{target}/pulse", **documented(models.MonitorPulsePage))
 def pulse(target: str, request: Request, limit: int = 5):
     if not 1 <= limit <= 50:
@@ -1034,7 +1114,8 @@ def pulse(target: str, request: Request, limit: int = 5):
     store = _store()
     scheduler = getattr(request.app.state, "monitor_scheduler", None)
     return {"pulses": _present_pulses(store, target, store.pulses(target, limit), scheduler),
-            **_readings(store, target, scheduler)}
+            **_readings(store, target, scheduler),
+            "connection_problem": _connection_problem(store, target)}
 
 
 @router.post("/targets/{target}/collect-now", **documented(models.CollectNowResult))
@@ -1135,22 +1216,29 @@ async def start_report(target: str, request: Request):
 
 
 @router.get("/targets/{target}/report/latest", **documented(models.DatabaseReport))
-def latest_report(target: str):
+def latest_report(target: str, daily: bool = False):
+    """The newest run of any kind, or with `daily` the newest one the Reports tab shows."""
     from features.monitor.report import present_report
 
     store = _store()
     # Sample days are demo history; the latest is always a real run when there is one.
     rows = store.read("SELECT * FROM report_run WHERE target=? "
+                      + (DAILY_ONLY if daily else "") +
                       "ORDER BY sample,COALESCE(period_end,ts) DESC,ts DESC,id DESC LIMIT 1",
                       (target,))
-    if not rows:
-        raise HTTPException(404, "No report yet")
-    return present_report(rows[0], store)
+    # Null until the first checkup; a fresh database's landing page reads this.
+    return present_report(rows[0], store) if rows else None
+
+
+# The Reports tab shows the finished nightly reports; a checkup someone runs, like the first
+# one, feeds Actions.
+DAILY_ONLY = "AND trigger='nightly' AND state='done' "
 
 
 @router.get("/targets/{target}/report/history", **documented(models.ReportHistory))
-def report_history(target: str, limit: int = 10):
-    """Finished reports only, newest day first; every run counts, sample days included."""
+def report_history(target: str, limit: int = 10, daily: bool = False):
+    """Finished reports only, newest day first; sample days included. Every run counts, or
+    with `daily` only the ones the Reports tab shows."""
     from features.monitor.report import report_summary
 
     if not 1 <= limit <= 100:
@@ -1158,6 +1246,7 @@ def report_history(target: str, limit: int = 10):
     store = _store()
     rows = store.read("SELECT id,target,ts,trigger,finished_at,report_json,period_start,"
                          "period_end,sample FROM report_run WHERE target=? AND state='done' "
+                         + (DAILY_ONLY if daily else "") +
                          "ORDER BY COALESCE(period_end,ts) DESC,sample,ts DESC,id DESC LIMIT ?",
                          (target, limit))
     texts = {item["query_key"]: item.get("text") or "" for row in rows

@@ -1,21 +1,12 @@
-import {
-  act,
-  cleanup,
-  fireEvent,
-  renderHook,
-  screen,
-  waitFor,
-  within,
-} from '@testing-library/react'
+import { cleanup, fireEvent, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { resetStubState, setFixtureTiming } from '@/lib/monitor/api'
 import { setFixtureOverride } from '@/lib/monitor/contract'
 import { FIXTURE_NOW, reportSummaries } from '@/lib/monitor/fixtures'
-import { LinkStub, queryClientWrapper, renderWithClient } from '@/test-utils'
+import { LinkStub, renderWithClient } from '@/test-utils'
 import { DayPicker } from './DayPicker'
 import { ReportView } from './ReportView'
 import { dayList } from './snapshotModel'
-import { resetReportRuns, useReportRun } from './useReportRun'
 
 const navigate = vi.fn()
 let search: Record<string, unknown> = {}
@@ -36,7 +27,6 @@ beforeEach(() => {
   setFixtureTiming(0)
   setFixtureOverride('localdev')
   resetStubState()
-  resetReportRuns()
   navigate.mockReset()
   search = {}
 })
@@ -44,42 +34,13 @@ afterEach(() => {
   vi.useRealTimers()
   cleanup()
   setFixtureOverride(undefined)
-  resetReportRuns()
-})
-
-it('runs Analyze database from queued to done with skipped and plan-only rows', async () => {
-  const { result } = renderHook(() => useReportRun('localdev'), {
-    wrapper: queryClientWrapper(),
-  })
-  await act(() => result.current.start())
-  await waitFor(() => expect(result.current.status).toBe('done'))
-  const states = result.current.view?.queries.map((row) => row.state) ?? []
-  expect(states).toHaveLength(15)
-  expect(states).toContain('skipped')
-  expect(states).toContain('provisional')
-  expect(states).toContain('failed')
-  expect(result.current.active).toBe(false)
-})
-
-it('shares one run between consumers and cancels it', async () => {
-  setFixtureTiming(0, 20)
-  const wrapper = queryClientWrapper()
-  const a = renderHook(() => useReportRun('localdev'), { wrapper })
-  const b = renderHook(() => useReportRun('localdev'), { wrapper })
-  await act(() => a.result.current.start())
-  await waitFor(() => expect(b.result.current.status).toBe('running'))
-  expect(b.result.current.reportId).toBe(a.result.current.reportId)
-  await act(() => b.result.current.cancel())
-  await waitFor(() => expect(a.result.current.status).toBe('cancelled'))
 })
 
 function ReportTab({ reportId = 'latest' as number | 'latest' }) {
-  const run = useReportRun('localdev')
   return (
     <ReportView
       target="localdev"
       reportId={reportId}
-      run={run}
       onShowLatest={() => undefined}
       onPick={(id) => navigate(id)}
     />
@@ -130,7 +91,7 @@ it('opens on the day, titled by its date alone, with a bar to jump between secti
     'The day in brief',
     'Database health',
     'The day in numbers',
-    'Database actions',
+    'What to change',
     'Queries per second',
     'What happened',
     'Queries to look at',
@@ -164,7 +125,7 @@ it('shows each query to look at with its grade and status, and opens it on the d
   expect(call.search.target).toBe('localdev')
 })
 
-it('puts health first, then the brief and database actions, before the chart, events and queries', async () => {
+it('puts health first, then the brief and what to change, before the chart, events and queries', async () => {
   renderWithClient(<ReportTab />)
   await screen.findByTestId('snapshot-title')
   const order = [...document.querySelectorAll('h2')].map(
@@ -174,7 +135,7 @@ it('puts health first, then the brief and database actions, before the chart, ev
     'Database health',
     'The day in numbers',
     'The day in brief',
-    'Database actions',
+    'What to change',
     'Queries per second',
     'Spikes',
     'What happened',
@@ -191,16 +152,9 @@ it('puts health first, then the brief and database actions, before the chart, ev
   expect(screen.getByTestId('day-numbers-against').textContent).toMatch(
     /^Against \w+day\. Pick one/
   )
-  const actions = screen.getAllByTestId('db-action')
-  expect(actions[0].textContent).toContain('Vacuum 1 bloated table')
-  // Actions start as one line each and open on a click.
-  expect(screen.queryAllByTestId('db-action-detail')).toHaveLength(0)
-  fireEvent.click(within(actions[0]).getByRole('button'))
-  const detail = within(actions[0]).getByTestId('db-action-detail')
-  expect(detail.textContent).toContain('18.0% dead')
-  expect(detail.textContent).toContain('Why today:')
-  expect(detail.textContent).toContain('VACUUM (ANALYZE) public.orders;')
-  expect(detail.textContent).not.toMatch(/\{\{q:/)
+  // What to change lives on Actions; the report points there.
+  const now = screen.getByTestId('report-actions-now')
+  expect(within(now).getByRole('button', { name: 'Open Actions' })).toBeTruthy()
 })
 
 it('opens a query from what happened in place, with the Database page second', async () => {
@@ -235,31 +189,20 @@ it('opens each query to look at on its fix, and a tile switches the chart', asyn
   expect(screen.getByTestId('download-csv')).toBeTruthy()
 })
 
-it("says there is no snapshot yet and offers to run today's", async () => {
+it('says the first daily report arrives tonight', async () => {
   setFixtureOverride('empty')
   renderWithClient(<ReportTab />)
-  expect(await screen.findByText('Today so far')).toBeTruthy()
-  // No promise about how long it takes.
+  expect(
+    await screen.findByText('Your first daily report arrives tonight')
+  ).toBeTruthy()
+  // No promise about how long it takes, and no report before the day is in.
   expect(screen.queryByText(/minute or two/)).toBeNull()
-  expect(screen.getByRole('button', { name: 'See today so far' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'See today so far' })).toBeNull()
 })
 
 it('says a missing day is gone', async () => {
   renderWithClient(<ReportTab reportId={9999} />)
   expect(await screen.findByText('This day is gone')).toBeTruthy()
-})
-
-it("replaces the snapshot with the animated run while today's runs", async () => {
-  setFixtureTiming(0, 30)
-  renderWithClient(<ReportTab />)
-  await screen.findByTestId('day-snapshot')
-  const { result } = renderHook(() => useReportRun('localdev'), {
-    wrapper: queryClientWrapper(),
-  })
-  await act(() => result.current.start())
-  const run = await screen.findByTestId('analyze-run')
-  expect(within(run).getByRole('list', { name: 'Analysis steps' })).toBeTruthy()
-  await act(() => result.current.cancel())
 })
 
 it('lists one clean row per day in the day picker, with prev and next', async () => {

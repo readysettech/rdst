@@ -958,8 +958,8 @@ function MoreRow({
 
 function CalmBand() {
   return (
-    <section className="space-y-3" aria-label="Act now">
-      <SectionHeader title="Act now" count={0} band="act_now" />
+    <section className="space-y-3" aria-label="Urgent">
+      <SectionHeader title="Urgent" count={0} band="act_now" />
       <div className="flex items-center gap-3 rounded-card border border-dashed border-border-layout-1 px-5 py-4">
         <Text level="body-small" className="text-content-layout-2">
           Nothing is hurting your databases right now.

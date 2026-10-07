@@ -1,63 +1,16 @@
 import { ErrorState } from '@rs/ui-new/error-state'
 import { Icon } from '@rs/ui-new/icon'
 import { Page } from '@rs/ui-new/page'
-import { Show } from '@rs/ui-new/show'
 import { Skeleton } from '@rs/ui-new/skeleton'
-import { HStack, VStack } from '@rs/ui-new/stack'
-import { Tag } from '@rs/ui-new/tag'
-import { useNavigate } from '@tanstack/react-router'
-import { DemoCard, JobCard } from './HomeCards'
-import { DatabaseHome, FirstRunHome } from './HomeStates'
-import { useHomeController } from './useHomeController'
+import { HStack } from '@rs/ui-new/stack'
+import { Text } from '@rs/ui-new/text'
+import { Link, Navigate } from '@tanstack/react-router'
+import type { ReactNode } from 'react'
+import { useMonitoredTargets } from '../../hooks/useMonitoredTargets'
+import { useSystemStatus } from '../../lib/useSystemStatus'
+import { DatabaseGrid, NextSteps } from './DatabaseGrid'
 
-export { DatabaseCard, DatabaseHome, FirstRunHome } from './HomeStates'
-
-function HomeLoading() {
-  return (
-    <Page className="gap-6">
-      <Page.Header>
-        <HStack className="w-full items-center gap-4">
-          <Skeleton className="h-12 w-12 rounded-2xl" />
-          <VStack className="items-start gap-2">
-            <Skeleton className="h-6 w-40 rounded-lg" />
-            <Skeleton className="h-4 w-80 max-w-full rounded-lg" />
-          </VStack>
-        </HStack>
-      </Page.Header>
-      <Page.Content className="space-y-4">
-        <Skeleton className="h-64 rounded-2xl" />
-        <div className="grid grid-cols-1 gap-4 tablet:grid-cols-2">
-          <Skeleton className="h-36 rounded-2xl" />
-          <DemoCard compact />
-        </div>
-      </Page.Content>
-    </Page>
-  )
-}
-
-export function HomePage() {
-  const controller = useHomeController()
-  const navigate = useNavigate()
-
-  if (controller.phase === 'loading') return <HomeLoading />
-
-  if (controller.phase === 'error') {
-    return (
-      <ErrorState
-        layout="page"
-        errorClass="rdst-service"
-        title="Home could not load"
-        message="RDST could not confirm the current target state. No database or query data was changed."
-        action={{
-          label: 'Open the demo',
-          onClick: () => navigate({ to: '/demo' }),
-        }}
-        onRetry={controller.retryCore}
-        detail={controller.errorDetail}
-      />
-    )
-  }
-
+function HomeFrame({ children }: { children: ReactNode }) {
   return (
     <Page className="gap-6">
       <Page.Header>
@@ -69,76 +22,67 @@ export function HomePage() {
               className="h-6 w-6 text-content-primary-soft"
             />
           </div>
-          <VStack className="min-w-0 flex-1 items-start gap-0.5">
-            {/* The sidebar's value-proposition line (C1 / D-5) is the one
-              place that says what RDST is for; a description here would print
-              the same sentence 300px away. */}
-            <Page.Title>Home</Page.Title>
-          </VStack>
-          <Show when={controller.target}>
-            <Tag
-              size="base"
-              variant="informative"
-              modifier="ghost"
-              label={controller.target}
-            />
-          </Show>
+          <Page.Title>Home</Page.Title>
         </HStack>
       </Page.Header>
-
-      <Page.Content>
-        <Show when={controller.phase === 'degraded'}>
-          <VStack className="items-stretch gap-4">
-            <ErrorState
-              errorClass="database"
-              title="Monitoring status didn't load"
-              message="RDST couldn't read this database's monitoring state. The Database page may still show it."
-              trustworthy="The target remains configured."
-              onRetry={controller.retryCore}
-              detail={controller.errorDetail}
-            />
-            <div className="grid grid-cols-1 gap-4 tablet:grid-cols-2">
-              <JobCard
-                to="/database"
-                icon="database"
-                title="Open database"
-                description="See live load and the queries worth fixing first."
-                chip={{ label: controller.target, variant: 'informative' }}
-              />
-              <DemoCard compact />
-            </div>
-          </VStack>
-        </Show>
-        <Show
-          when={
-            controller.phase === 'ready' && controller.state === 'first-run'
-          }
-        >
-          <FirstRunHome />
-        </Show>
-        <Show
-          when={
-            controller.phase === 'ready' && controller.state !== 'first-run'
-              ? controller.state
-              : null
-          }
-        >
-          {(state) => (
-            <DatabaseHome
-              state={state}
-              target={controller.target}
-              health={controller.health}
-              monitorQueries={controller.monitorQueries}
-              pulse={controller.pulse}
-              monitoringOn={controller.monitoringOn}
-              recents={controller.recents}
-              counts={controller.counts}
-              historyDays={controller.historyDays}
-              attentionCount={controller.attentionCount}
-            />
-          )}
-        </Show>
-      </Page.Content>
+      <Page.Content className="space-y-8">{children}</Page.Content>
     </Page>
+  )
+}
+
+function HomeLoading() {
+  return (
+    <HomeFrame>
+      <div className="grid grid-cols-1 gap-4 tablet:grid-cols-2">
+        <Skeleton className="h-48 rounded-2xl" />
+        <Skeleton className="h-48 rounded-2xl" />
+      </div>
+    </HomeFrame>
+  )
+}
+
+/**
+ * Home with no database opens Connect. With one monitored database it's that database's
+ * page; with two or more it's every database at a glance.
+ */
+export function HomePage() {
+  const status = useSystemStatus()
+  const { targets, monitored, isPending } = useMonitoredTargets()
+
+  if (status.isError || status.data?.error)
+    return (
+      <ErrorState
+        layout="page"
+        errorClass="rdst-service"
+        title="Home couldn't load"
+        message="RDST couldn't read your databases. Nothing was changed."
+        onRetry={() => void status.refetch()}
+        detail={String(status.error ?? status.data?.error ?? '')}
+      />
+    )
+  if (isPending) return <HomeLoading />
+  if (targets.length === 0) return <Navigate to="/onboarding" replace />
+  if (monitored.length < 2)
+    return (
+      <Navigate
+        to="/database"
+        search={monitored.length === 1 ? { target: monitored[0] } : {}}
+        replace
+      />
+    )
+  return (
+    <HomeFrame>
+      <DatabaseGrid targets={targets} monitored={monitored} />
+      <NextSteps />
+      <Text as="p" level="body-small" className="text-content-layout-3">
+        Curious how Readyset caching could speed up your database?{' '}
+        <Link
+          to="/demo"
+          className="text-content-primary-soft underline-offset-4 hover:underline"
+        >
+          Try the end-to-end demo
+        </Link>
+      </Text>
+    </HomeFrame>
   )
 }

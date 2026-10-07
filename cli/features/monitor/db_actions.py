@@ -12,6 +12,9 @@ from typing import Any
 from features.monitor.presentation import format_size, plain
 
 LARGE_TABLE_ROWS = 100_000
+VACUUM_MIN_BYTES = 8 * 1024 * 1024
+LOW_CACHE_HIT = 0.95
+MIN_DISK_READS_PER_S = 50
 FULL_SCANS_PER_DAY = 1_000
 BAD_SCAN_MULTIPLIER = 10
 
@@ -120,8 +123,18 @@ def setting_value(recommended: str) -> tuple[str, str | None] | None:
     return number, unit or None
 
 
+EXAMPLE_RAM_GB = 16
+
+
 def setting_sql(parameter: str, recommended: str, engine: str) -> str | None:
     value = setting_value(recommended)
+    share = re.match(r"(\d+)% of RAM", str(recommended or ""))
+    if value is None and share:
+        # RDST can't see the server's memory, so the SQL carries a worked example to resize.
+        example = EXAMPLE_RAM_GB * int(share.group(1)) // 100
+        sql = setting_sql(parameter, f"{example} GB", engine)
+        return sql and (f"-- {share.group(1)}% of the server's RAM: {example}GB on a "
+                        f"{EXAMPLE_RAM_GB} GB server. Change it to fit yours.\n{sql}")
     if value is None:
         return None
     number, unit = value
@@ -143,6 +156,23 @@ def setting_sql(parameter: str, recommended: str, engine: str) -> str | None:
     return sql + "\nSELECT pg_reload_conf();"
 
 
+def setting_steps(parameter: str, recommended: str, engine: str, restart: bool) -> str:
+    """Numbered steps, one per line: the value, where to set it, and when it takes effect."""
+    managed = ("On RDS, Aurora, Cloud SQL or Azure, set it in the instance's parameter group "
+               "instead; the SQL needs a superuser.")
+    run = (f"Run the SQL below to set {parameter}. {managed}")
+    if engine == "mysql":
+        apply = ("Restart MySQL; the new value takes effect then." if restart else
+                 "SET PERSIST applies it now and keeps it across restarts.")
+    else:
+        apply = ("Restart PostgreSQL in a quiet moment; the new value takes effect then."
+                 if restart else "The reload in the SQL applies it; no restart needed.")
+    relative = str(recommended or "").replace("of RAM", "of the server's RAM")
+    pick = (f"Pick a value near {relative}." if "RAM" in relative else
+            f"Set it to {recommended}." if recommended else None)
+    return "\n".join(step for step in (pick, run, apply) if step)
+
+
 # A MySQL table's free space is worth a rebuild from this much (below it, InnoDB's own extent
 # allocation dominates), and a purge backlog from this many undo records.
 MYSQL_FREE_WARN_BYTES = 64 * 1024 * 1024
@@ -161,6 +191,14 @@ def _action(**fields: Any) -> dict[str, Any]:
     return {**base, **fields}
 
 
+def _memory_short(numbers: dict[str, Any]) -> float | None:
+    """The read-weighted cache hit when misses are both frequent and a real share of reads."""
+    weighted, reads = numbers.get("cache_hit_weighted"), numbers.get("disk_reads_per_s")
+    if not isinstance(weighted, (int, float)) or not isinstance(reads, (int, float)):
+        return None
+    return weighted if weighted < LOW_CACHE_HIT and reads >= MIN_DISK_READS_PER_S else None
+
+
 def _settings(config: dict[str, Any], engine: str, lowest_hit: float | None
               ) -> list[dict[str, Any]]:
     actions = []
@@ -172,7 +210,7 @@ def _settings(config: dict[str, Any], engine: str, lowest_hit: float | None
         status = row.get("status")
         default_buffers = (parameter == DEFAULT_BUFFERS.get(engine) and
                            (_mb(current) or 0) <= DEFAULT_SHARED_BUFFERS_MB)
-        low_hit = isinstance(lowest_hit, (int, float)) and lowest_hit < 0.95
+        low_hit = isinstance(lowest_hit, (int, float))
         if status not in ("warn", "crit") and not default_buffers:
             continue
         title, why = SETTING_WORDS.get(parameter, (f"Review {parameter}", plain(row.get("note"))))
@@ -186,15 +224,13 @@ def _settings(config: dict[str, Any], engine: str, lowest_hit: float | None
                        "default.")
             severity = "warn" if low_hit else "info"
             if low_hit:
-                evidence.append({"label": "Lowest cache hit", "value": _pct(lowest_hit)})
+                finding = f"Only {_pct(lowest_hit)} of reads found their data in memory. {finding}"
+                evidence.append({"label": "Cache hit", "value": _pct(lowest_hit)})
         restart = parameter in (MYSQL_RESTART if engine == "mysql" else RESTART)
         actions.append(_action(
             id=f"setting_{parameter}", check="settings", title=title, severity=severity,
             finding=finding, evidence=evidence, why=why,
-            steps=("Change it, then restart the server for it to take effect." if restart else
-                   "SET PERSIST applies it now and keeps it across restarts."
-                   if engine == "mysql" else
-                   "Change it and reload the configuration; no restart needed."),
+            steps=setting_steps(parameter, recommended, engine, restart),
             sql=setting_sql(parameter, recommended, engine), restart=restart,
             setting={"name": parameter, "current": current, "target": recommended},
             caveat=None if default_buffers else plain(row.get("note")) or None))
@@ -259,8 +295,11 @@ def _vacuum(vacuum: dict[str, Any], engine: str) -> list[dict[str, Any]]:
     actions = []
     tables = [table for table in vacuum.get("tables") or [] if isinstance(table, dict)]
     mysql = engine == "mysql"
+    # Autovacuum keeps small tables in hand; a warning there isn't worth anyone's time.
     bloated = sorted((table for table in tables if table.get("status") in ("warn", "crit")
-                      and (not mysql or (table.get("free_bytes") or 0) >= MYSQL_FREE_WARN_BYTES)),
+                      and (not mysql or (table.get("free_bytes") or 0) >= MYSQL_FREE_WARN_BYTES)
+                      and (mysql or table.get("status") == "crit"
+                           or (table.get("size_bytes") or 0) >= VACUUM_MIN_BYTES)),
                      key=lambda table: -(table.get("dead_ratio_pct") or 0))
     if bloated and mysql:
         worst = bloated[0]
@@ -401,9 +440,11 @@ def _connections(connections: dict[str, Any], numbers: dict[str, Any], engine: s
                    "Lower the pooler's server pool size, or raise max_connections if the "
                    "server has memory to spare.")))
     idle = int(connections.get("idle_in_transaction_count") or 0)
-    if idle:
-        sessions = [row for row in connections.get("long_running_idle_in_tx") or []
-                    if isinstance(row, dict)]
+    sessions = [row for row in connections.get("long_running_idle_in_tx") or []
+                if isinstance(row, dict)]
+    # A snapshot often lands between two statements of a busy transaction; only a session left
+    # idle past a minute is one the application forgot.
+    if idle and sessions:
         longest = max((float(row.get("duration_seconds") or 0) for row in sessions), default=0)
         evidence = [{"label": "Sessions idle in a transaction", "value": str(idle)}]
         if longest:
@@ -476,7 +517,9 @@ def _workload(numbers: dict[str, Any], prior: dict[str, Any], engine: str
               ) -> list[dict[str, Any]]:
     actions = []
     lowest = numbers.get("cache_hit_ratio_min")
-    if isinstance(lowest, (int, float)) and lowest < 0.9:
+    reads = numbers.get("disk_reads_per_s")
+    quiet = isinstance(reads, (int, float)) and reads < MIN_DISK_READS_PER_S
+    if isinstance(lowest, (int, float)) and lowest < 0.9 and not quiet:
         evidence = [{"label": "Lowest cache hit", "value": _pct(lowest)}]
         average = numbers.get("cache_hit_ratio_avg")
         if isinstance(average, (int, float)):
@@ -557,9 +600,8 @@ def database_actions(collectors: dict[str, Any] | None, numbers: dict[str, Any],
     errors = collectors.get("section_errors") or {}
     usable = {name: section for name, section in collectors.items()
               if isinstance(section, dict) and name not in errors}
-    lowest = numbers.get("cache_hit_ratio_min")
     actions = _workload(numbers, prior or {}, engine)
-    actions += _settings(usable.get("config_audit") or {}, engine, lowest)
+    actions += _settings(usable.get("config_audit") or {}, engine, _memory_short(numbers))
     actions += _indexes(usable.get("index_health") or {}, engine)
     actions += _vacuum(usable.get("vacuum_bloat") or {}, engine)
     actions += _connections(usable.get("connections") or {}, numbers, engine)
@@ -584,7 +626,8 @@ def database_actions(collectors: dict[str, Any] | None, numbers: dict[str, Any],
                                        if row["label"] not in known]
                 action["severity"] = min(action["severity"], cache["severity"],
                                          key=SEVERITY_RANK.__getitem__)
-                action["finding"] = f"{cache['finding']} {action['finding']}"
+                if not action["finding"].startswith("Only "):
+                    action["finding"] = f"{cache['finding']} {action['finding']}"
     unique.sort(key=lambda action: SEVERITY_RANK[action["severity"]])
     return unique
 

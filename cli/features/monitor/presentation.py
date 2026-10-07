@@ -156,6 +156,8 @@ POSITIVE_TYPES = {"query_improved"}
 FYI_TYPES = {"daily_summary", "query_improved"}
 ACT_NOW_TYPES = {"lock_contention", "stuck_query", "monitoring_issue"}
 GROUP_BUCKET_SECONDS = 6 * 3600
+# A second of extra database time each minute.
+URGENT_GROUP_IMPACT_MS = 1000
 RECOVERED_WINDOW_S = 86400
 
 
@@ -549,7 +551,7 @@ def current_title(item: dict[str, Any]) -> str:
         body = item.get("body_json") or {}
         if isinstance(body, str):
             body = json.loads(body)
-        return str(body.get("headline_title") or "Daily report ready")
+        return str(body.get("headline_title") or "Checkup ready")
     if item["type"] == "monitoring_issue":
         return MONITORING_TITLES.get(item["subject"], item["title"])
     return item["title"]
@@ -683,8 +685,10 @@ def group_alert(keys: list[str], body: dict[str, Any], names: dict[str, str],
         else:
             impact = abs((after or 0) - (before or 0)) * (numbers["after_ms"] or
                                                           numbers["before_ms"] or 0) * 60
+        measured = None not in (before, after, numbers["after_qps" if latency else "after_ms"])
         members.append({"query_key": key, "display_name": names.get(key, f"Query {key}"),
-                        "before": before, "after": after, "change": change, "impact_ms": impact})
+                        "before": before, "after": after, "change": change, "impact_ms": impact,
+                        "measured": measured})
     members.sort(key=lambda member: (-member["impact_ms"], member["query_key"]))
     median = _median([member["change"] for member in members if member["change"] is not None])
     metric = "latency" if latency else "calls"
@@ -702,7 +706,9 @@ def group_alert(keys: list[str], body: dict[str, Any], names: dict[str, str],
     lead = (f"{label} {direction} {change_text(median)}." if median is not None else
             f"{len(keys)} {'query' if len(keys) == 1 else 'queries'} changed together.")
     return {"title": group_title(kinds), "summary": f"{lead} Most impact: {worst}." if worst
-            else lead, "measurement": measurement, "members": top, "median_change": median}
+            else lead, "measurement": measurement, "members": top, "median_change": median,
+            "impact_ms": sum(member["impact_ms"] for member in members)
+            if members and all(member.pop("measured") for member in members) else None}
 
 
 def alert_measurement(item: dict[str, Any], body: dict[str, Any]) -> dict[str, Any] | None:
@@ -796,6 +802,10 @@ def present_inbox_item(item: dict[str, Any], names: dict[str, str],
             title = repeat_title(top, len(keys), repeats, int(time.time()))
         if not recovered(item, body):
             summary = group["summary"]
+        # Many queries moving together asks to act now only when it costs real database time.
+        if band == "act_now" and group["impact_ms"] is not None and \
+                group["impact_ms"] < URGENT_GROUP_IMPACT_MS:
+            band = "watch"
         extra = {"measurement": group["measurement"], "members": group["members"],
                  "median_change": group["median_change"]}
     return {**item, "title": title,
@@ -909,7 +919,7 @@ def band_reason(item: dict[str, Any], body: dict[str, Any], status: str) -> str:
     label = ("Back to normal" if status == "back_to_normal" else "Closed"
              if status == "closed" else BAND_LABELS.get("watch" if band == "fyi" else band, "Watch"))
     if item["type"] == "daily_summary":
-        return f"{label}: the daily report is ready"
+        return f"{label}: the checkup is ready"
     routine = routine_repeat(body)
     what = "a routine burst" if routine else _what_changed(item)
     rule = RULE_PHRASES.get(item.get("relevance_rule") or "")

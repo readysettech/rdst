@@ -156,7 +156,12 @@ def _window_numbers(store: MonitorStore, target: str, start: int, end: int) -> d
     ratios = [point["cache_hit_ratio"] for point in points
               if point["cache_hit_ratio"] is not None]
     limits = [point["max_conns"] for point in points if point["max_conns"] is not None]
+    hits = sum(row.get("blks_hit") or 0 for row in rows)
+    reads = sum(row.get("blks_read") or 0 for row in rows)
     return {**period, "observed_seconds": seconds, "first_ts": first, "last_ts": last,
+            # Weighted by reads, so a quiet minute's few misses don't read as a memory problem.
+            "cache_hit_weighted": hits / (hits + reads) if hits + reads else None,
+            "disk_reads_per_s": reads / seconds,
             "peak_qps": busiest["qps"] if busiest else None,
             "peak_qps_at": busiest["ts"] if busiest else None,
             "cache_hit_ratio_avg": sum(ratios) / len(ratios) if ratios else None,
@@ -1006,15 +1011,10 @@ def brief_facts(snapshot: dict[str, Any], target: str) -> list[dict[str, Any]]:
         facts.append({"kind": "health", "text": f"{actions[0]['title']}: {finding}", "keys": [],
                       "why": action_why(actions[0]),
                       "weight": 90 if actions[0]["severity"] == "bad" else 70})
-    parts = []
+    # What to change is counted on Actions, which stays current; the day names its fixes.
     if ready:
-        parts.append(f"{len(ready)} {'query has' if len(ready) == 1 else 'queries have'} a "
-                     "suggested fix")
-    if actions:
-        parts.append(f"{len(actions)} database "
-                     f"{'change is' if len(actions) == 1 else 'changes are'} worth making")
-    if parts:
-        facts.append({"kind": "todo", "text": " and ".join(parts).capitalize() + ".",
+        facts.append({"kind": "todo", "text": f"{len(ready)} "
+                      f"{'query has' if len(ready) == 1 else 'queries have'} a suggested fix.",
                       "keys": [], "why": TOPIC_WHY["todo"], "weight": 45})
     spikes = snapshot.get("spikes") or []
     if spikes:
@@ -1065,11 +1065,19 @@ def _direction_matches(text: str) -> bool:
     return True
 
 
+# Phrasing that reads as machine-written filler; a sentence carrying it falls back to the facts.
+_SLOP = re.compile(
+    r"\b(?:quietly|simply|somehow|seamless(?:ly)?|crucial(?:ly)?|here's|here is|"
+    r"the whole (?:plan|point|thing)|the only thing|that's it|at the end of the day|"
+    r"the reality is)\b|\bnot\b[^.]{0,60}\b(?:but|it's|it is)\b|;", re.IGNORECASE)
+
+
 def clean_sentence(text: str, allowed: set[str], keys: set[str]) -> bool:
-    """A sentence the report may show: no SQL, no dashes, only known queries and numbers,
-    and every "rose/fell from X to Y" pointing the way the numbers move."""
+    """A sentence the report may show: no SQL, no dashes, no filler phrasing, only known
+    queries and numbers, and every "rose/fell from X to Y" pointing the way the numbers move."""
     stripped = _TOKEN.sub("", text)
     return bool(stripped.strip()) and _direction_matches(stripped) and not (
+        _SLOP.search(stripped) or
         _SQL.search(stripped) or re.search("[–—]", text) or
         any(number not in allowed for number in _NUMBER.findall(stripped)) or
         any(key not in keys for key in _TOKEN.findall(text)))
@@ -1093,6 +1101,15 @@ def brief_sentences(summary: str | None, facts: list[dict[str, Any]]) -> tuple[l
 
 
 # Assembly
+
+def database_check(store: MonitorStore, target: str, now: int,
+                   collectors: dict[str, Any]) -> list[dict[str, Any]]:
+    """Today's database findings from fresh checks, measured as the checkup measures them."""
+    start, end, _ = report_period("user", now)
+    prior_start, prior_end = prior_period(start, end)
+    return database_actions(collectors, _window_numbers(store, target, start, end),
+                            _window_numbers(store, target, prior_start, prior_end))
+
 
 def build(store: MonitorStore, target: str, start: int, end: int, now: int, *,
           partial: bool, run_analyses: list[dict[str, Any]] | None = None,

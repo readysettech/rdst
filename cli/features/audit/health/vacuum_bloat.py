@@ -20,7 +20,10 @@ _PG_TABLE_SQL = """
 SELECT
     schemaname,
     relname,
-    COALESCE(n_live_tup, 0) AS live_tup,
+    -- n_live_tup counts from the last statistics reset (or reads 0 before the first
+    -- analyze), so the planner's estimate stands in whenever it's the larger.
+    GREATEST(COALESCE(n_live_tup, 0),
+             (SELECT reltuples FROM pg_class c WHERE c.oid = relid), 0)::bigint AS live_tup,
     COALESCE(n_dead_tup, 0) AS dead_tup,
     last_vacuum,
     last_autovacuum,

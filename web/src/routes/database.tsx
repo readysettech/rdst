@@ -37,8 +37,11 @@ export type DatabaseSearch = {
   /** `settings` opens the monitoring settings sheet, `setup` the prerequisites check and
    * `enable` the turn-on dialog. */
   panel?: string
-  /** `report` shows the Report tab; `report` picks one (default latest). */
+  /** The tab: `actions`, `indexes`, `queries` (or `live`) or `report`; `report` picks one
+   * (default latest). */
   view?: string
+  /** An action to open on the Actions tab, from an Inbox item's likely fix. */
+  action?: string
   report?: string
   /** Hero metric (`load`, `calls`, `latency`) and a health chart in its place. */
   metric?: string
@@ -65,6 +68,7 @@ const KEYS = [
   'select',
   'panel',
   'view',
+  'action',
   'report',
   'metric',
   'health',

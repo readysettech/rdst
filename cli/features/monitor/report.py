@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import re
 import logging
 import time
 from dataclasses import asdict
 from datetime import datetime
-from typing import Any, Callable, Literal
+from typing import Any, Awaitable, Callable, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from features.monitor import database_limit, report_prompt, snapshot
+from features.monitor import action_explain, actions, database_limit, report_prompt, snapshot
 from features.monitor.analyze_queue import daily_cap, enqueue_for_report, started_today
 from features.monitor.run_guard import ThreadWork
 from features.monitor.naming import target_names
@@ -23,6 +24,7 @@ from shared.llm_manager.inference_attribution import (
     count_billable_calls, inference_workflow, monitoring_database,
 )
 from shared.monitor.monitor_store import EVERYTHING_ELSE, RETIRED_TYPES, MonitorStore
+from shared.monitor.statements import statement_kind
 
 logger = logging.getLogger(__name__)
 USER_WAIT_SECONDS = 60
@@ -99,6 +101,18 @@ class QueryNote(BaseModel):
     action: str = ""
 
 
+class ActionPick(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action_id: str
+    why: str | None = None
+
+
+class ActionOverlap(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action_ids: list[str]
+    note: str
+
+
 class ReportNarrative(BaseModel):
     model_config = ConfigDict(extra="forbid")
     summary: str
@@ -110,6 +124,10 @@ class ReportNarrative(BaseModel):
     brief_items: list[BriefItem] | None = None
     database_recommendations: list[DatabasePick] | None = None
     query_notes: list[QueryNote] | None = None
+    # The checkup's order and wording for the open actions; absent before checkups.
+    action_picks: list[ActionPick] | None = None
+    index_plan_explanation: str | None = None
+    overlaps: list[ActionOverlap] | None = None
 
 
 def validate_narrative(raw: str | dict[str, Any]) -> dict[str, Any]:
@@ -321,24 +339,42 @@ async def _fallback_explain(target: str, key: str, sql: str,
     return result
 
 
-def _collect_context(target: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    from features.audit.health import collect_health_report
-    from features.schema.schema_collector import collect_all_tables_schema
+def _target_config(target: str) -> dict[str, Any]:
     from shared.config.targets import TargetsConfig
 
     config = TargetsConfig()
     config.load()
-    target_config = config.get(target) or {}
+    return config.get(target) or {}
+
+
+def collect_health(target: str, target_config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The database checks (vacuum, indexes, connections, settings, replication, full
+    scans): SQL against the database, no model."""
+    from features.audit.health import collect_health_report
+
+    target_config = target_config if target_config is not None else _target_config(target)
     engine = target_config.get("engine", "postgresql")
     try:
-        health = asdict(collect_health_report(target_config, engine))
+        return asdict(collect_health_report(target_config, engine, target=target))
     except Exception as exc:
-        health = {"collection_error": str(exc), "engine": engine}
+        return {"collection_error": str(exc), "engine": engine}
+
+
+def _collect_context(target: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    from features.schema.schema_collector import collect_all_tables_schema
+
+    target_config = _target_config(target)
+    health = collect_health(target, target_config)
     try:
         schema = collect_all_tables_schema(target_config, target)
     except Exception as exc:
         schema = {"error": str(exc)}
     return health, schema
+
+
+def _checkup_actions(store: MonitorStore, target: str, now: int, day: dict[str, Any]) -> None:
+    """Refresh the actions with this run's database actions; their whys are written apart."""
+    actions.refresh(store, target, now, database=day.get("actions") or [])
 
 
 def _narrate(context: dict[str, Any]) -> dict[str, Any]:
@@ -488,43 +524,19 @@ def _file_report_items(store: MonitorStore, target: str, run_id: int, ts: int,
             return scans.get("compared", False) and table not in scans.get("unchecked_tables", [])
         return check in SECTION_OF or check in ("cache", "transactions")
 
-    health_items = {item["subject"]: item for item in store.inbox(target=target)
-                    if item["type"] == "health_finding"}
-    open_items = {subject: item for subject, item in health_items.items()
-                  if item["state"] not in ("resolved", "dismissed")}
-    active, headlines = set(), []
-    for action in actions:
-        subject = action["id"]
-        if action["severity"] not in ("warn", "bad") or not checked(action["check"], subject):
-            continue
-        active.add(subject)
-        prior = open_items.get(subject)
-        previous_body = json.loads(prior["body_json"]) if prior else {}
-        last = health_items.get(subject) or {}
-        dismissed = last.get("state") == "dismissed"
-        # A finding that cleared recently and came back is a flap, not news.
-        returning = last.get("state") == "resolved" and \
-            ts - int(last.get("resolved_at") or 0) < HEADLINE_QUIET_S
-        headline = action["severity"] == "bad" and not dismissed and not returning and (
-            prior is None or (previous_body.get("severity") == "warn" and
-                              not previous_body.get("headline_report_id")))
-        if headline:
-            headlines.append(action)
-        headline_id = run_id if headline else previous_body.get("headline_report_id")
-        store.upsert_item(target, "health_finding", subject,
-                          .75 if action["severity"] == "bad" else .6, action["title"],
-                          {**action, "report_id": run_id, "headline_report_id": headline_id},
-                          ts, delivery="inbox",
-                          reopen_resolved=True)
-    for subject, item in open_items.items():
-        body = json.loads(item["body_json"])
-        if subject not in active and checked(body.get("check", ""), subject):
-            body["resolution"] = {"before": {"severity": body.get("severity")},
-                                  "after": {"report_id": run_id}}
-            store.update_item_body(item["id"], body)
-            store.action_item(item["id"], "resolve", ts, resolved_by="code", measured_recovery=True)
+    # Findings live on the Actions tab; the Inbox keeps only the checkup's own notice. Items
+    # filed before Actions existed close here.
+    for item in store.inbox(target=target):
+        if item["type"] == "health_finding" and item["state"] not in ("resolved", "dismissed"):
+            store.action_item(item["id"], "resolve", ts, resolved_by="code")
+    # Headline a bad finding only the night its action first opens, so it never nags.
+    opened = {row["key"] for row in store.actions(target)
+              if row["opened_at"] >= int(row_ts(store, run_id) or ts)}
+    headlines = [action for action in actions
+                 if action["severity"] == "bad" and checked(action["check"], action["id"])
+                 and f"db:{action['id']}" in opened]
     body = {"report_id": run_id, "summary": narrative["summary"]}
-    title = "Daily report ready"
+    title = "Checkup ready"
     if headlines:
         title = headlines[0]["title"] if len(headlines) == 1 else f"{len(headlines)} things to fix on {target}"
         body.update(headline_title=title, headline_summary=headlines[0]["finding"] +
@@ -538,6 +550,11 @@ def _file_report_items(store: MonitorStore, target: str, run_id: int, ts: int,
     item = store.upsert_item(target, "daily_summary", _local_day(ts), .4, title, body, ts,
                              delivery="notify" if headlines else "inbox")
     close_older_reports(store, target, item["id"], ts)
+
+
+def row_ts(store: MonitorStore, run_id: int) -> int | None:
+    row = store.report(run_id)
+    return int(row["ts"]) if row else None
 
 
 def close_older_reports(store: MonitorStore, target: str, keep_id: int, ts: int) -> None:
@@ -807,6 +824,7 @@ async def run_report(target: str, trigger: Literal["nightly", "user"], *,
                   "title": item["title"], "body": json.loads(item["body_json"])}
                  for item in store.inbox(target=target) if item["state"] in {"new", "seen", "snoozed"}]
         index_facts = await _to_thread(target, _index_facts, store, target)
+        await _to_thread(target, _checkup_actions, store, target, now, day)
         context = {"target": target, "top_queries": [{"query_key": key, "display_name": names[key],
                    "text": texts.get(key, ""), "total_ms": totals[key]["total_ms"],
                    "db_time_share": totals[key]["total_ms"] / total_db_ms if total_db_ms else 0}
@@ -1154,6 +1172,46 @@ def _day_summary(row: dict[str, Any], day: dict[str, Any] | None) -> dict[str, A
             "qps": qps}
 
 
+FIRST_CHECKUP_MIN_S = 120
+FIRST_CHECKUP_MAX_S = 600
+FIRST_PASS = 10
+CHECKUP_SLOTS = 2
+# When the first pass of analyses finished: the page stops showing its progress.
+FIRST_PASS_DONE = "first_pass_done"
+
+
+def first_pass(store: MonitorStore, target: str, now: int) -> dict[str, Any] | None:
+    """The first deep-analysis pass after monitoring turned on: how far along it is.
+
+    None outside the first monitored hour or once it's recorded as done. It's done ("due") once
+    the top queries are analyzed and two minutes have passed, or at ten minutes regardless.
+    """
+    start, end = store.first_hour(target)
+    if not start or not start <= now < end:
+        return None
+    done = store.read("SELECT value FROM monitor_setting WHERE target=? AND key=?",
+                      (target, FIRST_PASS_DONE))
+    if done and str(done[0]["value"]).isdigit() and int(done[0]["value"]) >= start:
+        return None
+    jobs = store.read("SELECT state FROM analyze_job WHERE target=? AND enqueued_at>=? "
+                      "AND enqueued_at<? AND reason IN ('new','top15_stale')", (target, start, end))
+    finished = sum(1 for job in jobs if job["state"] in ("done", "failed", "skipped"))
+    # The first pass analyzes reads only, so writes never count toward what it waits for.
+    tracked = sum(1 for row in store.read("SELECT text FROM query_text WHERE target=? AND "
+                                          "first_seen>=?", (target, start))
+                  if statement_kind(row["text"] or "") == "select")
+    total = max(len(jobs), min(FIRST_PASS, tracked))
+    elapsed = now - start
+    due = elapsed >= FIRST_CHECKUP_MAX_S or (
+        elapsed >= FIRST_CHECKUP_MIN_S and total > 0 and finished >= total)
+    return {"started_at": start, "analyzed": finished, "total": total, "due": due,
+            "due_by": start + FIRST_CHECKUP_MAX_S}
+
+
+# A claimed checkup waiting for a slot renews its claim this often, well inside the stale limit.
+SLOT_HEARTBEAT_S = 120
+
+
 def _nightly_ready(store: MonitorStore, target: str, now: int) -> bool:
     """Wait for a minute of observed query history and a positive query delta in the day
     the nightly report covers."""
@@ -1180,6 +1238,9 @@ class ReportScheduler:
         self.clock = clock
         self._task: asyncio.Task | None = None
         self._runs: set[asyncio.Task] = set()
+        # Checkups share the model with deep analyses; a few at a time keeps both moving.
+        self._slots = asyncio.Semaphore(CHECKUP_SLOTS)
+        self._explaining: set[str] = set()
 
     async def start(self) -> "ReportScheduler":
         if self._task is None:
@@ -1236,38 +1297,93 @@ class ReportScheduler:
             if not database_limit._signed_in():
                 database_limit.hold_signed_out(self.store, target, now)
                 continue
-            levers = self.store.levers(target)
-            if not levers["nightly_report"] or local.hour < levers["nightly_hour"]:
-                continue
-            cutoff = int(local.replace(hour=levers["nightly_hour"], minute=0, second=0,
-                                       microsecond=0).timestamp())
-            if not _nightly_ready(self.store, target, now):
-                continue
-            day_start, _, _ = snapshot.report_period("nightly", now)
-            # One nightly snapshot per day: any real run already covering it counts.
-            if self.store.read(
-                "SELECT 1 FROM report_run WHERE target=? AND sample=0 "
-                "AND (state IN ('running','done') OR (trigger='nightly' AND state='failed')) "
-                "AND ((trigger='nightly' AND period_start=?) OR (period_start IS NULL AND "
-                "(ts>=? OR COALESCE(finished_at,0)>=?))) LIMIT 1",
-                (target, day_start, cutoff, cutoff)):
-                continue
-            run, claimed = self.store.claim_report(target, "nightly", now, day_start)
-            if claimed:
-                plan.append(("nightly", (target, run)))
+            nightly = self._nightly(target, now, local)
+            progress = first_pass(self.store, target, now)
+            if progress is not None and progress["due"]:
+                self.store.write_setting(target, FIRST_PASS_DONE, str(now))
+            if nightly is not None:
+                plan.append(("nightly", (target, nightly)))
+            if target not in self._explaining and action_explain.due(self.store, target, now):
+                plan.append(("explain", (target,)))
         return plan
+
+    def _nightly(self, target: str, now: int, local: datetime) -> dict[str, Any] | None:
+        """The nightly run this tick claims for the target, if one is due."""
+        levers = self.store.levers(target)
+        if not levers["nightly_report"] or local.hour < levers["nightly_hour"]:
+            return None
+        cutoff = int(local.replace(hour=levers["nightly_hour"], minute=0, second=0,
+                                   microsecond=0).timestamp())
+        if not _nightly_ready(self.store, target, now):
+            return None
+        day_start, _, _ = snapshot.report_period("nightly", now)
+        # One nightly snapshot per day: any real run already covering it counts.
+        if self.store.read(
+            "SELECT 1 FROM report_run WHERE target=? AND sample=0 "
+            "AND (state IN ('running','done') OR (trigger='nightly' AND state='failed')) "
+            "AND ((trigger='nightly' AND period_start=?) OR (period_start IS NULL AND "
+            "(ts>=? OR COALESCE(finished_at,0)>=?))) LIMIT 1",
+            (target, day_start, cutoff, cutoff)):
+            return None
+        run, claimed = self.store.claim_report(target, "nightly", now, day_start)
+        return run if claimed else None
+
+    async def _in_slot(self, work: Awaitable[Any], run_id: int | None = None) -> Any:
+        if run_id is None:
+            async with self._slots:
+                return await work
+        # A claimed run waiting for a slot stays alive, and runs only if nothing has failed or
+        # replaced it meanwhile.
+        while True:
+            try:
+                await asyncio.wait_for(self._slots.acquire(), timeout=SLOT_HEARTBEAT_S)
+                break
+            except asyncio.TimeoutError:
+                if not await asyncio.to_thread(self.store.touch_report, run_id, int(self.clock())):
+                    if inspect.iscoroutine(work):
+                        work.close()
+                    return None
+        try:
+            if not await asyncio.to_thread(self.store.touch_report, run_id, int(self.clock())):
+                if inspect.iscoroutine(work):
+                    work.close()
+                return None
+            return await work
+        finally:
+            self._slots.release()
 
     def _launch(self, plan: list[tuple[str, tuple]]) -> None:
         for kind, args in plan:
             if kind == "retry":
-                task = asyncio.create_task(self._retry_narrative(*args))
+                work = self._retry_narrative(*args)
+            elif kind == "explain":
+                self._explain(args[0])
+                continue
             else:
                 target, run = args
-                task = asyncio.create_task(run_report(target, "nightly", store=self.store,
-                                                      clock=self.clock, claimed_run=run,
-                                                      wake_queue=_wake_analyze_queue))
+                work = run_report(target, "user" if kind == "first" else "nightly",
+                                  store=self.store, clock=self.clock, claimed_run=run,
+                                  wake_queue=_wake_analyze_queue)
+            run_id = None if kind == "retry" else args[1]["id"]
+            task = asyncio.create_task(self._in_slot(work, run_id))
             self._runs.add(task)
             task.add_done_callback(self._finished)
+
+    def _explain(self, target: str) -> None:
+        """The whys for a database's new changes: its own short call, apart from the slots
+        nightly checkups wait on."""
+        self._explaining.add(target)
+
+        async def run() -> None:
+            try:
+                await _to_thread(target, action_explain.explain, self.store, target,
+                                 int(self.clock()))
+            finally:
+                self._explaining.discard(target)
+
+        task = asyncio.create_task(run())
+        self._runs.add(task)
+        task.add_done_callback(self._finished)
 
     def _finished(self, task: asyncio.Task) -> None:
         self._runs.discard(task)

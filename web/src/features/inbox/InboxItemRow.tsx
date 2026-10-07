@@ -16,7 +16,7 @@ import { SeverityIcon } from '../monitor-kit/SeverityIcon'
 import { itemBand, itemTone } from '../monitor-kit/severity'
 import { ActionTiles } from './ActionTiles'
 import { actionTiles, adviceNotes } from './actionTileModel'
-import { itemLink, itemRoute, routeHref } from './inboxLinks'
+import { fixRoute, itemLink, itemRoute, routeHref } from './inboxLinks'
 import {
   closedLabel,
   type SentStamp,
@@ -412,6 +412,7 @@ export function InboxItemRow({
           {title}
           <CompactStory item={item} story={story} actions={actions} />
           <ReasonLine item={item} tone={tone} />
+          <LikelyFixLine item={item} actions={actions} />
         </div>
         <Text
           level="caption"
@@ -480,6 +481,7 @@ export function InboxItemRow({
             database={showTarget ? item.target : null}
           />
           <ReasonLine item={item} tone={tone} />
+          <LikelyFixLine item={item} actions={actions} />
         </div>
         {open && (
           <div
@@ -757,7 +759,7 @@ const REASON_TONE: Record<string, string> = {
   neutral: 'text-content-layout-2',
 }
 
-/** True when a reason only restates the title ('The daily report is ready'). */
+/** True when a reason only restates the title ('The checkup is ready'). */
 function sameWords(reason: string, title: string) {
   const words = (text: string) =>
     text
@@ -787,6 +789,45 @@ function ReasonLine({ item, tone }: { item: InboxItem; tone: string }) {
         <span className={cn('font-medium', REASON_TONE[tone])}>{label}: </span>
       )}
       {rest}
+    </Text>
+  )
+}
+
+/** The open action that would likely fix this item, linked to the Database page's Actions. */
+function LikelyFixLine({
+  item,
+  actions,
+}: {
+  item: InboxItem
+  actions: InboxActions
+}) {
+  const route = fixRoute(item)
+  if (!route || !item.action) return null
+  return (
+    <Text
+      as="p"
+      level="caption"
+      data-testid="item-likely-fix"
+      className="min-w-0 text-content-layout-3"
+    >
+      <span className="font-medium">Likely fix: </span>
+      <a
+        href={routeHref(route)}
+        onClick={(event) => {
+          if (
+            event.button !== 0 ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.shiftKey
+          )
+            return
+          event.preventDefault()
+          actions.openRoute(item, route)
+        }}
+        className="rounded-control text-content-primary-soft underline-offset-4 outline-none hover:underline focus-visible:shadow-focus"
+      >
+        {item.action.title}
+      </a>
     </Text>
   )
 }

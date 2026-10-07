@@ -27,16 +27,11 @@ import {
 
 /** Every daily nav destination, with the page title it must agree with. */
 const NAV = [
-  { path: '/', label: 'Home', heading: 'Home' },
-  { path: '/database', label: 'Database', heading: 'e2e-guard' },
   { path: '/inbox', label: 'Inbox', heading: 'Inbox' },
-  {
-    path: '/agent-activity',
-    label: 'Agent activity',
-    heading: 'Agent activity',
-  },
+  { path: '/database', label: 'Database', heading: 'e2e-guard' },
+  { path: '/agent-activity', label: 'Agent audit', heading: 'Agent audit' },
   { path: '/ask', label: 'Ask', heading: 'Ask' },
-  { path: '/demo', label: 'Try the demo' },
+  { path: '/demo', label: 'Readyset Caching' },
   { path: '/configure', label: 'Settings', heading: 'Settings' },
 ] as const
 
@@ -93,7 +88,8 @@ test('the mobile drawer carries a close control and keeps its footer inside', as
   await page.setViewportSize(PHONE)
   setBackendFixtures()
   await configureTestTarget(page, { hasPassword: true })
-  await page.goto('/')
+  // One database: Home redirects here, and a navigation closes the drawer.
+  await page.goto('/database')
 
   const hamburger = page.getByRole('button', { name: 'Open navigation' })
   await hamburger.click()
@@ -191,33 +187,29 @@ test('an install with no database is named in plain words', async ({
   await clearTargets(page.request)
   await page.goto('/')
 
-  const sidebar = page.locator('#app-sidebar')
-  await expect(sidebar.getByText('No targets', { exact: true })).toBeVisible()
-  await expect(sidebar.getByText('No Targets', { exact: true })).toHaveCount(0)
+  // Home opens Connect, the next step, instead of naming an empty list.
+  await expect(page).toHaveURL(/\/onboarding/)
+  await expect(
+    page.getByRole('heading', { name: 'Start with Readyset', exact: true })
+  ).toBeVisible()
+  await expect(page.getByText('No Targets', { exact: true })).toHaveCount(0)
 })
 
 /**
- * A-40 - the demo card's call to action sits on its row's footer baseline
- * rather than mid-card above a band of empty gradient.
+ * A-40 - the demo stays one link away from every page, in the daily nav as Readyset Caching.
  */
-test('the demo card lands its call to action on the row baseline', async ({
-  page,
-}) => {
+test('the demo is Readyset Caching in the sidebar nav', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   setBackendFixtures()
   await configureTestTarget(page, { hasPassword: true })
-  await page.goto('/')
+  await page.goto('/database')
 
-  const card = page.getByRole('link', { name: /Launch the demo/ })
-  await expect(card).toBeVisible()
-  const cardBox = await card.boundingBox()
-  const ctaBox = await page
-    .getByText('Launch the demo', { exact: true })
-    .boundingBox()
-  const cardBottom = (cardBox?.y ?? 0) + (cardBox?.height ?? 0)
-  const ctaBottom = (ctaBox?.y ?? 0) + (ctaBox?.height ?? 0)
-  expect(cardBottom - ctaBottom).toBeLessThan(60)
-  await shot(page, 'shell-home-demo-card')
+  const nav = page.locator('#app-sidebar nav')
+  await expect(
+    nav.getByRole('link', { name: /^Readyset Caching/ })
+  ).toHaveCount(1)
+  await nav.getByRole('link', { name: /^Readyset Caching/ }).click()
+  await expect(page).toHaveURL(/\/demo/)
 })
 
 /**
@@ -260,10 +252,8 @@ test('A-25 - the target switcher offers a way to manage targets', async ({
   await configureTestTarget(page, { hasPassword: true })
   await page.goto('/')
 
-  await page
-    .locator('#app-sidebar')
-    .getByRole('button', { name: /Switch target/ })
-    .click()
+  // The switcher lives in the Database page header.
+  await page.getByRole('button', { name: /Switch target/ }).click()
   await expect(
     page.getByRole('menuitem', { name: /Manage targets|Add target/ })
   ).toBeVisible()

@@ -27,7 +27,7 @@ def test_atomic_replace_retries_windows_sharing_violation(monkeypatch):
     monkeypatch.setattr(persistence.time, "sleep", delays.append)
 
     destination = Path("config.toml")
-    persistence._replace_with_retry("config.tmp", destination)
+    persistence.replace_with_retry("config.tmp", destination)
 
     assert attempts == [("config.tmp", destination)] * 4
     assert delays == pytest.approx([0.05, 0.10, 0.15])
@@ -45,7 +45,7 @@ def test_atomic_replace_stops_after_bounded_retries(monkeypatch):
     monkeypatch.setattr(persistence.time, "sleep", lambda _delay: None)
 
     with pytest.raises(PermissionError) as exc_info:
-        persistence._replace_with_retry("config.tmp", Path("config.toml"))
+        persistence.replace_with_retry("config.tmp", Path("config.toml"))
 
     assert exc_info.value.winerror == 32
     assert attempts == 4
