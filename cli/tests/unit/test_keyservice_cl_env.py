@@ -283,6 +283,22 @@ def test_every_main_build_cleans_up_cl_envs(tmp_path, changed):
     assert "keyservice-cl-env-deploy" not in steps
 
 
+@pytest.mark.parametrize(
+    "changed", ["rdst/keyservice/src/index.py\n", "rdst/features/ask/service.py\n"]
+)
+def test_every_main_build_deploys_the_keyservice(tmp_path, changed):
+    # Staging tracks main and a release ships every client change merged since the
+    # last one, so a build that touched no keyservice code still deploys both.
+    steps = _all_steps(_generated_pipeline(tmp_path, changed=changed, branch="main"))
+
+    staging = steps["keyservice-staging-deploy"]
+    assert staging["command"] == ".buildkite/deploy.sh staging"
+    assert "depends_on" not in staging
+    prod = steps["keyservice-prod-deploy"]
+    assert prod["command"] == ".buildkite/deploy.sh prod"
+    assert prod["depends_on"] == "release-approval"
+
+
 @pytest.mark.parametrize("name", ["cl14490", "pr-14490-7", "pr-x"])
 def test_personal_env_rejects_ci_preview_names(name):
     result = subprocess.run(

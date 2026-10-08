@@ -96,7 +96,7 @@ export interface StartBackendOptions {
   /** Runs this instead of the bundled backend; tests use it for a stand-in process. */
   command?: { file: string; args: string[] }
   log?: BackendLog
-  /** The keyservice a change build was packaged for; RDST_KEYSERVICE_URL still wins. */
+  /** The keyservice a change or staging build was packaged for; RDST_KEYSERVICE_URL wins. */
   keyservice?: string
   onPhase?: (phase: StartupPhase, store?: string) => void
   /** Called once the process exists, so a quit during startup can stop it. */

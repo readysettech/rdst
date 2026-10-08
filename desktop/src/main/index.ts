@@ -206,7 +206,7 @@ async function resolveRendererUrl(): Promise<string> {
   return webServer.url
 }
 
-/** The keyservice a change build was packaged for (the CI scripts bake it in), if any. */
+/** The keyservice a change or staging build was packaged for (CI bakes it in), if any. */
 function packagedKeyservice(): string | undefined {
   try {
     const packageJson = JSON.parse(

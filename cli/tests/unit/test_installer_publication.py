@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -10,6 +11,7 @@ import yaml
 
 RDST_DIR = Path(__file__).parents[2]
 DETECT_PIPELINE = RDST_DIR / ".buildkite" / "detect_pipeline_areas.sh"
+DESKTOP_BUILD_LIB = RDST_DIR / ".buildkite" / "desktop_build_lib.sh"
 WINDOWS_DESKTOP_BUILD = RDST_DIR / ".buildkite" / "build_rdst_desktop_windows.ps1"
 WINDOWS_DESKTOP_SIGNING_CONFIG = (
     RDST_DIR / ".buildkite" / "electron-builder-windows-signed.yml"
@@ -197,6 +199,72 @@ def test_desktop_pipeline_builds_smokes_and_publishes_windows(tmp_path: Path):
     assert "smoke-rdst-desktop-windows" in publish["depends_on"]
     assert "windows '*.exe'" in publish["command"]
     assert "smoke-rdst-desktop-windows" in steps["release-approval"]["depends_on"]
+
+
+@pytest.mark.parametrize("branch", ["main", "refs/changes/90/14490/5"])
+def test_desktop_builds_upload_staging_variants_publish_never_takes(
+    tmp_path: Path, branch: str
+):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    git = fake_bin / "git"
+    git.write_text(
+        "#!/bin/sh\nprintf '%s\\n' web-apps/apps/rdst-desktop/electron-builder.yml\n",
+        encoding="utf-8",
+    )
+    git.chmod(0o755)
+    env = os.environ | {"PATH": f"{fake_bin}:{os.environ['PATH']}", "BUILDKITE_BRANCH": branch}
+
+    result = run_script(DETECT_PIPELINE, env)
+
+    assert result.returncode == 0, result.stderr
+    pipeline = yaml.safe_load(result.stdout)
+    steps = {step.get("key"): step for step in flatten_steps(pipeline["steps"]) if "key" in step}
+    for platform in ("linux", "macos"):
+        build = steps[f"build-rdst-desktop-{platform}"]
+        staging = f"rdst/.buildkite-artifacts/rdst-desktop-{platform}-staging/*"
+        assert staging in build["artifact_paths"]
+    # The publisher only takes each platform's own directory, so a staging
+    # variant can never reach the download bucket or an update channel.
+    assert "staging" not in steps["publish-rdst-desktop"]["command"]
+
+
+def run_verify_packaged_keyservice(tmp_path: Path, packaged: str | None, expected: str):
+    app = tmp_path / "app" / "resources"
+    app.mkdir(parents=True)
+    metadata = {"name": "rdst-desktop", "version": "0.1.1"}
+    if packaged is not None:
+        metadata["rdstKeyservice"] = packaged
+    # asar stores package.json uncompressed between its header and other files.
+    (app / "app.asar").write_bytes(
+        b"\x04\x00\x00\x00header" + json.dumps(metadata).encode() + b"\x00more files"
+    )
+    return subprocess.run(
+        [
+            "bash",
+            "-c",
+            'set -euo pipefail; source "$1"; verify_packaged_keyservice "$2" "test package" "$3"',
+            "bash",
+            str(DESKTOP_BUILD_LIB),
+            str(tmp_path / "app"),
+            expected,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_staging_variant_must_carry_the_staging_keyservice(tmp_path: Path):
+    staging = "https://keyservice-staging.readyset.io"
+
+    assert run_verify_packaged_keyservice(tmp_path / "ok", staging, staging).returncode == 0
+
+    wrong = {"prod": "", "other": "https://keyservice.readyset.io", "none": None}
+    for case, packaged in wrong.items():
+        result = run_verify_packaged_keyservice(tmp_path / case, packaged, staging)
+        assert result.returncode == 1, case
+        assert f"expected '{staging}'" in result.stderr
 
 
 def test_windows_build_uploads_normalized_artifact_paths():
