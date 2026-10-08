@@ -211,7 +211,6 @@ def test_keyservice_cl_deploys_its_cl_env(tmp_path):
         "https://keyservice-cl14490.readyset.io"
     )
     assert "keyservice-migrations-append-only" in steps
-    assert "keyservice-cl-env-cleanup" not in steps
     # The build preview the E2E suite uses is still emitted alongside.
     assert "keyservice-preview-deploy" in steps
 
@@ -268,19 +267,36 @@ def test_main_build_bakes_no_keyservice_url(tmp_path):
     assert "RDST_BUILD_KEYSERVICE_URL" not in pipeline["env"]
 
 
-@pytest.mark.parametrize(
-    "changed", ["rdst/keyservice/src/index.py\n", "rdst/features/ask/service.py\n"]
-)
-def test_every_main_build_cleans_up_cl_envs(tmp_path, changed):
-    pipeline = _generated_pipeline(tmp_path, changed=changed, branch="main")
-    steps = {
-        step.get("key"): step for step in pipeline["steps"] if isinstance(step, dict)
-    }
-
-    cleanup = steps["keyservice-cl-env-cleanup"]
-    assert cleanup["command"] == ".buildkite/cleanup-cl-envs.sh"
-    assert cleanup["soft_fail"] is True
+def test_main_builds_leave_ci_env_cleanup_to_the_monthly_schedule(tmp_path):
+    steps = _all_steps(
+        _generated_pipeline(tmp_path, changed="rdst/keyservice/src/index.py\n", branch="main")
+    )
+    assert not [key for key in steps if key and "cleanup" in key]
     assert "keyservice-cl-env-deploy" not in steps
+
+
+def test_cleanup_mode_runs_only_the_cleanup(tmp_path):
+    # A git that fails proves the scheduled build never takes a diff.
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "git").write_text("#!/bin/sh\nexit 2\n", encoding="utf-8")
+    (fake_bin / "git").chmod(0o755)
+    result = subprocess.run(
+        ["bash", str(RDST_ROOT / ".buildkite" / "detect_pipeline_areas.sh")],
+        env=os.environ
+        | {"PATH": f"{fake_bin}:{os.environ['PATH']}", "BUILDKITE_BRANCH": "main", "RDST_PIPELINE_MODE": "cleanup"},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    (step,) = yaml.safe_load(result.stdout)["steps"]
+    assert step["key"] == "keyservice-ci-env-cleanup"
+    # A month separates runs, so a transient failure is retried.
+    assert step["retry"]["automatic"] == [{"exit_status": "*", "limit": 3}]
+    assert step["command"] == "python3 -I .buildkite/cleanup_ci_envs.py"
+    docker = next(p["docker#v5.11.0"] for p in step["plugins"] if "docker#v5.11.0" in p)
+    assert docker["image"] == "public.ecr.aws/docker/library/python:3.12-slim-bookworm"
+    assert (KEYSERVICE_CI / "cleanup_ci_envs.py").is_file()
 
 
 @pytest.mark.parametrize(
