@@ -142,9 +142,10 @@ fi
         "FAKE_BUILDKITE_STEPS": str(steps),
         "RDST_DESKTOP_ARTIFACT_SOURCE": "desktop/*",
         "RDST_DESKTOP_UPDATE_ARTIFACT_SOURCE": "desktop/update/*",
-        "RDST_DESKTOP_DESTINATION_BASE": "s3://bucket/packages/rdst-desktop",
-        "RDST_DESKTOP_PUBLIC_BASE_URL": "https://example.test/rdst-desktop",
+        "RDST_DESKTOP_DESTINATION_ROOT": "s3://bucket/packages",
+        "RDST_DESKTOP_PUBLIC_ROOT_URL": "https://example.test",
         "RDST_DESKTOP_IS_MAIN": "true",
+        "RDST_DESKTOP_FLAVOR": "release",
     }
     return env, store, artifacts, steps
 
@@ -241,3 +242,96 @@ def test_desktop_build_cannot_replace_published_metadata(publication_env):
     assert repeated.returncode != 0
     assert "Refusing to replace channel metadata" in repeated.stderr
     assert latest.read_bytes() == published_metadata
+
+
+def test_staging_channel_publishes_apart_from_production(publication_env):
+    # Main builds publish the staging channel first and production after the
+    # Release button, in the same build: neither may take the other's prefix or
+    # announcement step.
+    env, store, artifacts, steps = publication_env
+    _stage_windows_artifacts(artifacts, "0.1.900", b"staging")
+    staging = _publish(env | {"RDST_DESKTOP_FLAVOR": "staging"}, 900)
+    assert staging.returncode == 0, staging.stderr
+    staging_feed = store / "packages/rdst-desktop-staging/windows/update"
+    assert "version: 0.1.900" in (staging_feed / "latest.yml").read_text(encoding="utf-8")
+    assert not (store / "packages/rdst-desktop").exists()
+
+    _stage_windows_artifacts(artifacts, "0.1.900", b"release")
+    production = _publish(env, 900)
+    assert production.returncode == 0, production.stderr
+    production_feed = store / "packages/rdst-desktop/windows/update"
+    assert "version: 0.1.900" in (production_feed / "latest.yml").read_text(encoding="utf-8")
+    assert steps.read_text().splitlines() == [
+        "announce-rdst-desktop-windows-staging",
+        "announce-rdst-desktop-windows",
+    ]
+
+
+def test_only_a_staging_promotion_publishes_from_a_change(publication_env):
+    env, store, artifacts, _ = publication_env
+    _stage_windows_artifacts(artifacts, "0.1.900", b"staging")
+    change = env | {"RDST_DESKTOP_IS_MAIN": "false"}
+    for flavor, mode in (("release", "promote-staging"), ("staging", ""), ("release", "")):
+        refused = _publish(change | {"RDST_DESKTOP_FLAVOR": flavor, "RDST_PIPELINE_MODE": mode}, 900)
+        assert refused.returncode == 1, (flavor, mode)
+        assert "only main builds and staging promotions publish" in refused.stderr
+    assert not list(store.rglob("*.exe"))
+
+    promoted = _publish(
+        change | {"RDST_DESKTOP_FLAVOR": "staging", "RDST_PIPELINE_MODE": "promote-staging"}, 900
+    )
+    assert promoted.returncode == 0, promoted.stderr
+    assert (store / "packages/rdst-desktop-staging/windows/update/latest.yml").is_file()
+
+
+@pytest.mark.parametrize("flavor", ["../prod", "prod", ""])
+def test_desktop_flavor_is_validated(publication_env, flavor):
+    env, _, artifacts, _ = publication_env
+    _stage_windows_artifacts(artifacts, "0.1.900", b"bytes")
+    result = _publish(env | {"RDST_DESKTOP_FLAVOR": flavor}, 900)
+    assert result.returncode == 2
+    assert "desktop flavor" in result.stderr
+
+
+def _stage_macos_artifacts(root: Path, version: str, *, notarized: bool) -> None:
+    for child in root.rglob("*"):
+        if child.is_file():
+            child.unlink()
+    update = root / "update"
+    update.mkdir(parents=True, exist_ok=True)
+    sums = ""
+    for extension in ("dmg", "zip"):
+        package = root / f"rdst-desktop-staging-{version}-arm64.{extension}"
+        package.write_bytes(extension.encode())
+        sums += f"{hashlib.sha256(package.read_bytes()).hexdigest()}  {package.name}\n"
+    _write_text(root / "SHA256SUMS", sums)
+    _write_text(
+        update / "latest-mac.yml",
+        f"version: {version}\nfiles:\n  - url: rdst-desktop-staging-{version}-arm64.zip\n",
+    )
+    if notarized:
+        _write_text(root / "notarized", "submission-id\n")
+
+
+def test_unnotarized_macos_packages_are_never_published(publication_env):
+    # A main build's staging notarization soft-fails, which its dependents treat
+    # as passed, so the publisher itself refuses packages Apple did not accept.
+    env, store, artifacts, _ = publication_env
+    env = env | {"RDST_DESKTOP_FLAVOR": "staging", "BUILDKITE_BUILD_NUMBER": "900"}
+
+    def publish():
+        return subprocess.run(
+            [os.environ.get("BASH", "bash"), str(UPLOAD), "macos", "*.dmg", "*.zip"],
+            env=env, capture_output=True, text=True, check=False,
+        )
+
+    _stage_macos_artifacts(artifacts, "0.1.900", notarized=False)
+    refused = publish()
+    assert refused.returncode == 1
+    assert "staging macOS packages were not notarized" in refused.stderr
+    assert not list(store.rglob("*.dmg"))
+
+    _stage_macos_artifacts(artifacts, "0.1.900", notarized=True)
+    published = publish()
+    assert published.returncode == 0, published.stderr
+    assert (store / "packages/rdst-desktop-staging/macos/update/latest-mac.yml").is_file()

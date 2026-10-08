@@ -554,7 +554,11 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
         import shutil
         import subprocess
 
+        from shared.constants import rdst_instance_suffix
+
         action = getattr(args, "action", "add")
+        # Each desktop flavor registers its own server beside production's.
+        server_name = f"rdst{rdst_instance_suffix()}"
 
         # Check if claude CLI is available
         claude_path = shutil.which("claude")
@@ -596,7 +600,8 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
                 else:
                     mcp_command = [sys.executable, mcp_server_path]
 
-            # Install the /rdst slash command globally
+            # Install the /rdst slash command globally, named like the server so a
+            # staging or change build never replaces production's
             slash_cmd_content = """# RDST Mode Activated
 
 You have RDST (Readyset Data and SQL Toolkit) tools available.
@@ -653,7 +658,7 @@ Keep it conversational. The user shouldn't need to know the underlying commands 
             # Install slash command to ~/.claude/commands/
             claude_commands_dir = os.path.expanduser("~/.claude/commands")
             os.makedirs(claude_commands_dir, exist_ok=True)
-            slash_cmd_path = os.path.join(claude_commands_dir, "rdst.md")
+            slash_cmd_path = os.path.join(claude_commands_dir, f"{server_name}.md")
             try:
                 with open(slash_cmd_path, "w", encoding="utf-8") as f:
                     f.write(slash_cmd_content)
@@ -663,7 +668,7 @@ Keep it conversational. The user shouldn't need to know the underlying commands 
 
             try:
                 result = subprocess.run(
-                    [claude_path, "mcp", "add", "rdst", "--"] + mcp_command,
+                    [claude_path, "mcp", "add", server_name, "--"] + mcp_command,
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
@@ -672,11 +677,11 @@ Keep it conversational. The user shouldn't need to know the underlying commands 
                 if result.returncode == 0:
                     return RdstResult(
                         True,
-                        """RDST registered with Claude Code!
+                        f"""RDST registered with Claude Code!
 
 To use RDST in Claude:
   1. Start a new Claude Code session
-  2. Type /rdst to activate RDST mode
+  2. Type /{server_name} to activate RDST mode
 
 Claude will now have access to all RDST tools for query analysis and optimization.""",
                     )
@@ -692,7 +697,7 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
 
         elif action == "remove":
             # Remove the slash command
-            slash_cmd_path = os.path.expanduser("~/.claude/commands/rdst.md")
+            slash_cmd_path = os.path.expanduser(f"~/.claude/commands/{server_name}.md")
             if os.path.exists(slash_cmd_path):
                 try:
                     os.remove(slash_cmd_path)
@@ -701,7 +706,7 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
 
             try:
                 result = subprocess.run(
-                    [claude_path, "mcp", "remove", "rdst"],
+                    [claude_path, "mcp", "remove", server_name],
                     capture_output=True,
                     text=True,
                     encoding="utf-8",

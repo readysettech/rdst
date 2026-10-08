@@ -8,6 +8,8 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
+from shared.constants import rdst_instance_suffix
+
 _KEYRING_TIMEOUT = 2
 # A probe that timed out (a busy disk at startup, a slow credential service) is tried again
 # after this many seconds instead of leaving the keyring off for the life of the process.
@@ -48,7 +50,7 @@ class SecretStoreService:
     _probe_retry_at: dict[str, float] = {}
 
     def __init__(self, service_name: str | None = None):
-        self.service_name = service_name or self.SERVICE_NAME
+        self.service_name = service_name or f"{self.SERVICE_NAME}{rdst_instance_suffix()}"
         self._keyring = self._load_keyring()
 
     def _load_keyring(self):

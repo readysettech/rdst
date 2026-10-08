@@ -13,6 +13,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from shared.config.targets import TargetsConfig
 from shared.deploy.docker_topology import DockerTopology
+from shared.deploy.local_docker import target_container_name
 from shared.password_resolver import resolve_password_value
 from shared.service_events import ErrorEvent, ProgressEvent
 from shared.async_utils import run_blocking
@@ -353,7 +354,7 @@ class CacheService:
 
             cache_name, cache_config = resolved
             container_name = cache_config.get(
-                "container_name", f"rdst-readyset-{input_data.target}"
+                "container_name", target_container_name(input_data.target)
             )
             host = cache_config.get("host", "")
 
@@ -849,7 +850,7 @@ class CacheService:
 
             cache_name, cache_config = resolved
             container_name = cache_config.get(
-                "container_name", f"rdst-readyset-{input_data.target}"
+                "container_name", target_container_name(input_data.target)
             )
 
             # Stop and remove Docker container (best effort)

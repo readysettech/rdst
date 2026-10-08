@@ -12,13 +12,14 @@ from typing import Any, Dict, Optional
 from pathlib import Path
 from urllib.parse import quote as urlquote
 
+from shared.constants import rdst_instance_suffix
 from shared.deploy.docker_topology import (
     ContainerNetworkPlan,
     DockerTopology,
     DockerTopologyError,
 )
 
-MANAGED_SANDBOX_NAME = "rdst-readyset-sandbox"
+MANAGED_SANDBOX_NAME = f"rdst-readyset-sandbox{rdst_instance_suffix()}"
 MANAGED_SANDBOX_LABEL = "io.readyset.rdst.sandbox"
 MANAGED_SANDBOX_INSTANCE_LABEL = "io.readyset.rdst.instance"
 MANAGED_SANDBOX_PORT_ATTEMPTS = 3
@@ -238,7 +239,7 @@ def deploy_local_docker(
 
 def _find_existing_container(target_name: str) -> Optional[Dict[str, Any]]:
     """Check for existing Readyset container for this target."""
-    name = f"rdst-readyset-{target_name}"
+    name = target_container_name(target_name)
     try:
         result = subprocess.run(
             [
@@ -693,6 +694,17 @@ def remove_configured_legacy_container(name: str) -> Dict[str, Any]:
         }
     if state is None:
         return {"success": True, "removed": False}
+    # Every instance's managed sandbox carries the managed label; legacy
+    # containers never do, so another instance's sandbox is never taken.
+    labelled, label_error = _inspect_exact_container_checked(name)
+    if label_error:
+        return {
+            "success": False,
+            "removed": False,
+            "error": f"Could not verify legacy container '{name}': {label_error}",
+        }
+    if labelled and labelled.get("managed") == "true":
+        return {"success": False, "error": "Not an RDST legacy container name"}
     container_id = str(state.get("id") or "")
     if not container_id:
         return {
@@ -1089,8 +1101,9 @@ def _reconcile_ambiguous_managed_create() -> Dict[str, Any]:
     return {"success": True, "removed": False}
 
 
-def _container_name(target_name: str) -> str:
-    return f"rdst-readyset-{target_name}"
+def target_container_name(target_name: str) -> str:
+    """Name of the Readyset container RDST runs for a target, apart per instance."""
+    return f"rdst-readyset-{target_name}{rdst_instance_suffix()}"
 
 
 def _docker_inspect_state(name: str) -> Optional[Dict[str, Any]]:
@@ -1219,7 +1232,7 @@ def _tcp_reachable(host: str, port: int, timeout: float = 1.0) -> bool:
 def probe_local_docker(target_name: str) -> "ProbeResult":
     """Detect current state of the cache container for this target."""
     from .lifecycle import ProbeResult, ProbeState
-    name = _container_name(target_name)
+    name = target_container_name(target_name)
     state = _docker_inspect_state(name)
     if state is None:
         return ProbeResult(state=ProbeState.NOT_DEPLOYED, mode="docker", container_id=name,
@@ -1253,7 +1266,7 @@ def probe_local_docker(target_name: str) -> "ProbeResult":
 def start_local_docker(target_name: str) -> "LifecycleResult":
     """Start a stopped container (docker start)."""
     from .lifecycle import LifecycleResult, ProbeState
-    name = _container_name(target_name)
+    name = target_container_name(target_name)
     state = _docker_inspect_state(name)
     if state is None:
         return LifecycleResult(
@@ -1282,7 +1295,7 @@ def start_local_docker(target_name: str) -> "LifecycleResult":
 def stop_local_docker(target_name: str) -> "LifecycleResult":
     """Stop a running container without removing it (docker stop)."""
     from .lifecycle import LifecycleResult, ProbeState
-    name = _container_name(target_name)
+    name = target_container_name(target_name)
     state = _docker_inspect_state(name)
     if state is None:
         return LifecycleResult(
@@ -1311,7 +1324,7 @@ def stop_local_docker(target_name: str) -> "LifecycleResult":
 def restart_local_docker(target_name: str) -> "LifecycleResult":
     """Restart a container (docker restart)."""
     from .lifecycle import LifecycleResult, ProbeState
-    name = _container_name(target_name)
+    name = target_container_name(target_name)
     state = _docker_inspect_state(name)
     if state is None:
         return LifecycleResult(

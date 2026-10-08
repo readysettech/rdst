@@ -254,7 +254,7 @@ def test_cl_without_keyservice_changes_points_at_staging(tmp_path):
     assert pipeline["env"]["RDST_BUILD_KEYSERVICE_URL"] == (
         "https://keyservice-staging.readyset.io"
     )
-    sidecar = steps["build-rdst-sidecar-linux-amd64"]
+    sidecar = steps["build-rdst-sidecar-linux"]
     docker = next(
         p["docker#v5.11.0"] for p in sidecar["plugins"] if "docker#v5.11.0" in p
     )

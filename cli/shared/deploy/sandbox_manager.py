@@ -40,12 +40,13 @@ from shared.config.targets import TargetsConfig
 from shared.constants import rdst_data_dir
 from shared.deploy import READYSET_IMAGE
 from shared.deploy.docker_topology import DockerTopology
+from shared.deploy.local_docker import MANAGED_SANDBOX_NAME
 from shared.password_resolver import resolve_password_value
 from shared.persistence import delete_file, update_json, write_text
 
 logger = logging.getLogger(__name__)
 
-SANDBOX_CONTAINER_NAME = "rdst-readyset-sandbox"
+SANDBOX_CONTAINER_NAME = MANAGED_SANDBOX_NAME
 SANDBOX_DEPLOYMENT_VERSION = 5
 DEFAULT_IDLE_TTL = timedelta(days=1)
 DEFAULT_MANAGED_SANDBOX_PORTS = {"postgresql": 5433, "mysql": 3307}

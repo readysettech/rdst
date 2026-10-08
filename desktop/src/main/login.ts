@@ -2,6 +2,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
+import { appId, productName } from './instance.js'
+
 export interface LoginStatus {
   enabled: boolean
   available: boolean
@@ -17,11 +19,27 @@ interface LoginApp {
   }) => void
 }
 
-const ENTRY_NAME = 'com.readyset.rdst-desktop.desktop'
+/** Names the Linux autostart entry: its file is `<appId>.desktop`. */
+export interface LoginIdentity {
+  appId: string
+  productName: string
+}
+
+const PRODUCTION_IDENTITY: LoginIdentity = {
+  appId: appId(''),
+  productName: productName(''),
+}
 const HIDDEN_ARG = '--hidden'
 
-function autostartPath(env: NodeJS.ProcessEnv): string {
-  return path.join(env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'autostart', ENTRY_NAME)
+function autostartPath(
+  env: NodeJS.ProcessEnv,
+  identity: LoginIdentity
+): string {
+  return path.join(
+    env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'),
+    'autostart',
+    `${identity.appId}.desktop`
+  )
 }
 
 function escapeDesktopExec(value: string): string {
@@ -31,13 +49,14 @@ function escapeDesktopExec(value: string): string {
 export function getStartAtLogin(
   app: LoginApp,
   platform: NodeJS.Platform = process.platform,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  identity: LoginIdentity = PRODUCTION_IDENTITY
 ): LoginStatus {
   if (platform === 'linux') {
     if (env.APPIMAGE) {
       return { enabled: false, available: false, note: 'Start at login is unavailable in AppImage builds.' }
     }
-    return { enabled: fs.existsSync(autostartPath(env)), available: true }
+    return { enabled: fs.existsSync(autostartPath(env, identity)), available: true }
   }
   if (platform === 'darwin' || platform === 'win32') {
     return { enabled: app.getLoginItemSettings({ args: [HIDDEN_ARG] }).openAtLogin, available: true }
@@ -51,17 +70,18 @@ export function setStartAtLogin(
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
   executable: string = process.execPath,
-  appArgs: string[] = []
+  appArgs: string[] = [],
+  identity: LoginIdentity = PRODUCTION_IDENTITY
 ): LoginStatus {
   if (platform === 'linux') {
-    if (env.APPIMAGE) return getStartAtLogin(app, platform, env)
-    const entry = autostartPath(env)
+    if (env.APPIMAGE) return getStartAtLogin(app, platform, env, identity)
+    const entry = autostartPath(env, identity)
     if (enabled) {
       fs.mkdirSync(path.dirname(entry), { recursive: true })
       fs.writeFileSync(entry, [
         '[Desktop Entry]',
         'Type=Application',
-        'Name=RDST Desktop',
+        `Name=${identity.productName}`,
         `Exec=${[executable, ...appArgs].map(escapeDesktopExec).join(' ')} ${HIDDEN_ARG}`,
         'Terminal=false',
         'X-GNOME-Autostart-enabled=true',
@@ -70,12 +90,12 @@ export function setStartAtLogin(
     } else {
       fs.rmSync(entry, { force: true })
     }
-    return getStartAtLogin(app, platform, env)
+    return getStartAtLogin(app, platform, env, identity)
   }
   if (platform === 'darwin' || platform === 'win32') {
     app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: true, args: [HIDDEN_ARG] })
   }
-  return getStartAtLogin(app, platform, env)
+  return getStartAtLogin(app, platform, env, identity)
 }
 
 export function isHiddenLaunch(argv: string[] = process.argv): boolean {

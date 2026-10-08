@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from dataclasses import asdict
 from html import escape
 from typing import Any, AsyncGenerator, Optional
@@ -35,6 +36,10 @@ OAUTH_PROVIDERS = {
     "supabase": ("supabase_oauth", "Supabase"),
     "digitalocean": ("digitalocean_oauth", "DigitalOcean"),
 }
+
+# The desktop shell names the deep-link scheme it registered (rdst-staging for
+# a staging flavor, rdst-dev unpackaged); anything else falls back to rdst.
+_DESKTOP_PROTOCOL_RE = re.compile(r"^rdst(?:-[a-z0-9-]+)?$")
 
 
 class AwsLoginRequest(BaseModel):
@@ -378,7 +383,10 @@ async def _poll_provider_login(provider: str, login_id: str):
 def _provider_return_url(request: Request, provider: str) -> str:
     """Return to this web app, or to the desktop deep-link when sidecar-hosted."""
     if os.environ.get("RDST_DESKTOP") == "1":
-        return f"rdst://oauth-complete?provider={quote(provider)}"
+        scheme = os.environ.get("RDST_DESKTOP_PROTOCOL", "").strip()
+        if not _DESKTOP_PROTOCOL_RE.fullmatch(scheme):
+            scheme = "rdst"
+        return f"{scheme}://oauth-complete?provider={quote(provider)}"
 
     candidates = [request.headers.get("origin", ""), str(request.base_url)]
     for candidate in candidates:

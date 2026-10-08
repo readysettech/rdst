@@ -28,17 +28,20 @@ from features.qprouter.readyset_client import ReadysetClient
 from features.qprouter.sqp_client import to_decimal, to_hex
 from features.qpdemo.load_driver import DualPathLoadDriver, WindowStat
 from features.qpdemo.workload import WORKLOAD, load_sqls, workload_dicts
+from shared.constants import rdst_instance_suffix
 from shared.deploy.docker_topology import DockerTopology
 from shared.telemetry import telemetry
 
-PROJECT = "qpdemo"
+PROJECT = qdeploy.PROJECT
 ASSETS = Path(__file__).parent / "assets"
-WORKDIR = Path.home() / ".rdst" / "qpdemo"
+# Under ~/.rdst regardless of RDST_DATA_DIR, as production always kept it (running
+# qp-cron containers mount QP_CONFIG_DIR); a staging or change build uses its own.
+WORKDIR = Path.home() / f".rdst{rdst_instance_suffix()}" / "qpdemo"
 QP_CONFIG_DIR = WORKDIR / "qp-cron"
 # Legacy on-disk state; consolidated into config.toml's [demo] section on first
 # load, then removed. Retained only so the migration can find and delete them.
 STATE_PATH = WORKDIR / "state.json"
-DEMO_DIR = Path.home() / ".rdst" / "demo"
+DEMO_DIR = WORKDIR.parent / "demo"
 HISTORY_PATH = DEMO_DIR / "history.json"
 API_KEY = "rdst-demo-key"
 CREDS = dict(user="sqp_user", password="sqp_pass", database="sqp_test")

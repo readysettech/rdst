@@ -10,7 +10,9 @@
 // - Linux: whether a notification daemon owns org.freedesktop.Notifications on the
 //   session bus (`dbus-send`, then `gdbus`).
 
-export const APP_USER_MODEL_ID = 'com.readyset.rdst-desktop'
+import { appId as instanceAppId } from './instance.js'
+
+export const APP_USER_MODEL_ID = instanceAppId('')
 export const HEALTH_CHECK_INTERVAL_MS = 5 * 60_000
 
 export type NotificationBlock =

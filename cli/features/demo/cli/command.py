@@ -18,11 +18,13 @@ import time
 from shared.child_process import rdst_child_argv
 from shared.cli.types import RdstResult
 from shared.config.targets import TargetsConfig
+from shared.constants import rdst_instance_suffix
 from shared.deploy.docker_topology import DockerTopology
 from shared.ui import StyleTokens, get_console, MessagePanel, NextSteps
 
 
-DEMO_CONTAINER = "rdst-demo-pg"
+# Apart per instance, so a staging or change build never replaces production's demo database.
+DEMO_CONTAINER = f"rdst-demo-pg{rdst_instance_suffix()}"
 DEMO_PORT = 15432
 DEMO_USER = "postgres"
 DEMO_PASSWORD = "rdst_demo"

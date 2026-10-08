@@ -12,12 +12,25 @@ export interface UpdateStatePayload {
   progress?: number
 }
 
-// Must match the per-platform publish URLs in electron-builder.yml. Only
-// main-branch CI builds populate these prefixes.
-export const UPDATE_FEED_URLS: Partial<Record<NodeJS.Platform, string>> = {
-  darwin: 'https://downloads.readyset.io/packages/rdst-desktop/macos/update',
-  linux: 'https://downloads.readyset.io/packages/rdst-desktop/linux/update',
-  win32: 'https://downloads.readyset.io/packages/rdst-desktop/windows/update',
+const FEED_PLATFORMS: Partial<Record<NodeJS.Platform, string>> = {
+  darwin: 'macos',
+  linux: 'linux',
+  win32: 'windows',
+}
+
+/**
+ * The update channel of the build named `name` (its flavor's name in flavors.json), which
+ * electron-builder.yml publishes to. Only main-branch CI builds and staging promotions
+ * populate these prefixes.
+ */
+export function updateFeedUrl(
+  platform: NodeJS.Platform,
+  name: string
+): string | undefined {
+  const feedPlatform = FEED_PLATFORMS[platform]
+  return feedPlatform
+    ? `https://downloads.readyset.io/packages/${name}/${feedPlatform}/update`
+    : undefined
 }
 
 export interface UpdateEnvironment {
@@ -30,6 +43,8 @@ export interface UpdateEnvironment {
   updatesEnabled: boolean
   platform: NodeJS.Platform
   appImagePath: string | undefined
+  /** The build's flavor name (flavors.json), which names its channel and packages. */
+  packageName: string
 }
 
 /**
@@ -98,14 +113,16 @@ export function manualDownloadLinks(options: {
   arch: string
   version: string
   files: Array<{ url: string }>
+  packageName: string
 }): UpdateDownloadLink[] {
-  const feedUrl = UPDATE_FEED_URLS[options.platform]
+  const name = options.packageName
+  const feedUrl = updateFeedUrl(options.platform, name)
   if (!feedUrl) return []
 
   if (options.platform === 'darwin') {
     const dmg =
       options.files.find((file) => file.url.endsWith('.dmg'))?.url ??
-      `rdst-desktop-${options.version}-${options.arch}.dmg`
+      `${name}-${options.version}-${options.arch}.dmg`
     return [{ label: '.dmg', url: `${feedUrl}/${dmg}` }]
   }
 
@@ -113,11 +130,11 @@ export function manualDownloadLinks(options: {
     return [
       {
         label: '.deb',
-        url: `${feedUrl}/rdst-desktop-${options.version}-amd64.deb`,
+        url: `${feedUrl}/${name}-${options.version}-amd64.deb`,
       },
       {
         label: '.rpm',
-        url: `${feedUrl}/rdst-desktop-${options.version}-x86_64.rpm`,
+        url: `${feedUrl}/${name}-${options.version}-x86_64.rpm`,
       },
     ]
   }

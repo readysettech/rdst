@@ -10,6 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict
 
+from shared.constants import rdst_instance_suffix
+
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -160,7 +162,7 @@ def build_variables(
         "db_engine": engine,
         "readyset_port": str(readyset_port),
         "metrics_port": str(metrics_port),
-        "container_name": f"rdst-readyset-{target_name}",
+        "container_name": f"rdst-readyset-{target_name}{rdst_instance_suffix()}",
         "target_name": target_name,
         "readyset_image": READYSET_IMAGE,
         "squeepy_image": SQUEEPY_IMAGE,

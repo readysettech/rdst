@@ -19,7 +19,7 @@ except ImportError:
 
 from pathlib import Path
 
-from shared.constants import rdst_data_dir
+from shared.constants import rdst_data_dir, rdst_instance_suffix
 from shared.persistence import update_json, write_text
 from shared.secret_store_service import SecretStoreService
 
@@ -40,7 +40,7 @@ def slack_agents_dir() -> Path:
 
 
 def _secret_store() -> SecretStoreService:
-    return SecretStoreService(service_name="rdst-slack")
+    return SecretStoreService(service_name=f"rdst-slack{rdst_instance_suffix()}")
 
 
 def _token_key(workspace_id: str, kind: str, version: str | None = None) -> str:

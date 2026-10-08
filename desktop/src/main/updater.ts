@@ -9,7 +9,7 @@ import {
   manualDownloadLinks,
   parseUpdateMetadata,
   resolveUpdateMode,
-  UPDATE_FEED_URLS,
+  updateFeedUrl,
   type UpdateEnvironment,
   type UpdateStatePayload,
 } from './update-policy.js'
@@ -101,7 +101,7 @@ function setupInPlaceUpdates(): void {
  * deb/rpm installs.
  */
 function setupUpdateNotifications(env: UpdateEnvironment): void {
-  const feedUrl = UPDATE_FEED_URLS[env.platform]
+  const feedUrl = updateFeedUrl(env.platform, env.packageName)
   if (!feedUrl) return
   const channel =
     env.platform === 'darwin' ? 'latest-mac.yml' : 'latest-linux.yml'
@@ -126,6 +126,7 @@ function setupUpdateNotifications(env: UpdateEnvironment): void {
         arch: process.arch,
         version: metadata.version,
         files: metadata.files,
+        packageName: env.packageName,
       }),
     })
   }

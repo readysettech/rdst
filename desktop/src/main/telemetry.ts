@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 
 // Keep the desktop scrubber aligned with the web app through telemetry.test.ts.
@@ -67,7 +66,7 @@ export function loadDirectTelemetryConfig(options: {
   env: NodeJS.ProcessEnv
   packaged: boolean
   appVersion: string
-  dataDir?: string
+  dataDir: string
   defaults?: Pick<DirectTelemetryConfig, 'key' | 'host' | 'internalProbeUrl'>
 }): DirectTelemetryConfig {
   const defaults =
@@ -75,13 +74,7 @@ export function loadDirectTelemetryConfig(options: {
     (typeof __RDST_TELEMETRY_CONFIG__ === 'undefined'
       ? { key: '', host: '', internalProbeUrl: '' }
       : __RDST_TELEMETRY_CONFIG__)
-  const configuredDir =
-    options.dataDir ||
-    options.env.RDST_DATA_DIR?.trim() ||
-    path.join(os.homedir(), '.rdst')
-  const dataDir = configuredDir.startsWith('~/')
-    ? path.join(os.homedir(), configuredDir.slice(2))
-    : configuredDir
+  const { dataDir } = options
   let disabled = telemetryDisabled(options.env, options.packaged)
   let account = ''
   try {

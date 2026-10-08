@@ -5,6 +5,7 @@ import {
   manualDownloadLinks,
   parseUpdateMetadata,
   resolveUpdateMode,
+  updateFeedUrl,
 } from './update-policy.js'
 
 describe('resolveUpdateMode', () => {
@@ -15,6 +16,7 @@ describe('resolveUpdateMode', () => {
         updatesEnabled: true,
         platform: 'linux',
         appImagePath: '/tmp/rdst.AppImage',
+        packageName: 'rdst-desktop',
       })
     ).toBe('disabled')
   })
@@ -26,6 +28,7 @@ describe('resolveUpdateMode', () => {
         updatesEnabled: false,
         platform: 'linux',
         appImagePath: '/tmp/rdst.AppImage',
+        packageName: 'rdst-desktop',
       })
     ).toBe('disabled')
   })
@@ -37,6 +40,7 @@ describe('resolveUpdateMode', () => {
         updatesEnabled: true,
         platform: 'linux',
         appImagePath: '/tmp/rdst.AppImage',
+        packageName: 'rdst-desktop',
       })
     ).toBe('auto')
   })
@@ -48,6 +52,7 @@ describe('resolveUpdateMode', () => {
         updatesEnabled: true,
         platform: 'linux',
         appImagePath: undefined,
+        packageName: 'rdst-desktop',
       })
     ).toBe('notify')
   })
@@ -59,6 +64,7 @@ describe('resolveUpdateMode', () => {
         updatesEnabled: true,
         platform: 'darwin',
         appImagePath: undefined,
+        packageName: 'rdst-desktop',
       })
     ).toBe('auto')
   })
@@ -70,6 +76,7 @@ describe('resolveUpdateMode', () => {
         updatesEnabled: true,
         platform: 'win32',
         appImagePath: undefined,
+        packageName: 'rdst-desktop',
       })
     ).toBe('auto')
   })
@@ -131,6 +138,7 @@ describe('manualDownloadLinks', () => {
         platform: 'darwin',
         arch: 'arm64',
         version: '1.0.42',
+        packageName: 'rdst-desktop',
         files: [
           { url: 'rdst-desktop-1.0.42-arm64.zip' },
           { url: 'rdst-desktop-1.0.42-arm64.dmg' },
@@ -150,6 +158,7 @@ describe('manualDownloadLinks', () => {
         platform: 'darwin',
         arch: 'arm64',
         version: '1.0.42',
+        packageName: 'rdst-desktop',
         files: [{ url: 'rdst-desktop-1.0.42-arm64.zip' }],
       })
     ).toEqual([
@@ -166,6 +175,7 @@ describe('manualDownloadLinks', () => {
         platform: 'linux',
         arch: 'x64',
         version: '1.0.42',
+        packageName: 'rdst-desktop',
         files: [{ url: 'rdst-desktop-1.0.42-x86_64.AppImage' }],
       })
     ).toEqual([
@@ -186,8 +196,36 @@ describe('manualDownloadLinks', () => {
         platform: 'win32',
         arch: 'x64',
         version: '1.0.42',
+        packageName: 'rdst-desktop',
         files: [],
       })
     ).toEqual([])
+  })
+})
+
+describe('updateFeedUrl', () => {
+  it('points each flavor at its own channel', () => {
+    expect(updateFeedUrl('linux', 'rdst-desktop-staging')).toBe(
+      'https://downloads.readyset.io/packages/rdst-desktop-staging/linux/update'
+    )
+    expect(updateFeedUrl('win32', 'rdst-desktop')).toBe(
+      'https://downloads.readyset.io/packages/rdst-desktop/windows/update'
+    )
+    expect(updateFeedUrl('freebsd', 'rdst-desktop')).toBeUndefined()
+  })
+
+  it("links a staging install to staging's own packages", () => {
+    expect(
+      manualDownloadLinks({
+        platform: 'linux',
+        arch: 'x64',
+        version: '1.0.42',
+        packageName: 'rdst-desktop-staging',
+        files: [],
+      }).map((link) => link.url)
+    ).toEqual([
+      'https://downloads.readyset.io/packages/rdst-desktop-staging/linux/update/rdst-desktop-staging-1.0.42-amd64.deb',
+      'https://downloads.readyset.io/packages/rdst-desktop-staging/linux/update/rdst-desktop-staging-1.0.42-x86_64.rpm',
+    ])
   })
 })

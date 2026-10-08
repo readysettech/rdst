@@ -778,7 +778,7 @@ class ScanCommand:
         if target:
             try:
                 import yaml
-                schema_path = os.path.expanduser(f"~/.rdst/semantic-layer/{target}.yaml")
+                schema_path = rdst_semantic_layer_dir() / f"{target}.yaml"
                 if os.path.exists(schema_path):
                     with open(schema_path, encoding="utf-8") as f:
                         schema = yaml.safe_load(f)

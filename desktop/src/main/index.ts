@@ -29,6 +29,14 @@ import {
   startInboxNotifications,
   systemNotificationOptions,
 } from './inbox-notifications.js'
+import {
+  appId,
+  dataDir,
+  packageName,
+  parseInstance,
+  productName,
+  urlScheme,
+} from './instance.js'
 import { getStartAtLogin, isHiddenLaunch, setStartAtLogin } from './login.js'
 import {
   allPaused,
@@ -68,10 +76,16 @@ import { hideWindowOnClose, stopBeforeQuit } from './window-lifecycle.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RENDERER_DIR = path.resolve(__dirname, '../renderer')
-const OAUTH_PROTOCOL = app.isPackaged ? 'rdst' : 'rdst-dev'
+const PACKAGED = packagedMetadata()
+// A staging or change build's own identity; unpackaged development is production's.
+const INSTANCE = app.isPackaged ? parseInstance(PACKAGED.instance) : ''
+const OAUTH_PROTOCOL = urlScheme(INSTANCE, app.isPackaged)
 // Windows toasts are attributed through the AppUserModelID on the Start menu shortcut, which
 // the NSIS installer sets to the electron-builder appId; the process must claim the same one.
-const APP_USER_MODEL_ID = 'com.readyset.rdst-desktop'
+const APP_USER_MODEL_ID = appId(INSTANCE)
+const PRODUCT_NAME = productName(INSTANCE)
+const LOGIN_IDENTITY = { appId: APP_USER_MODEL_ID, productName: PRODUCT_NAME }
+const DATA_DIR = dataDir(INSTANCE)
 
 // CI smoke mode boots the full shell (sidecar backend, static server,
 // renderer), records SMOKE_OK when requested, and exits.
@@ -185,7 +199,8 @@ async function resolveRendererUrl(): Promise<string> {
       startBackend({
         resourcesPath: getResourcesPath(),
         sourceDir: E2E_SOURCE_ROOT,
-        keyservice: packagedKeyservice(),
+        keyservice: PACKAGED.keyservice,
+        identity: { instance: INSTANCE, protocol: OAUTH_PROTOCOL },
         log,
         onPhase,
         onSpawn: (handle) => {
@@ -206,15 +221,18 @@ async function resolveRendererUrl(): Promise<string> {
   return webServer.url
 }
 
-/** The keyservice a change or staging build was packaged for (CI bakes it in), if any. */
-function packagedKeyservice(): string | undefined {
+/** The keyservice and instance a change or staging build was packaged for (CI bakes them in). */
+function packagedMetadata(): { keyservice?: string; instance?: unknown } {
   try {
     const packageJson = JSON.parse(
       fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')
-    ) as { rdstKeyservice?: string }
-    return packageJson.rdstKeyservice || undefined
+    ) as { rdstKeyservice?: string; rdstInstance?: unknown }
+    return {
+      keyservice: packageJson.rdstKeyservice || undefined,
+      instance: packageJson.rdstInstance,
+    }
   } catch {
-    return undefined
+    return {}
   }
 }
 
@@ -539,7 +557,7 @@ function focusMainWindow(): void {
         console.error('[rdst-desktop] failed to create window:', error)
         captureError('window', error)
         dialog.showErrorBox(
-          'RDST Desktop',
+          PRODUCT_NAME,
           `Unable to open the RDST window.\n\n${errorMessage(error)}`
         )
       })
@@ -566,7 +584,7 @@ async function openInbox(route = '/inbox'): Promise<void> {
     console.error('[rdst-desktop] failed to open inbox:', error)
     captureError('window', error)
     dialog.showErrorBox(
-      'RDST Desktop',
+      PRODUCT_NAME,
       `Unable to open the inbox.\n\n${errorMessage(error)}`
     )
   }
@@ -718,7 +736,7 @@ function refreshTrayMenu(): void {
 
 function buildTrayMenu(): void {
   if (!tray) return
-  const login = getStartAtLogin(app)
+  const login = startAtLoginStatus()
   const pauseItems = pauseMenuModel(trayDatabases).map(
     (item): Electron.MenuItemConstructorOptions =>
       item.separator
@@ -911,12 +929,11 @@ function watchBackendExit(handle: BackendHandle): void {
 /** desktop_installed on a new install's first launch, desktop_upgraded after an update. */
 function recordInstallChange(userData: string, settingsExisted: boolean): void {
   if (!telemetry || SMOKE_MODE || !app.isPackaged) return
-  const dataDir = process.env.RDST_DATA_DIR || path.join(os.homedir(), '.rdst')
   const change = detectInstallChange({
     markerFile: path.join(userData, 'telemetry-install.json'),
     version: app.getVersion(),
     settingsExisted,
-    rdstDataExists: fs.existsSync(path.join(dataDir, 'config.toml')),
+    rdstDataExists: fs.existsSync(path.join(DATA_DIR, 'config.toml')),
   })
   if (change.kind === 'installed') {
     capture('desktop_installed', {
@@ -942,8 +959,13 @@ function configureStartAtLogin(
     process.platform,
     process.env,
     process.execPath,
-    app.isPackaged ? [] : [app.getAppPath()]
+    app.isPackaged ? [] : [app.getAppPath()],
+    LOGIN_IDENTITY
   )
+}
+
+function startAtLoginStatus(): ReturnType<typeof getStartAtLogin> {
+  return getStartAtLogin(app, process.platform, process.env, LOGIN_IDENTITY)
 }
 
 function handleDeepLink(url: string): void {
@@ -1006,6 +1028,7 @@ async function startApplication(): Promise<void> {
       env: process.env,
       packaged: app.isPackaged,
       appVersion: app.getVersion(),
+      dataDir: DATA_DIR,
     })
   )
 
@@ -1027,7 +1050,7 @@ async function startApplication(): Promise<void> {
     app.isPackaged &&
     !SMOKE_MODE &&
     !settings.startAtLoginConfigured &&
-    getStartAtLogin(app).available
+    startAtLoginStatus().available
   ) {
     try {
       configureStartAtLogin(true)
@@ -1043,7 +1066,7 @@ async function startApplication(): Promise<void> {
       notificationHealth ?? (await notificationWatch?.refresh()) ?? null
   )
   ipcMain.on('desktop:open-notification-settings', openNotificationSettings)
-  ipcMain.handle('desktop:get-start-at-login', () => getStartAtLogin(app))
+  ipcMain.handle('desktop:get-start-at-login', startAtLoginStatus)
   ipcMain.handle('desktop:set-start-at-login', (_event, enabled: boolean) => {
     const result = configureStartAtLogin(enabled)
     settings.markStartAtLoginConfigured()
@@ -1073,6 +1096,7 @@ async function startApplication(): Promise<void> {
       isPackaged: app.isPackaged,
       platform: process.platform,
       appImagePath: process.env.APPIMAGE,
+      packageName: packageName(INSTANCE),
     })
   }
 
@@ -1209,7 +1233,7 @@ async function startApplication(): Promise<void> {
       app.exit(1)
       return
     }
-    dialog.showErrorBox('RDST Desktop failed to start', errorMessage(error))
+    dialog.showErrorBox(`${PRODUCT_NAME} failed to start`, errorMessage(error))
     app.quit()
   }
 }
@@ -1248,7 +1272,7 @@ if (app.requestSingleInstanceLock()) {
   configurePrimaryInstance()
 } else {
   console.error(
-    'Another RDST Desktop instance already holds the single-instance lock; quitting.'
+    `Another ${PRODUCT_NAME} instance already holds the single-instance lock; quitting.`
   )
   app.quit()
 }

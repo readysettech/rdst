@@ -98,6 +98,8 @@ export interface StartBackendOptions {
   log?: BackendLog
   /** The keyservice a change or staging build was packaged for; RDST_KEYSERVICE_URL wins. */
   keyservice?: string
+  /** The packaged build's instance ('' for production) and the URL scheme the shell registered. */
+  identity?: BackendIdentity
   onPhase?: (phase: StartupPhase, store?: string) => void
   /** Called once the process exists, so a quit during startup can stop it. */
   onSpawn?: (handle: BackendHandle) => void
@@ -164,18 +166,32 @@ export class StartupWatch {
   }
 }
 
+export interface BackendIdentity {
+  instance: string
+  protocol: string
+}
+
 export function backendEnvironment(
   base: NodeJS.ProcessEnv = process.env,
-  keyservice?: string
+  keyservice?: string,
+  identity?: BackendIdentity
 ): NodeJS.ProcessEnv {
-  return {
+  const environment: NodeJS.ProcessEnv = {
     ...base,
     PATH: backendExecutablePath(base.PATH),
     RDST_DESKTOP: '1',
     ...(keyservice && !base.RDST_KEYSERVICE_URL
       ? { RDST_KEYSERVICE_URL: keyservice }
       : {}),
+    ...(identity?.protocol ? { RDST_DESKTOP_PROTOCOL: identity.protocol } : {}),
   }
+  // The shell's identity decides the backend's: an inherited RDST_INSTANCE must not move
+  // production onto another build's data.
+  if (identity) {
+    if (identity.instance) environment.RDST_INSTANCE = identity.instance
+    else delete environment.RDST_INSTANCE
+  }
+  return environment
 }
 
 function backendBinaryName(platform: NodeJS.Platform): string {
@@ -387,7 +403,11 @@ export async function startBackend(
     {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      env: backendEnvironment(process.env, options.keyservice),
+      env: backendEnvironment(
+        process.env,
+        options.keyservice,
+        options.identity
+      ),
     }
   )
 

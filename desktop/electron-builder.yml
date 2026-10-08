@@ -1,31 +1,46 @@
-appId: com.readyset.rdst-desktop
-# Packaged package.json only: Electron on Linux reads desktopName for its app_id.
-extraMetadata:
-  desktopName: rdst-desktop.desktop
-productName: RDST Desktop
+# One config for every flavor in flavors.json (production, staging, change builds), each
+# with its own identity, URL scheme, Electron profile, backend data, and update channel, so
+# they install and run next to each other. scripts/flavor.mjs renders it with a flavor's
+# RDST_DESKTOP_* values into build/<flavor>/electron-builder.yml, which builds pass to --config.
+appId: "${RDST_DESKTOP_APP_ID}"
+productName: "${RDST_DESKTOP_PRODUCT_NAME}"
 protocols:
-  - name: RDST
+  - name: "${RDST_DESKTOP_PRODUCT_NAME}"
     schemes:
-      - rdst
+      - "${RDST_DESKTOP_SCHEME}"
 directories:
   buildResources: resources
-  output: dist
+  output: "dist/${RDST_DESKTOP_FLAVOR}"
 files:
   - out/**/*
   - node_modules/**/*
+# Packaged package.json: name is the Electron profile (userData, single-instance lock),
+# desktopName is Electron's Linux app_id, and the shell reads its instance from rdstInstance.
+extraMetadata:
+  name: "${RDST_DESKTOP_NAME}"
+  desktopName: "${RDST_DESKTOP_NAME}.desktop"
+  rdstInstance: "${RDST_DESKTOP_INSTANCE}"
 extraFiles:
   - from: "sidecar/${os}-${arch}"
     to: "sidecar"
     filter:
       - "**/*"
+  # Tells a directly launched sidecar which build it is.
+  - from: "${RDST_DESKTOP_MARKER}"
+    to: sidecar/rdst/instance.json
 # Tray state icons (problem, paused, offline) are drawn at runtime from these two.
 extraResources:
   - from: resources/tray.png
     to: icons/tray.png
   - from: resources/iconTemplate.png
     to: icons/iconTemplate.png
+# Each platform's publish feed is the flavor's own update channel, the one updateFeedUrl in
+# src/main/update-policy.ts checks.
 mac:
-  artifactName: "rdst-desktop-${version}-${arch}.${ext}"
+  artifactName: "${RDST_DESKTOP_NAME}-${version}-${arch}.${ext}"
+  publish:
+    - provider: generic
+      url: "${RDST_DESKTOP_FEED}/macos/update"
   category: public.app-category.developer-tools
   # Alerts (not banners) by default, so a lost database stays on screen until dismissed.
   extendInfo:
@@ -43,11 +58,6 @@ mac:
   notarize: false
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
-  # Update channel fed by main-branch CI builds; keep in sync with
-  # UPDATE_FEED_URLS in src/main/update-policy.ts.
-  publish:
-    - provider: generic
-      url: https://downloads.readyset.io/packages/rdst-desktop/macos/update
 # Uninstalling removes the app's data too (resources/installer.nsh adds the sidecar's data,
 # Credential Manager entries and the start-at-login value). An update keeps all of it:
 # the updater runs the old uninstaller with --updated, which both deletions check.
@@ -55,24 +65,27 @@ nsis:
   include: resources/installer.nsh
   deleteAppDataOnUninstall: true
 win:
+  artifactName: "${RDST_DESKTOP_NAME}-${version}-${arch}.${ext}"
+  publish:
+    - provider: generic
+      url: "${RDST_DESKTOP_FEED}/windows/update"
   extraResources:
     - from: resources/uninstall-cleanup.ps1
       to: uninstall-cleanup.ps1
-  artifactName: "rdst-desktop-${version}-${arch}.${ext}"
   target:
     - target: nsis
       arch:
         - x64
+linux:
+  artifactName: "${RDST_DESKTOP_NAME}-${version}-${arch}.${ext}"
+  # Notifications (libnotify's desktop-entry hint) and window grouping find the app through
+  # its .desktop file: desktopName is Electron's app_id and WM_CLASS, and the installed entry
+  # is named after executableName, so they agree.
+  executableName: "${RDST_DESKTOP_NAME}"
   publish:
     - provider: generic
-      url: https://downloads.readyset.io/packages/rdst-desktop/windows/update
-linux:
-  artifactName: "rdst-desktop-${version}-${arch}.${ext}"
+      url: "${RDST_DESKTOP_FEED}/linux/update"
   category: Development
-  # Notifications (libnotify's desktop-entry hint) and window grouping find the app through
-  # its .desktop file: desktopName (set through extraMetadata below) is Electron's app_id and
-  # WM_CLASS, and the installed entry is named after executableName, so they agree.
-  executableName: rdst-desktop
   desktop:
     entry:
       Comment: Watches your databases and tells you when a query starts hurting
@@ -81,9 +94,6 @@ linux:
     - AppImage
     - deb
     - rpm
-  publish:
-    - provider: generic
-      url: https://downloads.readyset.io/packages/rdst-desktop/linux/update
 # electron-builder's default depends lists plus ALSA: the Electron binary
 # links libasound.so.2 at load time, so a stock install without it fails
 # to launch. Overriding depends replaces the defaults, hence the full list.

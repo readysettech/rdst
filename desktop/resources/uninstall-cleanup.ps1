@@ -1,6 +1,20 @@
+# -Instance names a flavor build (for example cl); production passes none.
+param([string]$Instance = '')
 $ErrorActionPreference = 'Stop'
 
+function Get-RdstCredentialPattern {
+    param([string]$Instance)
+    if ($Instance -and $Instance -cnotmatch '\A[a-z][a-z0-9-]{0,31}\z') {
+        throw "Invalid RDST instance: $Instance"
+    }
+    # Exactly this flavor's services, so one flavor's uninstall never removes another's sign-in.
+    $suffix = if ($Instance) { "-$Instance" } else { '' }
+    return '^(?:rdst-(?:web|slack){0}(?:@.+)?|.+@rdst-(?:web|slack){0})$' -f $suffix
+}
+
 function Remove-RdstCredentials {
+    param([string]$Instance)
+    $pattern = Get-RdstCredentialPattern $Instance
     Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -36,7 +50,7 @@ public static class RdstCredentials {
             for ($i = 0; $i -lt $count; $i++) {
                 $pointer = [Runtime.InteropServices.Marshal]::ReadIntPtr($credentials, $i * [IntPtr]::Size)
                 $credential = [Runtime.InteropServices.Marshal]::PtrToStructure($pointer, [type][RdstCredentials+Credential])
-                if ($credential.Type -eq 1 -and $credential.TargetName -cmatch '^(?:rdst-(?:web|slack)(?:@.+)?|.+@rdst-(?:web|slack))$') {
+                if ($credential.Type -eq 1 -and $credential.TargetName -cmatch $pattern) {
                     if (-not [RdstCredentials]::Delete($credential.TargetName, 1, 0)) {
                         throw "CredDelete failed for target $($credential.TargetName): $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
                     }
@@ -64,6 +78,8 @@ function Remove-RdstOwnedDirectory {
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
-    Remove-RdstCredentials
-    Remove-RdstOwnedDirectory $env:RDST_DATA_DIR
+    Remove-RdstCredentials $Instance
+    # RDST_DATA_DIR overrides every flavor alike, so it may hold production's data:
+    # only production's uninstall removes it.
+    if (-not $Instance) { Remove-RdstOwnedDirectory $env:RDST_DATA_DIR }
 }

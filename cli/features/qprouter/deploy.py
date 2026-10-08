@@ -24,8 +24,12 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from shared.constants import rdst_instance_suffix
 from shared.deploy.docker_topology import DockerTopology
 
+# Container-name prefix; each desktop flavor gets its own set of containers.
+# Links alias every peer under its production name, which the rendered configs use.
+PROJECT = f"qpdemo{rdst_instance_suffix()}"
 READYSET_IMAGE = "public.ecr.aws/readyset/readyset:latest-stable"
 SQP_IMAGE = "public.ecr.aws/i9r8k6s4/sqp:20260709-1722"
 QP_CRON_IMAGE = (
@@ -336,7 +340,7 @@ def deploy_readyset(
             name,
             "--restart=unless-stopped",
             "--link",
-            "qpdemo-pg:qpdemo-pg",
+            f"{PROJECT}-pg:qpdemo-pg",
             *_limit_flags("readyset"),
             "-e",
             f"UPSTREAM_DB_URL={db}",
@@ -379,9 +383,9 @@ def deploy_sqp(
             name,
             "--restart=unless-stopped",
             "--link",
-            "qpdemo-pg:qpdemo-pg",
+            f"{PROJECT}-pg:qpdemo-pg",
             "--link",
-            "qpdemo-readyset:qpdemo-readyset",
+            f"{PROJECT}-readyset:qpdemo-readyset",
             *_limit_flags("sqp"),
             "-p",
             f"{_publish_bind()}{ports.sqp}:{ports.sqp}",
@@ -416,9 +420,9 @@ def deploy_qp_cron(
         name,
         "--restart=unless-stopped",
         "--link",
-        "qpdemo-sqp:qpdemo-sqp",
+        f"{PROJECT}-sqp:qpdemo-sqp",
         "--link",
-        "qpdemo-readyset:qpdemo-readyset",
+        f"{PROJECT}-readyset:qpdemo-readyset",
         *_limit_flags("qp-cron"),
         QP_CRON_IMAGE,
     ]

@@ -54,6 +54,41 @@ describe('start at login', () => {
     )
   })
 
+  it('names the Linux entry after the build it starts', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rdst-login-'))
+    temporary.push(dir)
+    const env = { XDG_CONFIG_HOME: dir }
+    const app = fakeApp()
+    const staging = {
+      appId: 'com.readyset.rdst-desktop.staging',
+      productName: 'RDST Desktop Staging',
+    }
+    const production = path.join(
+      dir,
+      'autostart',
+      'com.readyset.rdst-desktop.desktop'
+    )
+    const entry = path.join(
+      dir,
+      'autostart',
+      'com.readyset.rdst-desktop.staging.desktop'
+    )
+    setStartAtLogin(app, true, 'linux', env, '/opt/rdst', [])
+    expect(
+      setStartAtLogin(app, true, 'linux', env, '/opt/rdst', [], staging).enabled
+    ).toBe(true)
+    expect(fs.readFileSync(entry, 'utf8')).toContain(
+      'Name=RDST Desktop Staging\n'
+    )
+    expect(
+      setStartAtLogin(app, false, 'linux', env, '/opt/rdst', [], staging)
+        .enabled
+    ).toBe(false)
+    expect(getStartAtLogin(app, 'linux', env, staging).enabled).toBe(false)
+    expect(fs.existsSync(entry)).toBe(false)
+    expect(fs.readFileSync(production, 'utf8')).toContain('Name=RDST Desktop\n')
+  })
+
   it('explains why AppImage login launch is unavailable', () => {
     const app = fakeApp()
     const env = { APPIMAGE: '/tmp/RDST.AppImage' }

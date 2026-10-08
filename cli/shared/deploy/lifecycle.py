@@ -268,7 +268,7 @@ def _cleanup_ephemeral_deploy(
     if mode != "docker":
         return None
     import subprocess
-    container_name = f"rdst-readyset-{target_name}"
+    container_name = local_docker.target_container_name(target_name)
     try:
         result = subprocess.run(
             ["docker", "rm", "-f", container_name],

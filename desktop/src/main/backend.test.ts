@@ -247,3 +247,50 @@ describe('backendEnvironment keyservice', () => {
     expect(backendEnvironment({}).RDST_KEYSERVICE_URL).toBeUndefined()
   })
 })
+
+describe('backendEnvironment identity', () => {
+  it('tells the sidecar its instance and the scheme the shell registered', () => {
+    const cl = backendEnvironment(
+      { RDST_INSTANCE: 'staging', RDST_DESKTOP_PROTOCOL: 'rdst' },
+      undefined,
+      { instance: 'cl', protocol: 'rdst-cl' }
+    )
+    expect(cl.RDST_INSTANCE).toBe('cl')
+    expect(cl.RDST_DESKTOP_PROTOCOL).toBe('rdst-cl')
+
+    // An inherited instance never moves production onto another build's data.
+    const production = backendEnvironment(
+      { RDST_INSTANCE: 'staging' },
+      undefined,
+      { instance: '', protocol: 'rdst' }
+    )
+    expect(production.RDST_INSTANCE).toBeUndefined()
+    expect(production.RDST_DESKTOP_PROTOCOL).toBe('rdst')
+
+    const dev = backendEnvironment({}, undefined, {
+      instance: '',
+      protocol: 'rdst-dev',
+    })
+    expect(dev.RDST_DESKTOP_PROTOCOL).toBe('rdst-dev')
+    expect(backendEnvironment({}).RDST_DESKTOP_PROTOCOL).toBeUndefined()
+  })
+})
+
+describe('startBackend identity', () => {
+  it('passes the instance and scheme to the backend process', async () => {
+    const script = path.join(tempDir, 'print-identity.mjs')
+    fs.writeFileSync(
+      script,
+      'const { RDST_INSTANCE, RDST_DESKTOP_PROTOCOL } = process.env\n' +
+        "console.error('identity=' + RDST_INSTANCE + '/' + RDST_DESKTOP_PROTOCOL)\n" +
+        'process.exit(3)\n'
+    )
+    await expect(
+      startBackend({
+        resourcesPath: tempDir,
+        command: { file: process.execPath, args: [script] },
+        identity: { instance: 'staging', protocol: 'rdst-staging' },
+      })
+    ).rejects.toThrow('identity=staging/rdst-staging')
+  }, 15_000)
+})

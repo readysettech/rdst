@@ -633,7 +633,8 @@ class CacheCommands:
             # an orphan container the user wants removed. Idempotent path: try
             # to clean any container matching the conventional name and report.
             import subprocess
-            container_name = f"rdst-readyset-{target}"
+            from shared.deploy.local_docker import target_container_name
+            container_name = target_container_name(target)
             try:
                 r = subprocess.run(
                     ["docker", "rm", "-f", container_name],
@@ -677,7 +678,8 @@ class CacheCommands:
                 # successful no-op (matches rm -f semantics). Also probe Docker
                 # in case there's an orphan container we should still flag.
                 import subprocess
-                container_name = f"rdst-readyset-{target}"
+                from shared.deploy.local_docker import target_container_name
+                container_name = target_container_name(target)
                 container_exists = False
                 try:
                     r = subprocess.run(

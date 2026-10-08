@@ -16,11 +16,12 @@ function run(command, args) {
 
 run("pnpm.cmd", ["prepackage"]);
 
-const builderArgs = ["--win", "--x64", "--publish", "never"];
+// The flavor to package (flavors.json); scripts/flavor.mjs renders its config.
+const flavor = process.env.RDST_DESKTOP_FLAVOR || "release";
+run("node", ["./scripts/flavor.mjs", flavor]);
+const builderArgs = ["--win", "--x64", "--publish", "never", "--config", `build/${flavor}/electron-builder.yml`];
+// The version the sidecar was stamped with, so the shell and its update metadata match it.
 if (process.env.RDST_BUILD_VERSION) {
-  builderArgs.push(
-    `-c.extraMetadata.version=${process.env.RDST_BUILD_VERSION}`,
-    `-c.extraMetadata.rdstUpdates=${process.env.RDST_DESKTOP_UPDATES ?? "disabled"}`
-  );
+  builderArgs.push(`-c.extraMetadata.version=${process.env.RDST_BUILD_VERSION}`);
 }
 run("electron-builder.cmd", builderArgs);

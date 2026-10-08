@@ -1,0 +1,32 @@
+{
+  "release": {
+    "instance": "",
+    "appId": "com.readyset.rdst-desktop",
+    "productName": "RDST Desktop",
+    "scheme": "rdst",
+    "name": "rdst-desktop",
+    "keyservice": "",
+    "updates": "enabled",
+    "signed": ["macos", "windows"]
+  },
+  "staging": {
+    "instance": "staging",
+    "appId": "com.readyset.rdst-desktop.staging",
+    "productName": "RDST Desktop Staging",
+    "scheme": "rdst-staging",
+    "name": "rdst-desktop-staging",
+    "keyservice": "https://keyservice-staging.readyset.io",
+    "updates": "enabled",
+    "signed": ["macos"]
+  },
+  "cl": {
+    "instance": "cl",
+    "appId": "com.readyset.rdst-desktop.cl",
+    "productName": "RDST Desktop CL",
+    "scheme": "rdst-cl",
+    "name": "rdst-desktop-cl",
+    "keyservice": null,
+    "updates": "disabled",
+    "signed": []
+  }
+}
