@@ -64,7 +64,8 @@ SUPPORT_EMAIL = "hello@readyset.io"
 ACCOUNT = "_account"
 _DEFAULT_PORTS = {"postgresql": 5432, "mysql": 3306}
 _LOOPBACK = {"localhost", "localhost.localdomain", "::1", "0:0:0:0:0:0:0:1", "0.0.0.0", "::"}
-_TIMEOUT_S = 5
+# Claims that arrive together queue in the Key Service; ten at once took up to 11 seconds.
+_TIMEOUT_S = 20
 
 _summary_lock = threading.Lock()
 _last_summary: dict[str, Any] | None = None
