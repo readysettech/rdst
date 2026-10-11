@@ -305,6 +305,32 @@ describe('ConfigureForm sandbox behavior', () => {
 describe('ConfigureForm SSH jump host', () => {
   afterEach(cleanup)
 
+  it('discovers SSH keys only after the section is expanded', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (url) =>
+        Response.json(
+          String(url).startsWith('/api/tunnel/ssh-keys') ? { options: [] } : []
+        )
+      )
+    const sshKeyRequests = () =>
+      fetchMock.mock.calls.filter(([url]) =>
+        String(url).startsWith('/api/tunnel/ssh-keys')
+      )
+    try {
+      render(<ConfigureForm />)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      expect(sshKeyRequests()).toHaveLength(0)
+
+      fireEvent.click(
+        screen.getByRole('button', { name: /Connect via SSH jump host/ })
+      )
+      await waitFor(() => expect(sshKeyRequests()).toHaveLength(1))
+    } finally {
+      fetchMock.mockRestore()
+    }
+  })
+
   it('expands an existing target SSH configuration by default', () => {
     render(
       <ConfigureForm

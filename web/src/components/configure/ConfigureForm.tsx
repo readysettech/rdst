@@ -677,12 +677,16 @@ export function ConfigureForm({
                 open={sshOpen}
                 onToggle={setSshOpen}
               >
-                <SshFields
-                  value={ssh}
-                  onChange={setSsh}
-                  disabled={isLoading}
-                  idPrefix="cfg-ssh"
-                />
+                {/* SSH key discovery can trigger OS folder-access prompts, so it waits until
+                    the user opens this section. */}
+                {sshOpen && (
+                  <SshFields
+                    value={ssh}
+                    onChange={setSsh}
+                    disabled={isLoading}
+                    idPrefix="cfg-ssh"
+                  />
+                )}
               </Disclosure>
 
               {/* Advanced — TLS verification, collapsed until asked for. [VIS-114] */}

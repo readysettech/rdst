@@ -45,6 +45,8 @@ mac:
   # Alerts (not banners) by default, so a lost database stays on screen until dismissed.
   extendInfo:
     NSUserNotificationAlertStyle: alert
+    # Shown in the macOS prompt when SSH key discovery first looks in Downloads.
+    NSDownloadsFolderUsageDescription: RDST looks for SSH keys you have downloaded, such as AWS .pem files, to offer them for jump-host connections.
   target:
     - dmg
     - zip
