@@ -7,9 +7,9 @@ from shared.llm_manager.base import ProviderRequest
 from shared.llm_manager.claude_provider import ClaudeProvider
 
 
-def _request(response_format):
+def _request(response_format, model="claude-haiku-4-5-20251001"):
     return ProviderRequest(
-        model="claude-haiku-4-5-20251001",
+        model=model,
         messages=[
             {
                 "role": "system",
@@ -102,3 +102,94 @@ class TestJsonObjectResponseFormat:
             "type": "tool",
             "name": "table_selection",
         }
+
+
+class TestNativeStructuredOutput:
+    SCHEMA = {
+        "type": "object",
+        "properties": {
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "sql": {"type": "string"},
+        },
+        "required": ["confidence", "sql"],
+        "additionalProperties": False,
+    }
+
+    def test_current_models_reason_and_enforce_a_restated_schema(self):
+        client, create = _sdk_client(text='{"confidence": 0.9, "sql": "SELECT 1"}')
+        request = _request(
+            {"type": "json_schema", "json_schema": {
+                "name": "sql_generation", "strict": True, "schema": self.SCHEMA}},
+            model="claude-haiku-5-5",
+        )
+        with patch(
+            "shared.llm_manager.claude_provider.anthropic.Anthropic",
+            return_value=client,
+        ):
+            response = ClaudeProvider().complete(request, api_key="test-key")
+
+        payload = create.call_args.kwargs
+        assert "tools" not in payload and "tool_choice" not in payload
+        assert payload["output_config"] == {
+            "effort": "medium",
+            "format": {"type": "json_schema", "schema": {
+                "type": "object",
+                "properties": {
+                    "confidence": {"type": "number", "description": "{minimum: 0, maximum: 1}"},
+                    "sql": {"type": "string"},
+                },
+                "additionalProperties": False,
+                "required": ["confidence", "sql"],
+            }},
+        }
+        assert response.text == '{"confidence": 0.9, "sql": "SELECT 1"}'
+
+    def test_open_object_schemas_are_stated_in_the_prompt_instead(self):
+        client, create = _sdk_client()
+        schema = {"type": "object", "additionalProperties": {"type": "string"}}
+        request = _request(
+            {"type": "json_schema", "json_schema": {
+                "name": "filters", "strict": True, "schema": schema}},
+            model="claude-haiku-5-5",
+        )
+        with patch(
+            "shared.llm_manager.claude_provider.anthropic.Anthropic",
+            return_value=client,
+        ):
+            ClaudeProvider().complete(request, api_key="test-key")
+
+        payload = create.call_args.kwargs
+        assert payload["output_config"] == {"effort": "medium"}
+        assert "tools" not in payload
+        assert '{"type":"object","additionalProperties":{"type":"string"}}' in payload["system"]
+
+    def test_json_object_on_current_models_is_prompted_without_a_format(self):
+        client, create = _sdk_client()
+        with patch(
+            "shared.llm_manager.claude_provider.anthropic.Anthropic",
+            return_value=client,
+        ):
+            ClaudeProvider().complete(
+                _request({"type": "json_object"}, model="claude-haiku-5-5"),
+                api_key="test-key",
+            )
+
+        payload = create.call_args.kwargs
+        # Claude has no JSON mode: the prompt asks for JSON and reasoning is kept.
+        assert payload["output_config"] == {"effort": "medium"}
+        assert "tools" not in payload and "tool_choice" not in payload
+        assert "respond with valid json" in payload["system"].lower()
+
+    def test_no_response_format_sends_no_format(self):
+        client, create = _sdk_client()
+        with patch(
+            "shared.llm_manager.claude_provider.anthropic.Anthropic",
+            return_value=client,
+        ):
+            ClaudeProvider().complete(
+                _request(None, model="claude-haiku-5-5"), api_key="test-key"
+            )
+
+        payload = create.call_args.kwargs
+        assert payload["output_config"] == {"effort": "medium"}
+        assert "tools" not in payload

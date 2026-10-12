@@ -4,6 +4,8 @@ with its charged cost, never Claude prices for a hosted call."""
 import json
 from unittest.mock import MagicMock
 
+import pytest
+
 from features.analyze.functions import llm_analysis
 from features.analyze.functions.workflow_integration import _llm_info
 
@@ -66,3 +68,12 @@ def test_each_rewrite_runs_under_the_runs_statement_timeout(monkeypatch):
     assert calls[0]["rewrite_max_time_ms"] == 1500
     assert calls[0]["statement_timeout_ms"] == 1500
     assert calls[0]["non_interactive"] == "True"
+
+
+def test_haiku_prompts_past_100k_tokens_are_priced_at_the_long_prompt_rate():
+    from features.analyze.functions import shallow_analysis
+
+    for estimate in (llm_analysis.estimate_cost, shallow_analysis.estimate_cost):
+        assert estimate(100_000, 10_000, "claude-haiku-5-5") == pytest.approx(0.015)
+        assert estimate(120_000, 10_000, "claude-haiku-5-5") == pytest.approx(0.085)
+        assert estimate(120_000, 10_000, "claude-haiku-4-5-20251001") == pytest.approx(0.17)

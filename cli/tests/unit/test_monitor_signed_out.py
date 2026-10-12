@@ -102,12 +102,12 @@ def test_provider_resolution_guard_and_manual_policy(authorization, feature, mon
     variant, signed_in = authorization
     from shared.llm_manager.base import ProviderResponse
     from shared.llm_manager.claude_provider import ClaudeProvider
-    from shared.llm_manager.hosted_glm_provider import HostedGLMProvider
+    from shared.llm_manager.hosted_provider import HostedProvider
 
     transport = Mock(return_value=ProviderResponse(text="unit", usage={"total_tokens": 1}))
     hosted_transport = Mock(return_value=ProviderResponse(text="unit", usage={"total_tokens": 1}))
     monkeypatch.setattr(ClaudeProvider, "complete", transport)
-    monkeypatch.setattr(HostedGLMProvider, "complete", hosted_transport)
+    monkeypatch.setattr(HostedProvider, "complete", hosted_transport)
     with inference_workflow(feature, "web"):
         if feature == "monitor" or variant in {"none", "saved_readyset"}:
             with pytest.raises(LLMError):

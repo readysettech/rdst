@@ -1,4 +1,4 @@
-"""Readyset-hosted GLM provider backed by the bounded Keyservice endpoint."""
+"""Readyset-hosted AI provider backed by the bounded Keyservice endpoint."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from .key_resolution import HOSTED_MODEL
 
 _HTTP_SESSION = requests.Session()
 # Schema annotation deliberately uses worker threads, while an interactive Ask
-# can start before annotation finishes. DeepInfra may reject that local burst,
+# can start before annotation finishes. Upstream providers may reject that local burst,
 # so keep Readyset-hosted requests from one RDST process in a single fair-ish
 # queue. Claude BYOK is unaffected and separate RDST clients remain independent.
 _HOSTED_REQUEST_LOCK = threading.Lock()
@@ -48,10 +48,11 @@ def _audit(request: ProviderRequest, started: float, **result: Any) -> None:
     from shared.agent_activity import record_llm_call
 
     operation = ((request.extra or {}).get("_rdst_attribution") or {}).get("operation")
-    record_llm_call("readyset", HOSTED_MODEL, operation, operation, started, **result)
+    model = (result.get("usage") or {}).get("served_model") or HOSTED_MODEL
+    record_llm_call("readyset", model, operation, operation, started, **result)
 
 
-class HostedGLMProvider(Provider):
+class HostedProvider(Provider):
     """Call the Readyset-funded route without exposing its OpenRouter key."""
 
     def default_model(self) -> str:

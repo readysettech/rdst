@@ -17,7 +17,7 @@ from shared import agent_activity
 from shared.agent_activity import recorder
 from shared.agent_activity.store import RETENTION_SECONDS, AgentActivityStore
 from shared.llm_manager.base import LLMError, ProviderRequest, ProviderResponse
-from shared.llm_manager.hosted_glm_provider import HostedGLMProvider
+from shared.llm_manager.hosted_provider import HostedProvider
 from shared.llm_manager.jev_client import JevClient
 from shared.llm_manager.key_resolution import HOSTED_MODEL, KeyResolution
 from shared.llm_manager.llm_manager import LLMManager
@@ -189,7 +189,7 @@ def test_empty_actions_are_dropped_and_failures_recorded(data_dir):
 
 def test_hosted_calls_record_the_charged_cost_only_inside_an_action(data_dir, monkeypatch):
     monkeypatch.setattr(
-        HostedGLMProvider, "_complete_serialized",
+        HostedProvider, "_complete_serialized",
         lambda self, request, **kwargs: ProviderResponse(
             text="ok", usage={"prompt_tokens": 1200, "completion_tokens": 80},
             raw={"usage": {"cost_microusd": 2500}}))
@@ -214,10 +214,10 @@ def test_hosted_failures_and_claude_usage_are_recorded(data_dir, monkeypatch):
     def refuse(self, request, **kwargs):
         raise LLMError("Sign in", code="LOGIN_REQUIRED")
 
-    monkeypatch.setattr(HostedGLMProvider, "_complete_serialized", refuse)
+    monkeypatch.setattr(HostedProvider, "_complete_serialized", refuse)
     with agent_activity.action("daily_snapshot", "db"):
         with pytest.raises(LLMError):
-            HostedGLMProvider().complete(ProviderRequest(model="m", messages=[]), api_key="t")
+            HostedProvider().complete(ProviderRequest(model="m", messages=[]), api_key="t")
         # Claude BYOK calls reach the audit through the LLM usage telemetry choke point.
         telemetry.track_llm_usage(provider="claude", model="claude-sonnet-4-6",
                                   tokens_in=1_000_000, tokens_out=0, duration_ms=900,

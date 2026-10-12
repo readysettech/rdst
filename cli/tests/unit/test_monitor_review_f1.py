@@ -98,7 +98,7 @@ async def test_narrative_retry_sends_required_database_header(tmp_path, monkeypa
     monkeypatch.setattr(reports.database_limit, "paused", lambda *args: False)
     monkeypatch.setattr(reports.database_limit, "target_fingerprint", lambda target: "database-fingerprint")
     from shared.llm_manager.base import ProviderRequest
-    from shared.llm_manager.hosted_glm_provider import HostedGLMProvider
+    from shared.llm_manager.hosted_provider import HostedProvider
     narrative = {"summary": "Ready", "fix_first": [], "one_fix_several_queries": [],
                  "health": [], "changed_since_yesterday": []}
     sent = []
@@ -107,11 +107,11 @@ async def test_narrative_retry_sends_required_database_header(tmp_path, monkeypa
         sent.append(headers)
         assert headers.get("X-RDST-Monitor-Database") == "database-fingerprint"
         return SimpleNamespace(status_code=200, json=lambda: {"text": encoded})
-    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
     def narrate(context):
         request = ProviderRequest(model="hosted", messages=[{"role": "user", "content": "Report"}],
                                   max_tokens=100, temperature=0)
-        answer = HostedGLMProvider().complete(request, api_key="test-token",
+        answer = HostedProvider().complete(request, api_key="test-token",
                                              base_url="https://keyservice.test")
         return json.loads(answer.text)
     monkeypatch.setattr(reports, "_narrate", narrate)

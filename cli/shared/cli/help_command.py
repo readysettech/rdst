@@ -1320,7 +1320,7 @@ class HelpCommand:
 
             # Use Haiku for fast, cheap responses
             from shared.llm_manager.claude_provider import AnthropicModel
-            llm = LLMManager(defaults={"model": AnthropicModel.HAIKU_4_5.value})
+            llm = LLMManager(defaults={"model": AnthropicModel.HAIKU_5_5.value})
 
             # Build prompt
             system_message = """You are a helpful assistant for RDST, a database performance analysis CLI tool.
@@ -1341,7 +1341,7 @@ Include command examples when relevant. If the question isn't covered in the doc
                     system_message=system_message,
                     user_query=user_query,
                     max_tokens=1000,
-                    model=AnthropicModel.HAIKU_4_5.value,
+                    model=AnthropicModel.HAIKU_5_5.value,
                     purpose="help_answer",
                 )
 

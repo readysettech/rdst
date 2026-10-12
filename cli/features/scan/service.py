@@ -769,7 +769,7 @@ Respond with ONLY this JSON (no markdown code blocks):
                 user_query=user_query,
                 max_tokens=2000,
                 temperature=0.0,
-                model="claude-haiku-4-5-20251001",
+                model="claude-haiku-5-5",
                 purpose="orm_conversion",
             )
 

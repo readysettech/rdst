@@ -10,7 +10,7 @@ from features.monitor.analyze_queue import AnalyzeQueue, analysis_retry, retry_p
 from features.monitor.api.routes import _jobs_with_reasons
 from features.monitor.presentation import analysis_error_kind, analysis_reason
 from shared.llm_manager.base import ProviderRequest
-from shared.llm_manager.hosted_glm_provider import HostedGLMProvider
+from shared.llm_manager.hosted_provider import HostedProvider
 from shared.llm_manager.inference_attribution import record_billable_call
 from shared.monitor.monitor_store import MonitorStore
 
@@ -43,7 +43,7 @@ async def test_immediate_retry(tmp_path, monkeypatch, reason, second_fails, shap
                                       else {"text": "answer", "usage": {}})
         return response
 
-    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
 
     class Service:
         attempts = 0
@@ -61,7 +61,7 @@ async def test_immediate_retry(tmp_path, monkeypatch, reason, second_fails, shap
                 assert analysis_error_kind("running", current["error"]) == "retrying"
                 assert "trying again" in _jobs_with_reasons(store, "db", [current])[0]["reason_text"]
             if shape == "provider":
-                HostedGLMProvider().complete(
+                HostedProvider().complete(
                     ProviderRequest(model="unused", messages=[{"role": "user", "content": "Analyze"}]),
                     api_key="test-token", base_url="https://keyservice.example")
             if self.attempts == 1 or second_fails:

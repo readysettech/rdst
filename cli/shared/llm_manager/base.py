@@ -132,7 +132,7 @@ class Conversation:
 
 @dataclass
 class LLMDefaults:
-    # Auto prefers Claude BYOK, then Readyset-hosted GLM for signed-in users.
+    # Auto prefers Claude BYOK, then Readyset-hosted AI for signed-in users.
     provider: str = "auto"
     model: Optional[str] = None
     max_tokens: int = 800

@@ -12,7 +12,7 @@ from .claude_provider import (
     ClaudeProvider,
     normalize_anthropic_model,
 )
-from .hosted_glm_provider import HostedGLMProvider
+from .hosted_provider import HostedProvider
 
 if TYPE_CHECKING:
     from .key_resolution import KeyResolution
@@ -22,11 +22,12 @@ class LLMManager:
     """
     Unified LLM facade for RDST.
 
-    RDST uses Readyset-hosted GLM by default after account sign-in. A user who
+    RDST uses Readyset-hosted Haiku by default after account sign-in. A user who
     supplies ANTHROPIC_API_KEY uses Claude directly without a Readyset account.
 
-    Hosted model: GLM 5.3 Flash with server-enforced high reasoning
-    Claude BYOK default: Sonnet 4.6, overridable with RDST_ANTHROPIC_MODEL
+    Hosted model: Claude Haiku 5.5 with server-enforced high reasoning, or GLM 5.3 Flash for
+    prompts too long for Haiku's base rate
+    Claude BYOK default: Haiku 5.5, overridable with RDST_ANTHROPIC_MODEL
 
     Environment Variables
     --------------------
@@ -66,7 +67,7 @@ class LLMManager:
 
         self._providers: Dict[str, Provider] = {}
         self.register_provider("claude", ClaudeProvider())
-        self.register_provider("readyset", HostedGLMProvider())
+        self.register_provider("readyset", HostedProvider())
 
     # Provider registry
     def register_provider(self, name: str, provider: Provider) -> None:
@@ -78,7 +79,7 @@ class LLMManager:
             p = "readyset"
         if p not in self._providers:
             raise LLMError(
-                f"Unknown provider '{p}'. RDST supports Readyset-hosted GLM and Claude BYOK.",
+                f"Unknown provider '{p}'. RDST supports Readyset-hosted AI and Claude BYOK.",
                 code="NO_SUCH_PROVIDER",
             )
         return self._providers[p]
@@ -212,6 +213,8 @@ class LLMManager:
         actual_model = resolved["model"]
         if name == "lmstudio" and hasattr(resp, "raw") and resp.raw:
             actual_model = resp.raw.get("current_model", resolved["model"])
+        # Readyset-hosted inference serves long prompts on another model and names it.
+        actual_model = (resp.usage or {}).get("served_model") or actual_model
 
         out = {
             "text": resp.text,

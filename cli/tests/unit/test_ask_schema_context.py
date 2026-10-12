@@ -4,7 +4,7 @@ from features.ask.ambiguity_detection import detect_ambiguities
 from features.schema.inference_context import schema_context_prefix
 from features.ask.sql_generation import generate_sql_from_nl
 from shared.llm_manager.base import ProviderRequest
-from shared.llm_manager.hosted_glm_provider import HostedGLMProvider
+from shared.llm_manager.hosted_provider import HostedProvider
 
 
 def test_schema_prefix_is_stable_and_changes_with_schema_or_engine():
@@ -48,7 +48,7 @@ def test_clarification_and_generation_share_hosted_schema_prefix():
     )["success"]
     prefix = schema_context_prefix(schema, "postgresql")
     for request in requests:
-        messages = HostedGLMProvider._messages(ProviderRequest(
+        messages = HostedProvider._messages(ProviderRequest(
             model="fixture",
             messages=[
                 {"role": "system", "content": request["system_message"]},

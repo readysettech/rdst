@@ -1388,7 +1388,7 @@ class ConfigurationWizard:
             cfg._data.setdefault("llm", {})
             cfg._data["llm"]["provider"] = "claude"
             cfg._data["llm"].pop("model", None)
-            cfg._data["llm"]["hint"] = "Using Claude Sonnet 4.6"
+            cfg._data["llm"]["hint"] = "Using Claude Haiku 5.5"
 
             cfg.save()
             self._show_success("Configured", cfg._data["llm"]["hint"])

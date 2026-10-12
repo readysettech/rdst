@@ -77,7 +77,7 @@ class TestLLMDefaults:
         """Test default values are set."""
         defaults = LLMDefaults()
 
-        # Automatic routing prefers Claude BYOK and otherwise uses hosted GLM.
+        # Automatic routing prefers Claude BYOK and otherwise uses hosted AI.
         assert defaults.provider == "auto"
         assert defaults.model is None
         assert defaults.max_tokens == 800
@@ -341,6 +341,35 @@ def test_auto_routing_uses_hosted_model_and_ignores_model_argument(
     request = provider.complete.call_args.args[0]
     assert request.model == "z-ai/glm-5.3-flash"
     assert result["provider"] == "readyset"
+
+
+def test_hosted_result_names_the_model_that_served_a_long_prompt(
+    monkeypatch, tmp_rdst_home
+):
+    from shared.llm_manager.key_resolution import KeyResolution
+    from shared.llm_manager.llm_manager import LLMManager
+
+    provider = MagicMock()
+    provider.default_model.return_value = "anthropic/claude-haiku-5.5"
+    provider.complete.return_value = ProviderResponse(text="ok", usage={
+        "prompt_tokens": 1, "completion_tokens": 1, "served_model": "z-ai/glm-5.3-flash"})
+    manager = LLMManager()
+    manager.register_provider("readyset", provider)
+    monkeypatch.setattr(
+        manager,
+        "_safe_load_key_for_query",
+        lambda _provider: KeyResolution(
+            api_key="account-token", is_trial=False, provider="readyset"
+        ),
+    )
+    tracked = []
+    monkeypatch.setattr("shared.telemetry.telemetry.track_llm_usage",
+                        lambda **kwargs: tracked.append(kwargs["model"]))
+
+    result = manager.query(system_message="system", user_query="question")
+
+    assert result["model"] == "z-ai/glm-5.3-flash"
+    assert tracked == ["z-ai/glm-5.3-flash"]
 
 
 def test_claude_byok_honors_rdst_anthropic_model(monkeypatch, tmp_rdst_home):

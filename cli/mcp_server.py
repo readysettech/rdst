@@ -170,7 +170,7 @@ RDST requires AI access for query analysis. Two options:
 
 **Option 2: Your Own Anthropic API Key**
 - Set in the current shell: `{_ANTHROPIC_ASSIGNMENT}`
-- RDST uses Claude Sonnet 4.6 directly and does not require Readyset login
+- RDST uses Claude Haiku 5.5 directly and does not require Readyset login
 - `RDST_ANTHROPIC_MODEL` may override the Claude model
 
 If a user has no ANTHROPIC_API_KEY and is not signed in, tell them to run
@@ -452,7 +452,7 @@ New users sign in to Readyset for hosted inference. Browser sign-in is interacti
 Claude BYOK remains available without Readyset login. Set:
   {_ANTHROPIC_ASSIGNMENT}
 
-Claude defaults to Sonnet 4.6. The model is not selected through this tool;
+Claude defaults to Haiku 5.5. The model is not selected through this tool;
 advanced users can set RDST_ANTHROPIC_MODEL in the environment.
 """,
             "inputSchema": {
@@ -1871,7 +1871,7 @@ user each failed check's `fix` (SQL to run and provider steps). Re-check with
         result = run_rdst_command(["configure", "llm"])
         if result["success"]:
             result["next_steps"] = (
-                "Claude BYOK is configured. Sonnet 4.6 is the default; "
+                "Claude BYOK is configured. Haiku 5.5 is the default; "
                 "RDST_ANTHROPIC_MODEL may override it."
             )
         return result

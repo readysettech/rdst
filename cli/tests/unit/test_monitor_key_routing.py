@@ -10,7 +10,7 @@ import pytest
 from features.monitor import database_limit
 from shared import account_session
 from shared.config.targets import TargetsConfig
-from shared.llm_manager import hosted_glm_provider, inference_attribution
+from shared.llm_manager import hosted_provider, inference_attribution
 from shared.llm_manager.jev_client import JevClient
 from shared.llm_manager.llm_manager import LLMManager
 from shared.secret_store_service import SecretStoreService
@@ -67,7 +67,7 @@ def test_monitor_transport_routing(monkeypatch, source, preference, provider):
             return SimpleNamespace(status_code=200, json=lambda: body, headers={})
 
     transport = ServiceTransport()
-    monkeypatch.setattr(hosted_glm_provider, "_HTTP_SESSION", transport)
+    monkeypatch.setattr(hosted_provider, "_HTTP_SESSION", transport)
     manager = LLMManager()
     with inference_attribution.monitoring_database("a" * 64):
         for purpose in ("monitor_analyze", "monitor_report"):
@@ -86,7 +86,8 @@ def test_monitor_transport_routing(monkeypatch, source, preference, provider):
         assert billed.count == 1
     assert [call[0] for call in calls] == ["monitor_analyze", "monitor_report", "monitor_attention"]
     for _, url, headers, payload in calls[:2]:
-        assert payload["max_tokens"] == 123
+        # Own-key Claude calls reason under one output ceiling; hosted calls carry the request's.
+        assert payload["max_tokens"] == (32_768 if provider == "claude" else 123)
         if provider == "claude":
             assert url == "https://api.anthropic.com/v1/messages"
             assert headers["x-api-key"] == f"test-own-{source}"
@@ -126,7 +127,7 @@ def test_monitor_transport_refusal_preserves_message_and_never_bills(
             return SimpleNamespace(status_code=status, headers={},
                                    json=lambda: {"code": code, "detail": detail})
 
-    monkeypatch.setattr(hosted_glm_provider, "_HTTP_SESSION", Transport())
+    monkeypatch.setattr(hosted_provider, "_HTTP_SESSION", Transport())
     with inference_attribution.inference_workflow("monitor", "web", operation=purpose), \
             inference_attribution.count_billable_calls() as billed:
         with pytest.raises(LLMError) as error:

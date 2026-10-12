@@ -27,6 +27,9 @@ def estimate_tokens(text: str) -> int:
 # Pricing for cost estimation
 CLAUDE_PRICING = {
     "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},
+    # Haiku 5.5 bills a prompt above 100K tokens at five times its base rates.
+    "claude-haiku-5-5": {"input": 0.10, "output": 0.50, "long_prompt_tokens": 100_000,
+                         "long_prompt": {"input": 0.50, "output": 2.50}},
     "claude-haiku-4-5-20251001": {"input": 1.0, "output": 5.0},
     "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.0},
     "claude-3-haiku-20240307": {"input": 0.25, "output": 1.25},
@@ -37,6 +40,8 @@ CLAUDE_PRICING = {
 def estimate_cost(tokens_in: int, tokens_out: int, model: str = "default") -> float:
     """Estimate cost in USD for token usage."""
     pricing = CLAUDE_PRICING.get(model, CLAUDE_PRICING["default"])
+    if tokens_in > pricing.get("long_prompt_tokens", tokens_in):
+        pricing = pricing["long_prompt"]
     cost_in = (tokens_in / 1_000_000) * pricing["input"]
     cost_out = (tokens_out / 1_000_000) * pricing["output"]
     return cost_in + cost_out

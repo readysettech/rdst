@@ -29,7 +29,7 @@ from .models import InitStatus, InitValidationResult
 class InitService:
     """Stateless service for init workflow."""
 
-    _DEFAULT_CLAUDE_MODEL = AnthropicModel.SONNET_4_6.value
+    _DEFAULT_CLAUDE_MODEL = AnthropicModel.HAIKU_5_5.value
 
     def _load_config(self) -> TargetsConfig:
         cfg = TargetsConfig()
@@ -74,7 +74,7 @@ class InitService:
         cfg.set_llm_config(
             {
                 "provider": "claude",
-                "hint": "Using Claude Sonnet 4.6",
+                "hint": "Using Claude Haiku 5.5",
             }
         )
         cfg.save()

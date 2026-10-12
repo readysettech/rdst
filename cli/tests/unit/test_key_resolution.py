@@ -134,7 +134,7 @@ def test_no_key_or_account_requires_login(monkeypatch):
     assert exc.value.code == "LOGIN_REQUIRED"
 
 
-def test_account_session_selects_hosted_glm(monkeypatch):
+def test_account_session_selects_hosted_ai(monkeypatch):
     _patch_config(monkeypatch, None)
     _patch_store(monkeypatch, {})
     monkeypatch.setattr(account_session, "access_token", lambda: "supabase-access")
@@ -143,7 +143,7 @@ def test_account_session_selects_hosted_glm(monkeypatch):
 
     assert resolution.provider == "readyset"
     assert resolution.api_key == "supabase-access"
-    assert resolution.model == "z-ai/glm-5.3-flash"
+    assert resolution.model == "anthropic/claude-haiku-5.5"
 
 
 def test_explicit_claude_never_uses_readyset_account(monkeypatch):

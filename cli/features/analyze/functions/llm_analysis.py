@@ -43,7 +43,10 @@ CLAUDE_PRICING = {
     "claude-opus-4-1-20250805":   {"input": 15.0, "output": 75.0},  # Opus 4.1
     "claude-opus-4-20250514":     {"input": 15.0, "output": 75.0},  # Opus 4.0
     # Haiku family
-    "claude-haiku-4-5-20251001":  {"input": 1.0, "output": 5.0},    # Haiku 4.5 (latest)
+    # Haiku 5.5 bills a prompt above 100K tokens at five times its base rates.
+    "claude-haiku-5-5":           {"input": 0.10, "output": 0.50, "long_prompt_tokens": 100_000,
+                                   "long_prompt": {"input": 0.50, "output": 2.50}},
+    "claude-haiku-4-5-20251001":  {"input": 1.0, "output": 5.0},    # Haiku 4.5
     "claude-3-5-haiku-20241022":  {"input": 0.80, "output": 4.0},   # Haiku 3.5
     "claude-3-haiku-20240307":    {"input": 0.25, "output": 1.25},  # Haiku 3 (deprecated Apr 2026)
     # Fallback for unknown models (assume Sonnet pricing)
@@ -64,6 +67,8 @@ def estimate_cost(tokens_in: int, tokens_out: int, model: str = "default") -> fl
         Estimated cost in USD
     """
     pricing = CLAUDE_PRICING.get(model, CLAUDE_PRICING["default"])
+    if tokens_in > pricing.get("long_prompt_tokens", tokens_in):
+        pricing = pricing["long_prompt"]
     cost_in = (tokens_in / 1_000_000) * pricing["input"]
     cost_out = (tokens_out / 1_000_000) * pricing["output"]
     return cost_in + cost_out

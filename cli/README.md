@@ -178,8 +178,8 @@ No database handy? `rdst demo setup` starts a local demo database to explore wit
 Run `rdst <command> --help` for options and examples.
 
 AI-assisted commands (`ask`, `analyze` insights, `schema annotate`) use capped
-Readyset-hosted GLM 5.3 Flash after `rdst account login`. If you set
-`ANTHROPIC_API_KEY`, RDST uses Claude Sonnet 4.6 directly without requiring a
+Readyset-hosted Claude Haiku 5.5 after `rdst account login`. If you set
+`ANTHROPIC_API_KEY`, RDST uses Claude Haiku 5.5 directly without requiring a
 Readyset account. `RDST_ANTHROPIC_MODEL` can override the Claude BYOK model.
 
 ## Requirements

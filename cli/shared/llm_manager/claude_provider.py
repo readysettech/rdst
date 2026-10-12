@@ -13,6 +13,7 @@ import anthropic
 from shared.shell import environment_assignment
 
 from .base import LLMError, Provider, ProviderRequest, ProviderResponse
+from .claude_schema import claude_json_schema
 
 logger = logging.getLogger(__name__)
 
@@ -20,16 +21,16 @@ logger = logging.getLogger(__name__)
 class AnthropicModel(str, Enum):
     """Supported Anthropic models for RDST.
 
-    RDST uses Claude Sonnet 4.6 as the default model for query analysis.
+    RDST uses Claude Haiku 5.5 as the default model for query analysis.
     https://docs.anthropic.com/en/docs/about-claude/models/overview
     """
 
-    # Latest models (4.6) - RDST defaults
-    SONNET_4_6 = "claude-sonnet-4-6"  # Default - $3/$15 per MTok
-    OPUS_4_6 = "claude-opus-4-6"  # $5/$25 per MTok
+    HAIKU_5_5 = "claude-haiku-5-5"  # Default - $0.10/$0.50 per MTok up to 100K prompt tokens
 
     # Previous generation
-    SONNET_4_5 = "claude-sonnet-4-5-20250929"  # Previous default
+    SONNET_4_6 = "claude-sonnet-4-6"  # Previous default - $3/$15 per MTok
+    OPUS_4_6 = "claude-opus-4-6"  # $5/$25 per MTok
+    SONNET_4_5 = "claude-sonnet-4-5-20250929"
     SONNET_4 = "claude-sonnet-4-20250514"  # Previous version
     OPUS_4 = "claude-opus-4-20250514"  # $15/$75 per MTok
     HAIKU_4_5 = "claude-haiku-4-5-20251001"  # Fast and cheap for filters
@@ -43,6 +44,26 @@ _RETIRED_MODEL_REPLACEMENTS = {
     AnthropicModel.SONNET_4.value: AnthropicModel.SONNET_4_6.value,
     AnthropicModel.OPUS_4.value: AnthropicModel.OPUS_4_6.value,
 }
+
+# Reasoning models reject sampling values other than their defaults and instead reason at the
+# effort hosted inference uses, under one output ceiling: reasoning shares the output budget
+# and is billed as generated, so a caller's answer-sized max_tokens would only cut it short.
+_REASONING_EFFORT = "medium"
+_MAX_OUTPUT_TOKENS = 32_768
+# Gateways and cloud platforms wrap Anthropic ids, as in anthropic.claude-haiku-5-5-v1:0 or
+# claude-haiku-5-5-latest, so the family and version are found anywhere in the id.
+_CLAUDE_VERSION = re.compile(
+    r"(?:^|[^a-z0-9])claude-(haiku|sonnet|opus|fable|mythos)-(\d+)(?:-(\d{1,2}))?(?!\d)"
+)
+
+
+def _reasoning_model(model: str) -> bool:
+    """Claude 5 models and Opus 4.7 onward; other ids keep sampling and the caller's cap."""
+    match = _CLAUDE_VERSION.search(model.lower())
+    if not match:
+        return False
+    family, major, minor = match.group(1), int(match.group(2)), int(match.group(3) or 0)
+    return major >= 5 or (family == "opus" and (major, minor) >= (4, 7))
 
 # Anthropic documents a 32 MB limit for a Messages API request body. HTTPX uses
 # the same compact UTF-8 JSON encoding below, so this measures the bytes that the
@@ -66,7 +87,7 @@ def normalize_anthropic_model(model: str | AnthropicModel) -> str:
 class ClaudeProvider(Provider):
     """Anthropic Messages API provider backed by the official Python SDK."""
 
-    _DEFAULT_MODEL = os.getenv("RDST_ANTHROPIC_MODEL", AnthropicModel.SONNET_4_6.value)
+    _DEFAULT_MODEL = os.getenv("RDST_ANTHROPIC_MODEL", AnthropicModel.HAIKU_5_5.value)
     _BASE_URL = "https://api.anthropic.com"
     _API_VERSION = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
 
@@ -74,11 +95,11 @@ class ClaudeProvider(Provider):
         return normalize_anthropic_model(self._DEFAULT_MODEL)
 
     @staticmethod
-    def _timeout(request: ProviderRequest) -> int:
+    def _timeout(max_tokens: int) -> int:
         # Non-streaming calls hold the socket until the full response is
         # generated. Scale the read timeout with the requested response size,
         # using ~16 tokens/second as a conservative generation floor.
-        return min(600, max(60, int((request.max_tokens or 0) / 16)))
+        return min(600, max(60, int(max_tokens / 16)))
 
     def _client(
         self,
@@ -113,23 +134,42 @@ class ClaudeProvider(Provider):
             if message.get("role") in ("user", "assistant")
         ]
 
+        model = normalize_anthropic_model(request.model)
+        reasoning = _reasoning_model(model)
         payload: dict[str, Any] = {
-            "model": normalize_anthropic_model(request.model),
+            "model": model,
             "messages": messages,
-            "temperature": request.temperature,
-            "max_tokens": request.max_tokens or 800,
+            "max_tokens": _MAX_OUTPUT_TOKENS if reasoning else request.max_tokens or 800,
         }
+        if reasoning:
+            payload["output_config"] = {"effort": _REASONING_EFFORT}
+        else:
+            payload["temperature"] = request.temperature
+            if request.top_p is not None:
+                payload["top_p"] = request.top_p
         if system:
             payload["system"] = system
         if request.stop_sequences:
             payload["stop_sequences"] = list(request.stop_sequences)
-        if request.top_p is not None:
-            payload["top_p"] = request.top_p
 
         extra = dict(request.extra or {})
         response_format = extra.pop("response_format", None)
         if response_format:
-            if response_format.get("type") == "json_schema":
+            if response_format.get("type") == "json_schema" and reasoning:
+                # Native structured output keeps reasoning, which a forced tool call skips.
+                schema = (response_format.get("json_schema") or {}).get("schema") or {}
+                try:
+                    payload["output_config"]["format"] = {
+                        "type": "json_schema", "schema": claude_json_schema(schema),
+                    }
+                except ValueError:
+                    # Unenforceable; state the schema and let the caller validate the reply.
+                    payload["system"] = payload.get("system", "") + (
+                        "\n\nReturn only a JSON object that conforms to this JSON Schema. "
+                        "Do not use markdown or code fences.\n"
+                        + json.dumps(schema, separators=(",", ":"))
+                    )
+            elif response_format.get("type") == "json_schema":
                 json_schema = response_format.get("json_schema", {})
                 tool_name = json_schema.get("name", "json_response")
                 payload["tools"] = [
@@ -362,7 +402,7 @@ class ClaudeProvider(Provider):
             api_key=api_key,
             base_url=base_url,
             extra_headers=extra_headers,
-            timeout=self._timeout(request),
+            timeout=self._timeout(payload["max_tokens"]),
         )
         try:
             raw_response = client.messages.with_raw_response.create(**payload)

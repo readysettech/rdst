@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from shared.keyservice import keyservice_base_url
 from shared.shell import environment_assignment
 
-HOSTED_MODEL = "z-ai/glm-5.3-flash"
+HOSTED_MODEL = "anthropic/claude-haiku-5.5"
 
 
 @dataclass

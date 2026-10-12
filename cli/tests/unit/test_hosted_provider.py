@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from shared.llm_manager.base import LLMError, ProviderRequest
-from shared.llm_manager.hosted_glm_provider import HostedGLMProvider
+from shared.llm_manager.hosted_provider import HostedProvider
 from shared.llm_manager.inference_attribution import count_billable_calls
 
 
@@ -38,9 +38,9 @@ def _response(status_code=200, body=None):
 
 def test_calls_only_bounded_keyservice_protocol(monkeypatch):
     post = MagicMock(return_value=_response())
-    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
 
-    result = HostedGLMProvider().complete(
+    result = HostedProvider().complete(
         _request(extra={"_rdst_schema_cache_key": "a" * 64}),
         api_key="supabase-access",
         base_url="https://keyservice.example",
@@ -67,13 +67,13 @@ def test_calls_only_bounded_keyservice_protocol(monkeypatch):
 
 def test_billable_count_tracks_successful_keyservice_responses(monkeypatch):
     post = MagicMock(side_effect=[_response(429, {"code": "LIMIT"}), _response()])
-    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
     with count_billable_calls() as calls:
         with pytest.raises(LLMError):
-            HostedGLMProvider().complete(_request(), api_key="token",
+            HostedProvider().complete(_request(), api_key="token",
                                          base_url="https://keyservice.example")
         assert calls.count == 0
-        HostedGLMProvider().complete(_request(), api_key="token",
+        HostedProvider().complete(_request(), api_key="token",
                                      base_url="https://keyservice.example")
     assert calls.count == 1
 
@@ -88,10 +88,10 @@ def test_preserves_provider_reported_cache_hits(monkeypatch):
         },
     })
     monkeypatch.setattr(
-        "shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post",
+        "shared.llm_manager.hosted_provider._HTTP_SESSION.post",
         MagicMock(return_value=response),
     )
-    result = HostedGLMProvider().complete(
+    result = HostedProvider().complete(
         _request(), api_key="fixture", base_url="https://keyservice.example",
     )
     assert result.usage["cache_read_input_tokens"] == 3500
@@ -105,14 +105,14 @@ def test_saves_analytics_identity_only_for_the_response_session(monkeypatch):
     body["analytics_account_id"] = "rdst_account_hash"
     post = MagicMock(return_value=_response(body=body))
     save = MagicMock(return_value=True)
-    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
     monkeypatch.setattr(
-        "shared.llm_manager.hosted_glm_provider.account_session."
+        "shared.llm_manager.hosted_provider.account_session."
         "save_account_metadata_for_access_token",
         save,
     )
 
-    HostedGLMProvider().complete(
+    HostedProvider().complete(
         _request(),
         api_key="supabase-access",
         base_url="https://keyservice.example",
@@ -126,10 +126,10 @@ def test_saves_analytics_identity_only_for_the_response_session(monkeypatch):
 
 def test_forwards_only_reserved_attribution_metadata(monkeypatch):
     post = MagicMock(return_value=_response())
-    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
     monkeypatch.setenv("RDST_TELEMETRY", "false")
 
-    HostedGLMProvider().complete(
+    HostedProvider().complete(
         _request({
             "_rdst_attribution": {
                 "feature": "ask",
@@ -151,9 +151,25 @@ def test_forwards_only_reserved_attribution_metadata(monkeypatch):
     assert "response_format" not in payload["attribution"]
 
 
+def test_json_object_is_prompted_and_forwarded(monkeypatch):
+    post = MagicMock(return_value=_response())
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
+
+    HostedProvider().complete(
+        _request({"response_format": {"type": "json_object"}}),
+        api_key="supabase-access",
+        base_url="https://keyservice.example",
+    )
+
+    # Keyservice drops the format for Claude, so the prompt carries the contract.
+    payload = post.call_args.kwargs["json"]
+    assert payload["response_format"] == {"type": "json_object"}
+    assert "valid JSON object" in payload["messages"][0]["content"]
+
+
 def test_json_schema_is_prompted_and_forwarded(monkeypatch):
     post = MagicMock(return_value=_response())
-    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
     schema = {
         "type": "json_schema",
         "json_schema": {
@@ -162,7 +178,7 @@ def test_json_schema_is_prompted_and_forwarded(monkeypatch):
         },
     }
 
-    HostedGLMProvider().complete(
+    HostedProvider().complete(
         _request({"response_format": schema}),
         api_key="supabase-access",
         base_url="https://keyservice.example",
@@ -179,10 +195,10 @@ def test_preserves_keyservice_error_code(monkeypatch):
         403,
         {"code": "HOSTED_CAP_REACHED", "detail": "Monthly limit reached"},
     ))
-    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
 
     with pytest.raises(LLMError) as exc:
-        HostedGLMProvider().complete(
+        HostedProvider().complete(
             _request(),
             api_key="supabase-access",
             base_url="https://keyservice.example",
@@ -199,10 +215,10 @@ def test_preserves_keyservice_error_code(monkeypatch):
 def test_does_not_repeat_keyservice_inference_failures(monkeypatch, status, code):
     post = MagicMock(return_value=_response(status, {"code": code, "detail": "Unavailable"}))
     refresh = MagicMock()
-    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
-    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider.account_session.access_token", refresh)
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
+    monkeypatch.setattr("shared.llm_manager.hosted_provider.account_session.access_token", refresh)
     with pytest.raises(LLMError) as exc:
-        HostedGLMProvider().complete(_request(), api_key="token")
+        HostedProvider().complete(_request(), api_key="token")
     assert exc.value.code == code
     post.assert_called_once()
     refresh.assert_not_called()
@@ -213,9 +229,9 @@ def test_refreshes_only_account_auth_rejection_using_same_request_id(monkeypatch
         _response(401, {"code": "UNAUTHORIZED", "detail": "Expired token"}), _response(),
     ])
     refresh = MagicMock(return_value="new-token")
-    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
-    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider.account_session.access_token", refresh)
-    HostedGLMProvider().complete(_request(), api_key="old-token")
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
+    monkeypatch.setattr("shared.llm_manager.hosted_provider.account_session.access_token", refresh)
+    HostedProvider().complete(_request(), api_key="old-token")
     assert post.call_count == 2
     assert post.call_args_list[0].kwargs["json"]["request_id"] == post.call_args_list[1].kwargs["json"]["request_id"]
     assert post.call_args_list[1].kwargs["headers"]["Authorization"] == "Bearer new-token"
@@ -226,9 +242,9 @@ def test_does_not_repeat_transport_failure(monkeypatch):
     import requests
 
     post = MagicMock(side_effect=requests.Timeout())
-    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
     with pytest.raises(LLMError):
-        HostedGLMProvider().complete(_request(), api_key="token")
+        HostedProvider().complete(_request(), api_key="token")
     post.assert_called_once()
 
 
@@ -248,9 +264,9 @@ def test_serializes_hosted_requests_from_one_process(monkeypatch):
         return _response()
 
     monkeypatch.setattr(
-        "shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post
+        "shared.llm_manager.hosted_provider._HTTP_SESSION.post", post
     )
-    provider = HostedGLMProvider()
+    provider = HostedProvider()
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(
@@ -309,8 +325,8 @@ def test_strict_contracts_from_real_callers_reach_the_keyservice_unchanged(monke
     assert contract["json_schema"]["strict"] is True
 
     post = MagicMock(return_value=_response())
-    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
-    HostedGLMProvider().complete(
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
+    HostedProvider().complete(
         _request({"response_format": contract}),
         api_key="supabase-access",
         base_url="https://keyservice.example",
@@ -323,9 +339,9 @@ def test_usage_carries_the_served_model_and_keyservice_charge(monkeypatch):
     body = {"model": "z-ai/glm-5.3-flash", "text": "ok",
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "cost_microusd": 2100}}
     post = MagicMock(return_value=_response(body=body))
-    monkeypatch.setattr("shared.llm_manager.hosted_glm_provider._HTTP_SESSION.post", post)
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
 
-    result = HostedGLMProvider().complete(
+    result = HostedProvider().complete(
         _request(), api_key="supabase-access", base_url="https://keyservice.example")
 
     assert result.usage["served_model"] == "z-ai/glm-5.3-flash"

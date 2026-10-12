@@ -15,9 +15,9 @@ from shared.llm_manager.claude_provider import (
 )
 
 
-def _request(*, max_tokens=800, extra=None):
+def _request(*, max_tokens=800, extra=None, model="claude-sonnet-4-6"):
     return ProviderRequest(
-        model="claude-sonnet-4-6",
+        model=model,
         messages=[
             {"role": "system", "content": "system"},
             {"role": "user", "content": "question"},
@@ -211,7 +211,53 @@ def test_direct_client_is_pinned_to_origin_timeout_and_zero_retries():
     assert payload["messages"] == [{"role": "user", "content": "question"}]
     assert payload["temperature"] == 0.0
     assert payload["top_p"] == 0.9
+    assert "output_config" not in payload
     assert payload["stop_sequences"] == ["stop"]
+
+
+def test_models_that_reject_custom_sampling_reason_at_hosted_effort():
+    client, create = _completion_client()
+    with patch("shared.llm_manager.claude_provider.anthropic.Anthropic", return_value=client):
+        ClaudeProvider().complete(_request(model="claude-haiku-5-5"), api_key="sk-ant-test")
+
+    payload = create.call_args.kwargs
+    assert payload["model"] == "claude-haiku-5-5"
+    assert "temperature" not in payload and "top_p" not in payload
+    assert payload["output_config"] == {"effort": "medium"}
+    # Reasoning shares the output budget, so the caller's answer-sized cap is not sent.
+    assert payload["max_tokens"] == 32_768
+    assert payload["stop_sequences"] == ["stop"]
+
+
+@pytest.mark.parametrize("model,reasons", [
+    ("claude-haiku-5-5", True),
+    ("claude-sonnet-5", True),
+    ("claude-sonnet-5-5", True),
+    ("claude-opus-4-8", True),
+    ("claude-opus-5-5", True),
+    ("claude-fable-5-1", True),
+    # Gateways and cloud platforms wrap the Anthropic id.
+    ("claude-haiku-5-5-latest", True),
+    ("anthropic.claude-haiku-5-5-v1:0", True),
+    ("us.anthropic.claude-opus-4-7-20260101-v1:0", True),
+    ("anthropic.claude-sonnet-4-6-v1:0", False),
+    ("claude-sonnet-4-6", False),
+    ("claude-sonnet-4-5", False),
+    ("claude-sonnet-4-5-20250929", False),
+    ("claude-opus-4-6", False),
+    ("claude-opus-4-1-20250805", False),
+    ("claude-haiku-4-5-20251001", False),
+    ("claude-3-5-haiku-20241022", False),
+])
+def test_only_reasoning_models_lose_sampling_and_the_callers_cap(model, reasons):
+    client, create = _completion_client()
+    with patch("shared.llm_manager.claude_provider.anthropic.Anthropic", return_value=client):
+        ClaudeProvider().complete(_request(model=model), api_key="sk-ant-test")
+
+    payload = create.call_args.kwargs
+    assert ("output_config" in payload) is reasons
+    assert ("temperature" in payload) is not reasons
+    assert payload["max_tokens"] == (32_768 if reasons else 800)
 
 
 def test_malformed_success_response_is_normalized_as_parse_error():

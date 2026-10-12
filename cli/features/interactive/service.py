@@ -103,7 +103,7 @@ class InteractiveService:
     """Service for interactive analysis conversations."""
 
     DEFAULT_PROVIDER = "claude"
-    DEFAULT_MODEL = AnthropicModel.SONNET_4_6.value
+    DEFAULT_MODEL = AnthropicModel.HAIKU_5_5.value
 
     def __init__(
         self, conv_registry: ConversationRegistry | None = None, llm_manager=None
