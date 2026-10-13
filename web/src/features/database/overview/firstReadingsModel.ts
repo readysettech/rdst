@@ -2,7 +2,14 @@
 // turned on (finding queries, the first deep analyses, the first report), each with an
 // honest state and real progress. Everything derives from the monitor API (settings,
 // health history, collector pulses, the query list and the analysis queue); nothing is
-// estimated beyond the collector interval and the stored levers.
+// estimated beyond the collector interval and the stored levers. AI steps follow what can
+// run now, so a signed-out or AI-off database never reads as analyzing.
+import {
+  type AiBlocker,
+  type AiCanRun,
+  aiCanRun,
+  nextReportAt,
+} from '@/features/monitor-kit/aiMonitoring'
 import type {
   AnalyzeQueueEntry,
   AnalyzeQueueSummary,
@@ -29,6 +36,7 @@ export type FirstRunSettings = Pick<
   first_hour_started_at?: number | null
   ai_monitoring?: MonitorSettings['ai_monitoring']
   ai_reason?: MonitorSettings['ai_reason']
+  ai_since?: MonitorSettings['ai_since']
 }
 
 /** Monitoring is on and the chart has less than its first five minutes of history. */
@@ -109,6 +117,8 @@ export interface FirstRunInput {
     | null
     | undefined
   queue: AnalyzeQueueSummary | null | undefined
+  /** What AI work can run now; read from the settings when absent. */
+  can?: AiCanRun
 }
 
 export interface FirstRunModel {
@@ -150,28 +160,41 @@ export function clockSeconds(ts: number): string {
   })
 }
 
+/** A step that can't run now: off, waiting on the user, or waiting for AI to start. */
+function heldStep(
+  blocker: AiBlocker
+): Pick<FirstRunStep, 'state' | 'meta'> | null {
+  switch (blocker) {
+    case 'monitoring_off':
+    case 'deep_off':
+    case 'report_off':
+      return { state: 'off', meta: 'Turned off' }
+    case 'signed_out':
+      return { state: 'blocked', meta: 'Needs sign-in' }
+    case 'limit':
+    case 'quota':
+      return { state: 'blocked', meta: 'AI is off for this database' }
+    case 'unreachable':
+    case 'service_error':
+    case 'not_started':
+      return { state: 'pending', meta: 'Waiting for AI to start' }
+    default:
+      return null
+  }
+}
+
 function deepStep(
   queue: AnalyzeQueueSummary | null | undefined,
   startAt: number | null,
-  settings: FirstRunSettings | undefined,
+  blocker: AiBlocker | null,
   queriesFound: boolean
 ): FirstRunStep {
   const base = {
     id: 'deep' as const,
     label: 'Analyzing the most expensive queries',
   }
-  if (settings?.deep_analysis === false)
-    return { ...base, state: 'off', meta: 'Turned off', at: null }
-  const ai = settings?.ai_monitoring
-  if (ai === 'local' || ai === 'paused')
-    return {
-      ...base,
-      state: 'blocked',
-      meta: 'AI is off for this database',
-      at: null,
-    }
-  if (ai === 'pending' && settings?.ai_reason === 'signed_out')
-    return { ...base, state: 'blocked', meta: 'Needs sign-in', at: null }
+  const held = blocker ? heldStep(blocker) : null
+  if (held) return { ...base, ...held, at: null }
   if (!queue || startAt == null)
     return { ...base, state: 'pending', meta: null, at: null }
   const since = (job: AnalyzeQueueEntry) => job.enqueued_at >= startAt
@@ -302,7 +325,9 @@ export function firstRun(input: FirstRunInput): FirstRunModel {
     listed > 0 &&
     (input.queries ?? []).every((query) => !((query.qps ?? 0) > 0))
 
-  const deep = deepStep(input.queue, startAt, settings, Boolean(listed))
+  const can = input.can ?? aiCanRun({ settings, now })
+  const deep = deepStep(input.queue, startAt, can.deep, Boolean(listed))
+  const reportHeld = can.report ? heldStep(can.report) : null
   const steps: FirstRunStep[] = [
     listed
       ? {
@@ -325,13 +350,15 @@ export function firstRun(input: FirstRunInput): FirstRunModel {
           at: null,
         },
     deep,
-    {
-      id: 'report',
-      label: 'First report',
-      state: 'pending',
-      meta: 'Tonight at midnight',
-      at: null,
-    },
+    reportHeld
+      ? { id: 'report', label: 'First report', ...reportHeld, at: null }
+      : {
+          id: 'report',
+          label: 'First report',
+          state: 'pending',
+          meta: null,
+          at: nextReportAt(settings?.nightly_hour ?? 0, now),
+        },
   ]
   const complete =
     Boolean(listed) && (deep.state === 'done' || deep.state === 'off')

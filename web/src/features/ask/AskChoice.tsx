@@ -1,5 +1,6 @@
-// An ambiguous question: the clarifying question, the interpretations as radio rows
-// with one caption each, and one solid "Run with <choice>", inline under the box.
+// An ambiguous question: the clarifying question, the interpretations as radio rows with a
+// caption where it says more than the label, and one solid "Run with <choice>", inline
+// under the box.
 import { BaseInputRadioGroup } from '@rs/ui-new/base-input-radio-group'
 import { Button } from '@rs/ui-new/button'
 import { Text } from '@rs/ui-new/text'
@@ -19,12 +20,21 @@ export function AskChoice({
   const [index, setIndex] = useState(0)
   const question = clarification.questions[index]
   if (!question) return null
-  const options = question.options.map((option, position) => ({
-    value: option,
-    label: option,
-    description:
-      clarification.interpretations[position]?.description ?? undefined,
-  }))
+  // Interpretations pair with options by position only when there is a single question.
+  const single = clarification.questions.length === 1
+  const options = question.options.map((option, position) => {
+    const caption = single
+      ? clarification.interpretations[position]?.description?.trim()
+      : undefined
+    return {
+      value: option,
+      label: option,
+      description:
+        caption && caption.toLowerCase() !== option.trim().toLowerCase()
+          ? caption
+          : undefined,
+    }
+  })
   const chosen = answers[question.id] ?? question.options[0] ?? ''
   const last = index === clarification.questions.length - 1
   return (

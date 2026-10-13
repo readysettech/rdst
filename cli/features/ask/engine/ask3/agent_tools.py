@@ -325,7 +325,7 @@ class AgentToolExecutor:
 
         # Step 1: Read-only and LIMIT check
         validation_result = validate_sql_for_ask(
-            sql=sql, max_limit=1000, default_limit=100
+            sql=sql, max_limit=1000, default_limit=100, dialect=self.db_type
         )
 
         if not validation_result.get("is_valid"):
@@ -382,7 +382,7 @@ class AgentToolExecutor:
         from features.ask.sql_validation import validate_sql_for_ask
 
         validation_result = validate_sql_for_ask(
-            sql=sql, max_limit=1000, default_limit=100
+            sql=sql, max_limit=1000, default_limit=100, dialect=self.db_type
         )
 
         if not validation_result.get("is_valid"):

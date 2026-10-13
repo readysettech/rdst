@@ -41,8 +41,17 @@ export function EnableMonitoringDialog({
   // Absent outside a router, as in isolated renders; then the dialog only closes.
   const router = useRouter({ warn: false })
   const settings = useMonitorSettings(target)
-  // AI checks need a Readyset account: signed out, deep analysis waits for a sign-in.
-  const signedOut = useMonitoringLimit(target, open).data?.signed_in === false
+  // AI checks need a Readyset account: signed out, deep analysis waits for a sign-in. A full
+  // account or used-up AI usage holds it too.
+  const limit = useMonitoringLimit(target, open).data
+  const signedOut = limit?.signed_in === false
+  const deepWaits = signedOut
+    ? 'once you sign in'
+    : limit?.target_fits === false && limit.limit != null
+      ? 'once an AI slot is free'
+      : limit?.allowance?.includes('hosted') && !limit.own_key
+        ? 'once your AI usage is raised'
+        : null
   const update = useUpdateMonitorSettings(target)
   const client = useQueryClient()
   const [automatic, setAutomatic] = useState(true)
@@ -72,7 +81,9 @@ export function EnableMonitoringDialog({
       ? 'Run the setup steps above first. This check updates on its own once it passes.'
       : phase === 'unreachable'
         ? 'RDST needs to reach the database first.'
-        : 'Deep analysis is on. Change it any time in Monitoring settings.'
+        : automatic && deepWaits
+          ? `Deep analysis is on, and runs ${deepWaits}.`
+          : `Deep analysis is ${automatic ? 'on' : 'off'}. Change it any time in Monitoring settings.`
 
   const turnOn = () =>
     update.mutate(

@@ -67,6 +67,23 @@ describe('radarHead and radarRows', () => {
     ).toBe(`Last reading ${clock}, every minute`)
     expect(radarRows('off', analyzing, NOW, 3)).toEqual([])
   })
+
+  it('with AI checks paused, counts no first-hour analyses as done', () => {
+    const idle: DatabaseActivity = {
+      ...analyzing,
+      kind: 'reading',
+      label: 'Reading query statistics',
+      done: 0,
+      total: 10,
+      next_check_at: null,
+    }
+    expect(radarRows('watching', idle, NOW).map((row) => row.text)).toContain(
+      'Analyzed 0 of 10 queries'
+    )
+    expect(radarRows('paused', idle, NOW).map((row) => row.text)).toEqual([
+      `Last reading ${readingClock(NOW - 30)}, every minute`,
+    ])
+  })
 })
 
 describe('Radar', () => {

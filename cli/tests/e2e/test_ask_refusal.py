@@ -28,7 +28,7 @@ class TestAskRefusal:
         )
 
         # Should show the refusal error with low confidence.
-        assert "Cannot answer this question" in output, (
+        assert "doesn't have the data to answer that question" in output, (
             f"Expected refusal message in output, got:\n{output[-500:]}"
         )
         assert re.search(r"confidence: 0\.\d", output), (

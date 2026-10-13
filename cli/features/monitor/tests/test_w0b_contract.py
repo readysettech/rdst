@@ -129,7 +129,7 @@ def test_benchmark_fixes_estimates_after_from_the_planner(client, store, monkeyp
     result = client.post("/api/monitor/targets/db/benchmark-fixes",
                          json={"query_keys": [KEYS[0], KEYS[1]], "runs": 20}).json()
     assert result["scratch_schema"] is False and result["runs"] == 20
-    assert result["method"].startswith("Estimated from the planner on db")
+    assert result["method"].startswith("Estimated on db: index fixes tested as hypothetical")
     first, second = result["rows"]
     assert first["before_ms"] == pytest.approx(50.0) and first["after_ms"] == pytest.approx(2.5)
     assert first["change_pct"] == -95 and first["estimated"] is True

@@ -253,7 +253,39 @@ describe('useDemo provision persists across navigation', () => {
     second.unmount()
   })
 
-  it('surfaces a provision error and returns to idle so Start can retry', async () => {
+  it('ends a failed provision in the failed state with its message, never ready', async () => {
+    const sse = sseResponse()
+    const holder = { status: idleStatus as Record<string, unknown> }
+    const fetchMock = mockProvisionFetch(sse, holder)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useDemo())
+    await waitFor(() => expect(result.current.phase).toBe('idle'))
+    await act(async () => {
+      void result.current.provision()
+    })
+    await waitFor(() => expect(result.current.phase).toBe('provisioning'))
+    // Mid-deploy the backend reports provisioned, as it does once ports are allocated.
+    holder.status = provisionedStatus
+
+    await act(async () => {
+      sse.push('error', { message: 'ReadySet did not snapshot in time.' })
+      sse.close()
+    })
+    await waitFor(() => expect(result.current.phase).toBe('failed'))
+    expect(result.current.error).toBe('ReadySet did not snapshot in time.')
+
+    // A status read that still says provisioned doesn't turn the failure into Running.
+    await act(async () => {
+      await result.current.refreshStatus()
+    })
+    expect(result.current.phase).toBe('failed')
+    expect(
+      fetchMock.mock.calls.some(([u]) => String(u).includes('/load/start'))
+    ).toBe(false)
+  })
+
+  it('reconciles a dropped stream to failed when the backend says the start failed', async () => {
     const sse = sseResponse()
     const holder = { status: idleStatus as Record<string, unknown> }
     vi.stubGlobal('fetch', mockProvisionFetch(sse, holder))
@@ -264,13 +296,16 @@ describe('useDemo provision persists across navigation', () => {
       void result.current.provision()
     })
     await waitFor(() => expect(result.current.phase).toBe('provisioning'))
+    holder.status = {
+      ...idleStatus,
+      last_error: 'SQP proxy did not become ready.',
+    }
 
     await act(async () => {
-      sse.push('error', { message: 'Postgres failed to start' })
       sse.close()
     })
-    await waitFor(() => expect(result.current.phase).toBe('idle'))
-    expect(result.current.error).toBe('Postgres failed to start')
+    await waitFor(() => expect(result.current.phase).toBe('failed'))
+    expect(result.current.error).toBe('SQP proxy did not become ready.')
   })
 
   it('ignores a second Start while a deploy is already in flight (no double-provision)', async () => {

@@ -12,15 +12,27 @@ import {
   type MenuItemConstructorOptions,
   Notification,
   nativeImage,
+  protocol,
   shell,
   Tray,
 } from 'electron'
 
+import {
+  APP_ORIGIN,
+  APP_SCHEME,
+  APP_SCHEME_PRIVILEGES,
+  createAppRequestHandler,
+  isRendererUrl,
+} from './app-protocol.js'
+
 import { type BackendHandle, startBackend, stopBackend } from './backend.js'
 import { BackendLog } from './backend-log.js'
 import {
+  type BackendRunState,
   BackendStartCancelled,
   type BackendStartState,
+  keepBackendRunning,
+  runStateTooltip,
   startupTooltip,
   superviseBackendStart,
 } from './backend-supervisor.js'
@@ -53,8 +65,8 @@ import {
   watchNotificationHealth,
 } from './notification-health.js'
 import { checkPackagedWorkflow } from './packaged-smoke.js'
-import { startupPageUrl } from './startup-page.js'
-import { type StaticServerHandle, startStaticServer } from './static-server.js'
+import { rendererGoneAction } from './renderer-recovery.js'
+import { rendererCrashPageUrl, startupPageUrl } from './startup-page.js'
 import {
   DesktopTelemetry,
   detectInstallChange,
@@ -72,7 +84,11 @@ import {
   watchTrayStatus,
 } from './tray-state.js'
 import { setupAutoUpdates } from './updater.js'
-import { hideWindowOnClose, stopBeforeQuit } from './window-lifecycle.js'
+import {
+  cleanUpThen,
+  hideWindowOnClose,
+  stopBeforeQuit,
+} from './window-lifecycle.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RENDERER_DIR = path.resolve(__dirname, '../renderer')
@@ -87,11 +103,18 @@ const PRODUCT_NAME = productName(INSTANCE)
 const LOGIN_IDENTITY = { appId: APP_USER_MODEL_ID, productName: PRODUCT_NAME }
 const DATA_DIR = dataDir(INSTANCE)
 
-// CI smoke mode boots the full shell (sidecar backend, static server,
+// CI smoke mode boots the full shell (sidecar backend, app protocol,
 // renderer), records SMOKE_OK when requested, and exits.
 const SMOKE_MODE = process.env.RDST_DESKTOP_SMOKE === '1'
 const SMOKE_TIMEOUT_MS = 180_000
 const LIFECYCLE_MODE = SMOKE_MODE && process.env.RDST_DESKTOP_LIFECYCLE === '1'
+// A development renderer served by Vite instead of the bundled one.
+const DEV_RENDERER_URL = SMOKE_MODE
+  ? undefined
+  : process.env.ELECTRON_RENDERER_URL || undefined
+
+// Must happen before the app is ready.
+protocol.registerSchemesAsPrivileged([APP_SCHEME_PRIVILEGES])
 
 // Development and an installed build may run together. Keep Electron's
 // profile and single-instance lock separate, just as their OAuth protocols are
@@ -112,7 +135,12 @@ let backendLog: BackendLog | null = null
 let startState: BackendStartState = { phase: 'starting', attempt: 1 }
 const startPhases: BackendStartState['phase'][] = []
 let retryRequested: (() => void) | null = null
-let webServer: StaticServerHandle | null = null
+let appProtocolRegistered = false
+// Whether the backend that started is still up; it is restarted when it stops.
+let backendRunState: BackendRunState = 'running'
+let backendKeeper: { stop: () => void } | null = null
+// Automatic renderer reloads in the last minute, for the crash-loop limit.
+let rendererReloads: number[] = []
 const quitState = { started: false, completed: false }
 let cleanupPromise: Promise<void> | null = null
 let deepLinkPending = false
@@ -177,6 +205,14 @@ process.on('unhandledRejection', (reason) => {
   console.error('[rdst-desktop] unhandled rejection:', reason)
   captureError('main', reason, false)
 })
+// A launch with no terminal behind stdout or stderr (Finder, the dock, a closed shell) fails
+// writes with EPIPE or EIO; logging then must not crash the app.
+for (const stream of [process.stdout, process.stderr]) {
+  stream?.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EPIPE' || err.code === 'EIO') return
+    throw err
+  })
+}
 
 function getResourcesPath(): string {
   return app.isPackaged
@@ -184,41 +220,53 @@ function getResourcesPath(): string {
     : path.resolve(__dirname, '../..')
 }
 
+/** One start of the backend, logged to the backend log. */
+function startBackendOnce(
+  onPhase?: Parameters<typeof startBackend>[0]['onPhase']
+): Promise<BackendHandle> {
+  backendLog ??= new BackendLog(logsDirectory())
+  return startBackend({
+    resourcesPath: getResourcesPath(),
+    sourceDir: E2E_SOURCE_ROOT,
+    keyservice: PACKAGED.keyservice,
+    identity: { instance: INSTANCE, protocol: OAUTH_PROTOCOL },
+    log: backendLog,
+    onPhase,
+    onSpawn: (handle) => {
+      startingBackend = handle
+    },
+  }).finally(() => {
+    startingBackend = null
+  })
+}
+
+/** Serve the bundled renderer, and /api from whichever backend is running, on the app origin. */
+function registerAppProtocol(): void {
+  if (appProtocolRegistered) return
+  protocol.handle(
+    APP_SCHEME,
+    createAppRequestHandler({
+      rootDir: RENDERER_DIR,
+      apiBaseUrl: () => backend?.apiBaseUrl ?? null,
+      smokeAuth: SMOKE_MODE,
+    })
+  )
+  appProtocolRegistered = true
+}
+
 async function resolveRendererUrl(): Promise<string> {
-  const devRendererUrl = SMOKE_MODE
-    ? undefined
-    : process.env.ELECTRON_RENDERER_URL
-  if (devRendererUrl && !E2E_SOURCE_ROOT) {
-    return devRendererUrl
+  if (DEV_RENDERER_URL && !E2E_SOURCE_ROOT) {
+    return DEV_RENDERER_URL
   }
 
-  backendLog ??= new BackendLog(logsDirectory())
-  const log = backendLog
   backend = await superviseBackendStart({
-    start: ({ onPhase }) =>
-      startBackend({
-        resourcesPath: getResourcesPath(),
-        sourceDir: E2E_SOURCE_ROOT,
-        keyservice: PACKAGED.keyservice,
-        identity: { instance: INSTANCE, protocol: OAUTH_PROTOCOL },
-        log,
-        onPhase,
-        onSpawn: (handle) => {
-          startingBackend = handle
-        },
-      }).finally(() => {
-        startingBackend = null
-      }),
+    start: ({ onPhase }) => startBackendOnce(onPhase),
     onState: showStartState,
     cancelled: () => quitState.started,
   })
-  if (devRendererUrl) return devRendererUrl
-  webServer = await startStaticServer({
-    rootDir: RENDERER_DIR,
-    apiBaseUrl: backend.apiBaseUrl,
-    smokeAuth: SMOKE_MODE,
-  })
-  return webServer.url
+  if (DEV_RENDERER_URL) return DEV_RENDERER_URL
+  registerAppProtocol()
+  return APP_ORIGIN
 }
 
 /** The keyservice and instance a change or staging build was packaged for (CI bakes them in). */
@@ -294,23 +342,19 @@ function registerWindowControlHandlers(): void {
     event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent
   ) => BrowserWindow.fromWebContents(event.sender)
 
-  ipcMain.on('window:minimize', (event) => senderWindow(event)?.minimize())
-  ipcMain.on('window:toggle-maximize', (event) => {
-    const win = senderWindow(event)
-    if (!win) return
-    if (win.isMaximized()) {
-      win.unmaximize()
-    } else {
-      win.maximize()
-    }
-  })
-  ipcMain.on('window:close', (event) => senderWindow(event)?.close())
-  ipcMain.handle(
-    'window:is-maximized',
-    (event) => senderWindow(event)?.isMaximized() ?? false
-  )
   ipcMain.on('desktop:open-logs', openLogsFolder)
   ipcMain.on('desktop:retry-backend', () => retryRequested?.())
+  ipcMain.handle('desktop:get-backend-state', () => backendRunState)
+  ipcMain.on('desktop:reload-window', (event) => {
+    const window = senderWindow(event)
+    if (!window) return
+    rendererReloads = []
+    const url =
+      rendererUrl && !starting ? rendererUrl : startupPageUrl(startState)
+    void window.loadURL(url).catch((error) => {
+      console.warn('[rdst-desktop] could not reload the window:', error)
+    })
+  })
   ipcMain.handle('oauth:register-protocol', () => {
     if (process.defaultApp && process.argv[1]) {
       return app.setAsDefaultProtocolClient(OAUTH_PROTOCOL, process.execPath, [
@@ -335,19 +379,13 @@ function registerWindowControlHandlers(): void {
   })
 }
 
-function isLocalRendererUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url)
-    return parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost'
-  } catch {
-    return false
-  }
-}
-
 // The renderer is laid out for the browser at 100%; the desktop shell shows
 // it two zoom steps smaller so more of a page fits without scrolling. A
 // person's own zoom changes (Cmd/Ctrl +/-) persist per origin on top of this.
 const DEFAULT_ZOOM_FACTOR = 0.8
+// The title strip the window controls sit in, in device-independent pixels: the system's
+// caption height on Windows and Linux, and on macOS the sidebar's top up to its first item.
+const TITLE_BAR_HEIGHT = process.platform === 'darwin' ? 46 : 32
 
 // Electron's stock View menu resets zoom to 100 percent. This shell's actual
 // size is the default factor above, so Actual Size returns there while Zoom
@@ -410,12 +448,17 @@ async function createWindow(
     minWidth: 900,
     minHeight: 620,
     title: 'RDST',
-    titleBarStyle: isMac ? 'hiddenInset' : 'default',
-    // Centered in the renderer's dedicated traffic-light strip.
+    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
     trafficLightPosition: isMac ? { x: 22, y: 18 } : undefined,
-    // Frameless on Linux; the renderer draws its own window controls in the
-    // header and marks drag regions with -webkit-app-region.
-    frame: isMac,
+    // The system draws the window controls over the renderer: the traffic lights over the
+    // sidebar on macOS, the buttons at the top right on Windows and Linux. The renderer
+    // keeps their strip clear using the titlebar-area CSS environment variables this
+    // enables, and marks drag regions with -webkit-app-region.
+    titleBarOverlay: {
+      color: '#171616',
+      symbolColor: '#a19e9a',
+      height: TITLE_BAR_HEIGHT,
+    },
     transparent: false,
     // Matches --surface-layout-2 in the renderer's dark theme so there is no
     // flash before first paint.
@@ -462,14 +505,14 @@ async function createWindow(
   }
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (isLocalRendererUrl(url)) {
+    if (isRendererUrl(url, DEV_RENDERER_URL)) {
       return { action: 'allow' }
     }
     void shell.openExternal(url)
     return { action: 'deny' }
   })
   window.webContents.on('will-navigate', (event, url) => {
-    if (isLocalRendererUrl(url)) return
+    if (isRendererUrl(url, DEV_RENDERER_URL)) return
     event.preventDefault()
     void shell.openExternal(url)
   })
@@ -485,6 +528,8 @@ async function createWindow(
         handled: false,
       })
     }
+    if (SMOKE_MODE || quitState.started) return
+    recoverRenderer(window, details.reason)
   })
 
   if (SMOKE_MODE) {
@@ -496,14 +541,6 @@ async function createWindow(
     })
   }
 
-  const sendMaximizedState = (maximized: boolean) => {
-    if (!window.isDestroyed()) {
-      window.webContents.send('window:maximized-changed', maximized)
-    }
-  }
-  window.on('maximize', () => sendMaximizedState(true))
-  window.on('unmaximize', () => sendMaximizedState(false))
-
   await window.loadURL(rendererUrl)
 
   if (isMac) {
@@ -511,6 +548,46 @@ async function createWindow(
   }
 
   return window
+}
+
+/** Reload a window whose renderer died, or show the error page once it keeps dying. */
+function recoverRenderer(window: BrowserWindow, reason: string): void {
+  const next = rendererGoneAction(reason, rendererReloads, Date.now())
+  if (next.action === 'none' || window.isDestroyed()) return
+  rendererReloads = next.reloads
+  backendLog?.write('shell', [`renderer gone (${reason}): ${next.action}`])
+  // Loading from inside the render-process-gone event crashes Electron; wait for it to end.
+  setTimeout(() => {
+    if (window.isDestroyed()) return
+    if (next.action === 'reload') {
+      // The startup page is a data: URL that reload shows again as it was.
+      window.webContents.reload()
+      return
+    }
+    void window.loadURL(rendererCrashPageUrl()).catch((error) => {
+      console.warn('[rdst-desktop] could not show the crash page:', error)
+    })
+  }, 0)
+}
+
+function setBackendRunState(state: BackendRunState): void {
+  if (state === backendRunState) return
+  backendRunState = state
+  backendLog?.write('shell', [`backend: ${state}`])
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('desktop:backend-state', state)
+  }
+  if (state === 'failed' && settings.notificationsEnabled) {
+    showNotification(
+      'RDST stopped monitoring',
+      "RDST's background service keeps stopping. It tries again every 30 seconds.",
+      focusMainWindow,
+      true,
+      'backend_stopped'
+    )
+  }
+  void trayWatcher?.refresh()
+  buildTrayMenu()
 }
 
 function cleanup(): Promise<void> {
@@ -522,13 +599,8 @@ function cleanup(): Promise<void> {
     trayWatcher = null
     tray?.destroy()
     tray = null
-    const server = webServer
-    webServer = null
-    if (server) {
-      await server.close().catch((error) => {
-        console.warn('[rdst-desktop] failed to close web server:', error)
-      })
-    }
+    backendKeeper?.stop()
+    backendKeeper = null
 
     const backendHandle = backend ?? startingBackend
     backend = null
@@ -852,8 +924,9 @@ function createTray(): void {
       backend !== null &&
       backend.process.exitCode === null &&
       backend.process.signalCode === null,
-    starting: () => starting,
-    startingTooltip: () => startupTooltip(startState),
+    starting: () => starting || backendRunState !== 'running',
+    startingTooltip: () =>
+      starting ? startupTooltip(startState) : runStateTooltip(backendRunState),
     paused: async () => {
       await loadTrayDatabases()
       return allPaused(trayDatabases)
@@ -899,30 +972,30 @@ function showNotification(
   capture('system_notification_shown', { kind, critical })
 }
 
-// The sidecar exiting outside a quit leaves nothing watching the databases; say so once.
-function watchBackendExit(handle: BackendHandle): void {
-  handle.process.once('exit', (code, signal) => {
-    if (quitState.started) return
-    console.error(
-      `[rdst-desktop] RDST backend exited (code=${code}, signal=${signal})`
-    )
-    telemetry?.setBackend(null)
-    capture('app_error', {
-      component: 'backend_exit',
-      error_class: signal ?? `exit_${code ?? 'unknown'}`,
-      handled: false,
-    })
-    void trayWatcher?.refresh()
-    if (settings.notificationsEnabled) {
-      showNotification(
-        'RDST stopped monitoring',
-        "RDST's background service stopped, so it isn't watching your databases. " +
-          'Quit RDST from the tray and open it again to restart it.',
-        focusMainWindow,
-        true,
-        'backend_stopped'
+// The sidecar exiting outside a quit leaves nothing watching the databases; restart it.
+function keepBackendUp(handle: BackendHandle): void {
+  backendKeeper = keepBackendRunning(handle, {
+    start: () => startBackendOnce(),
+    stop: (restarted) => stopBackend(restarted),
+    quitting: () => quitState.started,
+    onExit: ({ code, signal }) => {
+      console.error(
+        `[rdst-desktop] RDST backend exited (code=${code}, signal=${signal})`
       )
-    }
+      backend = null
+      telemetry?.setBackend(null)
+      capture('app_error', {
+        component: 'backend_exit',
+        error_class: signal ?? `exit_${code ?? 'unknown'}`,
+        handled: false,
+      })
+    },
+    onState: setBackendRunState,
+    onRestarted: (restarted) => {
+      backend = restarted
+      telemetry?.setBackend(restarted.apiBaseUrl)
+      refreshTrayMenu()
+    },
   })
 }
 
@@ -1092,12 +1165,15 @@ async function startApplication(): Promise<void> {
   if (SMOKE_MODE) {
     ipcMain.handle('updates:get-state', () => null)
   } else {
-    setupAutoUpdates({
-      isPackaged: app.isPackaged,
-      platform: process.platform,
-      appImagePath: process.env.APPIMAGE,
-      packageName: packageName(INSTANCE),
-    })
+    setupAutoUpdates(
+      {
+        isPackaged: app.isPackaged,
+        platform: process.platform,
+        appImagePath: process.env.APPIMAGE,
+        packageName: packageName(INSTANCE),
+      },
+      (install) => cleanUpThen(quitState, cleanup, install)
+    )
   }
 
   try {
@@ -1109,7 +1185,7 @@ async function startApplication(): Promise<void> {
     if (!SMOKE_MODE || LIFECYCLE_MODE) createTray()
     await createWindow(startupPageUrl(startState), hidden)
     rendererUrl = await startBackendUntilReady()
-    smokeLog('backend and static server ready')
+    smokeLog('backend and app protocol ready')
 
     const window = mainWindow ?? (await createWindow(rendererUrl, hidden))
     if (!window.webContents.getURL().startsWith(rendererUrl))
@@ -1145,9 +1221,9 @@ async function startApplication(): Promise<void> {
     }
     if (backend) {
       telemetry?.setBackend(backend.apiBaseUrl)
-      watchBackendExit(backend)
+      keepBackendUp(backend)
       stopInboxStream = startInboxNotifications({
-        apiBaseUrl: backend.apiBaseUrl,
+        apiBaseUrl: () => backend?.apiBaseUrl ?? null,
         enabled: () => settings.notificationsEnabled,
         onEvent: (id) => {
           lastInboxEventId = id

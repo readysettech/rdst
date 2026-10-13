@@ -24,6 +24,7 @@ export const Route = createFileRoute('/results')({
     params: typeof search.params === 'string' ? search.params : undefined,
     origin: isResultsOrigin(search.origin) ? search.origin : undefined,
     hash: typeof search.hash === 'string' ? search.hash : undefined,
+    key: typeof search.key === 'string' && search.key ? search.key : undefined,
     analysisId:
       typeof search.analysisId === 'string' ? search.analysisId : undefined,
     monitorFixture:
@@ -36,7 +37,7 @@ export const Route = createFileRoute('/results')({
   // shell intact, instead of crashing. A monitored query's key is enough: the
   // page reads its SQL and its analysis from monitoring.
   beforeLoad: ({ search }) => {
-    if (!search.query && !search.hash) {
+    if (!search.query && !search.hash && !search.key) {
       throw redirect({ to: '/database' })
     }
   },

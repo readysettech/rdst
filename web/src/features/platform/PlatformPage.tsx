@@ -14,6 +14,7 @@ import { Verdict } from '@rs/ui-new/verdict'
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { useOpenAddDatabase } from '../../components/configure/addDatabase'
 import { TrialRegistrationDialog } from '../../components/TrialRegistrationDialog'
+import { thisComputer } from '../../lib/desktop'
 import {
   type ContainerProgress,
   type DemoFacts,
@@ -277,8 +278,8 @@ function WhatToTry({
         ))}
       </DividedList>
       <Text as="p" level="caption" className="mt-3.5 text-content-layout-3">
-        Runs in four local containers. Nothing leaves your Mac; it removes
-        itself after an hour, or sooner with Shut down demo.
+        Runs in four local containers. Nothing leaves {thisComputer()}; it
+        removes itself after an hour, or sooner with Shut down demo.
       </Text>
     </section>
   )
@@ -307,7 +308,7 @@ export function PlatformPage() {
     }
   }, [])
   useEffect(() => {
-    if (d.phase === 'idle') void recheck()
+    if (d.phase === 'idle' || d.phase === 'failed') void recheck()
   }, [d.phase, recheck])
 
   const [metric, setMetric] = useState<ComparisonMetric>('qps')
@@ -334,14 +335,15 @@ export function PlatformPage() {
   const errorRef = useRef<string | null | undefined>(undefined)
   const healthRef = useRef<Record<string, ContainerProgress['state']>>({})
   useEffect(() => {
-    if (d.error && d.error !== errorRef.current)
+    // A failed start shows its reason on the page instead.
+    if (d.error && d.error !== errorRef.current && d.phase !== 'failed')
       toast({
         title: 'Something went wrong',
         description: d.error,
         variant: 'negative',
       })
     errorRef.current = d.error
-  }, [d.error])
+  }, [d.error, d.phase])
   useEffect(() => {
     if (d.notice && d.notice !== noticeRef.current)
       toast({ description: d.notice })
@@ -471,6 +473,7 @@ export function PlatformPage() {
   const ready = d.phase === 'ready'
   const starting = d.phase === 'provisioning'
   const stopping = d.phase === 'tearing-down'
+  const failed = d.phase === 'failed'
   const blocked =
     checks != null && docker === 'ok' && !canStart(checks)
       ? checks.amd64_emulation === 'unavailable'
@@ -543,7 +546,7 @@ export function PlatformPage() {
         ? "Docker isn't installed"
         : docker === 'not_running'
           ? "Docker isn't running"
-          : 'A caching demo on your Mac, about 2 minutes'
+          : `A caching demo on ${thisComputer()}, about 2 minutes`
     actions = (
       <>
         <Button
@@ -568,7 +571,9 @@ export function PlatformPage() {
         : checks.images_present
           ? ' Docker is ready and the images are downloaded.'
           : ` Docker is ready. The first start downloads ${formatDownloadSize(checks.download_mb)}.`
-    meta = `A caching demo on your Mac, about 2 minutes.${requirements}`
+    meta = failed
+      ? "The demo didn't start"
+      : `A caching demo on ${thisComputer()}, about 2 minutes.${requirements}`
     actions = (
       <Button
         variant="primary"
@@ -615,6 +620,15 @@ export function PlatformPage() {
                   }
                 : undefined
             }
+            className="mb-7"
+          />
+        )}
+        {failed && (
+          <InlineNotice
+            tone="quiet"
+            accent="negative"
+            title=""
+            message={d.error ?? 'Start it again to retry.'}
             className="mb-7"
           />
         )}
@@ -699,8 +713,8 @@ export function PlatformPage() {
         title="Start the demo?"
         subtitle={
           checks?.images_present
-            ? 'Runs four containers on your Mac for up to an hour. The images are already downloaded.'
-            : `Downloads about ${formatDownloadSize(checks?.download_mb)} of images, then runs four containers on your Mac for up to an hour.`
+            ? `Runs four containers on ${thisComputer()} for up to an hour. The images are already downloaded.`
+            : `Downloads about ${formatDownloadSize(checks?.download_mb)} of images, then runs four containers on ${thisComputer()} for up to an hour.`
         }
         confirmLabel="Start the demo"
         confirmVariant="primary"

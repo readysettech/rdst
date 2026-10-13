@@ -194,6 +194,49 @@ describe('ProviderImport', () => {
     )
   })
 
+  it.each([
+    [{ skipped: 0, errors: 0 }, false],
+    [{ skipped: 1, errors: 1 }, true],
+  ])('a CSV import with %o left out stays on its summary: %s', async (left, stays) => {
+    const completion = {
+      type: 'import_complete' as const,
+      success: true,
+      imported: 1,
+      target_names: ['orders'],
+      ...left,
+    }
+    vi.mocked(useFleetImport).mockReturnValue({
+      runImport: vi.fn().mockResolvedValue(completion),
+      state: 'complete',
+      progress: [],
+      result: completion,
+      errors: stays ? ['Row 3 (Orders): Same name as row 2'] : [],
+      reset: vi.fn(),
+    })
+    const { container } = renderWithClient(
+      <ProviderImport initialTab="csv" onClose={vi.fn()} />
+    )
+    const input = container.querySelector(
+      'input[type="file"]'
+    ) as HTMLInputElement
+    // jsdom's File has no text(); the import only reads the name and the text.
+    const file = { name: 'fleet.csv', text: async () => 'name,host,engine\n' }
+    fireEvent.change(input, { target: { files: [file] } })
+    await waitFor(() => expect(screen.getByText('fleet.csv')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+
+    if (!stays) {
+      expect(await screen.findByTestId('credentials-step')).toBeTruthy()
+      return
+    }
+    const next = await screen.findByRole('button', { name: 'Continue' })
+    expect(screen.queryByTestId('credentials-step')).toBeNull()
+    expect(screen.getByText('Row 3 (Orders): Same name as row 2')).toBeTruthy()
+    expect(screen.getByText('1 imported, 1 skipped, 1 errors')).toBeTruthy()
+    fireEvent.click(next)
+    expect(await screen.findByTestId('credentials-step')).toBeTruthy()
+  })
+
   it('previews discovered databases and adds only the new checked ones', async () => {
     const onStepChange = vi.fn()
     renderImport({ initialTab: 'aws', onStepChange })

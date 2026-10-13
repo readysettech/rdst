@@ -20,6 +20,7 @@ import re
 import time
 from typing import Any, Callable
 
+from shared.db_connection import IoDeadline
 from shared.monitor.monitor_store import SAMPLES_PER_QUERY, MonitorStore
 from shared.target_backoff import TargetBackoff, target_backoff
 
@@ -29,6 +30,8 @@ IDLE_INTERVAL_S = 30.0
 TOP_KEYS = 20
 WANTED_REFRESH_S = 60
 STATEMENT_TIMEOUT_MS = 500
+# A read on a server that stopped answering is aborted after this long, client side.
+READ_DEADLINE_S = 5.0
 MAX_ROWS = 200
 # An idle session's last statement counts as a live sample for this long after it ran.
 RECENT_S = 120
@@ -237,21 +240,24 @@ class ParamSampler:
     def _read(self, target: str, engine: str,
               by_engine: dict[str, str]) -> list[tuple[str, str]]:
         connection = self._connection(target)
-        cursor = connection.cursor()
-        try:
-            if engine == "mysql":
-                return self._read_mysql(cursor, by_engine)
-            rows = self._read_postgres(cursor, by_engine)
-            # A COMMIT ends the read-only transaction without counting as a rollback in
-            # the database's own rollback rate, which RDST charts and alerts on.
-            connection.commit()
-            return rows
-        except Exception:
-            if engine != "mysql":
-                connection.rollback()
-            raise
-        finally:
-            cursor.close()
+        # A server that stops answering fails the read in bounded time; the failed pass drops
+        # the aborted connection and the next poll opens a fresh one.
+        with IoDeadline(connection, READ_DEADLINE_S):
+            cursor = connection.cursor()
+            try:
+                if engine == "mysql":
+                    return self._read_mysql(cursor, by_engine)
+                rows = self._read_postgres(cursor, by_engine)
+                # A COMMIT ends the read-only transaction without counting as a rollback in
+                # the database's own rollback rate, which RDST charts and alerts on.
+                connection.commit()
+                return rows
+            except Exception:
+                if engine != "mysql":
+                    connection.rollback()
+                raise
+            finally:
+                cursor.close()
 
     @staticmethod
     def _read_postgres(cursor: Any, by_engine: dict[str, str]) -> list[tuple[str, str]]:

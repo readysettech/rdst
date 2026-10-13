@@ -15,7 +15,7 @@ import requests
 from shared import account_session
 from shared.keyservice import keyservice_base_url
 
-from .base import LLMError, Provider, ProviderRequest, ProviderResponse
+from .base import LLMError, Provider, ProviderRequest, ProviderResponse, provider_unreachable
 from .key_resolution import HOSTED_MODEL
 
 _HTTP_SESSION = requests.Session()
@@ -196,6 +196,10 @@ class HostedProvider(Provider):
                         else 300
                     ),
                 )
+            except requests.ConnectionError as exc:  # also a connect timeout
+                raise provider_unreachable(
+                    "RDST's AI service", "HOSTED_INFERENCE_UNAVAILABLE", exc
+                ) from exc
             except requests.RequestException as exc:
                 raise LLMError(
                     f"Readyset-hosted inference is unavailable: {exc}",

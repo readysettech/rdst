@@ -11,6 +11,7 @@ teardown.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -31,6 +32,8 @@ from features.qpdemo.workload import WORKLOAD, load_sqls, workload_dicts
 from shared.constants import rdst_instance_suffix
 from shared.deploy.docker_topology import DockerTopology
 from shared.telemetry import telemetry
+
+logger = logging.getLogger(__name__)
 
 PROJECT = qdeploy.PROJECT
 ASSETS = Path(__file__).parent / "assets"
@@ -984,8 +987,27 @@ class DemoService:
             yield {"type": "complete", "percent": 100, "targets": [],
                    "message": "Environment ready. QueryPilot is off - cache by hand first."}
         except Exception as e:
+            self._abandon_provision()
             self._last_error = str(e)
             yield {"type": "error", "message": str(e)}
+
+    def _abandon_provision(self) -> None:
+        """Remove a half-built stack after a failed provision.
+
+        Left in place, it reads as a provisioned demo: status reports it running and the
+        UI starts traffic against it. The images stay for the retry.
+        """
+        try:
+            self.stop_load()
+            self._stop_supervisor()
+            self._force_clean()
+        except Exception:
+            logger.warning("Could not clean up a failed demo provision", exc_info=True)
+        self._delete_state()
+        self._ports = None
+        self._qp = None
+        self._auto_teardown_at = None
+        self._health = {n: "absent" for n in NAMES}
 
     def _wait_pg_connect(self, timeout: int) -> bool:
         """Readiness wait for the pre-baked image: data already exists, so

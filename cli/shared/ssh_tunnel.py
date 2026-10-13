@@ -25,6 +25,10 @@ KEEPALIVE_SECONDS = 30
 ACCEPT_READY_TIMEOUT_SECONDS = 2.0
 MAX_CHANNELS_PER_TUNNEL = 8
 CHANNEL_OPEN_TIMEOUT_SECONDS = 10
+# paramiko errors meaning the jump host dropped or never finished the session.
+_SESSION_LOST = ("no existing session", "ssh session not active",
+                 "error reading ssh protocol banner", "connection reset", "connection closed",
+                 "connection aborted", "socket is closed")
 
 logger = logging.getLogger(__name__)
 
@@ -422,6 +426,8 @@ class TunnelManager:
                         "SSH authentication failed; check the user, key, and ssh-agent",
                     )
                 ) from exc
+            if any(text in str(exc).lower() for text in _SESSION_LOST):
+                raise self._connection_error(exc, jump_host, resolved["port"]) from exc
             raise SshTunnelError(
                 self._message(target_name, jump_host, f"SSH setup failed: {exc}")
             ) from exc
@@ -448,7 +454,7 @@ class TunnelManager:
             probe.close()
         except (OSError, EOFError, paramiko.SSHException) as exc:
             client.close()
-            raise self._connection_error(exc, dest_host, dest_port) from exc
+            raise self._connection_error(exc, dest_host, dest_port, jump=False) from exc
 
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
@@ -685,7 +691,8 @@ class TunnelManager:
                         raise EOFError("SSH connection closed")
                 except (OSError, EOFError, paramiko.SSHException) as exc:
                     if tunnel.on_failure is not None:
-                        tunnel.on_failure(TunnelManager._connection_error(exc, dest_host, dest_port))
+                        tunnel.on_failure(TunnelManager._connection_error(exc, dest_host, dest_port,
+                                                                          jump=False))
                     tunnel.stop_event.set()
                     return
 
@@ -776,22 +783,45 @@ class TunnelManager:
         tunnel.transport.close()
 
     @staticmethod
-    def _connection_error(error: Exception, host: str, port: int) -> SshConnectionError:
+    def _connection_error(error: Exception, host: str, port: int, *,
+                          jump: bool = True) -> SshConnectionError:
+        """A reachability failure with its cause and what to check.
+
+        `jump` is the jump host itself; otherwise the jump host could not reach the database.
+        """
         detail = str(error).lower()
         if isinstance(error, socket.gaierror) or any(word in detail for word in (
             "name or service not known", "nodename nor servname", "getaddrinfo failed",
             "name does not resolve", "host not found", "temporary failure in name resolution",
             "no such host is known",
         )):
-            cause, message = "dns", f"SSH tunnel host not found: {host}"
+            cause = "dns"
         elif isinstance(error, (TimeoutError, socket.timeout)) or "timed out" in detail or "timeout" in detail:
-            cause, message = "timeout", f"SSH tunnel connection timed out: {host}:{port}"
+            cause = "timeout"
         elif (getattr(error, "errno", None) == errno.ECONNREFUSED or "refused" in detail
               or any(getattr(item, "errno", None) == errno.ECONNREFUSED
                      for item in getattr(error, "errors", {}).values())):
-            cause, message = "refused", f"SSH tunnel connection refused: {host}:{port}"
+            cause = "refused"
         else:
-            cause, message = "connection", f"SSH tunnel connection failed: {host}:{port}"
+            cause = "connection"
+        # Reasons start with "SSH ": that is how connection checks tell a tunnel failure apart.
+        address = f"{host}:{port}"
+        reach = "Check that it's running and that this computer can reach it."
+        via = "Check the database host and port, and that the jump host can reach it."
+        message = {
+            "dns": f"SSH jump host {host} wasn't found. Check its host name.",
+            "timeout": f"SSH jump host {address} didn't answer. {reach}",
+            "refused": f"SSH jump host {address} refused the connection. Check that SSH listens "
+                       "on that port.",
+            "connection": f"SSH jump host {address} couldn't be reached. {reach}",
+        }[cause] if jump else {
+            "dns": f"SSH jump host couldn't find the database host {host}. Check the database "
+                   "host name.",
+            "timeout": f"SSH jump host couldn't reach the database at {address} in time. {via}",
+            "refused": f"SSH jump host reached {address}, but the database refused the "
+                       "connection. Check the database host and port.",
+            "connection": f"SSH jump host couldn't reach the database at {address}. {via}",
+        }[cause]
         return SshConnectionError(message, cause=cause)
 
     @staticmethod

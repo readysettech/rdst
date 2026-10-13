@@ -42,6 +42,7 @@ except ImportError:
 from shared.db_connection import (
     cancel_postgres_by_pid,
     cancel_mysql_by_thread_id,
+    cancel_registered,
     create_mysql_connection_from_params,
     postgres_connection_kwargs,
     rdst_self_marker,
@@ -592,7 +593,10 @@ def _execute_postgres_explain_analyze(
         worker_state = _AnalyzeWorkerState('backend_pid')
         query_result = worker_state.result
         query_lock = worker_state.lock
-        active_connection = [None]
+        active_connection = []
+        # Held to clear active_connection before closing it, so a cancel never reads a closed one.
+        # Reentrant: the Ctrl+C handler can interrupt a cancel already holding it.
+        active_connection_lock = threading.RLock()
 
         def execute_explain_analyze():
             query_conn = None
@@ -601,7 +605,8 @@ def _execute_postgres_explain_analyze(
             error = None
             try:
                 query_conn = psycopg2.connect(**conn_params)
-                active_connection[0] = query_conn
+                with active_connection_lock:
+                    active_connection.append((query_conn, 'postgresql', None))
                 monitor_run = analysis_lane.register(target, query_conn, 'postgresql', target_config)
                 with query_conn.cursor() as query_cursor:
                     if statement_timeout_ms:
@@ -625,7 +630,8 @@ def _execute_postgres_explain_analyze(
                 error = str(e)
             finally:
                 analysis_lane.unregister(monitor_run, query_conn)
-                active_connection[0] = None
+                with active_connection_lock:
+                    active_connection.clear()
                 # Publish the terminal execution state before connection
                 # cleanup, which may itself block in a broken driver/socket.
                 worker_state.finish(data=data, error=error)
@@ -649,12 +655,12 @@ def _execute_postgres_explain_analyze(
         # Helper to cancel the backend query using shared utility
         def cancel_backend_query():
             worker_state.request_cancel()
-            if active_connection[0] is not None:
-                try:
-                    active_connection[0].cancel()
-                    return True
-                except Exception:
-                    pass
+            with active_connection_lock:
+                connected = bool(active_connection)
+            if connected and cancel_registered(active_connection_lock, lambda: active_connection):
+                return True
+            # Without a protocol cancel (libpq unavailable, or not taken) the server keeps running
+            # the statement; pg_cancel_backend still stops it.
             backend_pid = worker_state.identifier()
             if backend_pid:
                 return cancel_postgres_by_pid(conn_params, backend_pid, verbose=True)
@@ -1223,10 +1229,14 @@ def _execute_mysql_explain_analyze(
                 # Check results
                 if query_snapshot['data'] and not user_skipped:
                     # EXPLAIN ANALYZE completed successfully
+                    plan_time_ms = _extract_mysql_actual_time(query_snapshot['data'])
                     return {
                         "success": True,
                         "explain_plan": query_snapshot['data'],
-                        "execution_time_ms": execution_time_ms,
+                        "execution_time_ms": (
+                            execution_time_ms if plan_time_ms is None else plan_time_ms),
+                        # Wall clock of the whole run: connect, round trips and the wait loop.
+                        "actual_elapsed_time_ms": execution_time_ms,
                         "rows_examined": _extract_mysql_rows_examined(query_snapshot['data']),
                         "rows_returned": _extract_mysql_rows_returned(query_snapshot['data']),
                         "cost_estimate": _extract_mysql_cost(query_snapshot['data']),
@@ -1452,6 +1462,28 @@ def _extract_mysql_rows_returned(results: List[Dict[str, Any]]) -> int:
                     pass
 
     return 0
+
+
+_MYSQL_NUMBER = r'[0-9]+(?:\.[0-9]+)?(?:e[-+]?[0-9]+)?'
+_MYSQL_ACTUAL_TIME = re.compile(
+    rf'\(actual time=({_MYSQL_NUMBER})\.\.({_MYSQL_NUMBER}) rows=({_MYSQL_NUMBER}) '
+    rf'loops=({_MYSQL_NUMBER})\)')
+
+
+def _extract_mysql_actual_time(results: List[Dict[str, Any]]) -> Optional[float]:
+    """The root operation's measured time in ms from MySQL EXPLAIN ANALYZE output.
+
+    Each node reports "actual time=<first row>..<last row>" averaged per loop, so the root's
+    total is its last-row time times its loops. None when the root carries no timing.
+    """
+    for row in results:
+        if isinstance(row, dict) and isinstance(row.get('EXPLAIN'), str):
+            root = row['EXPLAIN'].lstrip().split('\n', 1)[0]
+            match = _MYSQL_ACTUAL_TIME.search(root)
+            if match:
+                return float(match.group(2)) * float(match.group(4))
+            return None
+    return None
 
 
 def _extract_mysql_cost(results: List[Dict[str, Any]]) -> float:

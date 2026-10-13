@@ -9,6 +9,7 @@ import sys
 from typing import List, Optional, Tuple
 
 from shared.email import EMAIL_RE
+from shared.telemetry_manager import FEEDBACK_NOT_SENT
 
 # Import UI system - handles Rich availability internally
 from shared.ui import (
@@ -207,7 +208,7 @@ class ReportCommand:
 
         # Submit feedback
         try:
-            telemetry.submit_feedback(
+            delivered = telemetry.submit_feedback(
                 reason=reason,
                 query_hash=query_hash,
                 query_sql=query_sql,
@@ -218,6 +219,9 @@ class ReportCommand:
                 include_query=include_query,
                 include_plan=include_plan,
             )
+            if not delivered:
+                self.console.print(MessagePanel(FEEDBACK_NOT_SENT, variant="error"))
+                return False
 
             self.console.print(
                 MessagePanel("Thank you for your feedback!", variant="success")

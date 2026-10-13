@@ -45,6 +45,7 @@ vi.mock('@/features/prerequisites', async (original) => ({
 }))
 
 const {
+  aiCanRun,
   aiStateCopy,
   allowanceCopy,
   enableAiCopy,
@@ -228,5 +229,59 @@ describe('one monitoring status for every surface', () => {
     })
     expect(signedOut.label).toBe('AI off: signed out')
     expect(needsUserAction(signedOut)).toBe(true)
+  })
+})
+
+describe('what AI work can run now', () => {
+  const on = {
+    enabled: true,
+    ai_monitoring: 'on' as const,
+    deep_analysis: true,
+    nightly_report: true,
+  }
+
+  it('runs everything with AI on, and reads nothing as blocked before settings load', () => {
+    const none = { checks: null, deep: null, report: null, summary: null }
+    expect(aiCanRun({ settings: on })).toEqual(none)
+    expect(aiCanRun({ settings: undefined })).toEqual(none)
+  })
+
+  it('signed out, holds checks, analyses and the report itself', () => {
+    const can = aiCanRun({
+      settings: { ...on, ai_monitoring: 'pending', ai_reason: 'signed_out' },
+    })
+    expect(can).toEqual({
+      checks: 'signed_out',
+      deep: 'signed_out',
+      report: 'signed_out',
+      summary: 'signed_out',
+    })
+    // A held first pass says signed out even while the settings still read on.
+    expect(aiCanRun({ settings: on, signInHeld: true }).deep).toBe('signed_out')
+  })
+
+  it('with AI off for the database, the report runs without its summary', () => {
+    const can = aiCanRun({ settings: { ...on, ai_monitoring: 'local' } })
+    expect(can).toEqual({
+      checks: 'limit',
+      deep: 'limit',
+      report: null,
+      summary: 'limit',
+    })
+  })
+
+  it('names the switches and the daily cap for deep analysis and the report', () => {
+    expect(aiCanRun({ settings: { ...on, deep_analysis: false } }).deep).toBe(
+      'deep_off'
+    )
+    expect(aiCanRun({ settings: on, dailyCapReached: true }).deep).toBe(
+      'daily_cap'
+    )
+    expect(
+      aiCanRun({ settings: { ...on, nightly_report: false } }).report
+    ).toBe('report_off')
+    expect(aiCanRun({ settings: { ...on, enabled: false } }).checks).toBe(
+      'monitoring_off'
+    )
   })
 })

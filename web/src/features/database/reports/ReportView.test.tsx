@@ -6,9 +6,11 @@ import {
   within,
 } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { aiCanRun } from '@/features/monitor-kit/aiMonitoring'
 import {
   getReportViewPreference,
   putReportViewPreference,
+  putSettings,
   resetStubState,
   setFixtureTiming,
 } from '@/lib/monitor/api'
@@ -51,7 +53,8 @@ function renderReport(
   scenario: string,
   run: ReportRun = idleRun(),
   reportId: number | 'latest' = 'latest',
-  onOpenActions?: () => void
+  onOpenActions?: () => void,
+  can?: Parameters<typeof ReportView>[0]['can']
 ) {
   setFixtureOverride(scenario)
   const onPick = vi.fn()
@@ -59,6 +62,7 @@ function renderReport(
     <ReportView
       target="demo"
       reportId={reportId}
+      can={can}
       run={run}
       onShowLatest={vi.fn()}
       onPick={onPick}
@@ -236,7 +240,7 @@ it('before the first report, says when it lands and shows the day so far', async
   ).toBeTruthy()
   expect(within(first).getByText('Thursday, October 8')).toBeTruthy()
   await within(first).findByText(
-    'Your first daily report arrives tonight, just after midnight. After that, one runs every night. Monitoring since 9:45 AM.'
+    'Your first daily report runs tonight, just after midnight. After that, one runs every night. Monitoring since 9:45 AM.'
   )
   expect(
     within(first).getByText('since 9:45 AM, comparisons start tomorrow')
@@ -245,6 +249,46 @@ it('before the first report, says when it lands and shows the day so far', async
   expect(screen.queryByRole('region', { name: 'Fix first' })).toBeNull()
   expect(screen.queryByText(/Report #/)).toBeNull()
   expect(within(first).queryByRole('button', { name: 'Run it now' })).toBeNull()
+})
+
+it('before the first report, says the saved report hour', async () => {
+  setFixtureOverride('ca-first-run')
+  await putSettings('demo', { nightly_hour: 6 })
+  renderReport('ca-first-run', idleRun())
+  const first = await screen.findByTestId('report-first')
+  // The fixture's clock is 9:56 AM, so the next 6 AM report is tomorrow's.
+  await within(first).findByText(
+    'Your first daily report runs tomorrow at 6 AM. After that, one runs every night. Monitoring since 9:45 AM.'
+  )
+  expect(first.textContent).not.toMatch(/midnight/)
+})
+
+it('signed out, before the first report, says it waits for a sign-in', async () => {
+  setFixtureOverride('ca-first-run')
+  await putSettings('demo', { nightly_hour: 6 })
+  const settings = {
+    enabled: true,
+    ai_monitoring: 'pending' as const,
+    ai_reason: 'signed_out' as const,
+  }
+  renderReport(
+    'ca-first-run',
+    idleRun(),
+    'latest',
+    vi.fn(),
+    aiCanRun({ settings })
+  )
+  const first = await screen.findByTestId('report-first')
+  await within(first).findByText(
+    'Your first daily report runs tomorrow at 6 AM once you sign in. Monitoring since 9:45 AM.'
+  )
+  expect(first.textContent).not.toMatch(/one runs every night/)
+  expect(
+    within(first).getByRole('link', { name: 'Sign in' }).getAttribute('href')
+  ).toBe('/account-login')
+  expect(
+    within(first).queryByRole('button', { name: 'Open Actions' })
+  ).toBeNull()
 })
 
 it('while the report runs, keeps the document dimmed under the running line', async () => {

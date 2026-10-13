@@ -27,6 +27,11 @@ export interface ResultsSearch {
   /** Registry hash of the query, needed to reach its stored analyses. */
   hash?: string
   /**
+   * Monitor key of the query, which reads its monitored row and analysis digest. Links
+   * without one fall back to `hash`; a registry hash can differ from the monitor key.
+   */
+  key?: string
+  /**
    * Opens a stored analysis read-only instead of starting a run (A3). This is
    * the persisted record's own id, not the `analysis_id` the SSE complete
    * event carries.

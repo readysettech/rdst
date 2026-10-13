@@ -871,6 +871,54 @@ def test_plan_only_digest_labels_estimates_and_omits_execution(mode):
     assert digest["fix"]["expected_gain"]["text"].startswith("Planner estimate:")
 
 
+def _rewrite_tested(sql, execution, cost, better=True):
+    improvement = {"overall": {"improvement_pct": 40.0, "is_better": better,
+                               "significant": True},
+                   "cost_estimate": {"improvement_pct": cost}}
+    if execution is not None:
+        improvement["execution_time"] = {"improvement_pct": execution, "baseline_ms": 80.0,
+                                         "rewrite_ms": 20.0}
+    return {"success": True, "sql": sql, "improvement": improvement}
+
+
+@pytest.mark.parametrize("tested,gain", [
+    (_rewrite_tested("SELECT  2;", 75.0, 30.0),
+     {"measured": True, "text": "Tested: 75% faster", "before_ms": 80.0, "after_ms": 20.0,
+      "cost_reduction_pct": 75.0}),
+    (_rewrite_tested("select 2", None, 30.0),
+     {"measured": False, "text": "Planner estimate: cost down 30%", "before_ms": None,
+      "after_ms": None, "cost_reduction_pct": 30.0}),
+    (_rewrite_tested("SELECT 2", -10.0, 30.0, better=False),
+     {"measured": False, "text": "Tested: no faster than the original", "before_ms": None,
+      "after_ms": None, "cost_reduction_pct": 0.0}),
+    (_rewrite_tested("SELECT 3", 75.0, 30.0),
+     {"measured": False, "text": "Estimated: 2x faster", "before_ms": None, "after_ms": None,
+      "cost_reduction_pct": None}),
+])
+def test_rewrite_fix_gain_comes_from_its_tested_rewrite(tested, gain):
+    from types import SimpleNamespace
+    from features.monitor.analysis_digest import digest_from_analysis
+
+    analysis = SimpleNamespace(
+        timestamp="2026-10-01T00:00:00Z", index_suggestions=[], rewrite_suggestions=[],
+        explain_plan={}, performance_metrics={},
+        llm_analysis={"rewrite_suggestions": [{"rewritten_sql": "SELECT 2",
+                                               "expected_improvement": "2x faster"}]},
+        display_payload={"rewrite_testing": {"tested": True, "rewrite_results": [tested]}})
+    digest = digest_from_analysis("q", {"mode": "analyze"}, analysis)
+    assert digest["fix"]["kind"] == "rewrite"
+    assert digest["fix"]["expected_gain"] == gain
+
+
+def test_rewrite_gain_never_borrows_a_test_whose_literals_differ():
+    from features.monitor.analysis_digest import _same_sql
+
+    assert _same_sql("SELECT * FROM t WHERE s = 'active';", "select *  from T where s = 'active'")
+    assert not _same_sql("SELECT * FROM t WHERE s = 'active'", "SELECT * FROM t WHERE s = 'Active'")
+    assert not _same_sql('SELECT "Name" FROM t', 'select "name" from t')
+    assert _same_sql("SELECT 'it''s' FROM t", "select 'it''s' from T;")
+
+
 def test_plan_only_mode_reaches_query_rows_and_report_digests(client, store):
     _seed(store, minutes=3)
     ref = _stored_analysis(store, KEYS[0], {}, mode="explain")

@@ -66,10 +66,10 @@ async def _import_csv(
 async def test_csv_import_with_password_derives_pointer_and_stores_secret(tmp_path):
     config, secret_store = await _import_csv(
         tmp_path,
-        "name,host,engine,password\norders prod,db.example.com,postgresql,s3cret\n",
+        "name,host,engine,password\norders-prod,db.example.com,postgresql,s3cret\n",
     )
 
-    target = config.targets["orders prod"]
+    target = config.targets["orders-prod"]
     assert target["password_env"] == "RDST_ORDERS_PROD_PASSWORD"
     assert "password" not in target
     assert secret_store.saved == [
@@ -171,3 +171,39 @@ def test_tunnel_wording_remains_for_genuine_network_failure():
     assert payload is not None
     assert payload["category"] == "database_connection_failed"
     assert payload["message"].startswith("The SSH tunnel opened")
+
+
+class FakeFleetConfig(FakeConfig):
+    def list_fleet_targets(self, group=None, tag=None) -> list[str]:
+        return list(self.targets)
+
+
+@pytest.mark.asyncio
+async def test_status_reports_failed_ssh_target_and_closes_its_tunnel(monkeypatch):
+    import shared.ssh_tunnel
+
+    closed: list[str] = []
+
+    class FakeTunnelManager:
+        def close(self, name: str) -> None:
+            closed.append(name)
+
+    monkeypatch.setattr(shared.ssh_tunnel, "get_tunnel_manager", FakeTunnelManager)
+    config = FakeFleetConfig()
+    config.upsert(
+        "prod",
+        {"engine": "postgresql", "host": "db.internal", "ssh": {"host": "bastion"}},
+    )
+    service = FleetService(config=config, secret_store=FakeSecretStore())
+
+    def unreachable(*args, **kwargs):
+        raise OSError("SSH tunnel to bastion failed: connection refused")
+
+    monkeypatch.setattr(service, "_check_connection", unreachable)
+
+    events = [event async for event in service.check_status()]
+
+    assert closed == ["prod"]
+    assert events[-1].type == "connectivity"
+    assert events[-1].target_name == "prod"
+    assert events[-1].status == "failed"

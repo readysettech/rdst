@@ -110,6 +110,19 @@ export function AskPanel({
     queryFn: () => fetchAskHistory(target, 50),
     enabled: Boolean(target),
   })
+  // A question still running or waiting on a detail belongs to the database it was asked on;
+  // switching databases drops it rather than finish it there.
+  const pending =
+    state === 'loading' ||
+    state === 'generating' ||
+    state === 'clarification_needed'
+  useEffect(() => {
+    if (pending && askedTarget && runsAgainst !== askedTarget) {
+      reset()
+      setAskedTarget(null)
+    }
+  }, [pending, askedTarget, runsAgainst, reset])
+
   // A finished question joins Earlier questions.
   useEffect(() => {
     if (state === 'complete')
@@ -151,11 +164,11 @@ export function AskPanel({
   }, [reset])
   const choose = useCallback(
     async (answers: Record<string, string>) => {
-      if (disabled) return
+      if (disabled || (askedTarget && askedTarget !== runsAgainst)) return
       if (beforeRun && !(await beforeRun())) return
       await resumeWithAnswers(answers)
     },
-    [beforeRun, disabled, resumeWithAnswers]
+    [askedTarget, beforeRun, disabled, resumeWithAnswers, runsAgainst]
   )
 
   // The answer replaces the steps, so the keyboard is told where it went: focus lands
@@ -247,11 +260,15 @@ export function AskPanel({
             executedSql={executedSql}
             limitAdded={limitAdded}
             onOpenInDatabase={
-              result.query_hash
+              // Only a query the database's list holds has a pane to open there.
+              result.monitor_key
                 ? () =>
                     void navigate({
                       to: '/database',
-                      search: { query: result.query_hash } as never,
+                      search: {
+                        target: answeredFrom || undefined,
+                        query: result.monitor_key,
+                      } as never,
                     })
                 : null
             }

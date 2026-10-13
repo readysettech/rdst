@@ -21,7 +21,7 @@ import os
 import random
 import time
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from features.query_registry.discovery import QueryDiscoveryCoordinator
 from shared.query_registry.observation_store import LeaseLostError, collection_owner
@@ -55,6 +55,22 @@ MAX_DUTY_CYCLE = 0.05
 # Per-cycle budget upper bound: the 30s statement timeout plus the 120s text
 # fetch budget cap; a cycle cancelled at the deadline is a failed tick.
 COLLECTION_DEADLINE_SECONDS = 120
+# How long a collection aborted at its deadline gets to unwind before the tick stops waiting.
+ABORT_GRACE_SECONDS = 5.0
+# A database read left unanswered this long gets a liveness probe on a fresh connection. When the
+# probe gets no answer either, the read is reported as a failed check while the collection keeps
+# waiting for its deadline, so a server that stopped answering reads as unreachable within about
+# one reading interval. A server that answers the probe is busy, and its slow read is left alone.
+NOT_ANSWERING_SECONDS = 10.0
+# The probe's bound on opening its connection and on its SELECT 1, each.
+PROBE_SECONDS = 3.0
+# How long the scheduler waits for a probe before counting it as unanswered.
+PROBE_WAIT_SECONDS = 5.0
+# A read that stays slow is probed again at most this often.
+PROBE_INTERVAL_SECONDS = 15.0
+# How long a monitored reading waits for another reader holding the database before it reads
+# anyway, so a reader stuck on a server that stopped answering can't hold the check off.
+ADMISSION_WAIT_SECONDS = 3.0
 # TTL is three collection deadlines. Confirmed dead local owners are reclaimed at
 # startup; remote or suspended owners retain the TTL and their write-time fence.
 LEASE_TTL_SECONDS = 3 * COLLECTION_DEADLINE_SECONDS
@@ -126,6 +142,8 @@ class _TargetSchedule:
     started_at: Optional[float] = None
     error: Optional[str] = None
     waiting_for_lease: bool = False
+    # When a due reading first found another reader holding the database.
+    held_since: Optional[float] = None
 
 
 class ObservationScheduler:
@@ -168,6 +186,9 @@ class ObservationScheduler:
         self._collections: set[asyncio.Task] = set()
         self._admitted: set[asyncio.Task] = set()
         self._retained: set[asyncio.Task] = set()
+        # target -> its collector's collection that is still running, including one retained past
+        # its deadline. A target never starts another collection while it has one.
+        self._running: Dict[str, asyncio.Task] = {}
         self._task: Optional[asyncio.Task[None]] = None
         self._stopping = False
         self._next_target_refresh = 0.0
@@ -244,6 +265,9 @@ class ObservationScheduler:
         schedule = self._schedules.get(name)
         if schedule is None or self._stopping:
             raise ValueError("This database isn't scheduled for monitoring")
+        if schedule.task is None and name in self._running:
+            return {"ok": False, "detail": schedule.error or
+                    "Waiting for the previous reading to finish"}
         if schedule.task is None:
             self._backoff.forget(name)
             schedule.next_due = self._clock()
@@ -271,12 +295,14 @@ class ObservationScheduler:
         except Exception:
             logger.debug("First-run listener failed for %s", name, exc_info=True)
 
-    async def _report_outcome(self, name: str, ok: bool, error: Optional[str] = None) -> None:
+    async def _report_outcome(self, name: str, ok: bool, error: Optional[str] = None,
+                              ts: Optional[float] = None) -> None:
         listener = self._outcome_listener
         if listener is None or self._stopping:
             return
         try:
-            await asyncio.to_thread(listener, name, ok, int(self._clock()), error)
+            await asyncio.to_thread(listener, name, ok, int(self._clock() if ts is None else ts),
+                                    error)
         except Exception:
             logger.debug("Collection outcome listener failed for %s", name, exc_info=True)
 
@@ -442,7 +468,7 @@ class ObservationScheduler:
         due = [
             (name, schedule)
             for name, schedule in self._schedules.items()
-            if schedule.task is None and schedule.next_due <= now
+            if schedule.task is None and schedule.next_due <= now and name not in self._running
         ]
         due.sort(key=lambda item: self._priority(item[0], item[1], now), reverse=True)
         slots = GLOBAL_CONCURRENCY - len(self._admitted)
@@ -460,8 +486,72 @@ class ObservationScheduler:
                     task.exception()
             schedule.task.add_done_callback(finished)
 
+    def _finish_attempt(self, name: str, shared: bool, success: bool) -> None:
+        """Settle backoff for an attempt; one that read alongside another reader leaves that
+        reader's admission in place."""
+        if not shared:
+            self._backoff.finish(name, success=success)
+        elif not success:
+            self._backoff.record_failure(name)
+
+    async def _database_answers(self, name: str, collector: Any) -> bool:
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(collector.probe_answering, PROBE_SECONDS), PROBE_WAIT_SECONDS)
+        except Exception:
+            logger.debug("Liveness probe got no answer from %s", name, exc_info=True)
+            return False
+        return True
+
+    async def _await_collection(self, name: str, schedule: _TargetSchedule, collector: Any,
+                                work: "asyncio.Task[Any]") -> Any:
+        """The collection's event, raising TimeoutError at its deadline. A read the database
+        leaves unanswered for NOT_ANSWERING_SECONDS, while a liveness probe gets no answer
+        either, is reported once as a failed check, dated from when the database last
+        answered."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + COLLECTION_DEADLINE_SECONDS
+        unanswered = getattr(collector, "unanswered_for", None)
+        probeable = callable(getattr(collector, "probe_answering", None))
+        reported = not callable(unanswered)
+        probe: Optional["asyncio.Task[bool]"] = None
+        next_probe = 0.0
+        try:
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError()
+                done, _ = await asyncio.wait(
+                    {work} if probe is None else {work, probe},
+                    timeout=remaining if reported else min(remaining, TICK_SECONDS),
+                    return_when=asyncio.FIRST_COMPLETED)
+                if work in done:
+                    return work.result()
+                if reported:
+                    continue
+                answered = None
+                if probe is not None and probe.done():
+                    answered, probe = probe.result(), None
+                waited = unanswered()
+                if waited is None or waited < NOT_ANSWERING_SECONDS:
+                    continue
+                if answered is False or not probeable:
+                    reported = True
+                    schedule.error = (
+                        f"The database didn't answer within {NOT_ANSWERING_SECONDS:g} s.")
+                    await self._report_outcome(name, False, schedule.error,
+                                               self._clock() - waited)
+                elif probe is None and self._monotonic() >= next_probe:
+                    next_probe = self._monotonic() + PROBE_INTERVAL_SECONDS
+                    probe = asyncio.create_task(self._database_answers(name, collector))
+        finally:
+            if probe is not None:
+                probe.cancel()
+
     async def _collect_target(self, name: str, schedule: _TargetSchedule) -> None:
         admitted = False
+        shared = False
+        failure_recorded = False
         schedule.latest_attempt_ok = False
         work = None
         token = None
@@ -473,16 +563,29 @@ class ObservationScheduler:
                 if name in self._monitored:
                     self._backoff.limit_retry(name, ACTIVE_INTERVAL_SECONDS)
                 if not self._backoff.acquire(name):
-                    schedule.next_due = self._clock() + TICK_SECONDS
-                    return
-                admitted = True
+                    now = self._clock()
+                    # Reading alongside a stuck holder is for other readers only; this
+                    # scheduler's own collection for the target never overlaps another.
+                    if name in self._monitored and name not in self._running and \
+                            self._backoff.busy(name):
+                        if schedule.held_since is None:
+                            schedule.held_since = now
+                        shared = now - schedule.held_since >= ADMISSION_WAIT_SECONDS
+                    else:
+                        schedule.held_since = None
+                    if not shared:
+                        schedule.next_due = now + TICK_SECONDS
+                        return
+                schedule.held_since = None
+                admitted = not shared
                 started = self._clock()
                 schedule.started_at = started
                 schedule.waiting_for_lease = False
                 started_elapsed = self._monotonic()
                 token = self._acquire_lease(name, int(started))
                 if self._store is not None and token is None:
-                    self._backoff.release(name)
+                    if admitted:
+                        self._backoff.release(name)
                     admitted = False
                     schedule.waiting_for_lease = True
                     # Another live process owns this target; try again next period.
@@ -499,7 +602,7 @@ class ObservationScheduler:
                         )
                     except asyncio.TimeoutError:
                         schedule.error = "Waiting for the previous reader to finish"
-                        self._backoff.finish(name, success=False)
+                        self._finish_attempt(name, shared, success=False)
                         admitted = False
                         self._record_failure(name, schedule)
                         await self._report_outcome(name, False, schedule.error)
@@ -511,10 +614,13 @@ class ObservationScheduler:
                 try:
                     work = asyncio.create_task(collector.collect_now())
                     self._collections.add(work)
-                    work.add_done_callback(self._collections.discard)
-                    event = await asyncio.wait_for(
-                        asyncio.shield(work), COLLECTION_DEADLINE_SECONDS
-                    )
+                    self._running[name] = work
+                    def collection_returned(done: asyncio.Task) -> None:
+                        self._collections.discard(done)
+                        if self._running.get(name) is done:
+                            del self._running[name]
+                    work.add_done_callback(collection_returned)
+                    event = await self._await_collection(name, schedule, collector, work)
                 except asyncio.CancelledError:
                     raise
                 except LeaseLostError:
@@ -522,7 +628,7 @@ class ObservationScheduler:
                     # the lease moved, so there is nothing to release.
                     logger.warning("Lease lost mid-collection for target %s", name)
                     self._leased.discard(name)
-                    self._backoff.finish(name, success=False)
+                    self._finish_attempt(name, shared, success=False)
                     admitted = False
                     self._record_failure(name, schedule)
                     return
@@ -532,19 +638,37 @@ class ObservationScheduler:
                         name,
                         exc_info=True,
                     )
-                    schedule.error = ("The reading timed out" if isinstance(exc, asyncio.TimeoutError)
-                                      else type(exc).__name__)
-                    await self._report_outcome(name, False, str(exc))
+                    timed_out = isinstance(exc, asyncio.TimeoutError)
+                    if timed_out:
+                        # Cancelling to_thread can't stop a driver call blocked on a server
+                        # that stopped answering; aborting the connection makes it raise.
+                        abort = getattr(collector, "abort_connection", None)
+                        if abort is not None:
+                            abort()
+                    schedule.error = (
+                        f"The database didn't answer within {COLLECTION_DEADLINE_SECONDS:g} s."
+                        if timed_out else type(exc).__name__
+                    )
+                    await self._report_outcome(
+                        name, False, schedule.error if timed_out else str(exc)
+                    )
                     event = None
-                    if isinstance(exc, asyncio.TimeoutError):
-                        # Cancellation of to_thread cannot stop the database driver. Hold
-                        # this admission slot until the collection really returns.
+                    if timed_out:
+                        # Work that outlives the grace keeps its admission slot and write
+                        # fence until it returns.
                         try:
-                            event = await asyncio.shield(work)
+                            event = await asyncio.wait_for(asyncio.shield(work), ABORT_GRACE_SECONDS)
                         except Exception:
                             logger.debug("Timed-out collection completed with an error", exc_info=True)
+                    if event is None and not work.done():
+                        # The work still runs on the collector's connection and state: the
+                        # target stays in flight, holding its admission, until it returns.
+                        self._backoff.record_failure(name)
+                        failure_recorded = True
+                        self._record_failure(name, schedule)
+                        return
                     if event is None or event.event == "discovery_error":
-                        self._backoff.finish(name, success=False)
+                        self._finish_attempt(name, shared, success=False)
                         admitted = False
                         self._record_failure(name, schedule)
                         return
@@ -552,17 +676,18 @@ class ObservationScheduler:
                     if token is not None and work.done():
                         collector.clear_write_fence()
                 if event.event == "discovery_error":
-                    self._backoff.finish(name, success=False)
+                    self._finish_attempt(name, shared, success=False)
                     admitted = False
                     self._record_failure(name, schedule)
-                    error = (event.data or {}).get("error")
+                    error = getattr(collector, "last_error", None) or \
+                        (event.data or {}).get("error")
                     schedule.error = "The database reading failed"
                     await self._report_outcome(
                         name, False, error if isinstance(error, str) else None
                     )
                     return
                 finished = self._clock()
-                self._backoff.finish(name, success=True)
+                self._finish_attempt(name, shared, success=True)
                 admitted = False
                 schedule.reading_duration_s = max(self._monotonic() - started_elapsed, 0.0)
                 stats = event.data.get("stats") or {}
@@ -595,7 +720,9 @@ class ObservationScheduler:
                 def completed(done: asyncio.Task) -> None:
                     self._admitted.discard(parent)
                     self._retained.discard(parent)
-                    if admitted:
+                    if admitted and failure_recorded:
+                        self._backoff.release(name)
+                    elif admitted:
                         self._backoff.finish(name, success=False)
                     if name not in self._schedules:
                         self._backoff.forget(name)

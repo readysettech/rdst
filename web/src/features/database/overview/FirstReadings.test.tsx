@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
+import { aiCanRun, firstReportLine } from '@/features/monitor-kit/aiMonitoring'
 import { at } from '@/lib/monitor/fixturesCa'
 import {
   FirstRunMore,
@@ -12,6 +13,11 @@ import {
   WaitingForQueries,
 } from './FirstReadings'
 import { type FirstRunStep, firstRun } from './firstReadingsModel'
+
+vi.mock('@tanstack/react-router', async () => {
+  const { fileRouteModuleMock } = await import('@/test-utils')
+  return fileRouteModuleMock()
+})
 
 afterEach(cleanup)
 
@@ -43,13 +49,81 @@ it('labels the window by its real span, as the axis draws it', () => {
 })
 
 it('says when the rest arrives under the chart', () => {
-  const { rerender, container } = render(<FirstRunNote firstReport />)
-  expect(
-    screen.getByText('Your first daily report runs tonight, just after midnight.')
-  ).toBeTruthy()
+  const line = 'Your first daily report runs tonight, just after midnight.'
+  const { rerender, container } = render(
+    <FirstRunNote firstReport line={line} />
+  )
+  expect(screen.getByText(line)).toBeTruthy()
   expect(screen.queryByText(/Deep analysis/)).toBeNull()
-  rerender(<FirstRunNote firstReport={false} />)
+  rerender(<FirstRunNote firstReport={false} line={line} />)
   expect(container.textContent).toBe('')
+})
+
+it('says the first report runs at the saved hour, and signed out, what it waits on', () => {
+  const settings = {
+    enabled: true,
+    nightly_report: true,
+    nightly_hour: 6,
+    ai_monitoring: 'on' as const,
+  }
+  // 9:56 AM: the next 6 AM report is tomorrow's.
+  const now = at(9, 56)
+  expect(firstReportLine(settings, aiCanRun({ settings, now }), now)).toBe(
+    'Your first daily report runs tomorrow at 6 AM.'
+  )
+  expect(
+    firstReportLine(settings, aiCanRun({ settings, now: at(3, 0) }), at(3, 0))
+  ).toBe('Your first daily report runs today at 6 AM.')
+  const signedOut = {
+    ...settings,
+    ai_monitoring: 'pending' as const,
+    ai_reason: 'signed_out' as const,
+  }
+  const line = firstReportLine(
+    signedOut,
+    aiCanRun({ settings: signedOut, now }),
+    now
+  )
+  expect(line).toBe(
+    'Your first daily report runs tomorrow at 6 AM once you sign in.'
+  )
+  expect(line).not.toMatch(/midnight/)
+})
+
+it('signed out, the waiting card says the analyses wait for a sign-in', () => {
+  const settings = {
+    enabled: true,
+    attention_every_min: 5 as const,
+    nightly_report: true,
+    nightly_hour: 6,
+    deep_analysis: true,
+    ai_monitoring: 'pending' as const,
+    ai_reason: 'signed_out' as const,
+  }
+  const model = firstRun({
+    now: at(9, 56),
+    settings,
+    history: null,
+    pulses: [],
+    queue: null,
+    queries: [],
+  })
+  render(
+    <WaitingForQueries
+      target="demo"
+      model={model}
+      now={at(9, 56)}
+      can={aiCanRun({ settings, now: at(9, 56) })}
+    />
+  )
+  expect(screen.getByTestId('sign-in-note').textContent).toBe(
+    'Sign in to run AI checks. Sign in'
+  )
+  const steps = Object.fromEntries(
+    model.steps.map((step) => [step.id, [step.state, step.meta]])
+  )
+  expect(steps.deep).toEqual(['blocked', 'Needs sign-in'])
+  expect(steps.report).toEqual(['blocked', 'Needs sign-in'])
 })
 
 const model = (

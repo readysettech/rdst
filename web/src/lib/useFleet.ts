@@ -344,7 +344,13 @@ export interface FleetSupabaseOrganization {
   name: string
 }
 
-export interface FleetSupabaseStatus {
+/** Set by the status check: refused credentials (401/403) versus a provider it couldn't ask. */
+interface FleetProviderCheck {
+  rejected?: boolean
+  unreachable?: boolean
+}
+
+export interface FleetSupabaseStatus extends FleetProviderCheck {
   connected: boolean
   method: 'oauth' | null
   detail: string | null
@@ -353,7 +359,7 @@ export interface FleetSupabaseStatus {
 
 // Neon authenticates with an API key alone, so there is no browser sign-in to
 // start or poll.
-export interface FleetNeonStatus {
+export interface FleetNeonStatus extends FleetProviderCheck {
   connected: boolean
   method: 'api_key' | null
   detail: string | null
@@ -361,7 +367,7 @@ export interface FleetNeonStatus {
 
 // DigitalOcean authenticates through the Readyset OAuth broker alone, so there
 // is no token field to fall back to.
-export interface FleetDigitaloceanStatus {
+export interface FleetDigitaloceanStatus extends FleetProviderCheck {
   connected: boolean
   method: 'oauth' | null
   detail: string | null

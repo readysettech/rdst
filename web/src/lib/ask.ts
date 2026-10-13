@@ -150,8 +150,12 @@ export function useAsk(): UseAskReturn {
       setState('loading')
 
       let terminalEventReceived = false
+      // A newer question, cancel, reset or unmount aborts this run, and from then on its
+      // events and failures never reach the state the newer run owns.
+      const live = () => !controller.signal.aborted && mountedRef.current
 
       const processFrame = (frame: SseFrame) => {
+        if (!live()) return
         let data: unknown
         try {
           data = JSON.parse(frame.data)
@@ -215,12 +219,14 @@ export function useAsk(): UseAskReturn {
         })
 
         if (!response.ok) {
+          if (!live()) return
           let body: unknown
           try {
             body = await response.clone().json()
           } catch {
             body = await response.text().catch(() => undefined)
           }
+          if (!live()) return
           const envelope = normalizeHttpError(response.status, body)
           setError({
             type: 'error',
@@ -253,7 +259,7 @@ export function useAsk(): UseAskReturn {
         buffer += decoder.decode()
         extractSseFrames(buffer, true).frames.forEach(processFrame)
 
-        if (!terminalEventReceived && mountedRef.current) {
+        if (!terminalEventReceived && live()) {
           setError({
             type: 'error',
             message:
@@ -265,10 +271,10 @@ export function useAsk(): UseAskReturn {
           setState('error')
         }
       } catch (streamError: unknown) {
+        if (!live()) return
         if (streamError instanceof Error && streamError.name === 'AbortError') {
           return
         }
-        if (!mountedRef.current) return
         setError({
           type: 'error',
           message:

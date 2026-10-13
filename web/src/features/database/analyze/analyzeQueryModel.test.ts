@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { CompleteEvent } from '@/lib/api'
-import { addQueryInput, checkPaste, pastedSql } from './analyzeQueryModel'
+import {
+  addQueryInput,
+  checkPaste,
+  pastedSql,
+  statementCount,
+} from './analyzeQueryModel'
 
 describe('checkPaste', () => {
   it('accepts one read, and asks for values when it has placeholders', () => {
@@ -24,6 +29,45 @@ describe('checkPaste', () => {
     const write = checkPaste('UPDATE orders SET total = 0')
     expect(write.ok).toBe(false)
     expect(!write.ok && write.reason).toMatch(/changes data/)
+  })
+})
+
+describe('statementCount', () => {
+  it.each([
+    'SELECT * FROM t LIMIT 3 /* note; still one statement */',
+    'SELECT 1 -- a; b\nFROM t',
+    "SELECT ';' AS semi FROM t",
+    "SELECT 'it''s; fine' FROM t",
+    "SELECT 'it\\'s; fine' FROM t",
+    'SELECT "odd;name" FROM t',
+    'SELECT `odd;name` FROM t',
+    'SELECT $$a; b$$ FROM t',
+    'SELECT $body$ x; $$ y; $body$ FROM t',
+    'SELECT 1 /* outer /* inner; */ still; */ FROM t',
+    'SELECT 1 FROM t;',
+    'SELECT 1 FROM t; -- done',
+    'SELECT 1 FROM t;;  ',
+  ])('reads %j as one statement', (sql) => {
+    expect(statementCount(sql)).toBe(1)
+    expect(checkPaste(sql).ok).toBe(true)
+  })
+
+  it.each([
+    'SELECT 1 FROM a; SELECT 2 FROM b',
+    "SELECT ';' FROM a; SELECT 2 FROM b",
+    'SELECT 1 /* x; */ FROM a;\nSELECT 2 FROM b;',
+    'SELECT $$;$$ FROM a; SELECT 2 FROM b',
+    'SELECT a$b$ FROM a; SELECT $b$ FROM b',
+  ])('reads %j as two statements', (sql) => {
+    expect(statementCount(sql)).toBe(2)
+    expect(checkPaste(sql)).toEqual({
+      ok: false,
+      reason: 'Paste one statement at a time.',
+    })
+  })
+
+  it('counts nothing in blank or comment-only input', () => {
+    expect(statementCount('  ;\n-- only a comment')).toBe(0)
   })
 })
 

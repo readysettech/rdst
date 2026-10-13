@@ -5,6 +5,7 @@ import type {
   AiMonitoringReason,
   AiMonitoringState,
   MonitoringLimit,
+  MonitorSettings,
 } from '@/lib/monitor/types'
 
 /** "AI monitoring on 2 of 3 databases", or without a known limit, "on 2 databases". */
@@ -362,6 +363,197 @@ function aiOffReason(input: MonitoringStatusInput): AiOffReason | null {
   const waited = since == null ? 0 : now - since
   if (waited < AI_STARTING_GRACE_S) return null
   return reason ?? 'not_started'
+}
+
+/**
+ * Why AI work can't run for a database now. The AI-off reasons, plus: monitoring is off,
+ * deep analysis or the nightly report is switched off, or today's automatic analyses are
+ * used up.
+ */
+export type AiBlocker =
+  | AiOffReason
+  | 'monitoring_off'
+  | 'deep_off'
+  | 'report_off'
+  | 'daily_cap'
+
+/**
+ * What AI work can run for one database now, read from what can run rather than from the
+ * settings alone. Every page that promises AI checks, deep analysis, a first plan or a
+ * report asks this first. A null blocker means it runs (or starts by itself in a moment).
+ */
+export interface AiCanRun {
+  checks: AiBlocker | null
+  deep: AiBlocker | null
+  /** The nightly report itself. */
+  report: AiBlocker | null
+  /** The report's written summary: also waits while AI is off for the database. */
+  summary: AiBlocker | null
+}
+
+export interface AiCanRunInput {
+  settings:
+    | (Pick<MonitorSettings, 'enabled'> &
+        Partial<
+          Pick<
+            MonitorSettings,
+            | 'deep_analysis'
+            | 'nightly_report'
+            | 'ai_monitoring'
+            | 'ai_reason'
+            | 'ai_since'
+          >
+        >)
+    | undefined
+  /** Analyses wait for a sign-in (a held first pass or row), whatever the settings say. */
+  signInHeld?: boolean
+  /** Today's automatic analyses are used up. */
+  dailyCapReached?: boolean
+  /** Epoch seconds; defaults to the wall clock. */
+  now?: number
+}
+
+/** What can run for a database now; with settings not loaded yet, nothing is blocked. */
+export function aiCanRun(input: AiCanRunInput): AiCanRun {
+  const { settings } = input
+  if (!settings)
+    return { checks: null, deep: null, report: null, summary: null }
+  const status = monitoringStatus({
+    enabled: settings.enabled,
+    ai: settings.ai_monitoring,
+    reason: input.signInHeld ? 'signed_out' : settings.ai_reason,
+    since: settings.ai_since,
+    now: input.now,
+  })
+  const checks: AiBlocker | null =
+    status.kind === 'off'
+      ? 'monitoring_off'
+      : input.signInHeld
+        ? 'signed_out'
+        : status.kind === 'local_only'
+          ? status.reason
+          : null
+  // The nightly report doesn't run signed out; with AI off it runs without its summary.
+  const report: AiBlocker | null =
+    checks === 'monitoring_off' || checks === 'signed_out'
+      ? checks
+      : settings.nightly_report === false
+        ? 'report_off'
+        : null
+  return {
+    checks,
+    deep:
+      checks ??
+      (settings.deep_analysis === false
+        ? 'deep_off'
+        : input.dailyCapReached
+          ? 'daily_cap'
+          : null),
+    report,
+    summary: report ?? checks,
+  }
+}
+
+export interface AiWaitCopy {
+  /** A short title: what waits ("Sign in to run AI checks"). */
+  title: string
+  /** One plain sentence: why, and what happens once it can run. */
+  detail: string
+  /** The way forward is a Readyset sign-in. */
+  signIn: boolean
+  /** The two as one caption line, for a note under something else. */
+  line: string
+}
+
+/** What waits on a blocker and what happens once it clears, in the shared words. */
+export function aiWaitCopy(blocker: AiBlocker): AiWaitCopy {
+  const copy = waitCopy(blocker)
+  // The AI-off details name their cause; the switches need their title said.
+  const line =
+    blocker in REASON_COPY ? copy.detail : `${copy.title}. ${copy.detail}`
+  return { ...copy, line }
+}
+
+function waitCopy(blocker: AiBlocker): Omit<AiWaitCopy, 'line'> {
+  switch (blocker) {
+    case 'signed_out':
+      return {
+        title: 'Sign in to run AI checks',
+        detail:
+          'AI checks need a Readyset sign-in, even with your own key. They start once you sign in.',
+        signIn: true,
+      }
+    case 'monitoring_off':
+      return {
+        title: 'Monitoring is off',
+        detail: 'Turn on monitoring to run AI checks and deep analysis.',
+        signIn: false,
+      }
+    case 'deep_off':
+      return {
+        title: 'Deep analysis is off',
+        detail:
+          'Turn it on in Monitoring settings to analyze the busiest queries.',
+        signIn: false,
+      }
+    case 'report_off':
+      return {
+        title: 'The daily report is off',
+        detail: 'Turn it on in Monitoring settings.',
+        signIn: false,
+      }
+    case 'daily_cap':
+      return {
+        title: "Today's automatic analyses are done",
+        detail: 'Automatic analyses start again tomorrow.',
+        signIn: false,
+      }
+    default: {
+      const copy = REASON_COPY[blocker]
+      return { title: copy.headline, detail: copy.detail, signIn: false }
+    }
+  }
+}
+
+/** The next run of the nightly report at local `hour`, epoch seconds. */
+export function nextReportAt(hour: number, now: number): number {
+  const due = new Date(now * 1000)
+  due.setHours(hour, 0, 0, 0)
+  if (due.getTime() / 1000 <= now) due.setDate(due.getDate() + 1)
+  return Math.floor(due.getTime() / 1000)
+}
+
+/** When the next report runs: "tonight, just after midnight", "tomorrow at 6 AM". */
+export function reportWhen(hour: number, now: number): string {
+  const at = nextReportAt(hour, now)
+  if (hour === 0) return 'tonight, just after midnight'
+  const clock = new Date(at * 1000).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+  })
+  const today = new Date(now * 1000).toDateString()
+  const day =
+    new Date(at * 1000).toDateString() === today ? 'today' : 'tomorrow'
+  return `${day} at ${clock}`
+}
+
+/**
+ * The line before a database's first report: when it runs, from the saved report hour,
+ * and what it waits on. Null when the report itself is off or monitoring is.
+ */
+export function firstReportLine(
+  settings: Pick<MonitorSettings, 'nightly_hour'> | undefined,
+  can: AiCanRun,
+  now: number
+): string | null {
+  if (can.report === 'monitoring_off') return null
+  if (can.report === 'report_off')
+    return 'The daily report is off. Turn it on in Monitoring settings.'
+  const when = reportWhen(settings?.nightly_hour ?? 0, now)
+  if (can.report === 'signed_out')
+    return `Your first daily report runs ${when} once you sign in.`
+  if (can.summary)
+    return `Your first daily report runs ${when}, without its written summary while AI is off.`
+  return `Your first daily report runs ${when}.`
 }
 
 /** Tone to classes, so a state reads in the same colors everywhere. */

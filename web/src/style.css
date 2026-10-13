@@ -29,6 +29,17 @@
 @layer custom {
   :root {
     -webkit-font-smoothing: antialiased;
+    /* The strip the desktop app's window controls sit in, 0 in the browser. */
+    --titlebar-height: env(titlebar-area-height, 0px);
+    /* The same strip where the controls sit at the right (Windows, Linux), so the canvas
+       starts below it; 0 where the traffic lights sit over the sidebar (macOS). The
+       controls' width, scaled far past the strip, caps the minimum at 0 or the height. */
+    --titlebar-right-height: min(
+      var(--titlebar-height),
+      calc(
+        (100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)) * 1000
+      )
+    );
   }
 
   /* Deliberately NOT `*`. A global smooth scroll-behavior animates the

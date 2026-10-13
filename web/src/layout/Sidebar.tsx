@@ -239,16 +239,12 @@ function DatabaseList({
   )
 }
 
-interface SidebarProps {
-  isElectronMac?: boolean
-}
-
 /**
  * The sidebar on the page tone, flush with the canvas: the four pages that cover every
  * database, one item per configured database, the Readyset Platform card, then the
  * secondary group and the account line.
  */
-export function Sidebar({ isElectronMac = false }: SidebarProps) {
+export function Sidebar() {
   const currentPath = useRouterState({
     select: (state) => state.location.pathname,
   })
@@ -296,10 +292,10 @@ export function Sidebar({ isElectronMac = false }: SidebarProps) {
   return (
     <aside
       id="app-sidebar"
-      className="flex h-dvh w-58 shrink-0 flex-col gap-1 px-3.5 pt-5.5 pb-4.5"
+      className="flex h-dvh w-58 shrink-0 flex-col gap-1 px-3.5 pb-4.5"
     >
-      {/* On desktop mac the window traffic lights get their own draggable strip. */}
-      {isElectronMac && <div className="draggable-region h-8 shrink-0" />}
+      {/* The top drags the desktop window and holds the macOS traffic lights. */}
+      <div className="draggable-region -mb-1 h-[max(--spacing(5.5),var(--titlebar-height))] shrink-0" />
 
       <nav aria-label="Primary" className="no-drag flex flex-col gap-1">
         {primaryItems.map((item) => (

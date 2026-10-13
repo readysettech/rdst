@@ -153,6 +153,10 @@ class CommandRun:
             self.error_type = type(exc).__name__
 
 
+FEEDBACK_NOT_SENT = "Couldn't send your feedback. Check your connection and try again."
+FEEDBACK_TELEMETRY_OFF = "Feedback isn't sent while telemetry is turned off."
+
+
 class TelemetryManager:
     """
     Manages all telemetry for RDST.
@@ -503,13 +507,20 @@ class TelemetryManager:
         stats[key] = stats.get(key, 0) + amount
         self._save_stats()
 
-    def track(self, event: str, properties: Optional[Dict[str, Any]] = None):
+    def track(
+        self,
+        event: str,
+        properties: Optional[Dict[str, Any]] = None,
+        *,
+        delivered: Optional[list] = None,
+    ):
         """
         Track an event to PostHog.
 
         Args:
             event: Event name (e.g., "analyze_run", "installation")
             properties: Additional properties to include
+            delivered: Send now instead of queueing, appending whether PostHog accepted it
         """
         if not self.POSTHOG_API_KEY or not self.is_enabled():
             return
@@ -519,6 +530,11 @@ class TelemetryManager:
         posthog = _get_posthog()
         if not posthog:
             return
+        if delivered is not None:
+            posthog = posthog.Client(
+                self.POSTHOG_API_KEY, host=self.POSTHOG_HOST, sync_mode=True,
+                max_retries=0, timeout=10,
+            )
 
         try:
             from shared import product_telemetry
@@ -561,15 +577,27 @@ class TelemetryManager:
                             else:
                                 all_props["$set_once"] = person_props
                             self._identified_person = profile
-                    posthog.capture(
+                    sent = posthog.capture(
                         distinct_id=distinct_id,
                         event=event,
                         properties=all_props
                     )
+                    if delivered is not None:
+                        delivered.append(sent is not None)
                 except Exception:
                     pass
 
-            self._enqueue_posthog_send(send)
+            if delivered is None:
+                self._enqueue_posthog_send(send)
+                return
+            with self._internal_user_lock:
+                internal_user = self._internal_user_result
+            if internal_user is None:
+                internal_user = self._detect_internal_user()
+            try:
+                send(internal_user)
+            finally:
+                posthog.shutdown()
 
         except Exception:
             pass
@@ -623,6 +651,18 @@ class TelemetryManager:
         all_props["device_stats"] = stats
 
         self.track(event, all_props)
+
+    def deliver_with_stats(self, event: str, properties: Optional[Dict[str, Any]] = None) -> bool:
+        """Like track_with_stats(), but sent now: whether PostHog accepted the event.
+
+        track() queues events for a background flush, so it can't tell its caller whether
+        anything left the machine.
+        """
+        all_props = properties.copy() if properties else {}
+        all_props["device_stats"] = self._get_stats()
+        delivered: list = []
+        self.track(event, all_props, delivered=delivered)
+        return delivered == [True]
 
     def track_first_event_once(
         self,
@@ -1390,9 +1430,9 @@ class TelemetryManager:
         include_query: bool = False,
         include_plan: bool = False,
         flags_used: Optional[list] = None,
-    ):
+    ) -> bool:
         """
-        Submit user feedback.
+        Submit user feedback, returning whether it reached PostHog.
 
         Args:
             reason: User's feedback text
@@ -1414,6 +1454,8 @@ class TelemetryManager:
 
         if not EMAIL_RE.match(email):
             raise ValueError("Invalid email address")
+        if not self.is_enabled():
+            raise RuntimeError(FEEDBACK_TELEMETRY_OFF)
 
         properties = {
             "reason": reason,
@@ -1448,7 +1490,7 @@ class TelemetryManager:
             except Exception:
                 pass
 
-        self.track_with_stats("feedback_submitted", properties)
+        return self.deliver_with_stats("feedback_submitted", properties)
 
     # =========================================================================
     # Cleanup

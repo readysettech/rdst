@@ -1,4 +1,3 @@
-import { cn } from '@rs/tailwind-base'
 import { Alert } from '@rs/ui-new/alert'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
@@ -22,7 +21,7 @@ import {
   fetchAccountStatus,
   startAccountLogin,
 } from '../lib/api'
-import { isDesktopMac, isDesktopRuntime } from '../lib/desktop'
+import { isDesktopRuntime } from '../lib/desktop'
 import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
 import { VALUE_PROPOSITION } from '../lib/valueProposition'
 
@@ -35,6 +34,12 @@ function accountCallbackUrl(): string {
     ? new URL('/api/account/oauth/callback', window.location.origin).toString()
     : localCallbackUrl()
 }
+
+const LINK_EXPIRED = 'This sign-in link has expired or was already used.'
+
+// Supabase, Keyservice and the local backend each word a spent or stale link differently.
+const SPENT_LINK =
+  /invalid_login|otp_expired|link is invalid|has expired|expired, or already|already (?:been )?used|already completed/i
 
 function GithubMark() {
   return (
@@ -157,6 +162,9 @@ export function SignInPage({
   const emailFieldId = useId()
   const [email, setEmail] = useState('')
   const [emailError, setEmailError] = useState<string | null>(null)
+  // Set once the user leaves a spent link for a new one.
+  const [abandonedCallback, setAbandonedCallback] = useState(false)
+  const [focusEmail, setFocusEmail] = useState(false)
 
   const finish = async () => {
     await invalidateTrialRelatedQueries(queryClient)
@@ -202,7 +210,10 @@ export function SignInPage({
     completeRef.current(callbackLoginId)
   }, [callbackLoginId])
   const finishing =
-    !!callbackLoginId && !callback.isError && !callback.isSuccess
+    !!callbackLoginId &&
+    !abandonedCallback &&
+    !callback.isError &&
+    !callback.isSuccess
   const goBack = () =>
     canGoBack ? router.history.back() : void navigate({ to: '/' })
   // Escape leaves the way Back does.
@@ -223,12 +234,28 @@ export function SignInPage({
     callback.error ??
     pollError ??
     null
-  const error =
-    callbackLoginId && callback.isError
-      ? 'This sign-in link has expired or was already used.'
-      : failure instanceof Error
-        ? failure.message
-        : failure
+  const failureText = failure instanceof Error ? failure.message : failure
+  const linkExpired =
+    (!!callbackLoginId && callback.isError) ||
+    (!!failureText && SPENT_LINK.test(failureText))
+  const error = linkExpired ? LINK_EXPIRED : failureText
+  useEffect(() => {
+    if (!focusEmail) return
+    setFocusEmail(false)
+    document.getElementById(emailFieldId)?.focus()
+  }, [focusEmail, emailFieldId])
+  // Back to the email step: forget the spent attempt and drop its id from the URL.
+  const sendNewLink = () => {
+    callback.reset()
+    magicLink.reset()
+    setPollError(null)
+    setDesktopLoginId(null)
+    if (callbackLoginId) {
+      setAbandonedCallback(true)
+      void navigate({ to: '/account-login', search: {}, replace: true })
+    }
+    setFocusEmail(true)
+  }
   const pending =
     github.isPending ||
     google.isPending ||
@@ -238,9 +265,7 @@ export function SignInPage({
   return (
     <main className="relative flex min-h-dvh items-center justify-center bg-surface-layout-2 px-6 py-12">
       {!finishing && (
-        <div
-          className={cn('absolute left-4', isDesktopMac() ? 'top-12' : 'top-4')}
-        >
+        <div className="absolute top-[max(--spacing(4),var(--titlebar-height))] left-4">
           <Button
             variant="primary"
             modifier="ghost"
@@ -356,8 +381,17 @@ export function SignInPage({
           </div>
         )}
         {error && (
-          <div className="mt-4 w-full text-left">
+          <div className="mt-4 flex w-full flex-col items-start gap-2 text-left">
             <Alert tone="quiet" variant="negative" icon="alert" label={error} />
+            {linkExpired && (
+              <Button
+                variant="primary"
+                modifier="ghost"
+                size="small"
+                label="Send a new link"
+                onClick={sendNewLink}
+              />
+            )}
           </div>
         )}
         <Text as="p" level="caption" className="mt-4 text-content-layout-3">

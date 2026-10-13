@@ -8,6 +8,7 @@ coercion, target naming, and the status envelope the discovery UI polls.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import threading
@@ -18,6 +19,8 @@ import requests
 
 from shared.password_resolver import derive_password_env as password_env_for
 from shared.secret_store_service import SecretStoreService
+
+logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 10.0
 
@@ -171,10 +174,14 @@ def provider_status(
         return status
 
     status["method"] = method
+    # Only a 401/403 means the provider refused the credentials. Anything else (offline,
+    # timeout, 5xx) says nothing about them, so the UI offers a retry instead.
+    unreachable = f"Couldn't reach {api_name}."
     try:
         response = probe(token)
-    except requests.RequestException as exc:
-        status["detail"] = f"Could not reach the {api_name} API: {exc}"
+    except requests.RequestException:
+        logger.debug("%s status probe failed", api_name, exc_info=True)
+        status.update(unreachable=True, detail=unreachable)
         return status
 
     if response.status_code == 200:
@@ -186,7 +193,9 @@ def provider_status(
         # Method is retained so the UI can say "expired" instead of "signed out".
         api_detail = (response.text or "").strip()[:200]
         status["detail"] = rejected_detail + (f" ({api_detail})" if api_detail else "")
+        status["rejected"] = True
         return status
 
-    status["detail"] = f"{api_name} API returned {response.status_code}"
+    logger.debug("%s status probe returned HTTP %s", api_name, response.status_code)
+    status.update(unreachable=True, detail=unreachable)
     return status

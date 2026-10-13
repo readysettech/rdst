@@ -98,6 +98,9 @@ class QueryTargetLifecycle:
     # measured. Absent keys mean the run reported nothing for them, so the
     # mapping stays TOML-serializable.
     last_compare: Dict[str, Any] = field(default_factory=dict)
+    # The latest Ask question that produced this SQL on this target, and when.
+    ask_question: str = ""
+    last_asked_at: str = ""
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "QueryTargetLifecycle":
@@ -887,6 +890,28 @@ class QueryEntry:
             and not lifecycle.reviewed_at
         )
 
+    def ask_history(self) -> List[Tuple[str, str, str]]:
+        """(target, question, asked_at) for every target this SQL was asked on.
+
+        One SQL pattern can answer questions on several databases; each keeps its
+        own question. Entries from before per-target questions fall back to the
+        entry's question on its home target only.
+        """
+        items: Dict[str, Tuple[str, str, str]] = {}
+        for key, lifecycle in self.target_lifecycle.items():
+            if "ask" not in lifecycle.sources:
+                continue
+            target = "" if key == _GLOBAL_TARGET_KEY else key
+            question = lifecycle.ask_question or (
+                self.question if target == self.home_target else ""
+            )
+            if question:
+                asked_at = lifecycle.last_asked_at or self.last_analyzed
+                items[target] = (target, question, asked_at)
+        if self.source == "ask" and self.question and self.home_target not in items:
+            items[self.home_target] = (self.home_target, self.question, self.last_analyzed)
+        return list(items.values())
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for TOML serialization."""
         return asdict(self)
@@ -1313,6 +1338,7 @@ class QueryRegistry:
         analyzed: bool,
         compared: bool,
         save_intent: bool,
+        question: str = "",
     ) -> None:
         """Update additive Query Library state without changing CLI metadata.
 
@@ -1339,6 +1365,10 @@ class QueryRegistry:
         if compared:
             lifecycle.last_compared_at = occurred_at
             lifecycle.comparison_count += 1
+        if source == "ask":
+            lifecycle.last_asked_at = occurred_at
+            if question:
+                lifecycle.ask_question = question
 
     def add_query(
         self,
@@ -1553,6 +1583,7 @@ class QueryRegistry:
             analyzed=analyzed,
             compared=compared,
             save_intent=save_intent,
+            question=question,
         )
 
         if self._defer_depth:

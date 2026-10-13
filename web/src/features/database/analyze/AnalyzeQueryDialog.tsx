@@ -6,7 +6,11 @@ import { Button } from '@rs/ui-new/button'
 import { Text } from '@rs/ui-new/text'
 import { useEffect, useState } from 'react'
 import { ParameterDialog } from '@/components/top'
-import { useAddQuery, useEnqueueAnalysis } from '@/lib/monitor/hooks'
+import {
+  analysisDidntStart,
+  useAddQuery,
+  useEnqueueAnalysis,
+} from '@/lib/monitor/hooks'
 import { DialogShell } from '../../../components/DialogShell'
 import { checkPaste, pastedSql } from './analyzeQueryModel'
 
@@ -23,14 +27,14 @@ export function AnalyzeQueryDialog({
   target: string
   open: boolean
   onClose: () => void
-  /** Close the dialog and open the query's pane, once it is in the list. */
+  /** Close the dialog and open the query's pane, once its analysis is queued. */
   onShowQuery: (key: string) => void
   initialSql?: string
 }) {
   const [sql, setSql] = useState(initialSql)
   const [values, setValues] = useState(false)
   const add = useAddQuery()
-  const enqueue = useEnqueueAnalysis(target)
+  const enqueue = useEnqueueAnalysis(target, { inline: true })
   const check = checkPaste(sql)
 
   useEffect(() => {
@@ -38,6 +42,7 @@ export function AnalyzeQueryDialog({
     setSql(initialSql)
     setValues(false)
     add.reset()
+    enqueue.reset()
   }, [open, initialSql])
 
   const { mutate: file } = add
@@ -46,10 +51,13 @@ export function AnalyzeQueryDialog({
     file(
       { target, input: { sql: statement } },
       {
-        onSuccess: (added) => {
-          queue(added.key)
-          onShowQuery(added.key)
-        },
+        // A refused analysis keeps the dialog open with the reason and the SQL to edit.
+        onSuccess: (added) =>
+          queue(added.key, {
+            onSuccess: () => onShowQuery(added.key),
+            onError: () => setValues(false),
+          }),
+        onError: () => setValues(false),
       }
     )
 
@@ -72,7 +80,7 @@ export function AnalyzeQueryDialog({
             variant="primary"
             modifier="solid"
             label="Analyze"
-            loading={add.isPending}
+            loading={add.isPending || enqueue.isPending}
             disabled={!check.ok}
             onClick={submit}
           />
@@ -124,6 +132,15 @@ export function AnalyzeQueryDialog({
                   ? add.error.message
                   : "The query wasn't added to the list."
               }
+            />
+          )}
+          {enqueue.isError && (
+            <Alert
+              tone="quiet"
+              variant="negative"
+              icon="alert"
+              className="mt-3"
+              label={analysisDidntStart(enqueue.error)}
             />
           )}
         </>

@@ -1,26 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  readSelectedTarget,
+  storeSelectedTarget,
+  TARGET_CHANGED_EVENT,
+  TARGET_STORAGE_KEY,
+} from '../features/database/selectedTarget'
 import { useSystemStatus } from '../lib/useSystemStatus'
 
-const TARGET_STORAGE_KEY = 'rdst_selected_target'
-const TARGET_CHANGED_EVENT = 'rdst_target_changed'
-
 /**
- * Hook for centralized target state management with localStorage sync
+ * The selected database, shared by every page and tab. localStorage gives it on first
+ * render; the backend's preferences, read once at load, are its source of truth.
  * @returns Object with target (string | null) and setTarget function
  */
 export function useTarget() {
-  const [target, setTargetState] = useState<string | null>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem(TARGET_STORAGE_KEY)
-    }
-    return null
-  })
+  const [target, setTargetState] = useState<string | null>(() =>
+    typeof window !== 'undefined' ? readSelectedTarget() : null
+  )
 
   useEffect(() => {
     if (typeof window === 'undefined') return
     // A change made before this subscription (another component's mount effect) is read
     // back here.
-    setTargetState(localStorage.getItem(TARGET_STORAGE_KEY))
+    setTargetState(readSelectedTarget())
 
     const handleStorage = (event: StorageEvent) => {
       if (event.key !== TARGET_STORAGE_KEY) return
@@ -47,24 +48,15 @@ export function useTarget() {
     }
   }, [])
 
-  const setTarget = useCallback((newTarget: string | null) => {
-    const normalizedTarget = newTarget?.trim() ? newTarget : null
-    setTargetState(normalizedTarget)
-
-    if (typeof window !== 'undefined') {
-      if (normalizedTarget) {
-        localStorage.setItem(TARGET_STORAGE_KEY, normalizedTarget)
-      } else {
-        localStorage.removeItem(TARGET_STORAGE_KEY)
-      }
-
-      window.dispatchEvent(
-        new CustomEvent<string | null>(TARGET_CHANGED_EVENT, {
-          detail: normalizedTarget,
-        })
-      )
-    }
-  }, [])
+  /** `automatic` marks a default the app filled in rather than the user's choice. */
+  const setTarget = useCallback(
+    (newTarget: string | null, automatic = false) => {
+      const normalizedTarget = newTarget?.trim() || null
+      setTargetState(normalizedTarget)
+      storeSelectedTarget(normalizedTarget, automatic)
+    },
+    []
+  )
 
   return { target, setTarget }
 }
@@ -135,7 +127,7 @@ export function useDefaultTarget(): string | null {
       if (dataUpdatedAt <= verify.current.after) return
     }
     lastCorrection.current = correctionKey
-    setTarget(current)
+    setTarget(current, true)
   }, [correctionKey, current, normalized, setTarget, refetch, dataUpdatedAt])
 
   return current

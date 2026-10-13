@@ -123,8 +123,8 @@ def ssh_error_payload(
         message = str(exc)[:300]
     elif category == "ssh_jump_unreachable":
         message = (
-            f"SSH jump host {jump_host}:{jump_port} is unreachable. Check its "
-            "hostname, port, VPN, and firewall rules."
+            f"SSH jump host {jump_host}:{jump_port} couldn't be reached. Check that it's "
+            "running and that this computer can reach it."
         )
     else:
         detail = str(exc).splitlines()[0][:300] if str(exc) else "Tunnel setup failed"

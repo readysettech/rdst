@@ -119,11 +119,58 @@ def plan_summary(analysis: Any, mode: str | None) -> dict[str, Any] | None:
             "rows_returned": int(returned) if returned is not None else None}
 
 
-def _index_gain(recommendation: dict[str, Any], testing: dict[str, Any]) -> dict[str, Any] | None:
-    sql = str(recommendation.get("sql") or "").strip().lower()
-    for result in testing.get("results") or [] if testing.get("tested") else []:
-        if not isinstance(result, dict) or str(result.get("index_sql") or "").strip().lower() != sql:
-            continue
+def _index_text(sql: Any) -> str:
+    """An index statement as the planner test compares it: case, spacing, a trailing semicolon
+    and CONCURRENTLY, which the test drops, never tell two apart."""
+    text = " ".join(str(sql or "").split()).rstrip(";").strip().lower()
+    return re.sub(r"\s+concurrently\b", "", text)
+
+
+def _indexed(sql: Any) -> tuple[str | None, list[str]]:
+    """The table and the columns, in order, an index statement covers."""
+    from features.monitor.db_actions import index_target
+
+    return index_target(str(sql or ""))
+
+
+def _tests(testing: dict[str, Any]) -> list[dict[str, Any]]:
+    return [result for result in testing.get("results") or [] if isinstance(result, dict)] \
+        if testing.get("tested") else []
+
+
+def tested_index(sql: Any, testing: dict[str, Any]) -> dict[str, Any] | None:
+    """The planner test of one index statement: the test of the same statement, else the only
+    test of an index on the same table and columns in the same order."""
+    results = _tests(testing)
+    text = _index_text(sql)
+    for result in results:
+        if text and _index_text(result.get("index_sql")) == text:
+            return result
+    wanted = _indexed(sql)
+    same = [result for result in results if wanted[0] and wanted[1]
+            and _indexed(result.get("index_sql")) == wanted]
+    return same[0] if len(same) == 1 else None
+
+
+def as_tested(item: dict[str, Any], testing: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
+    """A recommended index's statement and planner test. The analysis tests each index with its
+    columns in equality-then-range order and stores the statement as the AI wrote it, so the only
+    test of the same columns in another order is this one's, and its statement is the index that
+    gain belongs to."""
+    sql = str(item.get("sql") or "").strip()
+    result = tested_index(sql, testing)
+    if result is not None:
+        return sql, result
+    table, columns = _indexed(sql)
+    same = [result for result in _tests(testing) if table and columns and result.get("index_sql")
+            and _indexed(result["index_sql"])[0] == table
+            and sorted(_indexed(result["index_sql"])[1]) == sorted(columns)]
+    return (str(same[0]["index_sql"]).strip(), same[0]) if len(same) == 1 else (sql, None)
+
+
+def _index_gain(recommendation: dict[str, Any], result: dict[str, Any] | None
+                ) -> dict[str, Any] | None:
+    if result is not None:
         pct = _number(result.get("cost_reduction_pct"))
         if result.get("planner_used_index") and pct is not None:
             return {"measured": False, "text": f"Planner estimate: cost down {pct:.0f}% with a "
@@ -139,31 +186,96 @@ def _index_gain(recommendation: dict[str, Any], testing: dict[str, Any]) -> dict
     return None
 
 
+def rewrite_test_gain(result: Any) -> dict[str, Any] | None:
+    """A tested rewrite's gain: the measured run time when it ran, the planner's cost when it
+    was only planned. None unless the test found it significantly faster."""
+    improvement = result.get("improvement") if isinstance(result, dict) else None
+    if not isinstance(improvement, dict) or not result.get("success", True):
+        return None
+    overall = improvement.get("overall") or {}
+    if not overall.get("is_better") or not overall.get("significant"):
+        return None
+    timed = improvement.get("execution_time") or {}
+    measured = _number(timed.get("improvement_pct")) is not None
+    # A rewrite that ran no faster never counts, whatever the planner thought of it.
+    pct = _number(timed.get("improvement_pct") if measured
+                  else (improvement.get("cost_estimate") or {}).get("improvement_pct"))
+    if pct is None or pct <= 0:
+        return None
+    return {"improvement_pct": pct, "measured": measured,
+            "before_ms": _number(timed.get("baseline_ms")) if measured else None,
+            "after_ms": _number(timed.get("rewrite_ms")) if measured else None}
+
+
+_SQL_QUOTED = re.compile(r"'(?:[^'\\]|''|\\.)*'|\"(?:[^\"]|\"\")*\"|`[^`]*`|(\$\w*\$).*?\1",
+                         re.DOTALL)
+
+
+def _sql_shape(sql: Any) -> str:
+    """The statement with case and spacing folded outside literals and quoted names, which
+    keep their exact text, and without a trailing semicolon."""
+    text, parts, last = str(sql or "").strip().rstrip(";").strip(), [], 0
+    for match in _SQL_QUOTED.finditer(text):
+        parts += [re.sub(r"\s+", " ", text[last:match.start()].lower()), match.group(0)]
+        last = match.end()
+    parts.append(re.sub(r"\s+", " ", text[last:].lower()))
+    return "".join(parts)
+
+
+def _same_sql(left: Any, right: Any) -> bool:
+    return _sql_shape(left) == _sql_shape(right)
+
+
+def _rewrite_gain(item: dict[str, Any], testing: dict[str, Any]) -> dict[str, Any] | None:
+    sql = item["rewritten_sql"]
+    tested = [result for result in [*(testing.get("rewrite_results") or []),
+                                     testing.get("best_rewrite")]
+              if isinstance(result, dict) and result.get("success", True)
+              and isinstance(result.get("improvement"), dict)
+              and _same_sql(result.get("rewritten_sql") or result.get("sql"), sql)
+              ] if testing.get("tested") else []
+    if tested:
+        gain = rewrite_test_gain(tested[0])
+        if gain is None:
+            return {"measured": False, "text": "Tested: no faster than the original",
+                    "before_ms": None, "after_ms": None, "cost_reduction_pct": 0.0}
+        pct = gain["improvement_pct"]
+        return {"measured": gain["measured"],
+                "text": f"Tested: {pct:.0f}% faster" if gain["measured"]
+                else f"Planner estimate: cost down {pct:.0f}%",
+                "before_ms": gain["before_ms"], "after_ms": gain["after_ms"],
+                "cost_reduction_pct": pct}
+    estimate = str(item.get("expected_improvement") or "").strip()
+    return {"measured": False, "text": _sentence("Estimated: " + estimate), "before_ms": None,
+            "after_ms": None, "cost_reduction_pct": None} if estimate else None
+
+
 def _fixes(analysis: Any) -> list[dict[str, Any]]:
     llm = analysis.llm_analysis if isinstance(analysis.llm_analysis, dict) else {}
     display = analysis.display_payload if isinstance(analysis.display_payload, dict) else {}
     testing = display.get("index_testing") if isinstance(display.get("index_testing"), dict) else {}
+    rewrite_testing = display.get("rewrite_testing") \
+        if isinstance(display.get("rewrite_testing"), dict) else {}
     fixes: list[dict[str, Any]] = []
     indexes = [item for item in (llm.get("index_recommendations") or analysis.index_suggestions
                                  or []) if isinstance(item, dict) and item.get("sql")]
     for item in indexes:
-        columns = ", ".join(str(column) for column in item.get("columns") or [])
+        sql, tested = as_tested(item, testing)
+        columns = ", ".join(str(column) for column in
+                            (tested or {}).get("columns") or item.get("columns") or [])
         table = str(item.get("table") or "").split(".")[-1]
         fixes.append({"kind": "index",
                       "title": f"Add an index on {table}({columns})" if table and columns
                       else "Add an index",
-                      "sql": str(item["sql"]).strip(), "why": index_why(item.get("rationale")),
-                      "expected_gain": _index_gain(item, testing)})
+                      "sql": sql, "why": index_why(item.get("rationale")),
+                      "expected_gain": _index_gain(item, tested)})
     for item in llm.get("rewrite_suggestions") or analysis.rewrite_suggestions or []:
         if not isinstance(item, dict) or not item.get("rewritten_sql"):
             continue
-        gain = str(item.get("expected_improvement") or "").strip()
         fixes.append({"kind": "rewrite", "title": "Rewrite the query",
                       "sql": str(item["rewritten_sql"]).strip(),
                       "why": _sentence(item.get("explanation")),
-                      "expected_gain": {"measured": False, "text": _sentence("Estimated: " + gain),
-                                        "before_ms": None, "after_ms": None,
-                                        "cost_reduction_pct": None} if gain else None})
+                      "expected_gain": _rewrite_gain(item, rewrite_testing)})
     for item in llm.get("optimization_opportunities") or []:
         if isinstance(item, dict) and str(item.get("type") or "").lower() == "configuration" \
                 and str(item.get("priority") or "").lower() == "high":

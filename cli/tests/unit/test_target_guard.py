@@ -143,4 +143,7 @@ def test_ensure_target_password_categorizes_ssh_failure():
     assert exc.status_code == 503
     assert exc.detail["category"] == "ssh_jump_unreachable"
     assert exc.detail["target_name"] == "prod"
-    assert "jump.example.com:2222 is unreachable" in exc.detail["message"]
+    assert exc.detail["message"] == (
+        "SSH jump host jump.example.com:2222 couldn't be reached. Check that it's running "
+        "and that this computer can reach it."
+    )

@@ -259,6 +259,56 @@ def test_mysql_performance_schema_gap_is_a_monitoring_issue(monkeypatch, tmp_pat
     assert store.inbox("resolved")[0]["subject"] == "performance_schema_missing"
 
 
+async def test_a_passing_setup_check_unblocks_readings_without_a_restart(monkeypatch, tmp_path):
+    from features.monitor.api import routes as monitor_routes
+    from features.query_registry.discovery import (
+        QueryDiscoveryCollector,
+        QueryDiscoveryCoordinator,
+    )
+
+    class Config:
+        def load(self):
+            pass
+
+        def get(self, target):
+            return {"engine": "mysql"}
+
+    monkeypatch.setattr("shared.config.targets.TargetsConfig", Config)
+    coordinator = QueryDiscoveryCoordinator(collector_factory=QueryDiscoveryCollector)
+    monkeypatch.setattr(monitor_loop, "query_discovery", coordinator)
+    collector = coordinator.collector_for("db")
+    # A cycle before the GRANT found performance_schema unreadable and cached the gap.
+    collector._engine = "mysql"
+    collector._legacy_fallback = True
+    collector._source_unavailable = {"error_code": "permission_denied", "error": "OperationalError"}
+    collector._snapshot = {**collector._snapshot, "state": "watching",
+                           "capture_warning": collector._capture_warning()}
+    store = MonitorStore(tmp_path / "monitor.db")
+    store.set_settings("db", {"enabled": True})
+    active = monitor_loop.MonitorLoop(store, clock=lambda: 1000, index_reader=lambda target: [],
+                                      judge=lambda chosen, context: None,
+                                      setup_checker=lambda target, config: {"checks": []})
+    monkeypatch.setattr(monitor_loop, "_active_loop", active)
+    active._monitoring_issues("db", 1000, False)
+    readings = SimpleNamespace(next_reading_at=lambda target: None,
+                               collection_status=lambda target: {})
+    assert monitor_routes._readings(store, "db", readings)["setup_blocked"] is True
+
+    collected: list[str] = []
+    scheduler = SimpleNamespace(collect_soon=collected.append)
+    await monitor_loop.setup_check_passed("db", scheduler)
+    # Polling the passing check again finds nothing cached.
+    await monitor_loop.setup_check_passed("db", scheduler)
+
+    assert monitor_routes._readings(store, "db", readings).get("setup_blocked") is None
+    assert collected == ["db"] and active._wake.is_set()
+    # A pass before the next reading doesn't file the cached gap again.
+    active._monitoring_issues("db", 1060, False)
+    assert monitor_routes._readings(store, "db", readings).get("setup_blocked") is None
+    await collector._apply_reconnect()
+    assert collector._source_unavailable is None and not collector._legacy_fallback
+
+
 def test_database_checks_run_every_fifteen_minutes_without_a_model(monkeypatch, tmp_path):
     from features.monitor import snapshot
 

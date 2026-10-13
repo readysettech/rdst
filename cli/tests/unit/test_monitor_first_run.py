@@ -139,3 +139,12 @@ def test_pasted_query_is_refused_for_bad_input(client):
     assert http.post(base, json={"sql": "  ;"}).status_code == 422
     assert http.post(base, json={"sql": "SELECT * FROM pg_stat_activity"}).status_code == 422
     assert http.post(base, json={"sql": "SELECT 1 FROM t", "query_hash": "abc"}).status_code == 422
+
+
+def test_pasted_query_rdst_would_not_analyze_is_refused_with_why_and_not_listed(client):
+    _, http = client
+    response = http.post("/api/monitor/targets/db/queries", json={
+        "sql": "WITH gone AS (DELETE FROM orders WHERE id = 1 RETURNING *) SELECT * FROM gone"})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "WITH changes data, so RDST doesn't run it."
+    assert MonitorStore().read("SELECT COUNT(*) AS n FROM query_text WHERE target='db'")[0]["n"] == 0

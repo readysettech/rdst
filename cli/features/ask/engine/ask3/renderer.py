@@ -170,6 +170,11 @@ class AskRenderer:
             title=f"Results ({event.row_count} {'row' if event.row_count == 1 else 'rows'}, {event.execution_time_ms:.1f}ms)",
         )
         self._console.print(table)
+        if event.truncated and event.row_limit:
+            self._console.print(
+                f"[{StyleTokens.WARNING}]Showing the first {event.row_limit} rows; "
+                f"Ask limited the query to LIMIT {event.row_limit}.[/{StyleTokens.WARNING}]"
+            )
 
         # Breadcrumb: show saved query info
         if event.query_hash:

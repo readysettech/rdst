@@ -239,12 +239,16 @@ def test_the_global_plan_lists_each_databases_checkup(store, monkeypatch):
 
 
 def test_home_marks_a_database_building_its_first_plan(store, monkeypatch):
-    store.set_settings("db", {"enabled": True})
+    store.set_settings("db", {"enabled": True, "deep_analysis": True})
     store.start_first_hour("db", NOW - 120)
     monkeypatch.setattr(database_limit, "_signed_in", lambda: True)
     home = views.home(store, NOW, configured=[{"name": "db"}])
     models.HomeModel.model_validate(home)
     assert home["databases_strip"][0]["building"] is True
+    # The first plan comes from deep analyses; with them off there is nothing to build.
+    store.set_settings("db", {"deep_analysis": False})
+    assert views.home(store, NOW, configured=[{"name": "db"}])["databases_strip"][0][
+        "building"] is False
 
 
 def test_a_rewrite_card_carries_the_query_it_replaces(store):

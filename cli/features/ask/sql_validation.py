@@ -56,11 +56,31 @@ WRITE_KEYWORDS = {
 READ_KEYWORDS = {"SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN"}
 
 
+def describe_validation_issues(issues: Any) -> str:
+    """One sentence for a validation refusal, built from each issue's message.
+
+    Issues may be strings, dicts, or objects with a ``message``; their repr never reaches
+    the user.
+    """
+    messages: List[str] = []
+    for issue in issues or ():
+        message = issue.get("message") if isinstance(issue, dict) else getattr(
+            issue, "message", issue
+        )
+        text = message.strip().rstrip(".") if isinstance(message, str) else ""
+        if text and text not in messages:
+            messages.append(text)
+    if not messages:
+        return "The generated SQL failed validation."
+    return f"The generated SQL failed validation: {'; '.join(messages)}."
+
+
 def validate_sql_for_ask(
     sql: str,
     max_limit: int = 1000,
     default_limit: int = 100,
     enforce_result_limit: bool = True,
+    dialect: str = "",
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -77,6 +97,8 @@ def validate_sql_for_ask(
         max_limit: Maximum allowed LIMIT value
         default_limit: Default LIMIT to inject if missing
         enforce_result_limit: Add or reduce LIMIT clauses when true
+        dialect: Target database type; selects the string and comment syntax used to find
+            the outermost LIMIT
         **kwargs: Additional parameters
 
     Returns:
@@ -193,7 +215,7 @@ def validate_sql_for_ask(
         }
 
     # Step 4: Check for existing LIMIT clause
-    limit_info = _extract_limit_clause(sql)
+    limit_info = _extract_limit_clause(sql, dialect)
     has_limit = limit_info["has_limit"]
     limit_value = limit_info["limit_value"]
 
@@ -209,7 +231,7 @@ def validate_sql_for_ask(
             limit_value = default_limit
             limit_added = True
         elif limit_value and limit_value > max_limit:
-            validated_sql = _replace_limit(sql, max_limit)
+            validated_sql = _replace_limit(sql, max_limit, dialect)
             warnings.append(f"Reduced LIMIT from {limit_value} to maximum {max_limit}")
             limit_value = max_limit
             limit_reduced = True
@@ -244,7 +266,9 @@ def validate_filter_literal_provenance(
 ) -> Dict[str, Any]:
     """Report literal provenance without treating enum overlap as a schema error."""
     try:
-        tree = sqlglot.parse_one(sql, dialect=dialect or None)
+        tree = sqlglot.parse_one(
+            sql, dialect="postgres" if dialect == "postgresql" else dialect or None
+        )
     except Exception:
         return {"is_valid": True, "issues": [], "warnings": []}
 
@@ -585,82 +609,159 @@ def _get_first_keyword(sql: str) -> Optional[str]:
     return None
 
 
-def _extract_limit_clause(sql: str) -> Dict[str, Any]:
-    """
-    Extract LIMIT clause from SQL query.
+_TOP_LIMIT = re.compile(r"\bLIMIT\s+(\d+)(?:\s*,\s*(\d+)|\s+OFFSET\s+\d+)?", re.IGNORECASE)
+_TOP_FETCH = re.compile(
+    r"\bFETCH\s+(?:FIRST|NEXT)\s+(\d+)?\s*ROWS?\s+(?:ONLY|WITH\s+TIES)\b", re.IGNORECASE
+)
 
-    Returns:
-        Dict with has_limit (bool) and limit_value (int or None)
-    """
-    # Pattern for LIMIT clause (PostgreSQL and MySQL)
-    # Matches: LIMIT 100, LIMIT 100 OFFSET 10, LIMIT 10, 100 (MySQL)
-    pattern = r"\bLIMIT\s+(\d+)(?:\s*,\s*(\d+)|\s+OFFSET\s+\d+)?"
-    match = re.search(pattern, sql, re.IGNORECASE)
 
-    if match:
-        # For MySQL format "LIMIT offset, count", the count is in group 2
-        limit_value = int(match.group(2) if match.group(2) else match.group(1))
-        return {"has_limit": True, "limit_value": limit_value}
+_DOLLAR_QUOTE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$")
 
-    return {"has_limit": False, "limit_value": None}
+
+def _is_mysql(dialect: str) -> bool:
+    return "mysql" in (dialect or "").casefold()
+
+
+def _continues_identifier(sql: str, i: int) -> bool:
+    """Whether the character before ``i`` belongs to an identifier or keyword."""
+    return i > 0 and (sql[i - 1].isalnum() or sql[i - 1] in "_$")
+
+
+def _quoted_end(sql: str, start: int, backslash_escapes: bool) -> int:
+    """The index just past the quoted span opening at ``start``; a doubled quote is
+    always an escape, a backslash only when ``backslash_escapes``."""
+    quote, i, n = sql[start], start + 1, len(sql)
+    while i < n:
+        if backslash_escapes and sql[i] == "\\":
+            i += 2
+        elif sql[i] == quote:
+            if i + 1 < n and sql[i + 1] == quote:
+                i += 2
+            else:
+                return i + 1
+        else:
+            i += 1
+    return n
+
+
+def _block_comment_end(sql: str, start: int, nested: bool) -> int:
+    """The index just past the ``/* */`` comment opening at ``start``."""
+    depth, i, n = 1, start + 2, len(sql)
+    while i < n and depth:
+        if nested and sql.startswith("/*", i):
+            depth, i = depth + 1, i + 2
+        elif sql.startswith("*/", i):
+            depth, i = depth - 1, i + 2
+        else:
+            i += 1
+    return i
+
+
+def _top_level_text(sql: str, dialect: str = "") -> str:
+    """``sql`` with string literals, quoted names, comments and everything inside
+    parentheses blanked out, so a match in it belongs to the outermost query. Offsets are
+    preserved.
+
+    MySQL strings take backslash escapes and ``#`` starts a comment; PostgreSQL takes
+    backslash escapes only in ``E''`` strings, and has dollar-quoted bodies and nested
+    block comments. Any other dialect reads as PostgreSQL."""
+    mysql = _is_mysql(dialect)
+    out = list(sql)
+    i, depth, n = 0, 0, len(sql)
+    executable = False
+    while i < n:
+        ch = sql[i]
+        dollar = None
+        # MySQL runs the SQL inside /*! ... */ (optionally /*!NNNNN, a minimum version).
+        if mysql and sql.startswith("/*!", i):
+            end = i + 3
+            while end < n and sql[end].isdigit():
+                end += 1
+            out[i:end] = " " * (end - i)
+            i, executable = end, True
+            continue
+        if executable and sql.startswith("*/", i):
+            out[i:i + 2] = "  "
+            i, executable = i + 2, False
+            continue
+        if not mysql and ch == "$" and not _continues_identifier(sql, i):
+            dollar = _DOLLAR_QUOTE.match(sql, i)
+        if ch in "'\"`":
+            backslash = ch != "`" and (
+                mysql
+                or (
+                    ch == "'"
+                    and i > 0
+                    and sql[i - 1] in "eE"
+                    and not _continues_identifier(sql, i - 1)
+                )
+            )
+            end = _quoted_end(sql, i, backslash)
+        elif dollar is not None:
+            close = sql.find(dollar.group(), dollar.end())
+            end = n if close < 0 else close + len(dollar.group())
+        # MySQL reads "--" as a comment only before whitespace, a control character or the end:
+        # "2--1" subtracts.
+        elif (sql.startswith("--", i) and (not mysql or i + 2 >= n or sql[i + 2] <= " "
+                                           or sql[i + 2].isspace())) \
+                or (mysql and ch == "#"):
+            end = sql.find("\n", i)
+            end = n if end < 0 else end
+        elif sql.startswith("/*", i):
+            end = _block_comment_end(sql, i, nested=not mysql)
+        else:
+            if ch == "(":
+                depth += 1
+            if depth:
+                out[i] = " "
+            if ch == ")":
+                depth = max(0, depth - 1)
+            i += 1
+            continue
+        out[i:end] = " " * (end - i)
+        i = end
+    return "".join(out)
+
+
+def _outer_limit(sql: str, dialect: str = ""):
+    """The outermost query's LIMIT or FETCH FIRST match, or None."""
+    text = _top_level_text(sql, dialect)
+    return _TOP_LIMIT.search(text) or _TOP_FETCH.search(text)
+
+
+def _extract_limit_clause(sql: str, dialect: str = "") -> Dict[str, Any]:
+    """Whether the outermost query has a row limit (LIMIT or FETCH FIRST), and its count."""
+    match = _outer_limit(sql, dialect)
+    if match is None:
+        return {"has_limit": False, "limit_value": None}
+    if match.re is _TOP_FETCH:
+        return {"has_limit": True, "limit_value": int(match.group(1) or 1)}
+    # MySQL "LIMIT offset, count" keeps the count in group 2.
+    return {"has_limit": True, "limit_value": int(match.group(2) or match.group(1))}
 
 
 def _inject_limit(sql: str, limit: int) -> str:
-    """
-    Inject LIMIT clause into SQL query if missing.
-
-    Handles:
-    - Simple SELECT queries
-    - Queries with ORDER BY
-    - Queries with trailing semicolon
-    - CTEs (WITH clauses)
-    """
+    """Append a LIMIT to a query whose outermost level has none."""
     sql = sql.rstrip()
-
-    # Remove trailing semicolon if present
     if sql.endswith(";"):
         sql = sql[:-1].rstrip()
-
-    # Add LIMIT before any trailing semicolon
-    sql_with_limit = f"{sql} LIMIT {limit}"
-
-    return sql_with_limit
+    return f"{sql} LIMIT {limit}"
 
 
-def _replace_limit(sql: str, new_limit: int) -> str:
-    """
-    Replace existing LIMIT clause with new value.
-
-    Args:
-        sql: SQL query with existing LIMIT
-        new_limit: New LIMIT value to use
-
-    Returns:
-        Modified SQL with updated LIMIT
-    """
-    # Pattern to match and replace LIMIT clause
-    pattern = r"\bLIMIT\s+\d+(?:\s*,\s*\d+|\s+OFFSET\s+\d+)?"
-
-    def replace_func(match):
-        # Check if it's MySQL format with offset
-        if "," in match.group(0):
-            # Extract offset from "LIMIT offset, count"
-            offset_match = re.match(
-                r"LIMIT\s+(\d+)\s*,\s*\d+", match.group(0), re.IGNORECASE
-            )
-            if offset_match:
-                offset = offset_match.group(1)
-                return f"LIMIT {offset}, {new_limit}"
-        # Check for OFFSET syntax
-        elif "OFFSET" in match.group(0).upper():
-            offset_match = re.search(r"OFFSET\s+(\d+)", match.group(0), re.IGNORECASE)
-            if offset_match:
-                offset = offset_match.group(1)
-                return f"LIMIT {new_limit} OFFSET {offset}"
-        # Simple LIMIT
-        return f"LIMIT {new_limit}"
-
-    return re.sub(pattern, replace_func, sql, flags=re.IGNORECASE)
+def _replace_limit(sql: str, new_limit: int, dialect: str = "") -> str:
+    """Lower the outermost query's row limit to ``new_limit``, keeping any offset and the
+    FETCH FIRST form (WITH TIES may still return more rows than its count)."""
+    match = _outer_limit(sql, dialect)
+    if match is None:
+        return sql
+    if match.re is _TOP_FETCH:
+        # "FETCH FIRST ROW ONLY" means one row, already under any cap.
+        if not match.group(1):
+            return sql
+        start, end = match.span(1)
+        return sql[:start] + str(new_limit) + sql[end:]
+    start, end = match.span(2) if match.group(2) else match.span(1)
+    return sql[:start] + str(new_limit) + sql[end:]
 
 
 # A SELECT reaching this check is single-statement and read-only, so every

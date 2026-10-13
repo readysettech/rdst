@@ -71,7 +71,8 @@ export function radarRows(
       tone: 'work',
       text: progress ? `${activity.label}, ${progress}` : activity.label,
     })
-  else if (progress)
+  // With AI checks paused the first hour's analyses wait, so their count would mislead.
+  else if (progress && state !== 'paused')
     rows.push({ tone: 'work', text: `Analyzed ${progress} queries` })
   if (activity.last_reading_at != null)
     rows.push({

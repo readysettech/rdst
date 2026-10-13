@@ -211,3 +211,20 @@ def test_saved_readyset_preference_uses_the_session_over_an_own_key(monkeypatch)
     monkeypatch.setattr(account_session, "access_token", lambda: "account-token")
 
     assert key_resolution.resolve_api_key().provider == "readyset"
+
+
+def test_offline_session_refresh_is_a_network_error_not_signed_out(monkeypatch):
+    import requests
+
+    def offline():
+        try:
+            raise requests.ConnectionError("Name or service not known")
+        except requests.ConnectionError as exc:
+            raise account_session.AccountSessionError("Could not refresh") from exc
+
+    _patch_config(monkeypatch, None, provider="readyset")
+    monkeypatch.setattr(account_session, "access_token", offline)
+    with pytest.raises(LLMError) as exc:
+        key_resolution.resolve_api_key()
+    assert exc.value.code == "HOSTED_INFERENCE_UNAVAILABLE"
+    assert str(exc.value).startswith("Couldn't reach RDST's AI service.")

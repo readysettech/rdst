@@ -115,15 +115,15 @@ test('asks a question and renders the answer first with the post-validation SQL 
   await expect(page.getByTestId('ask-row').first()).toContainText('Ada')
   expect(requests).toEqual([{ question, target: 'e2e-guard' }])
 
-  // The SQL is folded by default; opening it shows the POST-VALIDATION query
-  // (with the injected LIMIT) and the disclosure names the added LIMIT.
-  await expect(page.getByTestId('ask-sql')).toHaveCount(0)
+  // The SQL is open once the answer lands: the POST-VALIDATION query (with the
+  // injected LIMIT), and the disclosure names the added LIMIT. It folds on request.
   const disclosure = page.getByRole('button', { name: /SQL that ran/ })
-  await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
-  await expect(disclosure).toContainText(/LIMIT \d+ added/)
-  await disclosure.click()
   await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
+  await expect(disclosure).toContainText(/LIMIT \d+ added/)
   await expect(page.getByTestId('ask-sql')).toContainText('LIMIT 100')
+  await disclosure.click()
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByTestId('ask-sql')).toHaveCount(0)
 
   // The silent auto-save is surfaced with the returned registry label.
   await expect(status).toContainText('saved as top customers')

@@ -17,6 +17,36 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_CANNOT_ANSWER_MESSAGES = {
+    "unsupported_request": (
+        "Ask only runs read-only queries, so it can't change data. "
+        "Ask about the data instead."
+    ),
+    "missing_schema": "This database doesn't have the data to answer that question.",
+    "ambiguous": (
+        "The question is too ambiguous to turn into one query. "
+        "Rephrase it more specifically."
+    ),
+}
+
+
+def cannot_answer_message(
+    reason: str, missing_schema: list[str], assumptions: list[str]
+) -> str:
+    """User-facing refusal copy; the machine-readable reason travels as the error category."""
+    parts = [
+        _CANNOT_ANSWER_MESSAGES.get(
+            reason, "Ask can't answer this question with this database."
+        )
+    ]
+    missing = [item.strip() for item in missing_schema if item.strip()]
+    if missing:
+        parts.append(f"Missing: {', '.join(missing)}.")
+    notes = [item.strip().rstrip(".") for item in assumptions if item.strip()]
+    if notes:
+        parts.append(f"{'; '.join(notes)}.")
+    return " ".join(parts)
+
 
 def generate_sql(
     ctx: "Ask3Context", presenter: "Ask3Presenter", llm_manager=None
@@ -87,7 +117,7 @@ def generate_sql(
             or result.get("error_code")
             or None
         )
-        error_category = (
+        error_category = result.get("error_category") or (
             "model-limit"
             if result.get("schema_request_failure_code")
             else "provider"
@@ -108,9 +138,11 @@ def generate_sql(
         assumptions = result.get("assumptions", [])
         reason = result.get("cannot_answer_reason") or "unspecified"
         missing_schema = result.get("missing_schema", [])
-        details = [*assumptions, *missing_schema]
-        explanation = "; ".join(details) if details else reason
-        ctx.mark_error(f"Cannot answer this question ({reason}). {explanation}")
+        ctx.mark_error(
+            cannot_answer_message(reason, missing_schema, assumptions),
+            code="ask_cannot_answer",
+            category=reason,
+        )
         presenter.error(ctx.error_message)
         return ctx
 

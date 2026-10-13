@@ -7,8 +7,12 @@ replacing the untyped extra_data dict from the state machine.
 
 from __future__ import annotations
 
+import logging
+import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -165,6 +169,96 @@ class ExecutionResult:
             "error_kind": self.error_kind,
             "truncated": self.truncated,
         }
+
+
+class StatementCancel:
+    """Database connections running statements for one Ask request.
+
+    Executors register a connection for the duration of its statement. cancel() asks
+    the server to stop every registered statement, abort() cuts the connections from
+    the client side, and both refuse later registrations, so a stopped request starts
+    no new statement.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._live: Dict[int, Tuple[Any, str, Optional[str], Dict[str, Any], Any]] = {}
+        self._cancelled = False
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    def register(
+        self,
+        conn: Any,
+        engine: str,
+        target: Optional[str],
+        target_config: Dict[str, Any],
+    ) -> bool:
+        """Track a connection about to run a statement; False once cancelled."""
+        # MySQL's thread id is read now, while no statement holds the connection.
+        try:
+            server_id = conn.thread_id() if engine == DbType.MYSQL else None
+        except Exception:
+            server_id = None
+        with self._lock:
+            if self._cancelled:
+                return False
+            self._live[id(conn)] = (conn, engine, target, target_config, server_id)
+            return True
+
+    def unregister(self, conn: Any) -> None:
+        with self._lock:
+            self._live.pop(id(conn), None)
+
+    def cancel(self) -> int:
+        """Ask the server to stop every registered statement.
+
+        PostgreSQL gets libpq's protocol cancel and MySQL a KILL QUERY on a side connection,
+        each bounded in time, so callers bound the whole call with a thread and fall back to
+        abort(). Returns how many statements the server agreed to stop.
+        """
+        from shared.db_connection import PostgresCancelRequest, cancel_mysql_by_thread_id
+
+        with self._lock:
+            self._cancelled = True
+            # Requests are built under the lock, which keeps executors from closing a connection.
+            live = [
+                (engine, target, target_config, server_id,
+                 None if engine == DbType.MYSQL else PostgresCancelRequest.for_connection(conn))
+                for conn, engine, target, target_config, server_id in self._live.values()
+            ]
+        sent = 0
+        for engine, target, target_config, server_id, request in live:
+            try:
+                if engine == DbType.MYSQL and server_id is not None:
+                    sent += bool(cancel_mysql_by_thread_id(target_config, server_id, target=target))
+                elif request is not None:
+                    sent += request.send()
+            except Exception:
+                logger.debug("Failed to cancel Ask statement", exc_info=True)
+        return sent
+
+    def abort(self) -> None:
+        """Shut down every registered connection's socket; never waits on the server.
+
+        A statement blocked on a server that stopped answering then fails promptly.
+        """
+        from shared.db_connection import abort_connection
+
+        with self._lock:
+            self._cancelled = True
+            # Held so no executor closes a connection, freeing its descriptor, mid-abort.
+            for conn, *_rest in self._live.values():
+                abort_connection(conn)
+
+    def stop(self, wait_seconds: float) -> None:
+        """Cancel server-side for up to wait_seconds, then abort the connections still live."""
+        worker = threading.Thread(target=self.cancel, name="ask-statement-cancel", daemon=True)
+        worker.start()
+        worker.join(wait_seconds)
+        self.abort()
 
 
 # Status constants

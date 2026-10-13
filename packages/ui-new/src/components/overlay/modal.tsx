@@ -14,6 +14,7 @@ import {
   type ReactElement,
   type ReactNode,
   useContext,
+  useRef,
 } from 'react'
 import type { WithChildren } from '../../helpers/types'
 import { useDisclosure } from '../../hooks/use-disclosure'
@@ -239,11 +240,16 @@ export const ModalContent = forwardRef<
       closeClassName,
       title,
       description,
+      onOpenAutoFocus,
+      onCloseAutoFocus,
       ...props
     },
     ref
   ) => {
     const transition = getTransition()
+    // Radix returns focus to a `Dialog.Trigger`; a dialog opened by state has none, so it
+    // would drop focus on the body. Remember what had focus as it opened and go back there.
+    const returnFocus = useRef<HTMLElement | null>(null)
     const styles = modalStyles({ size, tone })
     // Guarantee an accessible name: fall back to an sr-only title only when the
     // author supplied neither a `title` prop nor a title element in the tree.
@@ -271,6 +277,22 @@ export const ModalContent = forwardRef<
           translate="no"
           contentEditable={false}
           {...props}
+          onOpenAutoFocus={(event) => {
+            const active = document.activeElement
+            returnFocus.current =
+              active instanceof HTMLElement && active !== document.body
+                ? active
+                : null
+            onOpenAutoFocus?.(event)
+          }}
+          onCloseAutoFocus={(event) => {
+            onCloseAutoFocus?.(event)
+            const target = returnFocus.current
+            returnFocus.current = null
+            if (event.defaultPrevented || !target?.isConnected) return
+            event.preventDefault()
+            target.focus()
+          }}
           asChild
         >
           <m.div

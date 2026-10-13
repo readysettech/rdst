@@ -45,11 +45,13 @@ const reads = vi.hoisted(() => ({
   analysisHistory: undefined as unknown,
   query: undefined as unknown,
   digest: undefined as unknown,
+  keys: [] as (readonly unknown[])[],
 }))
 
 vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: vi.fn() }),
   useQuery: ({ queryKey }: { queryKey?: readonly unknown[] } = {}) => {
+    if (queryKey) reads.keys.push(queryKey)
     const data =
       queryKey?.[0] === 'storedAnalysis'
         ? reads.storedAnalysis
@@ -151,6 +153,7 @@ beforeEach(() => {
   reads.analysisHistory = undefined
   reads.query = undefined
   reads.digest = undefined
+  reads.keys = []
   hasParametersSpy.mockReturnValue(false)
   connectivity.failure = null
   connectivity.isChecking = false
@@ -260,7 +263,7 @@ describe('the full analysis of a monitored query', () => {
     fireEvent.click(within(bar).getByRole('button', { name: 'Send to Ask' }))
     expect(navigateSpy).toHaveBeenCalledWith({
       to: '/ask',
-      search: { sql: monitoredSearch.query },
+      search: { db: 'demo', sql: monitoredSearch.query },
     })
   })
 
@@ -295,6 +298,28 @@ describe('the full analysis of a monitored query', () => {
     expect(
       (navigateSpy.mock.calls[0][0] as { search: ResultsSearch }).search.query
     ).toMatch(/^select id, title from posts/)
+  })
+
+  it('reads the monitored row by its key when the registry hash differs', () => {
+    monitored()
+    vi.mocked(useAnalyze).mockReturnValue(liveRun())
+    unlocked()
+    render(
+      <ResultsPage
+        search={{ ...monitoredSearch, hash: 'registryhash', key: KEY }}
+      />
+    )
+    const monitorReads = reads.keys.filter(
+      (key) => key[2] === 'query' || key[2] === 'query-analysis'
+    )
+    expect(monitorReads.length).toBeGreaterThan(0)
+    expect(monitorReads.every((key) => key.includes(KEY))).toBe(true)
+    expect(reads.keys.some((key) => key.includes(monitoredSearch.query))).toBe(
+      false
+    )
+    expect(reads.keys.find((key) => key[0] === 'storedAnalysis')?.[1]).toBe(
+      'registryhash'
+    )
   })
 
   it('shows the benchmark card after a benchmark ran', () => {
@@ -525,6 +550,7 @@ describe('/results no-query guard (B1)', () => {
       params: undefined,
       origin: undefined,
       hash: undefined,
+      key: undefined,
       analysisId: undefined,
       monitorFixture: undefined,
     })
@@ -564,6 +590,9 @@ describe('/results no-query guard (B1)', () => {
     ).not.toThrow()
     expect(() =>
       beforeLoad({ search: { query: '', hash: 'k' } as ResultsSearch })
+    ).not.toThrow()
+    expect(() =>
+      beforeLoad({ search: { query: '', key: 'k' } as ResultsSearch })
     ).not.toThrow()
   })
 })

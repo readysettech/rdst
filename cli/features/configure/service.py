@@ -6,6 +6,8 @@ from typing import AsyncGenerator, Any, Dict, Optional
 
 from shared.config.targets import TargetsConfig, default_port_for
 from shared.db_connection import (
+    IoDeadline,
+    ServerNotAnsweringError,
     create_mysql_connection_from_params,
     postgres_connection_kwargs,
     resolve_connection_params,
@@ -25,6 +27,9 @@ from .events import (
 from .models import ConfigureInput, ConfigureOptions, TargetDetail, TargetSummary
 
 logger = logging.getLogger(__name__)
+
+# A connection test answers within this long after connecting, or fails as not answering.
+CONNECTION_TEST_TIMEOUT_SECONDS = 15
 
 
 class ConfigureService:
@@ -314,10 +319,15 @@ class ConfigureService:
             if entry is None:
                 raise LookupError(f"Database '{old}' not found.")
             was_default = cfg.get_default() == old
+            preferences = cfg._data.get("preferences")
+            was_selected = isinstance(preferences, dict) and \
+                preferences.get("selected_target") == old
             cfg.remove(old)
             cfg.upsert(new, entry)
             if was_default:
                 cfg.set_default(new)
+            if was_selected:
+                preferences["selected_target"] = new
             cfg.save()
             moved: list[Any] = []
             try:
@@ -336,6 +346,8 @@ class ConfigureService:
                 restore.upsert(old, entry)
                 if was_default:
                     restore.set_default(old)
+                if was_selected and isinstance(restore._data.get("preferences"), dict):
+                    restore._data["preferences"]["selected_target"] = old
                 restore.save()
                 raise
             finally:
@@ -560,6 +572,21 @@ class ConfigureService:
         *,
         force_fresh_tunnel: bool = False,
     ) -> Dict[str, Any]:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # Advanced on a thread with no event loop, the caller is already off the loop.
+            return self._connection_test(config, force_fresh_tunnel=force_fresh_tunnel)
+        return await asyncio.to_thread(
+            self._connection_test, config, force_fresh_tunnel=force_fresh_tunnel
+        )
+
+    def _connection_test(
+        self,
+        config: Dict[str, Any],
+        *,
+        force_fresh_tunnel: bool = False,
+    ) -> Dict[str, Any]:
         engine = config.get("engine", "postgresql")
         host = config.get("host")
         port = config.get("port")
@@ -594,25 +621,32 @@ class ConfigureService:
                 conn = psycopg2.connect(**postgres_connection_kwargs(params))
                 if provider_password_probe:
                     return self._password_required_result(config)
-                cursor = conn.cursor()
-                cursor.execute("SELECT version()")
-                version = cursor.fetchone()[0]
-                cursor.close()
-                from .privileges import detect_write_privileges
+                with IoDeadline(conn, CONNECTION_TEST_TIMEOUT_SECONDS):
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT version()")
+                    version = cursor.fetchone()[0]
+                    cursor.close()
+                    from .privileges import detect_write_privileges
 
-                privileges = detect_write_privileges(conn, engine)
-                return {
-                    "success": True,
-                    "message": "Connected successfully!",
-                    "server_version": (version[:120] + "...") if len(version) > 120 else version,
-                    "privileges": privileges,
-                    "query_capture": self._query_capture_capability(conn, engine),
-                }
+                    privileges = detect_write_privileges(conn, engine)
+                    return {
+                        "success": True,
+                        "message": "Connected successfully!",
+                        "server_version": (
+                            (version[:120] + "...") if len(version) > 120 else version
+                        ),
+                        "privileges": privileges,
+                        "query_capture": self._query_capture_capability(conn, engine),
+                    }
 
             if engine == "mysql":
                 import pymysql
 
-                conn = create_mysql_connection_from_params(params)
+                conn = create_mysql_connection_from_params(
+                    params,
+                    read_timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
+                    write_timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
+                )
                 if provider_password_probe:
                     return self._password_required_result(config)
                 cursor = conn.cursor()
@@ -644,6 +678,16 @@ class ConfigureService:
             }
 
         except Exception as e:
+            # PyMySQL reports its read timeout as a lost connection that "timed out".
+            if isinstance(e, ServerNotAnsweringError) or (
+                "during query (timed out)" in str(e).lower()
+            ):
+                return {
+                    "success": False,
+                    "message": f"The database at {host}:{port} accepted the connection but "
+                    f"didn't answer within {CONNECTION_TEST_TIMEOUT_SECONDS} s. Check that "
+                    "the database server is running and isn't paused or overloaded.",
+                }
             from shared.api.ssh_errors import (
                 ssh_error_payload,
                 tls_verification_error_payload,

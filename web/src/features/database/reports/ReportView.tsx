@@ -23,6 +23,11 @@ import { useToast } from '@rs/ui-new/use-toast'
 import { Verdict } from '@rs/ui-new/verdict'
 import { Link } from '@tanstack/react-router'
 import { type ReactNode, useCallback, useMemo, useState } from 'react'
+import {
+  type AiCanRun,
+  aiCanRun,
+  firstReportLine,
+} from '@/features/monitor-kit/aiMonitoring'
 import { domainFor, loadFromBreakdown } from '@/features/monitor-kit/charts'
 import { formatBytes, formatClock, plural } from '@/features/monitor-kit/format'
 import { downloadCsv } from '@/lib/csv'
@@ -1302,14 +1307,18 @@ function FirstReport({
   target,
   now,
   note,
+  can: given,
   onOpenActions,
 }: {
   target: string
   now: number
   note?: string
+  can?: AiCanRun
   onOpenActions?: () => void
 }) {
   const settings = useMonitorSettings(target)
+  const can = given ?? aiCanRun({ settings: settings.data, now })
+  const signIn = !note && can.report === 'signed_out'
   const health = useMonitorHealth(target, '24h')
   const load = useLoad(target, '24h')
   const history = health.data?.history
@@ -1335,7 +1344,8 @@ function FirstReport({
   const line =
     note ??
     [
-      'Your first daily report arrives tonight, just after midnight. After that, one runs every night.',
+      firstReportLine(settings.data, can, now),
+      can.report ? null : 'After that, one runs every night.',
       since ? `Monitoring since ${formatClock(since)}.` : null,
     ]
       .filter(Boolean)
@@ -1353,13 +1363,19 @@ function FirstReport({
             {line}
           </Text>
         )}
-        {onOpenActions && (
-          <Button
-            variant="primary"
-            modifier="ghost"
-            label="Open Actions"
-            onClick={onOpenActions}
-          />
+        {signIn ? (
+          <Link to={SIGN_IN} className={solidLink}>
+            Sign in
+          </Link>
+        ) : (
+          onOpenActions && (
+            <Button
+              variant="primary"
+              modifier="ghost"
+              label="Open Actions"
+              onClick={onOpenActions}
+            />
+          )
         )}
       </div>
       <Section
@@ -1414,6 +1430,7 @@ function ReportSkeleton() {
 export function ReportView({
   target,
   reportId,
+  can,
   run,
   onShowLatest,
   onPick,
@@ -1421,6 +1438,8 @@ export function ReportView({
 }: {
   target: string
   reportId: number | 'latest'
+  /** What AI work can run now; read from the settings when absent. */
+  can?: AiCanRun
   run: ReportRun
   onShowLatest: () => void
   onPick: (id: number) => void
@@ -1489,6 +1508,7 @@ export function ReportView({
       <FirstReport
         target={target}
         now={now}
+        can={can}
         onOpenActions={onOpenActions}
         note={
           stopped

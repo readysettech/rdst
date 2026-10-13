@@ -219,3 +219,24 @@ def test_sse_error_preserves_anthropic_type_and_request_id():
     assert raised.value.code == "ANTHROPIC_OVERLOADED_ERROR"
     assert raised.value.request_id == "req_stream"
     assert "Temporarily overloaded" in str(raised.value)
+
+
+@pytest.mark.parametrize("make_client", [_completion_client, _stream_client])
+@pytest.mark.parametrize("base_url,code,name", [
+    (None, "ANTHROPIC_UNREACHABLE", "Anthropic"),
+    ("https://trial.example", "PROXY_UNREACHABLE", "RDST's AI service"),
+])
+def test_connection_failure_is_a_network_error_not_an_auth_error(
+    make_client, base_url, code, name
+):
+    request = httpx.Request("POST", "https://example.test/v1/messages")
+    error = anthropic.APIConnectionError(request=request)
+    with _patch_client(make_client(error)), pytest.raises(LLMError) as raised:
+        provider = ClaudeProvider()
+        if make_client is _stream_client:
+            list(provider.stream(_request(), api_key="key", base_url=base_url))
+        else:
+            provider.complete(_request(), api_key="key", base_url=base_url)
+
+    assert raised.value.code == code
+    assert str(raised.value) == f"Couldn't reach {name}. Check your connection and try again."

@@ -60,14 +60,13 @@ class ThreadWork:
     async def stop(self, timeout: float = 15) -> bool:
         self.guard.stopped.set()
         with self._connections_lock:
-            connections = list(self.connections)
+            connections = bool(self.connections)
         if connections:
-            from shared.db_connection import cancel_query
+            from shared.db_connection import cancel_registered
 
             try:
-                await asyncio.wait_for(asyncio.gather(
-                    *(asyncio.to_thread(cancel_query, *row) for row in connections),
-                    return_exceptions=True), timeout=5)
+                await asyncio.wait_for(asyncio.to_thread(
+                    cancel_registered, self._connections_lock, lambda: self.connections), timeout=5)
             except asyncio.TimeoutError:
                 pass
         if not self.tasks:

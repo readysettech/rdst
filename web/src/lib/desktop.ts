@@ -1,11 +1,3 @@
-export interface DesktopWindowControls {
-  minimize: () => void
-  toggleMaximize: () => void
-  close: () => void
-  isMaximized: () => Promise<boolean>
-  onMaximizedChange: (callback: (maximized: boolean) => void) => () => void
-}
-
 export interface DesktopUpdateLink {
   label: string
   url: string
@@ -47,6 +39,17 @@ export interface DesktopNotifications {
   openSettings: () => void
 }
 
+/**
+ * The desktop app's background service after it first started: restarting while it comes
+ * back after stopping, failed while it keeps stopping (it still tries every 30 seconds).
+ */
+export type DesktopBackendState = 'running' | 'restarting' | 'failed'
+
+export interface DesktopBackend {
+  getState: () => Promise<DesktopBackendState>
+  onStateChange: (callback: (state: DesktopBackendState) => void) => () => void
+}
+
 declare global {
   interface Window {
     rdstDesktop?: {
@@ -61,9 +64,12 @@ declare global {
       files?: {
         selectSshKey: () => Promise<string | null>
       }
-      windowControls?: DesktopWindowControls
       updates?: DesktopUpdates
       notifications?: DesktopNotifications
+      backend?: DesktopBackend
+      startup?: {
+        openLogs: () => void
+      }
       /** The desktop app's own system notifications switch (the tray's Notifications). */
       getNotificationsEnabled?: () => Promise<boolean>
       setNotificationsEnabled?: (enabled: boolean) => Promise<boolean>
@@ -89,21 +95,6 @@ export function thisComputer(): string {
 
 export function isDesktopRuntime(): boolean {
   return window.rdstDesktop?.isDesktop === true
-}
-
-/**
- * True when the desktop shell uses a frameless window and the renderer draws
- * its own window controls.
- */
-export function isDesktopFrameless(): boolean {
-  return (
-    window.rdstDesktop?.isDesktop === true &&
-    window.rdstDesktop.platform !== 'darwin'
-  )
-}
-
-export function getWindowControls(): DesktopWindowControls | undefined {
-  return window.rdstDesktop?.windowControls
 }
 
 export function getDesktopUpdates(): DesktopUpdates | undefined {
@@ -140,4 +131,13 @@ export function getDesktopSystemNotifications():
 
 export function getDesktopNotifications(): DesktopNotifications | undefined {
   return window.rdstDesktop?.notifications
+}
+
+export function getDesktopBackend(): DesktopBackend | undefined {
+  return window.rdstDesktop?.backend
+}
+
+/** Opens the desktop app's logs folder; undefined outside the desktop app. */
+export function getDesktopOpenLogs(): (() => void) | undefined {
+  return window.rdstDesktop?.startup?.openLogs
 }

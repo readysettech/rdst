@@ -16,7 +16,8 @@ export interface HealthMetricsProps {
   onSelect: (id: HealthMetricId) => void
   /** The pane is open: the hero number steps down a size. */
   compact?: boolean
-  /** No readings are arriving: the numbers keep their last values in the third tone. */
+  /** No readings are arriving: the numbers keep their last values in the third tone, without
+   * the trend words ("steady", a peak) that would read as current. */
   staleSince?: number | null
 }
 
@@ -44,7 +45,7 @@ export function HealthMetrics({
               )
             }
             unit={metric.unit}
-            detail={stale ? (metric.reason ?? metric.detail) : metric.detail}
+            detail={stale ? metric.reason : metric.detail}
             reason={stale ? undefined : metric.reason}
             tone={stale ? 'neutral' : metric.tone}
             selected={metric.id === selected}

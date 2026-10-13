@@ -302,6 +302,65 @@ describe('HomeView sentence', () => {
     )
   })
 
+  it('signed out, promises no report and no analysis progress', () => {
+    const model = base()
+    const row = stripOf(model)[0]
+    const paused: HomeModel = {
+      ...quiet(model, 0),
+      status: {
+        ...quiet(model, 0).status,
+        state: 'paused',
+        target: 'demo',
+        next_report_at: model.generated_at + 3600,
+      },
+      databases_strip: [
+        {
+          ...row,
+          target: 'demo',
+          state: 'ai_paused',
+          building: false,
+          activity: {
+            kind: 'reading',
+            label: 'Reading query statistics',
+            done: 0,
+            total: 10,
+            last_reading_at: model.generated_at - 30,
+            every_s: 60,
+            next_check_at: null,
+          },
+        },
+      ],
+    }
+    signIn.held = new Set(['demo'])
+    renderWithClient(<HomeView model={paused} />)
+    const page = document.body.textContent ?? ''
+    expect(page).not.toMatch(/Next report/)
+    expect(page).not.toMatch(/0 of 10/)
+    expect(screen.getByTestId('sign-in-note').textContent).toBe(
+      'Sign in to run AI checks. Sign in'
+    )
+  })
+
+  it('names a database it cannot reach ahead of the Do first changes', () => {
+    const model = quiet(base(), 3)
+    renderWithClient(
+      <HomeView
+        model={{
+          ...model,
+          status: { ...model.status, state: 'cant_reach', target: 'demo' },
+        }}
+      />
+    )
+
+    const down = screen.getByRole('link', { name: "Can't reach demo" })
+    expect(href(down)).toBe('/database?target=demo')
+    expect(down.parentElement?.textContent).toBe(
+      "Can't reach demo since 9:55 AM; no readings or alerts until it answers."
+    )
+    expect(screen.queryByText(/All quiet/)).toBeNull()
+    expect(screen.queryByText(/alerts running/)).toBeNull()
+  })
+
   it('reads all quiet with nothing to act on and nothing to do first', () => {
     renderWithClient(<HomeView model={quiet(base(), 0)} />)
 

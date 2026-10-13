@@ -45,6 +45,7 @@ export function BenchmarkResultPane({
   target,
   queries,
   ranAt,
+  run,
   now,
   onRerun,
   onClose,
@@ -53,12 +54,14 @@ export function BenchmarkResultPane({
   /** The queries with fixes the benchmark covered. */
   queries: MonitorQuery[]
   ranAt: number
+  /** Identifies this run; a new one asks for a new estimate. */
+  run: number
   now: number
   onRerun: () => void
   onClose: () => void
 }) {
   const keys = useMemo(() => queries.map((query) => query.key), [queries])
-  const result = useBenchmarkFixes(target, keys)
+  const result = useBenchmarkFixes(target, keys, run)
   const rows = useMemo(
     () => benchmarkRows(queries, result.data),
     [queries, result.data]
@@ -92,14 +95,19 @@ export function BenchmarkResultPane({
             modifier="ghost"
             size="small"
             label="Rerun"
+            loading={result.isFetching}
             onClick={onRerun}
           />
         </>
       }
     >
-      <Verdict lead={verdict.lead} className="mb-5.5">
-        {verdict.rest}
-      </Verdict>
+      {result.isFetching ? (
+        <Verdict lead="Estimating each fix." className="mb-5.5" />
+      ) : (
+        <Verdict lead={verdict.lead} className="mb-5.5">
+          {verdict.rest}
+        </Verdict>
+      )}
       <DividedList
         columns={COLUMNS}
         head={[

@@ -21,6 +21,10 @@ export interface ProviderStatus {
   connected: boolean
   method: string | null
   detail: string | null
+  /** The provider refused the saved credentials (HTTP 401/403). */
+  rejected?: boolean
+  /** The provider couldn't be asked (offline, timeout, 5xx): the credentials are unknown. */
+  unreachable?: boolean
 }
 
 export interface ProviderPanelClient<S extends ProviderStatus> {
@@ -91,6 +95,7 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
     data: status,
     isLoading,
     isError,
+    isFetching,
     error,
     refetch,
   } = useQuery({
@@ -152,6 +157,49 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
       />
     )
   if (!status) return null
+
+  if (!status.connected && status.unreachable) {
+    const retry = () => void refetch()
+    return compact ? (
+      <div className={COMPACT_CARD} data-testid={testId}>
+        <HStack className="gap-2 items-center">
+          <Logo size={20} />
+          <Text level="label-small" className="text-content-layout-1">
+            {label}
+          </Text>
+        </HStack>
+        <HStack className="gap-1.5 items-center">
+          <Icon
+            name="alert"
+            label="Connection problem"
+            size="small"
+            className="shrink-0 text-content-warning-soft"
+          />
+          <Text level="caption" className="text-content-warning-soft">
+            {`Couldn't reach ${label}.`}
+          </Text>
+        </HStack>
+        <Button
+          variant="primary"
+          modifier="outline"
+          fullWidth
+          className="mt-auto"
+          label="Retry"
+          loading={isFetching}
+          onClick={retry}
+        />
+      </div>
+    ) : (
+      <InlineNotice
+        errorClass="network"
+        title={`Couldn't reach ${label}.`}
+        message="Check your connection and try again."
+        trustworthy={`Databases you already imported from ${label} are unaffected.`}
+        retryLabel="Retry"
+        onRetry={retry}
+      />
+    )
+  }
 
   if (status.connected) {
     const signOut = () => {

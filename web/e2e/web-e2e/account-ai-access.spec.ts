@@ -155,7 +155,6 @@ test('account login unlocks hosted Ask and sign-out restores the AI access choic
     }
     if (!answered) return
     await expect(answer).toContainText('Answered from')
-    await answer.getByRole('button', { name: /SQL that ran/ }).click()
     expect(
       (await answer.getByTestId('ask-sql').innerText()).toLowerCase()
     ).toContain('title_basics')

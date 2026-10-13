@@ -30,7 +30,8 @@ def test_report_rejects_invalid_email():
 
 
 def test_report_normalizes_email_before_posthog_and_slack_workflow():
-    with patch("shared.telemetry.telemetry.submit_feedback") as submit_feedback:
+    with patch("shared.telemetry.telemetry.submit_feedback",
+               return_value=True) as submit_feedback:
         response = _client().post(
             "/api/report",
             json={
@@ -44,3 +45,16 @@ def test_report_normalizes_email_before_posthog_and_slack_workflow():
     submit_feedback.assert_called_once()
     assert submit_feedback.call_args.kwargs["email"] == "feedback@example.com"
     assert submit_feedback.call_args.kwargs["flags_used"] == ["web"]
+
+
+def test_report_says_when_feedback_did_not_leave_the_machine():
+    with patch("shared.telemetry.telemetry.submit_feedback", return_value=False):
+        response = _client().post(
+            "/api/report", json={"reason": "Great tool", "email": "a@example.com"}
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": False,
+        "error": "Couldn't send your feedback. Check your connection and try again.",
+    }

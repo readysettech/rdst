@@ -71,9 +71,80 @@ describe('NeonConnectionPanel compact', () => {
     expect(screen.getByText(/revoked/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy()
   })
+
+  it('offers a retry, not a new key, when Neon could not be reached', async () => {
+    vi.mocked(fetchFleetNeonStatus)
+      .mockResolvedValueOnce({
+        connected: false,
+        method: 'api_key',
+        detail: "Couldn't reach Neon.",
+        unreachable: true,
+      })
+      .mockResolvedValue({ connected: true, method: 'api_key', detail: null })
+
+    renderWithClient(<NeonConnectionPanel compact />)
+
+    expect(await screen.findByText("Couldn't reach Neon.")).toBeTruthy()
+    expect(screen.queryByText('Neon connection failed')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(
+      await screen.findByText('Connected to Neon with an API key')
+    ).toBeTruthy()
+  })
 })
 
 describe('NeonConnectionPanel', () => {
+  it('says Neon could not be reached instead of naming a rejection', async () => {
+    vi.mocked(fetchFleetNeonStatus).mockResolvedValue({
+      connected: false,
+      method: 'api_key',
+      detail: "Couldn't reach Neon.",
+      unreachable: true,
+    })
+
+    renderWithClient(<NeonConnectionPanel />)
+
+    expect(await screen.findByText("Couldn't reach Neon.")).toBeTruthy()
+    expect(screen.queryByText('Neon rejected the saved API key')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(fetchFleetNeonStatus).toHaveBeenCalledTimes(2))
+  })
+
+  it('shows why a pasted key could not be checked when Neon is unreachable', async () => {
+    vi.mocked(fetchFleetNeonStatus).mockResolvedValue({
+      connected: false,
+      method: null,
+      detail: null,
+    })
+    const { FleetProviderError } = await import('../../lib/useFleet')
+    vi.mocked(setFleetNeonKey).mockRejectedValue(
+      new FleetProviderError(
+        "Couldn't reach Neon. Check your connection and try again.",
+        'provider_unreachable'
+      )
+    )
+
+    renderWithClient(<NeonConnectionPanel />)
+
+    await screen.findByRole('link', { name: 'Neon console' })
+    fireEvent.change(
+      document.querySelector('input[name="neon-api-key"]') as HTMLInputElement,
+      { target: { value: 'napi_good' } }
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+    expect(
+      await screen.findAllByText(
+        "Couldn't reach Neon. Check your connection and try again."
+      )
+    ).not.toHaveLength(0)
+    expect(
+      screen.queryByText(
+        'That API key was rejected by Neon. Check it and try again.'
+      )
+    ).toBeNull()
+  })
+
   it('explains a rejected key above the key field', async () => {
     vi.mocked(fetchFleetNeonStatus).mockResolvedValue({
       connected: false,

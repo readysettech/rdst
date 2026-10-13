@@ -7,7 +7,7 @@ import re
 from functools import lru_cache
 from typing import Any
 
-from features.monitor.analysis_digest import latest_done_job, load_analysis
+from features.monitor.analysis_digest import as_tested, latest_done_job, load_analysis
 from features.monitor.indexes import index_shape
 from shared.monitor.write_lookup import (column_roles, lookup_for, order_index_columns,
                                            write_shape)
@@ -38,17 +38,17 @@ def _suggestions(target: str, key: str, ref: str) -> tuple[dict[str, Any], ...]:
     llm = analysis.llm_analysis if isinstance(analysis.llm_analysis, dict) else {}
     display = analysis.display_payload if isinstance(analysis.display_payload, dict) else {}
     testing = display.get("index_testing") if isinstance(display.get("index_testing"), dict) else {}
-    tested = {str(result.get("index_sql") or "").strip().lower(): result
-              for result in testing.get("results") or [] if isinstance(result, dict)}
     found = []
     for item in llm.get("index_recommendations") or analysis.index_suggestions or []:
         if not isinstance(item, dict) or not item.get("table") or not item.get("columns"):
             continue
-        result = tested.get(str(item.get("sql") or "").strip().lower()) or {}
+        sql, tested = as_tested(item, testing)
+        result = tested or {}
         used = result.get("planner_used_index")
         pct = _number(result.get("cost_reduction_pct")) if used else 0.0 if used is False else None
-        found.append({"table": item["table"], "columns": list(item["columns"]),
-                      "method": item.get("index_type") or "btree", "sql": item.get("sql"),
+        found.append({"table": item["table"],
+                      "columns": list(result.get("columns") or item["columns"]),
+                      "method": item.get("index_type") or "btree", "sql": sql,
                       "gain_pct": pct, "verified": used is not None and not result.get("error"),
                       "impact": item.get("estimated_impact")})
     return tuple(found)

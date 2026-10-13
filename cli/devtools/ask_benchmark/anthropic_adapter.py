@@ -297,6 +297,7 @@ class AnthropicSDKAdapter:
             if error.code in {
                 "HTTP_ERROR",
                 "PROXY_UNREACHABLE",
+                "ANTHROPIC_UNREACHABLE",
                 "STREAM_INTERRUPTED",
             }:
                 raise BenchmarkTransportError(str(error)) from error

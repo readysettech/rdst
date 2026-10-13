@@ -410,8 +410,8 @@ class FakeAskService(AskService):
         async for event in fixtures.events("ask", ASK_EVENT):
             yield event
 
-    async def resume(self, session_id, clarification_answers=None):
-        del session_id, clarification_answers
+    async def resume(self, session_id, clarification_answers=None, target=None):
+        del session_id, clarification_answers, target
         async for event in fixtures.events("ask_resume", ASK_EVENT):
             yield event
 

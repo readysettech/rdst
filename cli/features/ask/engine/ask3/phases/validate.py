@@ -41,6 +41,8 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
     ctx.clear_validation_errors()
     ctx.limit_added = False
     ctx.limit_reduced = False
+    ctx.row_limit = None
+    ctx.limit_sql = None
 
     if not ctx.sql:
         ctx.validation_errors.append(
@@ -69,6 +71,7 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
         max_limit=1000,
         default_limit=ctx.max_rows,
         enforce_result_limit=ctx.enforce_result_limit,
+        dialect=ctx.db_type,
     )
 
     if not validation_result.get("is_valid"):
@@ -86,11 +89,13 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
     # streaming layer can surface an explicit "LIMIT added" note (T15).
     ctx.limit_added = bool(validation_result.get("limit_added"))
     ctx.limit_reduced = bool(validation_result.get("limit_reduced"))
+    ctx.row_limit = validation_result.get("limit_value")
 
     # Update SQL with the validated form
     validated_sql = validation_result.get("validated_sql")
     if validated_sql and validated_sql != ctx.sql:
         ctx.sql = validated_sql
+    ctx.limit_sql = ctx.sql
 
     # Step 2: Column validation against schema
     schema_dict = ctx.get_schema_as_dict()

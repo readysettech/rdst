@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Union
 
 
@@ -52,6 +52,9 @@ class FleetImportCompleteEvent:
     skipped: int
     errors: int
     target_names: list[str]
+    skipped_names: list[str] = field(default_factory=list)
+    # Each row that wasn't imported: {row, name, error}; row is None when no CSV row applies.
+    invalid_rows: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

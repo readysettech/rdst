@@ -1,15 +1,14 @@
+import { BaseInputSelect } from '@rs/ui-new/base-input-select'
 import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { BaseInputTextarea } from '@rs/ui-new/base-input-textarea'
 import { Button } from '@rs/ui-new/button'
-import { Dropdown } from '@rs/ui-new/dropdown'
-import { Icon } from '@rs/ui-new/icon'
 import { SegmentedControl } from '@rs/ui-new/segmented-control'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { toast } from '@rs/ui-new/use-toast'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import {
   fetchQueryRegistry,
   type QueryRegistryEntry,
@@ -26,6 +25,12 @@ interface ReportDialogProps {
   onClose: () => void
   initialQueryHash?: string
 }
+
+const FEEDBACK_NOT_SENT =
+  "Couldn't send your feedback. Check your connection and try again."
+
+// The related-query picker's value for no query; registry hashes are hex.
+const GENERAL_FEEDBACK = 'none'
 
 const sentimentOptions: Array<{ value: ReportSentiment; label: string }> = [
   { value: 'positive', label: 'Great' },
@@ -47,7 +52,7 @@ export function ReportDialog({
   const [reason, setReason] = useState('')
   const [email, setEmail] = useState('')
   const [emailOverride, setEmailOverride] = useState(false)
-  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const queryFieldId = useId()
 
   // Reset form when dialog opens
   useEffect(() => {
@@ -101,18 +106,15 @@ export function ReportDialog({
     staleTime: 30000,
   })
 
-  // Find selected query details
-  const selectedQuery = queries.find((q) => q.hash === selectedQueryHash)
-
-  // Submit mutation
+  // Thanks only once the feedback left the machine; otherwise the dialog keeps the text.
   const submitMutation = useMutation<ReportResponse, Error, ReportRequest>({
-    mutationFn: (request: ReportRequest) =>
-      submitReport(request).then((result) => {
-        if (!result.success) {
-          throw new Error(result.error || 'An error occurred')
-        }
-        return result
-      }),
+    mutationFn: async (request: ReportRequest) => {
+      const result = await submitReport(request).catch(() => {
+        throw new Error(FEEDBACK_NOT_SENT)
+      })
+      if (!result.success) throw new Error(result.error || FEEDBACK_NOT_SENT)
+      return result
+    },
     onSuccess: () => {
       toast({
         title: 'Thank you for your feedback!',
@@ -122,12 +124,7 @@ export function ReportDialog({
       onClose()
     },
     onError: (error) => {
-      toast({
-        title: 'Failed to submit feedback',
-        description:
-          error instanceof Error ? error.message : 'An error occurred',
-        variant: 'negative',
-      })
+      toast({ title: error.message, variant: 'negative' })
     },
   })
 
@@ -169,6 +166,14 @@ export function ReportDialog({
 
   const queryLabel = (query: QueryRegistryEntry) =>
     query.tag || `Query ${query.hash.slice(0, 8)}`
+
+  const queryOptions = [
+    { value: GENERAL_FEEDBACK, label: 'None - General feedback' },
+    ...queries.map((query) => ({
+      value: query.hash,
+      label: `${queryLabel(query)}: ${truncateSQL(query.sql, 40)}`,
+    })),
+  ]
 
   return (
     <DialogShell
@@ -215,79 +220,21 @@ export function ReportDialog({
         </div>
 
         <div>
-          <Text as="p" level="caption" className="mb-1.5 text-content-layout-3">
+          <label
+            htmlFor={queryFieldId}
+            className="mb-1.5 block text-caption text-content-layout-3"
+          >
             Related query (optional)
-          </Text>
-          <Dropdown open={dropdownOpen} onOpenChange={setDropdownOpen}>
-            <Dropdown.Trigger asChild>
-              <div className="flex cursor-pointer items-center justify-between gap-2 rounded-control bg-surface-layout-2 px-3.5 py-2.5 hover:bg-surface-raised">
-                {selectedQuery ? (
-                  <VStack className="min-w-0 items-start gap-0">
-                    <Text level="body-small" className="text-content-layout-1">
-                      {queryLabel(selectedQuery)}
-                    </Text>
-                    <Text
-                      level="mono-small"
-                      className="block max-w-[280px] truncate text-content-layout-3"
-                    >
-                      {truncateSQL(selectedQuery.sql)}
-                    </Text>
-                  </VStack>
-                ) : (
-                  <Text level="body-small" className="text-content-layout-3">
-                    None - General feedback
-                  </Text>
-                )}
-                <Icon
-                  name="chevron-down"
-                  label="Select query"
-                  size="small"
-                  className="shrink-0 text-content-layout-3"
-                />
-              </div>
-            </Dropdown.Trigger>
-            <Dropdown.Content
-              align="start"
-              className="w-[calc(100%-2rem)] max-w-[432px]"
-            >
-              <Dropdown.Item
-                label="None - General feedback"
-                onClick={() => {
-                  setSelectedQueryHash(null)
-                  setDropdownOpen(false)
-                }}
-              />
-              {queries.length > 0 && <Dropdown.Separator />}
-              {queries.map((query: QueryRegistryEntry) => (
-                <Dropdown.ItemWithChildren
-                  key={query.hash}
-                  onClick={() => {
-                    setSelectedQueryHash(query.hash)
-                    setDropdownOpen(false)
-                  }}
-                >
-                  <div className="space-y-0.5 py-1">
-                    <Text level="label-small" className="text-content-layout-1">
-                      {queryLabel(query)}
-                    </Text>
-                    <Text
-                      level="mono-small"
-                      className="block max-w-full truncate text-content-layout-3"
-                    >
-                      {truncateSQL(query.sql, 60)}
-                    </Text>
-                  </div>
-                </Dropdown.ItemWithChildren>
-              ))}
-              {queries.length === 0 && (
-                <div className="px-3 py-2">
-                  <Text level="body-small" className="text-content-layout-3">
-                    No queries in registry
-                  </Text>
-                </div>
-              )}
-            </Dropdown.Content>
-          </Dropdown>
+          </label>
+          <BaseInputSelect
+            id={queryFieldId}
+            name="related-query"
+            value={selectedQueryHash ?? GENERAL_FEEDBACK}
+            onValueChange={(next) =>
+              setSelectedQueryHash(next === GENERAL_FEEDBACK ? null : next)
+            }
+            options={queryOptions}
+          />
           {selectedQueryHash && (
             <div className="mt-2">
               <HStack className="items-center justify-between py-1.5">

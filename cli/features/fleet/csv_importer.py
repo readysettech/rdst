@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from shared.config.targets import validate_target_name
+
 from .models import FleetMember
 
 
@@ -64,6 +66,8 @@ def parse_csv(
 
     members: List[FleetMember] = []
     errors: List[Dict[str, Any]] = []
+    # Target names are unique regardless of case; the first row with a name keeps it.
+    first_rows: Dict[str, int] = {}
 
     with open(path, "r", newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
@@ -98,6 +102,16 @@ def parse_csv(
                         "error": "Missing required field (name, host, or engine)",
                     }
                 )
+                continue
+
+            try:
+                validate_target_name(name)
+            except ValueError as exc:
+                errors.append({"row": row_num, "name": name, "error": str(exc)})
+                continue
+            if name.casefold() in first_rows:
+                errors.append({"row": row_num, "name": name,
+                               "error": f"Same name as row {first_rows[name.casefold()]}"})
                 continue
 
             engine = _normalize_engine(engine_raw)
@@ -154,6 +168,8 @@ def parse_csv(
             # Secrets Manager ARN (optional, overrides password_env)
             secret_arn = (row.get("password_secret_arn") or row.get("secret_arn") or "").strip() or None
 
+            # Only a row that imports claims its name; a rejected one leaves it to a later row.
+            first_rows[name.casefold()] = row_num
             members.append(
                 FleetMember(
                     name=name,

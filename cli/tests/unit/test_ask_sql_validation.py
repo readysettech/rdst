@@ -20,6 +20,7 @@ from features.ask.engine.ask3.types import ColumnInfo, SchemaInfo, Status, Table
 from features.ask.sql_generation import generate_sql_from_nl
 from features.ask.sql_validation import (
     check_read_only,
+    describe_validation_issues,
     validate_filter_literal_provenance,
     validate_resolved_columns_against_schema,
     validate_sql_for_ask,
@@ -194,6 +195,21 @@ class TestFilterLiteralProvenance:
         assert "Alameda" in ctx.validation_errors[1].message
 
 
+def test_literal_provenance_parses_postgresql_targets() -> None:
+    # Targets name the dialect "postgresql"; sqlglot only knows "postgres".
+    result = validate_filter_literal_provenance(
+        "SELECT primarytitle FROM title_basics WHERE titletype = 'documentary'",
+        question="list some titles",
+        schema_formatted=(
+            "Table: title_basics\n  primarytitle (text)\n"
+            "  titletype (text) [enum: movie, short, tvSeries]\n"
+        ),
+        dialect="postgresql",
+    )
+
+    assert [warning["kind"] for warning in result["warnings"]] == ["unsupported_literal"]
+
+
 def test_table_validation_rejects_unknown_physical_table() -> None:
     result = validate_tables_against_schema(
         "SELECT id FROM invented_users",
@@ -351,6 +367,8 @@ class TestGenerationSafetyGate:
 
         assert result["success"] is False
         assert "read-only" in result["error"]
+        assert result["error_code"] == "ask_unsafe_sql"
+        assert result["error_category"] == "read_only"
 
     def test_read_only_statement_passes(self):
         result = self._generate("SELECT id FROM users")
@@ -377,6 +395,30 @@ class TestGenerationSafetyGate:
         assert result["error_code"] == "HOSTED_CAP_REACHED"
 
 
+class TestDescribeValidationIssues:
+    def test_issues_read_as_one_sentence_from_their_messages(self):
+        from features.ask.engine.ask3.types import ValidationError
+
+        issues = [
+            {"column": "status", "message": "Filter literal 'x' has no source.", "kind": "k"},
+            ValidationError(column="", table_alias=None, message="Table 'users' does not exist"),
+            "Only a single statement is allowed",
+            {"column": "id", "message": {"nested": True}},
+            {"column": "id"},
+        ]
+
+        assert describe_validation_issues(issues) == (
+            "The generated SQL failed validation: Filter literal 'x' has no source; "
+            "Table 'users' does not exist; Only a single statement is allowed."
+        )
+
+    def test_issues_without_messages_still_read_as_a_sentence(self):
+        assert describe_validation_issues([{"column": "id"}]) == (
+            "The generated SQL failed validation."
+        )
+        assert describe_validation_issues(None) == "The generated SQL failed validation."
+
+
 class TestExecutionGate:
     """Agent paths hand SQL straight to execute, so execute validates too."""
 
@@ -398,7 +440,8 @@ class TestExecutionGate:
 
         assert executed == []
         assert ctx.status == Status.ERROR
-        assert "validation failed" in ctx.error_message
+        assert ctx.error_message.startswith("The generated SQL failed validation: ")
+        assert ctx.execution_result.error == ctx.error_message
 
     def test_select_into_never_reaches_the_executor(self):
         executed = []
@@ -423,8 +466,51 @@ class TestExecutionGate:
 
         ctx = execute_query(self._ctx("SELECT id FROM users"), MagicMock(), executor)
 
-        assert executed == ["SELECT id FROM users LIMIT 100"]
+        # One row past the added cap tells whether the cap cut the result.
+        assert executed == ["SELECT id FROM users LIMIT 101"]
+        assert ctx.sql == "SELECT id FROM users LIMIT 100"
         assert ctx.status == Status.SUCCESS
+
+    @pytest.mark.parametrize(
+        ("sql", "returned", "row_limit", "truncated", "rows"),
+        [
+            ("SELECT id FROM users", 101, 100, True, 100),
+            ("SELECT id FROM users", 100, 100, False, 100),
+            ("SELECT id FROM users LIMIT 5000", 1001, 1000, True, 1000),
+        ],
+    )
+    def test_an_ask_cap_reports_exact_truncation(
+        self, sql, returned, row_limit, truncated, rows
+    ):
+        executed = []
+
+        def executor(run_sql, config):
+            executed.append(run_sql)
+            return {"success": True, "rows": [[1]] * returned, "columns": ["id"]}
+
+        ctx = execute_query(self._ctx(sql), MagicMock(), executor)
+
+        assert executed == [f"SELECT id FROM users LIMIT {row_limit + 1}"]
+        assert ctx.sql == f"SELECT id FROM users LIMIT {row_limit}"
+        assert ctx.row_limit == row_limit
+        assert ctx.execution_result.truncated is truncated
+        assert ctx.execution_result.row_count == rows
+
+    def test_the_query_own_limit_runs_unchanged_and_is_not_truncation(self):
+        executed = []
+
+        def executor(sql, config):
+            executed.append(sql)
+            return {"success": True, "rows": [[1]] * 10, "columns": ["id"]}
+
+        ctx = execute_query(
+            self._ctx("SELECT id FROM users LIMIT 10"), MagicMock(), executor
+        )
+
+        assert executed == ["SELECT id FROM users LIMIT 10"]
+        assert ctx.row_limit == 10
+        assert not (ctx.limit_added or ctx.limit_reduced)
+        assert ctx.execution_result.truncated is False
 
     def test_evaluation_select_executes_without_limit_mutation(self):
         executed = []
@@ -487,6 +573,203 @@ class TestExecutionGate:
 
         assert executed == []
         assert ctx.status == Status.ERROR
+
+    @pytest.mark.parametrize(
+        ("sql", "executed_sql", "reduced"),
+        [
+            ("SELECT id FROM users ORDER BY score FETCH FIRST 1000 ROWS WITH TIES",
+             "SELECT id FROM users ORDER BY score FETCH FIRST 1000 ROWS WITH TIES", False),
+            ("SELECT id FROM users ORDER BY score FETCH FIRST 5000 ROWS WITH TIES",
+             "SELECT id FROM users ORDER BY score FETCH FIRST 1000 ROWS WITH TIES", True),
+        ],
+    )
+    def test_ties_past_the_cap_are_cut_to_the_cap(self, sql, executed_sql, reduced):
+        executed = []
+
+        def executor(run_sql, config):
+            executed.append(run_sql)
+            return {"success": True, "rows": [[1]] * 1500, "columns": ["id"]}
+
+        ctx = execute_query(self._ctx(sql), MagicMock(), executor)
+
+        assert executed == [executed_sql]
+        assert ctx.execution_result.row_count == 1000
+        assert ctx.execution_result.truncated is True
+        assert ctx.row_limit == 1000
+        assert ctx.rows_capped is True
+        assert ctx.limit_reduced is reduced
+
+    def test_ties_within_the_cap_are_the_query_own_result(self):
+        def executor(run_sql, config):
+            return {"success": True, "rows": [[1]] * 12, "columns": ["id"]}
+
+        ctx = execute_query(
+            self._ctx("SELECT id FROM users ORDER BY score FETCH FIRST 10 ROWS WITH TIES"),
+            MagicMock(),
+            executor,
+        )
+
+        assert ctx.execution_result.row_count == 12
+        assert ctx.execution_result.truncated is False
+        assert ctx.rows_capped is False
+
+    def test_no_cap_applies_without_result_limit_enforcement(self):
+        ctx = self._ctx("SELECT id FROM users ORDER BY score FETCH FIRST 1000 ROWS WITH TIES")
+        ctx.enforce_result_limit = False
+
+        def executor(run_sql, config):
+            return {"success": True, "rows": [[1]] * 1500, "columns": ["id"]}
+
+        ctx = execute_query(ctx, MagicMock(), executor)
+
+        assert ctx.execution_result.row_count == 1500
+        assert ctx.rows_capped is False
+
+    @pytest.mark.parametrize(
+        ("db_type", "runner"), [("postgresql", "_execute_postgres"), ("mysql", "_execute_mysql")]
+    )
+    def test_database_fetch_stops_one_row_past_the_cap(self, monkeypatch, db_type, runner):
+        from features.ask.engine.ask3.phases import execute as execute_phase
+
+        calls = []
+
+        def run(sql, config, timeout, target, *, statement_cancel=None, max_rows=None):
+            calls.append(max_rows)
+            return {"success": True, "rows": [[1]] * max_rows, "columns": ["id"]}
+
+        monkeypatch.setattr(execute_phase, runner, run)
+        ctx = self._ctx("SELECT id FROM users ORDER BY score FETCH FIRST 1000 ROWS WITH TIES")
+        ctx.db_type = db_type
+
+        ctx = execute_query(ctx, MagicMock())
+
+        assert calls == [1001]
+        assert ctx.execution_result.row_count == 1000
+        assert ctx.execution_result.truncated is True
+
+    @pytest.mark.parametrize("db_type", ["postgresql", "mysql"])
+    def test_driver_fetches_a_bounded_batch(self, monkeypatch, db_type):
+        import psycopg2
+
+        from features.ask.engine.ask3.phases import execute as execute_phase
+
+        fetched = []
+
+        class Cursor:
+            description = [("id",)]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def execute(self, sql):
+                pass
+
+            def fetchmany(self, size):
+                fetched.append(size)
+                return [(1,)] * size
+
+            def fetchall(self):
+                raise AssertionError("an unbounded fetch can pull every tied row")
+
+        class Conn:
+            def cursor(self):
+                return Cursor()
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(
+            "shared.db_connection.resolve_connection_params",
+            lambda **_kwargs: {"host": "h", "user": "u", "database": "d"},
+        )
+        monkeypatch.setattr(psycopg2, "connect", lambda **_kwargs: Conn())
+        monkeypatch.setattr(
+            "shared.db_connection.postgres_connection_kwargs", lambda params, **kw: {}
+        )
+        monkeypatch.setattr(
+            "shared.db_connection.create_mysql_connection_from_params",
+            lambda params, **kw: Conn(),
+        )
+        run = execute_phase._execute_mysql if db_type == "mysql" else execute_phase._execute_postgres
+
+        result = run("SELECT id FROM users", {}, 0, "db", max_rows=3)
+
+        assert fetched == [3]
+        assert result["rows"] == [[1], [1], [1]]
+
+    def test_dialect_reaches_the_limit_check(self):
+        executed = []
+
+        def executor(run_sql, config):
+            executed.append(run_sql)
+            return {"success": True, "rows": [[1]], "columns": ["s"]}
+
+        ctx = self._ctx("SELECT 'it\\'s (x' AS s FROM users LIMIT 5")
+        ctx.db_type = "mysql"
+        ctx = execute_query(ctx, MagicMock(), executor)
+
+        assert executed == ["SELECT 'it\\'s (x' AS s FROM users LIMIT 5"]
+
+
+class TestLimitFlagsFollowTheExecutedSql:
+    """The LIMIT notes describe the statement that ran, never one it replaced."""
+
+    def _validated(self, sql: str) -> Ask3Context:
+        ctx = Ask3Context(
+            question="q", target="testdb", target_config={"host": "localhost"}
+        )
+        ctx.sql = sql
+        return validate_sql(ctx, MagicMock())
+
+    def _executor(self, executed, returned):
+        def executor(run_sql, config):
+            executed.append(run_sql)
+            return {"success": True, "rows": [[1]] * returned, "columns": ["id"]}
+
+        return executor
+
+    def test_the_linear_cap_is_probed_and_reported(self):
+        ctx = self._validated("SELECT id FROM users")
+        executed = []
+
+        ctx = execute_query(ctx, MagicMock(), self._executor(executed, 101))
+
+        assert executed == ["SELECT id FROM users LIMIT 101"]
+        assert ctx.limit_added is True
+        assert ctx.execution_result.truncated is True
+        assert ctx.execution_result.row_count == 100
+
+    def test_agent_sql_with_its_own_limit_is_not_reported_as_capped(self):
+        from features.ask.engine.ask3.agent_context import AgentExplorationContext
+
+        ctx = self._validated("SELECT id FROM users")
+        assert ctx.limit_added and ctx.row_limit == 100
+        agent_ctx = AgentExplorationContext.from_ask3_context(ctx, "zero_rows")
+        agent_ctx.final_sql = "SELECT id FROM users WHERE active LIMIT 100"
+        ctx = agent_ctx.to_ask3_context()
+        executed = []
+
+        ctx = execute_query(ctx, MagicMock(), self._executor(executed, 100))
+
+        assert executed == ["SELECT id FROM users WHERE active LIMIT 100"]
+        assert not (ctx.limit_added or ctx.limit_reduced)
+        assert ctx.row_limit == 100
+        assert ctx.execution_result.row_count == 100
+
+    def test_agent_sql_without_a_limit_gets_its_own_cap(self):
+        ctx = self._validated("SELECT id FROM users LIMIT 5000")
+        assert ctx.limit_reduced
+        ctx.sql = "SELECT id FROM users WHERE active"
+        executed = []
+
+        ctx = execute_query(ctx, MagicMock(), self._executor(executed, 3))
+
+        assert executed == ["SELECT id FROM users WHERE active LIMIT 101"]
+        assert ctx.limit_added is True and ctx.limit_reduced is False
+        assert ctx.row_limit == 100
 
 
 class TestAskExecutionEvidence:
@@ -571,4 +854,92 @@ class TestAskExecutionEvidence:
         )
 
         assert ctx.status == Status.SUCCESS
-        assert executed == ["SELECT id FROM users LIMIT 100"]
+        assert executed == ["SELECT id FROM users LIMIT 101"]
+
+
+@pytest.mark.parametrize(
+    ("sql", "validated", "limit_added", "limit_reduced"),
+    [
+        # FETCH FIRST is the query's own limit; appending LIMIT would break it.
+        (
+            "SELECT title FROM posts ORDER BY score DESC FETCH FIRST 9 ROWS WITH TIES",
+            "SELECT title FROM posts ORDER BY score DESC FETCH FIRST 9 ROWS WITH TIES",
+            False,
+            False,
+        ),
+        (
+            "SELECT title FROM posts ORDER BY score DESC FETCH NEXT 5000 ROWS ONLY",
+            "SELECT title FROM posts ORDER BY score DESC FETCH NEXT 1000 ROWS ONLY",
+            False,
+            True,
+        ),
+        # A LIMIT inside a subquery or a string doesn't bound the outer query.
+        (
+            "SELECT * FROM (SELECT id FROM posts LIMIT 5) recent JOIN votes v ON v.postid = recent.id",
+            "SELECT * FROM (SELECT id FROM posts LIMIT 5) recent JOIN votes v ON v.postid = recent.id LIMIT 100",
+            True,
+            False,
+        ),
+        (
+            "SELECT 'LIMIT 3' AS note FROM posts",
+            "SELECT 'LIMIT 3' AS note FROM posts LIMIT 100",
+            True,
+            False,
+        ),
+        (
+            "SELECT id FROM posts LIMIT 20, 5000",
+            "SELECT id FROM posts LIMIT 20, 1000",
+            False,
+            True,
+        ),
+    ],
+)
+def test_limit_handling_reads_only_the_outermost_query(
+    sql, validated, limit_added, limit_reduced
+):
+    result = validate_sql_for_ask(sql, default_limit=100, max_limit=1000)
+
+    assert result["validated_sql"] == validated
+    assert bool(result.get("limit_added")) is limit_added
+    assert bool(result.get("limit_reduced")) is limit_reduced
+
+
+@pytest.mark.parametrize(
+    ("sql", "dialect", "validated"),
+    [
+        # MySQL strings take backslash escapes, in either quote.
+        ("SELECT 'it\\'s (x' AS s FROM t LIMIT 5", "mysql",
+         "SELECT 'it\\'s (x' AS s FROM t LIMIT 5"),
+        ('SELECT "a\\" (" AS s FROM t LIMIT 5', "mysql", 'SELECT "a\\" (" AS s FROM t LIMIT 5'),
+        ("SELECT id FROM t # note (\nLIMIT 5", "mysql", "SELECT id FROM t # note (\nLIMIT 5"),
+        # MySQL's "--" opens a comment only before whitespace; "2--1" subtracts.
+        ("SELECT 2--1 AS d FROM t LIMIT 5", "mysql", "SELECT 2--1 AS d FROM t LIMIT 5"),
+        ("SELECT id FROM t -- note (\nLIMIT 5", "mysql", "SELECT id FROM t -- note (\nLIMIT 5"),
+        ("SELECT id FROM t --\x01(\nLIMIT 5", "mysql", "SELECT id FROM t --\x01(\nLIMIT 5"),
+        # MySQL runs what an executable comment holds.
+        ("SELECT id FROM t /*! LIMIT 5 */", "mysql", "SELECT id FROM t /*! LIMIT 5 */"),
+        ("SELECT id FROM t /*!80000 LIMIT 5 */", "mysql", "SELECT id FROM t /*!80000 LIMIT 5 */"),
+        ("SELECT /*+ NO_INDEX(t) ( */ id FROM t LIMIT 5", "mysql",
+         "SELECT /*+ NO_INDEX(t) ( */ id FROM t LIMIT 5"),
+        # PostgreSQL takes them only in E'' strings; a standard string ends at its quote.
+        ("SELECT E'it\\'s (' AS s FROM t LIMIT 5", "postgresql",
+         "SELECT E'it\\'s (' AS s FROM t LIMIT 5"),
+        ("SELECT 'C:\\' AS p, '(' AS q FROM t LIMIT 5", "postgresql",
+         "SELECT 'C:\\' AS p, '(' AS q FROM t LIMIT 5"),
+        ("SELECT $$ it's ( $$ AS s FROM t LIMIT 5", "postgresql",
+         "SELECT $$ it's ( $$ AS s FROM t LIMIT 5"),
+        ("SELECT $q$ ($$ $q$ AS s FROM t LIMIT 5", "postgresql",
+         "SELECT $q$ ($$ $q$ AS s FROM t LIMIT 5"),
+        ("SELECT $$LIMIT 3$$ AS s FROM t", "postgresql", "SELECT $$LIMIT 3$$ AS s FROM t LIMIT 100"),
+        ("SELECT id FROM t /* a /* b */ ( */ LIMIT 5", "postgresql",
+         "SELECT id FROM t /* a /* b */ ( */ LIMIT 5"),
+        # A parameter is not a dollar quote.
+        ("SELECT id FROM t WHERE a = $1 AND b = $2 LIMIT 5", "postgresql",
+         "SELECT id FROM t WHERE a = $1 AND b = $2 LIMIT 5"),
+    ],
+)
+def test_outer_limit_survives_dialect_quoting(sql, dialect, validated):
+    result = validate_sql_for_ask(sql, default_limit=100, max_limit=1000, dialect=dialect)
+
+    assert result["is_valid"], result["issues"]
+    assert result["validated_sql"] == validated

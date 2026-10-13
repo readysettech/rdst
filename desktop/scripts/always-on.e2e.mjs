@@ -273,27 +273,20 @@ try {
       return pulse.pulses.some((entry) => entry.kind === 'collect' && entry.ok && entry.ts > beforeClose)
     }, 'collector reading with the window closed', 90000)
   }
-  await clickMenu('Notifications')
   descendants = processTree(backendPid)
   for (const pid of [...descendants].reverse()) {
     try { process.kill(pid, 'SIGKILL') } catch (error) { if (error.code !== 'ESRCH') throw error }
   }
   await eventually(async () => (await snapshot()).trayState === 'offline', 'sidecar death reflected in tray')
-  await eventually(async () => (await snapshot()).notifications.some((item) =>
-    item.title === 'RDST stopped monitoring'), 'sidecar death notification')
-  const crashedShell = desktop.process()
-  await clickMenu('Quit RDST')
-  await eventually(() => crashedShell.exitCode !== null, 'shell quit after sidecar death', 15000)
-  desktop = await _electron.launch(launchOptions)
   const restarted = await eventually(async () => {
     const state = await snapshot()
-    return state?.backendPid && state.backendPid !== backendPid ? state : null
-  }, 'new sidecar after relaunch', 90000)
+    return state?.backendPid && state.backendPid !== backendPid && state.backendUrl ? state : null
+  }, 'sidecar restarted by the running shell', 90000)
   backendPid = restarted.backendPid
   assert.equal((await fetchWithTimeout(`${restarted.backendUrl}/health`)).status, 200)
   const persisted = await fetchWithTimeout(`${restarted.backendUrl}/api/monitor/targets/e2e/settings`)
   assert.equal((await persisted.json()).enabled, true)
-  console.log('PASS sidecar death alerts, relaunch restores a healthy backend and monitor settings')
+  console.log('PASS a sidecar that dies is restarted and keeps the monitor settings')
 
   descendants = processTree(backendPid)
   const exit = new Promise((resolve, reject) => {

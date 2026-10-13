@@ -29,6 +29,9 @@ LOST_AFTER_SECONDS = 180
 PUSH_AFTER_SECONDS = 3600
 ITEM = ("monitoring_issue", "lost_connection")
 TITLE = "Can't reach the database"
+# Detail of the ok collect pulse that ends a run of failed checks when the collection stored no
+# reading. It clears the failure but is not a reading, so reading timing skips it.
+ANSWERED = "The database answered"
 
 
 def clock_time(ts: int, *, meridiem: bool = True) -> str:
@@ -56,6 +59,8 @@ _REASONS = (
      "Update the password for this database in Settings."),
     (("timeout expired", "timed out", "connection timed out"), "The connection timed out.",
      "Check that the database is running and that this computer can reach its host and port."),
+    (("didn't answer",), "The database stopped answering.",
+     "Check that the database server is running and isn't paused or overloaded."),
     (("could not translate host name", "name or service not known", "nodename nor servname",
       "getaddrinfo failed"), "The host name didn't resolve.",
      "Check the host name for this database in Settings."),
@@ -160,6 +165,10 @@ class ConnectionWatch:
                 error = self._reason(target, error)
                 self.store.record_pulse(target, now, "collect", False,
                                         error or "Couldn't reach the database")
+            elif self._latest_collect_failed(target):
+                # A check reported failed while this collection waited on the database, or a
+                # collection that recorded no reading: the latest check says it answered.
+                self.store.record_pulse(target, now, "collect", True, ANSWERED)
             self.observe(target, ok, now, error)
         except Exception:
             logger.warning("Connection check for %s not recorded", target, exc_info=True)
@@ -217,6 +226,11 @@ class ConnectionWatch:
 
         return get_tunnel_manager().failure_reason(target) or error
 
+    def _latest_collect_failed(self, target: str) -> bool:
+        rows = self.store.read("SELECT ok FROM monitor_pulse WHERE target=? AND kind='collect' "
+                               "ORDER BY id DESC LIMIT 1", (target,))
+        return bool(rows) and not rows[0]["ok"]
+
     def _open_item(self, target: str) -> dict[str, Any] | None:
         rows = self.store.read("SELECT * FROM inbox_item WHERE target=? AND type=? AND subject=?",
                                (target, *ITEM))
@@ -226,7 +240,8 @@ class ConnectionWatch:
 
     def _last_reading(self, target: str, before: int) -> int | None:
         rows = self.store.read("SELECT MAX(ts) ts FROM monitor_pulse WHERE target=? "
-                               "AND kind='collect' AND ok=1 AND ts<=?", (target, before))
+                               "AND kind='collect' AND ok=1 AND detail!=? AND ts<=?",
+                               (target, ANSWERED, before))
         if rows and rows[0]["ts"] is not None:
             return int(rows[0]["ts"])
         rows = self.store.read("SELECT MAX(bucket_start) ts FROM db_series WHERE target=? "

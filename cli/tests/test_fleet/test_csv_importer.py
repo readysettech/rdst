@@ -211,6 +211,56 @@ class TestParseCSV:
             os.unlink(path)
 
 
+    def test_duplicate_and_invalid_names_are_row_errors(self):
+        path = self._write_csv(
+            "name,host,engine\n"
+            "db1,h1,postgresql\n"
+            "DB1,h2,postgresql\n"
+            "bad name,h3,mysql\n"
+        )
+        try:
+            members, errors = parse_csv(path)
+            assert [member.name for member in members] == ["db1"]
+            assert errors[0] == {"row": 3, "name": "DB1", "error": "Same name as row 2"}
+            assert errors[1]["row"] == 4 and "Invalid target name" in errors[1]["error"]
+        finally:
+            os.unlink(path)
+
+    def test_a_rejected_row_leaves_its_name_to_a_later_valid_row(self):
+        path = self._write_csv(
+            "name,engine,host,port\nprod,postgresql,db1,bad\nprod,postgresql,db2,5432\n")
+        try:
+            members, errors = parse_csv(path)
+            assert [(member.name, member.host) for member in members] == [("prod", "db2")]
+            assert [error["error"] for error in errors] == ["Invalid port: bad"]
+        finally:
+            os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_import_reports_skipped_and_rejected_rows_and_keeps_going(tmp_path):
+    from features.fleet.service import FleetService
+    from shared.config.targets import TargetsConfig
+
+    config = TargetsConfig(path=str(tmp_path / "config.toml"))
+    config.upsert("orders", {"engine": "postgresql", "host": "h0"})
+    config.upsert("Billing", {"engine": "postgresql", "host": "h0"})
+    path = tmp_path / "fleet.csv"
+    path.write_text("name,host,engine\norders,h1,postgresql\nbilling,h2,postgresql\n"
+                    "users,h3,mysql\nusers,h4,mysql\n", encoding="utf-8")
+    events = [event async for event in FleetService(config=config).import_fleet(str(path))]
+
+    done = events[-1]
+    assert done.type == "import_complete"
+    assert (done.imported, done.skipped, done.errors) == (1, 1, 2)
+    assert done.target_names == ["users"] and done.skipped_names == ["orders"]
+    assert [(row["row"], row["name"]) for row in done.invalid_rows] == [(5, "users"),
+                                                                        (None, "billing")]
+    messages = [event.message for event in events if event.type == "error"]
+    assert messages[0] == "Row 5 (users): Same name as row 4"
+    assert messages[1].startswith("billing: Target name 'billing' conflicts")
+
+
 class TestFleetMemberToConfig:
     def test_basic_config(self):
         from features.fleet.models import FleetMember

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -39,6 +40,7 @@ from features.top.events import (
 )
 from features.top.models import TopInput, TopOptions, TopQueryData
 from features.top.service import TopService
+from shared.db_connection import IoDeadline, abort_connection, close_connection
 from shared.query_registry import QueryRegistry, hash_sql
 from shared.query_registry.query_registry import (
     _identity_slot_count,
@@ -322,7 +324,10 @@ def _counters_moved(previous: Optional[CounterRow], current: CounterRow) -> bool
 OBSERVE_QUERY_TIMEOUT_S = 30
 
 
-def _default_connection_factory(target: str) -> tuple[Any, str]:
+def _default_connection_factory(
+    target: str, *, connect_timeout: int = 10,
+    query_timeout_seconds: float = OBSERVE_QUERY_TIMEOUT_S,
+) -> tuple[Any, str]:
     """Open the collector's own direct connection and report the target's engine."""
     from shared.config.targets import TargetsConfig, normalize_db_type
     from shared.db_connection import create_direct_connection
@@ -336,8 +341,9 @@ def _default_connection_factory(target: str) -> tuple[Any, str]:
     engine = normalize_db_type(target_config.get("engine")) or ""
     # Reads are catalog and statistics queries; a cap keeps one stuck database from holding
     # its monitor cycle.
-    connection = create_direct_connection(target_config, target=name, lane="rdst/observe",
-                                          query_timeout_seconds=OBSERVE_QUERY_TIMEOUT_S)
+    connection = create_direct_connection(target_config, connect_timeout, target=name,
+                                          lane="rdst/observe",
+                                          query_timeout_seconds=query_timeout_seconds)
     if engine == "postgresql":
         # SET LOCAL session setup needs a transaction block; the per-cycle
         # rollback returns the connection to idle between collections.
@@ -412,6 +418,10 @@ class QueryDiscoveryCollector:
         self._two_phase = two_phase_discovery_enabled() if two_phase is None else two_phase
         self._connection_factory = connection_factory
         self._connection: Optional[Any] = None
+        # Monotonic time of the latest database progress while a read is in flight.
+        self._db_waiting_since: Optional[float] = None
+        # The driver's error when this cycle's database read failed.
+        self.last_error: Optional[str] = None
         self._stats_source: Optional[StatementStatsSource] = None
         self._engine = ""
         self._source_name = ""
@@ -706,6 +716,16 @@ class QueryDiscoveryCollector:
         probes the statement source again and measures rates from a new baseline."""
         self._reconnect_pending = True
 
+    def setup_passed(self) -> bool:
+        """The statement source's prerequisite check passes: a gap cached from an earlier
+        cycle stops standing for the source, and the next cycle probes it again. Returns
+        whether a gap was cached and not yet due for a fresh probe."""
+        if self._source_unavailable is None or self._reconnect_pending:
+            return False
+        self.reconnect()
+        self._snapshot = {**self._snapshot, "capture_warning": None}
+        return True
+
     async def _apply_reconnect(self) -> None:
         if not self._reconnect_pending:
             return
@@ -751,6 +771,15 @@ class QueryDiscoveryCollector:
                 self.target,
                 exc_info=True,
             )
+
+    def abort_connection(self) -> None:
+        """Make a cycle blocked on a database that stopped answering fail, without waiting on
+        the driver; the next cycle opens a fresh connection."""
+        connection = self._connection
+        self._connection = None
+        self._stats_source = None
+        if connection is not None:
+            abort_connection(connection)
 
     async def close(self) -> None:
         task = self._task
@@ -1101,9 +1130,42 @@ class QueryDiscoveryCollector:
             try:
                 return execute(sql, params)
             finally:
-                self._db_touch_seconds += time.monotonic() - started
+                finished = time.monotonic()
+                self._db_touch_seconds += finished - started
+                if self._db_waiting_since is not None:
+                    self._db_waiting_since = finished
 
         return timed
+
+    async def _read_database(self, read: Callable[..., Any], *args: Any) -> Any:
+        """Run a blocking read of the target database in a worker thread, tracking how long
+        the database has left it unanswered."""
+        self._db_waiting_since = time.monotonic()
+        try:
+            return await asyncio.to_thread(read, *args)
+        finally:
+            self._db_waiting_since = None
+
+    def probe_answering(self, seconds: float) -> None:
+        """Raise unless a fresh connection opens and answers SELECT 1, each within about
+        ``seconds``. Blocking; the collector's own connection and state are left alone."""
+        if self._connection_factory is _default_connection_factory:
+            connection, _ = _default_connection_factory(
+                self.target, connect_timeout=max(1, math.ceil(seconds)),
+                query_timeout_seconds=seconds)
+        else:
+            connection, _ = self._connection_factory(self.target)
+        try:
+            with IoDeadline(connection, seconds), connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+        finally:
+            close_connection(connection)
+
+    def unanswered_for(self) -> Optional[float]:
+        """Seconds since the database last answered the read in flight; None between reads."""
+        since = self._db_waiting_since
+        return None if since is None else max(time.monotonic() - since, 0.0)
 
     def _engine_total_delta(self, result: CollectResult) -> Optional[tuple[int, float]]:
         """Engine-wide (calls, ms) since the previous reading, when both readings share an
@@ -1476,7 +1538,7 @@ class QueryDiscoveryCollector:
                     missing[row.engine_key] = normalized
         if missing:
             try:
-                fetched = await asyncio.to_thread(
+                fetched = await self._read_database(
                     self._fetch_statement_texts, set(missing)
                 )
             except Exception:
@@ -1553,9 +1615,7 @@ class QueryDiscoveryCollector:
 
         fetch_started = time.monotonic()
         try:
-            result, texts, activity_texts = await asyncio.to_thread(
-                self._two_phase_fetch
-            )
+            result, texts, activity_texts = await self._read_database(self._two_phase_fetch)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1581,6 +1641,7 @@ class QueryDiscoveryCollector:
                 self.target,
                 type(exc).__name__,
             )
+            self.last_error = str(exc).strip() or type(exc).__name__
             await asyncio.to_thread(
                 self._record_collector_state, state="unavailable", last_attempt_at=attempted_at,
                 duration_ms=int((time.monotonic() - collection_started) * 1000),
@@ -2315,6 +2376,7 @@ class QueryDiscoveryCollector:
 
     async def collect_now(self) -> QueryDiscoveryEvent:
         """Collect one target snapshot and persist observations, never Saved intent."""
+        self.last_error = None
         await self._apply_reconnect()
         if default_monitor_db_path().exists():
             settings = await asyncio.to_thread(MonitorStore().read,
@@ -2590,6 +2652,11 @@ class QueryDiscoveryCoordinator:
         collector = self._collectors.get(target)
         if collector is not None:
             collector.reconnect()
+
+    def setup_passed(self, target: str) -> bool:
+        """The target's prerequisite check passes; whether its collector held a source gap."""
+        collector = self._collectors.get(target)
+        return collector is not None and collector.setup_passed()
 
     def publish_assessment_update(self, target: str) -> None:
         collector = self._collectors.get(target)

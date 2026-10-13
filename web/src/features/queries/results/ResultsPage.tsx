@@ -115,7 +115,7 @@ export function ResultsPage({ search }: { search: ResultsSearch }) {
     actions,
   } = controller
   const target = query.target ?? ''
-  const key = search.hash ?? ''
+  const key = search.key ?? search.hash ?? ''
   const monitored = useMonitorQuery(target, key, '24h')
   const digest = useQueryDigest(target, key, Boolean(target && key))
 
@@ -260,7 +260,7 @@ export function ResultsPage({ search }: { search: ResultsSearch }) {
               onClick={() =>
                 void navigate({
                   to: '/ask',
-                  search: { sql: query.sql } as never,
+                  search: { db: query.target, sql: query.sql } as never,
                 })
               }
             />

@@ -8,7 +8,7 @@ import { Icon } from '../svg/icon'
 import { quietLineRecipe } from './quiet-line'
 
 /**
- * The six failure classes of the shared error contract (B7/T24). Each maps to
+ * The failure classes of the shared error contract (B7/T24). Each maps to
  * an accent + glyph and, at the call site, to one recovery destination. The
  * component itself is presentation-only: routing lives with the composer so
  * `@rs/ui-new` stays framework-agnostic.
@@ -19,6 +19,7 @@ export type ErrorClass =
   | 'local-dependency'
   | 'rdst-service'
   | 'provider'
+  | 'network'
   | 'valid-negative'
 
 type Accent = 'negative' | 'warning' | 'info'
@@ -30,6 +31,7 @@ const CLASS_META: Record<ErrorClass, { accent: Accent; icon: IconStrokeName }> =
     'local-dependency': { accent: 'warning', icon: 'layers' },
     'rdst-service': { accent: 'warning', icon: 'user-shield' },
     provider: { accent: 'warning', icon: 'sparkles' },
+    network: { accent: 'warning', icon: 'alert' },
     'valid-negative': { accent: 'info', icon: 'info' },
   }
 

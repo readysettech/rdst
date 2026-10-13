@@ -1,9 +1,11 @@
+import { toast } from '@rs/ui-new/use-toast'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
 import { jsonResponse, renderWithClient } from '@/test-utils'
-import { submitReport } from '../lib/api'
+import { fetchQueryRegistry, submitReport } from '../lib/api'
 import { ReportDialog } from './ReportDialog'
+
+vi.mock('@rs/ui-new/use-toast', () => ({ toast: vi.fn() }))
 
 vi.mock('../lib/api', async () => {
   const actual = await vi.importActual('../lib/api')
@@ -154,5 +156,99 @@ describe('ReportDialog', () => {
         expect.objectContaining({ email: 'grace@example.com' })
       )
     })
+  })
+
+  it('keeps the text and says so when the feedback never left the machine', async () => {
+    vi.mocked(submitReport).mockResolvedValue({
+      success: false,
+      error:
+        "Couldn't send your feedback. Check your connection and try again.",
+    })
+    const onClose = vi.fn()
+    renderWithClient(<ReportDialog isOpen onClose={onClose} />)
+
+    fireEvent.change(screen.getByPlaceholderText('Share your thoughts...'), {
+      target: { value: 'Offline feedback' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('you@example.com'), {
+      target: { value: 'a@example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith({
+        title:
+          "Couldn't send your feedback. Check your connection and try again.",
+        variant: 'negative',
+      })
+    )
+    expect(onClose).not.toHaveBeenCalled()
+    expect(
+      (
+        screen.getByPlaceholderText(
+          'Share your thoughts...'
+        ) as HTMLTextAreaElement
+      ).value
+    ).toBe('Offline feedback')
+  })
+
+  it('says the same when the local server could not be reached', async () => {
+    vi.mocked(submitReport).mockRejectedValue(new TypeError('Failed to fetch'))
+    renderWithClient(<ReportDialog isOpen onClose={() => {}} />)
+
+    fireEvent.change(screen.getByPlaceholderText('Share your thoughts...'), {
+      target: { value: 'Hello' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('you@example.com'), {
+      target: { value: 'a@example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title:
+            "Couldn't send your feedback. Check your connection and try again.",
+        })
+      )
+    )
+  })
+
+  it('picks the related query with the keyboard', async () => {
+    Element.prototype.scrollIntoView = vi.fn()
+    Element.prototype.hasPointerCapture = vi.fn(() => false)
+    Element.prototype.releasePointerCapture = vi.fn()
+    vi.mocked(fetchQueryRegistry).mockResolvedValueOnce({
+      queries: [
+        { hash: 'abcdef1234', tag: 'Orders', sql: 'SELECT * FROM orders' },
+      ],
+    } as never)
+    vi.mocked(submitReport).mockResolvedValue({ success: true, error: null })
+    renderWithClient(<ReportDialog isOpen onClose={() => {}} />)
+
+    const picker = screen.getByRole('combobox', {
+      name: 'Related query (optional)',
+    })
+    expect(picker.textContent).toContain('None - General feedback')
+    picker.focus()
+    fireEvent.keyDown(picker, { key: 'ArrowDown' })
+    const option = await screen.findByRole('option', {
+      name: 'Orders: SELECT * FROM orders',
+    })
+    fireEvent.keyDown(option, { key: 'Enter' })
+    await waitFor(() => expect(picker.textContent).toContain('Orders'))
+
+    fireEvent.change(screen.getByPlaceholderText('Share your thoughts...'), {
+      target: { value: 'About this query' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('you@example.com'), {
+      target: { value: 'a@example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() =>
+      expect(submitReport).toHaveBeenCalledWith(
+        expect.objectContaining({ query_hash: 'abcdef1234' })
+      )
+    )
   })
 })

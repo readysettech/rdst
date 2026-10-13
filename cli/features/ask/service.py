@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 import logging
+import threading
 import uuid
 from collections.abc import AsyncGenerator, Callable, Collection, MutableMapping
 from dataclasses import dataclass, field
@@ -15,7 +16,7 @@ from typing import Any
 from shared.config.targets import create_targets_config
 from shared.llm_manager import LLMManager
 from shared.llm_manager.inference_attribution import inference_workflow
-from shared.query_registry import QueryRegistry, generate_query_name
+from shared.query_registry import QueryRegistry, generate_query_name, hash_sql
 
 from .aggregate_domain_normalization import (
     normalize_context as normalize_all_rows_aggregate_context,
@@ -76,6 +77,7 @@ from .encoded_identifier_storage import (
 )
 from .engine.ask3.phases.generate import repair_validation_error
 from .engine.ask3.phases.validate import build_error_message
+from .engine.ask3.types import StatementCancel
 from .events import (
     AskClarificationNeededEvent,
     AskErrorEvent,
@@ -270,6 +272,7 @@ from .ranking_normalization import normalize_context as normalize_ranking_contex
 from .shared_entity_scope_normalization import (
     normalize_context as normalize_shared_entity_scope_context,
 )
+from .sql_validation import describe_validation_issues
 from .temporal_text_storage import (
     normalize_context as normalize_temporal_text_storage_context,
 )
@@ -334,6 +337,9 @@ _CORRECTION_STATE_FIELDS = (
     "validation_errors",
     "limit_added",
     "limit_reduced",
+    "row_limit",
+    "limit_sql",
+    "rows_capped",
     "explicit_ratio_normalization",
     "scalar_derived_metric_normalization",
     "all_rows_aggregate_normalization",
@@ -365,6 +371,80 @@ _CORRECTION_COPIED_FIELDS = frozenset(
 _DEFERRED_CORRECTION_INTENTS = frozenset(
     {"temporal_text_storage", "month_axis_storage"}
 )
+
+
+# Slack past the statement timeout before Ask stops waiting on the database.
+_EXECUTION_GRACE_SECONDS = 5
+# Upper bound on waiting for a server-side cancel before aborting the connection.
+_CANCEL_WAIT_SECONDS = 5
+
+
+def _execution_deadline(ctx: Any) -> float | None:
+    timeout = getattr(ctx, "timeout_seconds", 0)
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+        return None
+    return timeout + _EXECUTION_GRACE_SECONDS
+
+
+def _stop_statements_in_background(statement_cancel: StatementCancel) -> None:
+    # A cancelled task cannot reliably await, so stopping runs detached.
+    threading.Thread(
+        target=statement_cancel.stop,
+        args=(_CANCEL_WAIT_SECONDS,),
+        name="ask-statement-stop",
+        daemon=True,
+    ).start()
+
+
+def _monitor_key(sql: str) -> str | None:
+    """The key monitoring gives this statement: captured text is hashed without a dialect."""
+    if not sql:
+        return None
+    try:
+        return hash_sql(sql)
+    except Exception:
+        return None
+
+
+# How long a finished answer waits on a monitor-store lookup that is still running; the
+# lookup starts when execution ends, so a busy store can't hold up the answer.
+_MONITOR_LOOKUP_SECONDS = 0.25
+
+
+def _monitored_key(target: str | None, sql: str) -> str | None:
+    """The monitor key, only when monitoring has recorded this statement on the target."""
+    key = _monitor_key(sql)
+    if not key or not target:
+        return None
+    try:
+        from shared.monitor.monitor_store import MonitorStore, default_monitor_db_path
+
+        if not default_monitor_db_path().exists():
+            return None
+        rows = MonitorStore().read(
+            "SELECT 1 FROM query_text WHERE target=? AND query_key=? LIMIT 1", (target, key)
+        )
+    except Exception:
+        logging.getLogger(__name__).debug("Monitor key lookup failed", exc_info=True)
+        return None
+    return key if rows else None
+
+
+def _start_monitor_lookup(target: str | None, sql: str) -> tuple[str, asyncio.Task]:
+    return sql, asyncio.create_task(asyncio.to_thread(_monitored_key, target, sql))
+
+
+async def _recorded_monitor_key(
+    target: str | None, sql: str, started: tuple[str, asyncio.Task] | None = None
+) -> str | None:
+    """The monitor key for ``sql``, reusing a lookup ``started`` for the same SQL."""
+    if started is None or started[0] != sql:
+        started = _start_monitor_lookup(target, sql)
+    try:
+        # The lookup thread can't be interrupted; shielding lets it finish unobserved.
+        return await asyncio.wait_for(asyncio.shield(started[1]), _MONITOR_LOOKUP_SECONDS)
+    except asyncio.TimeoutError:
+        return None
 
 
 def _snapshot_correction_state(ctx: Any) -> dict[str, Any]:
@@ -619,6 +699,15 @@ class AskService:
                 category="query_timeout",
                 target=target,
             )
+        if error_kind == "refused":
+            return AskErrorEvent(
+                type="error",
+                message=message,
+                phase=phase,
+                code="sql_validation_failed",
+                category="sql_validation",
+                target=target,
+            )
         if error_kind in {"query_execution", "local_dependency"}:
             code = (
                 "database_query_failed"
@@ -833,12 +922,28 @@ class AskService:
         self,
         session_id: str,
         clarification_answers: dict[str, str] | None = None,
+        target: str | None = None,
     ) -> AsyncGenerator[AskEvent, None]:
         pending = self._session_store.get(session_id)
         if pending is None:
             yield AskErrorEvent(
                 type="error",
                 message=f"Session '{session_id}' not found or expired",
+            )
+            return
+
+        session_target = pending.context.target
+        if target and session_target and target != session_target:
+            yield AskErrorEvent(
+                type="error",
+                message=(
+                    f"This clarification belongs to {session_target}. "
+                    f"Ask again on {target}."
+                ),
+                phase=AskPhase.CLARIFY,
+                code="clarification_target_mismatch",
+                category="clarification_target_mismatch",
+                target=target,
             )
             return
 
@@ -911,6 +1016,24 @@ class AskService:
         return self._session_store.pop(session_id, None) is not None
 
     async def _run_from_generate(
+        self,
+        ctx: Any,
+        *,
+        persist_query: bool = True,
+    ) -> AsyncGenerator[AskEvent, None]:
+        if getattr(ctx, "statement_cancel", None) is None:
+            ctx.statement_cancel = StatementCancel()
+        try:
+            async for event in self._generate_and_execute(
+                ctx, persist_query=persist_query
+            ):
+                yield event
+        except asyncio.CancelledError:
+            # The worker thread outlives the cancelled await; stop its statement too.
+            _stop_statements_in_background(ctx.statement_cancel)
+            raise
+
+    async def _generate_and_execute(
         self,
         ctx: Any,
         *,
@@ -994,11 +1117,13 @@ class AskService:
             ctx = await asyncio.to_thread(validate_sql, ctx, _NullPresenter())
             self._observe(AskPhase.VALIDATE, ctx)
             if ctx.has_validation_errors():
-                errors = [str(e) for e in ctx.validation_errors]
                 yield AskErrorEvent(
                     type="error",
-                    message=f"SQL validation failed: {'; '.join(errors)}",
+                    message=describe_validation_issues(ctx.validation_errors),
                     phase=AskPhase.VALIDATE,
+                    code="sql_validation_failed",
+                    category="sql_validation",
+                    target=ctx.target,
                 )
                 return
 
@@ -1023,12 +1148,32 @@ class AskService:
             phase=AskPhase.EXECUTE,
             message="Executing query...",
         )
-        ctx = await asyncio.to_thread(
-            execute_query, ctx, _NullPresenter(), self._db_executor
-        )
+        deadline = _execution_deadline(ctx)
+        try:
+            ctx = await asyncio.wait_for(
+                asyncio.to_thread(
+                    execute_query, ctx, _NullPresenter(), self._db_executor
+                ),
+                deadline,
+            )
+        except asyncio.TimeoutError:
+            # The server stopped answering (its own statement timeout is shorter), so a
+            # cancel request can't land. Cutting the socket unblocks the worker thread,
+            # which is never awaited again.
+            ctx.statement_cancel.abort()
+            yield AskErrorEvent(
+                type="error",
+                message=f"{ctx.target} didn't answer within {deadline:g} s.",
+                phase=AskPhase.EXECUTE,
+                code="query_timeout",
+                category="query_timeout",
+                target=ctx.target,
+            )
+            return
         self._observe(AskPhase.EXECUTE, ctx)
 
         executed_sql = str(ctx.sql or "")
+        monitor_lookup = _start_monitor_lookup(ctx.target, executed_sql)
         if self._identifier_quoting_enabled:
             ctx = await self._apply_identifier_quoting(ctx)
         ctx = await self._apply_post_execution_repairs(ctx)
@@ -1127,9 +1272,15 @@ class AskService:
                 explanation=ctx.sql_explanation,
             )
 
-        if ctx.execution_result and not ctx.execution_result.error:
+        result = ctx.execution_result
+        # Only a statement that ran and returned a shape becomes a result; a refused or
+        # failed one ends in an error so no empty table stands in for an answer.
+        if result is not None and not result.error and result.columns:
             ctx.mark_success()
             qhash, qtag = self._auto_save_query(ctx, persist_query=persist_query)
+            limit_added = bool(getattr(ctx, "limit_added", False))
+            limit_reduced = bool(getattr(ctx, "limit_reduced", False))
+            ask_capped = limit_added or limit_reduced or bool(getattr(ctx, "rows_capped", False))
             yield AskResultEvent(
                 type="result",
                 success=True,
@@ -1142,19 +1293,24 @@ class AskService:
                 total_tokens=ctx.total_tokens,
                 query_hash=qhash,
                 query_tag=qtag,
-                limit_added=bool(getattr(ctx, "limit_added", False)),
+                limit_added=limit_added,
+                limit_reduced=limit_reduced,
+                # Only a cap Ask imposed counts as cutting the user's result.
+                truncated=ctx.execution_result.truncated and ask_capped,
+                row_limit=getattr(ctx, "row_limit", None),
+                monitor_key=await _recorded_monitor_key(
+                    ctx.target, ctx.sql or "", monitor_lookup
+                ),
             )
             return
 
-        error_msg = (
-            ctx.execution_result.error if ctx.execution_result else "Execution failed"
-        )
         yield self._database_error(
-            error_msg,
+            (result.error if result is not None else None)
+            or "The query didn't return a result.",
             AskPhase.EXECUTE,
             ctx.target,
             ctx.target_config or {},
-            ctx.execution_result.error_kind if ctx.execution_result else None,
+            result.error_kind if result is not None else None,
         )
 
     async def _apply_declared_count(self, ctx: Any) -> Any:

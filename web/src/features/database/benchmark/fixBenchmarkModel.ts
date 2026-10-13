@@ -30,7 +30,10 @@ export function queriesWithFixes(rows: MonitorQuery[]): MonitorQuery[] {
   )
 }
 
-/** One row per query: the result's before and after, else the live mean and nothing. */
+/**
+ * One row per query: the result's before and after, else the live mean and nothing. A
+ * before the result couldn't measure stays unknown, and so does a mean with no calls.
+ */
 export function benchmarkRows(
   queries: MonitorQuery[],
   result: BenchmarkFixesResult | undefined
@@ -45,7 +48,11 @@ export function benchmarkRows(
       name: query.display_name,
       color: swatchColor(query.color_index),
       sql: query.suggested_fix?.sql ?? null,
-      before_ms: facts?.before_ms ?? query.mean_ms,
+      before_ms: facts
+        ? facts.before_ms
+        : query.mean_ms > 0
+          ? query.mean_ms
+          : null,
       after_ms: facts?.after_ms ?? null,
       estimated: facts?.estimated ?? true,
       reason: facts?.reason ?? null,

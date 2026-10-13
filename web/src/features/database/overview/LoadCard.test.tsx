@@ -103,7 +103,10 @@ it('draws the busiest queries on the first window, with the line under the chart
     { key: 'a', label: 'orders by id', qps: [4, 5], meanMs: [2, 3] },
     { key: 'b', label: 'cart lines', qps: [1, 2], meanMs: [9, 8] },
   ])
-  const firstRun = { firstReport: true }
+  const firstRun = {
+    firstReport: true,
+    line: 'Your first daily report runs tonight, just after midnight.',
+  }
   const { rerender } = render(
     <LoadCard
       {...props({

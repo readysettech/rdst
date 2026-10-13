@@ -149,6 +149,43 @@ describe('DatabaseRows', () => {
     )
   })
 
+  it('says under the row what Test tunnel found', () => {
+    const ssh = { host: 'bastion.test', port: 22, user: 'deploy' }
+    const tunnelled = targets.map((target) => ({ ...target, ssh }))
+    const props = renderRows({
+      targets: tunnelled,
+      connectivity: {},
+      tunnelTests: {
+        orders: { status: 'ok' },
+        reports: {
+          status: 'failed',
+          message: "Couldn't reach the SSH jump host bastion.test:22.",
+        },
+      },
+    })
+    expect(screen.getByRole('status').textContent).toBe(
+      'Tunnel works. The jump host and the database are reachable.'
+    )
+    expect(
+      screen.getByText("Couldn't reach the SSH jump host bastion.test:22.")
+    ).toBeTruthy()
+    fireEvent.keyDown(
+      screen.getByRole('button', { name: 'More actions for orders' }),
+      { key: 'Enter' }
+    )
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Test tunnel' }))
+    expect(props.onTestTunnel).toHaveBeenCalledWith('orders')
+  })
+
+  it('says a tunnel test is running', () => {
+    renderRows({
+      targets: [{ ...targets[0], ssh: { host: 'b', port: 22, user: 'u' } }],
+      connectivity: {},
+      tunnelTests: { orders: { status: 'testing' } },
+    })
+    expect(screen.getByRole('status').textContent).toBe('Testing the tunnel...')
+  })
+
   it('says which database waits for a sign-in, with the link', () => {
     signIn.held = new Set(['orders'])
     renderRows()

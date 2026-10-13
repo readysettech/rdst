@@ -3,8 +3,8 @@ import {
   classifyError,
   friendlySqlError,
   isConnectionFailure,
-  isModelTimeout,
   isModelContextLimitError,
+  isModelTimeout,
   isTrialExhaustedError,
   normalizeExplainError,
   normalizeHttpError,
@@ -80,7 +80,10 @@ describe('classifyError', () => {
     ).toBe('rdst-service')
     expect(recoveryFor('rdst-service')?.label).toBe('Open AI settings')
     expect(
-      isModelTimeout({ code: 'error', message: 'Step X timed out after 5 minutes.' })
+      isModelTimeout({
+        code: 'error',
+        message: 'Step X timed out after 5 minutes.',
+      })
     ).toBe(false)
     expect(
       isModelTimeout({
@@ -94,6 +97,47 @@ describe('classifyError', () => {
     expect(
       classifyError({ code: 'trial_exhausted', message: 'verify your email' })
     ).toBe('rdst-service')
+  })
+
+  it('classifies an unreachable AI service as network before auth', () => {
+    for (const envelope of [
+      {
+        code: 'ANTHROPIC_UNREACHABLE',
+        message:
+          "Couldn't reach Anthropic. Check your connection and try again.",
+      },
+      {
+        code: 'HOSTED_INFERENCE_UNAVAILABLE',
+        message:
+          "Couldn't reach RDST's AI service. Check your connection and try again.",
+      },
+      { code: 'error', message: 'Claude request error: Connection error.' },
+      {
+        code: 'error',
+        message:
+          'AI service authentication failed: getaddrinfo ENOTFOUND api.anthropic.com',
+      },
+      { code: 'error', message: 'LLM call failed: fetch failed' },
+      { code: 'error', message: 'Anthropic request timed out (ECONNREFUSED)' },
+    ]) {
+      expect(classifyError(envelope)).toBe('network')
+    }
+    expect(retryHelps('network')).toBe(true)
+    expect(recoveryFor('network')).toBeUndefined()
+    // A database connection failure stays a database problem.
+    expect(
+      classifyError({
+        code: 'error',
+        message: 'connection refused (ECONNREFUSED)',
+      })
+    ).toBe('database')
+    // A rejected key is still a credential problem.
+    expect(
+      classifyError({
+        code: 'ANTHROPIC_AUTH_INVALID',
+        message: 'Anthropic rejected the configured API key.',
+      })
+    ).not.toBe('network')
   })
 
   it('maps Anthropic failures to provider', () => {

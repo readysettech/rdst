@@ -10,6 +10,7 @@ interface PageCopy {
   busy: boolean
   error?: string
   retry?: boolean
+  reload?: boolean
 }
 
 function copyFor(state: BackendStartState): PageCopy {
@@ -17,14 +18,16 @@ function copyFor(state: BackendStartState): PageCopy {
     case 'migrating':
       return {
         title: 'Upgrading your data, this can take a minute',
-        body: "RDST is updating its saved queries and monitoring history for this version. " +
+        body:
+          'RDST is updating its saved queries and monitoring history for this version. ' +
           "It'll open by itself when it's done. Please don't quit RDST until then.",
         busy: true,
       }
     case 'retrying':
       return {
         title: 'Restarting RDST',
-        body: `RDST's background service stopped while starting. ` +
+        body:
+          `RDST's background service stopped while starting. ` +
           `Trying again in ${Math.round(state.retryInMs / 1000)} seconds.`,
         busy: true,
         error: state.error,
@@ -32,7 +35,7 @@ function copyFor(state: BackendStartState): PageCopy {
     case 'failed':
       return {
         title: "RDST couldn't start",
-        body: "Its background service stopped every time it started. The log says why.",
+        body: 'Its background service stopped every time it started. The log says why.',
         busy: false,
         error: state.error,
         retry: true,
@@ -44,14 +47,36 @@ function copyFor(state: BackendStartState): PageCopy {
 
 /** The page the window shows until the backend is ready, as a data: URL. */
 export function startupPageHtml(state: BackendStartState): string {
-  const copy = copyFor(state)
+  return pageHtml(copyFor(state), state.phase)
+}
+
+/** The page the window shows after its renderer kept crashing. */
+export function rendererCrashPageHtml(): string {
+  return pageHtml(
+    {
+      title: "RDST's window stopped working",
+      body: 'It closed unexpectedly several times in a minute. The log may say why.',
+      busy: false,
+      reload: true,
+    },
+    'renderer-crashed'
+  )
+}
+
+export function rendererCrashPageUrl(): string {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(rendererCrashPageHtml())}`
+}
+
+function pageHtml(copy: PageCopy, phase: string): string {
   const error = copy.error
     ? `<pre>${escapeHtml(copy.error.split('\n').slice(0, 30).join('\n'))}</pre>`
     : ''
-  const buttons = copy.busy && !copy.error
-    ? ''
-    : `<div class="actions">
+  const buttons =
+    copy.busy && !copy.error
+      ? ''
+      : `<div class="actions">
         ${copy.retry ? '<button id="retry" class="primary">Try again</button>' : ''}
+        ${copy.reload ? '<button id="reload" class="primary">Reload</button>' : ''}
         <button id="logs">Open logs</button>
       </div>`
   return `<!doctype html>
@@ -75,7 +100,7 @@ export function startupPageHtml(state: BackendStartState): string {
     background: #262323; color: #e8e6e3; cursor: pointer; }
   button.primary { background: #e8e6e3; color: #171616; border-color: #e8e6e3; }
 </style></head>
-<body><main data-phase="${state.phase}">
+<body><main data-phase="${phase}">
   ${copy.busy ? '<div class="spinner"></div>' : ''}
   <h1>${escapeHtml(copy.title)}</h1>
   ${copy.body ? `<p>${escapeHtml(copy.body)}</p>` : ''}
@@ -86,6 +111,7 @@ export function startupPageHtml(state: BackendStartState): string {
   const desktop = window.rdstDesktop && window.rdstDesktop.startup
   document.getElementById('logs')?.addEventListener('click', () => desktop?.openLogs())
   document.getElementById('retry')?.addEventListener('click', () => desktop?.retry())
+  document.getElementById('reload')?.addEventListener('click', () => desktop?.reload())
 </script>
 </body></html>`
 }

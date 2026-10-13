@@ -1,9 +1,53 @@
-// Desktop notifications for inbox items the monitor marks `notified`. The choice is
-// per browser (localStorage); the OS permission prompt runs when it is turned on.
+// Desktop notifications for inbox items the monitor marks `notified`. The choice is kept in
+// the backend's preferences and cached in localStorage; each browser still needs the OS
+// permission, whose prompt runs when it is turned on.
 import { useSyncExternalStore } from 'react'
 
 const STORAGE_KEY = 'rdst_inbox_desktop_notifications'
 const CHANGE_EVENT = 'rdst_inbox_desktop_notifications_changed'
+const PREFERENCES_URL = '/api/settings/preferences'
+
+let hydrated = false
+
+function storeChoice(enabled: boolean) {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, enabled ? '1' : '0')
+  } catch {
+    /* storage unavailable: the choice lasts for this page only */
+  }
+  window.dispatchEvent(new Event(CHANGE_EVENT))
+}
+
+function saveChoice(enabled: boolean) {
+  void fetch(PREFERENCES_URL, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ push_notifications: enabled }),
+  }).catch(() => undefined)
+}
+
+/**
+ * Apply the backend's choice once per page load. With none saved yet, this browser's
+ * earlier choice is saved. Undefined means the backend doesn't keep one.
+ */
+export function hydrateDesktopNotifications(
+  fromBackend: boolean | null | undefined
+) {
+  if (hydrated || typeof window === 'undefined') return
+  hydrated = true
+  if (fromBackend === undefined) return
+  let local: string | null = null
+  try {
+    local = window.localStorage.getItem(STORAGE_KEY)
+  } catch {
+    /* no cache to compare */
+  }
+  if (fromBackend === null) {
+    if (local === '1') saveChoice(true)
+    return
+  }
+  if ((local === '1') !== fromBackend) storeChoice(fromBackend)
+}
 
 export type DesktopNotificationSupport = 'unsupported' | 'denied' | 'ok'
 
@@ -35,12 +79,8 @@ export async function setDesktopNotifications(on: boolean): Promise<boolean> {
         : await window.Notification.requestPermission()
     enabled = permission === 'granted'
   }
-  try {
-    window.localStorage.setItem(STORAGE_KEY, enabled ? '1' : '0')
-  } catch {
-    /* storage unavailable: the choice lasts for this page only */
-  }
-  window.dispatchEvent(new Event(CHANGE_EVENT))
+  storeChoice(enabled)
+  saveChoice(enabled)
   return enabled
 }
 

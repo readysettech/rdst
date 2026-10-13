@@ -1793,10 +1793,11 @@ class AddedQuery(BaseModel):
 
 
 class HomeStatus(BaseModel):
-    """needs_you: an Act now item is open. quiet: attention checks ran in the last 3 cycles
-    and nothing is open. paused: charts and stuck-query alerts run, AI checks do not. off:
-    no database is monitored."""
-    state: Literal["needs_you", "quiet", "paused", "off"]
+    """needs_you: an Act now item is open. cant_reach: nothing is open, but the latest check
+    of `target` failed, from `since`. quiet: attention checks ran in the last 3 cycles and
+    nothing is open. paused: charts and stuck-query alerts run, AI checks do not. off: no
+    database is monitored."""
+    state: Literal["needs_you", "cant_reach", "quiet", "paused", "off"]
     target: str | None
     needs_you: int
     to_watch: int

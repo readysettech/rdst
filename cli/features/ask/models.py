@@ -75,3 +75,7 @@ class AskResult:
     query_hash: str = ""
     query_tag: str = ""
     limit_added: bool = False
+    limit_reduced: bool = False
+    truncated: bool = False
+    row_limit: Optional[int] = None
+    monitor_key: Optional[str] = None

@@ -161,4 +161,28 @@ describe('SignInPage', () => {
       screen.getByRole('button', { name: 'Continue with GitHub' })
     ).toBeTruthy()
   })
+
+  it('turns a spent link into a sentence and a way to send a new one', async () => {
+    const raw = 'This sign-in session is unknown, expired, or already completed'
+    vi.mocked(completeAccountRedirect).mockRejectedValue(new Error(raw))
+    renderWithClient(<SignInPage callbackLoginId="login-9" />)
+
+    expect(
+      await screen.findByText(
+        'This sign-in link has expired or was already used.'
+      )
+    ).toBeTruthy()
+    expect(screen.queryByText(raw)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Send a new link' }))
+
+    expect(router.navigate).toHaveBeenCalledWith({
+      to: '/account-login',
+      search: {},
+      replace: true,
+    })
+    const email = await screen.findByLabelText('Email address')
+    await waitFor(() => expect(document.activeElement).toBe(email))
+    expect(screen.queryByText('Finishing sign-in...')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Send a new link' })).toBeNull()
+  })
 })

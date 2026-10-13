@@ -20,6 +20,7 @@ from features.schema.semantic_models import (
     TableAnnotation,
 )
 from shared.db_connection import (
+    IoDeadline,
     create_mysql_connection_from_params,
     postgres_connection_kwargs,
     quote_identifier,
@@ -37,6 +38,9 @@ from .pattern_detector import (
 # connection and the marker keeps the statements out of registry admission.
 PROFILE_LANE = "rdst/profile"
 _SELF_MARKER = rdst_self_marker(PROFILE_LANE)
+# A database that stops answering fails introspection after this long without progress: per
+# table on PostgreSQL, per socket read or write on MySQL.
+IO_TIMEOUT_SECONDS = 300
 
 
 class SchemaIntrospector:
@@ -140,7 +144,10 @@ class SchemaIntrospector:
         layer = SemanticLayer(target=target_name)
 
         try:
-            with connection.cursor() as cursor:
+            with (
+                IoDeadline(connection, IO_TIMEOUT_SECONDS) as deadline,
+                connection.cursor() as cursor,
+            ):
                 # Get all tables
                 cursor.execute("""
                     SELECT table_name
@@ -152,12 +159,14 @@ class SchemaIntrospector:
                 tables = [row[0] for row in cursor.fetchall()]
 
                 for table_name in tables:
+                    deadline.renew()
                     table_annotation = self._introspect_postgres_table(
                         cursor, table_name, enum_threshold, sample_enums
                     )
                     layer.tables[table_name] = table_annotation
 
                 # Get foreign key relationships
+                deadline.renew()
                 self._add_postgres_relationships(cursor, layer)
 
                 # Get installed extensions and custom types
@@ -578,7 +587,9 @@ class SchemaIntrospector:
             raise ConnectionError("Missing database connection details")
 
         # Determine SSL mode based on config
-        connection = create_mysql_connection_from_params(params)
+        connection = create_mysql_connection_from_params(
+            params, read_timeout=IO_TIMEOUT_SECONDS, write_timeout=IO_TIMEOUT_SECONDS
+        )
 
         layer = SemanticLayer(target=target_name)
 

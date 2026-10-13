@@ -74,6 +74,7 @@ async def test_rename_moves_the_connection_default_and_monitoring_history(tmp_rd
     cfg = TargetsConfig()
     cfg.load()
     cfg.set_default("shop")
+    cfg._data["preferences"] = {"selected_target": "shop"}
     cfg.save()
     store = MonitorStore()
     for target in ("shop", "billing"):
@@ -92,6 +93,7 @@ async def test_rename_moves_the_connection_default_and_monitoring_history(tmp_rd
     cfg.load()
     assert cfg.list_targets() == ["billing", "storefront"]
     assert cfg.get_default() == "storefront"
+    assert cfg._data["preferences"]["selected_target"] == "storefront"
     assert cfg.get("storefront")["password_env"] == "SHOP_PASSWORD"
     assert store.monitored_targets() == {"billing", "storefront"}
     assert sorted(item["target"] for item in store.inbox()) == ["billing", "storefront"]

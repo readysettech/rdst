@@ -49,7 +49,6 @@ import {
 import { clearAllBackgroundRuns } from '../../lib/backgroundRuns'
 import { thisComputer } from '../../lib/desktop'
 import { classifyError } from '../../lib/errorContract'
-import { isSshErrorCategory, sshErrorCopy } from '../../lib/sshErrors'
 import { invalidateTargetQueries } from '../../lib/targetQueries'
 import {
   invalidateTrialRelatedQueries,
@@ -70,7 +69,7 @@ import {
 import { formatBytes } from '../monitor-kit/format'
 import { AiKeyRouting } from './AiKeyRouting'
 import { ClearKeyringRow } from './ClearKeyringRow'
-import { DatabaseRows } from './DatabaseRows'
+import { DatabaseRows, type TunnelTest } from './DatabaseRows'
 import { DISCORD_INVITE_URL, DOCS_URL } from './links'
 import { PreferenceMenu } from './PreferenceMenu'
 import {
@@ -170,6 +169,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
   })
   // Which connection is being tested (drives the inline per-row spinner).
   const [testingTarget, setTestingTarget] = useState<string | null>(null)
+  const [tunnelTests, setTunnelTests] = useState<Record<string, TunnelTest>>({})
   const deepLinkHandledRef = useRef(false)
 
   const {
@@ -465,31 +465,27 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
   }
 
   const handleTunnelTest = async (targetName: string) => {
+    setTunnelTests((tests) => ({
+      ...tests,
+      [targetName]: { status: 'testing' },
+    }))
+    let outcome: TunnelTest
     try {
       const result = await testTunnel(targetName)
-      await tunnelStatusQuery.refetch()
-      toast({
-        title: result.ok ? 'Tunnel test passed' : 'Tunnel test failed',
-        description:
-          !result.ok && isSshErrorCategory(result.category)
-            ? sshErrorCopy({
-                category: result.category,
-                message: result.message,
-                target: targetName,
-              })
-            : result.message,
-        variant: result.ok ? 'positive' : 'negative',
-      })
+      outcome = result.ok
+        ? { status: 'ok' }
+        : { status: 'failed', message: result.message }
     } catch (caught) {
-      toast({
-        title: 'Tunnel test failed',
-        description:
+      outcome = {
+        status: 'failed',
+        message:
           caught instanceof Error
             ? caught.message
             : 'Could not test the tunnel.',
-        variant: 'negative',
-      })
+      }
     }
+    setTunnelTests((tests) => ({ ...tests, [targetName]: outcome }))
+    await refreshTunnelStatuses()
   }
 
   // A saved password changes what the row says about itself: `has_password`
@@ -776,6 +772,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
               setPasswordDialogTarget(target.name)
             }}
             onTestTunnel={(name) => void handleTunnelTest(name)}
+            tunnelTests={tunnelTests}
           />
           <AddDatabaseDialog
             request={null}

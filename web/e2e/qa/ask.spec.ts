@@ -190,7 +190,6 @@ test('an answer is stamped verified and right-aligns its numeric columns', async
   expect(alignment!.numberCell).toBe('right')
   expect(alignment!.textCell).not.toBe('right')
 
-  await page.getByRole('button', { name: /Show the SQL that ran/ }).click()
   await expect(page.locator('.cm-content')).toContainText('LIMIT 100')
   await shot(page, 'ask-answer')
 })

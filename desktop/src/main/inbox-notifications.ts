@@ -201,7 +201,8 @@ function waitForRetry(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 export function startInboxNotifications(options: {
-  apiBaseUrl: string
+  /** The backend's address, read on each connection; null while it is down. */
+  apiBaseUrl: string | (() => string | null)
   enabled: () => boolean
   notify: (notification: InboxNotification) => void
   fetcher?: typeof fetch
@@ -220,8 +221,13 @@ export function startInboxNotifications(options: {
     let retryMs = 1000
     while (!controller.signal.aborted) {
       try {
+        const apiBaseUrl =
+          typeof options.apiBaseUrl === 'function'
+            ? options.apiBaseUrl()
+            : options.apiBaseUrl
+        if (!apiBaseUrl) throw new Error('RDST backend is not running')
         const response = await fetcher(
-          `${options.apiBaseUrl}/api/monitor/inbox/stream?since=${startedAt}`,
+          `${apiBaseUrl}/api/monitor/inbox/stream?since=${startedAt}`,
           {
             headers: {
               Accept: 'text/event-stream',

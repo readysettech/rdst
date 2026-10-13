@@ -15,6 +15,15 @@ export interface ParsedConnectionUrl {
 export const defaultPortFor = (engine: string) =>
   engine === 'mysql' ? 3306 : 5432
 
+/** URL-decoded text; a malformed % sequence keeps the raw text rather than failing. */
+function decoded(text: string): string {
+  try {
+    return decodeURIComponent(text)
+  } catch {
+    return text
+  }
+}
+
 export function parseConnectionUrl(url: string): ParsedConnectionUrl | null {
   try {
     // Handle postgres:// as alias for postgresql://
@@ -40,7 +49,7 @@ export function parseConnectionUrl(url: string): ParsedConnectionUrl | null {
     const defaultPort = defaultPortFor(engine)
 
     // Extract database from pathname (remove leading slash)
-    const database = parsed.pathname.replace(/^\//, '')
+    const database = decoded(parsed.pathname.replace(/^\//, ''))
     const params = parsed.searchParams
 
     // Infer TLS/SSL from connection string query params
@@ -73,8 +82,8 @@ export function parseConnectionUrl(url: string): ParsedConnectionUrl | null {
       host: parsed.hostname || 'localhost',
       port: parsed.port ? Number.parseInt(parsed.port, 10) : defaultPort,
       database,
-      user: parsed.username ? decodeURIComponent(parsed.username) : '',
-      password: parsed.password ? decodeURIComponent(parsed.password) : '',
+      user: decoded(parsed.username),
+      password: decoded(parsed.password),
       tls,
       tlsVerify,
       tlsCa,

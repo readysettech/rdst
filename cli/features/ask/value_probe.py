@@ -9,7 +9,7 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
 
 from features.ask.engine.ask3.phases.execute import _execute_mysql, _execute_postgres
-from features.ask.sql_validation import validate_sql_for_ask
+from features.ask.sql_validation import describe_validation_issues, validate_sql_for_ask
 
 VALUE_PROBE_MAX_CALLS = 2
 VALUE_PROBE_TIMEOUT_SECONDS = 2
@@ -522,7 +522,7 @@ def _create_bounded_probe_executor(
         if not validation.get("is_valid"):
             diagnostics["failed_calls"] += 1
             return _failed_probe(
-                "SQL validation failed: " + "; ".join(validation.get("issues", [])),
+                describe_validation_issues(validation.get("issues")),
                 "probe_validation_failed",
             )
         validated_sql = str(validation.get("validated_sql") or sql)
@@ -547,6 +547,9 @@ def _create_bounded_probe_executor(
                     target_config,
                     max(0.001, remaining),
                     ctx.target,
+                    statement_cancel=getattr(ctx, "statement_cancel", None),
+                    # One row past the bound is enough to reject an oversized result.
+                    max_rows=max_rows + 1,
                 )
             else:
                 result = _execute_postgres(
@@ -554,6 +557,8 @@ def _create_bounded_probe_executor(
                     target_config,
                     max(0.001, remaining),
                     ctx.target,
+                    statement_cancel=getattr(ctx, "statement_cancel", None),
+                    max_rows=max_rows + 1,
                 )
         except Exception as exc:
             result = _failed_probe(str(exc), "probe_execution_failed")

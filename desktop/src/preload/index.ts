@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
+import type { BackendRunState } from '../main/backend-supervisor.js'
 import type { LoginStatus } from '../main/login.js'
 import type { NotificationHealth } from '../main/notification-health.js'
 import type { UpdateStatePayload } from '../main/update-policy.js'
@@ -23,20 +24,6 @@ contextBridge.exposeInMainWorld('rdstDesktop', {
   files: {
     selectSshKey: (): Promise<string | null> =>
       ipcRenderer.invoke('ssh:select-key'),
-  },
-  windowControls: {
-    minimize: () => ipcRenderer.send('window:minimize'),
-    toggleMaximize: () => ipcRenderer.send('window:toggle-maximize'),
-    close: () => ipcRenderer.send('window:close'),
-    isMaximized: (): Promise<boolean> =>
-      ipcRenderer.invoke('window:is-maximized'),
-    onMaximizedChange: (callback: (maximized: boolean) => void) => {
-      const listener = (_event: unknown, maximized: boolean) =>
-        callback(maximized)
-      ipcRenderer.on('window:maximized-changed', listener)
-      return () =>
-        ipcRenderer.removeListener('window:maximized-changed', listener)
-    },
   },
   updates: {
     getState: (): Promise<UpdateStatePayload | null> =>
@@ -64,6 +51,17 @@ contextBridge.exposeInMainWorld('rdstDesktop', {
   startup: {
     openLogs: () => ipcRenderer.send('desktop:open-logs'),
     retry: () => ipcRenderer.send('desktop:retry-backend'),
+    reload: () => ipcRenderer.send('desktop:reload-window'),
+  },
+  backend: {
+    getState: (): Promise<BackendRunState> =>
+      ipcRenderer.invoke('desktop:get-backend-state'),
+    onStateChange: (callback: (state: BackendRunState) => void) => {
+      const listener = (_event: unknown, state: BackendRunState) =>
+        callback(state)
+      ipcRenderer.on('desktop:backend-state', listener)
+      return () => ipcRenderer.removeListener('desktop:backend-state', listener)
+    },
   },
   getStartAtLogin: (): Promise<LoginStatus> =>
     ipcRenderer.invoke('desktop:get-start-at-login'),

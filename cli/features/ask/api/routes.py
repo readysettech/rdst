@@ -131,6 +131,10 @@ def _event_to_sse(event: AskEvent) -> dict:
                     "query_hash": event.query_hash,
                     "query_tag": event.query_tag,
                     "limit_added": event.limit_added,
+                    "limit_reduced": event.limit_reduced,
+                    "truncated": event.truncated,
+                    "row_limit": event.row_limit,
+                    "monitor_key": event.monitor_key,
                 }
             ),
         }
@@ -188,7 +192,7 @@ async def _ask_generator(
                                read_kind="query", question=question,
                                resumed=bool(session_id) or None) as activity:
         async for item in _ask_events(input_data, options, target_engine, session_id,
-                                      clarification_answers, extra, activity):
+                                      clarification_answers, extra, activity, target):
             yield item
 
 
@@ -200,6 +204,7 @@ async def _ask_events(
     clarification_answers: dict | None,
     extra: dict,
     activity: agent_activity.Activity,
+    target: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     async with telemetry.command_run(
         "ask",
@@ -214,6 +219,7 @@ async def _ask_events(
                 async for event in service.resume(
                     session_id=session_id,
                     clarification_answers=clarification_answers,
+                    target=target,
                 ):
                     run.observe(event)
                     _describe_ask(activity, event)
@@ -294,29 +300,28 @@ async def ask_history(
     """Past natural-language questions, newest first.
 
     Draws on the query registry, which auto-saves every answered ask with its
-    original question text. Only ask-sourced entries that carry a question are
-    returned; entries saved before question persistence landed have none. The
-    SQL is the original submitted form when stored, so a re-ask is faithful.
+    original question text. One item per database a SQL pattern was asked on,
+    carrying that database's question; entries saved before question
+    persistence landed have none. The SQL is the original submitted form when
+    stored, so a re-ask is faithful.
     """
     from shared.query_registry import QueryRegistry
 
     registry = QueryRegistry()
     items = [
         AskHistoryItem(
-            question=e.question,
+            question=question,
             sql=e.original_sql or e.sql,
             hash=e.hash,
             tag=e.tag,
-            target=e.home_target,
-            last_used=e.last_analyzed,
+            target=asked_on,
+            last_used=asked_at,
         )
         for e in registry.list_queries()
-        if e.source == "ask"
-        and e.question
-        # Scope by the query's home target; last_target is mutable and leaked
-        # questions across databases (rdst-e7s.26).
-        and (not target or e.home_target == target)
+        for asked_on, question, asked_at in e.ask_history()
+        if not target or asked_on == target
     ]
+    items.sort(key=lambda item: item.last_used, reverse=True)
     return AskHistoryResponse(items=items[:limit])
 
 

@@ -16,6 +16,7 @@ from .types import (
     Interpretation,
     SchemaInfo,
     SchemaSource,
+    StatementCancel,
     Status,
     ValidationError,
 )
@@ -169,9 +170,16 @@ class Ask3Context:
     retry_count: int = 0
     limit_added: bool = False  # True when validation injected a missing LIMIT
     limit_reduced: bool = False
+    row_limit: Optional[int] = None  # Effective LIMIT of the SQL that ran
+    limit_sql: Optional[str] = None  # The SQL the three fields above describe
+    rows_capped: bool = False  # Ask's row cap cut a result its own limit form let through
 
     # === Execution (Phase 5) ===
     execution_result: Optional[ExecutionResult] = None
+    # Live statement registry so a disconnect or deadline can cancel it server-side.
+    statement_cancel: Optional[StatementCancel] = field(
+        default=None, repr=False, compare=False
+    )
 
     # === Overall Status ===
     status: str = Status.PENDING
@@ -317,6 +325,9 @@ class Ask3Context:
             "retry_count": self.retry_count,
             "limit_added": self.limit_added,
             "limit_reduced": self.limit_reduced,
+            "row_limit": self.row_limit,
+            "limit_sql": self.limit_sql,
+            "rows_capped": self.rows_capped,
             # Execution
             "execution_result": self.execution_result.to_dict()
             if self.execution_result
@@ -532,6 +543,9 @@ class Ask3Context:
         ctx.retry_count = data.get("retry_count", 0)
         ctx.limit_added = data.get("limit_added", False)
         ctx.limit_reduced = data.get("limit_reduced", False)
+        ctx.row_limit = data.get("row_limit")
+        ctx.limit_sql = data.get("limit_sql")
+        ctx.rows_capped = data.get("rows_capped", False)
 
         # Status
         ctx.status = data.get("status", Status.PENDING)

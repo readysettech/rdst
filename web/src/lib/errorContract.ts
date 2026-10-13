@@ -86,6 +86,7 @@ const RECOVERY: Record<ErrorClass, RecoveryTarget | undefined> = {
   'local-dependency': { label: 'Set up caching', to: '/cache' },
   'rdst-service': { label: 'Open AI settings', to: '/configure' },
   provider: { label: 'Fix API key', to: '/configure' },
+  network: undefined,
   'valid-negative': undefined,
 }
 
@@ -100,8 +101,35 @@ export function retryHelps(errorClass: ErrorClass): boolean {
   return (
     errorClass === 'local-dependency' ||
     errorClass === 'rdst-service' ||
-    errorClass === 'provider'
+    errorClass === 'provider' ||
+    errorClass === 'network'
   )
+}
+
+const AI_NETWORK_CODES = new Set([
+  'anthropic_unreachable',
+  'proxy_unreachable',
+  'hosted_inference_unavailable',
+])
+
+const NETWORK_FAILURE =
+  /econnrefused|econnreset|enotfound|eai_again|getaddrinfo|name resolution|name or service not known|fetch failed|failed to fetch|networkerror|network is unreachable|connection error|connecterror|apiconnectionerror|failed to establish a new connection|max retries exceeded|unable to reach|couldn't reach|could not reach|\btimed out\b|\btimeout\b/
+
+const AI_SERVICE =
+  /anthropic|claude|\bllm\b|ai service|hosted|inference|gateway/
+
+/**
+ * A network failure on the way to the AI service (offline, DNS, refused, timed out). It
+ * says nothing about the credentials, so it must win over the auth tokens: retry, never
+ * sign in again.
+ */
+export function isAiNetworkError(
+  envelope: Pick<ApiErrorEnvelope, 'code' | 'message'>
+): boolean {
+  const code = (envelope.code ?? '').toLowerCase()
+  if (AI_NETWORK_CODES.has(code)) return true
+  const hay = `${code} ${envelope.message ?? ''}`.toLowerCase()
+  return AI_SERVICE.test(hay) && NETWORK_FAILURE.test(hay)
 }
 
 const CONTAINS = (haystack: string, needles: string[]): boolean =>
@@ -136,6 +164,7 @@ export function classifyError(envelope: ApiErrorEnvelope): ErrorClass {
 
   if (code === 'hosted_cap_reached') return 'rdst-service'
   if (isModelTimeout(envelope)) return 'rdst-service'
+  if (isAiNetworkError(envelope)) return 'network'
 
   if (
     CONTAINS(hay, [

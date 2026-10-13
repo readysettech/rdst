@@ -586,11 +586,11 @@ class TestEmailPersistence:
         mock_cfg.get_email.return_value = None  # no existing email
 
         with (
-            patch.object(tm, "track_with_stats") as mock_track,
+            patch.object(tm, "deliver_with_stats", return_value=True) as mock_track,
             patch("shared.config.targets.create_targets_config") as mock_cfg_factory,
         ):
             mock_cfg_factory.return_value = mock_cfg
-            tm.submit_feedback(
+            assert tm.submit_feedback(
                 reason="Great tool!",
                 query_hash="abc123",
                 query_sql="SELECT 1",
@@ -598,7 +598,7 @@ class TestEmailPersistence:
                 sentiment="positive",
                 email="feedback@example.com",
                 include_query=True,
-            )
+            ) is True
 
         mock_cfg.set_email.assert_called_once_with("feedback@example.com")
         mock_cfg.save.assert_called_once()
@@ -616,11 +616,69 @@ class TestEmailPersistence:
         tm = TelemetryManager()
         tm._rdst_dir = temp_rdst_dir
 
-        with patch.object(tm, "track_with_stats") as mock_track:
+        with patch.object(tm, "deliver_with_stats") as mock_track:
             with pytest.raises(ValueError, match="Email is required"):
                 tm.submit_feedback(reason="Anonymous feedback", email=None)
 
         mock_track.assert_not_called()
+
+    def test_feedback_reports_an_unreachable_posthog(self, temp_rdst_dir, monkeypatch):
+        from shared.telemetry_manager import TelemetryManager
+
+        tm = TelemetryManager()
+        tm._rdst_dir = temp_rdst_dir
+        tm._enabled = True
+        tm._initialized = True
+        tm._device_id = "test-device-id"
+        tm._internal_user_result = False
+        # Nothing listens on the discard port: the capture fails like an offline machine.
+        monkeypatch.setattr(tm, "POSTHOG_HOST", "http://127.0.0.1:9")
+        monkeypatch.setattr(tm, "POSTHOG_API_KEY", "phc_test")
+        with patch("shared.config.targets.create_targets_config"):
+            delivered = tm.submit_feedback(reason="Offline", email="a@example.com")
+
+        assert delivered is False
+
+    def test_feedback_is_sent_before_it_is_reported_delivered(self, temp_rdst_dir, monkeypatch):
+        from types import SimpleNamespace
+
+        from shared import telemetry_manager
+        from shared.telemetry_manager import TelemetryManager
+
+        captured = []
+
+        class SyncClient:
+            def __init__(self, *args, **kwargs):
+                assert kwargs["sync_mode"] is True
+
+            def capture(self, **kwargs):
+                captured.append(kwargs["event"])
+                return "event-uuid"
+
+            def shutdown(self):
+                pass
+
+        tm = TelemetryManager()
+        tm._rdst_dir = temp_rdst_dir
+        tm._enabled = True
+        tm._initialized = True
+        tm._device_id = "test-device-id"
+        tm._internal_user_result = False
+        monkeypatch.setattr(tm, "POSTHOG_API_KEY", "phc_test")
+        monkeypatch.setattr(telemetry_manager, "_get_posthog",
+                            lambda: SimpleNamespace(Client=SyncClient))
+        with patch("shared.config.targets.create_targets_config"):
+            assert tm.submit_feedback(reason="Hi", email="a@example.com") is True
+        assert captured[-1] == "feedback_submitted"
+
+    def test_feedback_is_not_claimed_sent_with_telemetry_off(self, temp_rdst_dir):
+        from shared.telemetry_manager import TelemetryManager
+
+        tm = TelemetryManager()
+        tm._rdst_dir = temp_rdst_dir
+        tm._enabled = False
+        with pytest.raises(RuntimeError, match="telemetry is turned off"):
+            tm.submit_feedback(reason="Hello", email="a@example.com")
 
 
 class TestTrialServiceDisplayName:

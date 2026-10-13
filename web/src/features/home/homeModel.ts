@@ -62,6 +62,7 @@ export function isEmptyHome(model: HomeModel): boolean {
 }
 
 export function homeTone(status: HomeStatus): StatusLineTone {
+  if (status.state === 'cant_reach') return 'negative'
   if (status.state === 'paused') return 'warning'
   if (status.state === 'off') return 'off'
   return 'live'

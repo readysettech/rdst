@@ -22,8 +22,9 @@ function hourClock(ts: number): string {
 }
 
 /**
- * The one sentence Home opens with, built from the status: Act now items first, then the
- * Do first changes, then the quiet, paused and not-monitored forms.
+ * The one sentence Home opens with, built from the status: Act now items first, then a
+ * database RDST can't reach, then the Do first changes, then the quiet, paused and
+ * not-monitored forms.
  */
 export function HomeSentence({
   status,
@@ -60,6 +61,22 @@ export function HomeSentence({
       </>
     )
   }
+  if (status.state === 'cant_reach')
+    return (
+      <>
+        <Link
+          to="/database"
+          search={{ target } as never}
+          className={statusLinkClass}
+        >
+          Can't reach {target}
+        </Link>
+        <StatusLine.Quiet>
+          {status.since ? ` since ${formatClock(status.since)}` : ''}; no
+          readings or alerts until it answers.
+        </StatusLine.Quiet>
+      </>
+    )
   const first = doFirstOn ?? target
   if (status.state !== 'off' && doFirst > 0 && first)
     return (
@@ -105,9 +122,13 @@ export function HomeSentence({
 
 /**
  * The caption under the sentence: what is watched out of `configured` databases, the last
- * reading, what comes next.
+ * reading, what comes next. Signed out, reports don't run, so none is promised.
  */
-export function homeCaption(status: HomeStatus, configured = 0): string | null {
+export function homeCaption(
+  status: HomeStatus,
+  configured = 0,
+  signedOut = false
+): string | null {
   const parts: string[] = []
   if (status.watching > 0)
     parts.push(
@@ -117,7 +138,7 @@ export function homeCaption(status: HomeStatus, configured = 0): string | null {
     )
   if (status.last_reading_at)
     parts.push(`Last reading ${clockSeconds(status.last_reading_at)}.`)
-  if (status.next_report_at)
+  if (status.next_report_at && !signedOut)
     parts.push(
       `Next ${status.watching > 1 ? 'reports' : 'report'} at ${hourClock(status.next_report_at)}.`
     )

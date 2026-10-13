@@ -487,11 +487,16 @@ def generate_sql_from_nl(
 
         # Validate safety. The model's own safety_assessment is not evidence --
         # the same model wrote the SQL -- so check the generated statement.
+        unsafe_sql = False
         if result.sql:
             read_only_check = check_read_only(result.sql)
             if not read_only_check["is_read_only"]:
+                unsafe_sql = True
                 result.success = False
-                result.error = "Generated query is not read-only (safety violation)"
+                result.error = (
+                    "The generated SQL would change data, so Ask didn't run it. "
+                    "Ask only runs read-only queries."
+                )
 
         # Convert to dict for workflow compatibility
         return {
@@ -504,6 +509,11 @@ def generate_sql_from_nl(
             "cannot_answer_reason": result.cannot_answer_reason,
             "missing_schema": result.missing_schema,
             "error": result.error,
+            **(
+                {"error_code": "ask_unsafe_sql", "error_category": "read_only"}
+                if unsafe_sql
+                else {}
+            ),
             "raw_response": result_data,
             **size_diagnostics,
         }

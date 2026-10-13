@@ -33,6 +33,7 @@ describe('leadSentence', () => {
     expect(
       leadSentence(
         result({
+          sql: 'SELECT title, votes, score FROM posts ORDER BY votes DESC LIMIT 100',
           rows: [
             ['Why does Postgres choose a sequential scan?', 412, 388],
             ['Index on (a, b) vs two indexes', 201, 190],
@@ -46,6 +47,7 @@ describe('leadSentence', () => {
     expect(
       leadSentence(
         result({
+          sql: 'SELECT title, votes, score FROM posts ORDER BY 2 DESC',
           rows: [
             ['A', '300', 1],
             ['B', '200', 1],
@@ -56,19 +58,116 @@ describe('leadSentence', () => {
     ).toBe('"A" leads with 300 votes.')
   })
 
-  it('reads the largest value even when the rows are not sorted on it', () => {
+  it('names no leader for a list the query does not rank', () => {
     expect(
       leadSentence(
         result({
+          sql: 'SELECT primarytitle, runtimeminutes FROM titles LIMIT 3',
+          columns: ['primarytitle', 'runtimeminutes'],
           rows: [
-            ['B', 20, 1],
-            ['A', 90, 1],
-            ['C', 40, 1],
+            ['B', 20],
+            ['A', 90],
+            ['C', 40],
           ],
           row_count: 3,
         })
       )
-    ).toBe('"A" leads with 90 votes, more than twice the next post.')
+    ).toBe('The answer has 3 rows.')
+  })
+
+  it('leads with the column the SQL ranks by, in the order the rows came back', () => {
+    const titles = {
+      columns: ['primarytitle', 'startyear', 'averagerating', 'numvotes'],
+      rows: [
+        ['The Chosen', 2019, 9.2, 81000],
+        ['Breaking Bad', 2008, 9.5, 2100000],
+        ['Planet Earth II', 2023, 9.4, 160000],
+      ],
+      row_count: 3,
+    }
+    expect(
+      leadSentence(
+        result({
+          ...titles,
+          sql: 'SELECT t.primarytitle, t.startyear, r.averagerating, r.numvotes FROM titles t JOIN ratings r ON (r.tconst = t.tconst) ORDER BY r."averagerating" DESC, r.numvotes DESC LIMIT 3',
+          rows: [titles.rows[1], titles.rows[2], titles.rows[0]],
+        })
+      )
+    ).toBe('"Breaking Bad" leads with 9.5 averagerating.')
+    // An ascending ranking names its first row as the lowest, not its largest value.
+    expect(
+      leadSentence(
+        result({
+          ...titles,
+          sql: 'SELECT primarytitle, startyear, averagerating, numvotes FROM titles ORDER BY numvotes',
+          rows: [titles.rows[0], titles.rows[2], titles.rows[1]],
+        })
+      )
+    ).toBe('"The Chosen" is lowest with 81,000 numvotes.')
+    // A window's ORDER BY is not the answer's ranking.
+    expect(
+      leadSentence(
+        result({
+          ...titles,
+          sql: 'SELECT primarytitle, startyear, rank() OVER (ORDER BY startyear DESC) AS averagerating, numvotes FROM titles',
+        })
+      )
+    ).toBe('The answer has 3 rows.')
+  })
+
+  it('reads a single value as itself', () => {
+    expect(
+      leadSentence(
+        result({
+          sql: 'SELECT count(*) AS movies FROM titles',
+          columns: ['movies'],
+          rows: [[40]],
+          row_count: 1,
+        })
+      )
+    ).toBe('The answer is 40 movies.')
+    expect(
+      leadSentence(
+        result({ columns: ['avg_rating'], rows: [['7.21']], row_count: 1 })
+      )
+    ).toBe('The answer is 7.21 avg_rating.')
+  })
+
+  it('names no leader when the answer is sorted on text or an expression', () => {
+    const rows = {
+      columns: ['primarytitle', 'titletype', 'averagerating'],
+      rows: [
+        ['Arcane', 'tvSeries', 9.0],
+        ['Dune', 'movie', 8.0],
+      ],
+      row_count: 2,
+    }
+    expect(
+      leadSentence(
+        result({ ...rows, sql: 'SELECT * FROM t ORDER BY titletype' })
+      )
+    ).toBe('The answer has 2 rows.')
+    expect(
+      leadSentence(
+        result({
+          ...rows,
+          sql: 'SELECT * FROM t ORDER BY length(primarytitle) DESC',
+        })
+      )
+    ).toBe('The answer has 2 rows.')
+  })
+
+  it('says the rows stop at the LIMIT when the query matched more', () => {
+    expect(
+      leadSentence(
+        result({
+          columns: ['n'],
+          rows: [[1], [2]],
+          row_count: 1000,
+          truncated: true,
+        })
+      )
+    ).toBe('Showing the first 1,000 rows; the query matched more.')
   })
 
   it('states the row count without a text column, a number or a single leader', () => {
@@ -84,9 +183,22 @@ describe('leadSentence', () => {
     expect(
       leadSentence(
         result({
+          sql: 'SELECT title, votes, score FROM posts ORDER BY votes DESC',
           rows: [
             ['A', 5, 1],
             ['B', 5, 1],
+          ],
+          row_count: 2,
+        })
+      )
+    ).toBe('The answer has 2 rows.')
+    // Two quantities and no ranking among them: no headline to pick.
+    expect(
+      leadSentence(
+        result({
+          rows: [
+            ['A', 90, 3],
+            ['B', 20, 7],
           ],
           row_count: 2,
         })
@@ -121,6 +233,11 @@ describe('cellText', () => {
     expect(cellText(4790, 'order_count')).toBe('4,790')
     expect(cellText(4790, 'customer_id')).toBe('4790')
     expect(cellText(2026, 'year')).toBe('2026')
+    expect(cellText(1894, 'startyear')).toBe('1894')
+    expect(cellText(1894, 'startYear')).toBe('1894')
+    expect(cellText(1894, 'release_year')).toBe('1894')
+    expect(cellText(1894, 'paid')).toBe('1,894')
+    expect(cellText(4790, 'zipcode')).toBe('4790')
     expect(cellText(null, 'id')).toBe('NULL')
   })
 })

@@ -17,6 +17,7 @@ import {
 import { SettingsPage } from '../features/settings/SettingsPage'
 import { fetchAccountStatus, setAiProvider, setEnvSecret } from '../lib/api'
 import { useTrialSource } from '../lib/trialQueries'
+import { testTunnel } from '../lib/tunnels'
 import { useConfigure } from '../lib/useConfigure'
 import {
   fetchFleetAwsStatus,
@@ -54,6 +55,11 @@ vi.mock('../lib/api', async (importOriginal) => ({
   setEnvSecret: vi.fn(),
 }))
 vi.mock('../lib/useConfigure', () => ({ useConfigure: vi.fn() }))
+vi.mock('../lib/tunnels', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/tunnels')>()),
+  fetchTunnelStatuses: vi.fn(async () => []),
+  testTunnel: vi.fn(),
+}))
 vi.mock('../lib/useFleet', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/useFleet')>()),
   fetchFleetAwsStatus: vi.fn(),
@@ -553,5 +559,57 @@ describe('Settings row password save', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
 
     expect(refetch).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Settings > Test tunnel', () => {
+  afterEach(cleanup)
+
+  async function testTunnelFromMenu() {
+    const configure = mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    vi.mocked(useConfigure).mockReturnValue({
+      ...configure,
+      targets: configure.targets.map((target) => ({
+        ...target,
+        ssh: { host: 'bastion.test', port: 22, user: 'deploy' },
+      })),
+    })
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    renderWithClient(<SettingsPage search={{}} />)
+    fireEvent.keyDown(
+      await screen.findByRole('button', { name: 'More actions for orders' }),
+      { key: 'Enter' }
+    )
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Test tunnel' }))
+  }
+
+  it('says under the row that the tunnel works', async () => {
+    vi.mocked(testTunnel).mockResolvedValue({
+      ok: true,
+      stage: 'database',
+      message: "Tunnel test passed for 'orders'.",
+    })
+    await testTunnelFromMenu()
+    expect(vi.mocked(testTunnel)).toHaveBeenCalledWith('orders')
+    expect(
+      await screen.findByText(
+        'Tunnel works. The jump host and the database are reachable.'
+      )
+    ).toBeTruthy()
+  })
+
+  it("shows the backend's reason under the row when the tunnel fails", async () => {
+    const message =
+      "Couldn't reach the SSH jump host bastion.test:22. Check that it's running and that this computer can reach it."
+    vi.mocked(testTunnel).mockResolvedValue({
+      ok: false,
+      stage: 'tunnel',
+      category: 'ssh_jump_unreachable',
+      message,
+    })
+    await testTunnelFromMenu()
+    expect(await screen.findByText(message)).toBeTruthy()
   })
 })

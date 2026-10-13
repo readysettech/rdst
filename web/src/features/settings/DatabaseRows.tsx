@@ -15,6 +15,11 @@ import type { FleetConnectivityEvent } from '../../types/fleet'
 import { SignInNote, useSignInHeld } from '../monitor-kit/signInHold'
 import { StateDot, switcherState } from '../shared/filters/DatabaseFilter'
 
+/** A row's last tunnel test: still running, or what it found. */
+export type TunnelTest =
+  | { status: 'testing' | 'ok' }
+  | { status: 'failed'; message: string }
+
 export interface DatabaseRowsProps {
   targets: ConfigureTarget[]
   /** The list has not been read yet. */
@@ -29,6 +34,8 @@ export interface DatabaseRowsProps {
   onRemove: (name: string) => void
   onSetPassword: (target: ConfigureTarget) => void
   onTestTunnel: (name: string) => void
+  /** Tunnel tests run from this page, by database name. */
+  tunnelTests?: Record<string, TunnelTest>
 }
 
 const ENGINE: Record<string, string> = {
@@ -45,6 +52,8 @@ function connection(target: ConfigureTarget): string {
 }
 
 const COLUMNS = 'minmax(0,1fr) 180px auto'
+// The line under a row that closes it.
+const LAST_LINE = 'border-b border-border-layout-2'
 const itemClass = 'h-8.5 min-w-0 rounded-md px-2.5 text-body-small'
 
 /** One row per configured database: name, connection, state word, its actions. */
@@ -60,6 +69,7 @@ export function DatabaseRows({
   onRemove,
   onSetPassword,
   onTestTunnel,
+  tunnelTests = {},
 }: DatabaseRowsProps) {
   const [removing, setRemoving] = useState<string | null>(null)
   // Rows tested here say when they connected; the sweep on opening only names failures.
@@ -100,10 +110,13 @@ export function DatabaseRows({
             result?.code === 'TARGET_PASSWORD_REQUIRED'
           const state = switcherState(lines.get(target.name))
           const canTest = !checkable || checkable.has(target.name)
+          const tunnel = tunnelTests[target.name]
           return (
             <div key={target.name}>
               <ListRow
-                className={failed || connected ? 'border-b-0' : undefined}
+                className={
+                  failed || connected || tunnel ? 'border-b-0' : undefined
+                }
               >
                 <div className="min-w-0">
                   <Text
@@ -173,6 +186,7 @@ export function DatabaseRows({
                         <Dropdown.Item
                           label="Test tunnel"
                           className={itemClass}
+                          disabled={tunnel?.status === 'testing'}
                           onClick={() => onTestTunnel(target.name)}
                         />
                       )}
@@ -187,7 +201,9 @@ export function DatabaseRows({
                 </div>
               </ListRow>
               {connected && (
-                <output className="block border-b border-border-layout-2 pb-3">
+                <output
+                  className={tunnel ? 'block pb-2' : `block pb-3 ${LAST_LINE}`}
+                >
                   <Text
                     as="p"
                     level="caption"
@@ -197,6 +213,7 @@ export function DatabaseRows({
                   </Text>
                 </output>
               )}
+              {tunnel && <TunnelLine test={tunnel} last={!failed} />}
               {failed && (
                 <div className="flex items-center gap-3 border-b border-border-layout-2 pb-3">
                   <div className="min-w-0 flex-1">
@@ -240,5 +257,33 @@ export function DatabaseRows({
         confirmVariant="negative"
       />
     </>
+  )
+}
+
+/** Under the row, what Test tunnel found, the way Test connection says it. */
+function TunnelLine({ test, last }: { test: TunnelTest; last: boolean }) {
+  const className = last ? `pb-3 ${LAST_LINE}` : 'pb-2'
+  if (test.status === 'failed')
+    return (
+      <div className={className}>
+        <Alert variant="warning" modifier="outline" label={test.message} />
+      </div>
+    )
+  return (
+    <output className={`block ${className}`}>
+      <Text
+        as="p"
+        level="caption"
+        className={
+          test.status === 'ok'
+            ? 'text-content-positive-soft'
+            : 'text-content-layout-3'
+        }
+      >
+        {test.status === 'ok'
+          ? 'Tunnel works. The jump host and the database are reachable.'
+          : 'Testing the tunnel...'}
+      </Text>
+    </output>
   )
 }

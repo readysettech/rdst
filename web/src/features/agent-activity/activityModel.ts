@@ -802,7 +802,7 @@ function reportLine(item: AgentActivityItem): ActivityLine {
 }
 
 function askLine(item: AgentActivityItem): ActivityLine {
-  const link = { to: '/ask', search: target(item) }
+  const link = { to: '/ask', search: item.target ? { db: item.target } : {} }
   const question = item.question ? quotedText(item.question) : 'a question'
   if (item.outcome === 'failed' || item.outcome === 'cancelled')
     return {

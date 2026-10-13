@@ -98,6 +98,6 @@ export const monitorKeys = {
   limitAll: ['monitor', 'limit'] as const,
   work: ['monitor', 'work'] as const,
   home: (target?: string) => ['monitor', 'home', target ?? 'all'] as const,
-  benchmarkFixes: (target: string, keys: string[]) =>
-    ['monitor', target, 'benchmark-fixes', keys.join(',')] as const,
+  benchmarkFixes: (target: string, keys: string[], run: number) =>
+    ['monitor', target, 'benchmark-fixes', keys.join(','), run] as const,
 }

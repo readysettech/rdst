@@ -663,6 +663,34 @@ def test_first_demo_fires_once_across_provisions(tmp_path, monkeypatch):
 
 
 
+def test_failed_provision_leaves_no_running_demo(tmp_path, monkeypatch):
+    svc = _bare_service(tmp_path, monkeypatch)
+    _stub_successful_provision(svc, monkeypatch)
+    _record_demo_events(svc, monkeypatch)
+    calls: list[str] = []
+
+    def _never_snapshots(*_a, **_k):
+        return False
+        yield  # pragma: no cover - generator shape
+
+    svc._wait_readyset_events = _never_snapshots
+    svc._running = False
+    svc._force_clean = lambda: calls.append("clean")
+    svc._delete_state = lambda: calls.append("delete_state")
+
+    out = list(svc.provision())
+
+    assert out[-1] == {"type": "error", "message": "ReadySet did not snapshot in time."}
+    assert not any(ev.get("type") == "complete" for ev in out)
+    # The half-built stack is gone, so nothing reports it provisioned or sends it traffic.
+    assert svc._ports is None
+    assert calls[-2:] == ["clean", "delete_state"]
+    assert svc._last_error == "ReadySet did not snapshot in time."
+    assert set(svc._health.values()) == {"absent"}
+    svc.start_load()
+    assert svc._running is False
+
+
 def _teardownable_service(tmp_path, monkeypatch):
     svc = _bare_service(tmp_path, monkeypatch)
     svc._ports = object()

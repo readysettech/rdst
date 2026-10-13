@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from typing import Any, Iterable
 
 from features.monitor.analysis_digest import digest_for_ref, library_analysis_jobs, summary_for_job
+from features.monitor.connection import ANSWERED
 from features.monitor.db_actions import concurrent_index_sql
 from features.monitor.naming import target_names
 from features.monitor.ranking import PRIOR_CALLS, blended_ms
@@ -1679,7 +1680,7 @@ def analysis_view(store: MonitorStore, target: str, key: str, digest: dict[str, 
                   now: int) -> dict[str, Any]:
     """The digest plus what the Full analysis page shows, read from the stored analysis.
     Facts the stored record lacks stay null."""
-    from features.monitor.analysis_digest import index_why, load_analysis
+    from features.monitor.analysis_digest import as_tested, index_why, load_analysis, tested_index
     from shared.monitor.monitor_store import local_day_bounds
 
     analysis = load_analysis({"state": "done", "analysis_ref": digest.get("analysis_ref"),
@@ -1696,14 +1697,11 @@ def analysis_view(store: MonitorStore, target: str, key: str, digest: dict[str, 
     testing = display.get("index_testing") if isinstance(display.get("index_testing"), dict) \
         else {}
     cost_before = cost_after = None
-    if fix and testing.get("tested"):
-        for result in testing.get("results") or []:
-            # A cost the planner reached without the index says nothing about the fix.
-            if isinstance(result, dict) and result.get("planner_used_index") and \
-                    str(result.get("index_sql") or "").strip().lower() \
-                    == str(fix.get("sql") or "").strip().lower():
-                cost_before = _num(result.get("original_cost") or result.get("cost_before"))
-                cost_after = _num(result.get("new_cost") or result.get("cost_after"))
+    tested = tested_index(fix.get("sql"), testing) if fix else None
+    # A cost the planner reached without the index says nothing about the fix.
+    if tested and tested.get("planner_used_index"):
+        cost_before = _num(tested.get("original_cost") or tested.get("cost_before"))
+        cost_after = _num(tested.get("new_cost") or tested.get("cost_after"))
     plan = digest.get("plan_summary") or {}
     root = explain.get("Plan") if isinstance(explain.get("Plan"), dict) else {}
     findings = [{"title": text, "detail": None, "value": None}
@@ -1717,11 +1715,12 @@ def analysis_view(store: MonitorStore, target: str, key: str, digest: dict[str, 
     lead_sql = str((digest.get("fix") or {}).get("sql") or "").strip().lower()
     indexes = []
     for item in llm.get("index_recommendations") or []:
-        sql = str(item.get("sql") or "").strip() if isinstance(item, dict) else ""
+        sql, tested = as_tested(item, testing) if isinstance(item, dict) else ("", None)
         if not sql or sql.lower() == lead_sql:
             continue
         table = str(item.get("table") or "").split(".")[-1]
-        columns = ", ".join(str(column) for column in item.get("columns") or [])
+        columns = ", ".join(str(column) for column in
+                            (tested or {}).get("columns") or item.get("columns") or [])
         indexes.append({"title": f"Add an index on {table}({columns})" if table and columns
                         else "Add an index",
                         "detail": index_why(item.get("rationale")) or None, "sql": sql})
@@ -1768,12 +1767,22 @@ def analysis_view(store: MonitorStore, target: str, key: str, digest: dict[str, 
             "explain_text": json.dumps(explain, indent=1)[:20000] if explain else None}
 
 
+def _listed_fix_digest(store: MonitorStore, target: str, key: str) -> dict[str, Any]:
+    """The digest of the analysis whose ready fix the query list shows; {} without one."""
+    from features.monitor.analysis_digest import latest_done_job
+
+    job = latest_done_job(store, target, key) or library_analysis_jobs(target, [key]).get(key)
+    digest = (digest_for_ref(target, key, job["analysis_ref"], job.get("mode"),
+                             job.get("finished_at")) if job else None) or {}
+    return digest if digest.get("fix_ready") and digest.get("fix") else {}
+
+
 def benchmark_fixes(store: MonitorStore, target: str, keys: list[str], runs: int,
                     now: int) -> dict[str, Any]:
     """Each query with its fix: before and after as Actions shows them, the mean over the
     plan's readings and the planner's measured estimate for the change. A query no open
-    change covers falls back to its analysis's estimate. Nothing runs on the database and no
-    scratch schema is built; `scratch_schema` says so."""
+    change covers falls back to the estimate of the analysis whose fix the list shows.
+    Nothing runs on the database and no scratch schema is built; `scratch_schema` says so."""
     from features.monitor.actions import database_minute, plan_cards
     from features.monitor.judge import ready_fixes
 
@@ -1781,29 +1790,38 @@ def benchmark_fixes(store: MonitorStore, target: str, keys: list[str], runs: int
     totals = database_minute(store, target, now)[1]
     # Actions' estimate for each query an open change speeds up; None where it has none.
     planned: dict[str, float | None] = {}
+    planned_kind: dict[str, str] = {}
     for card in plan_cards(store, target, now):
         if card["state"] == "open" and card["type"] in ("add_index", "rewrite_query"):
             for query in card["queries"]:
                 if planned.get(query["key"]) is None:
                     planned[query["key"]] = query["expected_ms"]
+                    planned_kind[query["key"]] = \
+                        "index" if card["type"] == "add_index" else "rewrite"
     names = target_names(store, target)
     rows = []
+    kinds: set[str] = set()
     for key in keys:
-        fix, total = fixes.get(key), totals.get(key) or {}
+        fix, total, digest = fixes.get(key), totals.get(key) or {}, {}
         calls = float(total.get("calls") or 0)
         before = float(total.get("total_ms") or 0) / calls if calls else None
         if key in planned:
             after = planned[key] if before is not None else None
         else:
-            digest = (digest_for_ref(target, key, fix["analysis_ref"], None) if fix else None) \
-                or {}
+            digest = ((digest_for_ref(target, key, fix["analysis_ref"], None) or {}) if fix
+                      else _listed_fix_digest(store, target, key))
             pct = ((digest.get("fix") or {}).get("expected_gain") or {}).get("cost_reduction_pct")
             after = (before * (1 - min(100.0, max(0.0, float(pct))) / 100)
                      if before is not None and isinstance(pct, (int, float)) else None)
+        if after is not None:
+            kinds.add(planned_kind.get(key) or str((digest.get("fix") or {}).get("kind")))
         reason = None
         if after is None:
-            reason = ("No fix is ready for this query." if fix is None and key not in planned
+            reason = ("No fix is ready for this query."
+                      if fix is None and key not in planned and not digest.get("fix")
                       else "No calls recorded to compare with." if before is None else
+                      "The analysis has no planner estimate for this index."
+                      if (digest.get("fix") or {}).get("kind") == "index" else
                       "The analysis gave no estimate for this fix.")
         rows.append({"key": key, "name": names.get(key) or f"Query {key}", "before_ms": before,
                      "after_ms": after,
@@ -1812,8 +1830,17 @@ def benchmark_fixes(store: MonitorStore, target: str, keys: list[str], runs: int
                      "reason": reason})
     return {"target": target, "ran_at": now, "runs": runs, "scratch_schema": False, "rows": rows,
             "share": round(sum(fixes[key]["share"] for key in keys if key in fixes), 4),
-            "method": f"Estimated from the planner on {target}: each fix tested as a hypothetical "
-                      "index, the same estimate Actions shows."}
+            "method": _benchmark_method(target, kinds)}
+
+
+def _benchmark_method(target: str, kinds: set[str]) -> str:
+    """How the estimates were made, naming only the kinds of fix the benchmark estimated."""
+    parts = [text for kind, text in (
+        ("index", "index fixes tested as hypothetical indexes by the planner"),
+        ("rewrite", "rewrites from their test runs or planner cost")) if kind in kinds]
+    if not parts:
+        return f"No fix here has an estimate on {target} yet."
+    return f"Estimated on {target}: {'; '.join(parts)}. Actions shows the same estimates."
 
 
 def _connection_label(entry: dict[str, Any]) -> str:
@@ -1837,9 +1864,32 @@ def _next_report_at(levers: dict[str, Any], now: int) -> int | None:
 def collect_timing(store: MonitorStore, target: str) -> tuple[int | None, int]:
     """The last good reading and the seconds between readings (60 until two exist)."""
     rows = store.read("SELECT ts FROM monitor_pulse WHERE target=? AND kind='collect' AND ok=1 "
-                      "ORDER BY id DESC LIMIT 2", (target,))
+                      "AND detail!=? ORDER BY id DESC LIMIT 2", (target, ANSWERED))
     every = max(30, min(600, rows[0]["ts"] - rows[1]["ts"])) if len(rows) == 2 else 60
     return (int(rows[0]["ts"]) if rows else None), int(every)
+
+
+def failing_since(store: MonitorStore, target: str) -> int | None:
+    """When the current run of failed collections began; None while the latest one succeeded."""
+    rows = store.read("SELECT MIN(ts) ts FROM monitor_pulse WHERE target=? AND kind='collect' "
+                      "AND ok=0 AND id > COALESCE((SELECT MAX(id) FROM monitor_pulse WHERE "
+                      "target=? AND kind='collect' AND ok=1), 0)", (target, target))
+    return int(rows[0]["ts"]) if rows and rows[0]["ts"] is not None else None
+
+
+def ai_paused_since(store: MonitorStore, target: str, issues: dict[str, dict[str, Any]]
+                    ) -> int | None:
+    """When attention checks stopped reaching the AI: the earlier of the first held check since
+    the AI last judged one and when the open sign-in or limit item was filed."""
+    rows = store.read("SELECT MIN(ts) ts FROM judge_run WHERE target=? AND outcome NOT IN "
+                      "('filed','empty','dry_run','noop') AND id > COALESCE((SELECT MAX(id) "
+                      "FROM judge_run WHERE target=? AND outcome IN ('filed','dry_run')), 0)",
+                      (target, target))
+    began = [int(row["created_at"]) for subject, row in issues.items()
+             if subject in ("jev_login", "database_limit")]
+    if rows and rows[0]["ts"] is not None:
+        began.append(int(rows[0]["ts"]))
+    return min(began) if began else store.enabled_at(target)
 
 
 def running_work(store: MonitorStore, targets: list[str]
@@ -2137,8 +2187,11 @@ def home(store: MonitorStore, now: int, *, configured: list[dict[str, Any]] | No
             issue = issues.get("lost_connection") or issues["password_missing"]
             state = "cant_reach"
             since = int(_body(issue).get("failed_since") or issue["created_at"])
+        elif (failing := failing_since(store, name)) is not None:
+            # The latest check failed: the database is down before the outage is filed.
+            state, since = "cant_reach", failing
         elif database_limit.paused(store, name, now) or "jev_login" in issues:
-            state, since = "ai_paused", ran or store.enabled_at(name)
+            state, since = "ai_paused", ai_paused_since(store, name, issues)
         else:
             state, since = "watching", None
         latest = store.read("SELECT calls FROM db_series WHERE target=? AND res=60 "
@@ -2156,7 +2209,11 @@ def home(store: MonitorStore, now: int, *, configured: list[dict[str, Any]] | No
                           "fixes_item_id": fixes["id"] if fixes else None,
                           "to_do": plan["to_do"], "do_first": plan["do_first"],
                           "_fixes_share": plan["fixes_share"], "_activity": doing,
-                          "_building": enabled and _building_first_plan(store, name, now)})
+                          # Only while its analyses can run: never signed out, with AI off
+                          # or deep analysis switched off.
+                          "_building": enabled and state != "ai_paused" and
+                          bool(levers["deep_analysis"]) and
+                          _building_first_plan(store, name, now)})
         if fixes:
             fixes_items[name] = fixes
         if enabled:
@@ -2170,10 +2227,12 @@ def home(store: MonitorStore, now: int, *, configured: list[dict[str, Any]] | No
                                     -row["fixes_ready"], row["target"]))
     act_items.sort(key=lambda item: -item["created_at"])
     lead = act_items[0] if act_items else None
-    target = (lead["target"] if lead else selected if selected in enabled_names
+    by_name = {row["target"]: row for row in databases}
+    unreachable = [name for name in enabled_names if by_name[name]["state"] == "cant_reach"]
+    down = selected if selected in unreachable else unreachable[0] if unreachable else None
+    target = (lead["target"] if lead else down if down else selected if selected in enabled_names
               else enabled_names[0] if enabled_names else
               next((str(entry["name"]) for entry in entries if entry.get("name")), None))
-    by_name = {row["target"]: row for row in databases}
     ran_at = max((ts for ts in checks if ts), default=None)
     interval = max((store.levers(name)["attention_every_min"] for name in enabled_names),
                    default=5) * 60
@@ -2182,6 +2241,8 @@ def home(store: MonitorStore, now: int, *, configured: list[dict[str, Any]] | No
         state = "off"
     elif lead:
         state, since = "needs_you", lead["created_at"]
+    elif down:
+        state, since = "cant_reach", by_name[down]["state_since"]
     elif (target and by_name[target]["state"] == "ai_paused") or ran_at is None or \
             now - ran_at > QUIET_CYCLES * interval:
         state = "paused"

@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
+import requests
 
 from features.providers import neon
 from features.providers.neon import discover_neon_projects, get_neon_status
@@ -207,8 +208,50 @@ class TestNeonStatus:
         assert "dev@example.com" in status["detail"]
         assert status["organizations"] == []
 
+    @pytest.mark.parametrize("outcome", [
+        requests.ConnectionError("Name or service not known"),
+        requests.Timeout("timed out"),
+        _response(503, None),
+    ])
+    def test_unreachable_neon_is_not_a_rejected_key(self, monkeypatch, outcome):
+        monkeypatch.setenv("NEON_API_KEY", "napi_key")
+        get = (lambda *a, **k: (_ for _ in ()).throw(outcome)) if isinstance(
+            outcome, Exception) else (lambda *a, **k: outcome)
+        with patch("features.providers.neon.requests.get", get):
+            status = get_neon_status()
+
+        assert status["connected"] is False
+        assert status["unreachable"] is True
+        assert "rejected" not in status
+        assert status["detail"] == "Couldn't reach Neon."
+
+    @pytest.mark.parametrize("code", [401, 403])
+    def test_refused_key_is_rejected(self, monkeypatch, code):
+        monkeypatch.setenv("NEON_API_KEY", "napi_key")
+        with patch("features.providers.neon.requests.get", return_value=_response(code, None)):
+            status = get_neon_status()
+
+        assert status["rejected"] is True
+        assert "unreachable" not in status
+        assert status["detail"].startswith("Neon rejected this API key")
+
 
 class TestNeonRoutes:
+    def test_key_check_against_an_unreachable_neon_is_not_a_rejection(
+        self, fleet_router_client, tmp_rdst_home
+    ):
+        with patch("features.providers.neon.requests.get",
+                   side_effect=requests.ConnectionError("offline")):
+            response = fleet_router_client.post(
+                "/api/providers/neon-key", json={"token": "napi_good"}
+            )
+
+        assert response.status_code == 502
+        assert response.json() == {
+            "code": "provider_unreachable",
+            "detail": "Couldn't reach Neon. Check your connection and try again.",
+        }
+
     def test_key_validation_failure_returns_400(self, fleet_router_client, tmp_rdst_home):
         with patch("features.providers.neon.requests.get", return_value=_response(401, None)):
             response = fleet_router_client.post(

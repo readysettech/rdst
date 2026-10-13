@@ -669,4 +669,11 @@ async def get_prerequisites(http_request: Request, name: str) -> dict:
 
     require_local_request(http_request)
     guard = ensure_target_password(name)
-    return await asyncio.to_thread(check_target, guard.target_name, guard.target_config)
+    result = await asyncio.to_thread(check_target, guard.target_name, guard.target_config)
+    if result.get("ready"):
+        # A fix applied while monitoring runs takes effect without a restart.
+        from features.monitor.loop import setup_check_passed
+
+        await setup_check_passed(guard.target_name,
+                                 getattr(http_request.app.state, "monitor_scheduler", None))
+    return result

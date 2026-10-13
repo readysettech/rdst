@@ -623,14 +623,15 @@ def health_section(collectors: dict[str, Any] | None,
                                        ("replication", "Replication"),
                                        ("sequential_scans", "Full table scans")) if name in errors]
 
-    from features.monitor.db_actions import MYSQL_FREE_WARN_BYTES, mysql_table
+    from features.monitor.db_actions import MYSQL_FREE_WARN_BYTES, VACUUM_DEAD_PCT, mysql_table
 
     mysql = str(collectors.get("engine") or "").lower() == "mysql"
     vacuum = collectors.get("vacuum_bloat")
     if isinstance(vacuum, dict) and "vacuum_bloat" not in errors:
         tables = [table for table in vacuum.get("tables") or []
                   if isinstance(table, dict) and table.get("status") in ("warn", "crit")
-                  and (not mysql or (table.get("free_bytes") or 0) >= MYSQL_FREE_WARN_BYTES)]
+                  and (not mysql or (table.get("free_bytes") or 0) >= MYSQL_FREE_WARN_BYTES)
+                  and (mysql or (table.get("dead_ratio_pct") or 0) >= VACUUM_DEAD_PCT)]
         tables.sort(key=lambda table: -(table.get("dead_ratio_pct") or 0))
         if tables and mysql:
             problems.append({

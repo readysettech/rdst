@@ -140,7 +140,7 @@ test('a database in its first minutes shows the readings so far', async ({
   await expect(page.getByTestId('query-section')).toBeVisible()
   await page.getByRole('tab', { name: 'Report' }).click()
   await expect(page.getByTestId('report-first')).toContainText(
-    'Your first daily report arrives tonight, just after midnight.'
+    'Your first daily report runs tonight, just after midnight.'
   )
 })
 

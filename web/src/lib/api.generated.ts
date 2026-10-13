@@ -348,9 +348,10 @@ export interface paths {
          * @description Past natural-language questions, newest first.
          *
          *     Draws on the query registry, which auto-saves every answered ask with its
-         *     original question text. Only ask-sourced entries that carry a question are
-         *     returned; entries saved before question persistence landed have none. The
-         *     SQL is the original submitted form when stored, so a re-ask is faithful.
+         *     original question text. One item per database a SQL pattern was asked on,
+         *     carrying that database's question; entries saved before question
+         *     persistence landed have none. The SQL is the original submitted form when
+         *     stored, so a re-ask is faithful.
          */
         get: operations["ask_history_api_ask_history_get"];
         put?: never;
@@ -5834,8 +5835,18 @@ export interface components {
              * @default false
              */
             limit_added?: boolean;
+            /**
+             * Limit Reduced
+             * @default false
+             */
+            limit_reduced?: boolean;
             /** Llm Calls */
             llm_calls: number;
+            /**
+             * Monitor Key
+             * @default null
+             */
+            monitor_key?: string | null;
             /**
              * Query Hash
              * @default
@@ -5848,6 +5859,11 @@ export interface components {
             query_tag?: string;
             /** Row Count */
             row_count: number;
+            /**
+             * Row Limit
+             * @default null
+             */
+            row_limit?: number | null;
             /** Rows */
             rows: unknown[];
             /** Sql */
@@ -5856,6 +5872,11 @@ export interface components {
             success: boolean;
             /** Total Tokens */
             total_tokens: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated?: boolean;
             /**
              * Type
              * @constant
@@ -7933,8 +7954,14 @@ export interface components {
             errors: number;
             /** Imported */
             imported: number;
+            /** Invalid Rows */
+            invalid_rows?: {
+                [key: string]: unknown;
+            }[];
             /** Skipped */
             skipped: number;
+            /** Skipped Names */
+            skipped_names?: string[];
             /** Success */
             success: boolean;
             /** Target Names */
@@ -8645,9 +8672,10 @@ export interface components {
         };
         /**
          * HomeStatus
-         * @description needs_you: an Act now item is open. quiet: attention checks ran in the last 3 cycles
-         *     and nothing is open. paused: charts and stuck-query alerts run, AI checks do not. off:
-         *     no database is monitored.
+         * @description needs_you: an Act now item is open. cant_reach: nothing is open, but the latest check
+         *     of `target` failed, from `since`. quiet: attention checks ran in the last 3 cycles and
+         *     nothing is open. paused: charts and stuck-query alerts run, AI checks do not. off: no
+         *     database is monitored.
          */
         HomeStatus: {
             /**
@@ -8677,7 +8705,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "needs_you" | "quiet" | "paused" | "off";
+            state: "needs_you" | "cant_reach" | "quiet" | "paused" | "off";
             /** Target */
             target: string | null;
             /** To Watch */
@@ -10843,12 +10871,16 @@ export interface components {
              * @enum {integer}
              */
             keep_readings_days?: 7 | 30 | 90;
+            /** Push Notifications */
+            push_notifications?: boolean | null;
             /**
              * Report View
              * @default quick
              * @enum {string}
              */
             report_view?: "quick" | "detailed";
+            /** Selected Target */
+            selected_target?: string | null;
             /**
              * Theme
              * @default dark
@@ -10862,8 +10894,12 @@ export interface components {
             font_size?: ("default" | "large") | null;
             /** Keep Readings Days */
             keep_readings_days?: (7 | 30 | 90) | null;
+            /** Push Notifications */
+            push_notifications?: boolean | null;
             /** Report View */
             report_view?: ("quick" | "detailed") | null;
+            /** Selected Target */
+            selected_target?: string | null;
             /** Theme */
             theme?: ("dark" | "light" | "system") | null;
         };

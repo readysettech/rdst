@@ -331,10 +331,10 @@ describe('firstRun', () => {
       meta: '0 analyzed, 1 failed',
       sub: 'Needs sign-in',
     })
-    // The first report runs whatever the nightly setting says.
+    // With the nightly report off, no first report is promised.
     expect(byId(login).report).toMatchObject({
-      state: 'pending',
-      meta: 'Tonight at midnight',
+      state: 'off',
+      meta: 'Turned off',
     })
     const local = firstRun({
       ...base,

@@ -55,7 +55,7 @@ export function Main({
       <main
         id="main-content"
         data-layout="split"
-        className="my-3 mr-3 flex min-h-0 min-w-0 flex-1 flex-col"
+        className="mt-[max(--spacing(3),var(--titlebar-right-height))] mr-3 mb-3 flex min-h-0 min-w-0 flex-1 flex-col"
       >
         {children}
       </main>
@@ -65,7 +65,7 @@ export function Main({
     <main
       id="main-content"
       data-layout={layout}
-      className="relative my-3 mr-3 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-canvas border border-border-layout-soft bg-surface-layout-1"
+      className="relative mt-[max(--spacing(3),var(--titlebar-right-height))] mr-3 mb-3 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-canvas border border-border-layout-soft bg-surface-layout-1"
     >
       <Scrollable rootClassName="min-h-0 flex-1" viewportRef={canvas}>
         {layout === 'legacy' ? (

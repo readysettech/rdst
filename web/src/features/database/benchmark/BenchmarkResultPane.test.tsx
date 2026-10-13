@@ -1,13 +1,26 @@
-import { cleanup, screen, within } from '@testing-library/react'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { resetStubState, setFixtureTiming } from '@/lib/monitor/api'
+import {
+  benchmarkFixes,
+  resetStubState,
+  setFixtureTiming,
+} from '@/lib/monitor/api'
 import { setFixtureOverride } from '@/lib/monitor/contract'
 import { CA_NOW, caFixtures } from '@/lib/monitor/fixturesCa'
 import { renderWithClient } from '@/test-utils'
 import { BenchmarkResultPane } from './BenchmarkResultPane'
 import { queriesWithFixes } from './fixBenchmarkModel'
 
+vi.mock('@/lib/monitor/api', async () => {
+  const actual =
+    await vi.importActual<typeof import('@/lib/monitor/api')>(
+      '@/lib/monitor/api'
+    )
+  return { ...actual, benchmarkFixes: vi.fn(actual.benchmarkFixes) }
+})
+
 beforeEach(() => {
+  vi.mocked(benchmarkFixes).mockClear()
   setFixtureTiming(0)
   resetStubState()
   setFixtureOverride('ca-database')
@@ -26,6 +39,7 @@ it('lists each fix with before, after and change, the verdict and the method', a
       target="demo"
       queries={queries}
       ranAt={CA_NOW - 120}
+      run={1}
       now={CA_NOW}
       onRerun={vi.fn()}
       onClose={vi.fn()}
@@ -54,7 +68,7 @@ it('lists each fix with before, after and change, the verdict and the method', a
   expect(within(pane).getByText('-53%')).toBeTruthy()
   expect(
     within(pane).getByText(
-      'Estimated from the planner on demo: each fix tested as a hypothetical index, the same estimate Actions shows.'
+      'Estimated on demo: index fixes tested as hypothetical indexes by the planner. Actions shows the same estimates.'
     )
   ).toBeTruthy()
   const solids = within(pane)
@@ -62,4 +76,30 @@ it('lists each fix with before, after and change, the verdict and the method', a
     .filter((button) => button.className.includes('bg-surface-primary-solid'))
   expect(solids.map((button) => button.textContent)).toEqual(['Copy all fixes'])
   expect(within(pane).getByRole('button', { name: 'Rerun' })).toBeTruthy()
+})
+
+it('asks for a new estimate on each run, even for the same queries', async () => {
+  const queries = queriesWithFixes(
+    caFixtures('ca-database').queries('demo', '1h', 500, 0).queries
+  )
+  const pane = (run: number) => (
+    <BenchmarkResultPane
+      target="demo"
+      queries={queries}
+      ranAt={CA_NOW - 120}
+      run={run}
+      now={CA_NOW}
+      onRerun={vi.fn()}
+      onClose={vi.fn()}
+    />
+  )
+  const { rerender } = renderWithClient(pane(1))
+  expect(await screen.findByText('65.4')).toBeTruthy()
+  expect(benchmarkFixes).toHaveBeenCalledTimes(1)
+
+  rerender(pane(2))
+  // The pane estimates again rather than showing the last result as new.
+  expect(screen.getByText('Estimating each fix.')).toBeTruthy()
+  await waitFor(() => expect(benchmarkFixes).toHaveBeenCalledTimes(2))
+  expect(await screen.findByText('65.4')).toBeTruthy()
 })

@@ -6,6 +6,7 @@ clarification handling, and error scenarios.
 """
 
 import asyncio
+import json
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -511,8 +512,257 @@ class TestAskServiceSessionManagement:
 
         assert validations == 2
         assert isinstance(events[-1], AskErrorEvent)
+        assert events[-1].message == (
+            "The generated SQL failed validation: Only a single statement is allowed."
+        )
         assert events[-1].phase == AskPhase.VALIDATE
+        assert events[-1].code == "sql_validation_failed"
+        assert events[-1].category == "sql_validation"
         execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("sql", "returned", "expected"),
+        [
+            (
+                "SELECT id FROM users",
+                101,
+                {"limit_added": True, "limit_reduced": False, "truncated": True,
+                 "row_limit": 100, "row_count": 100},
+            ),
+            (
+                "SELECT id FROM users",
+                40,
+                {"limit_added": True, "limit_reduced": False, "truncated": False,
+                 "row_limit": 100, "row_count": 40},
+            ),
+            (
+                "SELECT id FROM users LIMIT 5000",
+                1001,
+                {"limit_added": False, "limit_reduced": True, "truncated": True,
+                 "row_limit": 1000, "row_count": 1000},
+            ),
+            (
+                "SELECT id FROM users LIMIT 100",
+                100,
+                {"limit_added": False, "limit_reduced": False, "truncated": False,
+                 "row_limit": 100, "row_count": 100},
+            ),
+            # Ties past the boundary come back beyond the query's own count; Ask's row
+            # cap still cuts the answer.
+            (
+                "SELECT id FROM users ORDER BY id FETCH FIRST 1000 ROWS WITH TIES",
+                1500,
+                {"limit_added": False, "limit_reduced": False, "truncated": True,
+                 "row_limit": 1000, "row_count": 1000},
+            ),
+        ],
+    )
+    async def test_result_reports_the_row_cap(self, sql, returned, expected):
+        from features.ask.api.routes import _event_to_sse
+        from features.ask.engine.ask3.context import Ask3Context
+        from shared.query_registry import hash_sql
+
+        def execute(_sql, _config):
+            return {"success": True, "rows": [[1]] * returned, "columns": ["id"]}
+
+        def fake_generate(context, _presenter, _manager):
+            context.sql = sql
+            return context
+
+        service = AskService(db_executor=execute, persist_queries=False)
+        ctx = Ask3Context(
+            question="Show user ids", target="test", target_config={"engine": "x"}
+        )
+        with (
+            patch("features.ask.service.generate_sql", side_effect=fake_generate),
+            patch(
+                "features.ask.service.validate_sql",
+                side_effect=lambda context, _presenter: context,
+            ),
+        ):
+            events = [event async for event in service._run_from_generate(ctx)]
+
+        result = events[-1]
+        assert isinstance(result, AskResultEvent)
+        assert {key: getattr(result, key) for key in expected} == expected
+        # Monitoring never saw this statement on the target.
+        assert result.monitor_key is None
+        payload = json.loads(_event_to_sse(result)["data"])
+        assert {key: payload[key] for key in expected if key != "row_count"} == {
+            key: value for key, value in expected.items() if key != "row_count"
+        }
+        assert payload["monitor_key"] == result.monitor_key
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("sql", "executed", "message", "code"),
+        [
+            # Refused at the execution gate: the agent and escalation paths hand SQL over
+            # without the validate phase.
+            ("DROP TABLE users", None, "The generated SQL failed validation: ",
+             "sql_validation_failed"),
+            # Ran but produced no result shape.
+            ("SELECT id FROM users", {"success": True, "rows": [], "columns": []},
+             "The query didn't return a result.", None),
+        ],
+    )
+    async def test_refused_or_shapeless_execution_ends_in_a_sentence_not_a_table(
+        self, sql, executed, message, code
+    ):
+        from features.ask.engine.ask3.context import Ask3Context
+
+        calls = []
+        service = AskService(
+            db_executor=lambda run_sql, _config: calls.append(run_sql) or executed,
+            persist_queries=False,
+        )
+        ctx = Ask3Context(question="Q", target="test", target_config={"engine": "x"})
+
+        def fake_generate(context, _presenter, _manager):
+            context.sql = sql
+            return context
+
+        with (
+            patch("features.ask.service.generate_sql", side_effect=fake_generate),
+            patch(
+                "features.ask.service.validate_sql",
+                side_effect=lambda context, _presenter: context,
+            ),
+        ):
+            events = [event async for event in service._run_from_generate(ctx)]
+
+        assert not any(isinstance(event, AskResultEvent) for event in events)
+        error = events[-1]
+        assert isinstance(error, AskErrorEvent)
+        assert error.message.startswith(message) and error.message.endswith(".")
+        assert "{" not in error.message and "[" not in error.message
+        assert error.code == code
+        assert (calls == []) == (executed is None)
+
+    @pytest.mark.asyncio
+    async def test_monitor_key_is_set_only_for_a_statement_the_monitor_recorded(
+        self, tmp_path, monkeypatch
+    ):
+        from features.ask.engine.ask3.context import Ask3Context
+        from shared.monitor import monitor_store
+        from shared.query_registry import hash_sql
+
+        sql = "SELECT id FROM users LIMIT 100"
+        store_path = tmp_path / "monitor.db"
+        monkeypatch.setattr(monitor_store, "default_monitor_db_path", lambda: store_path)
+        store = monitor_store.MonitorStore(store_path)
+        store.ensure_open()
+        store._write(lambda conn: conn.execute(
+            "INSERT INTO query_text VALUES (?,?,?,?,?)", ("watched", hash_sql(sql), sql, 0, 1)
+        ))
+
+        async def monitor_key(target):
+            service = AskService(
+                db_executor=lambda _sql, _config: {
+                    "success": True, "rows": [[1]], "columns": ["id"]
+                },
+                persist_queries=False,
+            )
+            ctx = Ask3Context(
+                question="Show user ids", target=target, target_config={"engine": "x"}
+            )
+
+            def fake_generate(context, _presenter, _manager):
+                context.sql = sql
+                return context
+
+            with (
+                patch("features.ask.service.generate_sql", side_effect=fake_generate),
+                patch(
+                    "features.ask.service.validate_sql",
+                    side_effect=lambda context, _presenter: context,
+                ),
+            ):
+                events = [event async for event in service._run_from_generate(ctx)]
+            assert isinstance(events[-1], AskResultEvent)
+            return events[-1]
+
+        watched = await monitor_key("watched")
+        assert watched.monitor_key == hash_sql(sql)
+        unwatched = await monitor_key("elsewhere")
+        assert unwatched.monitor_key is None
+
+    def test_monitor_key_lookup_tolerates_an_unreadable_store(self, tmp_path, monkeypatch):
+        from features.ask.service import _monitored_key
+        from shared.monitor import monitor_store
+
+        store_path = tmp_path / "monitor.db"
+        store_path.write_bytes(b"not a database")
+        monkeypatch.setattr(monitor_store, "default_monitor_db_path", lambda: store_path)
+
+        assert _monitored_key("db", "SELECT 1") is None
+        assert _monitored_key("db", "") is None
+
+    def test_monitor_key_matches_captured_statement_text(self):
+        from features.ask.service import _monitor_key
+        from shared.query_registry import hash_sql
+
+        executed = "SELECT primarytitle FROM title_basics WHERE titletype = 'movie' LIMIT 100"
+        assert _monitor_key(executed) == hash_sql(
+            "SELECT primarytitle FROM title_basics WHERE titletype = $1 LIMIT $2"
+        )
+
+    def test_monitor_key_is_the_statement_ask_ran_on_the_target(self):
+        from features.ask.service import _monitor_key
+        from shared.query_registry import hash_sql
+
+        # The target runs Ask's capped SQL with its one-row probe, never the SQL without
+        # Ask's LIMIT; the LIMIT count is a placeholder in the key.
+        answered = "SELECT id FROM users WHERE active LIMIT 100"
+        assert _monitor_key(answered) == hash_sql("SELECT id FROM users WHERE active LIMIT 101")
+        assert _monitor_key(answered) != hash_sql("SELECT id FROM users WHERE active")
+
+    @pytest.mark.asyncio
+    async def test_a_slow_monitor_store_does_not_hold_up_the_result(self, monkeypatch):
+        import threading
+        import time
+
+        from features.ask import service as service_module
+        from features.ask.engine.ask3.context import Ask3Context
+
+        released = threading.Event()
+
+        def slow_lookup(target, sql):
+            released.wait(5)
+            return "key"
+
+        monkeypatch.setattr(service_module, "_monitored_key", slow_lookup)
+        # The lookup must run off the event loop for the answer to go out without it.
+        monkeypatch.setattr(asyncio, "to_thread", asyncio.threads.to_thread)
+        service = AskService(
+            db_executor=lambda _sql, _config: {
+                "success": True, "rows": [[1]], "columns": ["id"]
+            },
+            persist_queries=False,
+        )
+        ctx = Ask3Context(question="Q", target="db", target_config={"engine": "x"})
+
+        def fake_generate(context, _presenter, _manager):
+            context.sql = "SELECT id FROM users"
+            return context
+
+        started = time.monotonic()
+        try:
+            with (
+                patch("features.ask.service.generate_sql", side_effect=fake_generate),
+                patch(
+                    "features.ask.service.validate_sql",
+                    side_effect=lambda context, _presenter: context,
+                ),
+            ):
+                events = [event async for event in service._run_from_generate(ctx)]
+        finally:
+            released.set()
+
+        assert isinstance(events[-1], AskResultEvent)
+        assert events[-1].monitor_key is None
+        assert time.monotonic() - started < 1.5
 
     @pytest.mark.asyncio
     async def test_generation_error_preserves_model_limit_envelope(self):
@@ -651,6 +901,34 @@ class TestAskServiceSessionManagement:
                 events = [event async for event in service.resume("pending")]
                 assert isinstance(events[-1], AskErrorEvent)
                 assert events[-1].message == "resume failed"
+
+    @pytest.mark.asyncio
+    async def test_resume_refuses_a_different_database(self):
+        from features.ask.engine.ask3.context import Ask3Context
+        from features.ask.service import _PendingAskSession
+
+        sessions = {
+            "pending": _PendingAskSession(
+                context=Ask3Context(question="question", target="imdb"),
+                persist_query=False,
+                clarification_context={"q1": {}},
+            )
+        }
+        service = AskService(session_store=sessions)
+
+        with patch.object(service, "_run_from_generate") as run:
+            events = [
+                event
+                async for event in service.resume("pending", {"q1": "a"}, target="tpcds")
+            ]
+
+        [error] = events
+        assert error.code == "clarification_target_mismatch"
+        assert error.message == (
+            "This clarification belongs to imdb. Ask again on tpcds."
+        )
+        run.assert_not_called()
+        assert "pending" in sessions
 
     def test_abandon_removes_injected_session(self):
         sessions = {"pending": Mock()}
@@ -1885,6 +2163,30 @@ class TestAskServiceTargetNotFoundHint:
 
 class TestAskRendererDryRunMessage:
     """Tests that the renderer shows 'Dry run' for dry-run results."""
+
+    def test_truncated_result_names_the_row_cap(self):
+        from features.ask.engine.ask3.renderer import AskRenderer
+
+        event = AskResultEvent(
+            type="result",
+            success=True,
+            sql="SELECT id FROM users LIMIT 100",
+            rows=[[1]],
+            columns=["id"],
+            row_count=1,
+            execution_time_ms=1.0,
+            llm_calls=1,
+            total_tokens=1,
+            limit_added=True,
+            truncated=True,
+            row_limit=100,
+        )
+        renderer = AskRenderer(verbose=False)
+        with patch.object(renderer, "_console") as console:
+            renderer.render(event)
+
+        printed = " ".join(str(call.args[0]) for call in console.print.call_args_list)
+        assert "Showing the first 100 rows" in printed
 
     def test_dry_run_result_shows_dry_run_message(self):
         """When result has execution_time_ms=0.0 and empty columns, show 'Dry run' message."""

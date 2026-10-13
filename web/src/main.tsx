@@ -9,10 +9,17 @@ import { createRoot } from 'react-dom/client'
 import { installAnalysisRunInvalidation } from './features/queries/results/analysisRunInvalidation'
 import { initAnalytics } from './lib/analytics'
 import { fetchEnvRequirements } from './lib/api'
+import {
+  installBackendReachability,
+  keepDataWhileDown,
+  retryQuery,
+} from './lib/backendReachability'
 import { preloadRouteCode } from './lib/preloadRouteCode'
 import { routeTree } from './routeTree.gen'
 
 import './style.css'
+
+installBackendReachability()
 
 void fetchEnvRequirements()
   .then(({ telemetry_enabled }) => initAnalytics(telemetry_enabled))
@@ -34,10 +41,15 @@ declare module '@tanstack/react-router' {
 // React Query's default (three retries with exponential backoff) held every
 // list behind its loading state for ~7s before the error branch could run, so
 // a dead endpoint looked like a slow one. One retry covers a transient blip
-// and still surfaces a real failure in about two seconds. [F-06]
+// and still surfaces a real failure in about two seconds. [F-06] While the
+// backend itself is down, queries wait for it and keep the data they had.
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { retry: 1, retryDelay: 800 },
+    queries: {
+      retry: retryQuery,
+      retryDelay: 800,
+      structuralSharing: keepDataWhileDown,
+    },
   },
 })
 installAnalysisRunInvalidation(queryClient)

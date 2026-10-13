@@ -967,6 +967,37 @@ describe('ActionsPage with nothing to change, against the backend', () => {
     expect(screen.queryByText('Nothing to change right now')).toBeNull()
   })
 
+  it("doesn't claim the busiest queries are analyzing while deep analysis is off", async () => {
+    setFixtureOverride(null)
+    const page = empty([{ database: 'demo', monitored: true }])
+    serve(
+      {
+        ...page,
+        databases: page.databases.map((row) => ({
+          ...row,
+          checkup: {
+            state: 'first_pass',
+            analyzed: 0,
+            total: 10,
+            due_by: null,
+            report_id: null,
+            finished_at: null,
+          },
+        })),
+      },
+      { demo: { deep_analysis: false, ai_monitoring: 'on' } }
+    )
+    renderWithClient(<ActionsPage />)
+    expect(await screen.findByText('Deep analysis is off')).toBeTruthy()
+    expect(screen.queryByText('Building your first plan')).toBeNull()
+    expect(screen.queryByText(/0 of 10/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Monitoring settings' }))
+    expect(routerState.navigate).toHaveBeenCalledWith({
+      to: '/database',
+      search: { target: 'demo', panel: 'settings' },
+    })
+  })
+
   it("doesn't claim RDST checks a database that isn't monitored", async () => {
     setFixtureOverride(null)
     routerState.search = { db: 'shop' }

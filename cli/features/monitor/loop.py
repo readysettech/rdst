@@ -10,6 +10,7 @@ import threading
 import time
 from typing import Any, Callable
 
+from shared.db_connection import IoDeadline
 from shared.target_backoff import TargetBackoff, target_backoff
 
 from features.monitor import actions, database_limit
@@ -27,6 +28,9 @@ from shared.monitor.statements import alert_member
 
 logger = logging.getLogger(__name__)
 TARGETS_RETRY_S = 5
+# A pass's reads hold the database's admission; one that stopped answering is aborted after
+# this long so the collector can still record the outage.
+READ_DEADLINE_S = 120
 # Collected minutes an hour needs before its rate stands for the normal level.
 HOUR_RATE_MIN_MINUTES = 10
 _active_lock = threading.Lock()
@@ -53,7 +57,7 @@ def _top_blocker(target: str) -> dict[str, Any] | None:
             return None
         from shared.query_registry.sql_normalizer import normalize_and_extract
 
-        with connection.cursor() as cursor:
+        with IoDeadline(connection, READ_DEADLINE_S), connection.cursor() as cursor:
             # SET LOCAL inside a transaction ends with it, so a pooled server connection
             # never keeps the timeout.
             cursor.execute("BEGIN")
@@ -96,7 +100,8 @@ def signed_in() -> bool:
 def _scan_indexes(target: str) -> list[dict[str, str]]:
     connection, engine = _default_connection_factory(target)
     try:
-        return read_indexes(connection, engine)
+        with IoDeadline(connection, READ_DEADLINE_S):
+            return read_indexes(connection, engine)
     finally:
         try:
             if engine == "postgresql":
@@ -108,7 +113,8 @@ def _scan_indexes(target: str) -> list[dict[str, str]]:
 def _scan_stats(target: str) -> dict[str, Any]:
     connection, engine = _default_connection_factory(target)
     try:
-        return read_stats(connection, engine)
+        with IoDeadline(connection, READ_DEADLINE_S):
+            return read_stats(connection, engine)
     finally:
         try:
             if engine == "postgresql":
@@ -827,6 +833,27 @@ def connection_changed(target: str, scheduler: Any = None) -> None:
     collect_soon = getattr(scheduler, "collect_soon", None)
     if callable(collect_soon):
         collect_soon(target)
+
+
+async def setup_check_passed(target: str, scheduler: Any = None) -> None:
+    """The monitoring prerequisites pass for a database. A statement-source gap its collector
+    cached before the fix stops blocking: the setup item closes and the database is read now,
+    as after a connection edit. Call from the event loop."""
+    if not query_discovery.setup_passed(target):
+        return
+    loop = _active_loop
+    if loop is not None:
+        def resolve() -> None:
+            now = int(loop.clock())
+            for subject in STATEMENT_SOURCES.values():
+                loop.store.action_item_for_subject(target, "monitoring_issue", subject, now)
+
+        try:
+            await asyncio.to_thread(resolve)
+        except Exception:
+            # The next clean reading closes the item instead.
+            logger.debug("Setup item not closed for %s", target, exc_info=True)
+    connection_changed(target, scheduler)
 
 
 def cycling(target: str) -> bool:

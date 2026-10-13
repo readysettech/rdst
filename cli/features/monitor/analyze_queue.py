@@ -625,8 +625,11 @@ def first_hour_facts(store: MonitorStore, target: str, now: int) -> dict[str, An
         return None
     top = top_n(target, store)
     next_check = _next_first_hour_check(start, now)
+    from features.monitor.connection import ANSWERED
+
     readings = store.read("SELECT MIN(ts) AS ts,COUNT(*) AS n FROM monitor_pulse WHERE target=? "
-                          "AND kind='collect' AND ok=1 AND ts>=?", (target, start))[0]
+                          "AND kind='collect' AND ok=1 AND detail!=? AND ts>=?",
+                          (target, ANSWERED, start))[0]
     found = store.read("SELECT MIN(first_seen) AS ts FROM query_text WHERE target=? "
                        "AND first_seen>=?", (target, start))[0]["ts"]
     counts = store.read(

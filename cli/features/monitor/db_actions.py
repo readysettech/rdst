@@ -13,6 +13,8 @@ from features.monitor.presentation import format_size, plain
 
 LARGE_TABLE_ROWS = 100_000
 VACUUM_MIN_BYTES = 8 * 1024 * 1024
+# The dead-row share at which a PostgreSQL table needs a vacuum; stale statistics get ANALYZE.
+VACUUM_DEAD_PCT = 15.0
 LOW_CACHE_HIT = 0.95
 MIN_DISK_READS_PER_S = 50
 FULL_SCANS_PER_DAY = 1_000
@@ -323,6 +325,7 @@ def _vacuum(vacuum: dict[str, Any], engine: str) -> list[dict[str, Any]]:
     # Autovacuum keeps small tables in hand; a warning there isn't worth anyone's time.
     bloated = sorted((table for table in tables if table.get("status") in ("warn", "crit")
                       and (not mysql or (table.get("free_bytes") or 0) >= MYSQL_FREE_WARN_BYTES)
+                      and (mysql or (table.get("dead_ratio_pct") or 0) >= VACUUM_DEAD_PCT)
                       and (mysql or table.get("status") == "crit"
                            or (table.get("size_bytes") or 0) >= VACUUM_MIN_BYTES)),
                      key=lambda table: -(table.get("dead_ratio_pct") or 0))

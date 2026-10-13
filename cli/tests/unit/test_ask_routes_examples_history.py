@@ -148,3 +148,67 @@ async def test_history_scopes_by_ask_origin_not_stolen_target(
 
     assert [i["question"] for i in imdb] == ["which actors worked with Nolan?"]
     assert tpcds == []
+
+
+@pytest.mark.asyncio
+async def test_history_keeps_one_question_per_database(app, monkeypatch, tmp_path):
+    # The same SQL asked on two databases stays two history items, each with the
+    # question asked there.
+    path = tmp_path / "queries.toml"
+    registry = QueryRegistry(registry_path=str(path))
+    sql = "SELECT primarytitle FROM title_basics"
+    registry.add_query(
+        sql, source="ask", tag="t", target="imdb", question="list titles",
+        ask_target="imdb",
+    )
+    registry.add_query(
+        sql, source="ask", tag="t", target="imdb_copy", question="titles in the copy",
+        ask_target="imdb_copy",
+    )
+    # Per-target questions survive a reload from disk.
+    reloaded = QueryRegistry(registry_path=str(path))
+
+    import shared.query_registry as sqr
+
+    monkeypatch.setattr(sqr, "QueryRegistry", lambda *a, **k: reloaded)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        everywhere = (await client.get("/api/ask/history")).json()["items"]
+        copy = (await client.get(
+            "/api/ask/history", params={"target": "imdb_copy"}
+        )).json()["items"]
+
+    assert [(i["target"], i["question"]) for i in everywhere] == [
+        ("imdb_copy", "titles in the copy"),
+        ("imdb", "list titles"),
+    ]
+    assert [(i["target"], i["question"]) for i in copy] == [
+        ("imdb_copy", "titles in the copy")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resume_carries_the_request_target(monkeypatch):
+    captured = {}
+
+    class FakeService:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def resume(self, **kwargs):
+            captured.update(kwargs)
+            return
+            yield
+
+    monkeypatch.setattr(ask_routes, "AskService", FakeService)
+
+    _ = [
+        item
+        async for item in ask_routes._ask_generator(
+            None, None, session_id="s1", clarification_answers={}, target="tpcds"
+        )
+    ]
+
+    assert captured["target"] == "tpcds"

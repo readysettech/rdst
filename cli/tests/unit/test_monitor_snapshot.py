@@ -240,6 +240,17 @@ def test_database_actions_carry_evidence_and_sql():
     assert db_actions.setting_value("25% of RAM") is None
 
 
+def test_stale_statistics_alone_get_analyze_not_vacuum():
+    stale = {"schema": "public", "table": "orders", "live_tuples": 50_000, "dead_tuples": 0,
+             "dead_ratio_pct": 0.0, "status": "warn", "n_mod_since_analyze": 40_000,
+             "size_bytes": 64 * 1024 * 1024}
+    collectors = {**COLLECTORS, "vacuum_bloat": {"tables": [stale]}}
+    actions = {action["id"] for action in db_actions.database_actions(collectors, {}, {})}
+    assert "analyze" in actions and "vacuum" not in actions
+    checks = [problem["check"] for problem in snapshot.health_section(collectors)["problems"]]
+    assert "vacuum_bloat" not in checks
+
+
 def test_health_overview_leads_with_the_worst_check():
     numbers = {"cache_hit_ratio_min": 0.72, "active_conns_peak": 9, "max_conns": 100,
                "xact_rollback": 0, "deadlocks": 0}

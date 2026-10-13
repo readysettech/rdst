@@ -78,7 +78,10 @@ export function AskEarlier({
                   {group.heading}
                 </div>
                 {group.items.map((item) => (
-                  <ListRow key={item.hash} className="min-h-11 py-1.5">
+                  <ListRow
+                    key={`${item.target}:${item.hash}`}
+                    className="min-h-11 py-1.5"
+                  >
                     <span className="min-w-0 truncate text-body-small text-content-layout-1">
                       {item.question}
                     </span>

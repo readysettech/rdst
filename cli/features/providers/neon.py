@@ -58,17 +58,23 @@ def _get(
     return bearer_get(f"{API_BASE}{path}", key, params=params, timeout=timeout)
 
 
-def validate_key(key: str) -> tuple[bool, str]:
-    """Check an API key against the projects endpoint before storing it."""
+UNREACHABLE_DETAIL = "Couldn't reach Neon. Check your connection and try again."
+
+
+def validate_key(key: str) -> tuple[Optional[bool], str]:
+    """Check an API key against the projects endpoint before storing it.
+
+    Returns None as the verdict when Neon couldn't be asked: only a 401/403 rejects a key.
+    """
     try:
         response = _get("/projects", key, params={"limit": 1})
-    except requests.RequestException as exc:
-        return False, f"Could not reach the Neon API: {exc}"
+    except requests.RequestException:
+        return None, UNREACHABLE_DETAIL
     if response.status_code == 200:
         return True, "Key accepted by the Neon API"
     if response.status_code in (401, 403):
         return False, "Neon rejected this API key"
-    return False, f"Neon API returned {response.status_code}"
+    return None, UNREACHABLE_DETAIL
 
 
 def _account_name(key: str) -> Optional[str]:

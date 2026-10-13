@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
-import { app, BrowserWindow, ipcMain, net } from 'electron'
+import { app, BrowserWindow, ipcMain, autoUpdater as nativeUpdater, net } from 'electron'
 import electronUpdater from 'electron-updater'
 
+import { installOrQuit } from './window-lifecycle.js'
 import {
   isNewerVersion,
   manualDownloadLinks,
@@ -19,6 +20,8 @@ import {
 const { autoUpdater } = electronUpdater
 
 const INITIAL_CHECK_DELAY_MS = 15_000
+// A successful install quits the app within a second; one that hasn't by then isn't going to.
+const INSTALL_TIMEOUT_MS = 10_000
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 let currentState: UpdateStatePayload | null = null
@@ -55,6 +58,11 @@ function scheduleChecks(check: () => void): void {
 /** In-place updates through electron-updater; macOS, Windows, and AppImage installs. */
 function setupInPlaceUpdates(): void {
   let downloadingVersion: string | null = null
+  // On macOS, Squirrel fetches each update again once electron-updater has it, and can install
+  // it only after that; Restart is offered from then on.
+  const squirrel = process.platform === 'darwin'
+  let squirrelVersion: string | null = null
+  let pendingVersion: string | null = null
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
   autoUpdater.on('error', (error) => {
@@ -77,14 +85,20 @@ function setupInPlaceUpdates(): void {
       progress: Math.min(100, Math.max(0, Math.round(progress.percent))),
     })
   })
+  const ready = (version: string) =>
+    broadcastState({ status: 'ready', version, downloadLinks: [], progress: 100 })
+  if (squirrel) {
+    nativeUpdater.on('update-downloaded', () => {
+      if (!pendingVersion) return
+      squirrelVersion = pendingVersion
+      pendingVersion = null
+      ready(squirrelVersion)
+    })
+  }
   autoUpdater.on('update-downloaded', (info) => {
     downloadingVersion = null
-    broadcastState({
-      status: 'ready',
-      version: info.version,
-      downloadLinks: [],
-      progress: 100,
-    })
+    if (!squirrel || squirrelVersion === info.version) ready(info.version)
+    else pendingVersion = info.version
   })
 
   scheduleChecks(() => {
@@ -145,7 +159,9 @@ function setupUpdateNotifications(env: UpdateEnvironment): void {
  * even when updates are disabled so the preload bridge always works.
  */
 export function setupAutoUpdates(
-  options: Omit<UpdateEnvironment, 'updatesEnabled'>
+  options: Omit<UpdateEnvironment, 'updatesEnabled'>,
+  /** Ends the app's background work, then calls install; windows must close for it to run. */
+  beforeInstall: (install: () => void) => void
 ): void {
   const env: UpdateEnvironment = {
     ...options,
@@ -156,7 +172,15 @@ export function setupAutoUpdates(
   ipcMain.handle('updates:get-state', () => currentState)
   ipcMain.on('updates:install', () => {
     if (mode === 'auto' && currentState?.status === 'ready') {
-      autoUpdater.quitAndInstall()
+      beforeInstall(() =>
+        installOrQuit({
+          install: () => autoUpdater.quitAndInstall(),
+          onError: (listener) => autoUpdater.once('error', listener),
+          // A window that won't close can be why the install didn't quit; exit skips windows.
+          quit: () => app.exit(0),
+          timeoutMs: INSTALL_TIMEOUT_MS,
+        })
+      )
     }
   })
 

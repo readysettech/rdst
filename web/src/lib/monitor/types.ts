@@ -1587,10 +1587,11 @@ export interface MonitorLink {
 
 // GET /api/monitor/home
 
-/** needs_you: an Act now item is open. quiet: attention checks ran in the last 3 cycles
- * and nothing is open. paused: charts and stuck-query alerts run, AI checks do not. off:
- * no database is monitored. */
-export type HomeState = 'needs_you' | 'quiet' | 'paused' | 'off'
+/** needs_you: an Act now item is open. cant_reach: nothing is open, but the latest check of
+ * `target` failed. quiet: attention checks ran in the last 3 cycles and nothing is open.
+ * paused: charts and stuck-query alerts run, AI checks do not. off: no database is
+ * monitored. */
+export type HomeState = 'needs_you' | 'cant_reach' | 'quiet' | 'paused' | 'off'
 
 export interface HomeStatus {
   state: HomeState
@@ -1603,7 +1604,8 @@ export interface HomeStatus {
   link: MonitorLink | null
   /** The last attention check that ran; null when none did. */
   checks_ran_at: number | null
-  /** For quiet: since when; for paused: since when AI checks stopped. */
+  /** For quiet: since when; for cant_reach: since its checks fail; for paused: since when AI
+   * checks stopped. */
   since: number | null
   last_reading_at: number | null
   next_report_at: number | null

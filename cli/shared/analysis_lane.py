@@ -109,12 +109,9 @@ def stop(run: AnalysisRun) -> None:
     run.stopped.set()
     if _current.get() is run:
         _current.set(None)
-    with run.lock:
-        connections = list(run.connections)
-    from shared.db_connection import cancel_query
+    from shared.db_connection import cancel_registered
 
-    for conn, engine, config in connections:
-        cancel_query(conn, engine, config)
+    cancel_registered(run.lock, lambda: run.connections)
     with _registry_lock:
         runs = _runs.get(run.target, [])
         if run in runs:

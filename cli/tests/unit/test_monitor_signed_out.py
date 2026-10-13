@@ -283,3 +283,19 @@ async def test_logout_during_parameter_collection_holds_analysis(authorization, 
     assert service.calls == []
     assert store.analyze_jobs("db")[0]["state"] == "queued"
     assert store.analyze_jobs("db")[0]["error"] == "signed out"
+
+
+@pytest.mark.parametrize("signed_in, deep_analysis, building", [
+    (True, True, True), (False, True, False), (True, False, False)])
+def test_home_builds_the_first_plan_only_while_its_analyses_can_run(
+        monkeypatch, tmp_path, signed_in, deep_analysis, building):
+    from features.monitor.api import views
+
+    monkeypatch.setattr(views, "registry_entries", lambda keys=None: {})
+    monkeypatch.setattr(database_limit, "_signed_in", lambda: signed_in)
+    store = MonitorStore(tmp_path / "monitor.db", clock=lambda: NOW)
+    store.set_settings("db", {"enabled": True, "deep_analysis": deep_analysis})
+    store.start_first_hour("db", NOW - 30)
+    database_limit.set_ai_state(store, "db", "on")
+    home = views.home(store, NOW, configured=[{"name": "db"}])
+    assert home["databases_strip"][0]["building"] is building

@@ -9,12 +9,14 @@ import { useReducedMotion } from '@rs/ui-new/motion'
 import { Text } from '@rs/ui-new/text'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
+import { type AiCanRun, aiWaitCopy } from '@/features/monitor-kit/aiMonitoring'
 import {
   formatClock,
   formatElapsed,
   formatWeekdayClock,
 } from '@/features/monitor-kit/format'
 import { RollingNumber } from '@/features/monitor-kit/RollingNumber'
+import { SignInNote } from '@/features/monitor-kit/signInHold'
 import type { MonitorPulseState } from '@/features/monitor-kit/useMonitorPulse'
 import { getPulses } from '@/lib/monitor/api'
 import { useAnalyzeJobs } from '@/lib/monitor/hooks'
@@ -70,16 +72,18 @@ export function firstRunLabel(domain: [number, number], now: number): string {
 }
 
 export interface FirstRunNoteProps {
-  /** No report yet: the first one runs tonight. */
+  /** No report yet. */
   firstReport: boolean
+  /** When the first report runs and what it waits on (firstReportLine). */
+  line: string | null
 }
 
 /** The line under the chart in the first hour: when the report arrives. */
-export function FirstRunNote({ firstReport }: FirstRunNoteProps) {
-  if (!firstReport) return null
+export function FirstRunNote({ firstReport, line }: FirstRunNoteProps) {
+  if (!firstReport || !line) return null
   return (
     <Text as="p" level="caption" className="mt-3 text-content-layout-3">
-      Your first daily report runs tonight, just after midnight.
+      {line}
     </Text>
   )
 }
@@ -263,6 +267,8 @@ export interface FirstRunProps {
   /** Every row of the query list, writes included; null while loading. */
   queries: MonitorQuery[] | null | undefined
   nextReadingAt?: number | null
+  /** What AI work can run now. */
+  can?: AiCanRun
 }
 
 /** The model the strip and the waiting card share. */
@@ -273,6 +279,7 @@ export function useFirstRun({
   pulse,
   queries,
   nextReadingAt,
+  can,
 }: FirstRunProps): FirstRunModel {
   const extra = useFirstRunPulses(target, pulse.beat)
   const jobs = useAnalyzeJobs(target)
@@ -288,6 +295,7 @@ export function useFirstRun({
     nextReadingAt: pulse.nextAt ?? nextReadingAt,
     queries,
     queue: jobs.data?.queue,
+    can,
   })
 }
 
@@ -335,9 +343,10 @@ export function FirstRunStrip({
   ) : null
   if (model.complete) {
     // Its steps are done: one quiet line until the hour is up or the user hides it.
+    const reportWhen = report?.at != null ? when(report.at, now) : null
     const reportLine =
-      report?.state === 'pending' && report.at != null
-        ? ` The nightly checkup runs ${when(report.at, now).toLowerCase()}.`
+      report?.state === 'pending' && reportWhen
+        ? ` The nightly checkup runs ${reportWhen[0].toLowerCase()}${reportWhen.slice(1)}.`
         : ''
     return (
       <section
@@ -426,12 +435,16 @@ export function WaitingForQueries({
   target,
   model,
   now,
+  can,
 }: {
   target: string
   model: FirstRunModel
   now: number
+  /** What AI work can run now: when the analyses can't, the card says what they wait on. */
+  can?: AiCanRun
 }) {
   const reduced = Boolean(useReducedMotion())
+  const wait = can?.deep ? aiWaitCopy(can.deep) : null
   const { next } = readingsLine(model, now)
   const seconds = Math.max(10, Math.round(model.interval))
   return (
@@ -485,6 +498,18 @@ export function WaitingForQueries({
               {next ? `, ${next}` : ''}
             </span>
           </Text>
+          {wait?.signIn ? (
+            <SignInNote />
+          ) : wait ? (
+            <Text
+              as="p"
+              level="caption"
+              className="text-content-layout-3"
+              data-testid="waiting-ai-note"
+            >
+              {wait.line}
+            </Text>
+          ) : null}
         </div>
         <div className="space-y-3 border-border-layout-1 max-laptop:border-t max-laptop:pt-6 laptop:border-l laptop:pl-10">
           <Text as="h3" level="label-medium" className="text-content-layout-1">

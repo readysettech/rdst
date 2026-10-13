@@ -107,19 +107,29 @@ def ensure(manager):
     return manager.ensure_tunnel("db", SSH, "database.internal", 5432)
 
 
+UNREACHABLE = ("SSH jump host bastion.example.com:22 couldn't be reached. Check that it's running "
+               "and that this computer can reach it.")
+
+
 @pytest.mark.parametrize("phase,error,reason,cause", [
     ("connect", socket.gaierror(-2, "Name or service not known"),
-     "SSH tunnel host not found: bastion.example.com", "dns"),
+     "SSH jump host bastion.example.com wasn't found. Check its host name.", "dns"),
     ("connect", paramiko.AuthenticationException("rejected"), "SSH authentication failed", None),
     ("channel", paramiko.ChannelException(2, "Name or service not known"),
-     "SSH tunnel host not found: database.internal", "dns"),
+     "SSH jump host couldn't find the database host database.internal.", "dns"),
     ("channel", paramiko.ChannelException(2, "Connection refused"),
-     "SSH tunnel connection refused: database.internal:5432", "refused"),
+     "SSH jump host reached database.internal:5432, but the database refused the connection.",
+     "refused"),
     ("channel", socket.timeout("timed out"),
-     "SSH tunnel connection timed out: database.internal:5432", "timeout"),
+     "SSH jump host couldn't reach the database at database.internal:5432 in time.",
+     "timeout"),
     ("connect", paramiko.ssh_exception.NoValidConnectionsError({
         ("192.0.2.1", 22): ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")}),
-     "SSH tunnel connection refused: bastion.example.com:22", "refused"),
+     "SSH jump host bastion.example.com:22 refused the connection.", "refused"),
+    ("connect", paramiko.SSHException("No existing session"),
+     UNREACHABLE, "connection"),
+    ("connect", paramiko.SSHException("Error reading SSH protocol banner"),
+     UNREACHABLE, "connection"),
 ])
 def test_busy_callers_share_bounded_retries_and_surface_reason(harness, caplog, phase, error, reason, cause):
     manager, now, state = harness
@@ -146,6 +156,8 @@ def test_busy_callers_share_bounded_retries_and_surface_reason(harness, caplog, 
     assert not any("Secsh channel" in row.message for row in caplog.records)
     payload = connectivity_error_payload(caught.value, "db", CONFIG)
     assert reason in payload["message"]
+    if cause:
+        assert payload["category"] == "ssh_jump_unreachable"
     result = check_target("db", CONFIG)
     assert reason in result["connection_error"]
     # An unmonitored target has no scheduled tunnel work, even after its deadline.
@@ -222,7 +234,7 @@ def test_runtime_failure_stops_all_waiting_channels_and_closes_listener(harness)
     assert not tunnel.transport.is_active()
     assert not tunnel.clients
     for _ in range(1000):
-        with pytest.raises(SshTunnelError, match="host not found"):
+        with pytest.raises(SshTunnelError, match="couldn't find the database host"):
             ensure(manager)
     assert state.channels == 2
 
@@ -276,7 +288,7 @@ def test_reason_reaches_monitor_pulse_inbox_and_driver(harness, tmp_path, monkey
     monkeypatch.setattr(manager, "ensure_tunnel", lambda *args, **kwargs: ("127.0.0.1", 40000))
     monkeypatch.setattr("shared.db_connection._create_postgres_connection",
                         MagicMock(side_effect=RuntimeError("server closed the connection")))
-    with pytest.raises(SshTunnelError, match="host not found"):
+    with pytest.raises(SshTunnelError, match="couldn't find the database host"):
         create_direct_connection(CONFIG, target="db")
 
 

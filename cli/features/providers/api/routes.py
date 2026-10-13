@@ -513,6 +513,10 @@ async def set_fleet_neon_key(http_request: Request, request: ProviderTokenReques
             content={"code": "invalid_token", "detail": "Provide a Neon API key"},
         )
     valid, detail = await asyncio.to_thread(validate_key, token)
+    if valid is None:
+        return JSONResponse(
+            status_code=502, content={"code": "provider_unreachable", "detail": detail}
+        )
     if not valid:
         return JSONResponse(
             status_code=400, content={"code": "invalid_token", "detail": detail}

@@ -12,6 +12,9 @@ import type { ReactNode } from 'react'
 import { useOpenAddDatabase } from '@/components/configure/addDatabase'
 import { MonitoringStatusAction } from '@/features/monitor-kit/AiMonitoringStatus'
 import {
+  type AiBlocker,
+  aiCanRun,
+  aiWaitCopy,
   type MonitoringStatus,
   monitoringStatus,
   needsUserAction,
@@ -171,14 +174,25 @@ export function PlanView({
   const monitored = inScope.filter((row) => row.monitored)
   const waitsForSignIn =
     useSignInHeld(monitored.map((row) => row.database)).size > 0
-  const aiOff = useAiOff(
+  const { aiOff, deepBlocked } = useAiOff(
     monitored.map((row) => row.database),
     !cards.length && !waitsForSignIn
   )
-  // The first plan is still building on a monitored database in view.
-  const building = monitored.filter(
+  // The first plan is still building on a monitored database in view, where its analyses
+  // can run; where they can't, the page says what they wait on.
+  const firstPass = monitored.filter(
     (row) => row.checkup?.state === 'first_pass'
   )
+  const building = firstPass.filter((row) => !deepBlocked.has(row.database))
+  const heldFirst = building.length
+    ? null
+    : (firstPass
+        .map((row) => ({
+          database: row.database,
+          blocker: deepBlocked.get(row.database),
+        }))
+        .find((row) => row.blocker) ?? null)
+  const heldCopy = heldFirst?.blocker ? aiWaitCopy(heldFirst.blocker) : null
   const analyzed = building.reduce(
     (sum, row) =>
       sum + Math.min(row.checkup?.analyzed ?? 0, row.checkup?.total ?? 0),
@@ -318,6 +332,27 @@ export function PlanView({
             </span>
           }
         />
+      ) : heldFirst && heldCopy ? (
+        <EmptyState
+          tone="quiet"
+          title={heldCopy.title}
+          body={`${firstPass.length > 1 ? `${heldFirst.database}: ` : ''}${heldCopy.detail} Changes show up here once the first analyses run.`}
+          action={
+            heldFirst.blocker === 'deep_off'
+              ? {
+                  label: 'Monitoring settings',
+                  onClick: () =>
+                    void navigate({
+                      to: '/database',
+                      search: {
+                        target: heldFirst.database,
+                        panel: 'settings',
+                      } as never,
+                    }),
+                }
+              : undefined
+          }
+        />
       ) : building.length ? (
         <EmptyState
           tone="quiet"
@@ -364,11 +399,17 @@ export function PlanView({
   )
 }
 
-/** The first monitored database whose AI is off for a reason the user has to act on. */
+/**
+ * The first monitored database whose AI is off for a reason the user has to act on, and
+ * every database whose deep analyses can't run now, with why.
+ */
 function useAiOff(
   databases: string[],
   enabled: boolean
-): { database: string; status: MonitoringStatus } | null {
+): {
+  aiOff: { database: string; status: MonitoringStatus } | null
+  deepBlocked: ReadonlyMap<string, AiBlocker>
+} {
   const settings = useQueries({
     queries: databases.map((database) => ({
       queryKey: monitorKeys.settings(database),
@@ -376,6 +417,8 @@ function useAiOff(
       enabled,
     })),
   })
+  let aiOff: { database: string; status: MonitoringStatus } | null = null
+  const deepBlocked = new Map<string, AiBlocker>()
   for (const [index, query] of settings.entries()) {
     const data = query.data
     if (!data?.enabled) continue
@@ -385,9 +428,12 @@ function useAiOff(
       reason: data.ai_reason,
       since: data.ai_since,
     })
-    if (needsUserAction(status)) return { database: databases[index], status }
+    if (!aiOff && needsUserAction(status))
+      aiOff = { database: databases[index], status }
+    const deep = aiCanRun({ settings: data }).deep
+    if (deep) deepBlocked.set(databases[index], deep)
   }
-  return null
+  return { aiOff, deepBlocked }
 }
 
 function LeadParts({ parts }: { parts: LeadPart[] }) {

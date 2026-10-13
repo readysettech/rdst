@@ -78,6 +78,7 @@ function answer(overrides: Partial<AskResultEvent> = {}): AskResultEvent {
     llm_calls: 1,
     total_tokens: 10,
     query_hash: 'hash-1',
+    monitor_key: 'key-1',
     query_tag: 'votes-this-week',
     limit_added: true,
     ...overrides,
@@ -124,6 +125,35 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('the box', () => {
+  it('drops a question waiting on a detail when the database changes', async () => {
+    const idle = askState()
+    vi.mocked(useAsk).mockReturnValue(idle)
+    const view = renderAsk()
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Question' }), {
+      key: 'Enter',
+    })
+    await vi.waitFor(() => expect(idle.ask).toHaveBeenCalled())
+    const waiting = askState({
+      state: 'clarification_needed',
+      reset: idle.reset,
+    })
+    vi.mocked(useAsk).mockReturnValue(waiting)
+    view.rerender(
+      <AskPanel
+        target="demo"
+        initialQuestion="Which posts got the most votes this week?"
+      />
+    )
+    expect(idle.reset).not.toHaveBeenCalled()
+    view.rerender(
+      <AskPanel
+        target="other"
+        initialQuestion="Which posts got the most votes this week?"
+      />
+    )
+    expect(idle.reset).toHaveBeenCalled()
+  })
+
   it('ignores Enter while a question runs', () => {
     const ask = askState({ state: 'generating' })
     vi.mocked(useAsk).mockReturnValue(ask)
@@ -279,6 +309,8 @@ describe('answering', () => {
     expect(screen.getByText('Top by what?')).toBeTruthy()
     expect(screen.getAllByRole('radio')).toHaveLength(3)
     expect(screen.getByText('users.reputation, highest first')).toBeTruthy()
+    // A caption that only repeats its label is left out.
+    expect(screen.getAllByText('Reputation')).toHaveLength(1)
     fireEvent.click(screen.getByRole('radio', { name: /Accepted answers/ }))
     fireEvent.click(
       screen.getByRole('button', { name: 'Run with accepted answers' })
@@ -328,9 +360,12 @@ describe('the answer', () => {
     fireEvent.click(within(table).getByRole('button', { name: 'Download CSV' }))
     expect(downloadCsv).toHaveBeenCalledWith('csv', 'rows.csv')
 
-    expect(
-      screen.getByRole('button', { name: 'Open in Database' })
-    ).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Open in Database' }))
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/database',
+      search: { target: 'demo', query: 'key-1' },
+    })
+    navigate.mockReset()
     expect(
       screen.getByRole('button', { name: "Ask again with today's data" })
     ).toBeTruthy()
@@ -340,17 +375,91 @@ describe('the answer', () => {
       search: { query: `${SQL} LIMIT 1000`, target: 'demo', origin: 'ask' },
     })
 
-    expect(screen.queryByTestId('ask-sql')).toBeNull()
+    // The SQL that ran is open once the answer lands, and folds on request.
+    expect(screen.getByTestId('ask-sql').textContent).toContain('FROM votes v')
     const disclosure = screen.getByRole('button', { name: /SQL that ran/ })
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true')
     expect(disclosure.textContent).toContain('LIMIT 1000 added')
     fireEvent.click(disclosure)
-    expect(screen.getByTestId('ask-sql').textContent).toContain('FROM votes v')
+    expect(screen.queryByTestId('ask-sql')).toBeNull()
+  })
+
+  it('offers Open in Database only for a query the database lists', () => {
+    vi.mocked(useAsk).mockReturnValue(
+      askState({ state: 'complete', result: answer({ monitor_key: null }) })
+    )
+    renderAsk()
+    expect(screen.getByTestId('ask-answer')).toBeTruthy()
+    expect(
+      screen.queryByRole('button', { name: 'Open in Database' })
+    ).toBeNull()
+  })
+
+  it('says when the rows stop at a LIMIT Ask lowered', () => {
+    const ask = askState({
+      state: 'complete',
+      result: answer({
+        sql: `${SQL.replace('LIMIT 10', 'LIMIT 1000')}`,
+        limit_added: false,
+        limit_reduced: true,
+        truncated: true,
+        row_limit: 1000,
+        row_count: 1000,
+      }),
+      sqlGenerated: {
+        type: 'sql_generated',
+        sql: SQL.replace('LIMIT 10', 'LIMIT 1000000'),
+        explanation: 'Every post, limited to 1000000 as requested.',
+      },
+    })
+    vi.mocked(useAsk).mockReturnValue(ask)
+    renderAsk()
+    expect(screen.getByTestId('ask-status').textContent).toContain(
+      'first 1,000 rows'
+    )
+    expect(
+      screen.getByText(
+        "Every post, limited to 1000000 as requested. Ask lowered the query's LIMIT to 1,000."
+      )
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: /SQL that ran/ }).textContent
+    ).toContain('LIMIT lowered to 1000')
+  })
+
+  it('says when Ask added the LIMIT the explanation does not mention', () => {
+    const unlimited = SQL.replace(' LIMIT 10', '')
+    vi.mocked(useAsk).mockReturnValue(
+      askState({
+        state: 'complete',
+        result: answer({ sql: `${unlimited} LIMIT 100`, limit_added: true }),
+        sqlGenerated: {
+          type: 'sql_generated',
+          sql: unlimited,
+          explanation: 'Upvotes per post this week, with no limit.',
+        },
+      })
+    )
+    renderAsk()
+    expect(
+      screen.getByText(
+        'Upvotes per post this week, with no limit. Ask added LIMIT 100.'
+      )
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: /SQL that ran/ }).textContent
+    ).toContain('LIMIT 100 added')
   })
 
   it('says when the query ran and matched nothing', () => {
     const ask = askState({
       state: 'complete',
-      result: answer({ rows: [], row_count: 0, execution_time_ms: 300 }),
+      result: answer({
+        rows: [],
+        row_count: 0,
+        execution_time_ms: 300,
+        limit_added: false,
+      }),
       sqlGenerated: {
         type: 'sql_generated',
         sql: SQL,
@@ -367,8 +476,9 @@ describe('the answer', () => {
     ).toBeTruthy()
     expect(screen.queryByTestId('ask-table')).toBeNull()
     expect(screen.getByRole('button', { name: 'Edit question' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Show the SQL' }))
     expect(screen.getByTestId('ask-sql')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Hide the SQL' }))
+    expect(screen.queryByTestId('ask-sql')).toBeNull()
   })
 
   it('names the database and its error when the query failed, with the SQL in view', () => {

@@ -6,7 +6,7 @@ import logging
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from shared.api.email import EMAIL_RE as _EMAIL_RE
 from shared.api.email import normalized_email as _normalized_email
@@ -201,6 +201,11 @@ class Preferences(BaseModel):
     keep_readings_days: KeepReadingsDays = 7
     # The Report page's last view, for every database and day.
     report_view: ReportView = "quick"
+    # The database the app has selected; None until one is picked.
+    selected_target: str | None = None
+    # "Push to this computer": inbox alerts as system notifications from the app. None
+    # until someone chooses.
+    push_notifications: bool | None = None
 
 
 class PreferencesUpdate(BaseModel):
@@ -208,6 +213,9 @@ class PreferencesUpdate(BaseModel):
     font_size: FontSize | None = None
     keep_readings_days: KeepReadingsDays | None = None
     report_view: ReportView | None = None
+    # An empty name clears the selection.
+    selected_target: str | None = Field(default=None, max_length=256)
+    push_notifications: bool | None = None
 
 
 def _read_preferences(cfg: TargetsConfig) -> Preferences:
@@ -223,7 +231,11 @@ async def get_preferences(request: Request) -> Preferences:
     require_local_request(request)
     cfg = TargetsConfig()
     cfg.load()
-    return _read_preferences(cfg)
+    preferences = _read_preferences(cfg)
+    # A database removed since it was selected is no selection.
+    if preferences.selected_target and cfg.get(preferences.selected_target) is None:
+        preferences.selected_target = None
+    return preferences
 
 
 @router.put("/preferences")
@@ -233,8 +245,12 @@ async def put_preferences(request: Request, body: PreferencesUpdate) -> Preferen
     cfg = TargetsConfig()
     cfg.load()
     current = _read_preferences(cfg)
-    updated = current.model_copy(update=body.model_dump(exclude_none=True))
-    cfg._data["preferences"] = updated.model_dump()
+    changes = body.model_dump(exclude_none=True)
+    if "selected_target" in changes:
+        changes["selected_target"] = changes["selected_target"].strip() or None
+    updated = current.model_copy(update=changes)
+    # TOML has no null; preferences not set yet are left out of the file.
+    cfg._data["preferences"] = updated.model_dump(exclude_none=True)
     cfg.save()
     from shared.monitor.monitor_store import _PREFERENCES_CACHE
 

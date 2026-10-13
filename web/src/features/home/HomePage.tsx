@@ -581,7 +581,7 @@ export function HomeView({
           <>
             <StatusLine
               tone={homeTone(model.status)}
-              caption={homeCaption(model.status, strip.length)}
+              caption={homeCaption(model.status, strip.length, signIn)}
             >
               <HomeSentence
                 status={model.status}

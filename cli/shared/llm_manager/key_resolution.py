@@ -112,9 +112,21 @@ def resolve_api_key(provider: str = "auto") -> KeyResolution:
 
     # 3. Readyset account session.
     if requested_provider != "claude":
-        from shared.account_session import access_token
+        import requests
 
-        account_token = access_token()
+        from shared.account_session import AccountSessionError, access_token
+
+        from .base import provider_unreachable
+
+        try:
+            account_token = access_token()
+        except AccountSessionError as exc:
+            # Offline, the session can't refresh: a network problem, not a signed-out one.
+            if isinstance(exc.__cause__, requests.RequestException):
+                raise provider_unreachable(
+                    "RDST's AI service", "HOSTED_INFERENCE_UNAVAILABLE", exc
+                ) from exc
+            raise
         if account_token:
             return KeyResolution(
                 api_key=account_token,

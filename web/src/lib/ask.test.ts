@@ -109,6 +109,68 @@ describe('useAsk stream lifecycle', () => {
     expect(result.current.error).toBeUndefined()
   })
 
+  it('keeps the newer answer when an earlier, aborted ask reports a failure late', async () => {
+    const RESULT =
+      'event: result\ndata: {"type":"result","success":true,"sql":"SELECT 2","columns":["two"],"rows":[[2]],"row_count":1,"execution_time_ms":1,"llm_calls":0,"total_tokens":0,"query_hash":"h2","query_tag":"two"}\n\n'
+    let earlier: ReadableStreamDefaultController<Uint8Array> | undefined
+    let earlierFetch: ((error: Error) => void) | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        // The first ask streams, and its connection only fails after it was superseded.
+        .mockResolvedValueOnce(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                earlier = controller
+              },
+            }),
+            { status: 200 }
+          )
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise<Response>((_resolve, reject) => {
+              earlierFetch = reject
+            })
+        )
+        .mockResolvedValueOnce(sseResponse(RESULT))
+    )
+
+    const { result } = renderHook(() => useAsk())
+    let first: Promise<void> | undefined
+    let second: Promise<void> | undefined
+    act(() => {
+      first = result.current.ask({ question: 'one', target: 'prod' })
+    })
+    await waitFor(() => expect(earlier).toBeDefined())
+    act(() => {
+      second = result.current.ask({ question: 'two', target: 'prod' })
+    })
+    await waitFor(() => expect(earlierFetch).toBeDefined())
+    await act(async () => {
+      await result.current.ask({ question: 'three', target: 'prod' })
+    })
+    expect(result.current.state).toBe('complete')
+
+    await act(async () => {
+      earlier?.enqueue(
+        new TextEncoder().encode(
+          'event: error\ndata: {"type":"error","message":"Lost connection to the database","phase":"execute","code":"DB_CONNECTION_FAILED"}\n\n'
+        )
+      )
+      earlier?.close()
+      earlierFetch?.(new TypeError('Failed to fetch'))
+      await first
+      await second
+    })
+
+    expect(result.current.state).toBe('complete')
+    expect(result.current.error).toBeUndefined()
+    expect(result.current.result?.sql).toBe('SELECT 2')
+  })
+
   it('keeps the target switch lock active during clarification and clears it on reset', async () => {
     __resetTargetSwitchLockForTests()
     vi.stubGlobal(

@@ -4,8 +4,12 @@ import { settingsFixture } from '@/lib/monitor/fixtures'
 import { renderWithClient } from '@/test-utils'
 
 const mutate = vi.hoisted(() => vi.fn())
-const account = vi.hoisted(() => ({ signedIn: true }))
+const account = vi.hoisted(() => ({
+  signedIn: true,
+  limit: {} as Record<string, unknown>,
+}))
 const prereq = vi.hoisted(() => ({ phase: 'ready' }))
+const saved = vi.hoisted(() => ({ value: {} as Record<string, unknown> }))
 vi.mock('@tanstack/react-router', () => ({
   useRouter: () => null,
   Link: ({ to, children }: { to: string; children: string }) => (
@@ -15,9 +19,16 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('@/lib/monitor/hooks', async (original) => ({
   ...(await original<typeof import('@/lib/monitor/hooks')>()),
   useMonitorSettings: () => ({
-    data: { ...settingsFixture('localdev'), enabled: false, configured: false },
+    data: {
+      ...settingsFixture('localdev'),
+      enabled: false,
+      configured: false,
+      ...saved.value,
+    },
   }),
-  useMonitoringLimit: () => ({ data: { signed_in: account.signedIn } }),
+  useMonitoringLimit: () => ({
+    data: { signed_in: account.signedIn, ...account.limit },
+  }),
   useUpdateMonitorSettings: () => ({
     mutate,
     isPending: false,
@@ -38,7 +49,9 @@ beforeEach(() => mutate.mockReset())
 afterEach(() => {
   cleanup()
   account.signedIn = true
+  account.limit = {}
   prereq.phase = 'ready'
+  saved.value = {}
 })
 
 it('says what monitoring reads and runs and turns it on with one action', () => {
@@ -76,6 +89,25 @@ it('says what monitoring reads and runs and turns it on with one action', () => 
   )
   mutate.mock.calls[0][1].onSuccess()
   expect(onClose).toHaveBeenCalled()
+})
+
+it('turning monitoring back on says whether deep analysis is on', () => {
+  saved.value = { configured: true, deep_analysis: false }
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  expect(
+    screen.getByText(
+      'Deep analysis is off. Change it any time in Monitoring settings.'
+    )
+  ).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: /Advanced/ }))
+  fireEvent.click(screen.getByRole('switch', { name: 'Analyze automatically' }))
+  expect(
+    screen.getByText(
+      'Deep analysis is on. Change it any time in Monitoring settings.'
+    )
+  ).toBeTruthy()
 })
 
 it('keeps the analysis choices folded under Advanced', () => {
@@ -131,4 +163,37 @@ it('signed out, signing in leads and turning on stays secondary', () => {
     screen.getByRole('button', { name: 'Turn on monitoring' })
   ).toBeTruthy()
   expect(screen.getByText(/You're signed out\./)).toBeTruthy()
+})
+
+it("with the account's AI slots full, says deep analysis waits for a free one", () => {
+  account.limit = { target_fits: false, limit: 3, in_use: 3 }
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  expect(
+    screen.getByText('Deep analysis is on, and runs once an AI slot is free.')
+  ).toBeTruthy()
+  expect(
+    screen.queryByText(
+      'Deep analysis is on. Change it any time in Monitoring settings.'
+    )
+  ).toBeNull()
+})
+
+it('signed out, says deep analysis runs once you sign in', () => {
+  account.signedIn = false
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  expect(
+    screen.getByText('Deep analysis is on, and runs once you sign in.')
+  ).toBeTruthy()
+  expect(screen.queryByText(/^Deep analysis is on\. /)).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: /Advanced/ }))
+  fireEvent.click(screen.getByRole('switch', { name: 'Analyze automatically' }))
+  expect(
+    screen.getByText(
+      'Deep analysis is off. Change it any time in Monitoring settings.'
+    )
+  ).toBeTruthy()
 })

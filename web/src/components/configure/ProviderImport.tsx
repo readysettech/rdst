@@ -398,6 +398,12 @@ export function ProviderImport({
     reset: resetImport,
   } = useFleetImport()
   const isImporting = importState === 'running'
+  // An import that left rows out stays on its summary until the user moves on.
+  const [reviewingImport, setReviewingImport] = useState(false)
+  const clearImport = () => {
+    setReviewingImport(false)
+    resetImport()
+  }
 
   // AWS discover form. All common regions start selected; custom ones join the
   // chip bar as they're added.
@@ -486,7 +492,7 @@ export function ProviderImport({
 
   const handleCsvFile = async (file: File | undefined) => {
     if (!file) return
-    resetImport()
+    clearImport()
     setCsvUpload({ name: file.name, content: await file.text() })
   }
 
@@ -497,7 +503,9 @@ export function ProviderImport({
       await publishNewTargets()
       setCredentialTargetNames(completion.target_names)
       setPrivateTargetGroups([])
-      setStep('credentials')
+      if (completion.skipped > 0 || completion.errors > 0)
+        setReviewingImport(true)
+      else setStep('credentials')
     }
   }
 
@@ -663,8 +671,10 @@ export function ProviderImport({
     (accountTab ? accountConnected : awsConnected && !awsWizard)
   const caption =
     addTab === 'csv'
-      ? (csvUpload?.name ??
-        'Passwords are set in the next step, never in the CSV.')
+      ? reviewingImport
+        ? 'Next, set credentials for the imported databases.'
+        : (csvUpload?.name ??
+          'Passwords are set in the next step, never in the CSV.')
       : previewMembers !== null
         ? 'Next, set credentials for the databases you add.'
         : !activeConnected || awsWizard
@@ -704,7 +714,7 @@ export function ProviderImport({
               progress={importProgress}
               errors={importErrors}
               result={importResult}
-              onClear={resetImport}
+              onClear={clearImport}
             />
           </VStack>
         </Show>
@@ -913,15 +923,24 @@ export function ProviderImport({
               disabled={isImporting}
               onClick={() => csvFileInputRef.current?.click()}
             />
-            <Button
-              variant="primary"
-              modifier="solid"
-              label="Import"
-              aria-label="Import"
-              onClick={handleImport}
-              loading={isImporting}
-              disabled={!csvUpload}
-            />
+            {reviewingImport ? (
+              <Button
+                variant="primary"
+                modifier="solid"
+                label="Continue"
+                onClick={() => setStep('credentials')}
+              />
+            ) : (
+              <Button
+                variant="primary"
+                modifier="solid"
+                label="Import"
+                aria-label="Import"
+                onClick={handleImport}
+                loading={isImporting}
+                disabled={!csvUpload}
+              />
+            )}
           </>
         ) : previewMembers !== null ? (
           <>

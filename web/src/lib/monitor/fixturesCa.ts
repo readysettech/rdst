@@ -2993,7 +2993,7 @@ function benchmarkFixesResult(
     scratch_schema: false,
     rows,
     share: 0.54,
-    method: `Estimated from the planner on ${target}: each fix tested as a hypothetical index, the same estimate Actions shows.`,
+    method: `Estimated on ${target}: index fixes tested as hypothetical indexes by the planner. Actions shows the same estimates.`,
   }
 }
 

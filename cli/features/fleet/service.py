@@ -55,6 +55,11 @@ def fleet_member_shape(
     }
 
 
+def _row_error_event(error: dict[str, Any]) -> FleetErrorEvent:
+    where = f"Row {error['row']} ({error['name']})" if error["row"] is not None else error["name"]
+    return FleetErrorEvent(type="error", message=f"{where}: {error['error']}", phase="import")
+
+
 class FleetService:
     """Service layer for fleet operations."""
 
@@ -96,11 +101,7 @@ class FleetService:
 
         if errors and not members:
             for error in errors:
-                yield FleetErrorEvent(
-                    type="error",
-                    message=f"Row {error['row']} ({error['name']}): {error['error']}",
-                    phase="import",
-                )
+                yield _row_error_event(error)
             yield FleetImportCompleteEvent(
                 type="import_complete",
                 success=False,
@@ -108,6 +109,7 @@ class FleetService:
                 skipped=0,
                 errors=len(errors),
                 target_names=[],
+                invalid_rows=errors,
             )
             return
 
@@ -115,6 +117,7 @@ class FleetService:
         imported = 0
         skipped = 0
         imported_names: list[str] = []
+        skipped_names: list[str] = []
 
         for index, member in enumerate(members):
             existing = config.get(member.name)
@@ -128,6 +131,7 @@ class FleetService:
                     message=f"Target '{member.name}' already exists",
                 )
                 skipped += 1
+                skipped_names.append(member.name)
                 continue
 
             if dry_run:
@@ -144,6 +148,12 @@ class FleetService:
                 continue
 
             target_config = member.to_target_config()
+            # Upsert before storing the password: a name it rejects must not leave a secret.
+            try:
+                config.upsert(member.name, target_config)
+            except ValueError as exc:
+                errors.append({"row": None, "name": member.name, "error": str(exc)})
+                continue
             stored_env = store_target_password(
                 member.name,
                 member.password,
@@ -152,7 +162,7 @@ class FleetService:
             )
             if stored_env:
                 target_config["password_env"] = stored_env
-            config.upsert(member.name, target_config)
+                config.upsert(member.name, target_config)
             imported += 1
             imported_names.append(member.name)
             yield FleetImportProgressEvent(
@@ -168,11 +178,7 @@ class FleetService:
             config.save()
 
         for error in errors:
-            yield FleetErrorEvent(
-                type="error",
-                message=f"Row {error['row']} ({error['name']}): {error['error']}",
-                phase="import",
-            )
+            yield _row_error_event(error)
 
         yield FleetImportCompleteEvent(
             type="import_complete",
@@ -181,6 +187,8 @@ class FleetService:
             skipped=skipped,
             errors=len(errors),
             target_names=imported_names,
+            skipped_names=skipped_names,
+            invalid_rows=errors,
         )
 
     async def list_fleet(self, group: str | None = None, tag: str | None = None):
@@ -304,6 +312,8 @@ class FleetService:
                 )
             except Exception as exc:
                 if target_config.get("ssh"):
+                    from shared.ssh_tunnel import get_tunnel_manager
+
                     get_tunnel_manager().close(name)
                 from shared.api.ssh_errors import connectivity_error_payload
 
@@ -347,27 +357,32 @@ class FleetService:
         force_fresh_tunnel: bool = False,
     ) -> tuple[str, dict]:
         """Check DB connectivity and return server version plus privileges."""
+        from features.configure.service import CONNECTION_TEST_TIMEOUT_SECONDS
+        from shared.db_connection import IoDeadline
+
         named_config = {**target_config, "name": target_name}
         connection = create_direct_connection(
             named_config,
             connect_timeout=3,
             force_fresh_tunnel=force_fresh_tunnel,
+            query_timeout_seconds=CONNECTION_TEST_TIMEOUT_SECONDS,
         )
         try:
-            cursor = connection.cursor()
-            engine = target_config.get("engine", "postgresql")
-            cursor.execute("SELECT version()" if engine == "postgresql" else "SELECT VERSION()")
-            row = cursor.fetchone()
-            if row is None:
-                version = "unknown"
-            elif isinstance(row, dict):
-                version = str(list(row.values())[0])
-            else:
-                version = str(row[0])
-            cursor.close()
-            from features.configure.privileges import detect_write_privileges
+            with IoDeadline(connection, CONNECTION_TEST_TIMEOUT_SECONDS):
+                cursor = connection.cursor()
+                engine = target_config.get("engine", "postgresql")
+                cursor.execute("SELECT version()" if engine == "postgresql" else "SELECT VERSION()")
+                row = cursor.fetchone()
+                if row is None:
+                    version = "unknown"
+                elif isinstance(row, dict):
+                    version = str(list(row.values())[0])
+                else:
+                    version = str(row[0])
+                cursor.close()
+                from features.configure.privileges import detect_write_privileges
 
-            privileges = detect_write_privileges(connection, engine)
-            return version.split("\n")[0][:80], privileges
+                privileges = detect_write_privileges(connection, engine)
+                return version.split("\n")[0][:80], privileges
         finally:
             connection.close()

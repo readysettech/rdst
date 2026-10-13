@@ -10,9 +10,7 @@ from typing import Any
 
 import anthropic
 
-from shared.shell import environment_assignment
-
-from .base import LLMError, Provider, ProviderRequest, ProviderResponse
+from .base import LLMError, Provider, ProviderRequest, ProviderResponse, provider_unreachable
 from .claude_schema import claude_json_schema
 
 logger = logging.getLogger(__name__)
@@ -359,16 +357,8 @@ class ClaudeProvider(Provider):
         base_url: str | None,
     ) -> None:
         if base_url:
-            raise LLMError(
-                "Unable to reach RDST trial service.\n\n"
-                "Options:\n"
-                "  1. Try again in a few minutes\n"
-                f"  2. Set your own key: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n"
-                "     Get one at: https://console.anthropic.com/",
-                code="PROXY_UNREACHABLE",
-                cause=exc,
-            )
-        raise LLMError(f"Claude request error: {exc}", code="HTTP_ERROR", cause=exc)
+            raise provider_unreachable("RDST's AI service", "PROXY_UNREACHABLE", exc)
+        raise provider_unreachable("Anthropic", "ANTHROPIC_UNREACHABLE", exc)
 
     @staticmethod
     def _usage(message) -> dict[str, int]:
@@ -480,10 +470,7 @@ class ClaudeProvider(Provider):
         except anthropic.APIStatusError as exc:
             self._raise_status_error(exc, base_url=base_url, model=model)
         except anthropic.APIConnectionError as exc:
-            target = "RDST trial service" if base_url else "Anthropic"
-            raise LLMError(
-                f"Unable to reach {target}: {exc}", code="HTTP_ERROR", cause=exc
-            )
+            self._raise_connection_error(exc, base_url=base_url)
         except anthropic.APIError as exc:
             raise LLMError(
                 f"The Anthropic response stream was interrupted: {exc}",

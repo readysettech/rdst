@@ -202,6 +202,7 @@ describe('PlatformPage', () => {
 
   afterEach(() => {
     cleanup()
+    delete window.rdstDesktop
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
@@ -216,7 +217,7 @@ describe('PlatformPage', () => {
     ).toBeTruthy()
     expect(
       await screen.findByText(
-        'A caching demo on your Mac, about 2 minutes. Docker is ready. The first start downloads 1.1 GB.'
+        'A caching demo on this computer, about 2 minutes. Docker is ready. The first start downloads 1.1 GB.'
       )
     ).toBeTruthy()
     expect(screen.getByText('Readyset caches your queries')).toBeTruthy()
@@ -245,7 +246,7 @@ describe('PlatformPage', () => {
     fireEvent.click(tryCache)
     expect(
       screen.getByText(
-        /Runs in four local containers\. Nothing leaves your Mac/
+        /Runs in four local containers\. Nothing leaves this computer/
       )
     ).toBeTruthy()
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -257,7 +258,7 @@ describe('PlatformPage', () => {
     })
     expect(
       within(confirm).getByText(
-        'Downloads about 1.1 GB of images, then runs four containers on your Mac for up to an hour.'
+        'Downloads about 1.1 GB of images, then runs four containers on this computer for up to an hour.'
       )
     ).toBeTruthy()
     expect(demo.provision).not.toHaveBeenCalled()
@@ -268,13 +269,15 @@ describe('PlatformPage', () => {
   })
 
   it('asks before starting even with the images downloaded, and says so', async () => {
+    // The macOS app names the machine as a Mac; elsewhere it is "this computer".
+    window.rdstDesktop = { isDesktop: true, platform: 'darwin' }
     stubApi({ preflight: { ...checks, images_present: true } })
     const demo = mockDemo({})
     renderWithClient(<PlatformPage />)
 
     expect(
       await screen.findByText(
-        'A caching demo on your Mac, about 2 minutes. Docker is ready and the images are downloaded.'
+        'A caching demo on this Mac, about 2 minutes. Docker is ready and the images are downloaded.'
       )
     ).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Start the demo' }))
@@ -283,7 +286,7 @@ describe('PlatformPage', () => {
     })
     expect(
       within(confirm).getByText(
-        'Runs four containers on your Mac for up to an hour. The images are already downloaded.'
+        'Runs four containers on this Mac for up to an hour. The images are already downloaded.'
       )
     ).toBeTruthy()
     fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }))
@@ -354,6 +357,26 @@ describe('PlatformPage', () => {
     expect(screen.getByTestId('try-cache').closest('.opacity-45')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(demo.tearDown).toHaveBeenCalledTimes(1)
+  })
+
+  it('failed: says why the start failed, offers Start again and sends no traffic', async () => {
+    const calls = stubApi()
+    mockDemo({ phase: 'failed', error: 'ReadySet did not snapshot in time.' })
+    renderWithClient(<PlatformPage />)
+
+    expect(screen.getByText("The demo didn't start")).toBeTruthy()
+    expect(screen.getByText('ReadySet did not snapshot in time.')).toBeTruthy()
+    expect(screen.queryByText('Running')).toBeNull()
+    expect(screen.queryByTestId('platform-comparison-card')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Start the demo' })).toBeTruthy()
+    await waitFor(() =>
+      expect(calls.some((call) => call.url === '/api/demo/preflight')).toBe(
+        true
+      )
+    )
+    expect(calls.some((call) => call.url === '/api/demo/load/start')).toBe(
+      false
+    )
   })
 
   it('running: the proof in the verdict, the comparison, the queries and one solid QueryPilot button', async () => {

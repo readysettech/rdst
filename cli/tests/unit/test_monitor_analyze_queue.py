@@ -352,18 +352,19 @@ def test_analysis_lane_cancels_driver_connections(monkeypatch):
     cancelled = []
     class PG:
         def cancel(self):
-            cancelled.append("pg")
+            raise AssertionError("conn.cancel() holds the GIL while the server is silent")
+    monkeypatch.setattr("shared.db_connection._prepared_cancel",
+                        lambda conn, engine, config: lambda: cancelled.append((engine, conn)))
     run = analysis_lane.begin("db")
     conn = PG()
     analysis_lane.register("db", conn, "postgresql")
     analysis_lane.stop(run)
-    assert cancelled == ["pg"]
+    assert cancelled == [("postgresql", conn)]
     run = analysis_lane.begin("db")
-    monkeypatch.setattr("shared.db_connection.cancel_query",
-                        lambda conn, engine, config: cancelled.append(engine))
-    analysis_lane.register("db", object(), "mysql", {"engine": "mysql"})
+    mysql = object()
+    analysis_lane.register("db", mysql, "mysql", {"engine": "mysql"})
     analysis_lane.stop(run)
-    assert cancelled[-1] == "mysql"
+    assert cancelled[-1] == ("mysql", mysql)
 
 
 def test_analysis_lane_rejects_statement_after_stop():
@@ -1348,8 +1349,8 @@ def test_analysis_connections_share_three_slots_and_cancel_separately(monkeypatc
     first_context = copy_context()
     second = analysis_lane.begin('budget-test', execute=False)
     cancelled = []
-    monkeypatch.setattr('shared.db_connection.cancel_query',
-                        lambda conn, engine, config: cancelled.append(conn))
+    monkeypatch.setattr('shared.db_connection._prepared_cancel',
+                        lambda conn, engine, config: lambda: cancelled.append(conn))
     first_context.run(analysis_lane.register, 'budget-test', 'first', 'postgresql')
     analysis_lane.register('budget-test', 'second', 'postgresql')
     analysis_lane.stop(first)

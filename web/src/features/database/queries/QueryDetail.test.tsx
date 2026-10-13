@@ -10,7 +10,18 @@ import { provenance, QueryDetail, readysetLine } from './QueryDetail'
 const navigate = vi.fn()
 vi.mock('@tanstack/react-router', async () => {
   const { fileRouteModuleMock } = await import('@/test-utils')
-  return fileRouteModuleMock({ useNavigate: () => navigate })
+  return fileRouteModuleMock({
+    useNavigate: () => navigate,
+    Link: ({ to, search, children, className }: Record<string, unknown>) => (
+      <a
+        href={to as string}
+        data-search={JSON.stringify(search)}
+        className={className as string}
+      >
+        {children as React.ReactNode}
+      </a>
+    ),
+  })
 })
 
 const demo = caFixtures('ca-database')
@@ -71,7 +82,14 @@ describe('QueryDetail', () => {
       'select id, title from posts'
     )
     expect(screen.getByText('No blockers found, not verified.')).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Full analysis' })).toBeTruthy()
+    const full = screen.getByRole('link', { name: 'Full analysis' })
+    // The page reads the monitored row by its key; the hash reaches the stored analysis.
+    expect(JSON.parse(full.getAttribute('data-search') ?? '{}')).toMatchObject({
+      target: 'demo',
+      key: query.key,
+      hash: CA_KEYS.postsByOwneruserid,
+      analysisId: `ca_${CA_KEYS.postsByOwneruserid}`,
+    })
     const solids = screen
       .getAllByRole('button')
       .filter((button) => button.className.includes('bg-surface-primary-solid'))

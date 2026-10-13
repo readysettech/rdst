@@ -468,6 +468,49 @@ describe('DatabasePage', () => {
     expect(screen.queryByTestId('tab-live-dot')).toBeNull()
   })
 
+  it('signed out, claims no first plan, no running checks and no midnight report', async () => {
+    setFixtureOverride('ca-first-run')
+    select('demo')
+    settingsPatch.value = {
+      ai_monitoring: 'pending',
+      ai_reason: 'signed_out',
+      nightly_hour: 6,
+    }
+    // The first pass ran out its time with nothing analyzed: no plan to claim.
+    actionsState.page = actionsPage('done')
+    renderPage()
+    const pointer = await screen.findByTestId('first-plan-pointer')
+    expect(pointer.textContent).toContain('Sign in to run the first analyses')
+    expect(pointer.textContent).not.toContain('Your first plan is in')
+    expect(pointer.textContent).not.toContain('Checks continue')
+    const chart = (await screen.findByTestId('first-run-chart')).textContent
+    expect(chart).toContain('at 6 AM once you sign in.')
+    expect(chart).not.toContain('midnight')
+    const strip = screen.getByTestId('first-run')
+    expect(strip.textContent).not.toContain('First run done')
+    expect(strip.textContent).toContain('Needs sign-in')
+  })
+
+  it("with deep analysis off, doesn't say the first analyses are running", async () => {
+    setFixtureOverride('ca-first-run')
+    select('demo')
+    settingsPatch.value = { deep_analysis: false }
+    actionsState.page = actionsPage('first_pass')
+    renderPage()
+    const pointer = await screen.findByTestId('first-plan-pointer')
+    expect(pointer.textContent).toContain('Deep analysis is off')
+    expect(pointer.textContent).not.toContain('Building your first plan')
+    expect(pointer.textContent).not.toContain('of 10 done')
+    fireEvent.click(
+      within(pointer).getByRole('button', { name: 'Monitoring settings' })
+    )
+    expect(navigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        search: expect.objectContaining({ panel: 'settings' }),
+      })
+    )
+  })
+
   it('says why AI is off in the bar, with the way to turn it on', async () => {
     setFixtureOverride('ca-database')
     select('demo')

@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 
 from shared.llm_manager.base import LLMError, ProviderRequest
 from shared.llm_manager.hosted_provider import HostedProvider
@@ -359,3 +360,16 @@ def test_usage_carries_the_served_model_and_keyservice_charge(monkeypatch):
 
     assert result.usage["served_model"] == "z-ai/glm-5.3-flash"
     assert result.usage["cost_usd"] == 0.0021
+
+
+@pytest.mark.parametrize("error", [
+    requests.ConnectionError("getaddrinfo failed"), requests.ConnectTimeout("timed out"),
+])
+def test_unreachable_keyservice_is_a_network_error(monkeypatch, error):
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post",
+                        MagicMock(side_effect=error))
+    with pytest.raises(LLMError) as exc:
+        HostedProvider().complete(_request(), api_key="token")
+    assert exc.value.code == "HOSTED_INFERENCE_UNAVAILABLE"
+    assert str(exc.value) == (
+        "Couldn't reach RDST's AI service. Check your connection and try again.")

@@ -37,4 +37,22 @@ it('keeps the last numbers without a selection while readings are missing', () =
   )
   expect(screen.queryAllByRole('button')).toHaveLength(0)
   expect(screen.getByText('last reading 9:40:58')).toBeTruthy()
+  // The trend words describe readings that stopped; the reasons still explain the numbers.
+  expect(screen.queryByText('0 deadlocks')).toBeNull()
+  expect(screen.getByText('shared_buffers is the default')).toBeTruthy()
+})
+
+it('says nothing is steady once the readings stop', () => {
+  const steady = metrics.map((metric) =>
+    metric.id === 'connections' ? { ...metric, detail: 'steady' } : metric
+  )
+  render(
+    <HealthMetrics
+      metrics={steady}
+      selected="qps"
+      onSelect={vi.fn()}
+      staleSince={at(9, 40, 58)}
+    />
+  )
+  expect(screen.queryByText('steady')).toBeNull()
 })

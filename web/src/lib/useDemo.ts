@@ -11,7 +11,13 @@ import { plural } from '../features/monitor-kit/format'
 import { readSSE } from './sseReader'
 
 // ---- types -----------------------------------------------------------------
-export type Phase = 'idle' | 'provisioning' | 'ready' | 'tearing-down'
+// `failed`: the last start failed; the backend removed what it built, so nothing runs.
+export type Phase =
+  | 'idle'
+  | 'provisioning'
+  | 'ready'
+  | 'tearing-down'
+  | 'failed'
 export type ContainerState =
   | 'pending'
   | 'starting'
@@ -612,7 +618,10 @@ async function reconcileAfterProvisionStreamEnd(
   try {
     const s = await getStatus()
     if (demoProvisionController !== ctrl) return
-    setProvisionPhase(s.provisioned ? 'ready' : 'idle')
+    if (!s.provisioned && s.last_error) demoPendingError = s.last_error
+    setProvisionPhase(
+      s.provisioned ? 'ready' : s.last_error ? 'failed' : 'idle'
+    )
   } catch {
     if (demoProvisionController === ctrl) setProvisionPhase('idle')
   }
@@ -705,7 +714,7 @@ async function runProvision(): Promise<void> {
         } else if (type === 'error') {
           terminal = true
           demoPendingError = data.message ?? 'Provisioning failed'
-          setProvisionPhase('idle')
+          setProvisionPhase('failed')
         }
       },
       ctrl.signal
@@ -793,7 +802,13 @@ export function useDemo() {
       // after the first status read), e.g. the one-hour auto-teardown notice.
       if (s.notice) setNotice(s.notice)
       setProvisionPhase((current) => {
-        if (current === 'provisioning' || current === 'tearing-down')
+        // A failed start stays failed until the next start or a shutdown: whatever the
+        // backend still reports, it isn't a demo to show as running or send traffic to.
+        if (
+          current === 'provisioning' ||
+          current === 'tearing-down' ||
+          current === 'failed'
+        )
           return current
         return s.provisioned ? 'ready' : 'idle'
       })
@@ -1041,7 +1056,10 @@ export function useDemo() {
       void refreshStatus()
       void refreshHistory()
       void refreshPatterns()
-    } else if (prev === 'provisioning' && phase === 'idle') {
+    } else if (
+      prev === 'provisioning' &&
+      (phase === 'idle' || phase === 'failed')
+    ) {
       const message = takeProvisionError()
       if (message) setError(message)
     }

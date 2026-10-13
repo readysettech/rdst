@@ -43,6 +43,15 @@ class LLMError(Exception):
         self.request_id = request_id
 
 
+def provider_unreachable(provider: str, code: str, cause: Exception) -> LLMError:
+    """A network failure on the way to an AI provider: worth a retry, never a credential problem."""
+    return LLMError(
+        f"Couldn't reach {provider}. Check your connection and try again.",
+        code=code,
+        cause=cause,
+    )
+
+
 @dataclass
 class ProviderMessage:
     # "system" | "user" | "assistant"

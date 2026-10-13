@@ -15,6 +15,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from features.monitor.api import models, views
 from features.monitor.api.models import documented
+from features.monitor.connection import ANSWERED
 from features.monitor.naming import target_names
 from features.monitor.presentation import RECOVERED_WINDOW_S
 from features.query_registry.discovery import query_discovery
@@ -164,8 +165,9 @@ def _setup_blocker(store: MonitorStore, target: str) -> str | None:
 
 
 def _readings(store: MonitorStore, target: str, scheduler: Any = None) -> dict[str, Any]:
-    """The last collector reading and the next one expected; null next while paused."""
+    """The last good reading and the next one expected; null next while paused."""
     last, interval = _collect_timing(store, target)
+    reading_at = views.collect_timing(store, target)[0]
     enabled = bool(store.levers(target)["enabled"])
     next_at = scheduler.next_reading_at(target) if scheduler is not None else None
     if next_at is None:
@@ -175,7 +177,7 @@ def _readings(store: MonitorStore, target: str, scheduler: Any = None) -> dict[s
     if enabled and (blocker := _setup_blocker(store, target)):
         # A setup problem explains the missing readings better than the scheduler can.
         status = {**status, "delay_reason": blocker, "setup_blocked": True}
-    return {"last_reading_at": last["ts"] if last else None,
+    return {"last_reading_at": reading_at,
             "next_reading_at": next_at if enabled else None,
             "checks_ran_at": views.checks_ran_at(store, target), **status}
 
@@ -480,7 +482,7 @@ class AddQueryRequest(BaseModel):
 def add_query(target: str, body: AddQueryRequest):
     """Put a query analyzed from "Analyze a query" in the list, with its analysis attached."""
     from shared.config.targets import TargetsConfig
-    from shared.monitor.statements import is_workload
+    from shared.monitor.statements import analyzability, is_workload
     from shared.query_registry import hash_sql
 
     config = TargetsConfig()
@@ -494,6 +496,11 @@ def add_query(target: str, body: AddQueryRequest):
         raise HTTPException(422, "RDST lists application queries, not catalog or RDST reads")
     if (body.query_hash is None) != (body.analysis_id is None):
         raise HTTPException(422, "Pass query_hash and analysis_id together")
+    if body.analysis_id is None:
+        # Pasted to be analyzed: one RDST would refuse to analyze stays out of the list.
+        verdict = analyzability(sql)
+        if not verdict["analyzable"]:
+            raise HTTPException(422, verdict["not_analyzable_reason"])
     ref = (f"/api/query-registry/{body.query_hash}/analysis/{body.analysis_id}"
            if body.query_hash else None)
     store = _store()
@@ -1207,7 +1214,8 @@ def _pulse_state(store: MonitorStore, target: str, now: int,
     issues = {row["subject"] for row in store.read(
         "SELECT subject FROM inbox_item WHERE target=? AND type='monitoring_issue' "
         "AND state NOT IN ('resolved','dismissed')", (target,))}
-    if issues & {"lost_connection", "password_missing"}:
+    if issues & {"lost_connection", "password_missing"} or \
+            views.failing_since(store, target) is not None:
         return "connection_lost"
     if last_collect is None or now - last_collect["ts"] > COLLECT_LATE_SECONDS:
         return "late"
@@ -1221,8 +1229,9 @@ def _pulse_state(store: MonitorStore, target: str, now: int,
 
 
 def _collect_timing(store: MonitorStore, target: str) -> tuple[dict | None, int]:
+    # The ok pulse ending a failed check repeats that check; it is no reading of its own.
     collects = store.read("SELECT ts FROM monitor_pulse WHERE target=? AND kind='collect' "
-                          "ORDER BY id DESC LIMIT 2", (target,))
+                          "AND detail!=? ORDER BY id DESC LIMIT 2", (target, ANSWERED))
     last = collects[0] if collects else None
     interval = (max(30, min(600, collects[0]["ts"] - collects[1]["ts"]))
                 if len(collects) == 2 else 60)
@@ -1264,7 +1273,11 @@ def _connection_problem(store: MonitorStore, target: str) -> dict[str, str] | No
                       "'password_missing') AND state NOT IN ('resolved','dismissed') "
                       "ORDER BY id DESC LIMIT 1", (target,))
     if not rows:
-        return None
+        # Before the outage is filed, the latest failed check says why.
+        latest = store.read("SELECT ok,detail FROM monitor_pulse WHERE target=? "
+                            "AND kind='collect' ORDER BY id DESC LIMIT 1", (target,))
+        return connection_problem(latest[0]["detail"]) if latest and not latest[0]["ok"] \
+            else None
     if rows[0]["subject"] == "password_missing":
         return {"reason": "No password is saved for this database.",
                 "fix": "Add the password for this database in Settings."}

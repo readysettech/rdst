@@ -16,6 +16,8 @@ from dataclasses import dataclass
 
 import psycopg2
 
+from shared.db_connection import cancel_postgres_connection
+
 from common import BASELINE, INDEX, STUCK_SQL, connection_args, ledger_event, write_control
 
 LOG = logging.getLogger(__name__)
@@ -140,7 +142,7 @@ class Runner:
                 self.stuck_thread = threading.Thread(target=self.run_stuck, daemon=True)
                 self.stuck_thread.start()
             elif self.stuck_connection is not None:
-                self.stuck_connection.cancel()
+                cancel_postgres_connection(self.stuck_connection)
         else:
             controls = {
                 "new_heavy_query": {"heavy_enabled": phase == "start",

@@ -4310,9 +4310,26 @@
             "title": "Limit Added",
             "type": "boolean"
           },
+          "limit_reduced": {
+            "default": false,
+            "title": "Limit Reduced",
+            "type": "boolean"
+          },
           "llm_calls": {
             "title": "Llm Calls",
             "type": "integer"
+          },
+          "monitor_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Monitor Key"
           },
           "query_hash": {
             "default": "",
@@ -4327,6 +4344,18 @@
           "row_count": {
             "title": "Row Count",
             "type": "integer"
+          },
+          "row_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Row Limit"
           },
           "rows": {
             "items": {},
@@ -4344,6 +4373,11 @@
           "total_tokens": {
             "title": "Total Tokens",
             "type": "integer"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
           },
           "type": {
             "const": "result",
@@ -10082,9 +10116,24 @@
             "title": "Imported",
             "type": "integer"
           },
+          "invalid_rows": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Invalid Rows",
+            "type": "array"
+          },
           "skipped": {
             "title": "Skipped",
             "type": "integer"
+          },
+          "skipped_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skipped Names",
+            "type": "array"
           },
           "success": {
             "title": "Success",
@@ -12143,7 +12192,7 @@
         "type": "object"
       },
       "HomeStatus": {
-        "description": "needs_you: an Act now item is open. quiet: attention checks ran in the last 3 cycles\nand nothing is open. paused: charts and stuck-query alerts run, AI checks do not. off:\nno database is monitored.",
+        "description": "needs_you: an Act now item is open. cant_reach: nothing is open, but the latest check\nof `target` failed, from `since`. quiet: attention checks ran in the last 3 cycles and\nnothing is open. paused: charts and stuck-query alerts run, AI checks do not. off: no\ndatabase is monitored.",
         "properties": {
           "act_now": {
             "default": 0,
@@ -12227,6 +12276,7 @@
           "state": {
             "enum": [
               "needs_you",
+              "cant_reach",
               "quiet",
               "paused",
               "off"
@@ -18804,6 +18854,17 @@
             "title": "Keep Readings Days",
             "type": "integer"
           },
+          "push_notifications": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Push Notifications"
+          },
           "report_view": {
             "default": "quick",
             "enum": [
@@ -18812,6 +18873,17 @@
             ],
             "title": "Report View",
             "type": "string"
+          },
+          "selected_target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Target"
           },
           "theme": {
             "default": "dark",
@@ -18860,6 +18932,17 @@
             ],
             "title": "Keep Readings Days"
           },
+          "push_notifications": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Push Notifications"
+          },
           "report_view": {
             "anyOf": [
               {
@@ -18874,6 +18957,18 @@
               }
             ],
             "title": "Report View"
+          },
+          "selected_target": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Target"
           },
           "theme": {
             "anyOf": [
@@ -29797,7 +29892,7 @@
     },
     "/api/ask/history": {
       "get": {
-        "description": "Past natural-language questions, newest first.\n\nDraws on the query registry, which auto-saves every answered ask with its\noriginal question text. Only ask-sourced entries that carry a question are\nreturned; entries saved before question persistence landed have none. The\nSQL is the original submitted form when stored, so a re-ask is faithful.",
+        "description": "Past natural-language questions, newest first.\n\nDraws on the query registry, which auto-saves every answered ask with its\noriginal question text. One item per database a SQL pattern was asked on,\ncarrying that database's question; entries saved before question\npersistence landed have none. The SQL is the original submitted form when\nstored, so a re-ask is faithful.",
         "operationId": "ask_history_api_ask_history_get",
         "parameters": [
           {

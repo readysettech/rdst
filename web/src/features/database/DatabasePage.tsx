@@ -28,6 +28,8 @@ import {
 } from '@/features/database/reports'
 import { MonitoringStatusAction } from '@/features/monitor-kit/AiMonitoringStatus'
 import {
+  aiCanRun,
+  firstReportLine,
   monitoringStatus,
   needsUserAction,
 } from '@/features/monitor-kit/aiMonitoring'
@@ -233,6 +235,8 @@ function LiveDotLabel({ id, label }: { id: string; label: string }) {
 interface BenchmarkRun {
   ranAt: number
   keys: string[]
+  /** Distinct per run, so a rerun asks again. */
+  run: number
 }
 
 function DatabaseView({ target }: { target: string }) {
@@ -302,6 +306,16 @@ function DatabaseView({ target }: { target: string }) {
   const outage = data?.outages?.find((entry) => entry.end === null) ?? null
   const unreachable = pulse.state === 'connection_lost' || outage !== null
   const now = pageNow(pulse.now, history?.last_ts)
+  const queue = jobs.data?.queue
+  // What AI work can run now: every promise of checks, analyses, a plan or a report reads it.
+  const can = aiCanRun({
+    settings: settings.data,
+    signInHeld: signIn,
+    dailyCapReached: Boolean(
+      queue?.automatic_enabled && queue.automatic_left === 0
+    ),
+    now: pulse.now,
+  })
   const firstRun = enabled && showFirstRun(settings.data, history, now)
   // The first minutes: the steps under way, and until the queries are known and ranked, a
   // card in place of the chart or the list.
@@ -312,6 +326,7 @@ function DatabaseView({ target }: { target: string }) {
     pulse,
     queries: rows.data?.queries,
     nextReadingAt: health.data?.next_reading_at,
+    can,
   })
   const waiting =
     enabled && !unmonitored && firstRunModel.waitingForQueries && !rows.isError
@@ -546,7 +561,7 @@ function DatabaseView({ target }: { target: string }) {
     setBenchmarkScope(null)
     if (list.openKey) list.open(null, undefined, { closePanel: true })
     else if (settingsOpen || page.panel === 'benchmark') page.setPanel(null)
-    setBenchmark({ ranAt: now, keys: benchmarkKeys })
+    setBenchmark({ ranAt: now, keys: benchmarkKeys, run: Date.now() })
   }
   const checkAgain = () => {
     void health.refetch()
@@ -691,7 +706,14 @@ function DatabaseView({ target }: { target: string }) {
       onHoverKey={setHoverKey}
       focusKey={list.openKey}
       onSelectKey={onSelect}
-      firstRun={firstRun ? { firstReport: newestId == null } : undefined}
+      firstRun={
+        firstRun
+          ? {
+              firstReport: newestId == null,
+              line: firstReportLine(settings.data, can, now),
+            }
+          : undefined
+      }
     />
   )
 
@@ -724,7 +746,9 @@ function DatabaseView({ target }: { target: string }) {
           <FirstPlanPointer
             page={actions.data}
             seen={planSeen}
+            can={can}
             onOpenActions={goToActions}
+            onOpenSettings={() => page.setPanel('settings')}
           />
         </div>
       )}
@@ -751,6 +775,7 @@ function DatabaseView({ target }: { target: string }) {
           target={target}
           model={firstRunModel}
           now={pulse.now}
+          can={can}
         />
       ) : health.isError && !data ? (
         <ErrorState
@@ -824,6 +849,7 @@ function DatabaseView({ target }: { target: string }) {
       target={target}
       queries={benchmarkRows}
       ranAt={benchmark.ranAt}
+      run={benchmark.run}
       now={now}
       onRerun={() => setBenchmarkOpen(true)}
       onClose={() => setBenchmark(null)}
@@ -897,6 +923,7 @@ function DatabaseView({ target }: { target: string }) {
                 <ReportView
                   target={target}
                   reportId={page.report}
+                  can={can}
                   run={run}
                   onShowLatest={() => openReport('latest')}
                   onPick={(id) => openReport(id)}

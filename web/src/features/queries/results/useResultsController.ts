@@ -87,6 +87,7 @@ export function useResultsController(
     params,
     origin,
     hash,
+    key,
     analysisId,
   } = search
   const resolvedOrigin = origin ?? DEFAULT_ORIGIN
@@ -162,11 +163,12 @@ export function useResultsController(
       navigate({ to: '/scan' })
       return
     }
+    const focus = key ?? hash
     navigate({
       to: '/database',
-      search: hash ? { target, focus: hash } : { target },
+      search: focus ? { target, focus } : { target },
     })
-  }, [hash, navigate, resolvedOrigin, target])
+  }, [hash, key, navigate, resolvedOrigin, target])
 
   const cacheQuery = useCallback(() => {
     if (query && target) cache.cacheQuery(query, query)
@@ -298,10 +300,11 @@ export function useResultsController(
         params,
         origin,
         hash,
+        key,
         analysisId: undefined,
       })
     },
-    [fast, hash, openSearch, origin, params, query, target]
+    [fast, hash, key, openSearch, origin, params, query, target]
   )
 
   /**
@@ -314,11 +317,11 @@ export function useResultsController(
       live.reset()
       setSubstitutedQuery(null)
       openSearch(
-        { query: edited, target, fast, origin, hash },
+        { query: edited, target, fast, origin, hash, key },
         { replace: true }
       )
     },
-    [fast, hash, live.reset, openSearch, origin, target]
+    [fast, hash, key, live.reset, openSearch, origin, target]
   )
 
   /** The live view's own re-measure, always a deliberate choice by the user. */
@@ -336,10 +339,11 @@ export function useResultsController(
         params,
         origin,
         hash,
+        key,
         analysisId: id,
       })
     },
-    [fast, hash, openSearch, origin, params, query, target]
+    [fast, hash, key, openSearch, origin, params, query, target]
   )
 
   const checkConversationStatus = useCallback(async (queryHash: string) => {

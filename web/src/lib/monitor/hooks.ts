@@ -177,14 +177,17 @@ export function analysisDidntStart(error: unknown): string {
     : "The analysis didn't start. Try again in a moment."
 }
 
-export function useEnqueueAnalysis(target: string) {
+/** Queue a query's analysis. A refusal is toasted unless the caller shows it `inline`. */
+export function useEnqueueAnalysis(target: string, { inline = false } = {}) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: (key: string) => enqueueAnalysis(target, key),
     onSuccess: () =>
       client.invalidateQueries({ queryKey: monitorKeys.analyzeJobs(target) }),
-    onError: (error) =>
-      toast({ title: analysisDidntStart(error), variant: 'warning' }),
+    onError: (error) => {
+      if (!inline)
+        toast({ title: analysisDidntStart(error), variant: 'warning' })
+    },
   })
 }
 
@@ -376,14 +379,15 @@ export function useConfiguredDatabases() {
 }
 
 /** Before and after for each query with a fix (POST /benchmark-fixes); one result per
- * key set, kept until the pane closes. */
+ * run, kept until the pane closes. Each run asks again, even for the same keys. */
 export const useBenchmarkFixes = (
   target: string,
   keys: string[],
+  run: number,
   enabled = true
 ) =>
   useQuery({
-    queryKey: monitorKeys.benchmarkFixes(target, keys),
+    queryKey: monitorKeys.benchmarkFixes(target, keys, run),
     queryFn: () => benchmarkFixes(target, keys),
     enabled: enabled && Boolean(target) && keys.length > 0,
     staleTime: Number.POSITIVE_INFINITY,

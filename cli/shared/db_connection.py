@@ -5,12 +5,20 @@ Handles creating direct psycopg2 or pymysql connections
 without using DataManager infrastructure.
 """
 
+import ctypes
+import ctypes.util
+import functools
+import glob
 import logging
+import math
+import os
 import select
 import socket
 import sqlite3
+import threading
 import time
-from typing import Dict, Any, List, Literal, Optional, Tuple
+from contextlib import AbstractContextManager
+from typing import Dict, Any, Callable, Iterable, List, Literal, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +27,10 @@ logger = logging.getLogger(__name__)
 # connection attribute). Features pass a specific lane such as "rdst/ask" or
 # "rdst/compare"; untagged callers fall back to this default.
 DEFAULT_LANE = "rdst/unknown"
+
+# Bounds a PostgreSQL cancel: libpq's protocol cancel request, or each step of the side
+# connection that carries a pg_cancel_backend.
+POSTGRES_CANCEL_SECONDS = 3
 
 
 def resolve_application_name(
@@ -747,23 +759,223 @@ def close_connection(connection):
         pass  # Ignore errors during close
 
 
+class ServerNotAnsweringError(TimeoutError):
+    """The database accepted the connection but stopped answering."""
+
+
+def abort_connection(connection) -> None:
+    """Shut down the socket under a psycopg2 or PyMySQL connection, from any thread.
+
+    A driver call blocked in a read on that socket then fails promptly. This never waits:
+    psycopg2's close() takes the lock a blocked call holds, and server-side cancellation needs
+    a server that answers. The connection is unusable afterwards; close it as usual.
+    """
+    try:
+        # psycopg2 exposes libpq's socket; PyMySQL keeps its socket on _sock.
+        raw = getattr(connection, '_sock', None)
+        descriptor = raw.fileno() if raw is not None else connection.fileno()
+        # A duplicate descriptor shuts down the same socket and leaves the driver's own open.
+        sock = socket.fromfd(descriptor, socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        finally:
+            sock.close()
+    except Exception:
+        logger.debug("Could not abort a database connection", exc_info=True)
+
+
+class IoDeadline:
+    """Client-side bound on a block of database calls.
+
+    Server-side timeouts can't end a call blocked on a server that stopped answering (paused,
+    wedged), and TCP keepalives don't fire while its kernel still acknowledges. When the block
+    runs ``seconds`` past entry or the last renew(), the connection is aborted so the blocked
+    call raises, and the block raises ServerNotAnsweringError even if it swallowed that error.
+    """
+
+    def __init__(self, connection, seconds: float) -> None:
+        self._connection = connection
+        self.seconds = seconds
+        self.expired = False
+        self._lock = threading.Lock()
+        self._generation = 0
+        self._timer: Optional[threading.Timer] = None
+
+    def renew(self) -> None:
+        with self._lock:
+            self._arm(active=True)
+
+    def _arm(self, *, active: bool) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+        self._generation += 1
+        if active and not self.expired:
+            self._timer = threading.Timer(self.seconds, self._expire, (self._generation,))
+            self._timer.daemon = True
+            self._timer.start()
+
+    def _expire(self, generation: int) -> None:
+        # Aborting under the lock keeps __exit__, and so the caller's close, from finishing
+        # while the abort still holds the connection's descriptor; the abort never waits.
+        with self._lock:
+            if generation != self._generation:
+                return
+            self.expired = True
+            abort_connection(self._connection)
+
+    def __enter__(self) -> "IoDeadline":
+        self.renew()
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        with self._lock:
+            self._arm(active=False)
+        if self.expired and (exc is None or isinstance(exc, Exception)):
+            raise ServerNotAnsweringError(
+                "The database accepted the connection but didn't answer within "
+                f"{self.seconds:g} s."
+            ) from exc
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _libpq() -> Optional[ctypes.CDLL]:
+    """The libpq psycopg2 runs on, or None when it can't be loaded.
+
+    PQgetCancel reads PGconn fields, so only a libpq of the version psycopg2 runs is used. On
+    Linux and macOS the extension module's own handle resolves symbols through its dependencies,
+    which finds the exact library it links; psycopg2-binary's bundled copy (Windows) and the
+    system library are the fallbacks.
+    """
+    try:
+        import psycopg2
+        from psycopg2 import _psycopg, extensions
+    except ImportError:
+        return None
+    package = os.path.dirname(psycopg2.__file__)
+    candidates = [_psycopg.__file__]
+    for pattern in (
+        os.path.join(package, os.pardir, "psycopg2_binary.libs", "libpq*"),
+        os.path.join(package, ".dylibs", "libpq*"),
+        os.path.join(package, "libpq*.dll"),
+    ):
+        candidates += sorted(glob.glob(pattern))
+    candidates += filter(None, (ctypes.util.find_library("pq"), ctypes.util.find_library("libpq")))
+    expected = extensions.libpq_version()
+    for path in candidates:
+        try:
+            # CDLL calls release the GIL for their duration.
+            lib = ctypes.CDLL(path)
+            lib.PQlibVersion.restype = ctypes.c_int
+            if lib.PQlibVersion() != expected:
+                continue
+            lib.PQgetCancel.argtypes = [ctypes.c_void_p]
+            lib.PQgetCancel.restype = ctypes.c_void_p
+            lib.PQcancel.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+            lib.PQcancel.restype = ctypes.c_int
+            lib.PQfreeCancel.argtypes = [ctypes.c_void_p]
+            lib.PQfreeCancel.restype = None
+            return lib
+        except (OSError, AttributeError):
+            continue
+    logger.debug("libpq could not be loaded; PostgreSQL cancels abort the connection")
+    return None
+
+
+class PostgresCancelRequest:
+    """libpq's protocol cancel for the statement running on one psycopg2 connection.
+
+    The request goes to the address the connection reached on a fresh socket and carries the
+    backend key from the connection's startup, so a pooler routes it to the session it fronts
+    and the server needs no free connection slot. psycopg2's conn.cancel() sends the same
+    request but holds the GIL while waiting on the server, so a paused server would freeze the
+    whole process; here PQcancel runs through ctypes, which releases the GIL, on a daemon thread.
+    """
+
+    def __init__(self, lib: ctypes.CDLL, handle: int) -> None:
+        self._lib = lib
+        self._handle: Optional[int] = handle
+
+    @classmethod
+    def for_connection(cls, conn) -> Optional["PostgresCancelRequest"]:
+        """The request for ``conn``, or None when libpq or the connection is unavailable.
+
+        The caller keeps ``conn`` open until this returns. PQgetCancel only copies fields set by
+        the connection's startup and does no I/O, so it is safe while another thread runs a
+        statement on ``conn``.
+        """
+        lib = _libpq()
+        if lib is None or getattr(conn, "closed", True):
+            return None
+        pointer = getattr(conn, "pgconn_ptr", None)
+        if not isinstance(pointer, int) or not pointer:
+            return None
+        handle = lib.PQgetCancel(pointer)
+        return cls(lib, handle) if handle else None
+
+    def send(self, seconds: Optional[float] = None) -> bool:
+        """Dispatch the request once; True when the server took it within ``seconds``.
+
+        The thread running PQcancel owns the PGcancel and frees it when PQcancel returns, so a
+        request still waiting on a paused server keeps both rather than risk a use-after-free.
+        """
+        handle, self._handle = self._handle, None
+        if handle is None:
+            return False
+        lib = self._lib
+        taken = threading.Event()
+
+        def run() -> None:
+            errbuf = ctypes.create_string_buffer(256)
+            try:
+                if lib.PQcancel(handle, errbuf, len(errbuf)):
+                    taken.set()
+                else:
+                    logger.debug("PostgreSQL cancel request failed: %s",
+                                 errbuf.value.decode(errors="replace"))
+            finally:
+                lib.PQfreeCancel(handle)
+
+        threading.Thread(target=run, name="postgres-cancel", daemon=True).start()
+        return taken.wait(POSTGRES_CANCEL_SECONDS if seconds is None else seconds)
+
+    def __del__(self) -> None:
+        if self._handle is not None:
+            self._lib.PQfreeCancel(self._handle)
+
+
+def cancel_postgres_connection(conn, seconds: Optional[float] = None) -> bool:
+    """Stop the statement running on a psycopg2 connection, from any thread, in bounded time.
+
+    Sends libpq's protocol cancel; when that can't be sent or isn't taken within ``seconds``,
+    aborts the connection so the statement blocked on it fails. Returns whether the server
+    took the cancel.
+    """
+    request = PostgresCancelRequest.for_connection(conn)
+    if request is not None and request.send(seconds):
+        return True
+    abort_connection(conn)
+    return False
+
+
 def cancel_query(conn, engine: str, target_config: Optional[dict] = None) -> bool:
     """
     Cancel a running query on the database server.
 
+    PostgreSQL uses cancel_postgres_connection. MySQL runs KILL QUERY on a side connection.
+
     Args:
         conn: Active database connection with running query
         engine: 'postgresql' or 'mysql'
-        target_config: For MySQL, needed to create cancel connection
+        target_config: Needed to create the cancel connection for MySQL
 
     Returns:
         True if cancel was sent, False otherwise
     """
     try:
         if engine == 'postgresql':
-            # psycopg2 has built-in cancel support
-            conn.cancel()
-            return True
+            return cancel_postgres_connection(conn)
         elif engine == 'mysql':
             # MySQL requires KILL QUERY via separate connection
             if not target_config:
@@ -791,6 +1003,84 @@ def cancel_query(conn, engine: str, target_config: Optional[dict] = None) -> boo
     except Exception:
         return False
     return False
+
+
+Registered = Tuple[Any, str, Optional[dict]]
+
+
+def cancel_registered(lock: AbstractContextManager[Any], registered: Callable[[], Iterable[Registered]],
+                      seconds: Optional[float] = None) -> int:
+    """cancel_query for every (conn, engine, target_config) a registry lists, from any thread.
+
+    Owners hold ``lock`` to unregister a connection before closing it. Each request is built
+    under ``lock`` and sent outside it, so a connection that closes meanwhile is never touched;
+    a PostgreSQL connection whose cancel isn't taken is aborted only while it's still listed.
+    Returns how many cancels the server took within ``seconds``.
+    """
+    seconds = POSTGRES_CANCEL_SECONDS if seconds is None else seconds
+    with lock:
+        pending = [(conn, engine, _prepared_cancel(conn, engine, config))
+                   for conn, engine, config in registered()]
+    taken = [threading.Event() for _ in pending]
+
+    def send(index: int, request: Callable[[], bool]) -> None:
+        try:
+            if request():
+                taken[index].set()
+        except Exception:
+            logger.debug("Could not cancel a database statement", exc_info=True)
+
+    for index, (_conn, _engine, request) in enumerate(pending):
+        threading.Thread(target=send, args=(index, request), name="statement-cancel",
+                         daemon=True).start()
+    deadline = time.monotonic() + seconds
+    unanswered = [conn for (conn, engine, _request), event in zip(pending, taken)
+                  if not event.wait(max(0.0, deadline - time.monotonic()))
+                  and engine == 'postgresql']
+    if unanswered:
+        with lock:
+            listed = {id(conn) for conn, _engine, _config in registered()}
+            for conn in unanswered:
+                if id(conn) in listed:
+                    abort_connection(conn)
+    return sum(event.is_set() for event in taken)
+
+
+def _prepared_cancel(conn, engine: str, target_config: Optional[dict]) -> Callable[[], bool]:
+    """A cancel for the statement on ``conn`` that doesn't touch ``conn`` when sent."""
+    try:
+        if engine == 'postgresql':
+            request = PostgresCancelRequest.for_connection(conn)
+            if request is not None:
+                return request.send
+        elif engine == 'mysql' and target_config:
+            thread_id = conn.thread_id()
+            return lambda: cancel_mysql_by_thread_id(target_config, thread_id)
+    except Exception:
+        logger.debug("Could not prepare a database cancel", exc_info=True)
+    return lambda: False
+
+
+def _postgres_cancel_backend(
+    conn_params: Dict[str, Any], backend_pid: int, seconds: Optional[float] = None
+) -> bool:
+    """pg_cancel_backend over a side connection bounded by ``seconds`` at every step.
+
+    Raises when the server can't be reached or doesn't answer in time.
+    """
+    import psycopg2
+
+    seconds = POSTGRES_CANCEL_SECONDS if seconds is None else seconds
+    cancel_conn = psycopg2.connect(
+        **{**conn_params, 'connect_timeout': max(1, math.ceil(seconds))}
+    )
+    try:
+        with IoDeadline(cancel_conn, seconds), cancel_conn.cursor() as cursor:
+            cursor.execute("SELECT pg_cancel_backend(%s)", (backend_pid,))
+            row = cursor.fetchone()
+        return bool(row and row[0])
+    finally:
+        cancel_conn.close()
 
 
 def probe_target_connection(
@@ -855,8 +1145,9 @@ def cancel_postgres_by_pid(conn_params: Dict[str, Any], backend_pid: int, verbos
     """
     Cancel a PostgreSQL query by its backend PID.
 
-    This is useful when cancelling from a different thread/connection
-    than the one running the query.
+    Runs pg_cancel_backend on a side connection, so the pid must come from the server
+    (pg_backend_pid(), pg_stat_activity): through a pooler, a connection's get_backend_pid()
+    is the pooler's own. With the connection at hand, use cancel_postgres_connection.
 
     Args:
         conn_params: Connection parameters dict for creating cancel connection
@@ -867,21 +1158,13 @@ def cancel_postgres_by_pid(conn_params: Dict[str, Any], backend_pid: int, verbos
         True if query was cancelled, False otherwise
     """
     try:
-        import psycopg2
-        cancel_conn = psycopg2.connect(**conn_params)
-        try:
-            with cancel_conn.cursor() as cursor:
-                cursor.execute(f"SELECT pg_cancel_backend({backend_pid})")  # nosem
-                result = cursor.fetchone()
-                cancelled = result[0] if result else False
-            if verbose:
-                if cancelled:
-                    print(f"   >> Backend query (PID {backend_pid}) cancelled successfully", flush=True)
-                else:
-                    print(f"   >> Backend query (PID {backend_pid}) could not be cancelled (may have already finished)", flush=True)
-            return cancelled
-        finally:
-            cancel_conn.close()
+        cancelled = _postgres_cancel_backend(conn_params, backend_pid)
+        if verbose:
+            if cancelled:
+                print(f"   >> Backend query (PID {backend_pid}) cancelled successfully", flush=True)
+            else:
+                print(f"   >> Backend query (PID {backend_pid}) could not be cancelled (may have already finished)", flush=True)
+        return cancelled
     except Exception as e:
         if verbose:
             print(f"   >> Error cancelling PostgreSQL query: {e}", flush=True)

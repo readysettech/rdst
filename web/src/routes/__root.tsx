@@ -13,11 +13,14 @@ import {
 import { type ReactNode, useEffect } from 'react'
 import { AddDatabaseHost } from '@/components/configure/AddDatabaseDialog'
 import { AiAccessBoundary } from '../components/AiAccessBoundary'
+import { BackendDownBanner } from '../components/BackendDownBanner'
 // Direct import: the components barrel re-exports the SQL editor stack,
 // which would statically pull CodeMirror into the eager entry chunk.
 import { ConfigWarning } from '../components/ConfigWarning'
 import { DesktopNotificationsBanner } from '../components/DesktopNotificationsBanner'
-import { WindowControls } from '../components/WindowControls'
+import { hydrateSelectedTarget } from '../features/database/selectedTarget'
+import { hydrateDesktopNotifications } from '../features/inbox/desktopNotifications'
+import { usePreferences } from '../features/settings/preferences'
 import { useTarget } from '../hooks/useTarget'
 import { useGoShortcuts } from '../layout/goShortcuts'
 import { legacyTitle, Main } from '../layout/Main'
@@ -26,7 +29,6 @@ import { Sidebar } from '../layout/Sidebar'
 import { setAnalyticsAccountId } from '../lib/analytics'
 import { fetchAccountStatus } from '../lib/api'
 import { reportAppError } from '../lib/appErrors'
-import { isDesktopFrameless, isDesktopMac } from '../lib/desktop'
 import { useQueryDiscoveryTransport } from '../lib/useQueryDiscovery'
 
 export const Route = createRootRoute({
@@ -51,8 +53,6 @@ function AppShell({
   children: ReactNode
   layout?: RouteLayout
 }) {
-  const isElectronMac = isDesktopMac()
-  const isElectronFrameless = isDesktopFrameless()
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
@@ -60,7 +60,16 @@ function AppShell({
   const layout = layoutOverride ?? routeLayout
   useGoShortcuts()
 
-  if (layout === 'bare') return <>{children}</>
+  // The strip the desktop window controls sit in drags the window. Without a sidebar it
+  // spans the window; beside one, only where the controls sit at the right.
+  if (layout === 'bare')
+    return (
+      <>
+        <div className="draggable-region fixed inset-x-0 top-0 z-40 h-(--titlebar-height)" />
+        <BackendDownBanner />
+        {children}
+      </>
+    )
 
   return (
     <div className="relative flex h-dvh overflow-hidden bg-surface-layout-2">
@@ -71,12 +80,9 @@ function AppShell({
       >
         Skip to content
       </a>
-      {isElectronFrameless && (
-        <div className="draggable-region fixed top-0 right-0 z-40">
-          <WindowControls />
-        </div>
-      )}
-      <Sidebar isElectronMac={isElectronMac} />
+      <div className="draggable-region fixed inset-x-0 top-0 z-40 h-(--titlebar-right-height)" />
+      <BackendDownBanner />
+      <Sidebar />
       <Main
         layout={layout}
         scrollKey={pathname}
@@ -109,6 +115,17 @@ function ReadyRoot() {
   useEffect(() => {
     setAnalyticsAccountId(accountStatus.data?.analytics_account_id)
   }, [accountStatus.data?.analytics_account_id])
+
+  // The selected database and "Push to this computer" are kept with the backend's
+  // preferences; the first read on load replaces this browser's cached copies.
+  const preferences = usePreferences().data as
+    | { selected_target?: string | null; push_notifications?: boolean | null }
+    | undefined
+  useEffect(() => {
+    if (!preferences) return
+    hydrateSelectedTarget(preferences.selected_target)
+    hydrateDesktopNotifications(preferences.push_notifications)
+  }, [preferences])
 
   // The global notices show under the PageBar of the page on screen.
   return (

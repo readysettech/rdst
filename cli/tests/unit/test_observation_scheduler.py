@@ -894,6 +894,309 @@ async def test_timed_out_collection_reports_one_check_and_preserves_recovery(
         await scheduler.stop()
 
 
+class FrozenCollector(FakeCollector):
+    """Reads like the real collector: each answered reading records an ok collect pulse. While
+    frozen, a read stays in flight until the server thaws or the connection is aborted, and a
+    liveness probe gets no answer unless the server is only slow."""
+
+    def __init__(self, clock: FakeClock, store: MonitorStore) -> None:
+        super().__init__(clock)
+        self.store = store
+        self.frozen = False
+        self.slow = False
+        self.probes: list[float] = []
+        self.thawed = asyncio.Event()
+        self.aborts = 0
+        self._aborted = asyncio.Event()
+        self._read_started: float | None = None
+
+    def unanswered_for(self) -> float | None:
+        return None if self._read_started is None else self.clock.now - self._read_started
+
+    def abort_connection(self) -> None:
+        self.aborts += 1
+        self._aborted.set()
+
+    def probe_answering(self, seconds: float) -> None:
+        self.probes.append(self.clock.now)
+        if not self.slow:
+            raise TimeoutError(f"The database didn't answer within {seconds:g} s.")
+
+    async def collect_now(self):
+        self.collects += 1
+        self._aborted = asyncio.Event()
+        self._read_started = self.clock.now
+        try:
+            if self.frozen:
+                answered = asyncio.ensure_future(self.thawed.wait())
+                aborted = asyncio.ensure_future(self._aborted.wait())
+                await asyncio.wait({answered, aborted}, return_when=asyncio.FIRST_COMPLETED)
+                answered.cancel()
+                aborted.cancel()
+                if not self.thawed.is_set():
+                    raise ConnectionError("server closed the connection unexpectedly")
+        finally:
+            self._read_started = None
+        self.store.record_pulse("demo", int(self.clock.now), "collect", True, "Read 1 query")
+        return SimpleNamespace(event="discovery_update", data={"stats": {}})
+
+
+def _frozen_setup(tmp_path, monkeypatch):
+    monkeypatch.setattr(scheduler_module, "TICK_SECONDS", 0.01)
+    scheduler, coordinator, clock = make_scheduler(["demo"])
+    scheduler._monitored.add("demo")
+    store = MonitorStore(tmp_path / "monitor.db", clock=clock.time)
+    store.set_settings("demo", {"enabled": True})
+    scheduler.set_outcome_listener(ConnectionWatch(store, clock=clock.time).collection)
+    collector = FrozenCollector(clock, store)
+    coordinator.collectors["demo"] = collector
+    return scheduler, collector, clock, store
+
+
+def _pulse_state(store: MonitorStore, clock: FakeClock) -> str:
+    from features.monitor.api import views
+
+    now = int(clock.now)
+    state = monitor_routes._pulse_state(store, "demo", now,
+                                        monitor_routes._collect_timing(store, "demo")[0])
+    home = views.home(store, now, configured=[{"name": "demo"}])["databases"][0]["state"]
+    return f"{state}/{home}"
+
+
+async def test_frozen_database_reads_as_unreachable_within_a_reading_interval(
+        tmp_path, monkeypatch):
+    from features.monitor import database_limit
+    from features.monitor.api import views
+
+    monkeypatch.setattr(views, "registry_entries", lambda keys=None: {})
+    monkeypatch.setattr(database_limit, "_signed_in", lambda: True)
+    scheduler, collector, clock, store = _frozen_setup(tmp_path, monkeypatch)
+    schedule = scheduler._schedules["demo"]
+    try:
+        await asyncio.wait_for(run_tick(scheduler, schedule, clock), 2)
+        assert _pulse_state(store, clock) == "live/watching"
+
+        # Frozen right after a reading: the worst case waits a whole interval for the next one.
+        frozen_at = clock.now
+        collector.frozen = True
+        clock.now = schedule.next_due
+        assert clock.now - frozen_at <= ACTIVE_INTERVAL_SECONDS
+        reading_started = clock.now
+        scheduler._launch_due(clock.now)
+        task = schedule.task
+        await asyncio.sleep(0.03)
+        while views.failing_since(store, "demo") is None:
+            # Reported within about one reading interval of the freeze.
+            assert clock.now - frozen_at <= 75
+            clock.advance(1)
+            await asyncio.sleep(0.03)
+        assert views.failing_since(store, "demo") == reading_started
+        assert _pulse_state(store, clock) == "connection_lost/cant_reach"
+        assert "didn't answer" in store.pulses("demo", 1)[0]["detail"]
+        # The collection keeps waiting, and the outage stays visible while the server is frozen.
+        clock.advance(30)
+        await asyncio.sleep(0.05)
+        assert not task.done()
+        assert _pulse_state(store, clock) == "connection_lost/cant_reach"
+        assert views.home(store, int(clock.now), configured=[{"name": "demo"}])[
+            "databases"][0]["state_since"] == reading_started
+
+        # The first answer after the freeze clears it.
+        collector.thawed.set()
+        await asyncio.wait_for(task, 2)
+        assert views.failing_since(store, "demo") is None
+        assert _pulse_state(store, clock) == "live/watching"
+        assert schedule.error is None and schedule.consecutive_failures == 0
+    finally:
+        collector.thawed.set()
+        await scheduler.stop()
+
+
+async def test_slow_read_on_a_database_that_answers_probes_is_not_reported(
+        tmp_path, monkeypatch):
+    from features.monitor import database_limit
+    from features.monitor.api import views
+    from features.query_registry.scheduler import (NOT_ANSWERING_SECONDS,
+                                                   PROBE_INTERVAL_SECONDS)
+
+    monkeypatch.setattr(views, "registry_entries", lambda keys=None: {})
+    monkeypatch.setattr(database_limit, "_signed_in", lambda: True)
+    scheduler, collector, clock, store = _frozen_setup(tmp_path, monkeypatch)
+    schedule = scheduler._schedules["demo"]
+    try:
+        await asyncio.wait_for(run_tick(scheduler, schedule, clock), 2)
+        # A busy server: the read takes far longer than usual but the server still answers.
+        collector.frozen = collector.slow = True
+        clock.now = schedule.next_due
+        reading_started = clock.now
+        scheduler._launch_due(clock.now)
+        task = schedule.task
+        while clock.now - reading_started < 100:
+            clock.advance(1)
+            await asyncio.sleep(0.02)
+            assert views.failing_since(store, "demo") is None
+            # A slow reading can read as late, never as a lost connection.
+            assert _pulse_state(store, clock) in ("live/watching", "late/watching")
+        assert not task.done() and schedule.error is None
+        assert NOT_ANSWERING_SECONDS <= collector.probes[0] - reading_started <= \
+            NOT_ANSWERING_SECONDS + 2
+        gaps = [later - earlier for earlier, later in zip(collector.probes, collector.probes[1:])]
+        assert gaps and PROBE_INTERVAL_SECONDS <= min(gaps) <= max(gaps) <= \
+            PROBE_INTERVAL_SECONDS + 2
+        collector.thawed.set()
+        await asyncio.wait_for(task, 2)
+        assert schedule.latest_attempt_ok and schedule.consecutive_failures == 0
+        assert store.pulses("demo", 1)[0]["detail"] == "Read 1 query"
+    finally:
+        collector.thawed.set()
+        await scheduler.stop()
+
+
+async def test_collection_deadline_reports_each_timeout_and_retries_within_an_interval(
+        tmp_path, monkeypatch):
+    from features.monitor.api import views
+
+    monkeypatch.setattr(scheduler_module, "COLLECTION_DEADLINE_SECONDS", 0.05)
+    scheduler, collector, clock, store = _frozen_setup(tmp_path, monkeypatch)
+    schedule = scheduler._schedules["demo"]
+    try:
+        await asyncio.wait_for(run_tick(scheduler, schedule, clock), 2)
+        collector.frozen = True
+        first_failure = None
+        for attempt in range(1, 5):
+            await asyncio.wait_for(run_tick(scheduler, schedule, clock), 5)
+            pulse = store.pulses("demo", 1)[0]
+            assert (pulse["ok"], pulse["detail"]) == (
+                0, "The database didn't answer within 0.05 s.")
+            assert collector.aborts == attempt
+            assert schedule.consecutive_failures == attempt
+            first_failure = first_failure or pulse["ts"]
+            assert views.failing_since(store, "demo") == first_failure
+            # Backoff never pushes the next check past one reading interval.
+            assert 0 < schedule.next_due - clock.now <= ACTIVE_INTERVAL_SECONDS
+            assert scheduler._backoff.retry_after("demo") <= ACTIVE_INTERVAL_SECONDS
+        collector.thawed.set()
+        await asyncio.wait_for(run_tick(scheduler, schedule, clock), 2)
+        assert views.failing_since(store, "demo") is None
+    finally:
+        collector.thawed.set()
+        await scheduler.stop()
+
+
+async def test_monitored_reading_goes_ahead_of_a_reader_stuck_on_the_database(monkeypatch):
+    from features.query_registry.scheduler import ADMISSION_WAIT_SECONDS
+
+    scheduler, coordinator, clock = make_scheduler(["demo", "other"])
+    scheduler._monitored.add("demo")
+    # Another reader (a parameter sample, an index scan) holds the database and never returns.
+    for name in ("demo", "other"):
+        assert scheduler._backoff.acquire(name)
+    for name in ("demo", "other"):
+        schedule = scheduler._schedules[name]
+        await run_tick(scheduler, schedule, clock)
+        assert coordinator.collector_for(name).collects == 0
+    clock.advance(ADMISSION_WAIT_SECONDS)
+    for name in ("demo", "other"):
+        await run_tick(scheduler, scheduler._schedules[name], clock)
+    assert coordinator.collector_for("demo").collects == 1
+    assert coordinator.collector_for("other").collects == 0
+    # The stuck reader keeps its admission, whatever the reading's outcome.
+    assert scheduler._backoff.busy("demo")
+    coordinator.collector_for("demo").fail_with = ConnectionError("timeout expired")
+    for _ in range(2):
+        await run_tick(scheduler, scheduler._schedules["demo"], clock)
+        clock.advance(ADMISSION_WAIT_SECONDS)
+    assert coordinator.collector_for("demo").collects == 2
+    assert scheduler._backoff._states["demo"].active
+    assert scheduler._backoff.failed("demo")
+    await scheduler.stop()
+
+
+async def test_timed_out_collection_stays_in_flight_until_its_work_returns(monkeypatch):
+    from features.query_registry.scheduler import ADMISSION_WAIT_SECONDS
+
+    monkeypatch.setattr(scheduler_module, "COLLECTION_DEADLINE_SECONDS", 0.02)
+    monkeypatch.setattr(scheduler_module, "ABORT_GRACE_SECONDS", 0.02)
+    scheduler, coordinator, clock = make_scheduler(["demo"])
+    scheduler._monitored.add("demo")
+    collector = coordinator.collector_for("demo")
+    # Aborting can't unblock the read: it keeps the collector's connection and state.
+    collector.gate = asyncio.Event()
+    try:
+        result = await asyncio.wait_for(scheduler.check_now("demo"), 2)
+        assert result == {"ok": False, "detail": "The database didn't answer within 0.02 s."}
+        schedule = scheduler._schedules["demo"]
+        assert schedule.task is None and collector.collects == 1
+        assert scheduler._backoff._states["demo"].active
+        assert scheduler._backoff.failed("demo")
+        # Later ticks, a manual check, and a reader waiting out a busy holder never read again
+        # on the same collector while the first collection runs.
+        for _ in range(4):
+            clock.advance(ACTIVE_INTERVAL_SECONDS + 1)
+            scheduler._launch_due(clock.now)
+            assert schedule.task is None
+            result = await asyncio.wait_for(scheduler.check_now("demo"), 1)
+            assert result["ok"] is False and "didn't answer" in result["detail"]
+            await scheduler._collect_target("demo", schedule)
+            clock.advance(ADMISSION_WAIT_SECONDS)
+            await scheduler._collect_target("demo", schedule)
+        assert collector.collects == 1
+        scheduler._remove_target("demo")
+        scheduler._refresh_targets(clock.now)
+        schedule = scheduler._schedules["demo"]
+        schedule.next_due = clock.now
+        scheduler._launch_due(clock.now)
+        assert schedule.task is None and collector.collects == 1
+
+        collector.gate.set()
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert "demo" not in scheduler._running
+        assert not scheduler._backoff.busy("demo")
+        await asyncio.wait_for(run_tick(scheduler, schedule, clock), 2)
+        assert collector.collects == 2 and schedule.latest_attempt_ok
+    finally:
+        collector.gate.set()
+        await scheduler.stop()
+
+
+def test_a_reading_after_a_failed_check_records_that_the_database_answered(tmp_path):
+    clock = FakeClock()
+    store = MonitorStore(tmp_path / "monitor.db", clock=clock.time)
+    store.set_settings("demo", {"enabled": True})
+    watch = ConnectionWatch(store, clock=clock.time)
+    store.record_pulse("demo", int(clock.now), "collect", True, "Read 1 query")
+    watch.collection("demo", False, int(clock.now) - 20, "The database didn't answer within 12 s.")
+    watch.collection("demo", True, int(clock.now))
+    assert [(row["ok"], row["detail"]) for row in store.pulses("demo", 3)] == [
+        (1, "The database answered"), (0, "The database didn't answer within 12 s."),
+        (1, "Read 1 query")]
+    watch.collection("demo", True, int(clock.now) + 60)
+    assert len(store.pulses("demo", 10)) == 3
+
+
+def test_answered_pulse_clears_the_failure_without_counting_as_a_reading(tmp_path):
+    from features.monitor.api import views
+
+    clock = FakeClock()
+    now = int(clock.now)
+    store = MonitorStore(tmp_path / "monitor.db", clock=clock.time)
+    store.set_settings("demo", {"enabled": True})
+    watch = ConnectionWatch(store, clock=clock.time)
+    for ts in (now - 60, now):
+        store.record_pulse("demo", ts, "collect", True, "Read 1 query")
+    # The next reading's read went unanswered, then the collection returned without a reading.
+    watch.collection("demo", False, now + 60, "The database didn't answer within 12 s.")
+    assert views.failing_since(store, "demo") == now + 60
+    watch.collection("demo", True, now + 75)
+    assert views.failing_since(store, "demo") is None
+    assert views.collect_timing(store, "demo") == (now, 60)
+    last, interval = monitor_routes._collect_timing(store, "demo")
+    assert (last["ts"], interval) == (now + 60, 60)
+    assert monitor_routes._readings(store, "demo")["last_reading_at"] == now
+    assert watch._last_reading("demo", now + 100) == now
+
+
 # -- first-run fast phase ----------------------------------------------------
 
 

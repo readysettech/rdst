@@ -355,6 +355,7 @@ export function QueryDetail({
                     query: query.text,
                     target,
                     hash: ref.hash,
+                    key: query.key,
                     analysisId: ref.analysisId,
                   } as never
                 }
@@ -389,6 +390,7 @@ export function QueryDetail({
                   void navigate({
                     to: '/ask',
                     search: {
+                      db: target,
                       sql: query.text,
                       params: digest.data?.params?.length
                         ? digest.data.params

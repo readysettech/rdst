@@ -1,6 +1,6 @@
 // The answer: one status line, the lead sentence built from the top row, the
 // explanation, the table as a divided list with a rank column and mono numbers, the
-// ghost actions and "SQL that ran" folded. A query that matched nothing keeps the
+// ghost actions and "SQL that ran" open. A query that matched nothing keeps the
 // status line's shape with a grey icon and two ghosts.
 import { cn } from '@rs/tailwind-base'
 import { Button } from '@rs/ui-new/button'
@@ -62,17 +62,19 @@ export function StatusLine({
   )
 }
 
-/** "SQL that ran", folded, with the added LIMIT named in the caption. */
+/** "SQL that ran", foldable, with an added or lowered LIMIT named in the caption. */
 export function SqlDisclosure({
   title,
   sql,
   limitAdded,
+  limitReduced = false,
   open,
   onToggle,
 }: {
   title: string
   sql: string
   limitAdded: boolean
+  limitReduced?: boolean
   open: boolean
   onToggle: () => void
 }) {
@@ -95,13 +97,15 @@ export function SqlDisclosure({
           )}
         />
         {title}
-        {limitAdded && (
+        {(limitAdded || limitReduced) && (
           <Text
             as="span"
             level="caption"
             className="ml-1 text-content-layout-3"
           >
-            LIMIT {addedLimit(sql)} added
+            {limitReduced
+              ? `LIMIT lowered to ${addedLimit(sql)}`
+              : `LIMIT ${addedLimit(sql)} added`}
           </Text>
         )}
       </Pressable>
@@ -120,14 +124,21 @@ function Table({ result }: { result: AskResultEvent }) {
   const nameIndex = numeric.findIndex((isNumber) => !isNumber)
   const rows = all ? result.rows : result.rows.slice(0, ROWS_SHOWN)
   const more = result.rows.length - ROWS_SHOWN
+  // Widths that don't depend on the text: every row lines up, the name keeps room however
+  // wide the other cells are, and a result wider than the page scrolls sideways.
   const columns = `36px ${result.columns
     .map((_, index) =>
-      index === nameIndex ? 'minmax(0,1fr)' : 'minmax(96px,auto)'
+      index === nameIndex
+        ? 'minmax(10rem,2fr)'
+        : numeric[index]
+          ? 'minmax(6rem,1fr)'
+          : 'minmax(8rem,1.5fr)'
     )
     .join(' ')}`
   return (
-    <div data-testid="ask-table" className="mt-5">
+    <div data-testid="ask-table" className="mt-5 overflow-x-auto">
       <DividedList
+        className="min-w-fit"
         columns={columns}
         head={[
           { label: '' },
@@ -208,7 +219,7 @@ export function AskAnswer({
   onAskAgain: () => void
   onEdit: () => void
 }) {
-  const [sqlOpen, setSqlOpen] = useState(false)
+  const [sqlOpen, setSqlOpen] = useState(true)
   const noRows = result.rows.length === 0
   const lead = noRows ? null : leadSentence(result)
   const ghost = { variant: 'primary', modifier: 'ghost' } as const
@@ -222,7 +233,9 @@ export function AskAnswer({
         <StatusLine tone="positive">
           {[
             `Answered from ${answeredFrom}`,
-            rowsWord(result.row_count),
+            result.truncated
+              ? `first ${rowsWord(result.row_count)}`
+              : rowsWord(result.row_count),
             secondsWord(result.execution_time_ms),
             ...(result.query_tag
               ? [
@@ -258,6 +271,13 @@ export function AskAnswer({
           )}
         >
           {explanation}
+          {result.limit_reduced &&
+            result.row_limit != null &&
+            ` Ask lowered the query's LIMIT to ${result.row_limit.toLocaleString('en-US')}.`}
+          {/* The explanation predates the LIMIT validation adds, so it can say "no limit". */}
+          {limitAdded &&
+            !result.limit_reduced &&
+            ` Ask added LIMIT ${addedLimit(executedSql)}.`}
         </Text>
       )}
       {!noRows && <Table result={result} />}
@@ -296,6 +316,7 @@ export function AskAnswer({
           title="SQL that ran"
           sql={executedSql}
           limitAdded={limitAdded}
+          limitReduced={result.limit_reduced}
           open={sqlOpen}
           onToggle={() => setSqlOpen((value) => !value)}
         />

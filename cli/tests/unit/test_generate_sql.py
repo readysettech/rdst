@@ -73,7 +73,54 @@ class TestGenerateSqlAnswerabilityGate:
         assert result_ctx.status == Status.ERROR, (
             f"Expected Status.ERROR for cannot_answer, got {result_ctx.status}."
         )
-        assert result_ctx.error_message is not None
+        assert result_ctx.error_message == (
+            "This database doesn't have the data to answer that question. "
+            "Missing: box office revenue. "
+            "Schema doesn't contain box office revenue data."
+        )
+        assert result_ctx.error_code == "ask_cannot_answer"
+        assert result_ctx.error_category == "missing_schema"
+
+    def test_write_refusal_explains_read_only_without_the_reason_code(self):
+        from features.ask.engine.ask3.phases.generate import generate_sql
+
+        mock_result = self._mock_llm_response(
+            confidence=0.0, sql="", assumptions=[], cannot_answer=True
+        )
+        mock_result.update(cannot_answer_reason="unsupported_request", missing_schema=[])
+
+        with patch(
+            "features.ask.sql_generation.generate_sql_from_nl",
+            return_value=mock_result,
+        ):
+            result_ctx = generate_sql(self._make_ctx(), MagicMock(), MagicMock())
+
+        assert result_ctx.error_message == (
+            "Ask only runs read-only queries, so it can't change data. "
+            "Ask about the data instead."
+        )
+        assert result_ctx.error_code == "ask_cannot_answer"
+        assert result_ctx.error_category == "unsupported_request"
+
+    def test_unsafe_generated_sql_keeps_its_error_code(self):
+        from features.ask.engine.ask3.phases.generate import generate_sql
+
+        mock_result = {
+            "success": False,
+            "sql": "DELETE FROM users",
+            "error": "The generated SQL would change data, so Ask didn't run it.",
+            "error_code": "ask_unsafe_sql",
+            "error_category": "read_only",
+        }
+
+        with patch(
+            "features.ask.sql_generation.generate_sql_from_nl",
+            return_value=mock_result,
+        ):
+            result_ctx = generate_sql(self._make_ctx(), MagicMock(), MagicMock())
+
+        assert result_ctx.error_code == "ask_unsafe_sql"
+        assert result_ctx.error_category == "read_only"
 
     def test_low_confidence_alone_is_diagnostic(self):
         from features.ask.engine.ask3.phases.generate import generate_sql

@@ -59,6 +59,18 @@ describe('fixBenchmarkModel', () => {
     })
   })
 
+  it('keeps a before time nobody measured unknown instead of 0', () => {
+    const idle = { ...fixes[0], mean_ms: 0 }
+    expect(benchmarkRows([idle], undefined)[0].before_ms).toBeNull()
+    const unmeasured = {
+      ...result,
+      rows: [
+        { ...result.rows[0], key: idle.key, before_ms: null, after_ms: null },
+      ],
+    }
+    expect(benchmarkRows([fixes[0]], unmeasured)[0].before_ms).toBeNull()
+  })
+
   it('phrases the change as a percent of before', () => {
     expect(changePercent(69.7, 3.1)).toBe(-96)
     expect(changePercent(10, 12)).toBe(20)

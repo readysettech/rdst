@@ -245,6 +245,56 @@ def test_pulse_state_is_late_when_collection_stops(client, store):
     assert client.get("/api/monitor/targets/db/pulse").json()["pulses"][0]["state"] == "late"
 
 
+def test_a_failing_check_reads_as_unreachable_before_the_outage_is_filed(
+        monkeypatch, client, store):
+    store.set_settings("db", {"enabled": True})
+    _minutes(store, NOW - 180, 2)
+    store.record_pulse("db", NOW - 60, "collect", False, "Connection refused")
+    store.record_pulse("db", NOW, "collect", False, "Connection refused")
+    page = client.get("/api/monitor/targets/db/pulse").json()
+    assert page["pulses"][0]["state"] == "connection_lost"
+    assert page["last_reading_at"] == NOW - 120
+    assert page["connection_problem"] is not None
+    assert client.get("/api/monitor/targets/db/health").json()["last_reading_at"] == NOW - 120
+    monkeypatch.setattr(routes, "_configured_targets", lambda: [{"name": "db"}])
+    home = client.get("/api/monitor/home").json()
+    assert home["status"]["state"] == "cant_reach"
+    assert home["status"]["target"] == "db"
+    assert home["status"]["since"] == NOW - 60
+    assert [(row["target"], row["state"]) for row in home["databases"]] == [("db", "cant_reach")]
+
+    store.record_pulse("db", NOW + 1, "collect", True, "Read 1 query")
+    assert client.get("/api/monitor/targets/db/pulse").json()["pulses"][0]["state"] == "live"
+    assert client.get("/api/monitor/home").json()["status"]["state"] != "cant_reach"
+
+
+@pytest.mark.parametrize("held_checks", [True, False])
+def test_ai_paused_since_is_when_checks_stopped_not_the_latest_check(
+        monkeypatch, client, store, held_checks):
+    from features.monitor import database_limit
+
+    monkeypatch.setattr(database_limit, "_signed_in", lambda: True)
+    monkeypatch.setattr(routes, "_configured_targets", lambda: [{"name": "db"}])
+    store.set_settings("db", {"enabled": True})
+    _minutes(store, NOW - 120, 2)
+    store.record_judge_run("db", NOW - 3000, [], request={"q": 1}, outcome="filed")
+    if held_checks:
+        store.record_judge_run("db", NOW - 2400, [], request={"q": 1}, outcome="error")
+    store.upsert_item("db", "monitoring_issue", "jev_login", 1.0, "Sign in", {}, NOW - 2000)
+    stopped = NOW - 2400 if held_checks else NOW - 2000
+
+    def since():
+        home = client.get("/api/monitor/home").json()
+        assert home["databases"][0]["state"] == "ai_paused"
+        return home["databases"][0]["state_since"]
+
+    assert since() == stopped
+    # Checks keep running while paused; the pause still began when they stopped.
+    for ts, outcome in ((NOW - 900, "empty"), (NOW - 600, "error"), (NOW - 60, "empty")):
+        store.record_judge_run("db", ts, [], outcome=outcome)
+        assert since() == stopped
+
+
 async def test_stream_emits_pulse_after_each_collector_pass(monkeypatch, store):
     class Collector:
         async def subscribe(self):
@@ -789,3 +839,138 @@ def test_signed_out_manual_admission(client, store, monkeypatch, own_key):
         assert response.json()["queue_state"] == "today"
     else:
         assert store.analyze_jobs("db") == []
+
+
+def test_benchmark_estimates_every_fix_the_list_offers(monkeypatch, store):
+    from features.monitor import actions, analysis_digest, judge
+
+    monkeypatch.setattr(judge, "ready_fixes", lambda store, target, now: [])
+    monkeypatch.setattr(actions, "plan_cards", lambda store, target, now: [])
+    monkeypatch.setattr(actions, "database_minute", lambda store, target, now: (
+        0.0, {KEY_A: {"calls": 10, "total_ms": 400.0}}))
+    jobs = {KEY_A: {"analysis_ref": "ref-a", "mode": "explain", "finished_at": NOW},
+            KEY_B: {"analysis_ref": "ref-b", "mode": "explain", "finished_at": NOW}}
+    monkeypatch.setattr(analysis_digest, "latest_done_job",
+                        lambda store, target, key: jobs.get(key))
+    rewrite = {"kind": "rewrite", "sql": "SELECT 1", "expected_gain": {"cost_reduction_pct": 75}}
+    digests = {"ref-a": {"fix_ready": True, "fix": rewrite}, "ref-b": {"fix_ready": False}}
+    monkeypatch.setattr(views, "digest_for_ref", lambda target, key, ref, *args: digests[ref])
+
+    result = views.benchmark_fixes(store, "db", [KEY_A, KEY_B], 1, NOW)
+    rows = result["rows"]
+    # The method names only the kinds of fix it estimated.
+    assert result["method"] == ("Estimated on db: rewrites from their test runs or planner "
+                                "cost. Actions shows the same estimates.")
+
+    # A rewrite the list offers gets its analysis's estimate, not "No fix is ready".
+    assert (rows[0]["before_ms"], rows[0]["after_ms"], rows[0]["reason"]) == (40.0, 10.0, None)
+    # No calls in the window: the before time stays unknown, never zero.
+    assert (rows[1]["before_ms"], rows[1]["after_ms"]) == (None, None)
+    assert rows[1]["reason"] == "No fix is ready for this query."
+
+
+def _indexed_analysis(index_testing):
+    """A stored deep analysis as the analyze workflow saves it: the AI's index recommendation
+    as it wrote it, and the planner test of the statement the test ran."""
+    return SimpleNamespace(
+        timestamp="2026-10-01T00:00:00Z", index_suggestions=[], rewrite_suggestions=[],
+        explain_plan={"Plan": {"Node Type": "Seq Scan", "Relation Name": "posts",
+                               "Total Cost": 5120.0}},
+        performance_metrics={},
+        llm_analysis={"index_recommendations": [{
+            "table": "posts", "columns": ["creationdate", "owneruserid"],
+            "sql": "CREATE INDEX CONCURRENTLY idx_posts_owner ON posts (creationdate, "
+                   "owneruserid);",
+            "rationale": "Filters on owneruserid.", "estimated_impact": "high"}]},
+        display_payload={"explain_results": {"plan_format": "explain"},
+                         "index_testing": index_testing})
+
+
+# What index testing records: the statement it ran (no CONCURRENTLY, no semicolon, columns in
+# equality-then-range order) and the planner's costs.
+_PLANNER_TESTED = {
+    "success": True, "tested": True, "method": "hypopg", "baseline_cost": 5120.0,
+    "results": [{"index_sql": "CREATE INDEX idx_posts_owner ON posts (owneruserid, creationdate)",
+                 "table": "posts", "columns": ["owneruserid", "creationdate"],
+                 "planner_used_index": True, "hypothetical_index": "<13981>btree_posts_owner",
+                 "scan_type": "Index Scan", "cost_before": 5120.0, "cost_after": 896.0,
+                 "cost_reduction_pct": 82.5, "error": None}],
+    "summary": "Planner uses 1 of 1 recommended index(es) (estimated cost down 82.5%).",
+}
+_HYPOPG_MISSING = {"success": True, "tested": False, "skipped_reason": "hypopg_not_available",
+                   "message": "hypopg is not installed on this server."}
+
+
+def test_an_analyzed_index_fix_gets_the_planner_estimate_it_was_tested_with(monkeypatch, store):
+    from features.monitor import actions, analysis_digest, judge
+
+    monkeypatch.setattr(judge, "ready_fixes", lambda store, target, now: [])
+    monkeypatch.setattr(actions, "plan_cards", lambda store, target, now: [])
+    monkeypatch.setattr(actions, "database_minute", lambda store, target, now: (
+        0.0, {KEY_A: {"calls": 10, "total_ms": 400.0}, KEY_B: {"calls": 4, "total_ms": 80.0}}))
+    jobs = {key: {"analysis_ref": f"/api/query-registry/{key}/analysis/a-{key}", "mode": None,
+                  "finished_at": NOW} for key in (KEY_A, KEY_B)}
+    monkeypatch.setattr(analysis_digest, "latest_done_job",
+                        lambda store, target, key: jobs.get(key))
+    analyses = {jobs[KEY_A]["analysis_ref"]: _indexed_analysis(_PLANNER_TESTED),
+                jobs[KEY_B]["analysis_ref"]: _indexed_analysis(_HYPOPG_MISSING)}
+    monkeypatch.setattr(analysis_digest, "load_analysis", lambda job: analyses[job["analysis_ref"]])
+    analysis_digest.digest_for_ref.cache_clear()
+    try:
+        rows = views.benchmark_fixes(store, "db", [KEY_A, KEY_B], 1, NOW)["rows"]
+    finally:
+        analysis_digest.digest_for_ref.cache_clear()
+
+    # The fix as written and as tested differ only in build option, semicolon and column order.
+    assert rows[0]["before_ms"] == 40.0
+    assert rows[0]["after_ms"] == pytest.approx(40.0 * (1 - 0.825))
+    assert rows[0]["reason"] is None
+    # An analysis whose index the planner never tested says so, not that no fix is ready.
+    assert (rows[1]["before_ms"], rows[1]["after_ms"]) == (20.0, None)
+    assert rows[1]["reason"] == "The analysis has no planner estimate for this index."
+
+
+@pytest.mark.parametrize("sql,found", [
+    ("create index concurrently idx_posts_owner on posts (owneruserid,  creationdate);", True),
+    ("CREATE INDEX other_name ON public.posts (owneruserid, creationdate)", True),
+    # Another column order is another index, with its own plan.
+    ("CREATE INDEX idx_posts_owner ON posts (creationdate, owneruserid)", False),
+    ("CREATE INDEX idx_posts_owner ON posts (owneruserid)", False),
+])
+def test_an_index_statement_finds_its_planner_test(sql, found):
+    from features.monitor.analysis_digest import tested_index
+
+    expected = _PLANNER_TESTED["results"][0] if found else None
+    assert tested_index(sql, _PLANNER_TESTED) is expected
+    assert tested_index(sql, _HYPOPG_MISSING) is None
+
+
+def test_a_recommendation_tested_in_another_column_order_reads_as_the_tested_index():
+    from features.monitor.analysis_digest import as_tested
+
+    tested = _PLANNER_TESTED["results"][0]
+    written = {"sql": "CREATE INDEX idx_posts_owner ON posts (creationdate, owneruserid);"}
+    assert as_tested(written, _PLANNER_TESTED) == (tested["index_sql"], tested)
+    assert as_tested(written, _HYPOPG_MISSING) == (written["sql"], None)
+
+
+def test_two_tests_of_the_same_columns_match_only_their_own_order():
+    from features.monitor.analysis_digest import as_tested, tested_index
+
+    first, second = ({**_PLANNER_TESTED["results"][0], "index_sql": sql} for sql in (
+        "CREATE INDEX a ON posts (owneruserid, creationdate)",
+        "CREATE INDEX b ON posts (creationdate, owneruserid)"))
+    testing = {"tested": True, "results": [first, second]}
+    assert tested_index("CREATE INDEX b ON posts (creationdate, owneruserid);", testing) is second
+    assert tested_index("CREATE INDEX c ON posts (owneruserid, creationdate)", testing) is first
+    assert tested_index("CREATE INDEX d ON posts (owneruserid, creationdate, id)", testing) is None
+    written = {"sql": "CREATE INDEX e ON posts (creationdate, id, owneruserid)"}
+    assert as_tested(written, testing) == (written["sql"], None)
+
+
+def test_benchmark_method_follows_the_kinds_it_estimated():
+    assert views._benchmark_method("db", {"index"}) == (
+        "Estimated on db: index fixes tested as hypothetical indexes by the planner. "
+        "Actions shows the same estimates.")
+    assert "; rewrites from" in views._benchmark_method("db", {"index", "rewrite"})
+    assert views._benchmark_method("db", set()) == "No fix here has an estimate on db yet."

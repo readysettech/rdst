@@ -1,3 +1,4 @@
+import type { BackendRunState } from '../main/backend-supervisor.js'
 import type { UpdateStatePayload } from '../main/update-policy.js'
 import type { LoginStatus } from '../main/login.js'
 import type { NotificationHealth } from '../main/notification-health.js'
@@ -13,15 +14,6 @@ declare global {
       }
       files: {
         selectSshKey: () => Promise<string | null>
-      }
-      windowControls: {
-        minimize: () => void
-        toggleMaximize: () => void
-        close: () => void
-        isMaximized: () => Promise<boolean>
-        onMaximizedChange: (
-          callback: (maximized: boolean) => void
-        ) => () => void
       }
       updates: {
         getState: () => Promise<UpdateStatePayload | null>
@@ -40,6 +32,13 @@ declare global {
       startup: {
         openLogs: () => void
         retry: () => void
+        reload: () => void
+      }
+      backend: {
+        getState: () => Promise<BackendRunState>
+        onStateChange: (
+          callback: (state: BackendRunState) => void
+        ) => () => void
       }
       getStartAtLogin: () => Promise<LoginStatus>
       setStartAtLogin: (enabled: boolean) => Promise<LoginStatus>

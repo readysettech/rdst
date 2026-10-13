@@ -5,6 +5,7 @@ Allows web users to submit feedback about RDST analysis results.
 Feedback is sent to PostHog for analytics and to Slack through a PostHog workflow.
 """
 
+import asyncio
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Request
@@ -12,6 +13,7 @@ from pydantic import BaseModel
 
 from shared.api.email import normalized_email
 from shared.api.guards import require_local_request
+from shared.telemetry_manager import FEEDBACK_NOT_SENT
 
 router = APIRouter()
 
@@ -65,8 +67,9 @@ async def submit_report(
                 request.query_hash
             )
 
-        # Submit feedback via telemetry
-        telemetry.submit_feedback(
+        # Delivered before replying, so the dialog never thanks for feedback still here.
+        delivered = await asyncio.to_thread(
+            telemetry.submit_feedback,
             reason=request.reason,
             query_hash=request.query_hash,
             query_sql=query_sql,
@@ -78,7 +81,8 @@ async def submit_report(
             include_plan=request.include_plan,
             flags_used=["web"],  # Indicate this came from web UI
         )
-
+        if not delivered:
+            return ReportResponse(success=False, error=FEEDBACK_NOT_SENT)
         return ReportResponse(success=True)
 
     except Exception as e:
