@@ -1302,10 +1302,11 @@ def _extract_postgres_rows_examined(plan_data: Dict[str, Any]) -> int:
     """Extract total rows examined from PostgreSQL EXPLAIN plan.
 
     Uses 'Actual Rows' from EXPLAIN ANALYZE output, falling back to
-    'Plan Rows' (estimated) when ANALYZE data isn't available.
+    'Plan Rows' (estimated) when ANALYZE data isn't available. A node's
+    output excludes the rows its filter read and discarded, so those count too.
     """
     def extract_from_node(node):
-        total = _get_plan_row_count(node)
+        total = _get_plan_row_count(node) + (node.get('Rows Removed by Filter') or 0)
         for child in node.get('Plans', []):
             total += extract_from_node(child)
         return total

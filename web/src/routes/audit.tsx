@@ -148,9 +148,11 @@ function AuditPage() {
   const initializedSelection = useRef('')
   useEffect(() => {
     if (members.length === 0) return
+    // Only the search preselects. The app target arrives after the page loads and must not
+    // reset a selection the user has already made.
     const key = `${search.scope ?? ''}|${search.group ?? ''}|${
       search.target ?? ''
-    }|${search.targets ?? ''}|${appTarget ?? ''}`
+    }|${search.targets ?? ''}`
     if (initializedSelection.current === key) return
     initializedSelection.current = key
     setSelectedTargets(selectionFromAuditSearch(search, members, appTarget))

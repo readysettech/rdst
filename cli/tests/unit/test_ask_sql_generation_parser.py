@@ -116,3 +116,50 @@ def test_json_array_returns_failure_in_benchmark_mode():
 def test_benchmark_still_propagates_adapter_and_provider_errors(error):
     with pytest.raises(type(error), match=str(error)):
         _generate(error)
+
+
+@pytest.mark.parametrize("reply", [
+    '{"corrected_sql": "SELECT 1", "confidence": 0.8}',
+    'The column was misspelled. Here is the fix:\n\n```json\n'
+    '{"corrected_sql": "SELECT 1", "confidence": 0.8}\n```\nThis should run.',
+])
+def test_error_recovery_accepts_json_inside_prose(reply):
+    from features.ask.sql_generation import recover_from_error
+
+    class Manager:
+        def generate_response(self, **kwargs):
+            assert kwargs["extra"]["response_format"] == {"type": "json_object"}
+            return {"response": reply}
+
+    result = recover_from_error(
+        nl_question="How many users?",
+        failed_sql="SELECT count(*) FROM users",
+        error_message="query returned no rows",
+        filtered_schema="Table: users",
+        database_engine="postgresql",
+        llm_manager=Manager(),
+    )
+    assert result["success"] is True
+    assert result["corrected_sql"] == "SELECT 1"
+    assert result["confidence"] == 0.8
+
+
+def test_error_recovery_never_mistakes_a_nested_object_for_the_answer():
+    from features.ask.sql_generation import recover_from_error
+
+    # The outer object is broken by an unescaped quote; only its nested diagnosis decodes.
+    reply = '{"diagnosis": {"root_cause": "typo"}, "corrected_sql": "SELECT "name" FROM t"}'
+
+    class Manager:
+        def generate_response(self, **kwargs):
+            return {"response": reply}
+
+    result = recover_from_error(
+        nl_question="How many users?",
+        failed_sql="SELECT count(*) FROM users",
+        error_message="query returned no rows",
+        filtered_schema="Table: users",
+        database_engine="postgresql",
+        llm_manager=Manager(),
+    )
+    assert result["success"] is False

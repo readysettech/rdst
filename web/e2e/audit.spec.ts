@@ -268,6 +268,31 @@ test('single-run lock withdraws Run until Cancel releases it', async ({
   release()
 })
 
+test('a selected target stays selected when the app target loads afterwards', async ({
+  page,
+}) => {
+  await page.route(
+    '**/api/query-registry/discovery/stream?target=another-target',
+    (route) => route.fulfill({ contentType: 'text/event-stream', body: '' })
+  )
+  await prepareAuditPage(page)
+  const checkbox = page.getByRole('checkbox', { name: 'Select e2e-guard' })
+  await checkbox.click({ force: true })
+  await expect(checkbox).toBeChecked()
+
+  // The app shell settles the current target after the page renders.
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new CustomEvent('rdst_target_changed', { detail: 'another-target' })
+    )
+  )
+
+  await expect(checkbox).toBeChecked()
+  await expect(
+    page.getByRole('button', { name: 'Check requirements' })
+  ).toBeVisible()
+})
+
 test('AWS preflight appears only for AWS targets and hard-gates when signed out', async ({
   page,
 }) => {

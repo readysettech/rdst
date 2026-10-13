@@ -356,6 +356,21 @@ class TestExplainAnalysisHelpers:
         rows = explain_analysis._extract_postgres_rows_examined(plan_data)
         assert rows == 185  # 100 + 50 + 25 + 10
 
+    def test_postgres_rows_examined_counts_rows_a_filter_discarded(self):
+        explain_analysis = _import_module_directly(
+            "explain_analysis",
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
+        )
+        plan_data = {
+            "Plan": {
+                "Node Type": "Aggregate",
+                "Actual Rows": 1,
+                "Plans": [{"Node Type": "Seq Scan", "Actual Rows": 0,
+                           "Rows Removed by Filter": 18424}],
+            }
+        }
+        assert explain_analysis._extract_postgres_rows_examined(plan_data) == 18425
+
     def test_postgres_rows_returned(self):
         """Test PostgreSQL rows returned extraction."""
         explain_analysis = _import_module_directly(

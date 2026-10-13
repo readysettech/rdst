@@ -246,10 +246,30 @@ SELECTIVITY AWARENESS (use [distinct: N] annotations on columns if available):
   - Low distinct count (< 20) on large tables means each value matches a LARGE
     fraction of rows. An index on such a column returns too many rows to be
     useful — the optimizer correctly chooses a seq scan.
-  - CRITICAL: If rows_returned / row_estimate > 10%, the filter is NOT selective
+  - Selectivity is the fraction of table rows that satisfy the WHERE filter.
+    Rows Returned measures it only when the query neither aggregates nor limits;
+    an aggregate such as COUNT(*) returns one row whatever the filter matches.
+    Otherwise read it from the plan: the actual rows of the scan or Filter node
+    that applies the WHERE clause are the rows that passed it (Postgres also
+    reports Rows Removed by Filter), so selectivity = those rows / table rows,
+    even when that count is 0. Only when the plan has no such count, estimate it
+    from the schema: 1 / distinct for an equality, the range's share of the
+    column's span for a range, multiplied across conditions joined by AND.
+    Missing [distinct: N] annotations never justify withholding an index the
+    plan's row counts support.
+  - Rows Examined is how much the scans read, not how many rows match. A full
+    scan reads the whole table because no index serves the filter, however few
+    rows match, so a high Rows Examined percentage is the symptom an index fixes
+    and never evidence that the filter is unselective.
+  - ORDER BY with LIMIT: an index on the equality-filtered columns followed by the
+    ORDER BY column returns rows already in order, so the query stops after reading
+    about as many rows as it returns. That index helps however many rows the filter
+    matches, and the 10% rule below does not apply to it.
+  - CRITICAL: If the filter's selectivity is above 10%, the filter is NOT selective
     enough to benefit from ANY kind of index — including covering indexes,
     INCLUDE indexes, or composite indexes led by that column. A seq scan is
-    optimal when returning a large fraction of the table. Do NOT recommend
+    optimal when returning a large fraction of the table. Apart from the ORDER BY
+    with LIMIT case above, do NOT recommend
     any index — omit it entirely from index_recommendations. Instead,
     suggest alternatives in optimization_opportunities (caching, partitioning,
     materialized views).

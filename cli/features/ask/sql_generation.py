@@ -697,19 +697,9 @@ def refine_sql_with_feedback(
             **({"callback": callback} if callback else {}),
         )
 
-        response_text = llm_result.get("response", "")
-
-        # Strip markdown code fences if present
-        response_text = response_text.strip()
-        if response_text.startswith("```"):
-            first_newline = response_text.find("\n")
-            if first_newline != -1:
-                response_text = response_text[first_newline + 1 :]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
-
-        result_data = json.loads(response_text, strict=False)
+        result_data = _parse_json_object_response(
+            llm_result.get("response", ""), required_fields={"refined_sql"}
+        )
 
         return {
             "success": True,
@@ -814,19 +804,9 @@ def recover_from_error(
             extra={"response_format": {"type": "json_object"}},
         )
 
-        response_text = llm_result.get("response", "")
-
-        # Strip markdown code fences if present
-        response_text = response_text.strip()
-        if response_text.startswith("```"):
-            first_newline = response_text.find("\n")
-            if first_newline != -1:
-                response_text = response_text[first_newline + 1 :]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
-
-        result_data = json.loads(response_text, strict=False)
+        result_data = _parse_json_object_response(
+            llm_result.get("response", ""), required_fields={"corrected_sql"}
+        )
 
         return {
             "success": True,
