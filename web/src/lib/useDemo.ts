@@ -1,4 +1,5 @@
 import { toast } from '@rs/ui-new/use-toast'
+import { useQuery } from '@tanstack/react-query'
 import {
   useCallback,
   useEffect,
@@ -420,6 +421,30 @@ function resetPatternStats(
   }))
 }
 
+/** What the demo builds (GET /api/demo/facts), from the seed and workload metadata. */
+export interface DemoFacts {
+  /** Rows in the orders table. */
+  rows: number
+  tables: Record<string, number>
+  /** The PostgreSQL major version the orders image runs; "" when unknown. */
+  pg_version: string
+  query_count: number
+  /** The whole first-run image download. */
+  download_mb: number
+}
+
+export const getFacts = () =>
+  fetch('/api/demo/facts').then((r) => json<DemoFacts>(r))
+
+export function useDemoFacts() {
+  return useQuery({
+    queryKey: ['demo', 'facts'],
+    queryFn: getFacts,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  })
+}
+
 // ---- plain JSON actions ----------------------------------------------------
 export const getPreflight = () =>
   fetch('/api/demo/preflight').then((r) => json<PreflightChecks>(r))
@@ -732,6 +757,7 @@ export function useDemo() {
   const [nextPassEta, setNextPassEta] = useState<number | null>(null)
   const [cacheBudget, setCacheBudgetState] = useState(10)
   const [loadRunning, setLoadRunning] = useState(false)
+  const [autoTeardownAt, setAutoTeardownAt] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const loadAbortRef = useRef<AbortController | null>(null)
@@ -752,6 +778,7 @@ export function useDemo() {
       setNextPassEta(s.querypilot.next_pass_eta_s)
       setCacheBudgetState(s.cache_budget)
       setLoadRunning(s.load_running)
+      setAutoTeardownAt(s.auto_teardown_at)
       // The provision SSE stream owns container states while provisioning or
       // tearing down; the 5s health poll must not overwrite them (that flapped
       // green containers back to orange "recovering" mid-provision).
@@ -990,6 +1017,7 @@ export function useDemo() {
       setMode('count_star')
       setNextPassEta(null)
       setCacheBudgetState(10)
+      setAutoTeardownAt(null)
       setNotice("Everything's cleaned up - nothing left on your system.")
     } catch (e: any) {
       setError(e?.message ?? String(e))
@@ -1090,6 +1118,7 @@ export function useDemo() {
     nextPassEta,
     cacheBudget,
     loadRunning,
+    autoTeardownAt,
     error,
     notice,
     provision,

@@ -102,6 +102,51 @@ IMAGE_DOWNLOAD_MB = 1100
 # on Apple Silicon (via Rosetta or QEMU). Only ever pulled on ARM Macs.
 AMD64_PROBE_IMAGE = "public.ecr.aws/docker/library/busybox:stable"
 DISK_REQUIRED_GB = 2
+SEED_SQL = Path(__file__).resolve().parent / "assets" / "seed.sql"
+_SEED_SCALE = re.compile(r"\*\s*(?:about\s+)?([\d,]+)\s+(\w+)")
+_IMAGE_VERSION = re.compile(r"(?<!\d)(1[0-9])(?!\d)")
+
+
+def seed_scale(path: Path = SEED_SQL) -> dict[str, int]:
+    """The row counts the seed's header promises per table ("1,500,000 orders")."""
+    scale: dict[str, int] = {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                if not line.startswith("--"):
+                    break
+                match = _SEED_SCALE.search(line)
+                if match:
+                    scale[match.group(2)] = int(match.group(1).replace(",", ""))
+    except OSError:
+        return {}
+    return scale
+
+
+BAKED_DOCKERFILE = SEED_SQL.parent / "baked" / "Dockerfile"
+_BASE_IMAGE = re.compile(r"^FROM\s+\S*postgres:(\d+)", re.M)
+
+
+def pg_version(dockerfile: Path = BAKED_DOCKERFILE,
+               image: str = qdeploy.BAKED_PG_IMAGE) -> str:
+    """The PostgreSQL major version the baked image is built from (its Dockerfile's FROM
+    line), else one named in the image tag, else ""."""
+    try:
+        match = _BASE_IMAGE.search(dockerfile.read_text(encoding="utf-8"))
+        if match:
+            return match.group(1)
+    except OSError:
+        pass
+    match = _IMAGE_VERSION.search(image.rsplit(":", 1)[-1])
+    return match.group(1) if match else ""
+
+
+def demo_facts() -> dict:
+    """What the demo builds, for the Platform page's facts card and starting steps."""
+    scale = seed_scale()
+    return {"rows": scale.get("orders", 0), "tables": scale,
+            "pg_version": pg_version(), "query_count": len(WORKLOAD),
+            "download_mb": IMAGE_DOWNLOAD_MB}
 
 
 def _norm(sql: str) -> str:

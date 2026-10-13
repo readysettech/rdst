@@ -835,6 +835,27 @@ export interface paths {
         patch: operations["discovery_mode_api_demo_discovery_mode_patch"];
         trace?: never;
     };
+    "/api/demo/facts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Facts
+         * @description What the demo builds: the orders rows, the PostgreSQL version, the workload's
+         *     query count and the first-run download, from the seed and workload metadata.
+         */
+        get: operations["facts_api_demo_facts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/demo/load": {
         parameters: {
             query?: never;
@@ -1665,6 +1686,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/monitor/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Global Actions
+         * @description Every database's open actions in one ranked plan, or one database's with `db`.
+         */
+        get: operations["global_actions_api_monitor_actions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/actions/applied": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Applied Actions
+         * @description Changes applied in the last 30 days with their measured effect, then the undone and
+         *     dismissed ones.
+         */
+        get: operations["applied_actions_api_monitor_actions_applied_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/home": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Home
+         * @description Home: the status line, the day card, every database and today's log.
+         */
+        get: operations["home_api_monitor_home_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/monitor/inbox": {
         parameters: {
             query?: never;
@@ -1683,26 +1765,6 @@ export interface paths {
         get: operations["inbox_api_monitor_inbox_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/monitor/inbox/mark-all-seen": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Mark All Seen
-         * @description Marks new items seen and acknowledges recent recoveries.
-         */
-        post: operations["mark_all_seen_api_monitor_inbox_mark_all_seen_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1860,6 +1922,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/monitor/targets/{target}/actions/opened": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Actions Opened
+         * @description Actions was opened for this database: its Changes ready event closes.
+         */
+        post: operations["actions_opened_api_monitor_targets__target__actions_opened_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/monitor/targets/{target}/actions/{action_id}/{verb}": {
         parameters: {
             query?: never;
@@ -1871,7 +1953,12 @@ export interface paths {
         put?: never;
         /**
          * Action Verb
-         * @description Snooze, dismiss or reopen an action; `check` reads the database now to see if it's done.
+         * @description A user's verb on one action, answered with the database's Actions page.
+         *
+         *     set_aside (snooze is its older name) takes `until` and `reason`; dismiss takes `reason`;
+         *     did_it reads the database now and, unless it already shows the change, marks it applied
+         *     by you so measuring starts; undid_it marks an applied change undone with `reason`;
+         *     bring_back (or reopen) opens it again; check reads the database to see if it's done.
          */
         post: operations["action_verb_api_monitor_targets__target__actions__action_id___verb__post"];
         delete?: never;
@@ -1911,6 +1998,47 @@ export interface paths {
         get: operations["analyze_jobs_api_monitor_targets__target__analyze_jobs_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/analyze-jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Analyze Job
+         * @description Stop a queued or running analysis; the query's latest analysis stays as it was.
+         */
+        post: operations["cancel_analyze_job_api_monitor_targets__target__analyze_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/monitor/targets/{target}/benchmark-fixes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Benchmark Fixes
+         * @description Before and after for each query with a fix. The after is the planner's estimate;
+         *     a timed run on a scratch schema is not done, and `scratch_schema` reads false.
+         */
+        post: operations["benchmark_fixes_api_monitor_targets__target__benchmark_fixes_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2019,7 +2147,8 @@ export interface paths {
          * Load
          * @description Recorded execution time and calls per bucket, split by the top queries in the range.
          *
-         *     `from` and `to` (epoch seconds) scope it to a brushed window instead of `range`.
+         *     `rank` picks the top queries by execution time or by calls. `from` and `to` (epoch
+         *     seconds) scope it to a brushed window instead of `range`.
          */
         get: operations["load_api_monitor_targets__target__load_get"];
         put?: never;
@@ -2168,6 +2297,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/monitor/targets/{target}/queries/{key}/analyze/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Query Analysis
+         * @description Stop the query's queued or running analysis, whichever job holds it.
+         */
+        post: operations["cancel_query_analysis_api_monitor_targets__target__queries__key__analyze_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/monitor/targets/{target}/queries/{key}/library": {
         parameters: {
             query?: never;
@@ -2256,6 +2405,7 @@ export interface paths {
         /**
          * Latest Report
          * @description The newest run of any kind, or with `daily` the newest one the Reports tab shows.
+         *     `view=detailed` adds the detailed sections.
          */
         get: operations["latest_report_api_monitor_targets__target__report_latest_get"];
         put?: never;
@@ -2273,7 +2423,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Report */
+        /**
+         * Get Report
+         * @description One run; `view=detailed` adds the detailed sections.
+         */
         get: operations["get_report_api_monitor_targets__target__report__report_id__get"];
         put?: never;
         post?: never;
@@ -3756,6 +3909,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Preferences */
+        get: operations["get_preferences_api_settings_preferences_get"];
+        /**
+         * Put Preferences
+         * @description Change the preferences sent; the rest keep their values.
+         */
+        put: operations["put_preferences_api_settings_preferences_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/reset-local-data": {
         parameters: {
             query?: never;
@@ -4287,6 +4461,12 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             /**
+             * Effort
+             * @default copy_sql
+             * @enum {string}
+             */
+            effort?: "copy_sql" | "setting" | "code";
+            /**
              * Evidence
              * @default []
              */
@@ -4314,12 +4494,23 @@ export interface components {
                 [key: string]: number;
             } | null;
             /**
+             * Risk
+             * @default none
+             * @enum {string}
+             */
+            risk?: "none" | "restart" | "locks" | "writes";
+            /**
              * Rows
              * @default []
              */
             rows?: {
                 [key: string]: unknown;
             }[];
+            /**
+             * Saves Ms Per Min
+             * @default 0
+             */
+            saves_ms_per_min?: number;
             /** Score */
             score: number;
             /**
@@ -4335,11 +4526,13 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "open" | "snoozed" | "dismissed" | "applied" | "confirmed" | "no_effect" | "retired";
+            state: "open" | "snoozed" | "dismissed" | "applied" | "confirmed" | "no_effect" | "retired" | "undone";
             /** Steps */
             steps?: string | null;
             /** Summary */
             summary: string;
+            /** Tier */
+            tier?: ("first" | "then" | "later") | null;
             /** Title */
             title: string;
             /**
@@ -4360,7 +4553,11 @@ export interface components {
             /** Name */
             name: string;
         };
-        /** ActionVerb */
+        /**
+         * ActionVerb
+         * @description An action verb's optional body: `until` (epoch seconds) sets aside until a date, and
+         *     `reason` is the user's words for a set aside, a dismissal or an undo.
+         */
         ActionVerb: {
             /** Reason */
             reason?: string | null;
@@ -4373,6 +4570,54 @@ export interface components {
             counter_age_s: number;
             /** Observed S */
             observed_s: number;
+        };
+        /**
+         * ActionsCounts
+         * @description What each filter choice would show with the others kept: by database across every
+         *     database, by kind and tier inside the chosen database.
+         */
+        ActionsCounts: {
+            /** By Database */
+            by_database: {
+                [key: string]: number;
+            };
+            /** By Kind */
+            by_kind: {
+                [key: string]: number;
+            };
+            /** First */
+            first: number;
+            /** Later */
+            later: number;
+            /** Then */
+            then: number;
+            /** Total */
+            total: number;
+        };
+        /**
+         * ActionsDatabase
+         * @description A database in the Actions filter: its open changes and how many are Do first.
+         */
+        ActionsDatabase: {
+            checkup?: components["schemas"]["CheckupState"] | null;
+            /** Database */
+            database: string;
+            /** Do First */
+            do_first: number;
+            /** Monitored */
+            monitored: boolean;
+            /** To Do */
+            to_do: number;
+        };
+        /**
+         * ActionsOpened
+         * @description POST actions/opened: whether an open Changes ready event closed.
+         */
+        ActionsOpened: {
+            /** Closed */
+            closed: boolean;
+            /** Target */
+            target: string;
         };
         /** ActionsPage */
         ActionsPage: {
@@ -4691,6 +4936,11 @@ export interface components {
             items: components["schemas"]["AgentActivityItem"][];
             /** Next Cursor */
             next_cursor?: string | null;
+            /**
+             * Retention Days
+             * @default 90
+             */
+            retention_days?: number;
             /** Targets */
             targets: string[];
         };
@@ -4842,6 +5092,15 @@ export interface components {
             /** Signed In */
             signed_in: boolean;
         };
+        /** AlsoWorthDoing */
+        AlsoWorthDoing: {
+            /** Detail */
+            detail?: string | null;
+            /** Sql */
+            sql?: string | null;
+            /** Title */
+            title: string;
+        };
         /** AnalysisFix */
         AnalysisFix: {
             expected_gain: components["schemas"]["ExpectedGain"] | null;
@@ -4856,6 +5115,21 @@ export interface components {
             title: string;
             /** Why */
             why: string;
+        };
+        /** AnalysisFixDetail */
+        AnalysisFixDetail: {
+            /** Cost After */
+            cost_after?: number | null;
+            /** Cost Before */
+            cost_before?: number | null;
+            /** Serves */
+            serves?: string | null;
+            /** Size */
+            size?: string | null;
+            /** Sql */
+            sql: string;
+            /** Write Cost */
+            write_cost?: string | null;
         };
         /**
          * AnalysisHistoryEntry
@@ -4916,6 +5190,24 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** AnalysisParam */
+        AnalysisParam: {
+            /** Name */
+            name: string;
+            /** Value */
+            value: string;
+        };
+        /** AnalysisRunFacts */
+        AnalysisRunFacts: {
+            /** Id */
+            id?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Seconds */
+            seconds?: number | null;
+            /** Tokens */
+            tokens?: number | null;
+        };
         /** AnalysisSummary */
         AnalysisSummary: {
             /** Cost Estimate */
@@ -4949,6 +5241,11 @@ export interface components {
             already_queued?: boolean | null;
             /** Analysis Ref */
             analysis_ref: string | null;
+            /**
+             * Cancelled
+             * @default false
+             */
+            cancelled?: boolean;
             /** Enqueued At */
             enqueued_at: number;
             /** Error */
@@ -4957,12 +5254,14 @@ export interface components {
             estimated_start_at?: number | null;
             /** Finished At */
             finished_at: number | null;
+            /** Held Reason */
+            held_reason?: ("sign_in" | "monitoring_off" | "outside_top" | "ai_paused" | "automatic_off" | "over_allowance") | null;
             /** Id */
             id: number;
             /** Mode */
             mode: ("analyze" | "explain") | null;
             /** Param Source */
-            param_source: ("sampled" | "table_sampled" | "none") | null;
+            param_source: ("sampled" | "table_sampled" | "none" | "estimated") | null;
             /** Priority */
             priority: number;
             /** Query Key */
@@ -5000,6 +5299,11 @@ export interface components {
             already_queued?: boolean | null;
             /** Analysis Ref */
             analysis_ref: string | null;
+            /**
+             * Cancelled
+             * @default false
+             */
+            cancelled?: boolean;
             /** Display Name */
             display_name: string;
             /** Enqueued At */
@@ -5010,12 +5314,14 @@ export interface components {
             estimated_start_at?: number | null;
             /** Finished At */
             finished_at: number | null;
+            /** Held Reason */
+            held_reason?: ("sign_in" | "monitoring_off" | "outside_top" | "ai_paused" | "automatic_off" | "over_allowance") | null;
             /** Id */
             id: number;
             /** Mode */
             mode: ("analyze" | "explain") | null;
             /** Param Source */
-            param_source: ("sampled" | "table_sampled" | "none") | null;
+            param_source: ("sampled" | "table_sampled" | "none" | "estimated") | null;
             /** Priority */
             priority: number;
             /** Query Key */
@@ -5253,6 +5559,129 @@ export interface components {
             source?: string | null;
             /** Valid */
             valid: boolean;
+        };
+        /**
+         * AppliedDay
+         * @description Applied rows of one local day, newest first; `day` is its ISO date.
+         */
+        AppliedDay: {
+            /** Day */
+            day: string;
+            /** Rows */
+            rows: components["schemas"]["AppliedRow"][];
+            /** Start */
+            start: number;
+        };
+        /**
+         * AppliedPage
+         * @description GET /actions/applied?db=: the last 30 days of applied changes by day, the undone and
+         *     dismissed ones with their reasons, and the week's totals.
+         */
+        AppliedPage: {
+            /** Days */
+            days: components["schemas"]["AppliedDay"][];
+            /** Db */
+            db: string | null;
+            /** Dismissed */
+            dismissed: components["schemas"]["DismissedRow"][];
+            /** Since */
+            since: number | null;
+            totals: components["schemas"]["AppliedTotals"];
+            /** Undone */
+            undone: components["schemas"]["AppliedRow"][];
+        };
+        /**
+         * AppliedQuery
+         * @description A query an applied change was meant to speed up: average latency over the 7 days
+         *     before and since the change settled, and calls since.
+         */
+        AppliedQuery: {
+            /** After Ms */
+            after_ms: number | null;
+            /** Before Ms */
+            before_ms: number | null;
+            /** Calls After */
+            calls_after: number;
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * AppliedRow
+         * @description One applied change. `by` is user when you said you did it, detected when RDST saw it
+         *     land; `source` is how it closed (index_added, index_dropped, setting_changed,
+         *     query_replaced, cleared, user). Measuring rows say when RDST checks next.
+         */
+        AppliedRow: {
+            /** After Ms */
+            after_ms: number | null;
+            /** Applied At */
+            applied_at: number;
+            /** Before Ms */
+            before_ms: number | null;
+            /**
+             * By
+             * @enum {string}
+             */
+            by: "user" | "detected";
+            /** Calls After */
+            calls_after: number;
+            /** Database */
+            database: string;
+            /** Id */
+            id: number;
+            /** Key */
+            key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "index" | "setting" | "maintenance" | "rewrite" | "caching";
+            /** Next Check At */
+            next_check_at: number | null;
+            /** Queries */
+            queries: components["schemas"]["AppliedQuery"][];
+            /** Reason */
+            reason: string | null;
+            /** Rollback Sql */
+            rollback_sql: string | null;
+            /** Saved Ms Per Min */
+            saved_ms_per_min: number | null;
+            /** Source */
+            source: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "measuring" | "verified" | "no_change" | "undone";
+            /** Title */
+            title: string;
+            /** Type */
+            type: string;
+            /** Undone At */
+            undone_at: number | null;
+            /** Verified At */
+            verified_at: number | null;
+        };
+        /**
+         * AppliedTotals
+         * @description The last 7 days: changes applied by status, and the database time the verified ones
+         *     save a minute, also as a share of all database time.
+         */
+        AppliedTotals: {
+            /** Changes This Week */
+            changes_this_week: number;
+            /** Measuring */
+            measuring: number;
+            /** No Change */
+            no_change: number;
+            /** Saved Ms Per Min */
+            saved_ms_per_min: number;
+            /** Saved Share */
+            saved_share: number | null;
+            /** Verified */
+            verified: number;
         };
         /**
          * AskClarificationNeededEvent
@@ -5862,6 +6291,69 @@ export interface components {
             /** Target */
             target: string;
         };
+        /** BenchmarkFacts */
+        BenchmarkFacts: {
+            /** After Ms */
+            after_ms?: number | null;
+            /** Before Ms */
+            before_ms?: number | null;
+            /** Change */
+            change?: number | null;
+            /** Method */
+            method?: string | null;
+        };
+        /** BenchmarkFixRow */
+        BenchmarkFixRow: {
+            /** After Ms */
+            after_ms: number | null;
+            /** Before Ms */
+            before_ms: number | null;
+            /** Change Pct */
+            change_pct: number | null;
+            /**
+             * Estimated
+             * @default true
+             */
+            estimated?: boolean;
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** BenchmarkFixesRequest */
+        BenchmarkFixesRequest: {
+            /** Query Keys */
+            query_keys: string[];
+            /**
+             * Runs
+             * @default 20
+             */
+            runs?: number;
+            /**
+             * Scratch Schema
+             * @default true
+             */
+            scratch_schema?: boolean;
+        };
+        /** BenchmarkFixesResult */
+        BenchmarkFixesResult: {
+            /** Method */
+            method: string;
+            /** Ran At */
+            ran_at: number;
+            /** Rows */
+            rows: components["schemas"]["BenchmarkFixRow"][];
+            /** Runs */
+            runs: number;
+            /** Scratch Schema */
+            scratch_schema: boolean;
+            /** Share */
+            share: number;
+            /** Target */
+            target: string;
+        };
         /**
          * BenchmarkLaneNumbers
          * @description One lane's measurement of one query in a benchmark.
@@ -6184,12 +6676,18 @@ export interface components {
         };
         /** CheckupState */
         CheckupState: {
+            /** Ai Reason */
+            ai_reason?: ("limit" | "quota") | null;
             /** Analyzed */
             analyzed: number;
             /** Due By */
             due_by: number | null;
             /** Finished At */
             finished_at: number | null;
+            /** Held */
+            held?: ("sign_in" | "ai_paused") | null;
+            /** Held Text */
+            held_text?: string | null;
             /** Report Id */
             report_id: number | null;
             /**
@@ -6408,6 +6906,24 @@ export interface components {
             share: number;
         };
         /**
+         * ConfirmedFixRow
+         * @description A fix measured as working in the report's day.
+         */
+        ConfirmedFixRow: {
+            /** After Ms */
+            after_ms: number | null;
+            /** Applied At */
+            applied_at: number | null;
+            /** Before Ms */
+            before_ms: number | null;
+            /** Confirmed At */
+            confirmed_at: number | null;
+            /** Query Keys */
+            query_keys: string[];
+            /** Title */
+            title: string;
+        };
+        /**
          * ConnectionProblem
          * @description Why RDST can't reach the database, and what to check.
          */
@@ -6467,12 +6983,66 @@ export interface components {
             /** Waiting On */
             waiting_on?: string | null;
         };
+        /**
+         * DatabaseActivity
+         * @description What monitoring is doing on one database now: a pass checking it, an analysis or the
+         *     report running, or readings alone. `done`/`total` count the first hour's analyses.
+         */
+        DatabaseActivity: {
+            /** Done */
+            done?: number | null;
+            /**
+             * Every S
+             * @default 60
+             */
+            every_s?: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "reading" | "checking" | "analyzing" | "report" | "idle";
+            /** Label */
+            label: string;
+            /** Last Reading At */
+            last_reading_at?: number | null;
+            /** Next Check At */
+            next_check_at?: number | null;
+            /** Total */
+            total?: number | null;
+        };
         /** DatabaseReport */
         DatabaseReport: {
+            /**
+             * Copy Count
+             * @default 0
+             */
+            copy_count?: number;
+            day?: components["schemas"]["ReportDay"] | null;
+            detailed?: components["schemas"]["ReportDetailed"] | null;
             /** Finished At */
             finished_at?: number | null;
+            /**
+             * Fix First
+             * @default []
+             */
+            fix_first?: components["schemas"]["ReportFixItem"][];
+            /**
+             * Health
+             * @default []
+             */
+            health?: components["schemas"]["ReportHealthRow"][];
+            /**
+             * Health Fine
+             * @default []
+             */
+            health_fine?: string[];
             /** Id */
             id: number;
+            /**
+             * Narrative Missing
+             * @default false
+             */
+            narrative_missing?: boolean;
             /** Period End */
             period_end?: number | null;
             /**
@@ -6495,6 +7065,7 @@ export interface components {
                 [key: string]: components["schemas"]["QueryRef"];
             };
             report_json: components["schemas"]["ReportBody"] | null;
+            run?: components["schemas"]["ReportRun"] | null;
             /**
              * Sample
              * @default false
@@ -6514,6 +7085,7 @@ export interface components {
             trigger: "user" | "nightly";
             /** Ts */
             ts: number;
+            verdict?: components["schemas"]["ReportVerdictText"] | null;
         };
         /**
          * DaySnapshot
@@ -6583,15 +7155,26 @@ export interface components {
          * @description One stored deep analysis, as the query row and the report card show it.
          */
         DeepAnalysisDigest: {
+            /**
+             * Also
+             * @default []
+             */
+            also?: components["schemas"]["AlsoWorthDoing"][];
             /** Analysis Ref */
             analysis_ref: string | null;
             /** Analyzed At */
             analyzed_at: number | null;
+            benchmark?: components["schemas"]["BenchmarkFacts"] | null;
+            /** Calls Today */
+            calls_today?: number | null;
             /** Efficiency Score */
             efficiency_score: number | null;
+            /** Explain Text */
+            explain_text?: string | null;
             /** Findings */
             findings: string[];
             fix: components["schemas"]["AnalysisFix"] | null;
+            fix_detail?: components["schemas"]["AnalysisFixDetail"] | null;
             /**
              * Fix Ready
              * @default false
@@ -6608,11 +7191,39 @@ export interface components {
              * @default []
              */
             other_fixes?: components["schemas"]["AnalysisFix"][];
+            /** Param Source */
+            param_source?: string | null;
+            /**
+             * Params
+             * @default []
+             */
+            params?: components["schemas"]["AnalysisParam"][];
+            /**
+             * Plan Findings
+             * @default []
+             */
+            plan_findings?: components["schemas"]["PlanFinding"][];
             plan_summary: components["schemas"]["PlanSummary"] | null;
+            /** Planner Cost */
+            planner_cost?: number | null;
             /** Query Key */
             query_key: string;
             /** Rating */
             rating: string | null;
+            readyset?: components["schemas"]["ReadysetFacts"] | null;
+            /**
+             * Rewrites
+             * @default []
+             */
+            rewrites?: components["schemas"]["RewriteTested"][];
+            /** Rows Read */
+            rows_read?: number | null;
+            /** Rows Returned */
+            rows_returned?: number | null;
+            run?: components["schemas"]["AnalysisRunFacts"] | null;
+            /** Score */
+            score?: number | null;
+            verdict?: components["schemas"]["ReportVerdictText"] | null;
         };
         /**
          * DeleteResponse
@@ -6626,6 +7237,108 @@ export interface components {
         DeletedMuteRule: {
             /** Deleted */
             deleted: number;
+        };
+        /**
+         * DetailedStretch
+         * @description A spike the day crossed (`spike`), or when none did, one of its two busiest stretches
+         *     (`busiest`), with the queries behind it and the rollbacks inside it.
+         */
+        DetailedStretch: {
+            /** End */
+            end: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "spike" | "busiest";
+            /** Metric */
+            metric: ("traffic" | "latency") | null;
+            /** Peak */
+            peak: number | null;
+            /** Queries */
+            queries: components["schemas"]["DetailedStretchQuery"][];
+            /** Ratio */
+            ratio: number | null;
+            /** Rollbacks */
+            rollbacks: number | null;
+            /** Start */
+            start: number;
+            /** Summary */
+            summary: string | null;
+            /** Usual */
+            usual: number | null;
+        };
+        /**
+         * DetailedStretchQuery
+         * @description A query behind a busy stretch: its share of the stretch's time (busiest stretches), or
+         *     its level before and during (spikes).
+         */
+        DetailedStretchQuery: {
+            /** Before */
+            before: number | null;
+            /** Display Name */
+            display_name: string;
+            /** During */
+            during: number | null;
+            /** Query Key */
+            query_key: string;
+            /** Ratio */
+            ratio: number | null;
+            /** Share */
+            share: number | null;
+        };
+        /**
+         * DetailedTile
+         * @description One of the Detailed view's six numbers with the day before's. Rollbacks and deadlocks
+         *     share a tile: `value` counts rollbacks, `second` deadlocks.
+         */
+        DetailedTile: {
+            /** Change */
+            change: number | null;
+            /** Label */
+            label: string;
+            /** Limit */
+            limit?: number | null;
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "qps" | "mean_ms" | "p95_ms" | "connections" | "cache_hit" | "rollbacks_deadlocks";
+            /** Prior */
+            prior: number | null;
+            /** Prior Note */
+            prior_note?: string | null;
+            /** Second */
+            second?: number | null;
+            /** Second Prior */
+            second_prior?: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "ok" | "warn" | "bad" | "collecting";
+            /**
+             * Unit
+             * @enum {string}
+             */
+            unit: "qps" | "ms" | "count" | "ratio";
+            /** Value */
+            value: number | null;
+        };
+        /** DetailedTotals */
+        DetailedTotals: {
+            /** Data Bytes */
+            data_bytes: number;
+            /** Data Kept Days */
+            data_kept_days: number;
+            /** Queries Seen */
+            queries_seen: number;
+            /** Ran At */
+            ran_at: number;
+            /** Readings */
+            readings: number;
+            /** Report Number */
+            report_number: number;
         };
         /**
          * DigestEntry
@@ -6663,6 +7376,26 @@ export interface components {
         DiscoveryModeBody: {
             /** Mode */
             mode: string;
+        };
+        /** DismissedRow */
+        DismissedRow: {
+            /** Database */
+            database: string;
+            /** Dismissed At */
+            dismissed_at: number;
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "index" | "setting" | "maintenance" | "rewrite" | "caching";
+            /** Reason */
+            reason: string | null;
+            /** Title */
+            title: string;
+            /** Type */
+            type: string;
         };
         /** EmailRequest */
         EmailRequest: {
@@ -7453,6 +8186,48 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /**
+         * GlobalActionsPage
+         * @description GET /actions?db=: the plan across databases (decision 6). `cards` holds the open
+         *     actions ranked Do first, Then, Later, each tier by time saved a minute; `set_aside` and
+         *     `dismissed` list the held ones for Bring back.
+         */
+        GlobalActionsPage: {
+            /** Applied Count */
+            applied_count: number;
+            /** Cards */
+            cards: components["schemas"]["PlanCard"][];
+            counts: components["schemas"]["ActionsCounts"];
+            /** Databases */
+            databases: components["schemas"]["ActionsDatabase"][];
+            /** Db */
+            db: string | null;
+            /** Dismissed */
+            dismissed: components["schemas"]["PlanCard"][];
+            /** Keep */
+            keep: {
+                [key: string]: number;
+            };
+            /** Left Out */
+            left_out: {
+                [key: string]: number;
+            };
+            /** Observed S */
+            observed_s: number | null;
+            /**
+             * Report Checks
+             * @default {}
+             */
+            report_checks?: {
+                [key: string]: components["schemas"]["ReportChecks"];
+            };
+            /** Set Aside */
+            set_aside: components["schemas"]["PlanCard"][];
+            /** Unmonitored */
+            unmonitored: string[];
+            /** Updated At */
+            updated_at: number | null;
+        };
         /** GuardCheckRequest */
         GuardCheckRequest: {
             /** Sql */
@@ -7620,6 +8395,38 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * HealthCheckRow
+         * @description Every health check, worst first: its finding, the one number it shows and the Fix first
+         *     rank that addresses it.
+         */
+        HealthCheckRow: {
+            /** Check */
+            check: string;
+            /** Finding */
+            finding: string;
+            /** Fix Rank */
+            fix_rank: number | null;
+            /**
+             * In Actions
+             * @default false
+             */
+            in_actions?: boolean;
+            /** Label */
+            label: string;
+            /**
+             * Needs You
+             * @default false
+             */
+            needs_you?: boolean;
+            /** Number */
+            number: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "bad" | "warn" | "ok" | "unavailable";
+        };
         /** HealthNow */
         HealthNow: {
             /** Active Conns */
@@ -7653,8 +8460,14 @@ export interface components {
             lock_waits_peak?: number | null;
             /** Mean Ms */
             mean_ms: number;
+            /** P95 Ms */
+            p95_ms?: number | null;
             /** Qps */
             qps: number;
+            /** Qps Peak */
+            qps_peak?: number | null;
+            /** Qps Peak At */
+            qps_peak_at?: number | null;
             /** Xact Rollback */
             xact_rollback: number;
         };
@@ -7696,6 +8509,208 @@ export interface components {
             };
             /** Span Seconds */
             span_seconds: number;
+        };
+        /** HomeAnalyzed */
+        HomeAnalyzed: {
+            /** Analysis Ref */
+            analysis_ref: string | null;
+            /** Analyzed At */
+            analyzed_at: number;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "fix_suggested" | "healthy" | "failed";
+            /** Query Key */
+            query_key: string;
+            /** Target */
+            target: string;
+        };
+        /** HomeDatabase */
+        HomeDatabase: {
+            /** Act Now */
+            act_now: number;
+            /** Connection */
+            connection: string;
+            /**
+             * Do First
+             * @default 0
+             */
+            do_first?: number;
+            /** Fixes Item Id */
+            fixes_item_id: number | null;
+            /** Fixes Ready */
+            fixes_ready: number;
+            /** Open Items */
+            open_items: number;
+            /** Qps */
+            qps: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "watching" | "cant_reach" | "ai_paused" | "not_monitored";
+            /** State Since */
+            state_since: number | null;
+            /** Target */
+            target: string;
+            /**
+             * To Do
+             * @default 0
+             */
+            to_do?: number;
+        };
+        /** HomeDayCard */
+        HomeDayCard: {
+            /** Cache Hit Ratio */
+            cache_hit_ratio: number | null;
+            /** Cache Hit Reason */
+            cache_hit_reason: string | null;
+            /** Fixes Item Id */
+            fixes_item_id: number | null;
+            /** Fixes Ready */
+            fixes_ready: number;
+            /** Fixes Share */
+            fixes_share: number | null;
+            /** Mean Ms */
+            mean_ms: number | null;
+            /** Mean Ms Delta */
+            mean_ms_delta: number | null;
+            /** Qps */
+            qps: number | null;
+            /** Qps Peak */
+            qps_peak: number | null;
+            /** Qps Peak At */
+            qps_peak_at: number | null;
+            /** Report Day */
+            report_day: string | null;
+            /** Report Id */
+            report_id: number | null;
+            /** Series */
+            series: components["schemas"]["HomeSparkPoint"][];
+            /** Target */
+            target: string;
+        };
+        /** HomeLogEntry */
+        HomeLogEntry: {
+            /** Band */
+            band?: ("act_now" | "watch") | null;
+            /** Detail */
+            detail: string | null;
+            link: components["schemas"]["MonitorLink"];
+            /** Text */
+            text: string;
+            /** Ts */
+            ts: number;
+        };
+        /**
+         * HomeModel
+         * @description GET /home: the status line, the day card, every database and today's log.
+         */
+        HomeModel: {
+            /** Databases */
+            databases: components["schemas"]["HomeDatabase"][];
+            /**
+             * Databases Strip
+             * @default []
+             */
+            databases_strip?: components["schemas"]["HomeStripRow"][];
+            day: components["schemas"]["HomeDayCard"] | null;
+            /** Generated At */
+            generated_at: number;
+            /** Not Monitored */
+            not_monitored: number;
+            /** Recently Analyzed */
+            recently_analyzed: components["schemas"]["HomeAnalyzed"][];
+            since_yesterday: components["schemas"]["HomeSinceYesterday"];
+            status: components["schemas"]["HomeStatus"];
+            /** Today */
+            today: components["schemas"]["HomeLogEntry"][];
+        };
+        /** HomeSinceYesterday */
+        HomeSinceYesterday: {
+            /** Fixes Confirmed */
+            fixes_confirmed: number;
+            /** Opened Closed */
+            opened_closed: number;
+        };
+        /** HomeSparkPoint */
+        HomeSparkPoint: {
+            /** Qps */
+            qps: number | null;
+            /** Ts */
+            ts: number;
+        };
+        /**
+         * HomeStatus
+         * @description needs_you: an Act now item is open. quiet: attention checks ran in the last 3 cycles
+         *     and nothing is open. paused: charts and stuck-query alerts run, AI checks do not. off:
+         *     no database is monitored.
+         */
+        HomeStatus: {
+            /**
+             * Act Now
+             * @default 0
+             */
+            act_now?: number;
+            /** Checks Ran At */
+            checks_ran_at: number | null;
+            /**
+             * Do First
+             * @default 0
+             */
+            do_first?: number;
+            /** Headline */
+            headline: string | null;
+            /** Last Reading At */
+            last_reading_at: number | null;
+            link: components["schemas"]["MonitorLink"] | null;
+            /** Needs You */
+            needs_you: number;
+            /** Next Report At */
+            next_report_at: number | null;
+            /** Since */
+            since: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "needs_you" | "quiet" | "paused" | "off";
+            /** Target */
+            target: string | null;
+            /** To Watch */
+            to_watch: number;
+            /** Watching */
+            watching: number;
+        };
+        /**
+         * HomeStripRow
+         * @description One database in Home's "Across your databases" strip, in attention order.
+         */
+        HomeStripRow: {
+            /** Act Now */
+            act_now: number;
+            activity?: components["schemas"]["DatabaseActivity"] | null;
+            /**
+             * Building
+             * @default false
+             */
+            building?: boolean;
+            /** Do First */
+            do_first: number;
+            /** Fixes Ready */
+            fixes_ready: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "watching" | "cant_reach" | "ai_paused" | "not_monitored";
+            /** Target */
+            target: string;
+            /** To Do */
+            to_do: number;
         };
         /** ImportQueriesRequest */
         ImportQueriesRequest: {
@@ -7764,17 +8779,84 @@ export interface components {
             /** Summary */
             summary: string;
         };
+        /**
+         * InboxChanges
+         * @description A Changes ready event's plan in brief: how many changes, how many to do first, the top
+         *     titles and their action ids (do-first ones lead).
+         */
+        InboxChanges: {
+            /** Action Ids */
+            action_ids: number[];
+            /** Count */
+            count: number;
+            /** Do First */
+            do_first: number;
+            /** Titles */
+            titles: string[];
+        };
+        /** InboxFix */
+        InboxFix: {
+            /** Group */
+            group: string | null;
+            /** Latency Ms */
+            latency_ms: number | null;
+            /** Query Key */
+            query_key: string | null;
+            /** Rank */
+            rank: number;
+            /** Share */
+            share: number;
+            /** Sql */
+            sql: string;
+            /** Title */
+            title: string;
+        };
+        /** InboxFixGroup */
+        InboxFixGroup: {
+            /** Columns */
+            columns: string[];
+            /** Count */
+            count: number;
+            /** Group */
+            group: string;
+            /** Share */
+            share: number;
+            /** Table */
+            table: string;
+        };
+        /** InboxHistoryEntry */
+        InboxHistoryEntry: {
+            /** Text */
+            text: string;
+            /** Ts */
+            ts: number;
+        };
         /** InboxItem */
         InboxItem: {
             action?: components["schemas"]["InboxLikelyFix"] | null;
+            /** Action Id */
+            action_id?: number | null;
             advice?: components["schemas"]["InboxAdvice"] | null;
+            /** After Ms */
+            after_ms?: number | null;
+            /**
+             * Band
+             * @default watch
+             * @enum {string}
+             */
+            band?: "act_now" | "watch" | "closed";
             /**
              * Band Reason
              * @default
              */
             band_reason?: string;
+            /** Before Ms */
+            before_ms?: number | null;
             /** Body Json */
             body_json: string;
+            /** Calls */
+            calls?: number | null;
+            changes?: components["schemas"]["InboxChanges"] | null;
             /** Created At */
             created_at: number;
             /**
@@ -7783,11 +8865,32 @@ export interface components {
              * @enum {string}
              */
             delivery?: "digest" | "inbox" | "notify";
+            fix_group?: components["schemas"]["InboxFixGroup"] | null;
+            /**
+             * Fixes
+             * @default []
+             */
+            fixes?: components["schemas"]["InboxFix"][];
+            /** Fixes Share */
+            fixes_share?: number | null;
             /** Group Key */
             group_key: string;
+            /**
+             * History
+             * @default []
+             */
+            history?: components["schemas"]["InboxHistoryEntry"][];
             /** Id */
             id: number;
             incident?: components["schemas"]["Incident"] | null;
+            /** Index Name */
+            index_name?: string | null;
+            /**
+             * Kind
+             * @default other
+             * @enum {string}
+             */
+            kind?: "stuck_query" | "fixes_ready" | "report_ready" | "fix_confirmed" | "traffic_spike" | "monitoring_issue" | "changes_ready" | "no_change_yet" | "other";
             link: components["schemas"]["InboxLink"];
             measurement?: components["schemas"]["AlertMeasurement"] | null;
             /** Median Change */
@@ -7806,6 +8909,8 @@ export interface components {
              * @default []
              */
             occurrences?: components["schemas"]["Occurrence"][];
+            /** Pid */
+            pid?: number | null;
             /** Query Keys */
             query_keys: string[];
             /**
@@ -7816,6 +8921,11 @@ export interface components {
                 [key: string]: string;
             };
             recurring?: components["schemas"]["RecurringNote"] | null;
+            /**
+             * Related
+             * @default []
+             */
+            related?: components["schemas"]["InboxRelated"][];
             /** Relevance Rule */
             relevance_rule?: ("top_10_24h" | "top_10_1h" | "share_24h" | "share_1h" | "top_10_calls_24h" | "top_10_calls_1h" | "big_change" | "new_heavy") | null;
             /** Reopened Count */
@@ -7824,6 +8934,8 @@ export interface components {
             resolved_at: number | null;
             /** Resolved By */
             resolved_by: ("user" | "code" | "jev") | null;
+            /** Running S */
+            running_s?: number | null;
             /** Seen Count */
             seen_count: number;
             /** Severity */
@@ -7838,6 +8950,8 @@ export interface components {
              * @default 0
              */
             smaller_moved?: number;
+            /** Source Report Id */
+            source_report_id?: number | null;
             /**
              * State
              * @enum {string}
@@ -7851,6 +8965,11 @@ export interface components {
             status?: "ongoing" | "back_to_normal" | "closed" | "unknown";
             /** Status At */
             status_at?: number | null;
+            /**
+             * Steps
+             * @default []
+             */
+            steps?: components["schemas"]["InboxStep"][];
             /** Subject */
             subject: string;
             /** Subject Label */
@@ -7893,7 +9012,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "query" | "database" | "report" | "settings" | "configure" | "sign_in" | "setup";
+            kind: "query" | "database" | "report" | "settings" | "configure" | "sign_in" | "setup" | "actions";
             /** Label */
             label: string;
             /** Query Key */
@@ -7911,6 +9030,21 @@ export interface components {
         InboxPage: {
             /** Items */
             items: components["schemas"]["InboxItem"][];
+        };
+        /** InboxRelated */
+        InboxRelated: {
+            /** Detail */
+            detail: string | null;
+            /** Label */
+            label: string;
+            link: components["schemas"]["MonitorLink"];
+        };
+        /** InboxStep */
+        InboxStep: {
+            /** Sql */
+            sql: string;
+            /** Title */
+            title: string;
         };
         /**
          * Incident
@@ -7960,6 +9094,34 @@ export interface components {
             spark: components["schemas"]["TrendPoint"][];
             /** Start */
             start: number | null;
+        };
+        /**
+         * IndexChangeSeen
+         * @description An index added or dropped in the day; `from_rdst` when an RDST action named it, with
+         *     that action's measuring status, and reads since for an added one.
+         */
+        IndexChangeSeen: {
+            /** Action Id */
+            action_id: number | null;
+            /** Definition */
+            definition: string;
+            /** From Rdst */
+            from_rdst: boolean;
+            /** Index Name */
+            index_name: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "added" | "dropped";
+            /** Scans */
+            scans: number | null;
+            /** Status */
+            status: ("measuring" | "verified" | "no_change" | "undone") | null;
+            /** Table */
+            table: string;
+            /** Ts */
+            ts: number;
         };
         /** IndexPlan */
         IndexPlan: {
@@ -8462,6 +9624,8 @@ export interface components {
             error_kind?: string | null;
             /** Finished At */
             finished_at: number | null;
+            /** Held Reason */
+            held_reason?: ("sign_in" | "monitoring_off" | "outside_top" | "ai_paused" | "automatic_off" | "over_allowance") | null;
             /** Mode */
             mode: string;
             /** Mode Label */
@@ -8593,6 +9757,9 @@ export interface components {
             mode_label: string | null;
             /** Rating */
             rating: string | null;
+            /** Score */
+            score?: number | null;
+            verdict?: components["schemas"]["ReportVerdictText"] | null;
         };
         /** LibraryEntry */
         LibraryEntry: {
@@ -8746,6 +9913,8 @@ export interface components {
         };
         /** MonitorHealth */
         MonitorHealth: {
+            /** Checks Ran At */
+            checks_ran_at?: number | null;
             /** Delay Reason */
             delay_reason?: string | null;
             /** Detail Note */
@@ -8808,6 +9977,29 @@ export interface components {
             window?: string | null;
         };
         /**
+         * MonitorLink
+         * @description Where a Home or Inbox row leads; `label` is the destination word the row shows.
+         */
+        MonitorLink: {
+            /** Analysis Ref */
+            analysis_ref?: string | null;
+            /** Item Id */
+            item_id?: number | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "inbox" | "chart" | "query" | "queries" | "live" | "report" | "analysis" | "database" | "settings" | "sign_in" | "actions";
+            /** Label */
+            label: string;
+            /** Query Key */
+            query_key?: string | null;
+            /** Report Id */
+            report_id?: number | null;
+            /** Target */
+            target: string | null;
+        };
+        /**
          * MonitorOutage
          * @description A lost-connection episode: from the last reading to when monitoring resumed.
          */
@@ -8826,6 +10018,9 @@ export interface components {
         };
         /** MonitorPulse */
         MonitorPulse: {
+            activity?: components["schemas"]["DatabaseActivity"] | null;
+            /** Checks Ran At */
+            checks_ran_at?: number | null;
             /** Delay Reason */
             delay_reason?: string | null;
             /** Detail */
@@ -8863,6 +10058,9 @@ export interface components {
         };
         /** MonitorPulsePage */
         MonitorPulsePage: {
+            activity?: components["schemas"]["DatabaseActivity"] | null;
+            /** Checks Ran At */
+            checks_ran_at?: number | null;
             connection_problem?: components["schemas"]["ConnectionProblem"] | null;
             /** Delay Reason */
             delay_reason?: string | null;
@@ -8925,10 +10123,14 @@ export interface components {
             key: string;
             last_analysis: components["schemas"]["LastAnalysis"] | null;
             last_compare: components["schemas"]["LastCompare"] | null;
+            /** Latency Delta 24H */
+            latency_delta_24h?: number | null;
             /** Mean Ms */
             mean_ms: number;
             /** Not Analyzable Reason */
             not_analyzable_reason?: string | null;
+            /** Plan Score */
+            plan_score?: number | null;
             /** Qps */
             qps: number;
             /** Series */
@@ -8939,6 +10141,13 @@ export interface components {
             }[] | null;
             /** State */
             state: ("attention" | "new" | "fixed" | "fix_no_effect" | "stuck" | "muted")[];
+            /**
+             * Status
+             * @default not_analyzed
+             * @enum {string}
+             */
+            status?: "fix_suggested" | "analyzing" | "healthy" | "stuck" | "not_analyzed";
+            suggested_fix?: components["schemas"]["SuggestedFix"] | null;
             /** Tables */
             tables: string[];
             /** Text */
@@ -8950,6 +10159,11 @@ export interface components {
              * @enum {string}
              */
             text_status: "ok" | "truncated" | "unavailable";
+            /**
+             * Trend 24H
+             * @default []
+             */
+            trend_24h?: components["schemas"]["TrendMean"][];
             write_cost?: components["schemas"]["WriteCost"] | null;
         };
         /** MonitorQueryPage */
@@ -8968,6 +10182,11 @@ export interface components {
             queries: components["schemas"]["MonitorQuery"][];
             /** Range */
             range?: ("5m" | "15m" | "1h" | "24h" | "7d" | "30d" | "90d" | "all" | "custom") | null;
+            /**
+             * Seen Total
+             * @default 0
+             */
+            seen_total?: number;
             /** Target */
             target?: string | null;
             /** Total */
@@ -9032,6 +10251,13 @@ export interface components {
             notify_events: components["schemas"]["NotifyEvents"];
             /** Push Daily Cap */
             push_daily_cap: number;
+            /**
+             * @default {
+             *       "from_hour": 23,
+             *       "to_hour": 7
+             *     }
+             */
+            quiet_hours?: components["schemas"]["QuietHours"];
             /** Size Bytes */
             size_bytes: number;
             /** Unavailable Reason */
@@ -9067,6 +10293,10 @@ export interface components {
             } | null;
             /** Push Daily Cap */
             push_daily_cap?: number | null;
+            /** Quiet Hours */
+            quiet_hours?: {
+                [key: string]: number;
+            } | null;
         };
         /** MonitorUsage */
         MonitorUsage: {
@@ -9291,6 +10521,11 @@ export interface components {
         /** NotifyEvents */
         NotifyEvents: {
             /**
+             * Daily Report
+             * @default true
+             */
+            daily_report?: boolean;
+            /**
              * Database Events
              * @default true
              */
@@ -9437,6 +10672,147 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /**
+         * PlanCard
+         * @description One action on the global Actions page. `sql` applies it and `rollback_sql` reverses it
+         *     (migration templates are built client-side from both). `before_ms`/`after_ms` are the
+         *     measured averages once the actions check has verified it.
+         */
+        PlanCard: {
+            /** After Ms */
+            after_ms: number | null;
+            /**
+             * Apply
+             * @enum {string}
+             */
+            apply: "run_sql" | "setting" | "config_restart" | "app_change" | "readyset";
+            /** Before Ms */
+            before_ms: number | null;
+            /** Checkup Rank */
+            checkup_rank: number | null;
+            /** Closed At */
+            closed_at: number | null;
+            /** Columns */
+            columns: string[];
+            /** Confidence */
+            confidence: string | null;
+            /** Database */
+            database: string;
+            /**
+             * Effort
+             * @enum {string}
+             */
+            effort: "copy_sql" | "setting" | "code";
+            /** Evidence */
+            evidence: {
+                [key: string]: unknown;
+            }[];
+            /** Id */
+            id: number;
+            /** Index Name */
+            index_name: string | null;
+            /** Key */
+            key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "index" | "setting" | "maintenance" | "rewrite" | "caching";
+            /** Note */
+            note: string | null;
+            /** Opened At */
+            opened_at: number;
+            /** Original */
+            original?: string | null;
+            /** Priority */
+            priority: ("first" | "then" | "later") | null;
+            /** Queries */
+            queries: components["schemas"]["PlanQuery"][];
+            /** Rank */
+            rank: number | null;
+            /** Reason */
+            reason: string | null;
+            /** Restart */
+            restart: boolean;
+            /**
+             * Risk
+             * @enum {string}
+             */
+            risk: "none" | "restart" | "locks" | "writes";
+            /** Rollback Sql */
+            rollback_sql: string | null;
+            /** Rows */
+            rows: {
+                [key: string]: unknown;
+            }[];
+            /** Saves Ms Per Min */
+            saves_ms_per_min: number;
+            /** Score */
+            score: number;
+            /** Set Aside Until */
+            set_aside_until: number | null;
+            /** Setting */
+            setting: {
+                [key: string]: unknown;
+            } | null;
+            /** Share */
+            share: number;
+            /** Sql */
+            sql: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "open" | "snoozed" | "dismissed" | "applied" | "confirmed" | "no_effect" | "retired" | "undone";
+            /** Steps */
+            steps: string | null;
+            /** Summary */
+            summary: string;
+            /** Table */
+            table: string | null;
+            /** Title */
+            title: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "add_index" | "drop_index" | "rewrite_query" | "change_setting" | "run_maintenance" | "try_caching";
+            /** Updated At */
+            updated_at: number;
+            /** Why */
+            why: string | null;
+            /** Write Cost */
+            write_cost: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** PlanFinding */
+        PlanFinding: {
+            /** Detail */
+            detail?: string | null;
+            /** Title */
+            title: string;
+            /** Value */
+            value?: string | null;
+        };
+        /**
+         * PlanQuery
+         * @description A query a change speeds up: its share of the database's time over the plan's window,
+         *     its average latency there, and the latency expected after the change when the plan knows
+         *     the gain.
+         */
+        PlanQuery: {
+            /** Expected Ms */
+            expected_ms: number | null;
+            /** Key */
+            key: string;
+            /** Mean Ms */
+            mean_ms: number | null;
+            /** Name */
+            name: string;
+            /** Share */
+            share: number;
+        };
         /** PlanSummary */
         PlanSummary: {
             /** Execution Ms */
@@ -9449,6 +10825,47 @@ export interface components {
             rows_returned: number | null;
             /** Text */
             text: string;
+        };
+        /**
+         * Preferences
+         * @description App preferences kept in the RDST config file's [preferences] section.
+         */
+        Preferences: {
+            /**
+             * Font Size
+             * @default default
+             * @enum {string}
+             */
+            font_size?: "default" | "large";
+            /**
+             * Keep Readings Days
+             * @default 7
+             * @enum {integer}
+             */
+            keep_readings_days?: 7 | 30 | 90;
+            /**
+             * Report View
+             * @default quick
+             * @enum {string}
+             */
+            report_view?: "quick" | "detailed";
+            /**
+             * Theme
+             * @default dark
+             * @enum {string}
+             */
+            theme?: "dark" | "light" | "system";
+        };
+        /** PreferencesUpdate */
+        PreferencesUpdate: {
+            /** Font Size */
+            font_size?: ("default" | "large") | null;
+            /** Keep Readings Days */
+            keep_readings_days?: (7 | 30 | 90) | null;
+            /** Report View */
+            report_view?: ("quick" | "detailed") | null;
+            /** Theme */
+            theme?: ("dark" | "light" | "system") | null;
         };
         /**
          * ProgressEvent
@@ -10078,6 +11495,16 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /**
+         * QuietHours
+         * @description Pushes are held between these local hours; equal hours mean no quiet hours.
+         */
+        QuietHours: {
+            /** From Hour */
+            from_hour: number;
+            /** To Hour */
+            to_hour: number;
+        };
         /** RangeAvailability */
         RangeAvailability: {
             /** Enabled */
@@ -10094,6 +11521,25 @@ export interface components {
              * @enum {integer}
              */
             res: 60 | 300 | 3600 | 86400;
+        };
+        /**
+         * RdstDidRow
+         * @description One timed line of RDST's own day; `until` ends a stretch (an analysis batch, the
+         *     checks that ran all day).
+         */
+        RdstDidRow: {
+            /** Detail */
+            detail: string | null;
+            /** Item Id */
+            item_id: number | null;
+            /** Report Id */
+            report_id: number | null;
+            /** Text */
+            text: string;
+            /** Ts */
+            ts: number;
+            /** Until */
+            until: number | null;
         };
         /** ReadysetCacheability */
         ReadysetCacheability: {
@@ -10182,6 +11628,19 @@ export interface components {
              */
             warnings?: string[] | null;
         };
+        /** ReadysetFacts */
+        ReadysetFacts: {
+            /**
+             * Blockers
+             * @default []
+             */
+            blockers?: string[];
+            /**
+             * Verified
+             * @default false
+             */
+            verified?: boolean;
+        };
         /** Recommendations */
         Recommendations: {
             /** Available */
@@ -10264,6 +11723,108 @@ export interface components {
              */
             version?: number;
         };
+        /**
+         * ReportCheckOnly
+         * @description A check the report flags that has no change on Actions (a setting merely off a rule
+         *     of thumb, an index with no reads in the report's window).
+         */
+        ReportCheckOnly: {
+            /** Check */
+            check: string;
+            /** Finding */
+            finding: string;
+            /** Label */
+            label: string;
+        };
+        /**
+         * ReportChecks
+         * @description The latest report's health checks: `needs_you` of `checks` ("2 of 8 checks need
+         *     you"), and the ones needing you that only the report lists.
+         */
+        ReportChecks: {
+            /** Checks */
+            checks: number;
+            /** Needs You */
+            needs_you: number;
+            /** Not In Actions */
+            not_in_actions: components["schemas"]["ReportCheckOnly"][];
+            /** Report Id */
+            report_id: number;
+        };
+        /** ReportDay */
+        ReportDay: {
+            chart: components["schemas"]["SnapshotChart"] | null;
+            /**
+             * Compared
+             * @default true
+             */
+            compared?: boolean;
+            /** Label */
+            label: string;
+            /** Query Count */
+            query_count: number;
+            /** Spikes */
+            spikes: components["schemas"]["SnapshotSpike"][];
+            /** Tiles */
+            tiles: components["schemas"]["ReportDayTile"][];
+        };
+        /** ReportDayTile */
+        ReportDayTile: {
+            /** Detail */
+            detail: string | null;
+            /** Label */
+            label: string;
+            /** Limit */
+            limit?: number | null;
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "qps" | "mean_ms" | "connections" | "cache_hit";
+            /** Reason */
+            reason: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "ok" | "warn" | "bad" | "collecting";
+            /**
+             * Unit
+             * @enum {string}
+             */
+            unit: "qps" | "ms" | "count" | "ratio";
+            /** Value */
+            value: number | null;
+        };
+        /**
+         * ReportDetailed
+         * @description GET report?view=detailed: the sections Detailed adds, in report-detailed.html order.
+         *     Verdict, the day and Fix first stay in the top-level fields both views share.
+         */
+        ReportDetailed: {
+            /**
+             * Compared
+             * @default true
+             */
+            compared?: boolean;
+            /** Fixes Confirmed */
+            fixes_confirmed: components["schemas"]["ConfirmedFixRow"][];
+            /** Health Checks */
+            health_checks: components["schemas"]["HealthCheckRow"][];
+            /** Index Changes Seen */
+            index_changes_seen: components["schemas"]["IndexChangeSeen"][];
+            /** Settings Audit */
+            settings_audit: components["schemas"]["SettingsAuditRow"][];
+            /** Spikes */
+            spikes: components["schemas"]["DetailedStretch"][];
+            /** Tiles */
+            tiles: components["schemas"]["DetailedTile"][];
+            totals: components["schemas"]["DetailedTotals"];
+            /** What Changed */
+            what_changed: components["schemas"]["WhatChangedRow"][];
+            /** What Rdst Did */
+            what_rdst_did: components["schemas"]["RdstDidRow"][];
+        };
         /** ReportFixFirst */
         ReportFixFirst: {
             /** Action */
@@ -10305,6 +11866,44 @@ export interface components {
             /** Why */
             why: string;
         };
+        /** ReportFixItem */
+        ReportFixItem: {
+            /** After Ms */
+            after_ms?: number | null;
+            /** Before Ms */
+            before_ms?: number | null;
+            /** Detail */
+            detail: string | null;
+            /** Fixed At */
+            fixed_at?: number | null;
+            /** Group */
+            group: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "index" | "config" | "rewrite" | "other";
+            /** Query Keys */
+            query_keys: string[];
+            /** Rank */
+            rank: number | null;
+            /**
+             * Restart
+             * @default false
+             */
+            restart?: boolean;
+            /** Share */
+            share: number | null;
+            /** Sql */
+            sql: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "ready" | "needs_attention" | "worth_doing" | "fixed" | "smaller";
+            /** Title */
+            title: string;
+        };
         /** ReportHealthCheck */
         ReportHealthCheck: {
             /** Action */
@@ -10327,6 +11926,34 @@ export interface components {
             status: "ok" | "warn" | "bad" | "info";
             /** Value */
             value: string;
+        };
+        /** ReportHealthRow */
+        ReportHealthRow: {
+            /** Check */
+            check: string;
+            /** Detail */
+            detail: string | null;
+            /** Finding */
+            finding: string;
+            /** Fix Rank */
+            fix_rank: number | null;
+            /**
+             * In Actions
+             * @default false
+             */
+            in_actions?: boolean;
+            /** Label */
+            label: string;
+            /**
+             * Needs You
+             * @default false
+             */
+            needs_you?: boolean;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "bad" | "warn" | "ok" | "unavailable";
         };
         /** ReportHistory */
         ReportHistory: {
@@ -10407,6 +12034,24 @@ export interface components {
             /** Success */
             success: boolean;
         };
+        /** ReportRun */
+        ReportRun: {
+            /** Analyses */
+            analyses: number;
+            /** Model */
+            model: string | null;
+            /** Number */
+            number: number;
+            /** Ran At */
+            ran_at: number;
+            /** Rewrites */
+            rewrites: number;
+            /**
+             * Trigger
+             * @enum {string}
+             */
+            trigger: "nightly" | "on_request";
+        };
         /** ReportSummary */
         ReportSummary: {
             counts: components["schemas"]["ReportSummaryCounts"];
@@ -10485,6 +12130,16 @@ export interface components {
              */
             tone: "negative" | "warning" | "positive" | "neutral";
         };
+        /**
+         * ReportVerdictText
+         * @description A two-clause verdict: the lead ("demo needs two things today:") and the rest.
+         */
+        ReportVerdictText: {
+            /** Lead */
+            lead: string;
+            /** Rest */
+            rest: string;
+        };
         /** ResetLocalDataResponse */
         ResetLocalDataResponse: {
             /** Removed Path */
@@ -10556,6 +12211,25 @@ export interface components {
             explanation: string;
         } & {
             [key: string]: unknown;
+        };
+        /** RewriteTested */
+        RewriteTested: {
+            /** After Ms */
+            after_ms?: number | null;
+            /** Before Ms */
+            before_ms?: number | null;
+            /** Name */
+            name: string;
+            /**
+             * Outcome
+             * @default untested
+             * @enum {string}
+             */
+            outcome?: "faster" | "slower" | "no_change" | "untested";
+            /** Runs */
+            runs?: number | null;
+            /** Sql */
+            sql?: string | null;
         };
         /** RewriteTesting */
         RewriteTesting: {
@@ -11211,6 +12885,31 @@ export interface components {
             /** Target */
             target: string;
         };
+        /**
+         * SettingsAuditRow
+         * @description A setting off the recommendation and when a change takes effect; `in_actions` when
+         *     the database shows the problem it fixes, so Actions lists the change.
+         */
+        SettingsAuditRow: {
+            /** Current */
+            current: string;
+            /**
+             * In Actions
+             * @default false
+             */
+            in_actions?: boolean;
+            /** Note */
+            note: string | null;
+            /** Parameter */
+            parameter: string;
+            /** Recommended */
+            recommended: string;
+            /**
+             * Takes Effect
+             * @enum {string}
+             */
+            takes_effect: "after a restart" | "on reload";
+        };
         /** SettingsBody */
         SettingsBody: {
             /** Cache Budget */
@@ -11535,7 +13234,7 @@ export interface components {
              * Metric
              * @enum {string}
              */
-            metric: "qps" | "mean_ms" | "active_conns_peak" | "cache_hit_ratio_min" | "xact_rollback" | "deadlocks";
+            metric: "qps" | "mean_ms" | "p95_ms" | "active_conns_peak" | "cache_hit_ratio_min" | "xact_rollback" | "deadlocks";
             /** Prior */
             prior: number | null;
             /**
@@ -11842,6 +13541,13 @@ export interface components {
             label: string;
             /** Value */
             value: string;
+        };
+        /** SuggestedFix */
+        SuggestedFix: {
+            /** Label */
+            label: string;
+            /** Sql */
+            sql: string;
         };
         /**
          * TargetData
@@ -12341,6 +14047,13 @@ export interface components {
              */
             type: "status";
         };
+        /** TrendMean */
+        TrendMean: {
+            /** Mean Ms */
+            mean_ms: number | null;
+            /** Ts */
+            ts: number;
+        };
         /** TrendPoint */
         TrendPoint: {
             /** Ts */
@@ -12504,6 +14217,11 @@ export interface components {
          * @description Request body for updating a target.
          */
         UpdateTargetRequest: {
+            /**
+             * Name
+             * @description A new name; omitted keeps it.
+             */
+            name?: string | null;
             target: components["schemas"]["TargetData"];
         };
         /** UsageCaps */
@@ -12553,6 +14271,34 @@ export interface components {
         VerifyPollResponse: {
             /** Verified */
             verified: boolean;
+        };
+        /**
+         * WhatChangedRow
+         * @description A query against the day before, by average time per call. `plan_changed` rows carry
+         *     the filing's time and detail instead of numbers.
+         */
+        WhatChangedRow: {
+            /** After Ms */
+            after_ms: number | null;
+            /** Before Ms */
+            before_ms: number | null;
+            /** Change */
+            change: number | null;
+            /** Detail */
+            detail: string | null;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "slower" | "faster" | "new_heavy" | "plan_changed";
+            /** Query Key */
+            query_key: string | null;
+            /** Share */
+            share: number | null;
+            /** Ts */
+            ts: number | null;
         };
         /** WorkersBody */
         WorkersBody: {
@@ -14221,6 +15967,26 @@ export interface operations {
             };
         };
     };
+    facts_api_demo_facts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     load_intensity_api_demo_load_patch: {
         parameters: {
             query?: never;
@@ -15559,6 +17325,100 @@ export interface operations {
             };
         };
     };
+    global_actions_api_monitor_actions_get: {
+        parameters: {
+            query?: {
+                db?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlobalActionsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    applied_actions_api_monitor_actions_applied_get: {
+        parameters: {
+            query?: {
+                db?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppliedPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    home_api_monitor_home_get: {
+        parameters: {
+            query?: {
+                target?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HomeModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     inbox_api_monitor_inbox_get: {
         parameters: {
             query?: {
@@ -15581,37 +17441,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InboxPage"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    mark_all_seen_api_monitor_inbox_mark_all_seen_post: {
-        parameters: {
-            query?: {
-                target?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -15902,6 +17731,37 @@ export interface operations {
             };
         };
     };
+    actions_opened_api_monitor_targets__target__actions_opened_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionsOpened"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     action_verb_api_monitor_targets__target__actions__action_id___verb__post: {
         parameters: {
             query?: never;
@@ -15909,7 +17769,7 @@ export interface operations {
             path: {
                 target: string;
                 action_id: number;
-                verb: "snooze" | "dismiss" | "reopen" | "check";
+                verb: "set_aside" | "snooze" | "dismiss" | "did_it" | "undid_it" | "bring_back" | "reopen" | "check";
             };
             cookie?: never;
         };
@@ -15990,6 +17850,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AnalyzeJobPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_analyze_job_api_monitor_targets__target__analyze_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+                job_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzeJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    benchmark_fixes_api_monitor_targets__target__benchmark_fixes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BenchmarkFixesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BenchmarkFixesResult"];
                 };
             };
             /** @description Validation Error */
@@ -16174,6 +18101,7 @@ export interface operations {
                 top?: number;
                 from?: number | null;
                 to?: number | null;
+                rank?: "time" | "calls";
             };
             header?: never;
             path: {
@@ -16484,6 +18412,38 @@ export interface operations {
             };
         };
     };
+    cancel_query_analysis_api_monitor_targets__target__queries__key__analyze_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzeJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     ensure_library_entry_api_monitor_targets__target__queries__key__library_post: {
         parameters: {
             query?: never;
@@ -16621,6 +18581,7 @@ export interface operations {
         parameters: {
             query?: {
                 daily?: boolean;
+                view?: "quick" | "detailed";
             };
             header?: never;
             path: {
@@ -16652,7 +18613,9 @@ export interface operations {
     };
     get_report_api_monitor_targets__target__report__report_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                view?: "quick" | "detailed";
+            };
             header?: never;
             path: {
                 target: string;
@@ -18994,6 +20957,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VerifyPollResponse"];
+                };
+            };
+        };
+    };
+    get_preferences_api_settings_preferences_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Preferences"];
+                };
+            };
+        };
+    };
+    put_preferences_api_settings_preferences_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreferencesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Preferences"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

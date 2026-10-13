@@ -248,6 +248,19 @@ def test_does_not_repeat_transport_failure(monkeypatch):
     post.assert_called_once()
 
 
+@pytest.mark.parametrize("attribution, timeout", [
+    ({"feature": "monitor", "operation": "monitor_report"}, 120),
+    ({"feature": "analyze", "operation": "monitor_report"}, 120),
+    ({"feature": "audit", "operation": "audit_health"}, 600),
+    ({"feature": "ask", "operation": "sql_generation"}, 300),
+])
+def test_report_narrative_has_a_shorter_timeout(monkeypatch, attribution, timeout):
+    post = MagicMock(return_value=_response())
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
+    HostedProvider().complete(_request({"_rdst_attribution": attribution}), api_key="token")
+    assert post.call_args.kwargs["timeout"] == timeout
+
+
 def test_serializes_hosted_requests_from_one_process(monkeypatch):
     guard = threading.Lock()
     active = 0

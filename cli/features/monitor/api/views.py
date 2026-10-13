@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import time
 from collections import defaultdict
+from datetime import datetime, timedelta
 from typing import Any, Iterable
 
-from features.monitor.analysis_digest import library_analysis_jobs, summary_for_job
+from features.monitor.analysis_digest import digest_for_ref, library_analysis_jobs, summary_for_job
+from features.monitor.db_actions import concurrent_index_sql
 from features.monitor.naming import target_names
 from features.monitor.ranking import PRIOR_CALLS, blended_ms
 from features.monitor.presentation import (
@@ -22,12 +25,17 @@ from features.monitor.presentation import (
     INCIDENT_NEAR_S,
     analysis_error_kind,
     analysis_reason,
+    clock_text,
+    database_fix,
     display_name,
     first_changed_at,
+    format_pct,
     group_is_latency,
     incident_levels,
     incident_signal,
     incident_span,
+    item_view,
+    latency_text,
     member_signal,
     present_inbox_item,
     settle_status,
@@ -395,6 +403,16 @@ def _health_point(bucket: int, parts: list[tuple[dict, float]], step: int,
             "deadlocks": round(sum(v * s for v, s in deadlocks)) if deadlocks else None}
 
 
+def p95_of_buckets(rows: Iterable[dict[str, Any]]) -> float | None:
+    """The 95th percentile of the per-bucket mean latency: the latency a busy reading
+    reaches. Readings carry no per-call distribution, so this is the tail RDST can see."""
+    means = sorted(row["total_ms"] / row["calls"] for row in rows
+                   if row.get("calls") and row.get("total_ms") is not None)
+    if not means:
+        return None
+    return means[max(0, math.ceil(0.95 * len(means)) - 1)]
+
+
 def _period(rows: list[dict[str, Any]], seconds: int,
             points: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     calls = sum(row["calls"] or 0 for row in rows)
@@ -405,11 +423,26 @@ def _period(rows: list[dict[str, Any]], seconds: int,
     if points is None:
         ratios = [row["cache_hit_ratio"] for row in rows if row["cache_hit_ratio"] is not None]
     return {"qps": calls / max(60, seconds), "mean_ms": total / calls if calls else 0.0,
+            "p95_ms": p95_of_buckets(rows),
             "db_time_ms": total, "active_conns_peak": max(active) if active else None,
             "lock_waits_peak": max((row["lock_waits"] for row in rows if row.get("lock_waits") is not None), default=None),
             "cache_hit_ratio_min": min(ratios) if ratios else None,
-            "xact_rollback": sum(row["xact_rollback"] or 0 for row in rows),
-            "deadlocks": sum(row["deadlocks"] or 0 for row in rows)}
+            # Whole counts, so every page rounds them the same way.
+            "xact_rollback": round(sum(row["xact_rollback"] or 0 for row in rows)),
+            "deadlocks": round(sum(row["deadlocks"] or 0 for row in rows))}
+
+
+def peak_rate(store: MonitorStore, target: str, start: int, end: int,
+              average: float | None) -> dict[str, Any] | None:
+    """The busiest whole minute in [start, end) in queries a second: the one peak Home, the
+    Database page and the report show. Past minute retention, a rollup's average stands in
+    for its minutes. The peak never reads below the window's average rate."""
+    rows = store.read("SELECT bucket_start ts,calls*1.0/res qps FROM db_series WHERE target=? "
+                      "AND res<=3600 AND bucket_start>=? AND bucket_start+res<=? AND calls>0 "
+                      "ORDER BY qps DESC,res,bucket_start LIMIT 1", (target, start, end))
+    if not rows:
+        return None
+    return {"qps": max(float(rows[0]["qps"]), average or 0.0), "ts": int(rows[0]["ts"])}
 
 
 def health(store: MonitorStore, target: str, range: str, now: int,
@@ -447,9 +480,12 @@ def health(store: MonitorStore, target: str, range: str, now: int,
                                         "AND state='done' AND sample=0 AND ts>=?",
                                         (target, start))])
     markers.sort(key=lambda marker: marker["ts"])
+    period = _period(rows, observed, points)
+    peak = peak_rate(store, target, start, now + 1, period["qps"])
+    period.update(qps_peak=peak["qps"] if peak else None, qps_peak_at=peak["ts"] if peak else None)
     return {"target": target, "engine": _engine(target), "engine_version": None,
             "range": range, "res": res, "history": history, "now": now_tile,
-            "period": _period(rows, observed, points), "prior": prior, "series": points,
+            "period": period, "prior": prior, "series": points,
             "markers": markers, "detail_note": _minute_detail_note(rows, res)}
 
 
@@ -788,7 +824,8 @@ def queries(store: MonitorStore, target: str, range: str, now: int, *, sort: str
     jobs = {row["query_key"]: row for row in store.read(
         "SELECT j.* FROM analyze_job j WHERE j.target=? "
         "AND j.query_key IN (SELECT value FROM json_each(?)) AND j.id=("
-        "SELECT MAX(id) FROM analyze_job WHERE target=j.target AND query_key=j.query_key)",
+        "SELECT MAX(id) FROM analyze_job WHERE target=j.target AND query_key=j.query_key "
+        "AND NOT (state='skipped' AND error='cancelled'))",
         (target, json.dumps(keys)))}
     done = {row["query_key"]: row for row in store.read(
         "SELECT j.* FROM analyze_job j WHERE j.target=? AND j.id=(SELECT MAX(id) FROM analyze_job "
@@ -808,6 +845,10 @@ def queries(store: MonitorStore, target: str, range: str, now: int, *, sort: str
         for row, share in parts:
             per_key[row["query_key"]].setdefault(bucket, []).append((row, share))
     buckets = timeline(start, now, step, history, mini)
+    day_totals = stmt_totals(store, target, now - 86400, end, keys) if keys else {}
+    before_totals = stmt_totals(store, target, now - 2 * 86400, now - 86400, keys) if keys else {}
+    trends_24h = hourly_means(store, target, keys, now) if keys else {}
+    engine = _engine(target)
     rows = []
     store_full = store.full_detail_keys(target)
     priors = store.priors(target)
@@ -832,6 +873,17 @@ def queries(store: MonitorStore, target: str, range: str, now: int, *, sort: str
         job = jobs.get(key)
         queue_fact = plan["jobs"].get(job["id"], {}) if job and job["state"] == "queued" else {}
         items = open_items.get(key, [])
+        finished = done.get(key)
+        digest = (digest_for_ref(target, key, finished["analysis_ref"], finished.get("mode"),
+                                 finished.get("finished_at"))
+                  if finished and finished.get("analysis_ref") else None)
+        ready_fix = digest["fix"] if digest and digest.get("fix_ready") and digest.get("fix") \
+            else None
+        today_row, before_row = day_totals.get(key) or {}, before_totals.get(key) or {}
+        today_mean = (today_row["total_ms"] / today_row["calls"]
+                      if today_row.get("calls") else None)
+        before_mean = (before_row["total_ms"] / before_row["calls"]
+                       if before_row.get("calls") else None)
         series = []
         for bucket in buckets:
             parts = per_key[key].get(bucket, [])
@@ -873,6 +925,7 @@ def queries(store: MonitorStore, target: str, range: str, now: int, *, sort: str
                                "error_kind": analysis_error_kind(job["state"], job["error"]),
                                "queue_state": ("running" if job["state"] == "running"
                                                else queue_fact.get("queue_state")),
+                               "held_reason": queue_fact.get("held_reason"),
                                "queue_position": queue_fact.get("queue_position"),
                                "phase": ((current_phase(target, key) or "plan")
                                          if job["state"] == "running" else None),
@@ -886,14 +939,28 @@ def queries(store: MonitorStore, target: str, range: str, now: int, *, sort: str
             "sparkline": [{"ts": point["ts"], "qps": point["qps"] or 0.0} for point in series],
             "change_vs_prior": {"latency": latency, "qps": qps_change},
             "badges": [],
+            "plan_score": (digest or {}).get("efficiency_score"),
+            "latency_delta_24h": (today_mean / before_mean - 1
+                                  if today_mean is not None and before_mean else None),
+            "trend_24h": trends_24h.get(key, []),
+            "suggested_fix": ({"sql": concurrent_index_sql(ready_fix["sql"], engine) or "",
+                               "label": fix_label(ready_fix)}
+                              if ready_fix and ready_fix.get("sql") else None),
+            "status": query_status(key in stuck_now, job, digest, ready_fix),
             "_first_seen": first_seen.get(key),
             "_attention": bool(items) or (latency or 0) >= SIGNIFICANT_CHANGE,
         })
     page = [{field: value for field, value in row.items() if not field.startswith("_")}
             for row in rows]
     label = "custom" if window else range
+    seen_total = store.read(
+        "SELECT COUNT(*) n FROM query_text t WHERE t.target=? AND NOT EXISTS (SELECT 1 FROM "
+        "system_query x WHERE x.target=t.target AND x.query_key=t.query_key) AND COALESCE("
+        "(SELECT workload FROM query_ui u WHERE u.target=t.target AND u.query_key=t.query_key),1)=1",
+        (target,))[0]["n"]
     return {"target": target, "range": label, "window": label, "queries": page,
-            "total": total, "limit": limit, "offset": offset, "counts": counts,
+            "total": total, "seen_total": int(seen_total), "limit": limit, "offset": offset,
+            "counts": counts,
             "composition": composition, "history": history,
             **({"located": located} if locate is not None else {})}
 
@@ -972,15 +1039,21 @@ def workload_keys(store: MonitorStore, target: str, keys: Iterable[str],
     return {key for key in keys if key != EVERYTHING_ELSE and key not in system and is_workload(texts.get(key, ""))}
 
 
-def top_keys(totals: dict[str, dict[str, Any]], keys: Iterable[str], count: int) -> list[str]:
-    """The load ranking shared by the chart bands, row swatches and the report."""
-    ranked = sorted((key for key in keys if (totals.get(key) or {}).get("total_ms")),
-                    key=lambda key: (-totals[key]["total_ms"], key))
+def top_keys(totals: dict[str, dict[str, Any]], keys: Iterable[str], count: int,
+             by: str = "total_ms") -> list[str]:
+    """The load ranking shared by the chart bands, row swatches and the report: by recorded
+    execution time, or by calls for the calls chart."""
+    ranked = sorted((key for key in keys if (totals.get(key) or {}).get(by)),
+                    key=lambda key: (-totals[key][by], key))
     return ranked[:count]
 
 
 def load(store: MonitorStore, target: str, range: str, now: int,
-         top: int = LOAD_TOP, window: tuple[int, int] | None = None) -> dict[str, Any]:
+         top: int = LOAD_TOP, window: tuple[int, int] | None = None,
+         rank: str = "time") -> dict[str, Any]:
+    """The bands rank by execution time, or by calls when `rank` is "calls"; a band keeps the
+    color its row has in the time ranking, so the swatches agree across the page."""
+    by = "calls" if rank == "calls" else "total_ms"
     history = history_span(store, target, now)
     ranges = range_availability(history, now)
     start, seconds, res, now = bounds(range, now, history, window, chart=True)
@@ -989,11 +1062,17 @@ def load(store: MonitorStore, target: str, range: str, now: int,
     excluded = store.system_queries(target) | {row["query_key"] for row in store.read(
         "SELECT query_key FROM query_ui WHERE target=? AND workload=0", (target,))}
     user = set(totals) - excluded - {EVERYTHING_ELSE}
-    candidates = top_keys(totals, user, top * 4)
+    candidates = list(dict.fromkeys(top_keys(totals, user, top * 4) +
+                                    top_keys(totals, user, top * 4, by)))
     texts = query_texts(store, target, candidates)[0]
     allowed = workload_keys(store, target, candidates, texts)
     user.difference_update(set(candidates) - allowed)
-    leaders = top_keys(totals, user, top)
+    by_time = top_keys(totals, user, top)
+    leaders = top_keys(totals, user, top, by)
+    colors = {key: index for index, key in enumerate(by_time)}
+    taken = {colors[key] for key in leaders if key in colors}
+    free = iter(index for index, _ in enumerate(by_time) if index not in taken)
+    colors.update({key: next(free) for key in leaders if key not in colors})
     all_ms = sum(totals[key]["total_ms"] for key in user)
     all_calls = sum(totals[key]["calls"] for key in user)
     band_index = {key: index for index, key in enumerate(leaders)}
@@ -1007,11 +1086,12 @@ def load(store: MonitorStore, target: str, range: str, now: int,
     names = target_names(store, target, texts)
     names.update({key: f"Query {key}" for key in leaders if key not in names})
     bands = [{"key": key, "kind": "query", "display_name": names[key],
-              "color_index": index, "share": totals[key]["total_ms"] / all_ms if all_ms else 0.0,
+              "color_index": colors[key],
+              "share": totals[key]["total_ms"] / all_ms if all_ms else 0.0,
               "total_ms": totals[key]["total_ms"], "calls": totals[key]["calls"],
               "mean_ms": (totals[key]["total_ms"] / totals[key]["calls"]
                           if totals[key]["calls"] else None)}
-             for index, key in enumerate(leaders)]
+             for key in leaders]
     other = bool(rest_ms or rest_calls)
     if other:
         bands.append({"key": "other", "kind": "other", "display_name": "Everything else",
@@ -1170,6 +1250,11 @@ def inbox_items(store: MonitorStore, rows: list[dict[str, Any]], *,
                                        member_stats=stats.get(row["id"])),
                   "notified_at": notified.get(row["id"])}
                  for row in rows]
+    events = store.item_events([row["id"] for row in rows])
+    presented = [{**item, **item_view(item, _body(item), names[item["target"]],
+                                      item["query_keys"], events.get(item["id"], []),
+                                      engines[item["target"]])}
+                 for item in presented]
     # Open items are always measured, so every view reads the same status and band; closed
     # ones only when the caller shows their windows.
     windows: dict[int, dict[str, Any] | None] = {}
@@ -1185,15 +1270,17 @@ def inbox_items(store: MonitorStore, rows: list[dict[str, Any]], *,
 
 
 def likely_fix(item: dict[str, Any], actions: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """The best-scored open action covering one of an open item's queries, if any."""
-    keys = set(item.get("query_keys") or [])
-    if not keys or item["state"] in ("resolved", "dismissed"):
+    """The best-scored open action covering one of an open item's queries; for a
+    database-wide item, the action its subject maps to (presentation.LIKELY_FIX)."""
+    if item["state"] in ("resolved", "dismissed"):
         return None
-    for action in actions:
+    keys = set(item.get("query_keys") or [])
+    for action in actions if keys else []:
         payload = action["payload"]
         if payload.get("title") and keys.intersection(payload.get("queries") or []):
             return {"id": action["id"], "title": payload["title"], "type": action["type"]}
-    return None
+    return database_fix(str(item.get("type") or ""), _body(item) if "body_json" in item else {},
+                        actions)
 
 
 def _body(item: dict[str, Any]) -> dict[str, Any]:
@@ -1520,3 +1607,646 @@ def _trends(store: MonitorStore, target: str,
                 points.append({"ts": bucket, "value": value})
         result[item["id"]] = points
     return result
+
+
+# The redesign's query row fields, the Full analysis page and Home (plan section 4.2, W0).
+
+HOME_LOG_LIMIT = 6
+QUIET_CYCLES = 3
+OPEN_STATES = ("new", "seen", "snoozed")
+ENGINE_WORDS = {"postgresql": "PostgreSQL", "mysql": "MySQL"}
+_FIX_TITLE = re.compile(r"^Add an index on (\w+)\((.*)\)$")
+
+
+def fix_label(fix: dict[str, Any]) -> str:
+    """"Add index posts (creationdate, owneruserid, score)" from the digest's fix title."""
+    title = str(fix.get("title") or "")
+    match = _FIX_TITLE.match(title) if fix.get("kind") == "index" else None
+    if match:
+        return f"Add index {match.group(1)} ({match.group(2)})"
+    return title or "Fix suggested"
+
+
+def query_status(stuck: bool, job: dict[str, Any] | None, digest: dict[str, Any] | None,
+                 fix: dict[str, Any] | None) -> str:
+    if stuck:
+        return "stuck"
+    if job and job.get("state") in ("queued", "running"):
+        return "analyzing"
+    if fix:
+        return "fix_suggested"
+    return "healthy" if digest else "not_analyzed"
+
+
+def hourly_means(store: MonitorStore, target: str, keys: list[str],
+                 now: int) -> dict[str, list[dict[str, Any]]]:
+    """Each query's mean latency per hour over the last day, for the trend column."""
+    sums: dict[str, dict[int, list[float]]] = defaultdict(dict)
+    for bucket, parts in spread(stmt_rows(store, target, now - 86400, now + 1, keys,
+                                          step=3600), 3600).items():
+        for row, share in parts:
+            acc = sums[row["query_key"]].setdefault(bucket, [0.0, 0.0])
+            acc[0] += (row["calls"] or 0) * share
+            acc[1] += (row["total_ms"] or 0) * share
+    return {key: [{"ts": bucket, "mean_ms": ms / calls if calls else None}
+                  for bucket, (calls, ms) in sorted(buckets.items())]
+            for key, buckets in sums.items()}
+
+
+def checks_ran_at(store: MonitorStore, target: str) -> int | None:
+    """When an attention check last ran to completion (a shortlist judged, or nothing to
+    judge); null when the checks are held by sign-in, a limit or an error."""
+    rows = store.read("SELECT ts FROM judge_run WHERE target=? AND outcome IN "
+                      "('filed','empty','dry_run','noop') ORDER BY ts DESC,id DESC LIMIT 1",
+                      (target,))
+    return int(rows[0]["ts"]) if rows else None
+
+
+def checks_held(store: MonitorStore, target: str) -> bool:
+    """Whether the latest attention check stopped short: held by sign-in, a limit or an
+    error, so no next check is due until that clears."""
+    rows = store.read("SELECT outcome FROM judge_run WHERE target=? ORDER BY ts DESC,id DESC "
+                      "LIMIT 1", (target,))
+    return bool(rows) and rows[0]["outcome"] not in ("filed", "empty", "dry_run", "noop")
+
+
+def _num(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) \
+        else None
+
+
+def analysis_view(store: MonitorStore, target: str, key: str, digest: dict[str, Any],
+                  now: int) -> dict[str, Any]:
+    """The digest plus what the Full analysis page shows, read from the stored analysis.
+    Facts the stored record lacks stay null."""
+    from features.monitor.analysis_digest import index_why, load_analysis
+    from shared.monitor.monitor_store import local_day_bounds
+
+    analysis = load_analysis({"state": "done", "analysis_ref": digest.get("analysis_ref"),
+                              "target": target, "query_key": key, "mode": digest.get("mode")}) \
+        if digest.get("analysis_ref") else None
+    llm = getattr(analysis, "llm_analysis", None) if analysis else None
+    llm = llm if isinstance(llm, dict) else {}
+    display = getattr(analysis, "display_payload", None) if analysis else None
+    display = display if isinstance(display, dict) else {}
+    explain = getattr(analysis, "explain_plan", None) if analysis else None
+    explain = explain if isinstance(explain, dict) else {}
+    engine = _engine(target)
+    fix = digest.get("fix") if digest.get("fix_ready") and digest.get("fix") else None
+    testing = display.get("index_testing") if isinstance(display.get("index_testing"), dict) \
+        else {}
+    cost_before = cost_after = None
+    if fix and testing.get("tested"):
+        for result in testing.get("results") or []:
+            # A cost the planner reached without the index says nothing about the fix.
+            if isinstance(result, dict) and result.get("planner_used_index") and \
+                    str(result.get("index_sql") or "").strip().lower() \
+                    == str(fix.get("sql") or "").strip().lower():
+                cost_before = _num(result.get("original_cost") or result.get("cost_before"))
+                cost_after = _num(result.get("new_cost") or result.get("cost_after"))
+    plan = digest.get("plan_summary") or {}
+    root = explain.get("Plan") if isinstance(explain.get("Plan"), dict) else {}
+    findings = [{"title": text, "detail": None, "value": None}
+                for text in digest.get("findings") or []]
+    rewrites = [{"name": " ".join(str(item.get("explanation") or "Rewrite").split())[:80],
+                 "before_ms": None, "after_ms": None, "runs": None, "outcome": "untested",
+                 "sql": str(item["rewritten_sql"]).strip()}
+                for item in llm.get("rewrite_suggestions") or []
+                if isinstance(item, dict) and item.get("rewritten_sql")]
+    # Every index recommendation besides the one the fix leads with, with its statement.
+    lead_sql = str((digest.get("fix") or {}).get("sql") or "").strip().lower()
+    indexes = []
+    for item in llm.get("index_recommendations") or []:
+        sql = str(item.get("sql") or "").strip() if isinstance(item, dict) else ""
+        if not sql or sql.lower() == lead_sql:
+            continue
+        table = str(item.get("table") or "").split(".")[-1]
+        columns = ", ".join(str(column) for column in item.get("columns") or [])
+        indexes.append({"title": f"Add an index on {table}({columns})" if table and columns
+                        else "Add an index",
+                        "detail": index_why(item.get("rationale")) or None, "sql": sql})
+    also = indexes + [
+        {"title": " ".join(str(item["description"]).split())[:120], "detail": None}
+        for item in llm.get("optimization_opportunities") or []
+        if isinstance(item, dict) and item.get("description") and not (
+            str(item.get("type") or "").lower() == "configuration" and
+            str(item.get("priority") or "").lower() == "high")]
+    calls = (stmt_totals(store, target, local_day_bounds(now)[0], now + 1, [key]).get(key)
+             or {}).get("calls")
+    sampled = display.get("parameters") or display.get("sampled_parameters") or {}
+    if isinstance(sampled, dict):
+        params = [{"name": str(name), "value": str(value)} for name, value in sampled.items()]
+    elif isinstance(sampled, list):
+        # A monitor analysis records each placeholder with the SQL literal it ran with.
+        params = [{"name": str(value["name"]), "value": str(value["value"])}
+                  if isinstance(value, dict) and {"name", "value"} <= value.keys()
+                  else {"name": f"${index + 1}", "value": str(value)}
+                  for index, value in enumerate(sampled)]
+    else:
+        params = []
+    headline = str(digest.get("headline") or "").rstrip(".")
+    rest = str((fix or {}).get("why") or (findings[0]["title"] if findings else "")).strip()
+    ref = str(digest.get("analysis_ref") or "")
+    tokens = _num(llm.get("tokens") or getattr(analysis, "tokens_used", None))
+    return {**digest, "score": digest.get("efficiency_score"),
+            "verdict": {"lead": f"{headline}.", "rest": rest} if headline else None,
+            "fix_detail": {"sql": concurrent_index_sql(fix["sql"], engine) or fix["sql"],
+                           "serves": str(fix.get("why") or "") or None,
+                           "cost_before": cost_before, "cost_after": cost_after,
+                           "size": None, "write_cost": None}
+            if fix and fix.get("sql") else None,
+            "plan_findings": findings, "rewrites": rewrites, "also": also,
+            "readyset": {"blockers": [], "verified": False}, "benchmark": None,
+            "run": {"model": str(llm.get("model") or getattr(analysis, "model", "") or "") or None,
+                    "tokens": int(tokens) if tokens else None,
+                    "seconds": _num(getattr(analysis, "duration_s", None)),
+                    "id": ref.rstrip("/").rsplit("/", 1)[-1] or None},
+            "rows_read": plan.get("rows_examined"), "rows_returned": plan.get("rows_returned"),
+            "planner_cost": _num(root.get("Total Cost")),
+            "calls_today": int(calls) if calls else None, "params": params,
+            "param_source": str(display.get("param_source") or "") or None,
+            "explain_text": json.dumps(explain, indent=1)[:20000] if explain else None}
+
+
+def benchmark_fixes(store: MonitorStore, target: str, keys: list[str], runs: int,
+                    now: int) -> dict[str, Any]:
+    """Each query with its fix: before and after as Actions shows them, the mean over the
+    plan's readings and the planner's measured estimate for the change. A query no open
+    change covers falls back to its analysis's estimate. Nothing runs on the database and no
+    scratch schema is built; `scratch_schema` says so."""
+    from features.monitor.actions import database_minute, plan_cards
+    from features.monitor.judge import ready_fixes
+
+    fixes = {fix["query_key"]: fix for fix in ready_fixes(store, target, now)}
+    totals = database_minute(store, target, now)[1]
+    # Actions' estimate for each query an open change speeds up; None where it has none.
+    planned: dict[str, float | None] = {}
+    for card in plan_cards(store, target, now):
+        if card["state"] == "open" and card["type"] in ("add_index", "rewrite_query"):
+            for query in card["queries"]:
+                if planned.get(query["key"]) is None:
+                    planned[query["key"]] = query["expected_ms"]
+    names = target_names(store, target)
+    rows = []
+    for key in keys:
+        fix, total = fixes.get(key), totals.get(key) or {}
+        calls = float(total.get("calls") or 0)
+        before = float(total.get("total_ms") or 0) / calls if calls else None
+        if key in planned:
+            after = planned[key] if before is not None else None
+        else:
+            digest = (digest_for_ref(target, key, fix["analysis_ref"], None) if fix else None) \
+                or {}
+            pct = ((digest.get("fix") or {}).get("expected_gain") or {}).get("cost_reduction_pct")
+            after = (before * (1 - min(100.0, max(0.0, float(pct))) / 100)
+                     if before is not None and isinstance(pct, (int, float)) else None)
+        reason = None
+        if after is None:
+            reason = ("No fix is ready for this query." if fix is None and key not in planned
+                      else "No calls recorded to compare with." if before is None else
+                      "The analysis gave no estimate for this fix.")
+        rows.append({"key": key, "name": names.get(key) or f"Query {key}", "before_ms": before,
+                     "after_ms": after,
+                     "change_pct": round((after / before - 1) * 100)
+                     if after is not None and before else None, "estimated": True,
+                     "reason": reason})
+    return {"target": target, "ran_at": now, "runs": runs, "scratch_schema": False, "rows": rows,
+            "share": round(sum(fixes[key]["share"] for key in keys if key in fixes), 4),
+            "method": f"Estimated from the planner on {target}: each fix tested as a hypothetical "
+                      "index, the same estimate Actions shows."}
+
+
+def _connection_label(entry: dict[str, Any]) -> str:
+    engine = ENGINE_WORDS.get(str(entry.get("engine") or "postgresql").lower(), "PostgreSQL")
+    host, port = entry.get("host"), entry.get("port")
+    if host and port:
+        return f"{engine} at {host}:{port}"
+    return f"{engine} at {host}" if host else engine
+
+
+def _next_report_at(levers: dict[str, Any], now: int) -> int | None:
+    if not levers.get("nightly_report"):
+        return None
+    due = datetime.fromtimestamp(now).replace(hour=int(levers["nightly_hour"]), minute=0,
+                                              second=0, microsecond=0)
+    if due.timestamp() <= now:
+        due += timedelta(days=1)
+    return int(due.timestamp())
+
+
+def collect_timing(store: MonitorStore, target: str) -> tuple[int | None, int]:
+    """The last good reading and the seconds between readings (60 until two exist)."""
+    rows = store.read("SELECT ts FROM monitor_pulse WHERE target=? AND kind='collect' AND ok=1 "
+                      "ORDER BY id DESC LIMIT 2", (target,))
+    every = max(30, min(600, rows[0]["ts"] - rows[1]["ts"])) if len(rows) == 2 else 60
+    return (int(rows[0]["ts"]) if rows else None), int(every)
+
+
+def running_work(store: MonitorStore, targets: list[str]
+                 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    """The deep analysis and the report running now, per database, in one read each."""
+    if not targets:
+        return {}, {}
+    marks = ",".join("?" for _ in targets)
+    jobs = {row["target"]: row for row in store.read(
+        f"SELECT target,query_key FROM analyze_job WHERE state='running' AND target IN ({marks}) "
+        "ORDER BY started_at", tuple(targets))}
+    reports = {row["target"]: row for row in store.read(
+        f"SELECT target,id FROM report_run WHERE state='running' AND target IN ({marks})",
+        tuple(targets))}
+    return jobs, reports
+
+
+def first_hour_progress(store: MonitorStore, target: str, now: int) -> tuple[int, int] | None:
+    """The first hour's analyses: (finished, scheduled); None outside it or before any."""
+    from shared.monitor.monitor_store import FIRST_HOUR_JOB, FIRST_HOUR_S
+
+    enabled_at = store.enabled_at(target)
+    if not enabled_at or not enabled_at <= now < enabled_at + FIRST_HOUR_S:
+        return None
+    start, end = store.first_hour(target)
+    if not start or not start <= now < end:
+        return None
+    row = store.read("SELECT COUNT(*) AS total,COALESCE(SUM(state IN ('done','failed')),0) "
+                     "AS done FROM analyze_job WHERE target=? AND state!='skipped' AND "
+                     f"{FIRST_HOUR_JOB}", (target, start, end))[0]
+    return (int(row["done"]), int(row["total"])) if row["total"] else None
+
+
+def activity(store: MonitorStore, target: str, now: int, *, enabled: bool,
+             last_reading_at: int | None, every_s: int, checks_ran_at: int | None,
+             check_every_s: int, running: dict[str, Any] | None = None,
+             report: dict[str, Any] | None = None) -> dict[str, Any]:
+    """What monitoring is doing on this database right now, for the radar and its tooltip.
+    `done`/`total` count the first hour's analyses while it lasts."""
+    from features.monitor.loop import cycling
+
+    progress = first_hour_progress(store, target, now) if enabled else None
+    if not enabled:
+        kind, label = "idle", "Monitoring is off"
+    elif report:
+        kind, label = "report", "Writing the report"
+    elif running:
+        name = target_names(store, target).get(running["query_key"]) or \
+            f"Query {running['query_key']}"
+        kind, label = "analyzing", f"Analyzing {name}"
+    elif cycling(target):
+        kind, label = "checking", "Checking queries for changes"
+    else:
+        kind, label = "reading", "Reading query statistics"
+    return {"kind": kind, "label": label,
+            "done": progress[0] if progress else None,
+            "total": progress[1] if progress else None,
+            "last_reading_at": last_reading_at, "every_s": every_s,
+            "next_check_at": checks_ran_at + check_every_s
+            if enabled and checks_ran_at and not checks_held(store, target) else None}
+
+
+def _month_day(ts: int) -> str:
+    moment = datetime.fromtimestamp(ts)
+    return f"{moment.strftime('%B')} {moment.day}"
+
+
+def home_headline(item: dict[str, Any]) -> str:
+    """"a stuck query since 9:55 AM": what needs you and since when."""
+    type, subject = item["type"], item["subject"]
+    what = {"stuck_query": "a stuck query", "lock_contention": "queries waiting on locks",
+            "connections_near_max": "connections near the limit"}.get(type)
+    if type == "monitoring_issue":
+        what = ("the database can't be reached"
+                if subject in ("lost_connection", "password_missing") else "a monitoring issue")
+    if what is None:
+        what = item["title"][:1].lower() + item["title"][1:]
+    return f"{what} since {clock_text(item['created_at'])}"
+
+
+def _cache_reason(report: dict[str, Any] | None, cache: float | None) -> str | None:
+    if cache is None or cache >= 0.9 or not report:
+        return None
+    actions = ((report.get("snapshot") or {}).get("actions") or [])
+    buffers = next((action for action in actions if isinstance(action, dict) and action.get("id")
+                    in ("setting_shared_buffers", "setting_innodb_buffer_pool_size", "cache_hit")),
+                   None)
+    finding = str((buffers or {}).get("finding") or "")
+    if not finding:
+        return None
+    return "shared_buffers is the default" if "default" in finding.lower() else finding.rstrip(".")
+
+
+def _day_card(store: MonitorStore, target: str, now: int, midnight: int,
+              database: dict[str, Any]) -> dict[str, Any] | None:
+    from features.monitor.snapshot import _window_numbers
+
+    today = _window_numbers(store, target, midnight, now + 1)
+    if not today:
+        return None
+    span = now + 1 - midnight
+    yesterday = _window_numbers(store, target, midnight - 86400, midnight - 86400 + span)
+    vitals = today.get("vitals") or {}
+    latest = store.read("SELECT cache_hit_ratio FROM db_series WHERE target=? AND res=60 "
+                        "ORDER BY bucket_start DESC LIMIT 1", (target,))
+    cache = latest[0]["cache_hit_ratio"] if latest else today.get("cache_hit_ratio_min")
+    reports = store.read("SELECT id,ts,period_start,report_json FROM report_run WHERE target=? "
+                         "AND state='done' AND sample=0 ORDER BY COALESCE(period_end,ts) DESC,"
+                         "id DESC LIMIT 1", (target,))
+    report = json.loads(reports[0]["report_json"] or "null") if reports else None
+    mean, prior = today.get("mean_ms"), yesterday.get("mean_ms")
+    return {"target": target, "qps": today.get("qps"), "qps_peak": today.get("peak_qps"),
+            "qps_peak_at": today.get("peak_qps_at"), "mean_ms": mean,
+            "mean_ms_delta": mean / prior - 1 if mean is not None and prior else None,
+            "fixes_ready": database["fixes_ready"], "fixes_share": database["_fixes_share"],
+            "fixes_item_id": database["fixes_item_id"], "cache_hit_ratio": cache,
+            "cache_hit_reason": _cache_reason(report if isinstance(report, dict) else None, cache),
+            "series": [{"ts": ts, "qps": qps} for ts, qps in zip(vitals.get("xs") or [],
+                                                                 vitals.get("qps") or [])],
+            "report_id": reports[0]["id"] if reports else None,
+            "report_day": (datetime.fromtimestamp(int(reports[0]["period_start"] or reports[0]["ts"]))
+                           .date().isoformat() if reports else None)}
+
+
+def _log_entry(item: dict[str, Any], kind: str, ts: int) -> dict[str, Any] | None:
+    type, target = item["type"], item["target"]
+    body = _body(item)
+    inbox = {"kind": "inbox", "target": target, "label": "Inbox", "item_id": item["id"]}
+    keys = item.get("query_keys") or []
+    created = kind == "created"
+    if type in ("daily_summary", "report_ready"):
+        return None
+    if type == "stuck_query":
+        if created:
+            return {"ts": ts, "text": "Stuck query filed", "detail": None, "link": inbox,
+                    "band": "act_now"}
+        duration = body.get("duration_s")
+        minutes = max(1, int(round(float(duration) / 60))) if duration else None
+        return {"ts": ts, "text": "Stuck query ended, item closed",
+                "detail": f"ran {minutes} {'minute' if minutes == 1 else 'minutes'}"
+                if minutes else None, "link": inbox, "band": None}
+    if type == "fixes_ready":
+        if not created:
+            return None
+        count = int(body.get("count") or 0)
+        return {"ts": ts, "text": f"Report ran: {count} index {'fix' if count == 1 else 'fixes'} ready",
+                "detail": f"{format_pct(float(body.get('share') or 0))} of database time",
+                "link": inbox, "band": None}
+    if type == "changes_ready":
+        if not created:
+            return None
+        count, first = int(body.get("count") or 0), int(body.get("do_first") or 0)
+        return {"ts": ts, "text": f"{count} {'change' if count == 1 else 'changes'} ready",
+                "detail": f"{first} to do first" if first else None,
+                "link": {"kind": "actions", "target": target, "label": "Actions",
+                         "item_id": item["id"]}, "band": None}
+    if type == "no_change_yet":
+        return None
+    if type == "fix_confirmed":
+        if not created:
+            return None
+        before, after = body.get("before_ms"), body.get("after_ms")
+        return {"ts": ts, "text": f"Fix confirmed on {body.get('index_label') or body.get('index_name') or target}",
+                "detail": f"{latency_text(before)} to {latency_text(after)}"
+                if isinstance(before, (int, float)) and isinstance(after, (int, float)) else None,
+                "link": {"kind": "query", "target": target, "label": "Query",
+                         "query_key": keys[0] if keys else None, "item_id": item["id"]},
+                "band": None}
+    if type == "traffic_spike":
+        measurement = item.get("measurement") or {}
+        change = measurement.get("change")
+        size = f"{change + 1:.1f}x" if isinstance(change, (int, float)) else None
+        link = {"kind": "chart", "target": target, "label": "Chart", "item_id": item["id"]}
+        if created:
+            return {"ts": ts, "text": "Traffic spike filed", "detail": size, "link": link,
+                    "band": "watch"}
+        minutes = max(1, int(round(((item.get("resolved_at") or ts) - item["created_at"]) / 60)))
+        return {"ts": ts, "text": "Traffic spike ended",
+                "detail": f"{size} for {minutes} minutes" if size else f"{minutes} minutes",
+                "link": link, "band": None}
+    title = item["title"]
+    if created:
+        return {"ts": ts, "text": f"{title} filed", "detail": item.get("summary") or None,
+                "link": inbox, "band": "act_now" if item["severity_band"] == "act_now" else "watch"}
+    return {"ts": ts, "text": f"{title} closed", "detail": None, "link": inbox, "band": None}
+
+
+def home_log(store: MonitorStore, targets: list[str], since: int, limit: int,
+             fixes_items: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """The agent's own log, newest first: items filed and closed, reports run, analyses."""
+    if not targets:
+        return []
+    placeholders = ",".join("?" for _ in targets)
+    marks = store.read(f"SELECT e.ts,e.kind,e.item_id FROM inbox_event e JOIN inbox_item i "
+                       f"ON i.id=e.item_id WHERE i.target IN ({placeholders}) AND e.ts>=? "
+                       "AND e.kind IN ('created','resolved') AND i.delivery!='digest' "
+                       "ORDER BY e.ts DESC,e.id DESC LIMIT 200", (*targets, since))
+    ids = sorted({mark["item_id"] for mark in marks})
+    items: dict[int, dict[str, Any]] = {}
+    if ids:
+        rows = store.read(f"SELECT * FROM inbox_item WHERE id IN ({','.join('?' for _ in ids)})",
+                          tuple(ids))
+        items = {item["id"]: item for item in inbox_items(store, rows)}
+    entries = []
+    for mark in marks:
+        item = items.get(mark["item_id"])
+        entry = _log_entry(item, mark["kind"], mark["ts"]) if item else None
+        if entry:
+            entries.append(entry)
+    for run in store.read(f"SELECT id,target,trigger,ts,finished_at,period_start FROM report_run "
+                          f"WHERE target IN ({placeholders}) AND state='done' AND sample=0 "
+                          "AND COALESCE(finished_at,ts)>=? ORDER BY ts DESC LIMIT 20",
+                          (*targets, since)):
+        link = {"kind": "report", "target": run["target"], "label": "Report", "report_id": run["id"]}
+        fixes = fixes_items.get(run["target"])
+        fixes_body = _body(fixes) if fixes else {}
+        if run["trigger"] == "nightly":
+            entries.append({"ts": run["finished_at"] or run["ts"],
+                            "text": f"Daily report for {_month_day(int(run['period_start'] or run['ts'] - 86400))}",
+                            "detail": None, "link": link, "band": None})
+        elif fixes and fixes_body.get("report_id") == run["id"]:
+            continue
+        else:
+            entries.append({"ts": run["finished_at"] or run["ts"], "text": "Report ran",
+                            "detail": None, "link": link, "band": None})
+    jobs = store.read(f"SELECT target,query_key,finished_at FROM analyze_job WHERE target IN "
+                      f"({placeholders}) AND state='done' AND finished_at>=? AND reason!='user' "
+                      "ORDER BY finished_at DESC LIMIT 100", (*targets, since))
+    ready = {(row["target"], row["query_key"]) for row in store.read(
+        f"SELECT target,query_key FROM query_ui WHERE target IN ({placeholders}) AND fix_ready=1",
+        tuple(targets))}
+    group: list[dict[str, Any]] = []
+    for job in [*jobs, None]:
+        if group and (job is None or job["target"] != group[0]["target"] or
+                      group[-1]["finished_at"] - job["finished_at"] > 600):
+            count = len(group)
+            fixes = sum((row["target"], row["query_key"]) in ready for row in group)
+            detail = ("both healthy" if count == 2 and not fixes else "all healthy" if not fixes
+                      else f"{fixes} with a fix")
+            entries.append({"ts": group[0]["finished_at"],
+                            "text": f"{count} new {'query' if count == 1 else 'queries'} analyzed",
+                            "detail": detail if count > 1 else ("fix suggested" if fixes else "healthy"),
+                            "link": {"kind": "queries", "target": group[0]["target"],
+                                     "label": "Queries"}, "band": None})
+            group = []
+        if job is not None:
+            group.append(job)
+    entries.sort(key=lambda entry: -entry["ts"])
+    return entries[:limit]
+
+
+def _building_first_plan(store: MonitorStore, target: str, now: int) -> bool:
+    """Whether the first pass of analyses is still building this database's first plan."""
+    from features.monitor.report import first_pass
+
+    progress = first_pass(store, target, now)
+    return progress is not None and not progress["due"]
+
+
+def home(store: MonitorStore, now: int, *, configured: list[dict[str, Any]] | None = None,
+         selected: str | None = None, limit: int = HOME_LOG_LIMIT) -> dict[str, Any]:
+    """Home: one sentence from data, the selected database's day, every database sorted by
+    attention with its strip of counts, the day's log and what you analyzed. Act now (Inbox)
+    and Do first (Actions) count separately."""
+    from features.monitor import actions, database_limit
+    from shared.monitor.monitor_store import local_day_bounds
+
+    entries = configured or [{"name": name} for name in sorted(store.monitored_targets())]
+    analyzing, reporting = running_work(store, [str(entry.get("name") or "") for entry in entries])
+    midnight = local_day_bounds(now)[0]
+    databases: list[dict[str, Any]] = []
+    act_items: list[dict[str, Any]] = []
+    fixes_items: dict[str, dict[str, Any]] = {}
+    enabled_names: list[str] = []
+    checks: list[int | None] = []
+    readings: list[int | None] = []
+    reports_at: list[int | None] = []
+    for entry in entries:
+        name = str(entry.get("name") or "")
+        if not name:
+            continue
+        levers = store.levers(name)
+        enabled = bool(levers["enabled"])
+        rows = [row for row in store.inbox(target=name) if row["state"] in OPEN_STATES
+                and row["delivery"] != "digest" and not row.get("muted_by")]
+        items = inbox_items(store, rows) if rows else []
+        act = [item for item in items if item["severity_band"] == "act_now"]
+        fixes = next((item for item in items if item["type"] == "changes_ready"), None)
+        plan = actions.database_summary(store, name, now)
+        issues = {row["subject"]: row for row in rows if row["type"] == "monitoring_issue"}
+        ran = checks_ran_at(store, name) if enabled else None
+        if not enabled:
+            state, since = "not_monitored", None
+        elif issues.keys() & {"lost_connection", "password_missing"}:
+            issue = issues.get("lost_connection") or issues["password_missing"]
+            state = "cant_reach"
+            since = int(_body(issue).get("failed_since") or issue["created_at"])
+        elif database_limit.paused(store, name, now) or "jev_login" in issues:
+            state, since = "ai_paused", ran or store.enabled_at(name)
+        else:
+            state, since = "watching", None
+        latest = store.read("SELECT calls FROM db_series WHERE target=? AND res=60 "
+                            "ORDER BY bucket_start DESC LIMIT 1", (name,))
+        last_reading, every = collect_timing(store, name) if enabled else (None, 60)
+        doing = activity(store, name, now, enabled=enabled, last_reading_at=last_reading,
+                         every_s=every, checks_ran_at=ran,
+                         check_every_s=levers["attention_every_min"] * 60,
+                         running=analyzing.get(name), report=reporting.get(name))
+        databases.append({"target": name, "connection": _connection_label(entry), "state": state,
+                          "state_since": since,
+                          "qps": round(latest[0]["calls"] / 60, 3) if latest and enabled else None,
+                          "open_items": len(items), "act_now": len(act),
+                          "fixes_ready": plan["fixes_ready"],
+                          "fixes_item_id": fixes["id"] if fixes else None,
+                          "to_do": plan["to_do"], "do_first": plan["do_first"],
+                          "_fixes_share": plan["fixes_share"], "_activity": doing,
+                          "_building": enabled and _building_first_plan(store, name, now)})
+        if fixes:
+            fixes_items[name] = fixes
+        if enabled:
+            enabled_names.append(name)
+            checks.append(ran)
+            readings.append(last_reading)
+            reports_at.append(_next_report_at(levers, now))
+            act_items += act
+    order = {"cant_reach": 1, "watching": 2, "ai_paused": 3, "not_monitored": 4}
+    databases.sort(key=lambda row: (0 if row["act_now"] else order[row["state"]],
+                                    -row["fixes_ready"], row["target"]))
+    act_items.sort(key=lambda item: -item["created_at"])
+    lead = act_items[0] if act_items else None
+    target = (lead["target"] if lead else selected if selected in enabled_names
+              else enabled_names[0] if enabled_names else
+              next((str(entry["name"]) for entry in entries if entry.get("name")), None))
+    by_name = {row["target"]: row for row in databases}
+    ran_at = max((ts for ts in checks if ts), default=None)
+    interval = max((store.levers(name)["attention_every_min"] for name in enabled_names),
+                   default=5) * 60
+    since: int | None = None
+    if not enabled_names:
+        state = "off"
+    elif lead:
+        state, since = "needs_you", lead["created_at"]
+    elif (target and by_name[target]["state"] == "ai_paused") or ran_at is None or \
+            now - ran_at > QUIET_CYCLES * interval:
+        state = "paused"
+        since = (by_name[target]["state_since"] if target else None) or ran_at
+    else:
+        state = "quiet"
+        closed = store.read("SELECT MAX(resolved_at) ts FROM inbox_item WHERE target=? "
+                            "AND state IN ('resolved','dismissed') AND delivery!='digest'",
+                            (target,))
+        since = (closed[0]["ts"] if closed and closed[0]["ts"] else None) or \
+            store.enabled_at(target) or ran_at
+    status = {"state": state, "target": target,
+              "needs_you": len(act_items),
+              "to_watch": sum(row["open_items"] for row in databases) - len(act_items),
+              "headline": home_headline(lead) if lead else None,
+              "link": {"kind": "inbox", "target": lead["target"], "label": "Inbox",
+                       "item_id": lead["id"]} if lead else None,
+              "checks_ran_at": ran_at, "since": since,
+              "last_reading_at": max((ts for ts in readings if ts), default=None),
+              "next_report_at": min((ts for ts in reports_at if ts), default=None),
+              "watching": len(enabled_names),
+              "act_now": len(act_items),
+              "do_first": sum(row["do_first"] for row in databases
+                              if row["target"] in enabled_names)}
+    # The day card follows the database the user chose; the sentence keeps the one that
+    # needs them most.
+    day_target = selected if selected in enabled_names else target
+    day = (_day_card(store, day_target, now, midnight, by_name[day_target])
+           if day_target in enabled_names else None)
+    placeholders = ",".join("?" for _ in enabled_names)
+    opened_closed = fixes_confirmed = 0
+    if enabled_names:
+        opened_closed = store.read(
+            f"SELECT COUNT(*) n FROM inbox_item WHERE target IN ({placeholders}) "
+            "AND created_at>=? AND state IN ('resolved','dismissed') AND delivery!='digest'",
+            (*enabled_names, midnight - 86400))[0]["n"]
+        fixes_confirmed = store.read(
+            f"SELECT COUNT(*) n FROM inbox_item WHERE target IN ({placeholders}) "
+            "AND type='fix_confirmed' AND created_at>=?", (*enabled_names, midnight - 86400))[0]["n"]
+    analyzed = []
+    names_by_target: dict[str, dict[str, str]] = {}
+    if enabled_names:
+        for job in store.read(f"SELECT target,query_key,finished_at,analysis_ref FROM analyze_job "
+                              f"WHERE target IN ({placeholders}) AND reason='user' AND state='done' "
+                              "ORDER BY finished_at DESC,id DESC LIMIT 3", tuple(enabled_names)):
+            names = names_by_target.setdefault(job["target"], target_names(store, job["target"]))
+            ready = store.read("SELECT fix_ready FROM query_ui WHERE target=? AND query_key=?",
+                               (job["target"], job["query_key"]))
+            analyzed.append({"target": job["target"], "query_key": job["query_key"],
+                             "display_name": names.get(job["query_key"]) or f"Query {job['query_key']}",
+                             "analyzed_at": int(job["finished_at"] or 0),
+                             "analysis_ref": job["analysis_ref"],
+                             "outcome": "fix_suggested" if ready and ready[0]["fix_ready"]
+                             else "healthy"})
+    return {"status": status, "day": day,
+            "databases": [{key: value for key, value in row.items() if not key.startswith("_")}
+                          for row in databases],
+            "databases_strip": [{"target": row["target"], "state": row["state"],
+                                 "act_now": row["act_now"], "to_do": row["to_do"],
+                                 "do_first": row["do_first"], "fixes_ready": row["fixes_ready"],
+                                 "activity": row["_activity"],
+                                 "building": row["_building"]}
+                                for row in databases],
+            "not_monitored": sum(row["state"] == "not_monitored" for row in databases),
+            "today": home_log(store, enabled_names, midnight, limit, fixes_items),
+            "since_yesterday": {"opened_closed": int(opened_closed),
+                                "fixes_confirmed": int(fixes_confirmed)},
+            "recently_analyzed": analyzed, "generated_at": now}

@@ -3,15 +3,25 @@
 import { cn } from '@rs/tailwind-base'
 import { CopyButton } from '@rs/ui-new/copy-button'
 import { Icon } from '@rs/ui-new/icon'
+import { Scrollable } from '@rs/ui-new/scrollable'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { SqlTokens } from '@/components/SqlTokens'
 import type { PrereqFix } from './api'
 
-function CodeBlock({ code, kind }: { code: string; kind: 'sql' | 'shell' }) {
+export function CodeBlock({
+  code,
+  kind,
+}: {
+  code: string
+  kind: 'sql' | 'shell'
+}) {
   return (
     <div className="group/code flex items-start gap-2 rounded-control border border-border-layout-1 bg-surface-layout-2 py-2 pl-3 pr-1.5 transition-colors duration-fast ease-base hover:border-border-layout-2">
-      <div className="max-h-64 min-w-0 flex-1 overflow-auto py-0.5 font-mono text-mono-small leading-relaxed text-content-layout-1">
+      <Scrollable
+        rootClassName="min-w-0 flex-1"
+        className="max-h-64 py-0.5 font-mono text-mono-small leading-relaxed text-content-layout-1"
+      >
         {kind === 'sql' ? (
           <SqlTokens
             sql={code}
@@ -20,13 +30,13 @@ function CodeBlock({ code, kind }: { code: string; kind: 'sql' | 'shell' }) {
         ) : (
           <code className="whitespace-pre-wrap break-all">{code}</code>
         )}
-      </div>
+      </Scrollable>
       <CopyButton text={code} label="Copy" />
     </div>
   )
 }
 
-function Steps({ steps, start }: { steps: string[]; start: number }) {
+export function Steps({ steps, start }: { steps: string[]; start: number }) {
   if (steps.length === 0) return null
   return (
     <ol className="space-y-1.5">

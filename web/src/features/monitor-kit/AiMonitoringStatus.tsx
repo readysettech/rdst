@@ -1,7 +1,6 @@
 // AI monitoring status: a database's state (AI or local only) and the account's limit.
 import { cn } from '@rs/tailwind-base'
 import { Button } from '@rs/ui-new/button'
-import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
@@ -17,7 +16,6 @@ import type {
 } from '@/lib/monitor/types'
 import { invalidateTrialRelatedQueries } from '@/lib/trialQueries'
 import {
-  aiStateCopy,
   allowanceCopy,
   FREE_A_SLOT,
   limitBasis,
@@ -38,19 +36,15 @@ export function MonitoringStatusBadge({
   status,
   withReason = false,
   compact = false,
-  live = false,
   className,
 }: {
   status: MonitoringStatus
   withReason?: boolean
-  /** RDST is collecting right now: the dot beats (still under reduced motion). */
-  live?: boolean
   /** The short form ("AI on", "Local only") for tight lists. */
   compact?: boolean
   className?: string
 }) {
   const tone = MONITORING_TONE_CLASSES[status.tone]
-  const beating = live && status.kind !== 'off' && status.kind !== 'paused'
   return (
     <span
       data-testid="monitoring-status"
@@ -63,11 +57,10 @@ export function MonitoringStatusBadge({
     >
       <span
         aria-hidden="true"
-        data-heartbeat={beating ? 'on' : undefined}
         className={cn(
           'h-2 w-2 shrink-0 rounded-full',
           tone.dot,
-          beating ? 'rdst-heartbeat' : status.busy && 'animate-pulse'
+          status.busy && 'animate-pulse'
         )}
       />
       <span className="truncate">
@@ -126,7 +119,7 @@ export function MonitoringStatusAction({
           onClick={() =>
             void navigate({
               to: '/configure',
-              search: { panel: 'connections' },
+              search: { panel: 'connections' } as never,
             })
           }
         />
@@ -164,40 +157,17 @@ export function MonitoringStatusAction({
   }
 }
 
-const TAG_VARIANT = {
-  positive: 'positive',
-  warning: 'warning',
-  neutral: 'neutral',
-} as const
-
-/** "AI monitoring" or "Local monitoring only", as a small tag. */
-export function AiMonitoringTag({
-  state,
-}: {
-  state: AiMonitoringState | undefined
-}) {
-  const copy = aiStateCopy(state)
-  return (
-    <Tag
-      size="small"
-      variant={TAG_VARIANT[copy.tone]}
-      modifier="outline"
-      label={copy.label}
-      title={copy.description}
-      data-testid="ai-monitoring-state"
-      data-state={state ?? 'on'}
-    />
-  )
-}
-
 /** "AI monitoring on 2 of 3 databases", with which key sets the limit. */
 export function MonitoringLimitLine({
   limit,
   showBasis = true,
   quiet = false,
+  showElsewhere = true,
 }: {
   limit: MonitoringLimit | undefined
   showBasis?: boolean
+  /** False where the page lists the slots held elsewhere on its own. */
+  showElsewhere?: boolean
   /** A caption under a state badge that already says AI is on. */
   quiet?: boolean
 }) {
@@ -218,7 +188,7 @@ export function MonitoringLimitLine({
           {basis}
         </Text>
       ) : null}
-      <SlotsElsewhere limit={limit} />
+      {showElsewhere ? <SlotsElsewhere limit={limit} /> : null}
     </div>
   )
 }
@@ -348,7 +318,7 @@ export function AiMonitoringPanel({
   const status = monitoringStatus({ enabled: true, ai: state, reason, since })
   const stillFull = claim.isSuccess && claim.data.ai_monitoring === 'local'
   return (
-    <div className="space-y-2 py-3" data-testid="ai-monitoring-panel">
+    <div className="space-y-2 pb-3" data-testid="ai-monitoring-panel">
       <div className="flex flex-wrap items-center gap-2">
         <Text as="p" level="label-medium" className="text-content-layout-1">
           AI

@@ -87,7 +87,7 @@ export function muteScopes(subject: MuteSubject) {
     })
     scopes.push({
       scope: 'type_all',
-      label: `Mute "${typeLabel}" on all targets`,
+      label: `Mute "${typeLabel}" on all databases`,
     })
   }
   return scopes
@@ -145,9 +145,9 @@ export interface MuteMenuProps extends MuteSubject {
 }
 
 /**
- * The "..." menu for an alert or a query: mute at three scopes (this query + this
- * alert type, this query, this alert type on the target or everywhere) with a
- * duration, plus caller items.
+ * The "..." menu for an alert or a query: how long first (a week by default), then mute
+ * at three scopes (this query + this alert type, this query, this alert type on the
+ * database or everywhere), plus caller items.
  */
 export function MuteMenu({
   extraItems,
@@ -157,7 +157,7 @@ export function MuteMenu({
   className,
   ...subject
 }: MuteMenuProps) {
-  const [duration, setDuration] = useState<MuteDuration>('forever')
+  const [duration, setDuration] = useState<MuteDuration>('week')
   const { mute, pending } = useMuteAction()
   const scopes = muteScopes(subject)
   return (
@@ -176,16 +176,6 @@ export function MuteMenu({
       <Dropdown.Content align={align} className="min-w-72">
         {scopes.length > 0 && (
           <>
-            <Dropdown.Label>Mute</Dropdown.Label>
-            {scopes.map((option) => (
-              <Dropdown.Item
-                key={option.scope}
-                leftIcon="notification"
-                label={option.label}
-                onSelect={() => mute(subject, option.scope, duration, onMuted)}
-              />
-            ))}
-            <Dropdown.Separator />
             <Dropdown.Label>For how long</Dropdown.Label>
             {DURATIONS.map((option) => (
               <Dropdown.Item
@@ -199,6 +189,15 @@ export function MuteMenu({
                   event.preventDefault()
                   setDuration(option.value)
                 }}
+              />
+            ))}
+            <Dropdown.Separator />
+            <Dropdown.Label>Mute</Dropdown.Label>
+            {scopes.map((option) => (
+              <Dropdown.Item
+                key={option.scope}
+                label={option.label}
+                onSelect={() => mute(subject, option.scope, duration, onMuted)}
               />
             ))}
           </>

@@ -125,7 +125,7 @@ def suggest_parameter_values(
                     # Any unit plans and rewrites the same way; a rewrite still has to prove
                     # itself faster before it's shown.
                     suggestions[placeholder["key"]].append(
-                        {"value": TIME_UNIT, "provenance": "Sampled from date_trunc units"})
+                        {"value": TIME_UNIT, "provenance": "Query shape (date_trunc unit)"})
                     continue
                 if not binding or not binding.get("column"):
                     continue
@@ -162,11 +162,12 @@ def suggest_parameter_values(
 def _shape_hint(sql: str, placeholder: Dict[str, Any], kind: str | None) -> Dict[str, str] | None:
     """Use a harmless literal where SQL's grammar requires one.
 
-    This is a planning hint, not a sampled value. Callers must keep its
-    param_source as ``none`` and use plain EXPLAIN.
+    Callers use these hints for plain EXPLAIN with estimated parameter provenance.
     """
     token = placeholder["placeholder"]
-    match = re.search(r"(?<![\w$])" + re.escape(token) + r"(?!\w)", sql)
+    matches = [match for match in _SQL_TOKEN_RE.finditer(sql) if match.group() == token]
+    ordinal = placeholder["index"] - 1 if token == "?" else 0
+    match = matches[ordinal] if ordinal < len(matches) else None
     if match is None:
         return None
     before = sql[:match.start()].rstrip().lower()
@@ -193,6 +194,76 @@ def _shape_hint(sql: str, placeholder: Dict[str, Any], kind: str | None) -> Dict
     else:
         return None
     return {"value": value, "provenance": f"Query shape ({label})"}
+
+
+def plan_only_sql(sql: str, engine: str, data: Dict[str, Any] | None = None, conn=None,
+                  timeout_ms: int = SAMPLE_TIMEOUT_MS) -> str:
+    """Fill parameters for plain EXPLAIN. These values must never enable execution."""
+    placeholders = enumerate_placeholders(sql)
+    bindings = bind_placeholders_to_columns(sql, engine, placeholders)
+    supplied = (data or {}).get("placeholders") or []
+    values = {}
+    for ordinal, placeholder in enumerate(placeholders):
+        binding = bindings.get(placeholder["key"]) or {}
+        options = supplied[ordinal].get("suggestions", []) if ordinal < len(supplied) else []
+        if not options and conn is not None and binding.get("column"):
+            options = _sample_column_values(conn, engine, binding, timeout_ms=timeout_ms)
+        option = next((o for o in options if o.get("value") is not None), None)
+        option = option or _shape_hint(sql, placeholder, binding.get("kind"))
+        if option and option.get("value") is not None:
+            literal = option.get("literal_sql") or parameter_literal(
+                str(option["value"]), option.get("column_type"))
+        elif binding.get("kind") == "time_unit":
+            literal = "'minute'"
+        else:
+            cast = re.search(re.escape(placeholder["placeholder"]) + r"\s*::\s*([\w]+)", sql)
+            literal = _type_hint(cast.group(1).strip() if cast else None)["literal_sql"]
+        values[placeholder["key"]] = literal
+    ordinal = 0
+
+    def replace(match):
+        nonlocal ordinal
+        token = match.group()
+        if token == "?":
+            ordinal += 1
+            return values.get(f"?{ordinal}", token)
+        return values.get(token, token)
+
+    return _SQL_TOKEN_RE.sub(replace, sql)
+
+
+def parameter_literal(value: str | None, column_type: str | None = None) -> str:
+    if value is None:
+        return "NULL"
+    type_name = (column_type or "").lower()
+    quoted_type = (type_name in {"character varying", "character", "varchar", "char",
+                                 "uuid", "date", "datetime"}
+                   or type_name.endswith("text") or type_name.startswith("timestamp"))
+    if re.fullmatch(r"-?\d+(?:\.\d+)?", value) and not quoted_type:
+        return value
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _type_hint(column_type: str | None) -> Dict[str, str]:
+    type_name = (column_type or "").lower()
+    if type_name == "date":
+        literal = "CURRENT_DATE"
+    elif type_name.startswith("timestamp") or type_name == "datetime":
+        literal = "NOW()"
+    elif type_name == "interval":
+        literal = "'1 day'"
+    elif type_name in {"boolean", "bool"}:
+        literal = "TRUE"
+    elif type_name in {"json", "jsonb"}:
+        literal = "'{}'"
+    elif type_name == "uuid":
+        literal = "'00000000-0000-0000-0000-000000000001'"
+    elif any(t in type_name for t in ("char", "text", "enum", "set", "binary")):
+        literal = "''"
+    else:
+        literal = "1"
+    return {"value": literal, "literal_sql": literal, "column_type": column_type or "",
+            "provenance": "Column type (plan estimate)"}
 
 
 def enumerate_placeholders(sql: str) -> List[Dict[str, Any]]:
@@ -605,7 +676,8 @@ def _fetch_sample(
         cur.close()
 
 
-def _sample_column_values(conn, engine: str, binding: Dict[str, Any]) -> List[Dict[str, str]]:
+def _sample_column_values(conn, engine: str, binding: Dict[str, Any], *,
+                          timeout_ms: int = SAMPLE_TIMEOUT_MS) -> List[Dict[str, str]]:
     table, column = binding.get("table") or "", binding.get("column_name") or ""
     schema = ""
     if "." in table:
@@ -617,7 +689,10 @@ def _sample_column_values(conn, engine: str, binding: Dict[str, Any]) -> List[Di
         return []
     label = f"{table}.{column}"
     cur = conn.cursor()
+    column_type = None
     try:
+        if engine == "postgresql":
+            cur.execute(f"SET LOCAL statement_timeout = {timeout_ms}")
         cur.execute(
             "SELECT data_type FROM information_schema.columns WHERE table_name = %s "
             "AND column_name = %s AND table_schema = "
@@ -645,14 +720,15 @@ def _sample_column_values(conn, engine: str, binding: Dict[str, Any]) -> List[Di
             back = ("max({c}) - interval '5 minutes'" if engine == "postgresql"
                     else "DATE_SUB(MAX({c}), INTERVAL 5 MINUTE)").format(c=quoted)
             if engine == "postgresql":
-                cur.execute(f"SET LOCAL statement_timeout = {SAMPLE_TIMEOUT_MS}")
+                cur.execute(f"SET LOCAL statement_timeout = {timeout_ms}")
             cur.execute(f"{_SELF_MARKER}SELECT {back} FROM {qualified}")
             row = cur.fetchone()
             if row and row[0] is not None:
                 return [suggestion(_to_text(row[0]), f"Sampled from {label} (recent)")]
         if engine == "postgresql":
             cur.execute(
-                "SELECT (most_common_vals::text::text[])[1:%s] FROM pg_stats "
+                "SELECT (COALESCE(most_common_vals::text::text[], "
+                "histogram_bounds::text::text[]))[1:%s] FROM pg_stats "
                 "WHERE tablename = %s AND attname = %s "
                 + ("AND schemaname = %s" if schema else "AND schemaname = ANY(current_schemas(false))"),
                 (MAX_SUGGESTIONS, table, column) + ((schema,) if schema else ()),
@@ -661,25 +737,25 @@ def _sample_column_values(conn, engine: str, binding: Dict[str, Any]) -> List[Di
             if row and row[0]:
                 return [suggestion(str(v), f"Common value in {label} (pg_stats)") for v in row[0]]
             qualified = ".".join(f'"{p}"' for p in (schema, table) if p)
-            cur.execute(f"SET LOCAL statement_timeout = {SAMPLE_TIMEOUT_MS}")
+            cur.execute(f"SET LOCAL statement_timeout = {timeout_ms}")
             cur.execute(
                 f'{_SELF_MARKER}SELECT DISTINCT "{column}" FROM {qualified} WHERE "{column}" IS NOT NULL LIMIT {MAX_SUGGESTIONS}'
             )
         else:
             qualified = ".".join(f"`{p}`" for p in (schema, table) if p)
             cur.execute(
-                f"{_SELF_MARKER}SELECT /*+ MAX_EXECUTION_TIME({SAMPLE_TIMEOUT_MS}) */ DISTINCT `{column}` "
-                f"FROM {qualified} WHERE `{column}` IS NOT NULL LIMIT {MAX_SUGGESTIONS}"
+                f"{_SELF_MARKER}SELECT /*+ MAX_EXECUTION_TIME({timeout_ms}) */ `{column}` "
+                f"FROM {qualified} WHERE `{column}` IS NOT NULL LIMIT 1"
             )
         rows = cur.fetchall() or []
-        return [suggestion(_to_text(r[0]), f"Sampled from {label}") for r in rows]
+        return [suggestion(_to_text(r[0]), f"Sampled from {label}") for r in rows] or [_type_hint(column_type)]
     except Exception as exc:
         logger.debug("Parameter suggestions: column sample failed for %s: %s", label, exc)
         try:
             conn.rollback()
         except Exception:
             pass
-        return []
+        return [_type_hint(column_type)]
     finally:
         cur.close()
 

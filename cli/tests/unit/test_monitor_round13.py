@@ -33,8 +33,9 @@ def rows(store, **kwargs):
     return page, {row["key"]: row for row in page["queries"]}
 
 
-def test_newcomer_setting_defaults_to_25_and_is_validated(store):
-    assert store.settings("db")["newcomer_daily_cap"] == 25
+def test_newcomer_setting_defaults_to_100_and_is_validated(store):
+    assert store.settings("db")["newcomer_daily_cap"] == 100
+    assert store.settings("db")["analysis_daily_cap"] == 15
     assert store.set_settings("db", {"newcomer_daily_cap": 3})["newcomer_daily_cap"] == 3
     for bad in (-1, 1001, True, "5"):
         with pytest.raises(ValueError):

@@ -6,6 +6,7 @@ import {
 } from '../features/settings/SettingsPage'
 
 export const Route = createFileRoute('/configure')({
+  staticData: { layout: 'page' },
   validateSearch: (search: Record<string, unknown>): ConfigureSearch => ({
     edit: typeof search.edit === 'string' ? search.edit : undefined,
     section: search.section === 'ai' ? 'ai' : undefined,
@@ -17,7 +18,7 @@ export const Route = createFileRoute('/configure')({
         ? search.panel
         : undefined,
     returnTo: typeof search.returnTo === 'string' ? search.returnTo : undefined,
-    add: parseAddTab(search.add),
+    add: search.add === 1 || search.add === '1' ? 1 : parseAddTab(search.add),
     from:
       search.from === 'fleet' || search.from === 'dev-settings'
         ? search.from

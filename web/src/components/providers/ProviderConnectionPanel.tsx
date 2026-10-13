@@ -1,3 +1,4 @@
+import { Alert } from '@rs/ui-new/alert'
 import { Button } from '@rs/ui-new/button'
 import { InlineNotice } from '@rs/ui-new/error-state'
 import { Icon } from '@rs/ui-new/icon'
@@ -12,7 +13,7 @@ import type {
   FleetProviderLoginStatus,
   FleetProviderSlug,
 } from '../../lib/useFleet'
-import { COMPACT_CARD, shorten } from './cardShell'
+import { COMPACT_CARD, panelActions, shorten } from './cardShell'
 import { useProviderOAuthLogin } from './useProviderOAuthLogin'
 
 /** What every account provider reports about the credentials RDST holds. */
@@ -55,6 +56,7 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
   enabled = true,
   compact = false,
   onSignIn,
+  actions,
 }: {
   slug: FleetProviderSlug
   label: string
@@ -62,8 +64,8 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
   client: ProviderPanelClient<S>
   /** Compact signed-out line: what connecting this provider buys. */
   pitch: string
-  /** Full-panel line under the "Connect X" heading. */
-  blurb: string
+  /** Full-panel line beside the provider's logo. */
+  blurb: ReactNode
   /** The connected line, which only the provider itself can phrase. */
   connectedLine: (status: S) => string
   /** Rejected-credential heading, without its trailing period. */
@@ -71,12 +73,17 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
   /** The compact card's signed-out action. */
   connectLabel?: string
   /** A pasted-credential path, rendered below or in place of the sign-in. */
-  credentialSlot?: (context: { onSaved: () => Promise<unknown> }) => ReactNode
+  credentialSlot?: (context: {
+    onSaved: () => Promise<unknown>
+    actions?: HTMLElement | null
+  }) => ReactNode
   enabled?: boolean
   /** Settings-page rendering: one quiet card per connection state. */
   compact?: boolean
   /** Where the compact signed-out card sends the user to connect. */
   onSignIn?: () => void
+  /** The host dialog's footer, where the panel's buttons render. */
+  actions?: HTMLElement | null
 }) {
   const [signingOut, setSigningOut] = useState(false)
 
@@ -105,13 +112,12 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
     blockedAuthUrl,
     starting,
     beginLogin,
-    clearError,
   } = useProviderOAuthLogin({
-      label,
-      start: client.startLogin ?? noBrowserSignIn,
-      poll: client.pollLogin ?? noBrowserSignIn,
-      onSuccess: refetch,
-    })
+    label,
+    start: client.startLogin ?? noBrowserSignIn,
+    poll: client.pollLogin ?? noBrowserSignIn,
+    onSuccess: refetch,
+  })
 
   const testId = `${slug}-connection-panel`
 
@@ -141,7 +147,7 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
         errorClass="rdst-service"
         title={`Couldn't check the ${label} connection`}
         message={error instanceof Error ? error.message : String(error)}
-        trustworthy="Your fleet inventory and saved reports are unaffected."
+        trustworthy="Your databases and saved reports are unaffected."
         onRetry={() => void refetch()}
       />
     )
@@ -170,7 +176,8 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
             <Icon
               name="tick-double"
               label="Connected"
-              className="w-4 h-4 text-content-positive-soft shrink-0"
+              size="small"
+              className="shrink-0 text-content-positive-soft"
             />
             <Text level="caption" className="text-content-positive-soft">
               {line}
@@ -183,36 +190,33 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
             className="mt-auto"
             icon="logout"
             iconPosition="left"
-            label={signingOut ? 'Signing out...' : 'Sign out'}
+            label="Sign out"
             loading={signingOut}
             onClick={signOut}
           />
         </div>
       )
     return (
-      <div data-testid={testId}>
-        <HStack className="gap-2 items-center flex-wrap">
+      <HStack className="gap-2 items-center" data-testid={testId}>
+        <span className="shrink-0">
           <Logo size={16} />
-          <Icon
-            name="tick-double"
-            label="Connected"
-            className="w-4 h-4 text-content-positive-soft shrink-0"
-          />
-          <Text level="caption" className="text-content-positive-soft">
-            {line}
-          </Text>
-          <Button
-            variant="primary"
-            modifier="outline"
-            size="small"
-            icon="logout"
-            iconPosition="left"
-            label={signingOut ? 'Signing out...' : 'Sign out'}
-            loading={signingOut}
-            onClick={signOut}
-          />
-        </HStack>
-      </div>
+        </span>
+        <Text
+          level="body-small"
+          className="min-w-0 flex-1 truncate text-content-layout-1"
+        >
+          {line}
+        </Text>
+        <Button
+          variant="primary"
+          modifier="ghost"
+          size="small"
+          icon="logout"
+          label="Sign out"
+          loading={signingOut}
+          onClick={signOut}
+        />
+      </HStack>
     )
   }
 
@@ -224,11 +228,6 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
     : null
   const failureHeading = `${label} ${oauth ? 'sign-in' : 'connection'} failed`
   const signingIn = starting || Boolean(loginId)
-  const signInLabel = loginId
-    ? 'Waiting for browser approval'
-    : starting
-      ? 'Opening browser…'
-      : `Sign in with ${label}`
 
   // Signed out and only a settings card: name the provider, say what connecting
   // buys, and give one obvious way in. A rejection replaces the pitch with a
@@ -248,7 +247,8 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
               <Icon
                 name="alert"
                 label={oauth ? 'Sign-in problem' : 'Connection problem'}
-                className="w-4 h-4 text-content-warning-soft shrink-0"
+                size="small"
+                className="shrink-0 text-content-warning-soft"
               />
               <Text level="caption" className="text-content-warning-soft">
                 {failureHeading}
@@ -268,7 +268,7 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
           modifier="outline"
           fullWidth
           className="mt-auto"
-          label={loginId ? 'Waiting for approval' : connectLabel}
+          label={connectLabel}
           loading={Boolean(loginId)}
           onClick={() => {
             if (onSignIn) onSignIn()
@@ -279,95 +279,73 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
     )
 
   return (
-    <VStack
-      className="gap-4 items-stretch rounded-xl border border-border-layout-1 bg-surface-layout-1 p-4"
-      data-testid={testId}
-    >
+    <VStack className="gap-3 items-stretch" data-testid={testId}>
       {rejectedDetail && !loginId && (
         <InlineNotice
           errorClass="provider"
           icon="alert"
           title={rejectedTitle}
           message={shorten(rejectedDetail, 220)}
-          trustworthy={`Targets you already imported from ${label} are unaffected.`}
+          trustworthy={`Databases you already imported from ${label} are unaffected.`}
         />
       )}
 
-      <VStack className="gap-3 items-stretch">
+      <HStack className="gap-2 items-start">
+        <span className="mt-0.5 shrink-0">
+          <Logo size={16} />
+        </span>
+        <Text level="body-small" className="text-content-layout-2">
+          {blurb}
+        </Text>
+      </HStack>
+      {oauth && loginId && (
         <VStack className="gap-1 items-start">
-          <HStack className="gap-2 items-center">
-            <Logo />
-            <Text level="label-small" className="text-content-layout-1">
-              {`Connect ${label}`}
-            </Text>
-          </HStack>
-          <Text level="body-small" className="text-content-layout-2">
-            {blurb}
+          <Text level="caption" className="text-content-layout-3">
+            {loginStatus?.detail ||
+              'Authorize RDST in the browser tab we opened.'}
           </Text>
+          {blockedAuthUrl && (
+            <Text asChild level="body-small">
+              <a
+                href={blockedAuthUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-content-primary-soft underline-offset-4 hover:underline"
+              >
+                Popup blocked. Open sign-in.
+              </a>
+            </Text>
+          )}
         </VStack>
-        {/* A provider with a browser sign-in leads with it, and keeps any
-            pasted credential as the fallback below. One without a sign-in has
-            nothing else to lead with: the credential is the whole panel. */}
-        {oauth ? (
-          <VStack className="gap-1.5 items-start">
-            <Button
-              variant="primary"
-              modifier="solid"
-              label={signInLabel}
-              loading={signingIn}
-              disabled={signingIn}
-              onClick={() => void beginLogin()}
-            />
-            {loginId && (
-              <VStack className="gap-1 items-start">
-                <Text level="caption" className="text-content-layout-3">
-                  {loginStatus?.detail ||
-                    'Authorize RDST in the browser tab we opened.'}
-                </Text>
-                {blockedAuthUrl && (
-                  <a
-                    href={blockedAuthUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-sm text-content-primary-soft hover:underline"
-                  >
-                    Popup blocked. Open sign-in.
-                  </a>
-                )}
-              </VStack>
-            )}
-          </VStack>
-        ) : (
-          credentialSlot?.({ onSaved: refetch })
-        )}
-      </VStack>
+      )}
+      {/* A provider with a browser sign-in leads with it, and keeps any
+          pasted credential as the fallback below. One without a sign-in has
+          nothing else to lead with: the credential is the whole panel. */}
+      {!oauth && credentialSlot?.({ onSaved: refetch, actions })}
 
       {loginError && (
-        <div className="rounded-lg border border-border-negative-soft bg-surface-negative-soft/20 p-3">
-          <VStack className="gap-2 items-stretch">
-            <Text level="label-small" className="text-content-negative-soft">
-              {failureHeading}
-            </Text>
-            <Text level="body-small" className="text-content-layout-2">
-              {loginError.message}
-            </Text>
-            <HStack>
-              <Button
-                variant="primary"
-                modifier="outline"
-                size="small"
-                label="Try again"
-                onClick={() => {
-                  clearError()
-                  void beginLogin()
-                }}
-              />
-            </HStack>
-          </VStack>
-        </div>
+        <Alert
+          variant="negative"
+          modifier="ghost"
+          icon="alert"
+          iconPosition="left"
+          label={loginError.message}
+        />
       )}
 
-      {oauth && credentialSlot?.({ onSaved: refetch })}
+      {oauth && credentialSlot?.({ onSaved: refetch, actions })}
+      {oauth &&
+        panelActions(
+          actions,
+          <Button
+            variant="primary"
+            modifier="solid"
+            label={`Sign in with ${label}`}
+            aria-label={`Sign in with ${label}`}
+            loading={signingIn}
+            onClick={() => void beginLogin()}
+          />
+        )}
     </VStack>
   )
 }

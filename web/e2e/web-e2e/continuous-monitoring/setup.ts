@@ -43,29 +43,32 @@ test('ci-shop is monitored with two days of history', async ({
     .first()
     .click()
   const dialog = signedIn.getByRole('dialog')
-  // RDST reaches the database through the proxy and sees its own probe in
-  // the statement statistics.
   await expect(
-    dialog.locator('[data-check="visibility_probe"][data-status="ok"]')
-  ).toBeVisible({ timeout: 30_000 })
-  await expect(
-    dialog.getByRole('switch', { name: 'Include deep analysis' })
-  ).toBeChecked()
-  await expect(dialog).toContainText(
-    "You're signed in, so turning on monitoring includes AI checks through Readyset."
-  )
-  await dialog.getByRole('button', { name: 'Turn on monitoring' }).click()
-  await expect(signedIn.getByRole('tab', { name: 'Reports' })).toBeVisible()
-  // The header says the database's state in the shared words.
-  await expect(
-    signedIn
-      .getByTestId('monitoring-status')
-      .filter({ hasText: 'AI monitoring on' })
-      .first()
+    dialog.getByRole('heading', { name: `Monitor ${target}` })
   ).toBeVisible()
+  // Deep analysis runs EXPLAIN ANALYZE by default, under its warning; the switches
+  // sit behind Advanced.
+  await expect(dialog.getByTestId('explain-analyze-warning')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Advanced' }).click()
+  await expect(
+    dialog.getByRole('switch', { name: 'Analyze automatically' })
+  ).toBeChecked()
+  await expect(
+    dialog.getByRole('switch', { name: 'Measure real timings' })
+  ).toBeChecked()
+  const turnOn = dialog.getByRole('button', { name: 'Turn on monitoring' })
+  await expect(turnOn).toBeEnabled({ timeout: 30_000 })
+  await turnOn.click()
+  await expect(signedIn.getByRole('tab', { name: 'Report' })).toBeVisible()
+  // The bar says the database is being monitored beside its radar.
+  await expect(signedIn.locator('[data-page-bar]')).toContainText(
+    'Actively monitoring'
+  )
   // Attention checks run when a scenario asks for one; a real nightly run
   // would race the one the history builds for yesterday. The top 10 get their
   // first deep analysis at turn-on; no newcomers are analyzed after that.
+  // Pushes must not depend on the hour the suite runs: equal quiet hours mean
+  // no quiet window.
   const settings = await ok<{
     enabled: boolean
     deep_analysis: boolean
@@ -77,6 +80,7 @@ test('ci-shop is monitored with two days of history', async ({
         nightly_report: false,
         push_daily_cap: 20,
         newcomer_daily_cap: 0,
+        quiet_hours: { from_hour: 0, to_hour: 0 },
       },
     })
   )

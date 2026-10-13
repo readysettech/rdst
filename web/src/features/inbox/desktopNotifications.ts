@@ -1,5 +1,6 @@
 // Desktop notifications for inbox items the monitor marks `notified`. The choice is
 // per browser (localStorage); the OS permission prompt runs when it is turned on.
+import { useSyncExternalStore } from 'react'
 
 const STORAGE_KEY = 'rdst_inbox_desktop_notifications'
 const CHANGE_EVENT = 'rdst_inbox_desktop_notifications_changed'
@@ -46,6 +47,15 @@ export async function setDesktopNotifications(on: boolean): Promise<boolean> {
 export function onDesktopNotificationsChange(listener: () => void) {
   window.addEventListener(CHANGE_EVENT, listener)
   return () => window.removeEventListener(CHANGE_EVENT, listener)
+}
+
+/** Push to this computer, as Settings and the Inbox bell both show it. */
+export function useDesktopNotificationsOn(): boolean {
+  return useSyncExternalStore(
+    onDesktopNotificationsChange,
+    desktopNotificationsEnabled,
+    () => false
+  )
 }
 
 export function showDesktopNotification(data: Record<string, unknown>) {

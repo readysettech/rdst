@@ -130,7 +130,6 @@ async function mockTargets(
   overrides: {
     configureTargets?: RouteHandler
     fleetTargets?: RouteHandler
-    fleetTargetsPattern?: string
     fleetStatus?: RouteHandler
     awsStatus?: RouteHandler
   } = {}
@@ -141,7 +140,7 @@ async function mockTargets(
       ((route) => route.fulfill({ json: asConfigureTargets(fleet.members) }))
   )
   await page.route(
-    overrides.fleetTargetsPattern ?? '**/api/fleet/targets*',
+    '**/api/fleet/targets*',
     overrides.fleetTargets ?? ((route) => route.fulfill({ json: fleet }))
   )
   await page.route(
@@ -169,22 +168,24 @@ async function prepareSettingsPage(
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
 }
 
-test('groups the connections and shows live reachability', async ({ page }) => {
+test('lists the connections and shows live reachability', async ({ page }) => {
   await prepareSettingsPage(page)
 
+  const databases = page.getByRole('region', { name: 'Databases' })
+  for (const { name } of inventory.members) {
+    await expect(databases.getByText(name, { exact: true })).toBeVisible()
+    await expect(
+      databases.getByRole('button', { name: `More actions for ${name}` })
+    ).toBeVisible()
+  }
   await expect(
-    page.getByText('3 targets · 1 group', { exact: true }).first()
-  ).toBeVisible()
-  await expect(page.getByText('production', { exact: true })).toBeVisible()
-  await expect(page.getByText('Ungrouped', { exact: true })).toBeVisible()
-  await expect(page.getByText('aurora-writer', { exact: true })).toBeVisible()
-  await expect(page.getByText('11ms', { exact: true })).toBeVisible()
+    databases.getByRole('button', { name: 'Test connection' })
+  ).toHaveCount(inventory.members.length)
+  // The streamed failure sits under the unreachable row only, with the humane
+  // first line rather than a raw "Error:" dump.
   await expect(
-    page.getByRole('button', { name: 'Check all' }).first()
-  ).toBeVisible()
-  // The shared connection-failure surface keeps the humane first line next to
-  // the unreachable row and does not regress to a raw "Error:" dump.
-  await expect(page.getByText('Connection timed out')).toBeVisible()
+    databases.getByText('Connection timed out', { exact: true })
+  ).toHaveCount(1)
   await expect(page.getByText('Error: Connection timed out')).toHaveCount(0)
 })
 
@@ -200,55 +201,12 @@ test('does not render an Ungrouped group header when there are no real groups', 
   }
   await prepareSettingsPage(page, flat)
 
-  await expect(
-    page.getByText('2 targets · 0 groups', { exact: true }).first()
-  ).toBeVisible()
   await expect(page.getByText('Ungrouped', { exact: true })).toHaveCount(0)
   // With no groups there is nothing to switch between, so the view control hides.
   await expect(page.getByRole('button', { name: 'Groups' })).toHaveCount(0)
-  await expect(page.getByText('aurora-writer', { exact: true })).toBeVisible()
-})
-
-test('moves a target to a new group from its overflow menu', async ({
-  page,
-}) => {
-  let current: FleetFixture = inventory
-  let patchBody: unknown
-  await configureTestTarget(page, { hasPassword: true })
-  await mockTargets(page, inventory, {
-    fleetTargetsPattern: '**/api/fleet/targets**',
-    fleetTargets: (route) => {
-      if (route.request().method() === 'PATCH') {
-        patchBody = route.request().postDataJSON()
-        current = {
-          ...inventory,
-          members: inventory.members.map((member) =>
-            member.name === 'old-dead'
-              ? { ...member, group: 'archive' }
-              : member
-          ),
-          groups: ['production', 'archive'],
-        }
-        return route.fulfill({ json: { updated: true } })
-      }
-      return route.fulfill({ json: current })
-    },
-  })
-  await page.goto('/configure')
-
-  await page.getByRole('button', { name: 'More actions for old-dead' }).click()
-  await page.getByRole('menuitem', { name: 'Move to group…' }).click()
   await expect(
-    page.getByText('Move old-dead to group', { exact: true })
+    page.locator('#main-content').getByText('aurora-writer', { exact: true })
   ).toBeVisible()
-  await page.locator('input[name="move-target-new-group"]').fill('archive')
-  await page.getByRole('button', { name: 'Move target' }).click()
-
-  expect(patchBody).toEqual({ group: 'archive' })
-  await expect(
-    page.getByText('3 targets · 2 groups', { exact: true }).first()
-  ).toBeVisible()
-  await expect(page.getByText('archive', { exact: true })).toBeVisible()
 })
 
 test('/fleet redirects to the Targets section', async ({ page }) => {
@@ -256,13 +214,17 @@ test('/fleet redirects to the Targets section', async ({ page }) => {
 
   await page.goto('/fleet')
   await page.waitForURL(/\/configure/)
+  const url = new URL(page.url())
+  expect(url.hash).toBe('#connections')
+  expect(url.searchParams.get('from')).toBe('fleet')
   await expect(
     page.getByRole('heading', { name: 'Settings', level: 1 })
   ).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Targets' })).toBeVisible()
+  await expect(page.locator('#connections')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Databases' })).toBeVisible()
 })
 
-test('/fleet?add=aws lands with the discovery drawer open on the AWS tab', async ({
+test('/fleet?add=aws lands with the add-database dialog open on AWS', async ({
   page,
 }) => {
   await configureTestTarget(page, { hasPassword: true })
@@ -274,7 +236,7 @@ test('/fleet?add=aws lands with the discovery drawer open on the AWS tab', async
   await page.goto('/fleet?add=aws')
   await page.waitForURL(/\/configure/)
 
-  const drawer = page.getByRole('dialog', { name: 'Add target' })
+  const drawer = page.getByRole('dialog', { name: 'Import from AWS' })
   await expect(drawer).toBeVisible()
   await expect(drawer.getByText('Regions', { exact: true })).toBeVisible()
   await expect(
@@ -330,9 +292,9 @@ test('completes the signed-out AWS SSO browser flow and polls to success', async
     })
   })
 
-  // Signed out, AWS sign-in lives inside the discovery drawer.
+  // Signed out, AWS sign-in lives inside the provider import.
   await page.goto('/configure')
-  await page.getByRole('button', { name: 'Add target' }).first().click()
+  await page.getByRole('button', { name: 'Add a database' }).click()
   await page.getByRole('button', { name: 'AWS', exact: true }).click()
 
   await expect(
@@ -351,7 +313,7 @@ test('completes the signed-out AWS SSO browser flow and polls to success', async
     page.getByRole('link', { name: 'Open the AWS verification page' })
   ).toHaveAttribute('href', 'https://device.sso.aws.amazon.com/')
   await expect(
-    page.getByText('Signed into AWS as mike', { exact: true })
+    page.getByText('Signed in to AWS as mike', { exact: true })
   ).toBeVisible({ timeout: 7_000 })
   expect(polls).toBeGreaterThanOrEqual(2)
 })
@@ -517,7 +479,7 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
   })
 
   await page.goto('/configure')
-  await page.getByRole('button', { name: 'Add target' }).first().click()
+  await page.getByRole('button', { name: 'Add a database' }).click()
   await page.getByRole('button', { name: 'AWS', exact: true }).click()
   await expect(
     page.getByText(
@@ -527,13 +489,11 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
   ).toBeVisible()
   await page.getByRole('button', { name: 'Discover', exact: true }).click()
 
-  await expect(
-    page.getByText('Choose which databases to add to your fleet.')
-  ).toBeVisible()
+  await expect(page.getByText('Choose which databases to add.')).toBeVisible()
   expect(previewBody?.profile).toBe('dev')
   expect(previewBody?.regions).toEqual(expect.arrayContaining(['us-east-1']))
   const addTargetsDialog = page.getByRole('dialog', {
-    name: 'Add target',
+    name: 'Import from AWS',
   })
   const groupedPreviewLabel = addTargetsDialog.getByText('orders-cluster', {
     exact: true,
@@ -552,9 +512,10 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
     await ungroupedPreviewLabel.elementHandle()
   )
   expect(groupBeforeUngrouped).toBe(true)
+  // The already-added row carries a labelled tick and no checkbox.
   await expect(
-    page.getByText('already imported', { exact: true })
-  ).toBeVisible()
+    addTargetsDialog.getByText('Already added', { exact: true })
+  ).toHaveCount(1)
   await expect(
     page.getByRole('checkbox', { name: 'Select orders-reader' })
   ).toHaveCount(0)
@@ -671,15 +632,7 @@ test('CSV picker posts browser file content instead of a server path', async ({
     'name,host,engine,port,database,user\n' +
     'browser-csv,browser.test,postgresql,5432,app,app_user\n'
   await page.goto('/configure')
-  // The drawer opens on AWS and fetches that account's status, which re-lays
-  // the panel out. Let it land before picking a source, so the click cannot
-  // fall outside the drawer and dismiss it.
-  const awsStatus = page.waitForResponse('**/api/providers/aws-status*')
-  await page.getByRole('button', { name: 'Add target' }).first().click()
-  await awsStatus
-  await expect(
-    page.getByText('Choose an integration', { exact: true })
-  ).toBeVisible()
+  await page.getByRole('button', { name: 'Add a database' }).click()
   await page.getByRole('button', { name: 'CSV file', exact: true }).click()
   await expect(
     page.getByRole('button', { name: 'Choose CSV file' })

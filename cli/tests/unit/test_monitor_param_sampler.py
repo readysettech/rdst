@@ -87,6 +87,24 @@ def test_sampler_polls_only_for_top_queries_lacking_samples(tmp_path, monkeypatc
     assert connection.ended == "commit"
 
 
+def test_a_connection_change_closes_the_open_connection_on_the_next_pass(tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    sampler = ParamSampler(store, clock=lambda: NOW, interval_s=3)
+    closed = []
+
+    class Open:
+        def close(self):
+            closed.append(True)
+
+    sampler._connections["db"] = Open()
+    monkeypatch.setattr(sampler, "sample_target", lambda target: None)
+    sampler.tick()
+    assert closed == []
+    sampler.reconnect("db")
+    sampler.tick()
+    assert closed == [True] and "db" not in sampler._connections
+
+
 def test_mysql_reads_statement_history_by_digest():
     cursor = Cursor([("shop", "d1", "SELECT * FROM t WHERE id = 5")])
     rows = ParamSampler._read_mysql(cursor, {"shop:d1": "k1"})

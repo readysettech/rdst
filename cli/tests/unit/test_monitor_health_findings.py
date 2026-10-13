@@ -19,7 +19,10 @@ DAY = 86400
 
 @pytest.fixture
 def store(tmp_path):
-    return MonitorStore(tmp_path / "monitor.db")
+    store = MonitorStore(tmp_path / "monitor.db")
+    # NOW falls inside the default quiet hours in some time zones.
+    store.set_settings("db", {"quiet_hours": {"from_hour": 0, "to_hour": 0}})
+    return store
 
 
 def action(id="setting_shared_buffers", severity="bad", check="settings"):
@@ -63,12 +66,11 @@ def test_findings_stay_off_the_inbox_and_new_bad_ones_push_once(store, severitie
     assert items(store) == []
     assert len(pushes(store)) == count
     daily = present_inbox_item(items(store, "daily_summary")[0], {}, [], set())
+    assert daily["title"] == f"Daily report for {report._month_day(NOW)} is ready"
     if count:
         assert pushes(store)[0]["item_id"] == daily["id"]
-        assert daily["title"] == ("2 things to fix on db" if severities.count("bad") > 1
-                                  else findings[0]["title"])
-    else:
-        assert daily["title"] == "Checkup ready"
+        more = " Plus 1 more in today's report." if severities.count("bad") > 1 else ""
+        assert daily["summary"] == f"Fix setting_0. setting_0 needs attention.{more}"
 
 
 def test_a_finding_whose_action_was_already_open_does_not_push_again(store):

@@ -3,24 +3,43 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 let passwordLocked = false
 let connectivityChecking = false
-let connectivityFailure: { target: string; message: string } | null = null
 let aiBlocked = false
-const ensureReachable = vi.fn(async () => !connectivityFailure)
+let resolvedTarget: string | null = 'orders_db'
+const openAddDatabase = vi.fn()
+const ensureReachable = vi.fn(async () => true)
 
 vi.mock('../components/AiSetupNotice', () => ({
-  AiSetupNotice: ({ feature }: { feature: string }) =>
-    aiBlocked ? <div data-testid="ai-setup-notice">{feature}</div> : null,
+  AiSetupNotice: () =>
+    aiBlocked ? <div data-testid="ai-setup-notice" /> : null,
   useAiBlocked: () => aiBlocked,
 }))
-
+vi.mock('../components/configure/addDatabase', () => ({
+  useOpenAddDatabase: () => openAddDatabase,
+}))
 vi.mock('../hooks/useTarget', () => ({
   useTarget: () => ({ target: 'orders_db', setTarget: vi.fn() }),
   useTargetResolution: () => ({
-    target: 'orders_db',
+    target: resolvedTarget,
     setTarget: vi.fn(),
     isResolving: false,
     isUnavailable: false,
     refetch: vi.fn(),
+  }),
+}))
+const filter = vi.hoisted(() => ({
+  db: null as string | null,
+  setDb: vi.fn(),
+  databases: [] as { name: string; state: string | null; monitored: boolean }[],
+}))
+vi.mock('../hooks/useDbFilter', () => ({
+  useDbFilter: () => ({ db: filter.db, setDb: filter.setDb }),
+}))
+vi.mock('../lib/monitor/hooks', () => ({
+  useConfiguredDatabases: () => ({
+    databases: filter.databases,
+    doFirst: null,
+    isPending: false,
+    isError: false,
   }),
 }))
 vi.mock('../lib/useTargetPasswordLock', () => ({
@@ -33,7 +52,7 @@ vi.mock('../lib/useTargetPasswordLock', () => ({
 }))
 vi.mock('../lib/useTargetConnectivityGate', () => ({
   useTargetConnectivityGate: () => ({
-    failure: connectivityFailure,
+    failure: null,
     isChecking: connectivityChecking,
     ensureReachable,
     reset: vi.fn(),
@@ -57,27 +76,12 @@ vi.mock('../components/AskPanel', () => ({
     />
   ),
 }))
-vi.mock('../components/SemanticLayerBadge', () => ({
-  SemanticLayerBadge: () => <div data-testid="semantic-layer-badge" />,
-}))
-vi.mock('../components/TargetDropdown', () => ({
-  TargetDropdown: () => <div data-testid="target-dropdown" />,
-}))
 vi.mock('../components/TargetLockNotice', () => ({
   TargetLockNotice: () => <div data-testid="target-lock-notice" />,
 }))
 vi.mock('../components/TargetConnectivityNotice', () => ({
-  TargetConnectivityNotice: ({
-    failure,
-    isChecking,
-  }: {
-    failure: unknown
-    isChecking: boolean
-  }) => (
-    <div
-      data-failed={String(Boolean(failure))}
-      data-testid="target-connectivity-notice"
-    >
+  TargetConnectivityNotice: ({ isChecking }: { isChecking: boolean }) => (
+    <div data-testid="target-connectivity-notice">
       {isChecking ? 'checking' : 'settled'}
     </div>
   ),
@@ -89,67 +93,88 @@ import { Route } from './ask'
 beforeEach(() => {
   passwordLocked = false
   connectivityChecking = false
-  connectivityFailure = null
   aiBlocked = false
+  resolvedTarget = 'orders_db'
+  openAddDatabase.mockClear()
   ensureReachable.mockClear()
+  filter.db = null
+  filter.databases = [{ name: 'orders_db', state: null, monitored: true }]
 })
 
-afterEach(() => {
-  cleanup()
-})
+afterEach(cleanup)
 
 describe('ask route', () => {
-  it('accepts only the retired-agents arrival flag, never a view switcher', () => {
+  it('accepts a question to prefill and the retired-agents flag, nothing else', () => {
     const validateSearch = Route.options.validateSearch as (
       search: Record<string, unknown>
     ) => Record<string, unknown>
-    expect(validateSearch({ from: 'agents' })).toEqual({ from: 'agents' })
+    expect(validateSearch({ sql: 'select 1', from: 'agents' })).toEqual({
+      sql: 'select 1',
+      from: 'agents',
+    })
     expect(validateSearch({ view: 'chat', from: 'elsewhere' })).toEqual({})
+    expect(validateSearch({ db: 'demo' })).toEqual({ db: 'demo' })
+  })
+
+  it('accepts the sample values for the placeholders and drops malformed ones', () => {
+    const validateSearch = Route.options.validateSearch as (
+      search: Record<string, unknown>
+    ) => Record<string, unknown>
+    const params = [{ name: '$1', value: '7' }]
+    expect(
+      validateSearch({ sql: 'select $1', params: [...params, { name: 1 }] })
+    ).toEqual({ sql: 'select $1', params })
+    expect(validateSearch({ sql: 'select $1', params: 'x' })).toEqual({
+      sql: 'select $1',
+    })
   })
 })
 
-describe('AskPage workspace', () => {
-  it('renders Ask as one focused workspace with target provenance', () => {
+describe('AskPage', () => {
+  it('opens with the bar naming the target and the box as the page', () => {
     render(<AskPage />)
-
-    expect(screen.getByRole('heading', { name: 'Ask' })).toBeTruthy()
-    expect(
-      screen.getByText(
-        'Turn a database question into a verified answer and reusable SQL.'
-      )
-    ).toBeTruthy()
-    expect(screen.queryByTestId('semantic-layer-badge')).toBeNull()
-    expect(screen.queryByRole('link', { name: 'Discover schema' })).toBeNull()
-    expect(screen.getByTestId('target-dropdown')).toBeTruthy()
-
+    expect(screen.getByRole('heading', { level: 1, name: 'Ask' })).toBeTruthy()
+    expect(screen.getByRole('banner').textContent).toContain('orders_db')
+    // With one database the filter names it and offers no All databases.
+    expect(screen.getByTestId('database-filter').textContent).toBe('orders_db')
+    expect(screen.queryByText(/^Asks /)).toBeNull()
     const panel = screen.getByTestId('ask-panel')
     expect(panel.getAttribute('data-target')).toBe('orders_db')
     expect(panel.getAttribute('data-disabled')).toBe('false')
     expect(panel.getAttribute('data-has-preflight')).toBe('true')
-    expect(screen.queryByRole('tab')).toBeNull()
-    expect(screen.queryByText('Conversations')).toBeNull()
   })
 
-  it('says what happened when the reader arrives from the retired /agents URL', () => {
-    render(<AskPage movedFrom="agents" />)
-
-    expect(screen.getByRole('alert').textContent).toMatch(/rdst CLI/i)
-    expect(screen.getByText('Agents was retired')).toBeTruthy()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
-    expect(screen.queryAllByText('Agents was retired')).toHaveLength(0)
-  })
-
-  it('shows no arrival notice when Ask is opened directly', () => {
+  it('runs against the database the filter names', () => {
+    filter.db = 'analytics'
+    filter.databases = [
+      { name: 'demo', state: 'watching', monitored: true },
+      { name: 'analytics', state: 'watching', monitored: true },
+    ]
     render(<AskPage />)
-
-    expect(screen.queryAllByText('Agents was retired')).toHaveLength(0)
+    expect(screen.getByTestId('ask-panel').getAttribute('data-target')).toBe(
+      'analytics'
+    )
+    expect(screen.getByTestId('database-filter').textContent).toBe('analytics')
+    expect(screen.queryByText(/the first monitored database/)).toBeNull()
   })
 
-  it('keeps Ask visible but blocks submissions while connectivity is checked', () => {
+  it('asks the first monitored database for All databases, and says so', () => {
+    filter.databases = [
+      { name: 'staging', state: 'not_monitored', monitored: false },
+      { name: 'demo', state: 'watching', monitored: true },
+    ]
+    render(<AskPage />)
+    expect(screen.getByTestId('ask-panel').getAttribute('data-target')).toBe(
+      'demo'
+    )
+    expect(
+      screen.getByText('Asks demo, the first monitored database.')
+    ).toBeTruthy()
+  })
+
+  it('keeps the box but blocks questions while connectivity is checked', () => {
     connectivityChecking = true
     render(<AskPage />)
-
     expect(screen.getByTestId('target-connectivity-notice').textContent).toBe(
       'checking'
     )
@@ -158,21 +183,41 @@ describe('AskPage workspace', () => {
     )
   })
 
-  it('asks for an AI provider in place, without replacing the page', () => {
+  it('asks for an AI provider in place and blocks questions until then', () => {
     aiBlocked = true
     render(<AskPage />)
-
-    expect(screen.getByRole('heading', { name: 'Ask' })).toBeTruthy()
-    expect(screen.getByTestId('ai-setup-notice').textContent).toBe('Ask')
+    expect(screen.getByTestId('ai-setup-notice')).toBeTruthy()
     expect(screen.getByTestId('ask-panel').getAttribute('data-disabled')).toBe(
       'true'
     )
   })
 
-  it('keeps the workspace visible but disables Ask when the target is locked', () => {
+  it('drops a stored database that is no longer configured', () => {
+    resolvedTarget = 'ci_shop'
+    filter.db = 'ci_shop'
+    filter.databases = []
+    render(<AskPage />)
+    expect(screen.queryByText(/Asks ci_shop/)).toBeNull()
+    expect(screen.getByTestId('database-filter').textContent).toBe(
+      'All databases'
+    )
+    expect(screen.getByText('No database yet')).toBeTruthy()
+    expect(screen.queryByTestId('ask-panel')).toBeNull()
+  })
+
+  it('offers to add a database when there is none', () => {
+    resolvedTarget = null
+    filter.databases = []
+    render(<AskPage />)
+    expect(screen.getByText('No database yet')).toBeTruthy()
+    expect(screen.queryByTestId('ask-panel')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Add a database' }))
+    expect(openAddDatabase).toHaveBeenCalledOnce()
+  })
+
+  it('disables Ask when the target is locked', () => {
     passwordLocked = true
     render(<AskPage />)
-
     expect(screen.getByTestId('target-lock-notice')).toBeTruthy()
     expect(screen.getByTestId('ask-panel').getAttribute('data-disabled')).toBe(
       'true'

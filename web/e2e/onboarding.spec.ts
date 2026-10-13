@@ -3,12 +3,11 @@ import {
   clearTargets,
   expect,
   mockPrerequisites,
-  prerequisitesResult,
   setBackendFixtures,
   test,
 } from './fixtures'
 
-test('completes first-run onboarding and persists the target', async ({
+test('adds the first database from Home and persists it', async ({
   page,
   browserErrors,
 }) => {
@@ -44,8 +43,8 @@ test('completes first-run onboarding and persists the target', async ({
     ],
   })
 
-  // "Test & connect" tests before it saves, so the connection the first run
-  // stores is one that answered. A read-only role needs no further review.
+  // "Add and monitor" tests before it saves, so the connection the first run
+  // stores is one that answered.
   await page.route('**/api/configure/targets/e2e-db/test', (route) =>
     route.fulfill({
       headers: { 'content-type': 'text/event-stream' },
@@ -65,70 +64,43 @@ test('completes first-run onboarding and persists the target', async ({
     })
   )
 
-  // The four-step wizard was replaced by the single, exitable ConnectPage:
-  // one form, one primary action, straight back into the app.
+  // The retired first-run page lands on Home with the dialog open.
   await page.goto('/onboarding')
-  await expect(
-    page.getByRole('heading', { name: 'Start with Readyset' })
-  ).toBeVisible()
-
-  await page.locator('[name="name"]').fill('e2e-db')
-  await page.locator('[name="host"]').fill('127.0.0.1')
-  await page.locator('[name="database"]').fill('app')
-  await page.locator('[name="user"]').fill('e2e')
-  await page.locator('[name="password"]').fill('test-password')
-  // The check finds the extension missing until the user runs the fix in
-  // another window; the page re-checks on its own and finishes.
-  const prerequisites = await mockPrerequisites(
-    page,
-    'e2e-db',
-    prerequisitesResult('e2e-db', { ready: false })
-  )
-  await page.getByRole('button', { name: 'Test & connect' }).click()
-
-  // Connecting goes straight to the next step: the "Turn on monitoring" dialog
-  // on the new database's page, which runs the prerequisites check itself.
-  await expect(page).toHaveURL(/\/database\?panel=enable/)
-  const dialog = page.getByRole('dialog', {
-    name: 'Turn on monitoring for e2e-db',
-  })
+  await expect(page).toHaveURL(/\/\?add=1/)
+  const dialog = page.getByRole('dialog', { name: 'Add a database' })
   await expect(dialog).toBeVisible()
-  const checker = dialog.getByTestId('prereq-checker')
-  await expect(checker).toHaveAttribute('data-phase', 'blocked')
-  await expect(
-    checker.locator('[data-check="pg_stat_statements"][data-status="missing"]')
-  ).toBeVisible()
-  await expect(
-    checker.getByText('CREATE EXTENSION IF NOT EXISTS pg_stat_statements;')
-  ).toBeVisible()
-  prerequisites.answer(prerequisitesResult('e2e-db'))
-  await expect(checker).toHaveAttribute('data-phase', 'ready', {
-    timeout: 10_000,
-  })
-  await expect(
-    dialog.getByRole('heading', { name: 'Ready to monitor' })
-  ).toBeVisible()
-  // Its button really turns monitoring on.
+
+  // The database is named after its database name.
+  await dialog
+    .locator('[name="connection_string"]')
+    .fill('postgresql://e2e:test-password@127.0.0.1:5432/e2e-db')
+  await expect(dialog.locator('[name="host"]')).toHaveValue('127.0.0.1')
+  // Adding opens the new database's page on the turn-on dialog: its checks and the
+  // EXPLAIN ANALYZE warning come before monitoring turns on.
+  await mockPrerequisites(page, 'e2e-db')
   const enabled = page.waitForRequest(
     (request) =>
       request.method() === 'PUT' &&
       request.url().endsWith('/api/monitor/targets/e2e-db/settings') &&
       request.postDataJSON()?.enabled === true
   )
-  await dialog.getByRole('button', { name: /^Turn on/ }).click()
-  await enabled
-  await expect(dialog).toHaveCount(0)
-  await expect(page).not.toHaveURL(/panel=enable/)
-
-  // With one database Home opens its Database page, which proves the target persisted.
-  await page.goto('/')
+  await dialog.getByRole('button', { name: 'Add and monitor' }).click()
   await expect(page).toHaveURL(/\/database/)
-  await expect(
-    page.getByRole('heading', { level: 1, name: 'e2e-db' })
-  ).toBeVisible()
+  await expect(dialog).toHaveCount(0)
+  const enable = page.getByRole('dialog', { name: 'Monitor e2e-db' })
+  await expect(enable.getByTestId('explain-analyze-warning')).toBeVisible()
+  await enable.getByRole('button', { name: 'Turn on monitoring' }).click()
+  await enabled
 
-  // ConnectPage promotes the first target to default (addTarget →
-  // setDefaultTarget → completeInit), unlike the retired wizard.
+  // The sidebar lists the persisted database beside Home.
+  const listed = page
+    .getByRole('navigation', { name: 'Databases' })
+    .getByRole('link', { name: /^e2e-db/ })
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
+  await expect(listed).toBeVisible()
+
+  // The first database becomes the default.
   const targets = await page.request.get('/api/configure/targets')
   expect(targets.ok()).toBe(true)
   await expect(targets.json()).resolves.toMatchObject({
@@ -137,7 +109,5 @@ test('completes first-run onboarding and persists the target', async ({
   })
 
   await page.reload()
-  await expect(
-    page.getByRole('heading', { level: 1, name: 'e2e-db' })
-  ).toBeVisible()
+  await expect(listed).toBeVisible()
 })

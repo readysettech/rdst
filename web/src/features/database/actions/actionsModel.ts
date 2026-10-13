@@ -1,51 +1,6 @@
-// Small words for the Actions tab.
+// One database's actions in numbers, for the Live tab's pointer and the report's summary.
+import type { ActionCard, ActionsPage, IndexPlan } from '@/lib/monitor/actions'
 
-export function span(seconds: number): string {
-  if (seconds >= 2 * 86400) return `${Math.floor(seconds / 86400)} days`
-  if (seconds >= 2 * 3600) return `${Math.floor(seconds / 3600)} hours`
-  if (seconds >= 120) return `${Math.floor(seconds / 60)} minutes`
-  return 'a minute'
-}
-
-/** What the recommendations rest on: RDST's own readings, or the database's longer memory. */
-export function basedOn(window: {
-  observed_s: number
-  counter_age_s: number
-}): string {
-  const observed = `Based on ${span(window.observed_s)} of traffic`
-  return window.counter_age_s > window.observed_s * 2
-    ? `${observed} and ${span(window.counter_age_s)} of index statistics`
-    : observed
-}
-
-export function checkedAgo(at: number, now = Date.now() / 1000): string {
-  const seconds = Math.max(0, now - at)
-  if (seconds < 90) return 'checked just now'
-  if (seconds < 3600) return `checked ${Math.floor(seconds / 60)} min ago`
-  return `checked ${Math.floor(seconds / 3600)} h ago`
-}
-
-/** When a kind is checked next, as a countdown. */
-export function nextCheck(at: number, now = Date.now() / 1000): string {
-  const seconds = at - now
-  return seconds <= 60
-    ? 'Next check in under a minute'
-    : `Next check in ${Math.ceil(seconds / 60)} min`
-}
-
-export function formatBytes(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
-  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${bytes} B`
-}
-
-export function pct(share: number): string {
-  const value = share * 100
-  return value >= 10 ? `${value.toFixed(0)}%` : `${value.toFixed(1)}%`
-}
-
-export type Severity = 'low' | 'medium' | 'high'
 export type Category =
   | 'indexes'
   | 'settings'
@@ -53,7 +8,7 @@ export type Category =
   | 'rewrites'
   | 'caching'
 
-/** The Actions tab's kinds of change, in their default order. */
+/** The kinds of change, in their default order. */
 export const CATEGORIES: readonly { id: Category; label: string }[] = [
   { id: 'indexes', label: 'Indexes' },
   { id: 'settings', label: 'Server settings' },
@@ -62,94 +17,45 @@ export const CATEGORIES: readonly { id: Category; label: string }[] = [
   { id: 'caching', label: 'Caching' },
 ]
 
-/** How much a change matters, on one scale for every kind. */
-export const SEVERITY: Record<
-  Severity,
-  { label: string; tag: 'negative' | 'warning' | 'neutral' }
-> = {
-  high: { label: 'High impact', tag: 'negative' },
-  medium: { label: 'Worth doing', tag: 'warning' },
-  low: { label: 'Small win', tag: 'neutral' },
+/** Every open change, a grouped card's own changes counted one by one. */
+export function flat(page: ActionsPage | undefined): ActionCard[] {
+  return [...(page?.actions ?? []), ...(page?.more ?? [])].flatMap((card) =>
+    card.children.length ? card.children : [card]
+  )
 }
 
-/** Steps arrive one per line; a single line is a sentence, several are a numbered list. */
-export function stepList(steps: string | null | undefined): string[] {
-  return (steps ?? '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
+/** How many changes are open: the index plan's, then every other kind's. */
+export function changeCount(
+  page: ActionsPage | undefined,
+  plan?: IndexPlan | null
+): number {
+  if (!plan?.add || !plan.drop) return page?.open_count ?? 0
+  return (
+    plan.add.length +
+    plan.drop.length +
+    flat(page).filter((card) => card.category !== 'indexes').length
+  )
 }
 
-export type CardState = 'found' | 'checked' | 'checking' | 'waiting'
-
-export interface CategoryStatus {
-  state: CardState
-  count: number
-  /** One line under the label: what's there, or what RDST is doing. */
-  line: string
-  /** A quieter second line, like when it was last checked. */
-  sub?: string
+/** The first plan is still on its way: the first deep analyses are running. */
+export function buildingFirstPlan(page: ActionsPage | undefined): boolean {
+  return page?.checkup?.state === 'first_pass'
 }
 
-interface CoverageLike {
-  state: CardState
-  checked_at: number | null
-  next_at?: number | null
-}
-
-/** A category card's count and status line, from its changes and what RDST checked. */
-export function categoryStatus(
-  kind: Category,
-  cards: { type: string; severity: Severity }[],
-  coverage: CoverageLike | undefined,
-  progress: { analyzed: number; total: number },
-  now = Date.now() / 1000
-): CategoryStatus {
-  const count = cards.length
-  // Every kind says when it's looked at again, whether or not it has changes.
-  const next = coverage?.next_at ? nextCheck(coverage.next_at, now) : undefined
-  if (count) {
-    if (kind === 'indexes') {
-      const adds = cards.filter((card) => card.type === 'add_index').length
-      const drops = cards.filter((card) => card.type === 'drop_index').length
-      const parts = [
-        adds ? `${adds} to add` : '',
-        drops ? `${drops} to drop` : '',
-      ].filter(Boolean)
-      return { state: 'found', count, line: parts.join(', '), sub: next }
-    }
-    const high = cards.filter((card) => card.severity === 'high').length
-    const medium = cards.filter((card) => card.severity === 'medium').length
-    return {
-      state: 'found',
-      count,
-      line: high
-        ? `${high} high impact`
-        : medium
-          ? `${medium} worth doing`
-          : `${count} small ${count === 1 ? 'win' : 'wins'}`,
-      sub: next,
-    }
+/**
+ * The index plan's statement for a query's open action, the one the plan helps it most
+ * with. The plan is canonical: the query pane shows and copies this statement.
+ */
+export function planSqlFor(
+  plan: IndexPlan | null | undefined,
+  key: string
+): string | null {
+  let best: { sql: string; gain: number } | null = null
+  for (const add of plan?.add ?? []) {
+    if (plan?.set_aside?.includes(add.id)) continue
+    const help = add.helps.find((entry) => entry.key === key)
+    if (help && (!best || help.gain > best.gain))
+      best = { sql: add.sql, gain: help.gain }
   }
-  const state = coverage?.state ?? 'checking'
-  if (state === 'waiting')
-    return {
-      state,
-      count: 0,
-      line: progress.total
-        ? `Waiting on deep analysis, ${Math.min(progress.analyzed, progress.total)} of ${progress.total}`
-        : 'Waiting on deep analysis',
-    }
-  if (state === 'checking') return { state, count: 0, line: 'Checking now' }
-  const at = coverage?.checked_at
-  return {
-    state: 'checked',
-    count: 0,
-    line: 'Nothing to change',
-    sub: coverage?.next_at
-      ? nextCheck(coverage.next_at, now)
-      : at
-        ? checkedAgo(at, now).replace(/^c/, 'C')
-        : undefined,
-  }
+  return best?.sql ?? null
 }

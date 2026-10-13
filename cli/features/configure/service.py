@@ -275,6 +275,79 @@ class ConfigureService:
                 target_name=name,
             )
 
+    @staticmethod
+    def rename_blocker(name: str) -> Optional[str]:
+        """Why the database can't be renamed right now, or None."""
+        from shared import analysis_lane
+        from shared.monitor.monitor_store import MonitorStore, default_monitor_db_path
+        from shared.run_registry import run_registry
+
+        busy = (
+            analysis_lane.active(name) is not None
+            or run_registry.target_busy(name)
+            or (default_monitor_db_path().exists() and MonitorStore().busy(name))
+        )
+        if busy:
+            return f"{name} is running an analysis or a report. Rename it when that finishes."
+        return None
+
+    async def rename_target(self, old: str, new: str) -> None:
+        """Rename a database: its saved connection, the default, its monitoring history, its
+        analyses and its activity log move together. Runs under the run guards of both
+        names, so no monitor cycle reads either name mid-way."""
+        from features.monitor import actions, analysis_digest, plan_inputs
+        from features.monitor.api import views
+        from features.monitor.run_guard import RunGuard
+        from shared.agent_activity.store import AgentActivityStore
+        from shared.monitor.monitor_store import MonitorStore, default_monitor_db_path
+        from shared.query_registry import QueryRegistry
+        from shared.ssh_tunnel import get_tunnel_manager
+
+        def stores() -> list[Any]:
+            found: list[Any] = [MonitorStore()] if default_monitor_db_path().exists() else []
+            library = QueryRegistry().library_store
+            return found + ([library] if library is not None else []) + [AgentActivityStore()]
+
+        def move() -> None:
+            cfg = self._load_config()
+            entry = cfg.get(old)
+            if entry is None:
+                raise LookupError(f"Database '{old}' not found.")
+            was_default = cfg.get_default() == old
+            cfg.remove(old)
+            cfg.upsert(new, entry)
+            if was_default:
+                cfg.set_default(new)
+            cfg.save()
+            moved: list[Any] = []
+            try:
+                for store in stores():
+                    store.rename_target(old, new)
+                    moved.append(store)
+            except Exception:
+                for store in reversed(moved):
+                    try:
+                        store.rename_target(new, old)
+                    except Exception:
+                        logger.exception("Could not move %s back from %s to %s",
+                                         type(store).__name__, new, old)
+                restore = self._load_config()
+                restore.remove(new)
+                restore.upsert(old, entry)
+                if was_default:
+                    restore.set_default(old)
+                restore.save()
+                raise
+            finally:
+                # Analyses read under either name while the rows moved may be cached empty.
+                for cached in (analysis_digest.digest_for_ref, plan_inputs._suggestions,
+                               actions._tested_rewrite):
+                    cached.cache_clear()
+                views.forget_registry()
+
+        await asyncio.to_thread(RunGuard().run, old, lambda: RunGuard().run(new, move))
+        get_tunnel_manager().close(old)
+
     async def remove_target(
         self,
         name: str,
@@ -709,10 +782,13 @@ class ConfigureService:
                         "title": "Enable historical query discovery",
                         "detail": "permission" if "permission" in str(exc).lower() else "missing",
                         "instructions": [
-                            "Add pg_stat_statements to shared_preload_libraries and restart PostgreSQL.",
+                            "Add pg_stat_statements to shared_preload_libraries, keeping any libraries already listed, and restart PostgreSQL.",
                             "Run CREATE EXTENSION IF NOT EXISTS pg_stat_statements; in this database.",
                             "Grant this database user permission to read pg_stat_statements.",
                         ],
+                        # The lines to copy: server configuration, then SQL.
+                        "config": ["shared_preload_libraries = 'pg_stat_statements'"],
+                        "sql": ["CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"],
                     }
             try:
                 cursor.execute("SHOW VARIABLES LIKE 'performance_schema'")
@@ -731,6 +807,8 @@ class ConfigureService:
                     "Grant this database user SELECT access to performance_schema statement digest tables.",
                     "Verify with SHOW VARIABLES LIKE 'performance_schema';.",
                 ],
+                "config": ["performance_schema=ON"],
+                "sql": [],
             }
         finally:
             try:

@@ -1,76 +1,214 @@
-// Everything about one query, inline under its row (DESIGN_V4 section 3): its own
-// latency and calls charts, the full deep analysis, the SQL, Jev's structural read
-// and its benchmarks (DESIGN_V5 section 4). "Deep analyze this query" leads the
-// actions; a statement RDST won't run says why in its place. Nothing navigates away
-// except Send to Ask. A deep link's `tab` scrolls to that section; `readyset` is the
-// Benchmarks one.
-
+// The detail pane for one query: the row's chip and numbers in the header, then the
+// title, the two history lines, the fix (or the analysis in progress), the query and
+// the Readyset line; the four actions in the footer. A write also says what each run
+// costs its table.
 import { cn } from '@rs/tailwind-base'
-import { Button } from '@rs/ui-new/button'
-import { Icon } from '@rs/ui-new/icon'
+import { Button, buttonStyles } from '@rs/ui-new/button'
+import { SidePane } from '@rs/ui-new/side-pane'
+import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
-import { useNavigate } from '@tanstack/react-router'
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
-import { BenchmarkDialog } from '@/features/database/benchmark/BenchmarkDialog'
-import { BenchmarksSection } from '@/features/database/benchmark/BenchmarksSection'
-import { benchmarkBlockReason } from '@/features/database/benchmark/eligibility'
-import { useQueryBenchmark } from '@/features/database/benchmark/useQueryBenchmark'
-import { QueryContextSlot } from '@/features/inbox/InboxContextBanner'
-import { MuteMenu } from '@/features/monitor-kit/MuteMenu'
-import { QueryTextBody } from '@/features/monitor-kit/QueryTextBody'
-import { JevAssessment } from '@/features/queries/saved/JevAssessment'
-import type { JevAssessmentSummary } from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
+import { Link, useNavigate } from '@tanstack/react-router'
+import { type ReactNode, useState } from 'react'
+import { MiniTrend } from '@/features/monitor-kit/charts'
+import { formatRelative } from '@/features/monitor-kit/format'
+import { paramSourceText } from '@/features/queries/results/analysisView'
+import { getQueryAnalysis } from '@/lib/monitor/api'
 import { useMonitorQuery } from '@/lib/monitor/hooks'
-import type { MonitorQuery, MonitorRange } from '@/lib/monitor/types'
-import { AnalysisTab } from './AnalysisTab'
+import { monitorKeys } from '@/lib/monitor/keys'
+import type {
+  AnalyzeJob,
+  ApiRange,
+  DeepAnalysisDigest,
+  MonitorQuery,
+} from '@/lib/monitor/types'
+import { AnalyzingBlock } from '../analyze/AnalyzingBlock'
+import type { AnalyzingStep } from '../analyze/analyzingSteps'
+import { queriesWithFixes } from '../benchmark/fixBenchmarkModel'
+import {
+  formatSharePercent,
+  latencyText,
+  rowChip,
+  rowStatus,
+  STATUS_CHIP,
+  scorePoor,
+  swatchColor,
+} from '../databaseModel'
 import { analyzability, notAnalyzedLine } from './analyzability'
-import { PerformanceTab } from './PerformanceTab'
-import { type DetailTab, queryName } from './querySelectors'
+import { StatusChip } from './QuerySection'
+import { analysisLine } from './queryStatus'
+import { SqlCode } from './SqlCode'
 
-function Section({
-  id,
+const ghost = {
+  variant: 'primary',
+  modifier: 'ghost',
+  size: 'small',
+} as const
+
+const outlineLink = buttonStyles({
+  variant: 'primary',
+  modifier: 'outline',
+  size: 'small',
+}).root()
+
+/** Splits a stored-analysis reference into registry hash and analysis id. */
+function parseAnalysisRef(
+  ref: string | null | undefined,
+  fallbackHash: string
+): { hash: string; analysisId: string } | null {
+  if (!ref) return null
+  const marker = '/analysis/'
+  const at = ref.indexOf(marker)
+  if (at < 0) return { hash: fallbackHash, analysisId: ref }
+  const hash = ref.slice(0, at).replace(/\/+$/, '').split('/').pop()
+  const analysisId = ref.slice(at + marker.length).replace(/\/+$/, '')
+  return hash && analysisId ? { hash, analysisId } : null
+}
+
+function Block({
   title,
-  aside,
   children,
   className,
 }: {
-  id?: string
   title: string
-  aside?: ReactNode
   children: ReactNode
   className?: string
 }) {
   return (
-    <section
-      id={id}
-      aria-label={title}
-      className={cn(
-        'min-w-0 scroll-mt-28 space-y-3 rounded-panel border border-border-layout-1 bg-surface-layout-1 p-4',
-        className
-      )}
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <Text as="h3" level="label-large" className="text-content-layout-1">
-          {title}
-        </Text>
-        {aside}
-      </div>
+    <div className={cn('mt-6', className)}>
+      <Text as="h4" level="caption" className="mb-2 text-content-layout-3">
+        {title}
+      </Text>
       {children}
-    </section>
+    </div>
   )
 }
 
-export interface QueryDetailProps {
-  query: MonitorQuery
-  target: string
-  tab: DetailTab
-  /** The range to fetch this query's series for, and the window to show. */
-  range: MonitorRange
-  domain?: [number, number]
-  jev?: JevAssessmentSummary | null
-  /** Why Jev's assessment isn't complete yet, from the backend. */
-  jevWaiting?: string | null
-  onTabChange: (tab: DetailTab) => void
+function History({
+  title,
+  value,
+  points,
+  color,
+  format,
+}: {
+  title: string
+  value: string
+  points: { x: number; y: number | null }[]
+  color: string
+  format: (value: number) => string
+}) {
+  return (
+    <div className="relative">
+      <Text as="h4" level="caption" className="mb-2 text-content-layout-3">
+        {title}
+      </Text>
+      <Text
+        as="span"
+        level="caption"
+        className="absolute top-0 right-0 tabular-nums text-content-layout-1"
+      >
+        {value}
+      </Text>
+      <div className="h-18">
+        <MiniTrend
+          ariaLabel={title}
+          points={points}
+          color={color}
+          height={72}
+          resolution={60}
+          yMin="auto"
+          formatValue={format}
+        />
+      </div>
+    </div>
+  )
+}
+
+/** The plan score out of 100, in the warning tone when it's poor. */
+function PlanScore({ score }: { score: number }) {
+  return (
+    <Text
+      as="p"
+      level="body-small"
+      className="mb-2 text-content-layout-2"
+      data-testid="pane-plan-score"
+    >
+      Plan score{' '}
+      <span
+        className={cn(
+          'font-medium tabular-nums',
+          scorePoor(score)
+            ? 'text-content-warning-soft'
+            : 'text-content-layout-1'
+        )}
+      >
+        {Math.round(score)}
+      </span>
+      <span className="text-content-layout-3">/100</span>
+    </Text>
+  )
+}
+
+function CopyFix({ sql }: { sql: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <Button
+      variant="primary"
+      modifier="solid"
+      size="small"
+      label={copied ? 'Copied' : 'Copy fix'}
+      onClick={() => {
+        void navigator.clipboard?.writeText(sql).then(() => {
+          setCopied(true)
+          window.setTimeout(() => setCopied(false), 2000)
+        })
+      }}
+    />
+  )
+}
+
+/** The latest finished analysis as the pane reads it; null until one exists. */
+export function useQueryDigest(target: string, key: string, enabled: boolean) {
+  return useQuery({
+    queryKey: monitorKeys.queryAnalysis(target, key),
+    queryFn: () => getQueryAnalysis(target, key),
+    enabled: enabled && Boolean(target && key),
+    staleTime: 60_000,
+    retry: false,
+  })
+}
+
+/** "Estimated" from a plan, "Measured" when the query ran. */
+export function provenance(digest: DeepAnalysisDigest): {
+  tag: string
+  reason: string | null
+} {
+  const measured =
+    digest.mode === 'analyze' || digest.fix?.expected_gain?.measured
+  const source = paramSourceText(digest.param_source)
+  if (measured) return { tag: 'Measured', reason: source }
+  return {
+    tag: 'Estimated',
+    reason:
+      source ??
+      (digest.params?.length
+        ? 'planner, with sampled values'
+        : 'planner only, no sampled values'),
+  }
+}
+
+export function readysetLine(
+  digest: DeepAnalysisDigest | undefined,
+  analyzed = true
+): string {
+  const facts = digest?.readyset
+  if (!facts)
+    return analyzed
+      ? 'Checked for cache blockers after an analysis.'
+      : 'Not checked yet. Analyze checks it for cache blockers.'
+  if (facts.blockers.length)
+    return `${facts.blockers.length} ${facts.blockers.length === 1 ? 'blocker' : 'blockers'} found.`
+  return `No blockers found, ${facts.verified ? 'verified' : 'not verified'}.`
 }
 
 const WRITE = /^\s*(?:\/\*.*?\*\/\s*)?(?:INSERT|UPDATE|DELETE)\b/is
@@ -83,7 +221,7 @@ function WriteCost({
 }: {
   target: string
   query: MonitorQuery
-  range: MonitorRange
+  range: ApiRange
 }) {
   const cost = useMonitorQuery(target, query.key, range).data?.write_cost
   if (!cost) return null
@@ -92,7 +230,7 @@ function WriteCost({
       ? 'almost no writes'
       : `${cost.table_writes_per_s.toFixed(1)} rows written a second`
   return (
-    <Section title="What each write costs">
+    <Block title="What each write costs">
       <div
         className="space-y-1 text-body-small text-content-layout-2"
         data-testid="write-cost"
@@ -112,240 +250,325 @@ function WriteCost({
           <p>It changes {cost.set_columns.join(', ')}.</p>
         ) : null}
       </div>
-    </Section>
+    </Block>
   )
 }
 
+export interface QueryDetailProps {
+  target: string
+  query: MonitorQuery
+  now: number
+  /** The page's range, for the write's cost. */
+  range: ApiRange
+  onClose: () => void
+  onPrev?: () => void
+  onNext?: () => void
+  /** A deep analysis is under way: its steps replace the fix. */
+  analyzing?: { steps: AnalyzingStep[]; aboutSeconds: number | null } | null
+  /** The index plan's statement for this query's open action: the fix shown and copied. */
+  planSql?: string | null
+  /** Monitoring is on: a held analysis may wait for a sign-in. */
+  monitored?: boolean
+  /** This query's waiting analysis job, for why it's on hold and when it starts. */
+  job?: AnalyzeJob | null
+  onAnalyzeAgain: () => void
+  onBenchmark: () => void
+  onCancel?: () => void
+}
+
 export function QueryDetail({
-  query,
   target,
-  tab,
+  query,
+  now,
   range,
-  domain,
-  jev,
-  jevWaiting = null,
-  onTabChange,
+  onClose,
+  onPrev,
+  onNext,
+  analyzing = null,
+  planSql = null,
+  monitored = true,
+  job = null,
+  onAnalyzeAgain,
+  onBenchmark,
+  onCancel,
 }: QueryDetailProps) {
   const navigate = useNavigate()
-  const canAsk = query.text_status !== 'unavailable' && query.text.trim()
+  const status = rowStatus(query)
+  const digest = useQueryDigest(
+    target,
+    query.key,
+    !analyzing && status !== 'not_analyzed' && status !== 'stuck'
+  )
+  const color = swatchColor(query.color_index)
+  const ref = parseAnalysisRef(digest.data?.analysis_ref, query.key)
+  const fix = digest.data?.fix ?? null
+  const fixSql = planSql ?? query.suggested_fix?.sql ?? fix?.sql ?? null
+  const source = digest.data ? provenance(digest.data) : null
   const isWrite = WRITE.test(query.text)
-  const analysisRef = useRef<HTMLDivElement>(null)
-  const benchmarksRef = useRef<HTMLDivElement>(null)
-  const name = queryName(query)
-  const bench = useQueryBenchmark(query, target)
-  const blocked =
-    query.text_status === 'unavailable'
-      ? 'RDST can benchmark this query once its text is captured.'
-      : benchmarkBlockReason(query)
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const { primeFrom, setWithReadyset } = bench
-  const openBenchmark = useCallback(
-    (withReadyset?: boolean) => {
-      primeFrom()
-      if (withReadyset !== undefined) setWithReadyset(withReadyset)
-      setDialogOpen(true)
-    },
-    [primeFrom, setWithReadyset]
-  )
-  const closeBenchmark = useCallback(() => setDialogOpen(false), [])
+  // A statement RDST never analyzes has no Analyze; it says why instead.
   const gate = analyzability(query)
-  const [startSignal, setStartSignal] = useState(0)
-  const analysisState = query.last_analysis?.state
-  const analyzeLabel =
-    analysisState === 'done'
-      ? 'View deep analysis'
-      : analysisState === 'queued' || analysisState === 'running'
-        ? 'View analysis progress'
-        : 'Deep analyze this query'
-  const showAnalysis = () =>
-    analysisRef.current?.scrollIntoView?.({
-      behavior: 'smooth',
-      block: 'start',
-    })
-  // The section shows once there's something in it; the Benchmark button starts one.
-  const hasBenchmarks =
-    bench.live ||
-    Boolean(bench.run) ||
-    Boolean(bench.timeline.latest) ||
-    bench.timeline.past.length > 0 ||
-    tab === 'readyset'
-  const deepAnalyze = () => {
-    if (analyzeLabel === 'Deep analyze this query')
-      setStartSignal((value) => value + 1)
-    showAnalysis()
-  }
-
-  // A deep link to a section scrolls there once the detail has opened.
-  useEffect(() => {
-    if (tab === 'performance') return
-    const node =
-      tab === 'analysis' ? analysisRef.current : benchmarksRef.current
-    const timer = window.setTimeout(
-      () => node?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }),
-      320
-    )
-    return () => window.clearTimeout(timer)
-  }, [tab])
-
-  const performance = (
-    <Section title="Latency and calls">
-      <PerformanceTab
-        query={query}
-        target={target}
-        range={range}
-        domain={domain}
-        onOpenTab={onTabChange}
-      />
-    </Section>
-  )
+  const canAnalyze = gate.ok && query.text_status !== 'unavailable'
+  const line = analyzing || !canAnalyze ? null : analysisLine(query, job, now)
+  const hasFix = queriesWithFixes([query]).length > 0
+  const score =
+    query.plan_score ??
+    digest.data?.score ??
+    digest.data?.efficiency_score ??
+    null
 
   return (
-    <div className="space-y-3" data-testid="query-detail">
-      <QueryContextSlot queryKey={query.key} />
-      <div className="flex flex-wrap items-center gap-2">
-        {gate.ok && query.text_status !== 'unavailable' ? (
-          <Button
-            variant="primary"
-            modifier={analysisState === 'done' ? 'outline' : 'solid'}
-            size="small"
-            icon="speedometer"
-            iconPosition="left"
-            label={analyzeLabel}
-            onClick={deepAnalyze}
-          />
-        ) : null}
-        <Button
-          variant="primary"
-          modifier="outline"
-          size="small"
-          icon="speedometer"
-          iconPosition="left"
-          label={bench.live ? 'Benchmark running' : 'Benchmark'}
-          disabled={Boolean(blocked) || bench.live}
-          title={blocked ?? undefined}
-          onClick={() => openBenchmark()}
+    <SidePane
+      aria-label={query.display_name}
+      chip={
+        <StatusChip
+          chip={analyzing ? STATUS_CHIP.analyzing : rowChip(query, monitored)}
         />
-        {canAsk ? (
-          <Button
-            variant="primary"
-            modifier="ghost"
-            size="small"
-            label="Send to Ask"
-            icon="arrow-up-right"
-            iconPosition="right"
-            onClick={() =>
-              void navigate({ to: '/ask', search: { sql: query.text } })
-            }
-          />
-        ) : null}
-        <span className="ml-auto">
-          <MuteMenu
-            target={target}
-            queryKey={query.key}
-            queryLabel={name}
-            label={`More actions for ${name}`}
-            align="end"
-          />
-        </span>
+      }
+      meta={
+        <>
+          <span>{query.qps.toFixed(2)} calls/s</span>
+          <span>{latencyText(query.mean_ms)} ms</span>
+          <span>{formatSharePercent(query.db_time_share)} of time</span>
+          {score != null && (
+            <span
+              data-testid="pane-header-score"
+              className={cn(scorePoor(score) && 'text-content-warning-soft')}
+            >
+              Plan score {Math.round(score)}
+            </span>
+          )}
+        </>
+      }
+      onPrev={onPrev}
+      onNext={onNext}
+      onClose={onClose}
+      footer={
+        analyzing ? (
+          <Button {...ghost} label="Cancel" onClick={onCancel} />
+        ) : (
+          <>
+            {ref ? (
+              <Link
+                to="/results"
+                search={
+                  {
+                    query: query.text,
+                    target,
+                    hash: ref.hash,
+                    analysisId: ref.analysisId,
+                  } as never
+                }
+                className={outlineLink}
+              >
+                Full analysis
+              </Link>
+            ) : null}
+            {canAnalyze && (
+              <Button
+                {...ghost}
+                label={
+                  query.last_analysis?.finished_at != null
+                    ? 'Analyze again'
+                    : 'Analyze'
+                }
+                onClick={onAnalyzeAgain}
+              />
+            )}
+            {hasFix && (
+              <Button
+                {...ghost}
+                label="Estimate fix gain"
+                onClick={onBenchmark}
+              />
+            )}
+            {query.text_status !== 'unavailable' && (
+              <Button
+                {...ghost}
+                label="Send to Ask"
+                onClick={() =>
+                  void navigate({
+                    to: '/ask',
+                    search: {
+                      sql: query.text,
+                      params: digest.data?.params?.length
+                        ? digest.data.params
+                        : undefined,
+                    } as never,
+                  })
+                }
+              />
+            )}
+          </>
+        )
+      }
+    >
+      <Text as="h2" level="headline-3" className="mb-5 text-content-layout-1">
+        {query.display_name}
+      </Text>
+      <div className="grid grid-cols-2 gap-4">
+        <History
+          title="Mean latency"
+          value={`${latencyText(query.mean_ms)} ms`}
+          points={query.series.map((point) => ({
+            x: point.ts,
+            y: point.mean_ms,
+          }))}
+          color={color}
+          format={(value) => `${latencyText(value)} ms`}
+        />
+        <History
+          title="Calls per second"
+          value={query.qps.toFixed(2)}
+          points={query.series.map((point) => ({ x: point.ts, y: point.qps }))}
+          color={color}
+          format={(value) => `${value.toFixed(2)}/s`}
+        />
       </div>
 
       {!gate.ok && query.text_status !== 'unavailable' ? (
-        <div
-          className="flex items-start gap-2.5 rounded-panel border border-border-layout-1 bg-surface-layout-1 px-4 py-3"
+        <Text
+          as="p"
+          level="body-small"
+          className="mt-6 text-content-layout-2"
           data-testid="not-analyzed-line"
         >
-          <Icon
-            name="lock-sync"
-            label=""
-            size="small"
-            className="mt-0.5 shrink-0 text-content-layout-3"
-          />
-          <Text as="p" level="body-small" className="text-content-layout-2">
-            <span className="font-medium text-content-layout-1">
-              No deep analysis.
-            </span>{' '}
-            {notAnalyzedLine(query, gate)}
+          <span className="font-medium text-content-layout-1">
+            No deep analysis.
+          </span>{' '}
+          {notAnalyzedLine(query, gate)}
+        </Text>
+      ) : null}
+      {line ? (
+        <div
+          className="mt-6 flex flex-wrap items-center gap-x-3 gap-y-2"
+          data-testid="analysis-line"
+        >
+          <Text
+            as="p"
+            level="body-small"
+            className={
+              line.tone === 'negative'
+                ? 'text-content-negative-soft'
+                : 'text-content-layout-2'
+            }
+          >
+            {line.text}
           </Text>
+          {line.action ? (
+            <Button
+              variant="primary"
+              modifier="outline"
+              size="small"
+              label={line.action === 'retry' ? 'Retry' : 'Analyze now'}
+              onClick={onAnalyzeAgain}
+            />
+          ) : null}
         </div>
       ) : null}
 
-      {analysisState === 'done' ? null : performance}
-      <div ref={analysisRef} className="scroll-mt-24">
-        {isWrite ? (
-          <WriteCost target={target} query={query} range={range} />
-        ) : null}
-        <Section
-          id={`analysis-${query.key}`}
-          title={isWrite ? 'How it finds its rows' : 'Deep analysis'}
-        >
-          <AnalysisTab
-            query={query}
-            target={target}
-            startSignal={startSignal}
-            onCompare={() => {
-              openBenchmark(true)
-              onTabChange('readyset')
-            }}
+      {isWrite && <WriteCost target={target} query={query} range={range} />}
+
+      {analyzing ? (
+        <div className="mt-6">
+          <AnalyzingBlock
+            steps={analyzing.steps}
+            aboutSeconds={analyzing.aboutSeconds}
           />
-        </Section>
-      </div>
-
-      {analysisState === 'done' ? performance : null}
-
-      <div className="grid gap-3 laptop:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <Section title="SQL">
-          <div className="-mx-4 -mb-4 overflow-hidden border-t border-border-layout-1">
-            <QueryTextBody
-              text={query.text}
-              textStatus={query.text_status}
-              textReason={query.text_reason}
-              fingerprint={query.key}
-              tables={query.tables}
-              maxLines={10}
-            />
-          </div>
-        </Section>
-
-        {query.text_status !== 'unavailable' && (
-          <Section title="Query classification">
-            {jevWaiting ? (
-              <Text
-                as="p"
-                level="body-small"
-                className="text-content-layout-2"
-                data-testid="jev-waiting"
-              >
-                {jevWaiting}
+        </div>
+      ) : fixSql ? (
+        <Block title="Fix">
+          {score != null && <PlanScore score={score} />}
+          <SqlCode sql={fixSql} testId="fix-sql" />
+          <div className="mt-2.5 flex items-center gap-2">
+            <CopyFix sql={fixSql} />
+            {/CONCURRENTLY/i.test(fixSql) && (
+              <Text as="span" level="caption" className="text-content-layout-3">
+                Builds without blocking writes.
               </Text>
-            ) : (
-              <JevAssessment
-                assessment={jev}
-                hasDeepAnalysis={query.last_analysis?.state === 'done'}
-                onDeepAnalyze={deepAnalyze}
-              />
             )}
-          </Section>
-        )}
-      </div>
+          </div>
+          {fix?.why && (
+            <Text
+              as="p"
+              level="body-small"
+              className="mt-3 text-content-layout-2"
+            >
+              {fix.why}
+            </Text>
+          )}
+          {digest.data && source && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-caption text-content-layout-3">
+              <Tag
+                size="small"
+                variant="neutral"
+                modifier="outline"
+                className="rounded-pill"
+                label={source.tag}
+              />
+              {source.reason && <span>{source.reason}</span>}
+              {digest.data.analyzed_at != null && (
+                <span>
+                  analyzed {formatRelative(digest.data.analyzed_at, now)}
+                </span>
+              )}
+            </div>
+          )}
+          {fix?.kind === 'index' && (
+            <Text
+              as="p"
+              level="caption"
+              className="mt-1.5 text-content-layout-3"
+            >
+              RDST confirms the fix when the index appears.
+            </Text>
+          )}
+        </Block>
+      ) : digest.data ? (
+        <Block title={isWrite ? 'How it finds its rows' : 'Analysis'}>
+          {score != null && <PlanScore score={score} />}
+          <Text as="p" level="body-small" className="text-content-layout-2">
+            {digest.data.headline}
+          </Text>
+          {source && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-caption text-content-layout-3">
+              <Tag
+                size="small"
+                variant="neutral"
+                modifier="outline"
+                className="rounded-pill"
+                label={source.tag}
+              />
+              {source.reason && <span>{source.reason}</span>}
+              {digest.data.analyzed_at != null && (
+                <span>
+                  analyzed {formatRelative(digest.data.analyzed_at, now)}
+                </span>
+              )}
+            </div>
+          )}
+        </Block>
+      ) : null}
 
-      <div ref={benchmarksRef} className="scroll-mt-24">
-        {hasBenchmarks ? (
-          <Section id={`benchmarks-${query.key}`} title="Benchmarks">
-            <BenchmarksSection
-              bench={bench}
-              onOpen={() => openBenchmark()}
-              blockedReason={blocked}
+      <Block title="Query">
+        <SqlCode sql={query.text} testId="query-sql" />
+      </Block>
+
+      {!analyzing && (
+        <Block title="Readyset">
+          <div className="flex items-center gap-2.5 text-body-small text-content-layout-2">
+            <span
+              aria-hidden="true"
+              className={cn(
+                'h-1.75 w-1.75 shrink-0 rounded-full',
+                digest.data?.readyset?.verified
+                  ? 'bg-content-positive-plain'
+                  : 'bg-content-layout-3'
+              )}
             />
-          </Section>
-        ) : null}
-      </div>
-      <BenchmarkDialog
-        open={dialogOpen}
-        onClose={closeBenchmark}
-        bench={bench}
-        target={target}
-        queryLabel={name}
-      />
-    </div>
+            <span>{readysetLine(digest.data, status !== 'not_analyzed')}</span>
+          </div>
+        </Block>
+      )}
+    </SidePane>
   )
 }

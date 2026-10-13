@@ -1,10 +1,12 @@
 """Whether RDST can reach each monitored database, and the gap in readings an outage leaves.
 
 A database counts as unreachable after LOST_AFTER_FAILURES failed checks in a row, or once
-the first failure is LOST_AFTER_SECONDS old, so a single blip never alerts. Checks come from
+the first failure is LOST_AFTER_SECONDS old, so a single blip never alerts; after its connection
+settings change, the first failed check counts. Checks come from
 the collector (every minute for a monitored target) and from the monitor loop's own index
-scan. The Act now item closes on the first successful check, saying when monitoring resumed
-and which span has no readings.
+scan. The item is filed in the Inbox and pushes once the outage is PUSH_AFTER_SECONDS old.
+It closes on the first successful check, saying when monitoring resumed and which span has
+no readings.
 """
 
 from __future__ import annotations
@@ -22,8 +24,9 @@ from shared.monitor.monitor_store import MonitorStore
 
 logger = logging.getLogger(__name__)
 
-LOST_AFTER_FAILURES = 2
-LOST_AFTER_SECONDS = 120
+LOST_AFTER_FAILURES = 3
+LOST_AFTER_SECONDS = 180
+PUSH_AFTER_SECONDS = 3600
 ITEM = ("monitoring_issue", "lost_connection")
 TITLE = "Can't reach the database"
 
@@ -131,6 +134,16 @@ class ConnectionWatch:
         # target -> (failures in a row, first failure ts, latest error)
         self._failing: dict[str, tuple[int, int, str | None]] = {}
         self._last_check: dict[str, tuple[int, bool]] = {}
+        # Targets whose connection settings changed since their last good check.
+        self._changed: set[str] = set()
+
+    def settings_changed(self, target: str) -> None:
+        """The connection settings changed (or monitoring was turned back on): earlier checks
+        say nothing about the new settings, and the first failure with them files at once."""
+        with self._lock:
+            self._failing.pop(target, None)
+            self._last_check.pop(target, None)
+            self._changed.add(target)
 
     def collection(self, target: str, ok: bool, ts: int | None = None,
                    error: str | None = None) -> None:
@@ -164,6 +177,7 @@ class ConnectionWatch:
                 return
             self._last_check[target] = (now, ok)
             if ok:
+                self._changed.discard(target)
                 self._failing.pop(target, None)
                 self._recovered(target, now)
                 return
@@ -172,11 +186,13 @@ class ConnectionWatch:
             first_error = error or first_error
             failures += 1
             self._failing[target] = (failures, since, first_error)
-            if failures >= LOST_AFTER_FAILURES or now - since >= LOST_AFTER_SECONDS:
+            if failures >= LOST_AFTER_FAILURES or now - since >= LOST_AFTER_SECONDS or \
+                    target in self._changed:
                 self._file(target, now, since, first_error)
 
     def tick(self) -> None:
-        """File an ongoing outage at its deadline, even while a retry is still pending."""
+        """File an ongoing outage at its deadline, even while a retry is still pending, and
+        push it once it has lasted PUSH_AFTER_SECONDS."""
         now = int(self.clock())
         with self._lock:
             for target, (_, since, error) in list(self._failing.items()):
@@ -184,6 +200,16 @@ class ConnectionWatch:
                     self._failing.pop(target, None)
                 elif now - since >= LOST_AFTER_SECONDS:
                     self._file(target, now, since, error)
+                    self._push_if_due(target, now)
+
+    def _push_if_due(self, target: str, now: int) -> None:
+        item = self._open_item(target)
+        if item is None or item["delivery"] == "notify":
+            return
+        body = json.loads(item["body_json"])
+        since = int(body.get("failed_since") or item["created_at"])
+        if now - since >= PUSH_AFTER_SECONDS:
+            self.store.promote_item(item["id"], "notify", now)
 
     @staticmethod
     def _reason(target: str, error: str | None) -> str | None:
@@ -236,9 +262,10 @@ class ConnectionWatch:
             body["error"] = error[:300]
             if reason := reason_text(error):
                 body["message"] += f" {reason}"
-        self.store.upsert_item(target, *ITEM, 1.0, TITLE, body, now, delivery="notify")
+        self.store.upsert_item(target, *ITEM, 1.0, TITLE, body, now, delivery="inbox")
         if open_item is None:
             product_telemetry.connection_lost(target)
+        self._push_if_due(target, now)
 
     def _recovered(self, target: str, now: int) -> None:
         item = self._open_item(target)

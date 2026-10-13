@@ -55,7 +55,7 @@ async function setup(page: Page) {
 test('a11y: every keyboard stop is marked', async ({ page }) => {
   await setup(page)
   const unringed: string[] = []
-  for (const path of ['/', '/guards', '/audit']) {
+  for (const path of ['/', '/guards', '/database']) {
     await page.goto(path)
     await settle(page, 1200)
     const stops = await focusWalk(page, 14)
@@ -72,7 +72,7 @@ test('a11y: every keyboard stop is marked', async ({ page }) => {
 test('a11y: accessible names are said once', async ({ page }) => {
   await setup(page)
   const doubled: string[] = []
-  for (const path of ['/', '/queries', '/audit', '/guards']) {
+  for (const path of ['/', '/database', '/guards']) {
     await page.goto(path)
     await settle(page, 1200)
     const names = (await page.evaluate(DOUBLED_NAMES)) as string[]
@@ -102,7 +102,7 @@ test('a11y: text meets AA on the theme the app ships with', async ({
 }) => {
   await setup(page)
   const failing: string[] = []
-  for (const path of ['/', '/queries', '/cache', '/guards']) {
+  for (const path of ['/', '/database', '/cache', '/guards']) {
     await page.goto(path)
     await settle(page, 1200)
     const rows = await contrastRows(page, path)
@@ -116,47 +116,28 @@ test('a11y: text meets AA on the theme the app ships with', async ({
 })
 
 /**
- * F-44, F-45 - the sign-in dialog opens on the safe field rather than on a
- * one-Enter trip into a third-party redirect, and Escape leaves it.
+ * F-44, F-45 - the sign-in page is its own bare page: one heading, the two
+ * provider buttons, and nothing focused on arrival, so a stray Enter never
+ * trips a third-party redirect.
  */
-test('a11y: the sign-in dialog opens safely and closes on Escape', async ({
+test('a11y: the sign-in page opens safely with nothing focused', async ({
   page,
 }) => {
   await setup(page)
   await page.goto('/account-login')
-  const dialog = page.getByRole('dialog')
-  await expect(dialog).toBeVisible()
-  await expect(page.getByLabel('Email address')).toBeFocused()
   await expect(
-    dialog.getByRole('button', { name: 'Continue with Google' })
-  ).not.toBeFocused()
-
-  await page.keyboard.press('Escape')
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-  // Escape goes home, and home with a database configured is that database's page.
-  expect(['/', '/database']).toContain(new URL(page.url()).pathname)
-})
-
-/**
- * F-46 - a target row is one checkbox: a labelled outer control never wraps a
- * second, unlabelled one.
- */
-test('a11y: a selectable target row is a single checkbox', async ({ page }) => {
-  await setup(page)
-  await page.goto('/audit')
-  const row = page.getByRole('checkbox', { name: 'Select e2e-guard' })
-  await expect(row).toHaveCount(1)
-  const nested = await page.evaluate(() => {
-    const boxes = [
-      ...document.querySelectorAll('[role="checkbox"],input[type="checkbox"]'),
-    ]
-    return boxes
-      .filter((box) =>
-        boxes.some((other) => other !== box && other.contains(box))
-      )
-      .map((box) => box.getAttribute('aria-label') ?? box.tagName.toLowerCase())
-  })
-  expect(nested).toEqual([])
+    page.getByRole('heading', { level: 1, name: 'RDST' })
+  ).toBeVisible()
+  await expect(page.locator('#app-sidebar')).toHaveCount(0)
+  const github = page.getByRole('button', { name: 'Continue with GitHub' })
+  const google = page.getByRole('button', { name: 'Continue with Google' })
+  await expect(github).toBeVisible()
+  await expect(google).toBeVisible()
+  await expect(github).not.toBeFocused()
+  await expect(google).not.toBeFocused()
+  expect(
+    await page.evaluate(() => document.activeElement === document.body)
+  ).toBe(true)
 })
 
 /** F-32 - the active nav item says "you are here" beyond colour. */
@@ -170,15 +151,19 @@ test('a11y: the active nav item carries aria-current', async ({
     'Failed to load resource: the server responded with a status of 404 (Not Found)'
   )
   await setup(page)
-  for (const [path, label] of [
-    ['/database', 'Database'],
-    ['/inbox', 'Inbox'],
-    ['/agent-activity', 'Agent audit'],
-    ['/ask', 'Ask'],
+  // The Inbox badge and the Actions and Activity counts follow the label; a
+  // database's item carries its state or changes to do after its name.
+  for (const [path, text] of [
+    ['/', /^Home$/],
+    ['/database', /^e2e-guard/],
+    ['/inbox', /^Inbox( ?\d+)?$/],
+    ['/actions', /^Actions( ?\d+)?$/],
+    ['/agent-activity', /^Activity( ?\d+)?$/],
+    ['/ask', /^Ask$/],
   ] as const) {
     await page.goto(path)
     const current = page.locator('nav [aria-current="page"]')
     await expect(current).toHaveCount(1)
-    await expect(current).toHaveText(label)
+    await expect(current).toHaveText(text)
   }
 })

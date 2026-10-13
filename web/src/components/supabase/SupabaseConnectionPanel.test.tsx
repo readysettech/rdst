@@ -32,9 +32,7 @@ describe('SupabaseConnectionPanel compact', () => {
 
     renderWithClient(<SupabaseConnectionPanel compact />)
 
-    expect(
-      await screen.findByText(/Connected to Supabase with OAuth - Acme/)
-    ).toBeTruthy()
+    expect(await screen.findByText('Signed in to Supabase (Acme)')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy()
   })
 
@@ -117,10 +115,14 @@ describe('SupabaseConnectionPanel', () => {
       await screen.findByRole('button', { name: 'Sign in with Supabase' })
     )
 
-    const busy = await screen.findByRole('button', {
-      name: 'Waiting for browser approval',
-    })
-    expect(busy.hasAttribute('disabled')).toBe(true)
+    // The label stays; the button holds busy until the browser approves.
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole('button', { name: 'Sign in with Supabase' })
+          .hasAttribute('disabled')
+      ).toBe(true)
+    )
     expect(
       await screen.findByText('Waiting for you to approve the request')
     ).toBeTruthy()

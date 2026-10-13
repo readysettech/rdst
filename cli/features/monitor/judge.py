@@ -46,8 +46,9 @@ MEASURABLE_RECOVERY = {"latency_regression", "plan_change", "table_slowdown",
                        "traffic_spike", "query_stopped_running", "new_heavy_query",
                        "query_improved", "slow_creep"}
 CODE_OWNED = {"stuck_query", "connections_near_max", "lock_contention", "monitoring_issue",
-              "cache_candidate", "health_item", "health_finding", "daily_summary",
-              "rollback_or_deadlock_spike", "cache_hit_ratio_drop"} | MEASURABLE_RECOVERY
+              "daily_summary", "report_ready", "changes_ready", "fix_confirmed",
+              "no_change_yet", "rollback_or_deadlock_spike",
+              "cache_hit_ratio_drop"} | MEASURABLE_RECOVERY
 RECOVERY_CYCLES = 3
 BASELINE_BAND = 0.20
 HEAVY_SHARE = 0.05
@@ -1417,3 +1418,75 @@ class AttentionJudge:
                              row["qps"]))
         if episodes:
             self.store.record_attention_episodes(episodes)
+
+
+# Index fixes from the analyses. The plan itself lives in Actions; this list backs the
+# benchmark with fixes and the query page.
+
+
+def ready_fixes(store: MonitorStore, target: str, now: int) -> list[dict[str, Any]]:
+    """Index fixes from each query's latest finished analysis, ranked by its share of the
+    last 24 h of database time. A fix whose index exists already is not ready, and once the
+    database has an index plan, only a fix the plan adds is."""
+    from features.monitor.actions import planned_adds
+    from features.monitor.analysis_digest import digest_for_ref
+    from features.monitor.api.views import _engine
+    from features.monitor.db_actions import concurrent_index_sql, index_target
+    from features.monitor.delivery import query_totals
+    from features.monitor.indexes import index_columns
+    from features.monitor.naming import target_names
+
+    jobs = store.read(
+        "SELECT j.* FROM analyze_job j WHERE j.target=? AND j.state='done' "
+        "AND j.analysis_ref IS NOT NULL AND j.id=(SELECT MAX(id) FROM analyze_job "
+        "WHERE target=j.target AND query_key=j.query_key AND state='done' "
+        "AND analysis_ref IS NOT NULL)", (target,))
+    if not jobs:
+        return []
+    totals = query_totals(store, target, now - 86400, now + 1)
+    db_ms = sum(float(row.get("total_ms") or 0) for row in totals.values())
+    existing = {(row["table"].lower(), tuple(index_columns(row["definition"])))
+                for row in store.read('SELECT "table",definition FROM index_snapshot WHERE target=?',
+                                      (target,))}
+    plan = store.index_plan(target)
+    adds = planned_adds(plan) if plan is not None else None
+    names = target_names(store, target)
+    engine = _engine(target)
+    fixes = []
+    for job in jobs:
+        key = job["query_key"]
+        digest = digest_for_ref(target, key, job["analysis_ref"], job.get("mode"),
+                                job.get("finished_at"))
+        fix = (digest or {}).get("fix") if digest and digest.get("fix_ready") else None
+        if not fix or fix.get("kind") != "index" or not fix.get("sql"):
+            continue
+        table, columns = index_target(fix["sql"])
+        if table and (table, tuple(columns)) in existing:
+            continue
+        if adds is not None and not _planned(adds, key, table, columns):
+            continue
+        total = totals.get(key) or {}
+        calls, ms = float(total.get("calls") or 0), float(total.get("total_ms") or 0)
+        fixes.append({"query_key": key, "title": names.get(key) or f"Query {key}",
+                      "sql": concurrent_index_sql(fix["sql"], engine),
+                      "share": ms / db_ms if db_ms else 0.0,
+                      "latency_ms": ms / calls if calls else None,
+                      "table": table, "columns": columns,
+                      "group": f"{table} ({', '.join(columns)})" if table and columns else None,
+                      "analysis_ref": job["analysis_ref"]})
+    fixes.sort(key=lambda fix: (-fix["share"], fix["query_key"]))
+    for rank, fix in enumerate(fixes, 1):
+        fix["rank"] = rank
+    return fixes
+
+
+def _planned(adds: list[dict[str, Any]], key: str, table: str | None, columns: list[str]) -> bool:
+    """The plan adds this fix: the same index, a wider one it merged into, or another index on
+    the same table that the plan lists as speeding up this query."""
+    from features.monitor.index_plan import MAX_KEY_COLUMNS, _columns, _norm, _prefix
+
+    table, wanted = _norm(table), _columns(columns)[:MAX_KEY_COLUMNS]
+    return bool(table) and any(
+        add["table"] == table and (_prefix(wanted, tuple(add["columns"])) or
+                                   any(helped["key"] == key for helped in add.get("helps") or []))
+        for add in adds)

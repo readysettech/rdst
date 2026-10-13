@@ -16,6 +16,9 @@ Resolution = Literal[60, 300, 3600, 86400]
 # A response to an explicit [from, to] window reports range "custom".
 ScopedRange = Literal["5m", "15m", "1h", "24h", "7d", "30d", "90d", "all", "custom"]
 StepState = Literal["queued", "running", "done", "skipped", "failed"]
+# Why a queued analysis won't start on its own.
+HeldReason = Literal["sign_in", "monitoring_off", "outside_top", "ai_paused", "automatic_off",
+                     "over_allowance"]
 
 
 class ResolutionStart(BaseModel):
@@ -40,15 +43,50 @@ class HealthNow(BaseModel):
     rollbacks_per_min: int | None
 
 
+class BenchmarkFixesRequest(BaseModel):
+    query_keys: list[str]
+    runs: int = 20
+    scratch_schema: bool = True
+
+
+class BenchmarkFixRow(BaseModel):
+    key: str
+    name: str
+    before_ms: float | None
+    after_ms: float | None
+    change_pct: float | None
+    # True when the after value comes from the planner, not a timed run.
+    estimated: bool = True
+    # Why there is no after value; null when there is one.
+    reason: str | None = None
+
+
+class BenchmarkFixesResult(BaseModel):
+    target: str
+    ran_at: int
+    runs: int
+    # Whether the fixes were built and timed on a scratch schema.
+    scratch_schema: bool
+    rows: list[BenchmarkFixRow]
+    # The covered queries' share of database time over the last 24 h.
+    share: float
+    method: str
+
+
 class HealthPeriod(BaseModel):
     qps: float
     mean_ms: float
+    # The 95th percentile of the per-reading mean latency; null without readings.
+    p95_ms: float | None = None
     db_time_ms: float
     lock_waits_peak: int | None = None
     active_conns_peak: int | None
     cache_hit_ratio_min: float | None
     xact_rollback: int
     deadlocks: int
+    # The busiest whole minute, the same peak Home and the report show; never below `qps`.
+    qps_peak: float | None = None
+    qps_peak_at: int | None = None
 
 
 class HealthPoint(BaseModel):
@@ -110,6 +148,21 @@ class MonitorHealth(BaseModel):
     # Spans RDST couldn't reach the database; other gaps in the series have no known cause.
     outages: list[MonitorOutage] = []
     detail_note: str | None = None
+    # The last attention check that ran; null when none did.
+    checks_ran_at: int | None = None
+
+
+class DatabaseActivity(BaseModel):
+    """What monitoring is doing on one database now: a pass checking it, an analysis or the
+    report running, or readings alone. `done`/`total` count the first hour's analyses."""
+    kind: Literal["reading", "checking", "analyzing", "report", "idle"]
+    label: str
+    done: int | None = None
+    total: int | None = None
+    last_reading_at: int | None = None
+    # Seconds between readings.
+    every_s: int = 60
+    next_check_at: int | None = None
 
 
 class MonitorPulse(BaseModel):
@@ -125,6 +178,8 @@ class MonitorPulse(BaseModel):
     delay_reason: str | None = None
     # A setup problem (missing password or statement statistics) blocks readings.
     setup_blocked: bool = False
+    checks_ran_at: int | None = None
+    activity: DatabaseActivity | None = None
 
 
 class ConnectionProblem(BaseModel):
@@ -142,6 +197,9 @@ class MonitorPulsePage(BaseModel):
     delay_reason: str | None = None
     # A setup problem (missing password or statement statistics) blocks readings.
     setup_blocked: bool = False
+    # The last attention check that ran; null when none did.
+    checks_ran_at: int | None = None
+    activity: DatabaseActivity | None = None
 
 
 class CollectNowResult(BaseModel):
@@ -162,6 +220,66 @@ class MiniSeriesPoint(BaseModel):
     mean_ms: float | None
 
 
+class ReportVerdictText(BaseModel):
+    """A two-clause verdict: the lead ("demo needs two things today:") and the rest."""
+    lead: str
+    rest: str
+
+
+class AnalysisFixDetail(BaseModel):
+    sql: str
+    serves: str | None = None
+    cost_before: float | None = None
+    cost_after: float | None = None
+    size: str | None = None
+    write_cost: str | None = None
+
+
+class PlanFinding(BaseModel):
+    title: str
+    detail: str | None = None
+    value: str | None = None
+
+
+class RewriteTested(BaseModel):
+    name: str
+    before_ms: float | None = None
+    after_ms: float | None = None
+    runs: int | None = None
+    outcome: Literal["faster", "slower", "no_change", "untested"] = "untested"
+    sql: str | None = None
+
+
+class AlsoWorthDoing(BaseModel):
+    title: str
+    detail: str | None = None
+    sql: str | None = None
+
+
+class ReadysetFacts(BaseModel):
+    blockers: list[str] = []
+    verified: bool = False
+
+
+class BenchmarkFacts(BaseModel):
+    before_ms: float | None = None
+    after_ms: float | None = None
+    change: float | None = None
+    method: str | None = None
+
+
+class AnalysisRunFacts(BaseModel):
+    model: str | None = None
+    tokens: int | None = None
+    seconds: float | None = None
+    id: str | None = None
+
+
+class AnalysisParam(BaseModel):
+    name: str
+    value: str
+
+
 class LatestAnalysisSummary(BaseModel):
     """The latest finished analysis: a header line and where the complete record is."""
     analysis_ref: str
@@ -176,6 +294,8 @@ class LatestAnalysisSummary(BaseModel):
     efficiency_score: float | None = None
     # True only for an actionable recommendation with SQL: the 'Fix ready' chip.
     fix_ready: bool = False
+    score: float | None = None
+    verdict: ReportVerdictText | None = None
 
 
 class LastAnalysis(BaseModel):
@@ -196,8 +316,9 @@ class LastAnalysis(BaseModel):
     attempts: int | None = None
     retry_at: int | None = None
     # While queued: today (it starts today, at queue_position) or held (it won't start on
-    # its own; `reason` says why). running while it runs.
+    # its own; `reason` says why, `held_reason` in a word). running while it runs.
     queue_state: Literal["running", "today", "held"] | None = None
+    held_reason: HeldReason | None = None
     queue_position: int | None = None
     # While running, the step it's on: sample (finding real parameter values), plan
     # (EXPLAIN), run (EXPLAIN ANALYZE), schema, advise (the AI) or verify (testing fixes).
@@ -267,6 +388,16 @@ class WriteCost(BaseModel):
     hot_ratio: float | None
 
 
+class SuggestedFix(BaseModel):
+    sql: str
+    label: str
+
+
+class TrendMean(BaseModel):
+    ts: int
+    mean_ms: float | None
+
+
 class MonitorQuery(BaseModel):
     key: str
     text: str
@@ -303,6 +434,13 @@ class MonitorQuery(BaseModel):
     sparkline: list[dict] | None = None
     change_vs_prior: dict | None = None
     badges: list[str] | None = None
+    # The list's plan score, 24 h latency delta and trend, the fix line and one status word.
+    plan_score: float | None = None
+    latency_delta_24h: float | None = None
+    trend_24h: list[TrendMean] = []
+    suggested_fix: SuggestedFix | None = None
+    status: Literal["fix_suggested", "analyzing", "healthy", "stuck", "not_analyzed"] = \
+        "not_analyzed"
 
 
 class QueryCounts(BaseModel):
@@ -322,6 +460,8 @@ class CompositionSlice(BaseModel):
 class MonitorQueryPage(BaseModel):
     queries: list[MonitorQuery]
     total: int
+    # Every application query RDST has seen on the database, listed in the range or not.
+    seen_total: int = 0
     counts: QueryCounts
     composition: list[CompositionSlice]
     history: HistorySpan
@@ -454,6 +594,23 @@ class DeepAnalysisDigest(BaseModel):
     other_fixes: list[AnalysisFix] = []
     headline: str
     fix_ready: bool = False
+    # The Full analysis page's facts (views.analysis_view).
+    score: float | None = None
+    verdict: ReportVerdictText | None = None
+    fix_detail: AnalysisFixDetail | None = None
+    plan_findings: list[PlanFinding] = []
+    rewrites: list[RewriteTested] = []
+    also: list[AlsoWorthDoing] = []
+    readyset: ReadysetFacts | None = None
+    benchmark: BenchmarkFacts | None = None
+    run: AnalysisRunFacts | None = None
+    rows_read: int | None = None
+    rows_returned: int | None = None
+    planner_cost: float | None = None
+    calls_today: int | None = None
+    params: list[AnalysisParam] = []
+    param_source: str | None = None
+    explain_text: str | None = None
 
 
 class AnalyzeJob(BaseModel):
@@ -463,7 +620,7 @@ class AnalyzeJob(BaseModel):
     reason: Literal["new", "top15_stale", "user", "report"]
     state: Literal["queued", "running", "done", "failed", "skipped"]
     priority: float
-    param_source: Literal["sampled", "table_sampled", "none"] | None
+    param_source: Literal["sampled", "table_sampled", "none", "estimated"] | None
     mode: Literal["analyze", "explain"] | None
     enqueued_at: int
     started_at: int | None
@@ -475,12 +632,17 @@ class AnalyzeJob(BaseModel):
     # automatic analysis is off, signed out, or today's automatic analyses are done); null
     # once the job has ended. Nothing waits for a later day.
     queue_state: Literal["running", "today", "held"] | None = None
+    # Why a held job waits, for links: sign_in means automatic analyses need a Readyset
+    # sign-in, and `reason_text` says so.
+    held_reason: HeldReason | None = None
     # 1-based place among the queued jobs that start today.
     queue_position: int | None = None
     estimated_start_at: int | None = None
     # Only on a click's response: the query was already waiting its turn (or running), so
     # the click left it where it was.
     already_queued: bool | None = None
+    # Stopped by a cancel: it ended skipped and never became the query's latest analysis.
+    cancelled: bool = False
 
 
 class AnalyzeQueueEntry(AnalyzeJob):
@@ -609,7 +771,10 @@ class TrendPoint(BaseModel):
 
 class InboxLink(BaseModel):
     """Where an item opens: a query row and tab, the Database page, a report or a setting."""
-    kind: Literal["query", "database", "report", "settings", "configure", "sign_in", "setup"]
+    # `actions` opens Actions narrowed to `target` (?db=): the plan for Changes ready, Applied
+    # for a verified change.
+    kind: Literal["query", "database", "report", "settings", "configure", "sign_in", "setup",
+                  "actions"]
     target: str
     label: str
     query_key: str | None = None
@@ -697,6 +862,64 @@ class InboxLikelyFix(BaseModel):
     type: str
 
 
+MonitorLinkKind = Literal["inbox", "chart", "query", "queries", "live", "report", "analysis",
+                          "database", "settings", "sign_in", "actions"]
+
+
+class MonitorLink(BaseModel):
+    """Where a Home or Inbox row leads; `label` is the destination word the row shows."""
+    kind: MonitorLinkKind
+    target: str | None
+    label: str
+    item_id: int | None = None
+    query_key: str | None = None
+    report_id: int | None = None
+    analysis_ref: str | None = None
+
+
+class InboxStep(BaseModel):
+    title: str
+    sql: str
+
+
+class InboxFix(BaseModel):
+    rank: int
+    query_key: str | None
+    title: str
+    sql: str
+    share: float
+    latency_ms: float | None
+    group: str | None
+
+
+class InboxFixGroup(BaseModel):
+    group: str
+    table: str
+    columns: list[str]
+    count: int
+    share: float
+
+
+class InboxChanges(BaseModel):
+    """A Changes ready event's plan in brief: how many changes, how many to do first, the top
+    titles and their action ids (do-first ones lead)."""
+    count: int
+    do_first: int
+    titles: list[str]
+    action_ids: list[int]
+
+
+class InboxHistoryEntry(BaseModel):
+    ts: int
+    text: str
+
+
+class InboxRelated(BaseModel):
+    label: str
+    detail: str | None
+    link: MonitorLink
+
+
 class InboxItem(BaseModel):
     id: int
     target: str
@@ -750,7 +973,31 @@ class InboxItem(BaseModel):
     # Why it's in its section, one line: "Act now: latency up 3.2x on a top-10 query today,
     # still happening".
     band_reason: str = ""
-    # The open action that covers one of the item's queries, best score first.
+    # The item's kind and band, a stuck query's steps with its pid, a fixes item's ranked
+    # fixes, a confirmed fix's before and after, the item's own log and its related rows.
+    # fixes_ready is no longer filed (Changes ready replaces it); older rows still read.
+    kind: Literal["stuck_query", "fixes_ready", "report_ready", "fix_confirmed", "traffic_spike",
+                  "monitoring_issue", "changes_ready", "no_change_yet", "other"] = "other"
+    band: Literal["act_now", "watch", "closed"] = "watch"
+    pid: int | None = None
+    running_s: float | None = None
+    steps: list[InboxStep] = []
+    fixes: list[InboxFix] = []
+    fix_group: InboxFixGroup | None = None
+    fixes_share: float | None = None
+    source_report_id: int | None = None
+    before_ms: float | None = None
+    after_ms: float | None = None
+    calls: int | None = None
+    index_name: str | None = None
+    # Changes ready: the plan in brief.
+    changes: InboxChanges | None = None
+    # Fix confirmed and No change yet from the actions check: the applied action measured.
+    action_id: int | None = None
+    history: list[InboxHistoryEntry] = []
+    related: list[InboxRelated] = []
+    # Likely fix: the open action that covers one of the item's queries, best score first; for
+    # a database-wide item (connections, locks, cache hit), the action its subject maps to.
     action: InboxLikelyFix | None = None
 
 
@@ -877,7 +1124,7 @@ class SnapshotPeriod(BaseModel):
 
 
 class SnapshotNumber(BaseModel):
-    metric: Literal["qps", "mean_ms", "active_conns_peak", "cache_hit_ratio_min",
+    metric: Literal["qps", "mean_ms", "p95_ms", "active_conns_peak", "cache_hit_ratio_min",
                     "xact_rollback", "deadlocks"]
     label: str
     unit: Literal["qps", "ms", "count", "ratio"]
@@ -1171,6 +1418,211 @@ class AnalyzedQuery(BaseModel):
     error_kind: str | None = None
 
 
+class ReportDayTile(BaseModel):
+    metric: Literal["qps", "mean_ms", "connections", "cache_hit"]
+    label: str
+    value: float | None
+    unit: Literal["qps", "ms", "count", "ratio"]
+    detail: str | None
+    state: Literal["ok", "warn", "bad", "collecting"]
+    reason: str | None
+    # Connections: the server's limit ("8 of 100").
+    limit: float | None = None
+
+
+class ReportDay(BaseModel):
+    label: str
+    tiles: list[ReportDayTile]
+    chart: SnapshotChart | None
+    spikes: list[SnapshotSpike]
+    query_count: int
+    # False when the day before has no readings: nothing is compared against it.
+    compared: bool = True
+
+
+class ReportFixItem(BaseModel):
+    rank: int | None
+    title: str
+    detail: str | None
+    sql: str | None
+    share: float | None
+    state: Literal["ready", "needs_attention", "worth_doing", "fixed", "smaller"]
+    kind: Literal["index", "config", "rewrite", "other"]
+    group: str | None
+    query_keys: list[str]
+    restart: bool = False
+    fixed_at: int | None = None
+    before_ms: float | None = None
+    after_ms: float | None = None
+
+
+class ReportHealthRow(BaseModel):
+    check: str
+    label: str
+    state: Literal["bad", "warn", "ok", "unavailable"]
+    finding: str
+    detail: str | None
+    fix_rank: int | None
+    # Every warning ("Needs a look") and worse needs you.
+    needs_you: bool = False
+    # Actions lists a change for this warning; false when only the report shows it.
+    in_actions: bool = False
+
+
+class ReportRun(BaseModel):
+    number: int
+    trigger: Literal["nightly", "on_request"]
+    ran_at: int
+    model: str | None
+    analyses: int
+    rewrites: int
+
+
+class DetailedTile(BaseModel):
+    """One of the Detailed view's six numbers with the day before's. Rollbacks and deadlocks
+    share a tile: `value` counts rollbacks, `second` deadlocks."""
+    metric: Literal["qps", "mean_ms", "p95_ms", "connections", "cache_hit", "rollbacks_deadlocks"]
+    label: str
+    value: float | None
+    prior: float | None
+    change: float | None
+    unit: Literal["qps", "ms", "count", "ratio"]
+    state: Literal["ok", "warn", "bad", "collecting"]
+    # Connections: the server's limit ("8 of 100").
+    limit: float | None = None
+    second: float | None = None
+    second_prior: float | None = None
+    # "No data for the day before" when there is nothing to compare with.
+    prior_note: str | None = None
+
+
+class DetailedStretchQuery(BaseModel):
+    """A query behind a busy stretch: its share of the stretch's time (busiest stretches), or
+    its level before and during (spikes)."""
+    query_key: str
+    display_name: str
+    share: float | None
+    before: float | None
+    during: float | None
+    ratio: float | None
+
+
+class DetailedStretch(BaseModel):
+    """A spike the day crossed (`spike`), or when none did, one of its two busiest stretches
+    (`busiest`), with the queries behind it and the rollbacks inside it."""
+    kind: Literal["spike", "busiest"]
+    metric: Literal["traffic", "latency"] | None
+    start: int
+    end: int
+    peak: float | None
+    usual: float | None
+    ratio: float | None
+    summary: str | None
+    queries: list[DetailedStretchQuery]
+    rollbacks: float | None
+
+
+class WhatChangedRow(BaseModel):
+    """A query against the day before, by average time per call. `plan_changed` rows carry
+    the filing's time and detail instead of numbers."""
+    kind: Literal["slower", "faster", "new_heavy", "plan_changed"]
+    query_key: str | None
+    display_name: str
+    share: float | None
+    before_ms: float | None
+    after_ms: float | None
+    change: float | None
+    detail: str | None
+    ts: int | None
+
+
+class ConfirmedFixRow(BaseModel):
+    """A fix measured as working in the report's day."""
+    title: str
+    applied_at: int | None
+    confirmed_at: int | None
+    before_ms: float | None
+    after_ms: float | None
+    query_keys: list[str]
+
+
+class HealthCheckRow(BaseModel):
+    """Every health check, worst first: its finding, the one number it shows and the Fix first
+    rank that addresses it."""
+    check: str
+    label: str
+    state: Literal["bad", "warn", "ok", "unavailable"]
+    finding: str
+    number: str | None
+    fix_rank: int | None
+    # Every warning ("Needs a look") and worse needs you.
+    needs_you: bool = False
+    # Actions lists a change for this warning; false when only the report shows it.
+    in_actions: bool = False
+
+
+class SettingsAuditRow(BaseModel):
+    """A setting off the recommendation and when a change takes effect; `in_actions` when
+    the database shows the problem it fixes, so Actions lists the change."""
+    parameter: str
+    current: str
+    recommended: str
+    takes_effect: Literal["after a restart", "on reload"]
+    note: str | None
+    in_actions: bool = False
+
+
+class IndexChangeSeen(BaseModel):
+    """An index added or dropped in the day; `from_rdst` when an RDST action named it, with
+    that action's measuring status, and reads since for an added one."""
+    ts: int
+    kind: Literal["added", "dropped"]
+    index_name: str
+    table: str
+    definition: str
+    from_rdst: bool
+    action_id: int | None
+    status: Literal["measuring", "verified", "no_change", "undone"] | None
+    scans: int | None
+
+
+class RdstDidRow(BaseModel):
+    """One timed line of RDST's own day; `until` ends a stretch (an analysis batch, the
+    checks that ran all day)."""
+    ts: int
+    until: int | None
+    text: str
+    detail: str | None
+    item_id: int | None
+    report_id: int | None
+
+
+class DetailedTotals(BaseModel):
+    queries_seen: int
+    # Minute readings the day kept.
+    readings: int
+    data_kept_days: int
+    data_bytes: int
+    report_number: int
+    ran_at: int
+
+
+class ReportDetailed(BaseModel):
+    """GET report?view=detailed: the sections Detailed adds, in report-detailed.html order.
+    Verdict, the day and Fix first stay in the top-level fields both views share."""
+    tiles: list[DetailedTile]
+    spikes: list[DetailedStretch]
+    # False when the day before has no readings: What changed compares nothing.
+    compared: bool = True
+    what_changed: list[WhatChangedRow]
+    fixes_confirmed: list[ConfirmedFixRow]
+    health_checks: list[HealthCheckRow]
+    settings_audit: list[SettingsAuditRow]
+    index_changes_seen: list[IndexChangeSeen]
+    what_rdst_did: list[RdstDidRow]
+    totals: DetailedTotals
+
+
 class DatabaseReport(BaseModel):
     id: int
     target: str
@@ -1187,6 +1639,18 @@ class DatabaseReport(BaseModel):
     period_end: int | None = None
     period_partial: bool = False
     sample: bool = False
+    # The report as the Report page reads it (report_v2.view).
+    verdict: ReportVerdictText | None = None
+    day: ReportDay | None = None
+    fix_first: list[ReportFixItem] = []
+    health: list[ReportHealthRow] = []
+    health_fine: list[str] = []
+    run: ReportRun | None = None
+    narrative_missing: bool = False
+    # "Copy all N as SQL": the Fix first rows that carry SQL, on both views.
+    copy_count: int = 0
+    # Present with view=detailed.
+    detailed: ReportDetailed | None = None
 
 
 class NotifyEvents(BaseModel):
@@ -1196,6 +1660,13 @@ class NotifyEvents(BaseModel):
     stuck_query: bool = True
     database_events: bool = True
     query_changes: bool = True
+    daily_report: bool = True
+
+
+class QuietHours(BaseModel):
+    """Pushes are held between these local hours; equal hours mean no quiet hours."""
+    from_hour: int
+    to_hour: int
 
 
 AIMonitoringState = Literal["off", "on", "local", "pending", "paused"]
@@ -1224,6 +1695,7 @@ class MonitorSettings(BaseModel):
     # What pushes a notification; switched-off events still reach the Inbox. Database
     # unreachable is never held back by push_daily_cap.
     notify_events: NotifyEvents
+    quiet_hours: QuietHours = QuietHours(from_hour=23, to_hour=7)
     # Dev/demo lever; null means the default learning period applies.
     dev_learning_period_s: int | None = None
     # When monitoring was last turned on from the app.
@@ -1320,6 +1792,114 @@ class AddedQuery(BaseModel):
     job: AnalyzeJob | None = None
 
 
+class HomeStatus(BaseModel):
+    """needs_you: an Act now item is open. quiet: attention checks ran in the last 3 cycles
+    and nothing is open. paused: charts and stuck-query alerts run, AI checks do not. off:
+    no database is monitored."""
+    state: Literal["needs_you", "quiet", "paused", "off"]
+    target: str | None
+    needs_you: int
+    to_watch: int
+    headline: str | None
+    link: MonitorLink | None
+    checks_ran_at: int | None
+    since: int | None
+    last_reading_at: int | None
+    next_report_at: int | None
+    watching: int
+    # Counted apart: Act now items in the Inbox, Do first changes in Actions. `target` names
+    # the first configured database when none is monitored.
+    act_now: int = 0
+    do_first: int = 0
+
+
+class HomeLogEntry(BaseModel):
+    ts: int
+    text: str
+    detail: str | None
+    link: MonitorLink
+    band: Literal["act_now", "watch"] | None = None
+
+
+class HomeDatabase(BaseModel):
+    target: str
+    connection: str
+    state: Literal["watching", "cant_reach", "ai_paused", "not_monitored"]
+    state_since: int | None
+    qps: float | None
+    open_items: int
+    act_now: int
+    # Queries an open index or rewrite action speeds up.
+    fixes_ready: int
+    # The database's open Changes ready event.
+    fixes_item_id: int | None
+    # Open actions, and how many are Do first.
+    to_do: int = 0
+    do_first: int = 0
+
+
+class HomeStripRow(BaseModel):
+    """One database in Home's "Across your databases" strip, in attention order."""
+    target: str
+    state: Literal["watching", "cant_reach", "ai_paused", "not_monitored"]
+    act_now: int
+    to_do: int
+    do_first: int
+    fixes_ready: int
+    activity: DatabaseActivity | None = None
+    # The first pass of analyses is still building its first plan.
+    building: bool = False
+
+
+class HomeSparkPoint(BaseModel):
+    ts: int
+    qps: float | None
+
+
+class HomeDayCard(BaseModel):
+    target: str
+    qps: float | None
+    qps_peak: float | None
+    qps_peak_at: int | None
+    mean_ms: float | None
+    mean_ms_delta: float | None
+    fixes_ready: int
+    fixes_share: float | None
+    fixes_item_id: int | None
+    cache_hit_ratio: float | None
+    cache_hit_reason: str | None
+    series: list[HomeSparkPoint]
+    report_id: int | None
+    report_day: str | None
+
+
+class HomeAnalyzed(BaseModel):
+    target: str
+    query_key: str
+    display_name: str
+    analyzed_at: int
+    analysis_ref: str | None
+    outcome: Literal["fix_suggested", "healthy", "failed"]
+
+
+class HomeSinceYesterday(BaseModel):
+    opened_closed: int
+    fixes_confirmed: int
+
+
+class HomeModel(BaseModel):
+    """GET /home: the status line, the day card, every database and today's log."""
+    status: HomeStatus
+    day: HomeDayCard | None
+    databases: list[HomeDatabase]
+    databases_strip: list[HomeStripRow] = []
+    not_monitored: int
+    today: list[HomeLogEntry]
+    since_yesterday: HomeSinceYesterday
+    recently_analyzed: list[HomeAnalyzed]
+    generated_at: int
+
+
 def documented(model: type[BaseModel]) -> dict:
     """Route kwargs that publish `model` in OpenAPI without filtering the response."""
     return {"responses": {200: {"model": model}}}
@@ -1340,12 +1920,27 @@ class ActionWindow(BaseModel):
     counter_age_s: int
 
 
+ActionState = Literal["open", "snoozed", "dismissed", "applied", "confirmed", "no_effect",
+                      "retired", "undone"]
+ActionTier = Literal["first", "then", "later"]
+# What applying a change risks: a restart, every write on a write-heavy table, table locks.
+ActionRisk = Literal["none", "restart", "locks", "writes"]
+# What applying it takes: copy and run SQL, change a setting, or change application code.
+ActionEffort = Literal["copy_sql", "setting", "code"]
+
+
 class ActionCard(BaseModel):
     id: int | None
     key: str
     type: ActionType
-    state: Literal["open", "snoozed", "dismissed", "applied", "confirmed", "no_effect", "retired"]
+    state: ActionState
     score: float
+    risk: ActionRisk = "none"
+    effort: ActionEffort = "copy_sql"
+    # Database time it saves a minute (actions.saves_ms_per_min).
+    saves_ms_per_min: float = 0.0
+    # Its Do first / Then / Later tier while open; `priority` keeps the checkup's order.
+    tier: ActionTier | None = None
     title: str
     summary: str
     note: str | None
@@ -1392,6 +1987,13 @@ class CheckupState(BaseModel):
     due_by: int | None
     report_id: int | None
     finished_at: int | None
+    # sign_in while the first pass's analyses wait for a Readyset sign-in; `held_text` is
+    # the sentence to show with the sign-in link.
+    held: Literal["sign_in", "ai_paused"] | None = None
+    held_text: str | None = None
+    # With ai_paused: limit when the account's AI slots are all in use, quota when its AI
+    # usage ran out.
+    ai_reason: Literal["limit", "quota"] | None = None
 
 
 class StoryFact(BaseModel):
@@ -1425,6 +2027,215 @@ class ActionsPage(BaseModel):
     dismissed: int
     set_aside: list[ActionCard]
     window: ActionWindow | None
+
+
+ActionKind = Literal["index", "setting", "maintenance", "rewrite", "caching"]
+
+
+class PlanQuery(BaseModel):
+    """A query a change speeds up: its share of the database's time over the plan's window,
+    its average latency there, and the latency expected after the change when the plan knows
+    the gain."""
+    key: str
+    name: str
+    share: float
+    mean_ms: float | None
+    expected_ms: float | None
+
+
+class PlanCard(BaseModel):
+    """One action on the global Actions page. `sql` applies it and `rollback_sql` reverses it
+    (migration templates are built client-side from both). `before_ms`/`after_ms` are the
+    measured averages once the actions check has verified it."""
+    id: int
+    key: str
+    database: str
+    type: Literal["add_index", "drop_index", "rewrite_query", "change_setting",
+                  "run_maintenance", "try_caching"]
+    kind: ActionKind
+    state: ActionState
+    # Open cards: Do first / Then / Later, and the 1-based rank inside the returned list.
+    priority: ActionTier | None
+    rank: int | None
+    risk: ActionRisk
+    effort: ActionEffort
+    saves_ms_per_min: float
+    score: float
+    title: str
+    summary: str
+    note: str | None
+    why: str | None
+    apply: ActionApply
+    sql: str | None
+    rollback_sql: str | None
+    restart: bool
+    confidence: str | None
+    table: str | None
+    columns: list[str]
+    index_name: str | None
+    setting: dict | None
+    queries: list[PlanQuery]
+    # The queries' combined share of database time.
+    share: float
+    before_ms: float | None
+    after_ms: float | None
+    # An index add's write cost (writes_per_s, peak_writes_per_s, existing_indexes, ...).
+    write_cost: dict | None
+    steps: str | None
+    evidence: list[dict]
+    rows: list[dict]
+    # A rewrite's original query text, shown beside the rewrite.
+    original: str | None = None
+    opened_at: int
+    updated_at: int
+    set_aside_until: int | None
+    closed_at: int | None
+    # The user's reason for a set aside, a dismissal or an undo.
+    reason: str | None
+    # The checkup's own order, when it ranked this action.
+    checkup_rank: int | None
+
+
+class ActionsCounts(BaseModel):
+    """What each filter choice would show with the others kept: by database across every
+    database, by kind and tier inside the chosen database."""
+    by_database: dict[str, int]
+    by_kind: dict[str, int]
+    first: int
+    then: int
+    later: int
+    total: int
+
+
+class ActionsDatabase(BaseModel):
+    """A database in the Actions filter: its open changes and how many are Do first."""
+    database: str
+    monitored: bool
+    to_do: int
+    do_first: int
+    # Where its checkups stand; null for a database that isn't monitored.
+    checkup: CheckupState | None = None
+
+
+class ReportCheckOnly(BaseModel):
+    """A check the report flags that has no change on Actions (a setting merely off a rule
+    of thumb, an index with no reads in the report's window)."""
+    check: str
+    label: str
+    finding: str
+
+
+class ReportChecks(BaseModel):
+    """The latest report's health checks: `needs_you` of `checks` ("2 of 8 checks need
+    you"), and the ones needing you that only the report lists."""
+    report_id: int
+    checks: int
+    needs_you: int
+    not_in_actions: list[ReportCheckOnly]
+
+
+class GlobalActionsPage(BaseModel):
+    """GET /actions?db=: the plan across databases (decision 6). `cards` holds the open
+    actions ranked Do first, Then, Later, each tier by time saved a minute; `set_aside` and
+    `dismissed` list the held ones for Bring back."""
+    db: str | None
+    databases: list[ActionsDatabase]
+    unmonitored: list[str]
+    # When the newest plan in scope was computed, and how much traffic it read (seconds).
+    updated_at: int | None
+    observed_s: int | None
+    counts: ActionsCounts
+    cards: list[PlanCard]
+    set_aside: list[PlanCard]
+    dismissed: list[PlanCard]
+    # Changes applied in the last 30 days, for the Applied scope's count.
+    applied_count: int
+    # Per database: indexes the plan keeps, and smaller wins left out because writes outweigh.
+    keep: dict[str, int]
+    left_out: dict[str, int]
+    # Per database with a finished report: its health checks as the report counts them.
+    report_checks: dict[str, ReportChecks] = {}
+
+
+class AppliedQuery(BaseModel):
+    """A query an applied change was meant to speed up: average latency over the 7 days
+    before and since the change settled, and calls since."""
+    key: str
+    name: str
+    before_ms: float | None
+    after_ms: float | None
+    calls_after: int
+
+
+class AppliedRow(BaseModel):
+    """One applied change. `by` is user when you said you did it, detected when RDST saw it
+    land; `source` is how it closed (index_added, index_dropped, setting_changed,
+    query_replaced, cleared, user). Measuring rows say when RDST checks next."""
+    id: int
+    key: str
+    database: str
+    type: str
+    kind: ActionKind
+    title: str
+    applied_at: int
+    by: Literal["user", "detected"]
+    source: str | None
+    status: Literal["measuring", "verified", "no_change", "undone"]
+    queries: list[AppliedQuery]
+    before_ms: float | None
+    after_ms: float | None
+    calls_after: int
+    verified_at: int | None
+    next_check_at: int | None
+    rollback_sql: str | None
+    saved_ms_per_min: float | None
+    undone_at: int | None
+    reason: str | None
+
+
+class AppliedDay(BaseModel):
+    """Applied rows of one local day, newest first; `day` is its ISO date."""
+    start: int
+    day: str
+    rows: list[AppliedRow]
+
+
+class DismissedRow(BaseModel):
+    id: int
+    database: str
+    type: str
+    kind: ActionKind
+    title: str
+    dismissed_at: int
+    reason: str | None
+
+
+class AppliedTotals(BaseModel):
+    """The last 7 days: changes applied by status, and the database time the verified ones
+    save a minute, also as a share of all database time."""
+    changes_this_week: int
+    verified: int
+    measuring: int
+    no_change: int
+    saved_ms_per_min: float
+    saved_share: float | None
+
+
+class AppliedPage(BaseModel):
+    """GET /actions/applied?db=: the last 30 days of applied changes by day, the undone and
+    dismissed ones with their reasons, and the week's totals."""
+    db: str | None
+    since: int | None
+    days: list[AppliedDay]
+    undone: list[AppliedRow]
+    dismissed: list[DismissedRow]
+    totals: AppliedTotals
+
+
+class ActionsOpened(BaseModel):
+    """POST actions/opened: whether an open Changes ready event closed."""
+    target: str
+    closed: bool
 
 
 class IndexPlanHelp(BaseModel):

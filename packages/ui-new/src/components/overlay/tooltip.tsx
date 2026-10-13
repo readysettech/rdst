@@ -376,6 +376,7 @@ export const TooltipTrigger = TooltipPrimitive.Trigger
 type TooltipContentProps = {
   loading?: boolean
   icon?: IconStrokeName
+  /** The tooltip's text; `children`, when given, render in its place. */
   label: string
 } & TooltipVariants &
   ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
@@ -397,6 +398,7 @@ export const TooltipContent = forwardRef<
       fullWidth,
       disabled,
       iconPosition,
+      children,
       ...restProps
     },
     ref
@@ -431,18 +433,22 @@ export const TooltipContent = forwardRef<
           contentEditable={false}
           {...restProps}
         >
-          <IconWithSpinner
-            loading={loading}
-            hasIcon={hasLeftIcon || hasJustIcon}
-            rightGap={!hasJustIcon}
-            icon={icon as IconStrokeName}
-            label={label}
-          />
-          {!hasJustIcon && label}
-          {!hasJustIcon && hasRightIcon && (
+          {children ?? (
             <>
-              <div className="h-2 w-2" />
-              <Icon name={icon!} label={label} />
+              <IconWithSpinner
+                loading={loading}
+                hasIcon={hasLeftIcon || hasJustIcon}
+                rightGap={!hasJustIcon}
+                icon={icon as IconStrokeName}
+                label={label}
+              />
+              {!hasJustIcon && label}
+              {!hasJustIcon && hasRightIcon && (
+                <>
+                  <div className="h-2 w-2" />
+                  <Icon name={icon!} label={label} />
+                </>
+              )}
             </>
           )}
         </TooltipPrimitive.Content>

@@ -31,7 +31,8 @@ def test_page_decode_allows_a_rollback_journal_writer(tmp_path, monkeypatch, dec
     assert all('scale' in entry['target_lifecycle'] for entry in entries.values())
 
 
-@pytest.mark.parametrize('value', [0.12345678901234566, 1.0000000000000002, 1.0e-250, 1.0e250])
+@pytest.mark.parametrize('value', [0.12345678901234566, 1.0000000000000002, 1.0e-250, 1.0e250,
+                                   2.2790121708605243e274, 5e-324, 1.7976931348623157e308])
 def test_library_materialization_preserves_float_values(tmp_path, value):
     registry = QueryRegistry(registry_path=str(tmp_path / 'queries.toml'), use_sqlite=True)
     key, _ = registry.add_query('SELECT * FROM floats', avg_duration_ms=value, max_duration_ms=value)

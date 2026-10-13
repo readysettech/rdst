@@ -1,9 +1,16 @@
 import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
+import {
+  Modal,
+  ModalContent,
+  ModalContentContainer,
+  ModalTitle,
+} from '@rs/ui-new/modal'
+import { Scrollable } from '@rs/ui-new/scrollable'
 import { Skeleton } from '@rs/ui-new/skeleton'
 import { Text } from '@rs/ui-new/text'
 import { useToast } from '@rs/ui-new/use-toast'
-import { useDeleteMuteRule } from '@/lib/monitor/hooks'
+import { useDeleteMuteRule, useMuteRules } from '@/lib/monitor/hooks'
 import type { MuteRule } from '@/lib/monitor/types'
 import { formatRelative, plural } from '../monitor-kit/format'
 import {
@@ -11,8 +18,6 @@ import {
   describeRuleDuration,
   ruleIsActive,
 } from '../monitor-kit/severity'
-
-const DOT = '\u00b7'
 
 interface MuteRulesListProps {
   rules: MuteRule[] | undefined
@@ -77,7 +82,7 @@ export function MuteRulesList({
                   rule.note,
                 ]
                   .filter(Boolean)
-                  .join(` ${DOT} `)}
+                  .join(', ')}
               </Text>
             </div>
             <Button
@@ -106,5 +111,36 @@ export function MuteRulesList({
         )
       })}
     </ul>
+  )
+}
+
+/** The mute rules in a dialog, each with Unmute. */
+export function MuteRulesDialog({
+  open,
+  onClose,
+  names = new Map(),
+}: {
+  open: boolean
+  onClose: () => void
+  names?: Map<string, string>
+}) {
+  const rules = useMuteRules()
+  return (
+    <Modal open={open} onOpenChange={(next) => !next && onClose()}>
+      <ModalContentContainer open={open}>
+        <ModalContent size="base" className="overflow-hidden p-0">
+          <div className="shrink-0 border-b border-border-layout-2 p-5">
+            <ModalTitle className="h-auto">Mute rules</ModalTitle>
+          </div>
+          <Scrollable rootClassName="min-h-0 flex-1" className="pb-2">
+            <MuteRulesList
+              rules={rules.data?.rules}
+              loading={rules.isPending}
+              names={names}
+            />
+          </Scrollable>
+        </ModalContent>
+      </ModalContentContainer>
+    </Modal>
   )
 }

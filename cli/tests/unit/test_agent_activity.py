@@ -479,3 +479,19 @@ def test_daily_reports_carry_the_day_they_cover(data_dir):
     reports = {item["report_id"]: item for item in store.page(action="daily_snapshot")["items"]}
     assert (reports[7]["period_start"], reports[7]["period_end"]) == (HOUR - 86400, HOUR)
     assert reports[3]["period_start"] == HOUR - 2 * 86400
+
+
+def test_folded_lines_name_their_database_and_the_page_states_one_retention(data_dir):
+    store = AgentActivityStore()
+    for target in ("shop", "billing"):
+        for minute in range(3):
+            store.append(_entry(HOUR + minute * 60, action="attention_check", target=target,
+                                subject=""))
+    app = FastAPI()
+    app.include_router(routes.router, prefix="/api")
+    page = TestClient(app).get("/api/agent-activity").json()
+    rollups = [item for item in page["items"] if item["kind"] == "rollup"]
+    assert sorted((item["target"], item["count"]) for item in rollups) == [
+        ("billing", 3), ("shop", 3)]
+    assert page["targets"] == ["billing", "shop"]
+    assert page["retention_days"] * 86400 == RETENTION_SECONDS

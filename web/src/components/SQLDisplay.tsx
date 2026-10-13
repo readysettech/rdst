@@ -134,7 +134,6 @@ function buildParameterHighlightExtension(
 
 /**
  * Lightweight readonly SQL display with syntax highlighting.
- * Uses the same theme as SQLEditor for consistency.
  */
 export function SQLDisplay({
   sql: sqlCode,

@@ -119,13 +119,19 @@ export default defineConfig({
     {
       name: 'chromium-web-e2e-cim-setup',
       testMatch: 'setup.ts',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1440, height: 900 },
+      },
     },
     {
       name: 'chromium-web-e2e-cim',
       testMatch: '*.spec.ts',
       dependencies: ['chromium-web-e2e-cim-setup'],
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1440, height: 900 },
+      },
     },
   ],
 })

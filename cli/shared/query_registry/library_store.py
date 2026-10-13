@@ -1093,6 +1093,30 @@ def _decode_analysis_payload(payload: Any) -> Dict[str, Any]:
     return decoded if isinstance(decoded, dict) else {}
 
 
+# SQLite's decimal text for a REAL round-trips only between roughly 2**-200 and 2**300, so a
+# REAL leaves SQLite scaled into that range by an exact power of two, as "<digits> <power>". Each
+# band k holds values from 2**(k - 128) up; the last also holds zero and subnormals.
+_REAL_BANDS = (768, 512, 256, 0, -256, -512, -768, -1022)
+_REAL_BAND_PARAMS = {**{f"real_floor_{index}": 2.0 ** (band - 128)
+                        for index, band in enumerate(_REAL_BANDS[:-1])},
+                     **{f"real_scale_{index}": 2.0 ** -band for index, band in enumerate(_REAL_BANDS)}}
+
+
+def _real_text(column: str) -> str:
+    """SQL rendering a REAL column as exact text for `_real_value`."""
+    def text(index: int) -> str:
+        return f"printf('%!.17g',{column}*:real_scale_{index})||' {_REAL_BANDS[index]}'"
+
+    bands = " ".join(f"WHEN abs({column})>=:real_floor_{index} THEN {text(index)}"
+                     for index in range(len(_REAL_BANDS) - 1))
+    return f"CASE {bands} ELSE {text(len(_REAL_BANDS) - 1)} END"
+
+
+def _real_value(text: str) -> float:
+    digits, power = text.split()
+    return math.ldexp(float(digits), int(power))
+
+
 def _finite_float(value: Any) -> float:
     """Return a SQLite/JSON-safe finite number for legacy numeric input."""
     try:
@@ -1883,16 +1907,17 @@ class LibraryStore:
             names = [column[0] for column in
                      conn.execute("SELECT * FROM temp.library_read LIMIT 0").description]
             columns = ['"' + name.replace('"', '""') + '"' for name in names]
-            # Text preserves the full precision of SQLite REAL values during JSON transfer.
-            values = ",".join(f"CASE WHEN typeof({column})='real' THEN "
-                              f"printf('%!.26g',{column}) ELSE {column} END" for column in columns)
+            # REAL values cross the JSON transfer as exact text (see _REAL_BANDS).
+            values = ",".join(f"CASE WHEN typeof({column})='real' THEN {_real_text(column)} "
+                              f"ELSE {column} END" for column in columns)
             reals = ",".join(f"typeof({column})='real'" for column in columns)
             try:
                 rows = json.loads(conn.execute(
                     "SELECT json_group_array(json_array("
                     f"json_array({values}),json_array({reals}))) "
-                    "FROM (SELECT * FROM temp.library_read ORDER BY rowid)").fetchone()[0])
-                return [{name: float(value) if real else value
+                    "FROM (SELECT * FROM temp.library_read ORDER BY rowid)",
+                    _REAL_BAND_PARAMS).fetchone()[0])
+                return [{name: _real_value(value) if real else value
                          for name, value, real in zip(names, values, reals)} for values, reals in rows]
             except (sqlite3.OperationalError, json.JSONDecodeError):
                 rows = conn.execute("SELECT * FROM temp.library_read ORDER BY rowid").fetchall()
@@ -2191,6 +2216,36 @@ class LibraryStore:
             conn.execute("DELETE FROM assessment_schema_snapshot WHERE target_key = ?", (target,))
             conn.execute("UPDATE target_query SET rm_jev_priority = -1, rm_jev_target_identity = '' WHERE target_key = ?", (target,))
             return cursor.rowcount or 0
+
+    def rename_target(self, old: str, new: str) -> None:
+        """Move a database's queries, analyses and assessments to its new name in one
+        transaction. Rows a removed database left under the new name give way."""
+        if not self._db_path.exists():
+            return
+        with self._write() as conn:
+            conn.execute("DELETE FROM target_query WHERE target_key = ? AND identity_id IN "
+                         "(SELECT identity_id FROM target_query WHERE target_key = ?)", (new, old))
+            conn.execute("DELETE FROM query_assessment WHERE target_key = ?", (new,))
+            conn.execute("DELETE FROM assessment_schema_snapshot WHERE target_key = ?", (new,))
+            for table in ("target_query", "query_assessment", "assessment_schema_snapshot"):
+                conn.execute(f"UPDATE {table} SET target_key = ? WHERE target_key = ?", (new, old))
+            for column in ("last_target", "ask_target", "last_cache_target"):
+                conn.execute(f"UPDATE query_identity SET {column} = ? WHERE {column} = ?",
+                             (new, old))
+            # The stored body names its database too; the analysis reader matches on it.
+            ids = [row[0] for row in conn.execute(
+                "SELECT id FROM query_analysis WHERE target = ?", (old,))]
+            for start in range(0, len(ids), 500):
+                rows = conn.execute("SELECT id, payload FROM query_analysis WHERE id IN "
+                                    "(SELECT value FROM json_each(?))",
+                                    (_json_dumps(ids[start:start + 500]),)).fetchall()
+                updates = []
+                for row in rows:
+                    body = _decode_analysis_payload(row["payload"])
+                    payload = _json_dumps({**body, "target": new}) if body else row["payload"]
+                    updates.append((new, payload, row["id"]))
+                conn.executemany(
+                    "UPDATE query_analysis SET target = ?, payload = ? WHERE id = ?", updates)
 
     def _backfill_read_model(self, conn: sqlite3.Connection) -> None:
         """Populate v7 in bounded batches without loading the registry.

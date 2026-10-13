@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
 import {
   acceptBrowserError,
+  addDatabaseThroughDialog,
   clearTargets,
   expect,
   mockAiKeyReady,
@@ -25,11 +26,11 @@ async function countRequests(pages: Page[], run: () => Promise<void>) {
 }
 
 // The owner's fresh install sent about 70 requests a second from the Database
-// page after onboarding: a second tab, still holding the target list from before
-// the database was added, kept resetting the selection the onboarding tab made,
+// page after adding a database: a second tab, still holding the target list from before
+// the database was added, kept resetting the selection the adding tab made,
 // and every flip remounted the page. A settled Database page polls a few
 // endpoints a few times a minute.
-test('a Database page reached through onboarding stays calm', async ({
+test('a Database page reached through the add dialog stays calm', async ({
   page,
   browserErrors,
 }) => {
@@ -85,24 +86,13 @@ test('a Database page reached through onboarding stays calm', async ({
   await other.goto('/')
   await expect(other.locator('#main-content')).toBeVisible()
 
-  await page.goto('/onboarding')
-  await page.locator('[name="name"]').fill('calm-db')
-  await page.locator('[name="host"]').fill('127.0.0.1')
-  await page.locator('[name="database"]').fill('app')
-  await page.locator('[name="user"]').fill('calm')
-  await page.locator('[name="password"]').fill('calm-password')
-  await page.getByRole('button', { name: 'Test & connect' }).click()
-  // Connecting opens the turn-on dialog on the new database's page.
-  const dialog = page.getByRole('dialog', {
-    name: 'Turn on monitoring for calm-db',
+  // Adding from the dialog turns monitoring on and opens the database's page.
+  await addDatabaseThroughDialog(page, {
+    host: '127.0.0.1',
+    database: 'calm-db',
+    user: 'calm',
+    password: 'calm-password',
   })
-  await expect(dialog).toBeVisible({ timeout: 15_000 })
-  await expect(dialog.getByTestId('prereq-checker')).toHaveAttribute(
-    'data-phase',
-    'ready',
-    { timeout: 15_000 }
-  )
-  await dialog.getByRole('button', { name: 'Not now' }).click()
   await expect(
     page.getByRole('heading', { level: 1, name: 'calm-db' })
   ).toBeVisible()
@@ -122,7 +112,7 @@ test('a Database page reached through onboarding stays calm', async ({
   expect(
     counts.get('GET /api/monitor/targets/calm-db/report/latest') ?? 0
   ).toBeLessThanOrEqual(2)
-  // Both tabs follow the database the onboarding tab chose.
+  // Both tabs follow the database the adding tab chose.
   await expect(
     page.getByRole('heading', { level: 1, name: 'calm-db' })
   ).toBeVisible()

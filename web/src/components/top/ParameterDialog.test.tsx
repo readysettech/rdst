@@ -73,6 +73,42 @@ describe('ParameterDialog', () => {
     expect(screen.getAllByText('Parameters').length).toBeGreaterThanOrEqual(1)
   })
 
+  it('collects values in the shared dialog with a plain run button', () => {
+    render(
+      <ParameterDialog
+        isOpen
+        onClose={onClose}
+        onSubmit={onSubmit}
+        query={fewParamsQuery}
+      />
+    )
+
+    expect(
+      screen.getByRole('heading', { name: 'Enter parameter values' })
+    ).toBeTruthy()
+    const run = screen.getByRole('button', { name: 'Analyze query' })
+    expect(run.querySelector('svg')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders the inline form flat, without a heading or icon tile', () => {
+    render(
+      <ParameterDialog
+        presentation="inline"
+        isOpen
+        onClose={onClose}
+        onSubmit={onSubmit}
+        query={fewParamsQuery}
+      />
+    )
+
+    const form = screen.getByTestId('parameter-form-inline')
+    expect(form.querySelector('svg')).toBeNull()
+    expect(screen.queryByRole('heading')).toBeNull()
+    expect(form.className).not.toContain('border')
+  })
+
   it('disables Analyze button when params are empty', () => {
     render(
       <ParameterDialog
@@ -290,7 +326,7 @@ describe('ParameterDialog', () => {
     expect(inputs[0].value).toBe('42')
     expect(inputs[2].value).toBe('1')
     expect(screen.getByText('Observed value')).toBeTruthy()
-    expect(screen.getByText('Schema enum · users.name')).toBeTruthy()
+    expect(screen.getByText('Schema enum, users.name')).toBeTruthy()
     expect(
       screen.getByText(
         'Filled 2 of 2 missing parameters. Review suggested values before running.'
@@ -330,10 +366,9 @@ describe('ParameterDialog', () => {
     ) as HTMLInputElement[]
     expect(inputs[0].value).toBe('')
     expect(inputs[1].value).toBe('100')
-    const initLink = screen.getByRole('link', {
-      name: 'Initialize the semantic layer',
-    })
-    expect(initLink.getAttribute('href')).toBe('/schema')
+    expect(
+      screen.queryByRole('link', { name: 'Initialize the semantic layer' })
+    ).toBeNull()
   })
 
   it('offers sampled values from the database and a captured statement', async () => {

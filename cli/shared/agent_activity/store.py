@@ -26,7 +26,8 @@ from shared.query_registry.observation_store import (
 )
 
 SCHEMA_VERSION = 1
-RETENTION_SECONDS = 90 * 86400
+RETENTION_DAYS = 90
+RETENTION_SECONDS = RETENTION_DAYS * 86400
 PRUNE_EVERY_SECONDS = 3600
 ACTIONS = ("deep_analysis", "ask", "classification", "attention_check", "daily_snapshot",
            "explain_actions", "benchmark")
@@ -412,6 +413,15 @@ class AgentActivityStore:
     def targets(self) -> list[str]:
         return [row["target"] for row in self.read(
             "SELECT DISTINCT target FROM activity_entry WHERE target<>'' ORDER BY target")]
+
+    def rename_target(self, old: str, new: str) -> None:
+        """Move a database's entries to its new name in one transaction, so the log and its
+        database filter use the name the database has now."""
+        if not self.path.exists():
+            return
+        self.ensure_open()
+        self._write(lambda conn: conn.execute(
+            "UPDATE activity_entry SET target=? WHERE target=?", (new, old)))
 
     def entry(self, entry_id: int) -> dict[str, Any] | None:
         rows = self.read("SELECT * FROM activity_entry WHERE id=?", (int(entry_id),))

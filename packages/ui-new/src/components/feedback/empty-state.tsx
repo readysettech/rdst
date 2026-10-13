@@ -68,6 +68,11 @@ export interface EmptyStateProps extends EmptyStateVariants {
   action?: EmptyStateAction
   /** Secondary call to action, rendered as a link-styled button. */
   secondaryAction?: EmptyStateAction
+  /**
+   * `quiet`: a status line and a caption with no tile. `icon` is not drawn and the
+   * actions carry no icons.
+   */
+  tone?: 'default' | 'quiet'
   className?: string
 }
 
@@ -85,14 +90,17 @@ function EmptyStateImpl({
   action,
   secondaryAction,
   layout,
+  tone = 'default',
   className,
 }: EmptyStateProps) {
   const styles = emptyStateStyles({ layout })
+  const quiet = tone === 'quiet'
+  const actionIcon = (a: EmptyStateAction) => (quiet ? undefined : a.icon)
 
   return (
     <div className={styles.root({ class: className })}>
       {media ??
-        (icon && (
+        (icon && !quiet && (
           <div className={styles.tile()}>
             {/* Decorative: the visible title names the state, so labelling the
                 icon would double the announcement. */}
@@ -106,7 +114,11 @@ function EmptyStateImpl({
         ))}
 
       <VStack className="gap-1 items-center">
-        <Text as="h3" level="subtitle-1" className="text-content-layout-1">
+        <Text
+          as="h3"
+          level={quiet ? 'headline-5' : 'subtitle-1'}
+          className={quiet ? 'text-content-layout-2' : 'text-content-layout-1'}
+        >
           {title}
         </Text>
         {body && (
@@ -123,7 +135,7 @@ function EmptyStateImpl({
         <div
           className={cn(
             'flex flex-wrap items-center justify-center gap-3',
-            body || icon || media ? 'mt-2' : ''
+            body || (icon && !quiet) || media ? 'mt-2' : ''
           )}
         >
           {action && (
@@ -131,8 +143,8 @@ function EmptyStateImpl({
               variant="primary"
               modifier="solid"
               label={action.label}
-              icon={action.icon}
-              iconPosition={action.icon ? 'left' : 'none'}
+              icon={actionIcon(action)}
+              iconPosition={actionIcon(action) ? 'left' : 'none'}
               loading={action.loading}
               disabled={action.disabled || action.loading}
               onClick={action.onClick}
@@ -143,8 +155,8 @@ function EmptyStateImpl({
               variant="primary"
               modifier="link"
               label={secondaryAction.label}
-              icon={secondaryAction.icon}
-              iconPosition={secondaryAction.icon ? 'left' : 'none'}
+              icon={actionIcon(secondaryAction)}
+              iconPosition={actionIcon(secondaryAction) ? 'left' : 'none'}
               loading={secondaryAction.loading}
               disabled={secondaryAction.disabled || secondaryAction.loading}
               onClick={secondaryAction.onClick}

@@ -64,7 +64,7 @@ export function aiStateCopy(state: AiMonitoringState | undefined): AiStateCopy {
       return {
         label: 'AI monitoring',
         description:
-          'Charts, alerts, AI checks, deep analysis and nightly checkups.',
+          'Charts, alerts, AI checks, deep analysis and nightly reports.',
         tone: 'positive',
       }
   }
@@ -216,7 +216,7 @@ const REASON_COPY: Record<
     reasonLabel: "you're signed out",
     headline: 'Sign in to turn on AI monitoring',
     detail:
-      'Sign in to get AI checks, deep analysis and nightly checkups. Charts and alerts keep running.',
+      'Sign in to get AI checks, deep analysis and nightly reports. Charts and alerts keep running.',
     action: { kind: 'sign_in', label: 'Sign in' },
   },
   limit: {
@@ -316,7 +316,7 @@ export function monitoringStatus(
       reason: null,
       headline: null,
       detail:
-        'Charts, alerts, AI checks, deep analysis and nightly checkups are running.',
+        'Charts, alerts, AI checks, deep analysis and nightly reports are running.',
       action: null,
       tone: 'positive',
       busy: false,

@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -69,30 +75,6 @@ vi.mock('../lib/useAnthropicValidity', () => ({
 vi.mock('../components/aws/AwsConnectionPanel', () => ({
   AwsConnectionPanel: () => <div data-testid="aws-connection-panel" />,
 }))
-// The drawer and the dev tools own their own polling and are not part of the
-// row's password path; the connection list itself renders for real.
-vi.mock('../components/configure', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../components/configure')>()),
-  AddTargetsDrawer: ({
-    open,
-    initialTab,
-    onClose,
-  }: {
-    open: boolean
-    initialTab: string
-    onClose: () => void
-  }) =>
-    open ? (
-      <div data-testid="add-targets-drawer">
-        <span>{`Provider: ${initialTab}`}</span>
-        <button type="button" onClick={onClose}>
-          Close provider drawer
-        </button>
-      </div>
-    ) : null,
-  DevSettingsSection: () => null,
-}))
-
 // The route declares its component as a split-module loader, which is how the
 // router itself reaches the page.
 const { component: loadConfigurePage } = Route as unknown as {
@@ -244,51 +226,63 @@ describe('Settings row password save', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['fleet-targets'] })
   })
 
-  it('keeps settings areas mutually exclusive while switching panels', async () => {
+  it('says what each key covers, and the AI monitoring count, under AI', async () => {
+    mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    renderWithClient(<SettingsPage search={{}} />)
+    const routing = await screen.findByTestId('ai-key-routing')
+    expect(within(routing).getByText('What each key covers')).toBeTruthy()
+    expect(routing.closest('#ai')).toBeTruthy()
+  })
+
+  it('lays every group out on one page, with no tabs and no solid button', async () => {
     mockUseConfigure(vi.fn().mockResolvedValue(undefined))
     vi.mocked(useFleetStatus).mockReturnValue(
       fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
     )
     renderWithClient(<SettingsPage search={{}} />)
 
-    expect(await screen.findByRole('heading', { name: 'Targets' })).toBeTruthy()
-    expect(screen.queryByText('AI access')).toBeNull()
-
-    fireEvent.click(screen.getByRole('tab', { name: 'AI' }))
-    expect(await screen.findByText('AI access')).toBeTruthy()
-    expect(screen.queryByRole('heading', { name: 'Targets' })).toBeNull()
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Data & privacy' }))
     expect(
-      await screen.findByText('Loading local storage details…')
+      await screen.findByRole('heading', { level: 1, name: 'Settings' })
     ).toBeTruthy()
-    expect(screen.queryByText('AI access')).toBeNull()
+    for (const group of [
+      'Account',
+      'AI',
+      'Notifications',
+      'Appearance',
+      'Data',
+      'About',
+      'Databases',
+    ])
+      expect(
+        screen.getByRole('heading', { level: 2, name: group })
+      ).toBeTruthy()
+    expect(screen.queryByRole('tab')).toBeNull()
+    // Dark is the one theme RDST draws; Light and Font size wait until they apply.
+    expect(screen.getByText('Light colors are coming.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Theme/ })).toBeNull()
+    expect(screen.queryByText('Font size')).toBeNull()
+    expect(
+      screen
+        .getAllByRole('button')
+        .filter((button) =>
+          button.className.includes('bg-surface-primary-solid')
+        )
+    ).toEqual([])
   })
 
-  it('says so when a retired route sent the reader here', async () => {
-    // /fleet redirects into Settings; the arrival explains the move once
-    // instead of silently becoming a different page. [E-51, F-54]
+  it('lands silently when a retired route sent the reader here', async () => {
     mockUseConfigure(vi.fn().mockResolvedValue(undefined))
     vi.mocked(useFleetStatus).mockReturnValue(
       fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
     )
     renderWithClient(<SettingsPage search={{ from: 'fleet' }} />)
 
-    expect(await screen.findByText('Fleet moved into Settings')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
-    await waitFor(() =>
-      expect(screen.queryByText('Fleet moved into Settings')).toBeNull()
-    )
-  })
-
-  it('carries no arrival notice when Settings was asked for directly', async () => {
-    mockUseConfigure(vi.fn().mockResolvedValue(undefined))
-    vi.mocked(useFleetStatus).mockReturnValue(
-      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
-    )
-    renderWithClient(<SettingsPage search={{}} />)
-
-    expect(await screen.findByRole('heading', { name: 'Targets' })).toBeTruthy()
+    expect(
+      await screen.findByRole('heading', { name: 'Databases' })
+    ).toBeTruthy()
     expect(screen.queryByText('Fleet moved into Settings')).toBeNull()
   })
 
@@ -321,8 +315,11 @@ describe('Settings row password save', () => {
 
     renderWithClient(<SettingsPage search={{ panel: 'ai' }} />)
 
-    expect(await screen.findByText('Anthropic API key configured')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Use the included AI' }))
+    const hosted = await screen.findByRole('switch', {
+      name: 'Hosted by Readyset',
+    })
+    expect(hosted.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(hosted)
 
     await waitFor(() =>
       expect(vi.mocked(setAiProvider).mock.calls[0]?.[0]).toBe('readyset')
@@ -358,15 +355,18 @@ describe('Settings row password save', () => {
 
     renderWithClient(<SettingsPage search={{ panel: 'ai' }} />)
 
-    expect(await screen.findByText('Using the included AI')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Use Anthropic key' }))
+    const hosted = await screen.findByRole('switch', {
+      name: 'Hosted by Readyset',
+    })
+    expect(hosted.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(hosted)
 
     await waitFor(() =>
       expect(vi.mocked(setAiProvider).mock.calls[0]?.[0]).toBe('claude')
     )
   })
 
-  it('opens an edit deep link and clears it when the form is cancelled', async () => {
+  it('opens an edit deep link and clears it when the dialog is closed', async () => {
     const configure = mockUseConfigure(vi.fn().mockResolvedValue(undefined))
     configure.getTarget.mockResolvedValue({
       name: 'orders',
@@ -386,14 +386,55 @@ describe('Settings row password save', () => {
     await waitFor(() =>
       expect(configure.getTarget).toHaveBeenCalledWith('orders')
     )
-    expect(await screen.findByText('Edit target')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(
+      await screen.findByRole('dialog', { name: 'Edit database' })
+    ).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Close modal' }))
 
     expect(routerSpies.navigate).toHaveBeenCalledWith({
       to: '/configure',
       search: { panel: 'connections' },
       replace: true,
     })
+  })
+
+  it('saves an edit from the dialog and returns to the database list', async () => {
+    const configure = mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    configure.getTarget.mockResolvedValue({
+      name: 'orders',
+      engine: 'postgresql',
+      host: 'orders.test',
+      port: 5432,
+      database: 'orders',
+      user: 'app_ro',
+      has_password: true,
+      is_default: true,
+    })
+    configure.updateTarget.mockResolvedValue(undefined)
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    renderWithClient(<SettingsPage search={{ edit: 'orders' }} />)
+
+    const dialog = await screen.findByRole('dialog', { name: 'Edit database' })
+    fireEvent.change(within(dialog).getByLabelText('Name'), {
+      target: { value: 'orders-eu' },
+    })
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Save changes' })
+    )
+
+    await waitFor(() =>
+      expect(routerSpies.navigate).toHaveBeenCalledWith({
+        to: '/configure',
+        search: { panel: 'connections' },
+        replace: true,
+      })
+    )
+    expect(configure.updateTarget).toHaveBeenCalledWith(
+      'orders',
+      expect.objectContaining({ name: 'orders-eu', host: 'orders.test' })
+    )
   })
 
   it('returns to the owning feature when a connection repair is cancelled', async () => {
@@ -415,8 +456,10 @@ describe('Settings row password save', () => {
       <SettingsPage search={{ edit: 'orders', returnTo: '/audit' }} />
     )
 
-    expect(await screen.findByText('Edit target')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(
+      await screen.findByRole('dialog', { name: 'Edit database' })
+    ).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Close modal' }))
 
     expect(routerSpies.push).toHaveBeenCalledWith('/audit')
     expect(routerSpies.navigate).not.toHaveBeenCalledWith({
@@ -433,7 +476,7 @@ describe('Settings row password save', () => {
     )
     renderWithClient(<SettingsPage search={{ section: 'ai' }} />)
 
-    expect(await screen.findByText('AI access')).toBeTruthy()
+    expect(await screen.findByText('Use my own key')).toBeTruthy()
     expect(
       (await screen.findAllByText(/Anthropic API key/)).length
     ).toBeGreaterThan(0)
@@ -468,22 +511,25 @@ describe('Settings row password save', () => {
     })
   })
 
-  it('opens provider deep links on the requested source and cleans the URL on close', async () => {
+  it('opens the add-database dialog over Settings from the Databases group', async () => {
     mockUseConfigure(vi.fn().mockResolvedValue(undefined))
     vi.mocked(useFleetStatus).mockReturnValue(
       fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
     )
-    renderWithClient(<SettingsPage search={{ add: 'csv' }} />)
+    renderWithClient(<SettingsPage search={{}} />)
 
-    expect(await screen.findByText('Provider: csv')).toBeTruthy()
     fireEvent.click(
-      screen.getByRole('button', { name: 'Close provider drawer' })
+      await screen.findByRole('button', { name: 'Add a database' })
     )
 
-    expect(routerSpies.navigate).toHaveBeenCalledWith({
-      to: '/configure',
-      search: { panel: 'connections' },
-      replace: true,
+    const opened = routerSpies.navigate.mock.calls.at(-1)?.[0] as {
+      to: string
+      search: (current: Record<string, unknown>) => Record<string, unknown>
+    }
+    expect(opened.to).toBe('.')
+    expect(opened.search({ panel: 'connections' })).toEqual({
+      panel: 'connections',
+      add: 1,
     })
   })
 

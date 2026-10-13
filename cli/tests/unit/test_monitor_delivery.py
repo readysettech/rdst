@@ -369,7 +369,7 @@ def test_summaries_lead_with_the_finding():
     text = "On target 'localdev' (PostgreSQL), measured load is dominated by two queries."
     assert lead_with_finding(text) == "Measured load is dominated by two queries."
     assert lead_with_finding("Two queries carry the load.") == "Two queries carry the load."
-    item = {"type": "daily_summary", "subject": "d", "title": "Checkup ready",
+    item = {"type": "daily_summary", "subject": "d", "title": "Daily report ready",
             "state": "new"}
     assert inbox_summary(item, {"summary": text}, {}).startswith("Measured load")
 
@@ -434,9 +434,9 @@ def test_a_lost_connection_files_during_the_first_hour(store):
     from features.monitor.connection import ConnectionWatch
 
     store.set_settings("db", {"enabled": True})
-    store.start_first_hour("db", NOW - 120)
+    store.start_first_hour("db", NOW - 180)
     watch = ConnectionWatch(store, clock=lambda: NOW)
-    watch.collection("db", False, NOW - 60, "connection refused")
-    watch.collection("db", False, NOW, "connection refused")
+    for ts in (NOW - 120, NOW - 60, NOW):
+        watch.collection("db", False, ts, "connection refused")
     filed = [item for item in store.inbox() if item["subject"] == "lost_connection"]
-    assert len(filed) == 1 and filed[0]["state"] == "new"
+    assert len(filed) == 1 and filed[0]["state"] == "new" and filed[0]["delivery"] == "inbox"

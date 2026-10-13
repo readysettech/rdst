@@ -115,7 +115,7 @@ describe('AccountLoginDialog', () => {
       expect(completeAccountRedirect).toHaveBeenCalledWith('login-1', undefined)
     )
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1))
-    expect(screen.getByText('Readyset account connected')).toBeTruthy()
+    expect(screen.getByText(/Readyset account connected/)).toBeTruthy()
   })
 
   it('returns desktop OAuth through its local RDST server', async () => {
@@ -164,7 +164,7 @@ describe('AccountLoginDialog', () => {
     await act(async () => {
       await Promise.resolve()
     })
-    expect(screen.getByText('Readyset account connected')).toBeTruthy()
+    expect(screen.getByText(/Readyset account connected/)).toBeTruthy()
   })
 
   it('answers an invalid address under the field and holds the request', async () => {
@@ -202,5 +202,27 @@ describe('AccountLoginDialog', () => {
     await waitFor(() =>
       expect(startAccountGithubOAuth).toHaveBeenCalledWith(context)
     )
+  })
+
+  it('leads with GitHub, then Google, and says what signing in is for', () => {
+    renderWithClient(
+      <AccountLoginDialog isOpen onClose={vi.fn()} />,
+      createTestQueryClient()
+    )
+
+    expect(
+      screen.getByRole('heading', { name: 'Sign in to Readyset' })
+    ).toBeTruthy()
+    const buttons = screen
+      .getAllByRole('button')
+      .map((button) => button.textContent?.trim())
+    expect(buttons.indexOf('Continue with GitHub')).toBeLessThan(
+      buttons.indexOf('Continue with Google')
+    )
+    expect(
+      screen.getByText(
+        'Signing in turns on AI monitoring and the free AI included with a Readyset account for analyses, checks and Ask.'
+      )
+    ).toBeTruthy()
   })
 })

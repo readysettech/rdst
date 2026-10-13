@@ -99,55 +99,39 @@ test('asks a question and renders the answer first with the post-validation SQL 
   await expect(page.getByRole('heading', { name: 'Ask' })).toBeVisible()
 
   const question = 'Who are our highest revenue customers?'
-  await page
-    .getByPlaceholder(
-      'For example: Which customers placed the most orders this month?'
-    )
-    .fill(question)
-  // The composer submit is the only button named "Ask" — the view switcher's
-  // "Ask" segment is a tab, so it never collides on the button role.
-  await page.getByRole('button', { name: 'Get answer' }).click()
+  await page.getByRole('textbox', { name: 'Question' }).fill(question)
+  await page.getByRole('button', { name: 'Ask', exact: true }).click()
 
-  // Answer-first: the results table leads, with provenance stamped from the
-  // stream's own target and the plain-English explanation beside it.
-  await expect(page.getByText('Answer', { exact: true })).toBeVisible()
-  await expect(
-    page.getByText('Answered from e2e-guard via semantic layer')
-  ).toBeVisible()
+  // Answer-first: the status line stamps provenance from the stream's own
+  // target, then the explanation and the table.
+  const status = page.getByTestId('ask-status')
+  await expect(status).toContainText('Answered from e2e-guard')
+  await expect(status).toContainText('2 rows')
   await expect(
     page.getByText('Aggregates order totals by customer.')
   ).toBeVisible()
-  await expect(
-    page.getByRole('columnheader', { name: 'customer' })
-  ).toBeVisible()
-  await expect(page.getByRole('cell', { name: 'Ada' })).toBeVisible()
-  await expect(page.getByText('2 rows', { exact: true })).toBeVisible()
+  const table = page.getByTestId('ask-table')
+  await expect(table).toContainText('customer')
+  await expect(page.getByTestId('ask-row').first()).toContainText('Ada')
   expect(requests).toEqual([{ question, target: 'e2e-guard' }])
 
-  // The SQL is collapsed by default; toggling reveals the POST-VALIDATION
-  // query (with the injected LIMIT) plus the backend's LIMIT-added note.
-  await expect(page.locator('.cm-content')).toHaveCount(0)
-  const disclosure = page.getByRole('button', {
-    name: /Show the SQL that ran/,
-  })
+  // The SQL is folded by default; opening it shows the POST-VALIDATION query
+  // (with the injected LIMIT) and the disclosure names the added LIMIT.
+  await expect(page.getByTestId('ask-sql')).toHaveCount(0)
+  const disclosure = page.getByRole('button', { name: /SQL that ran/ })
   await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+  await expect(disclosure).toContainText(/LIMIT \d+ added/)
   await disclosure.click()
   await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
-  await expect(page.locator('.cm-content')).toContainText('LIMIT 100')
-  await expect(
-    page.getByText('was added to keep the result set bounded')
-  ).toBeVisible()
+  await expect(page.getByTestId('ask-sql')).toContainText('LIMIT 100')
 
   // The silent auto-save is surfaced with the returned registry label.
-  await expect(page.getByText('Saved as top customers')).toBeVisible()
+  await expect(status).toContainText('saved as top customers')
 
-  // Only "Ask another" clears the input.
-  await page.getByRole('button', { name: 'Ask another' }).click()
-  await expect(
-    page.getByPlaceholder(
-      'For example: Which customers placed the most orders this month?'
-    )
-  ).toHaveValue('')
+  // The question stays in the box after the answer.
+  await expect(page.getByRole('textbox', { name: 'Question' })).toHaveValue(
+    question
+  )
 })
 
 test('answers a clarification and resumes the original ask session', async ({
@@ -226,31 +210,22 @@ test('answers a clarification and resumes the original ask session', async ({
 
   await page.goto('/ask')
   const question = 'How much revenue did we make?'
-  await page
-    .getByPlaceholder(
-      'For example: Which customers placed the most orders this month?'
-    )
-    .fill(question)
-  // The composer submit is the only button named "Ask" — the view switcher's
-  // "Ask" segment is a tab, so it never collides on the button role.
-  await page.getByRole('button', { name: 'Get answer' }).click()
+  await page.getByRole('textbox', { name: 'Question' }).fill(question)
+  await page.getByRole('button', { name: 'Ask', exact: true }).click()
 
-  // Calm clarification heading with the original question echoed above the
-  // options — never dropped.
-  await expect(
-    page.getByText('One quick question', { exact: true })
-  ).toBeVisible()
-  await expect(page.getByText(`You asked: ${question}`)).toBeVisible()
-  // The question renders as written; splitting it on the first colon dropped
-  // the half that disambiguated it.
+  // The original question stays in the box above the choice.
+  await expect(page.getByRole('textbox', { name: 'Question' })).toHaveValue(
+    question
+  )
+  // The clarifying question renders as written, colon and all.
   await expect(
     page.getByText('Which revenue definition: choose one', { exact: true })
   ).toBeVisible()
-  await page.getByRole('radio', { name: 'Gross revenue' }).check()
-  // The submit button says the outcome ("Get answer"), not a step advance.
-  await page.getByRole('button', { name: 'Get answer' }).click()
+  await page.getByRole('radio', { name: /Gross revenue/ }).check()
+  // The submit button names the outcome it runs.
+  await page.getByRole('button', { name: 'Run with gross revenue' }).click()
 
-  await expect(page.getByRole('cell', { name: '7300' })).toBeVisible()
+  await expect(page.getByTestId('ask-row').first()).toContainText('7,300')
   expect(requests).toEqual([
     { question, target: 'e2e-guard' },
     {
@@ -309,26 +284,13 @@ test('a streamed Ask failure keeps the question and Try again re-runs it', async
 
   await page.goto('/ask')
   const question = 'Show recent orders'
-  await page
-    .getByPlaceholder(
-      'For example: Which customers placed the most orders this month?'
-    )
-    .fill(question)
-  // The composer submit is the only button named "Ask" — the view switcher's
-  // "Ask" segment is a tab, so it never collides on the button role.
-  await page.getByRole('button', { name: 'Get answer' }).click()
+  await page.getByRole('textbox', { name: 'Question' }).fill(question)
+  await page.getByRole('button', { name: 'Ask', exact: true }).click()
 
-  await expect(
-    page.getByText("Couldn't generate SQL", { exact: true })
-  ).toBeVisible()
-  await expect(
-    page.getByText('The SQL generator is temporarily unavailable', {
-      exact: true,
-    })
-  ).toBeVisible()
-  await expect(
-    page.getByText('Failed while generating SQL', { exact: true })
-  ).toBeVisible()
+  const failure = page.getByTestId('ask-failure')
+  await expect(failure).toContainText(
+    'The SQL generator is temporarily unavailable'
+  )
 
   // TRUE retry: the SAME question is re-run — the input is never wiped.
   // The retry renders the same error text as the first attempt, so waiting on
@@ -340,9 +302,9 @@ test('a streamed Ask failure keeps the question and Try again re-runs it', async
   )
   await page.getByRole('button', { name: 'Try again' }).click()
   await retryRequest
-  await expect(
-    page.getByText("Couldn't generate SQL", { exact: true })
-  ).toBeVisible()
+  await expect(failure).toContainText(
+    'The SQL generator is temporarily unavailable'
+  )
   expect(requests).toEqual([
     { question, target: 'e2e-guard' },
     { question, target: 'e2e-guard' },
@@ -351,12 +313,12 @@ test('a streamed Ask failure keeps the question and Try again re-runs it', async
   // A failure routes back to the composer with the question intact, so the
   // recovery is "Edit question" rather than a fresh, empty box.
   await page.getByRole('button', { name: 'Edit question' }).click()
+  await expect(page.getByRole('textbox', { name: 'Question' })).toHaveValue(
+    question
+  )
   await expect(
-    page.getByPlaceholder(
-      'For example: Which customers placed the most orders this month?'
-    )
-  ).toHaveValue(question)
-  await expect(page.getByRole('button', { name: 'Get answer' })).toBeEnabled()
+    page.getByRole('button', { name: 'Ask', exact: true })
+  ).toBeEnabled()
 })
 
 test('a model context limit is shown as a schema-size error', async ({
@@ -385,21 +347,17 @@ test('a model context limit is shown as a schema-size error', async ({
   await mockConnectivityOk(page)
   await page.goto('/ask')
   await page
-    .getByPlaceholder(
-      'For example: Which customers placed the most orders this month?'
-    )
+    .getByRole('textbox', { name: 'Question' })
     .fill('Show recent orders')
-  await page.getByRole('button', { name: 'Get answer' }).click()
+  await page.getByRole('button', { name: 'Ask', exact: true }).click()
 
-  await expect(
-    page.getByText('Database schema is too large', { exact: true })
-  ).toBeVisible()
-  await expect(
-    page.getByText('Failed while generating SQL', { exact: true })
-  ).toBeVisible()
-  await expect(page.getByText('AI service authentication failed')).toHaveCount(
-    0
+  const failure = page.getByTestId('ask-failure')
+  await expect(failure).toContainText(
+    'The complete database schema could not fit'
   )
+  // A schema that does not fit is neither a credential problem nor something a
+  // retry of the same question can fix.
+  await expect(failure.getByRole('link', { name: 'Sign in' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0)
   await expect(
     page.getByRole('button', { name: 'Edit question' })

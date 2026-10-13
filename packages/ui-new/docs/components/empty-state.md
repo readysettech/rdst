@@ -68,6 +68,10 @@ one component, not three:
 For the first-use brand-warm variant, pass an `IconTile` as `media` instead of
 the neutral `icon` tile.
 
+**Quiet tone.** `tone="quiet"` drops the tile: `icon` is not drawn, the title is
+`headline-5` in `content-layout-2` and the body stays the third-tone caption,
+so the state reads as a status line. Actions render without icons.
+
 ---
 
 ## Code
@@ -83,6 +87,7 @@ the neutral `icon` tile.
 | `action` | `{ label; onClick; icon? }` | — | Primary CTA (solid button). |
 | `secondaryAction` | `{ label; onClick; icon? }` | — | Secondary CTA (link-styled). |
 | `layout` | `'block' \| 'compact'` | `'block'` | Page/panel vs in-table. |
+| `tone` | `'default' \| 'quiet'` | `'default'` | `quiet`: no tile, status-line title (see Style). |
 | `className` | `string` | — | Class on the root. |
 
 ### Example

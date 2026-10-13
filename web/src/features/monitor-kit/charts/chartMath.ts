@@ -1,12 +1,11 @@
 // Pure geometry for monitor charts: nice y domains, line segments with gaps.
-import { comparisonChartMax } from '@/components/ComparisonLineChart'
 
 export interface ChartPoint {
   x: number
   y: number | null
 }
 
-const NICE = [1, 2, 2.5, 5, 10]
+const NICE = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]
 
 function niceUp(value: number): number {
   if (value <= 0) return 1
@@ -16,10 +15,9 @@ function niceUp(value: number): number {
   return nice * power
 }
 
-/** Nice top of a zero-based axis. Uses the Demo's 1/2/5 x 10^n above 1. */
+/** Nice top of a zero-based axis, close above the data so the chart uses its height. */
 export function niceMax(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 1
-  if (value > 1) return comparisonChartMax(value)
   return niceUp(value)
 }
 
@@ -182,7 +180,29 @@ export function clipToDomain(
 ): ChartPoint[] {
   if (!domain) return points
   const [from, to] = domain
-  return points.filter((point) => point.x >= from - step && point.x <= to + step)
+  return points.filter(
+    (point) => point.x >= from - step && point.x <= to + step
+  )
+}
+
+/**
+ * The points a load chart over `domain` draws, as indices into ascending `xs` with the x to
+ * draw each at. The bucket that holds the left edge is drawn on it, so a window that starts
+ * at the first reading never slopes in from a point the plot leaves out; one step past the
+ * right edge stays so the line runs off it.
+ */
+export function pointsInView(
+  xs: number[],
+  domain: [number, number],
+  step: number
+): { x: number; index: number }[] {
+  const [from, to] = domain
+  const out: { x: number; index: number }[] = []
+  xs.forEach((x, index) => {
+    if (x >= from && x <= to + step) out.push({ x, index })
+    else if (x < from && x >= from - step) out[0] = { x: from, index }
+  })
+  return out
 }
 
 export function downsample(

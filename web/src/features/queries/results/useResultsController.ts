@@ -4,6 +4,7 @@ import { hasParameters } from '../../../components/top'
 import { useTarget } from '../../../hooks/useTarget'
 import {
   analysisRunKey,
+  cancelAnalysisRun,
   useAnalysisRunKeyForHash,
 } from '../../../lib/analysisRuns'
 import type { AnalysisRerunReason } from '../../../lib/analytics'
@@ -20,16 +21,11 @@ import { useAnalyze } from '../../../lib/sse'
 import { useCacheAction } from '../../../lib/useCacheAction'
 import { useTargetConnectivityGate } from '../../../lib/useTargetConnectivityGate'
 import { useTargetPasswordLock } from '../../../lib/useTargetPasswordLock'
-import {
-  parseQueryLibrarySearch,
-  type QueryLibrarySearch,
-} from '../library/queryLibraryState'
 import { analysisAgeBucket } from './storedAnalysis'
 import type { ResultsOrigin, ResultsSearch } from './types'
 import { useStoredAnalysis } from './useStoredAnalysis'
 
-// Legacy/direct links carry neither `origin` nor `returnSearch` — they have
-// always landed on the Query Library, so that stays the fallback origin.
+// Direct links carry no `origin`; they go back to the Database query list.
 const DEFAULT_ORIGIN: ResultsOrigin = 'query-library'
 
 const ORIGIN_BACK_LABEL: Record<ResultsOrigin, string> = {
@@ -59,19 +55,6 @@ function parseStoredParameters(params?: string) {
   }
 }
 
-function parseReturnSearch(value?: string): QueryLibrarySearch | undefined {
-  if (!value) return undefined
-  try {
-    const parsed = JSON.parse(value)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return undefined
-    }
-    return parseQueryLibrarySearch(parsed as Record<string, unknown>)
-  } catch {
-    return undefined
-  }
-}
-
 /**
  * What the results presentation needs from a finished or in-flight analysis.
  * A live run and a replayed stored record both satisfy it, which is what lets
@@ -87,18 +70,6 @@ type ResultsAnalysisView = {
   errorEnvelope: ApiErrorEnvelope | undefined
 }
 
-/**
- * How a results view moves. `/results` navigates; the analyze drawer rewrites
- * its own `?analyze=` state over the Query Library. One controller, two
- * shells — the presentation below it is identical.
- */
-export interface ResultsShell {
-  /** Show different results in the same shell. */
-  openSearch: (next: ResultsSearch, options?: { replace?: boolean }) => void
-  /** Leave the results view for wherever the user came from. */
-  goBack: () => void
-}
-
 export interface ResultsControllerOptions {
   /** What the sidebar job for a run this view starts is called. */
   jobLabel?: string
@@ -106,7 +77,6 @@ export interface ResultsControllerOptions {
 
 export function useResultsController(
   search: ResultsSearch,
-  shell?: ResultsShell,
   options: ResultsControllerOptions = {}
 ) {
   const navigate = useNavigate()
@@ -115,7 +85,6 @@ export function useResultsController(
     target,
     fast = false,
     params,
-    returnSearch,
     origin,
     hash,
     analysisId,
@@ -123,10 +92,6 @@ export function useResultsController(
   const resolvedOrigin = origin ?? DEFAULT_ORIGIN
   const backLabel = ORIGIN_BACK_LABEL[resolvedOrigin]
   const storedParams = useMemo(() => parseStoredParameters(params), [params])
-  const queryLibraryReturnSearch = useMemo(
-    () => parseReturnSearch(returnSearch),
-    [returnSearch]
-  )
   // Attaching by identity is what lets a run outlive the view that started it:
   // closing the analyze drawer leaves the run in flight, and reopening it — or
   // opening `/results` for the same query — picks it back up. The registry hash
@@ -179,20 +144,12 @@ export function useResultsController(
 
   const openSearch = useCallback(
     (next: ResultsSearch, options?: { replace?: boolean }) => {
-      if (shell) {
-        shell.openSearch(next, options)
-        return
-      }
       navigate({ to: '/results', search: next, replace: options?.replace })
     },
-    [navigate, shell]
+    [navigate]
   )
 
   const goBack = useCallback(() => {
-    if (shell) {
-      shell.goBack()
-      return
-    }
     if (resolvedOrigin === 'home') {
       navigate({ to: '/' })
       return
@@ -205,14 +162,11 @@ export function useResultsController(
       navigate({ to: '/scan' })
       return
     }
-    // 'slow-queries' lives inside the Query Library's live-capture panel, and
-    // 'query-library' (the default) is the Query Library itself.
-    if (queryLibraryReturnSearch) {
-      navigate({ to: '/queries', search: queryLibraryReturnSearch })
-      return
-    }
-    navigate({ to: '/queries' })
-  }, [navigate, queryLibraryReturnSearch, resolvedOrigin, shell])
+    navigate({
+      to: '/database',
+      search: hash ? { target, focus: hash } : { target },
+    })
+  }, [hash, navigate, resolvedOrigin, target])
 
   const cacheQuery = useCallback(() => {
     if (query && target) cache.cacheQuery(query, query)
@@ -221,10 +175,8 @@ export function useResultsController(
   const setUpCaching = useCallback(() => {
     if (target) setTarget(target)
     navigate({
-      to: '/queries',
-      search: {
-        hash: analysis.results?.query_hash ?? undefined,
-      },
+      to: '/database',
+      search: { target, query: analysis.results?.query_hash ?? undefined },
     })
   }, [analysis.results?.query_hash, navigate, setTarget, target])
 
@@ -344,13 +296,12 @@ export function useResultsController(
         target,
         fast,
         params,
-        returnSearch,
         origin,
         hash,
         analysisId: undefined,
       })
     },
-    [fast, hash, openSearch, origin, params, query, returnSearch, target]
+    [fast, hash, openSearch, origin, params, query, target]
   )
 
   /**
@@ -363,11 +314,11 @@ export function useResultsController(
       live.reset()
       setSubstitutedQuery(null)
       openSearch(
-        { query: edited, target, fast, returnSearch, origin, hash },
+        { query: edited, target, fast, origin, hash },
         { replace: true }
       )
     },
-    [fast, hash, live.reset, openSearch, origin, returnSearch, target]
+    [fast, hash, live.reset, openSearch, origin, target]
   )
 
   /** The live view's own re-measure, always a deliberate choice by the user. */
@@ -383,13 +334,12 @@ export function useResultsController(
         target,
         fast,
         params,
-        returnSearch,
         origin,
         hash,
         analysisId: id,
       })
     },
-    [fast, hash, openSearch, origin, params, query, returnSearch, target]
+    [fast, hash, openSearch, origin, params, query, target]
   )
 
   const checkConversationStatus = useCallback(async (queryHash: string) => {
@@ -450,11 +400,11 @@ export function useResultsController(
       setShowParamDialog(false)
       setSubstitutedQuery(filledQuery)
       openSearch(
-        { query: filledQuery, target, fast, returnSearch, origin },
+        { query: filledQuery, target, fast, origin },
         { replace: true }
       )
     },
-    [fast, openSearch, origin, returnSearch, target]
+    [fast, openSearch, origin, target]
   )
 
   const cancelParameters = useCallback(() => {
@@ -466,6 +416,12 @@ export function useResultsController(
   // Stepping back out of the prompt alone, for Escape: the surface it sits in
   // stays, and the "Parameter values required" card is the way back in. [B-17]
   const dismissParameters = useCallback(() => setShowParamDialog(false), [])
+
+  /** Stop the run this view is attached to; the registry reports it cancelled. */
+  const cancelRun = useCallback(
+    () => cancelAnalysisRun(hashRunKey ?? requestRunKey),
+    [hashRunKey, requestRunKey]
+  )
 
   const closeInteractive = useCallback(() => {
     setIsInteractiveOpen(false)
@@ -537,6 +493,7 @@ export function useResultsController(
       dismissParameters,
       confirmAnalysis,
       cancelAnalysis,
+      cancelRun,
       setSkipAnalyzeConsent,
       openInteractive: () => setIsInteractiveOpen(true),
       closeInteractive,

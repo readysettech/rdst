@@ -12,8 +12,11 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 vi.mock('../lib/useAiGate', () => ({ useAiGate: () => state.gate }))
 vi.mock('./AiProviderGate', () => ({
-  AiProviderGate: ({ gate }: { gate: AiGate }) => (
-    <div>Setup {gate.status}</div>
+  AiProviderGate: ({ gate, title }: { gate: AiGate; title: string }) => (
+    <div>
+      <div>Setup {gate.status}</div>
+      <div data-testid="gate-title">{title}</div>
+    </div>
   ),
 }))
 afterEach(() => {
@@ -126,4 +129,21 @@ it.each([
   )
   expect(screen.getByText('Setup blocked')).toBeTruthy()
   expect(screen.queryByText('Application')).toBeNull()
+})
+
+it.each([
+  ['/ask', 'Ask'],
+  ['/agent-activity', 'Activity'],
+  ['/platform', 'Readyset Platform'],
+  ['/help', 'Help'],
+])('stands in for %s under its own bar title, inside the frame', (path, title) => {
+  state.path = path
+  state.gate = { status: 'blocked', reason: 'missing' }
+  render(
+    <AiAccessBoundary frame={(gate) => <main data-testid="shell">{gate}</main>}>
+      <div>Application</div>
+    </AiAccessBoundary>
+  )
+  expect(screen.getByTestId('shell').textContent).toContain('Setup blocked')
+  expect(screen.getByTestId('gate-title').textContent).toBe(title)
 })

@@ -4,6 +4,7 @@ import {
   findItem,
   hold,
   hook,
+  inboxDetail,
   items,
   judgeUntil,
   openInbox,
@@ -44,7 +45,9 @@ test('a stopped steady write reaches Jev; cheap noise and a quiet burst-only que
       type: 'jev',
       description: 'Jev judged the stopped write not worth an Inbox item',
     })
-    console.log(`ci-shop: Jev ignored the stopped write (${JSON.stringify(verdict)})`)
+    console.log(
+      `ci-shop: Jev ignored the stopped write (${JSON.stringify(verdict)})`
+    )
     expect(findItem(all, 'query_stopped_running', stopped)).toBeUndefined()
   } else {
     expect(findItem(all, 'query_stopped_running', stopped)).toBeTruthy()
@@ -53,8 +56,12 @@ test('a stopped steady write reaches Jev; cheap noise and a quiet burst-only que
   // query has been quiet for two hours: the gate keeps both from Jev.
   expect(run.shortlist).not.toContain(noise)
   expect(run.shortlist).not.toContain(burstOnly)
-  expect([...(run.gate?.smaller ?? []), ...(run.gate?.minor ?? [])]).toContain(noise)
-  expect(all.filter((item) => [noise, burstOnly].includes(item.subject))).toEqual([])
+  expect([...(run.gate?.smaller ?? []), ...(run.gate?.minor ?? [])]).toContain(
+    noise
+  )
+  expect(
+    all.filter((item) => [noise, burstOnly].includes(item.subject))
+  ).toEqual([])
   await hook.phase(request, 'noise', false)
 })
 
@@ -88,18 +95,22 @@ test('dropping an index on a top query files a regression the open Inbox shows',
     const row = await revealRow(page, item.id)
     expect(
       await page.evaluate(
-        () => (window as Window & { inboxStillLoaded?: boolean }).inboxStillLoaded
+        () =>
+          (window as Window & { inboxStillLoaded?: boolean }).inboxStillLoaded
       )
     ).toBe(true)
-    // Rows start collapsed unless a link opened one.
-    await expect(row).not.toHaveAttribute('data-open', 'true')
-    await row.getByRole('heading').getByRole('button').first().click()
-    await expect(row).toHaveAttribute('data-open', 'true')
-    // The time frame's link; a likely fix links to its action on the same page.
-    await row.locator('a[href*="/database"][href*="zoom="]').first().click()
+    // Rows start unselected unless a link opened one; the database sits under the time.
+    await expect(row).not.toHaveAttribute('aria-current', 'true')
+    await expect(row.getByTestId('inbox-item-database')).toHaveText(item.target)
+    await row.click()
+    await expect(row).toHaveAttribute('aria-current', 'true')
+    await inboxDetail(page, item.id)
+      // The time frame's link; a likely fix links to its action on the same page.
+      .locator('a[href*="/database"][href*="zoom="]')
+      .first()
+      .click()
     await expect(page).toHaveURL(/\/database/)
     await expect(page).toHaveURL(/zoom=\d+-\d+/)
-    await expect(page.getByTestId('time-frame-chip')).toContainText('From your Inbox')
   } finally {
     // The index goes back in. Recovery is checked once the slow calls have
     // left the five-minute window, after the Database page group
@@ -108,7 +119,7 @@ test('dropping an index on a top query files a regression the open Inbox shows',
   }
 })
 
-test('a third report-group burst joins the repeating item with three time frames', async ({
+test('a third report-group burst joins the repeating item, which resolves from its detail', async ({
   page,
   request,
 }, testInfo) => {
@@ -131,34 +142,40 @@ test('a third report-group burst joins the repeating item with three time frames
   const repeat = findItem(all, 'many_queries_changed')!
   expect(['new', 'seen']).toContain(repeat.state)
   const members = body(repeat).episode_query_keys as string[]
-  for (const name of ['b1_orders_by_status', 'b2_revenue_by_channel', 'b4_top_products']) {
+  for (const name of [
+    'b1_orders_by_status',
+    'b2_revenue_by_channel',
+    'b4_top_products',
+  ]) {
     expect(members).toContain(shapes[name].key)
   }
-  expect(all.filter((item) => item.type === 'many_queries_changed')).toHaveLength(1)
+  expect(
+    all.filter((item) => item.type === 'many_queries_changed')
+  ).toHaveLength(1)
 
+  // The item opens the Database page on the latest burst's time frame.
   await openInbox(page)
   const row = await revealRow(page, repeat.id)
-  await row.getByRole('heading').getByRole('button').first().click()
-  const times = row.getByRole('region', { name: 'Each time it happened' })
-  await times.getByRole('button', { name: /^Show the 3 times$/ }).click()
-  const frames = times.locator('li[data-occurrence]')
-  await expect(frames).toHaveCount(3)
-  const links = times.getByRole('link', { name: /^Open the Database page/ })
-  await expect(links).toHaveCount(3)
-  for (const link of await links.all()) {
-    await expect(link).toHaveAttribute('href', /zoom=\d+-\d+/)
-  }
-  await links.first().click()
+  await row.click()
+  await expect(row).toHaveAttribute('aria-current', 'true')
+  await inboxDetail(page, repeat.id)
+    .locator('a[href*="/database"][href*="zoom="]')
+    .first()
+    .click()
   await expect(page).toHaveURL(/\/database/)
   await expect(page).toHaveURL(/zoom=\d+-\d+/)
-  await expect(page.getByTestId('time-frame-chip')).toContainText('From your Inbox')
 
   // Resolving it closes this burst.
   await openInbox(page)
-  await row.hover()
-  await row.getByRole('button', { name: 'Resolve', exact: true }).click()
+  await row.click()
+  await inboxDetail(page, repeat.id)
+    .getByRole('button', { name: 'Resolve', exact: true })
+    .click()
   await expect(row).toHaveCount(0)
   await expect
-    .poll(async () => (await items(request)).find((item) => item.id === repeat.id)?.state)
+    .poll(
+      async () =>
+        (await items(request)).find((item) => item.id === repeat.id)?.state
+    )
     .toBe('resolved')
 })

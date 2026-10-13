@@ -302,7 +302,18 @@ test('scans a project, renders analysis, speed-tests a query, and hands off to A
   await expect(
     page.getByText('Comparison started', { exact: true })
   ).toBeVisible()
-  await expect(page.getByText('Load test complete')).toBeVisible()
+  // The run finishes in the background; the row offers the comparison again.
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const runs = JSON.parse(
+          window.localStorage.getItem('rdst_background_runs') ?? '[]'
+        ) as { kind: string; message: string }[]
+        return runs.find((run) => run.kind === 'speed_test')?.message
+      })
+    )
+    .toBe('Load test complete')
+  await expect(speedTestButton).toBeEnabled()
   expect(speedTestRequests).toEqual([
     {
       query,

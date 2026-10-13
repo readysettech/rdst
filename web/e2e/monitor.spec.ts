@@ -6,7 +6,8 @@ import {
   test,
 } from './fixtures'
 
-const ORDERS_SQL = 'SELECT id, total FROM orders WHERE customer_id = $1'
+const NOT_FOUND =
+  'Failed to load resource: the server responded with a status of 404 (Not Found)'
 
 // Each case seeds a full incident history through the real on-disk store.
 test.describe.configure({ timeout: 90_000 })
@@ -17,14 +18,17 @@ test.beforeEach(async ({ page }) => {
   expect(seeded.ok()).toBe(true)
 })
 
-test('database page shows live health and expandable query history', async ({
+/** The two panels of a split page. */
+function twoPane(page: import('@playwright/test').Page) {
+  return page.locator('[data-two-pane]')
+}
+
+test('database page shows the bar, the query list and a query pane', async ({
   page,
   browserErrors,
 }) => {
-  acceptBrowserError(
-    browserErrors,
-    'Failed to load resource: the server responded with a status of 404 (Not Found)'
-  )
+  // A monitored query has no Query Library record, so that lookup returns 404.
+  acceptBrowserError(browserErrors, NOT_FOUND)
   await mockPrerequisites(page, 'e2e-guard')
   // The classic per-target URL still lands on the Database page for that target.
   await page.goto('/db/e2e-guard')
@@ -32,195 +36,127 @@ test('database page shows live health and expandable query history', async ({
   await expect(
     page.getByRole('heading', { level: 1, name: 'e2e-guard' })
   ).toBeVisible()
-  await expect(page.getByTestId('load-hero')).toBeVisible()
-  const health = page.getByRole('region', { name: 'Database health' })
-  await expect(
-    health.getByRole('button', { name: /^Connections/ })
-  ).toBeVisible()
-  await expect(
-    page.getByRole('radio', { name: '15m', exact: true })
-  ).toBeVisible()
+  await expect(page.getByTestId('query-section')).toBeVisible()
 
-  // A row shows its fix or reason when it has one, else its SQL.
+  // A row opens the detail pane beside the page; the page itself never scrolls.
   const row = page.locator('[id="query-orders-e2e"]')
-  await expect(
-    row.getByTestId('row-reason').or(row.getByRole('code'))
-  ).toBeVisible()
-  await row.getByRole('button', { name: 'Details' }).click()
-  const detail = page.getByTestId('query-detail')
-  for (const name of ['Latency and calls', 'SQL', 'Deep analysis'])
-    await expect(detail.getByRole('region', { name })).toBeVisible()
-  await expect(detail.getByRole('region', { name: 'SQL' })).toContainText(
-    'FROM orders'
-  )
-  // Benchmarks shows once there's a run; the Benchmark button starts one.
-  await expect(
-    detail.getByRole('button', { name: 'Benchmark', exact: true })
-  ).toBeVisible()
+  await expect(row).toBeVisible()
+  await expect(twoPane(page)).not.toHaveAttribute('data-open', 'true')
+  await row.click()
+  await expect(twoPane(page)).toHaveAttribute('data-open', 'true')
+  await expect(row).toHaveAttribute('aria-current', 'true')
   await expect(page).toHaveURL(/query=orders-e2e/)
+  const pane = twoPane(page).locator(':scope > div').nth(1)
+  await expect(pane.getByRole('heading', { level: 2 })).toBeVisible()
+  await expect(pane).toContainText('FROM orders')
+  // The fix-gain estimate shows only for a query with a fix; Analyze for one RDST reads.
+  await expect(pane.getByRole('button', { name: 'Benchmark' })).toHaveCount(0)
+  await expect(
+    pane.getByRole('button', { name: /^Analyze( again)?$/ })
+  ).toBeVisible()
+  await pane.getByRole('button', { name: 'Close' }).click()
+  await expect(twoPane(page)).not.toHaveAttribute('data-open', 'true')
+  await expect(page).not.toHaveURL(/query=/)
 
+  // The seeded target is not monitored yet: one line and one solid button.
   await page.getByRole('button', { name: 'Turn on monitoring' }).click()
   const dialog = page.getByRole('dialog')
-  await expect(dialog).toContainText(
-    "You're signed out, so monitoring runs locally"
-  )
-  await expect(dialog).toContainText('Include deep analysis')
-  // Signed out, the dialog asks for sign-in to turn on AI; local monitoring still starts.
   await expect(
-    dialog.getByRole('heading', { name: 'AI monitoring' })
+    dialog.getByRole('heading', { name: 'Monitor e2e-guard' })
   ).toBeVisible()
-  await expect(dialog.getByTestId('ai-monitoring-sign-in')).toContainText(
-    'Sign in to turn on AI monitoring'
-  )
+  await expect(dialog).toContainText('Reads query statistics every minute')
+  await expect(dialog).toContainText('Analyze automatically turns it off.')
+  await expect(dialog.getByTestId('explain-analyze-warning')).toBeVisible()
+  // The analysis switches sit behind Advanced, both reachable.
+  await dialog.getByRole('button', { name: 'Advanced' }).click()
   await expect(
-    dialog.locator('[data-check="pg_stat_statements"][data-status="ok"]')
+    dialog.getByRole('switch', { name: 'Analyze automatically' })
   ).toBeVisible()
-  const execution = dialog.getByRole('radiogroup', {
-    name: 'When RDST analyzes a problem query',
-  })
-  await expect(execution).toBeVisible()
-  // EXPLAIN ANALYZE is preselected, with EXPLAIN only as the explained alternative.
   await expect(
-    execution.getByRole('radio', { name: /Run EXPLAIN ANALYZE/ })
-  ).toBeChecked()
+    dialog.getByRole('switch', { name: 'Measure real timings' })
+  ).toBeVisible()
   await expect(
-    execution.getByRole('radio', { name: /EXPLAIN only/ })
-  ).not.toBeChecked()
-  // The actions stay in view however long the checklist is.
-  await expect(
-    dialog.getByRole('button', { name: /^Turn on/ })
+    dialog.getByRole('button', { name: 'Turn on monitoring' })
   ).toBeInViewport()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
 })
 
 test('database page opens Analyze a query from a link', async ({ page }) => {
   await page.goto('/database?target=e2e-guard&panel=analyze')
   const dialog = page.getByRole('dialog', { name: 'Analyze a query' })
   await expect(dialog).toBeVisible()
-  const run = dialog.getByRole('button', { name: 'Run deep analysis' })
+  const run = dialog.getByRole('button', { name: 'Analyze', exact: true })
   await expect(run).toBeDisabled()
   await dialog.getByLabel('SQL').fill('UPDATE orders SET total = 0')
   await expect(dialog).toContainText('changes data')
-  await dialog.getByLabel('SQL').fill('SELECT id FROM orders WHERE id = $1')
-  await expect(dialog.getByRole('button', { name: 'Next' })).toBeEnabled()
+  await dialog.getByLabel('SQL').fill('SELECT id FROM orders WHERE id = 1')
+  await expect(run).toBeEnabled()
   await page.keyboard.press('Escape')
   await expect(page).not.toHaveURL(/panel=analyze/)
 })
 
-test('health tiles and the metric control switch the chart', async ({
+test('health numbers and the chart series switch the chart', async ({
   page,
 }) => {
-  await page.goto('/database?target=e2e-guard')
-  await expect(page.getByTestId('load-chart')).toBeVisible()
-  const tiles = page.getByRole('region', { name: 'Database health' })
-  const connections = tiles.getByRole('button', { name: /^Connections: / })
-  // The health tiles switch the chart like the metric control: one selected.
-  const metrics = page.getByRole('radiogroup', { name: 'Chart metric' })
+  // The frozen redesign fixture: every number has readings and can be selected.
+  // Its index plan has open actions, so without a view the page leads with
+  // Actions; the numbers and the chart live on the Queries tab.
+  await page.goto('/database?monitorFixture=ca-database&view=queries')
+  await expect(page.getByTestId('load-card')).toBeVisible()
+  const health = page.getByRole('region', { name: 'Database health' })
+  const connections = health.getByRole('button', { name: /Connections/ })
+  const series = page.getByRole('radiogroup', { name: 'Chart series' })
+  await expect(series).toBeVisible()
+
+  // A number puts its reading on the chart in place of the series control.
   await connections.click()
   await expect(connections).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByRole('heading', { name: 'Connections' })).toBeVisible()
-  await expect(metrics.getByRole('radio', { checked: true })).toHaveCount(0)
-  await metrics.getByRole('radio', { name: 'Queries/s' }).click()
+  await expect(page).toHaveURL(/health=connections/)
+  await expect(
+    page.getByRole('heading', { level: 2, name: 'Connections' })
+  ).toBeVisible()
+  await expect(series).toHaveCount(0)
+
+  // Queries per second brings the series control back.
+  await health.getByRole('button', { name: /Queries per second/ }).click()
   await expect(connections).toHaveAttribute('aria-pressed', 'false')
-  await expect(
-    page.getByRole('heading', { name: /^Queries per second, / })
-  ).toBeVisible()
-  await metrics.getByRole('radio', { name: 'Time spent' }).click()
-  await expect(metrics.getByRole('radio', { name: 'Time spent' })).toBeChecked()
-  await expect(
-    page.getByRole('heading', { name: /^Time spent, / })
-  ).toBeVisible()
+  await expect(page).not.toHaveURL(/health=/)
+  await series.getByRole('radio', { name: 'Latency' }).click()
+  await expect(series.getByRole('radio', { name: 'Latency' })).toBeChecked()
+  await expect(page).toHaveURL(/metric=latency/)
+  await series.getByRole('radio', { name: 'Time spent' }).click()
+  await expect(page).toHaveURL(/metric=time/)
 })
 
-test('a monitored database with no queries yet waits for real traffic', async ({
+test('a database in its first minutes shows the readings so far', async ({
   page,
-  browserErrors,
 }) => {
-  // The live stream is aborted below so the page runs on the mocked polls alone; the browser
-  // logs that aborted request as a failed resource load.
-  acceptBrowserError(browserErrors, 'Failed to load resource: net::ERR_FAILED')
-  // Monitoring is on and readings tick, but nothing has run: the page explains how to send
-  // it real traffic instead of drawing an empty chart. The served state is mocked; RDST
-  // never simulates traffic.
-  const now = Math.floor(Date.now() / 1000)
-  const on = now - 75
-  const first = on + 2
-  const ticks: number[] = []
-  for (let ts = first; ts <= now; ts += 10) ticks.unshift(ts)
-  const minute = (ts: number) => Math.floor(ts / 60) * 60
-  const history = {
-    first_ts: minute(first),
-    last_ts: minute(now),
-    span_seconds: minute(now) - minute(first) + 60,
-    resolutions: {
-      '60': { first_ts: minute(first) },
-      '300': { first_ts: null },
-      '3600': { first_ts: null },
-      '86400': { first_ts: null },
-    },
-  }
-  const base = '**/api/monitor/targets/e2e-guard'
-  const patch = (
-    glob: string,
-    edit: (real: Record<string, unknown>) => unknown
-  ) =>
-    page.route(glob, async (route) => {
-      const real = await (await route.fetch()).json()
-      await route.fulfill({ json: edit(real) })
-    })
-  await page.route(`${base}/stream**`, (route) => route.abort())
-  await patch(`${base}/pulse?**`, () => ({
-    pulses: ticks.slice(0, 50).map((ts) => ({
-      ts,
-      kind: 'collect',
-      ok: true,
-      detail: 'Read 0 queries',
-      next_collect_at: ts + 10,
-      state: 'live',
-    })),
-  }))
-  await patch(`${base}/health?**`, (real) => ({
-    ...real,
-    history,
-    series: [],
-    markers: [],
-  }))
-  await patch(`${base}/queries?**`, (real) => ({
-    ...real,
-    history,
-    queries: [],
-    total: 0,
-    composition: [],
-    counts: { all: 0, attention: 0, new: 0, fixed: 0, muted: 0 },
-  }))
-  await patch(`${base}/settings`, (real) => ({
-    ...real,
-    enabled: true,
-    enabled_at: on,
-  }))
-  await page.goto('/database?target=e2e-guard')
-  const waiting = page.getByTestId('waiting-for-queries')
-  await expect(waiting).toContainText('Waiting for queries')
-  await expect(waiting).toContainText('test suite')
-  await expect(waiting).toContainText('within 10 seconds')
-  await expect(page.getByTestId('first-run')).toContainText(
-    'Waiting for the database to run some'
+  // Monitoring just started: the chart spans the recorded minutes and the
+  // Report tab waits for the first report. The query list sits on Live.
+  await page.goto('/database?monitorFixture=ca-first-run&view=live')
+  await expect(page.getByTestId('first-run-chart')).toBeVisible()
+  await expect(page.locator('[data-page-bar]')).toContainText('min recorded')
+  await expect(page.getByTestId('query-section')).toBeVisible()
+  await page.getByRole('tab', { name: 'Report' }).click()
+  await expect(page.getByTestId('report-first')).toContainText(
+    'Your first daily report arrives tonight, just after midnight.'
   )
-  await expect(page.getByTestId('load-hero')).toHaveCount(0)
-  await expect(page.getByTestId('query-section')).toHaveCount(0)
 })
 
-test('database page opens monitoring settings from a link', async ({
+test('database page opens the monitoring settings pane from a link', async ({
   page,
 }) => {
-  // Inbox items about settings (storage budget) link here with panel=settings.
+  // Inbox items about settings link here with panel=settings.
   await page.goto('/database?target=e2e-guard&panel=settings')
-  const sheet = page.getByRole('dialog', { name: 'Monitoring settings' })
-  await expect(sheet).toBeVisible()
+  const pane = page.getByRole('region', { name: 'Monitoring, e2e-guard' })
+  await expect(pane).toBeVisible()
+  await expect(twoPane(page)).toHaveAttribute('data-open', 'true')
   await expect(
-    sheet.getByRole('radiogroup', { name: 'Pushes a day' })
+    pane.getByRole('switch', { name: 'Monitor this database' })
   ).toBeVisible()
   await page.keyboard.press('Escape')
-  await expect(sheet).toHaveCount(0)
+  await expect(pane).toHaveCount(0)
   await expect(page).not.toHaveURL(/panel=settings/)
 })
 
@@ -233,302 +169,252 @@ test('sidebar links leave the database page while its streams are open', async (
   await expect(
     page.getByRole('heading', { level: 1, name: 'e2e-guard' })
   ).toBeVisible()
-  const nav = page.locator('#app-sidebar')
+  const sidebar = page.locator('#app-sidebar')
   for (const [link, heading] of [
     ['Ask', 'Ask'],
-    ['Readyset Caching', 'See Readyset Platform in action'],
+    ['Readyset Platform', 'Readyset Platform'],
     ['Inbox', 'Inbox'],
   ] as const) {
-    await nav
-      .getByRole('link', { name: new RegExp(`^${link}`) })
-      .first()
-      .click()
+    await sidebar.getByRole('link', { name: new RegExp(`^${link}`) }).click()
     await expect(
       page.getByRole('heading', { level: 1, name: heading })
     ).toBeVisible()
   }
 })
 
-test('inbox resolves, reopens and marks alerts seen', async ({ page }) => {
+test('inbox opens an item, resolves it and keeps it under Closed', async ({
+  page,
+}) => {
   await page.goto('/inbox')
   await expect(
     page.getByRole('heading', { level: 1, name: 'Inbox' })
   ).toBeVisible()
-  const actNow = page.getByRole('region', { name: 'Urgent' })
+  // The filter row: Open and Closed with their counts, then the database.
+  const filters = page.getByRole('group', { name: 'Filters' })
+  await expect(
+    filters.getByRole('radio', { name: /^Open \d+$/, checked: true })
+  ).toBeVisible()
+  await expect(
+    filters.getByRole('button', { name: 'Database: All databases' })
+  ).toBeVisible()
+  const actNow = page.getByRole('region', { name: 'Act now' })
   const alertName = 'Orders lookup is 3x slower'
-  const alert = page.getByRole('heading', { name: alertName })
-  await expect(actNow.getByRole('heading', { level: 3 })).toHaveText([
-    'Orders lookup is 3x slower',
-    'Stuck query',
-  ])
+  const row = actNow.getByRole('button', { name: alertName })
+  await expect(row).toBeVisible()
+  // The database sits under the time at the row's right edge.
+  await expect(row.getByTestId('inbox-item-database')).toHaveText('e2e-guard')
+  await expect(
+    actNow.getByRole('button', { name: 'Stuck query' })
+  ).toBeVisible()
+  // Closed items live behind Closed.
+  await expect(page.getByRole('region', { name: 'Closed today' })).toHaveCount(
+    0
+  )
   // Digest-only findings never reach the inbox.
   await expect(page.getByText('Query improved')).toHaveCount(0)
-  // With a mouse, row actions float in on hover.
-  const row = actNow.getByRole('article').filter({ has: alert })
-  await row.hover()
-  await row.getByRole('button', { name: 'Resolve', exact: true }).click()
-  await expect(actNow.getByRole('heading', { name: alertName })).toHaveCount(0)
-  // Closed alerts list as Recovered on Open for 24 hours, each one reopenable.
-  const resolved = page.getByRole('region', {
-    name: 'Recovered in the last 24 hours',
-  })
-  await resolved.getByRole('article').filter({ has: alert }).hover()
-  await page.getByRole('button', { name: /^Reopen Orders lookup/ }).click()
-  // A measured recovery lists under Recovered, worded as observed.
-  await expect(resolved).toContainText(
-    'Calls back to normal: 1.1 calls a second.'
-  )
-  await expect(resolved).toContainText(/Calls back to normal (yesterday )?at /)
-  await expect(actNow.getByRole('heading', { name: alertName })).toBeVisible()
-  await page.getByRole('button', { name: 'Mark all seen' }).click()
-  await expect(page.getByText('Unread', { exact: true })).toHaveCount(0)
-  await expect(alert).toBeVisible()
+  // Nothing is selected until a row is picked.
+  await expect(
+    page.getByRole('region', { name: 'Nothing selected' })
+  ).toBeVisible()
+
+  await row.click()
+  await expect(row).toHaveAttribute('aria-current', 'true')
+  await expect(page).toHaveURL(/item=\d+/)
+  const detail = page.locator('[data-inbox-detail]')
+  await expect(
+    detail.getByRole('heading', { level: 2, name: alertName })
+  ).toBeVisible()
+  await expect(detail).toContainText('Act now')
+  // The Inbox's verbs are Resolve, Reopen and Mute; set aside and dismiss belong to Actions.
+  await detail
+    .getByRole('button', { name: `More actions for ${alertName}` })
+    .click()
+  await expect(
+    page.getByRole('menuitem', { name: 'Mark resolved' })
+  ).toBeVisible()
+  await expect(
+    page.getByRole('menuitem', { name: /Snooze|Dismiss/ })
+  ).toHaveCount(0)
+  await page.keyboard.press('Escape')
+
+  // Resolve closes it: it leaves Act now.
+  await detail.getByRole('button', { name: 'Resolve', exact: true }).click()
+  await expect(actNow.getByRole('button', { name: alertName })).toHaveCount(0)
+  // The Closed view keeps it for a week, under the day it closed, and can reopen it.
+  await filters.getByRole('radio', { name: /^Closed/ }).click()
+  await expect(page).toHaveURL(/state=closed/)
+  const closed = page
+    .getByRole('region', { name: 'Today' })
+    .getByRole('button', { name: alertName })
+  await expect(closed).toBeVisible()
+  await expect(
+    page.getByText('Closed items stay 7 days.').first()
+  ).toBeVisible()
+  await closed.click()
+  await detail.getByRole('button', { name: 'Reopen', exact: true }).click()
+  await filters.getByRole('radio', { name: /^Open/ }).click()
+  await expect(actNow.getByRole('button', { name: alertName })).toBeVisible()
 })
 
 test('inbox items say what to do and open the exact place', async ({
   page,
+  browserErrors,
 }) => {
+  // A query only monitoring has seen has no Query Library row for the detail to load.
+  acceptBrowserError(browserErrors, NOT_FOUND)
   await page.goto('/inbox')
-  const actNow = page.getByRole('region', { name: 'Urgent' })
-  const stuck = actNow
-    .getByRole('article')
-    .filter({ has: page.getByRole('heading', { name: 'Stuck query' }) })
-  // Items start folded to one line; the title opens them.
-  await expect(stuck.getByTestId('item-line')).toBeVisible()
-  const tiles = stuck.getByRole('region', { name: 'What you can do' })
-  await expect(tiles).toHaveCount(0)
-  await stuck.getByRole('button', { name: 'Stuck query', exact: true }).click()
-  await expect(tiles).toBeVisible()
-  // Each kind of step has its own color.
-  await expect(tiles.locator('[data-tile-kind]').first()).toBeVisible()
+  const actNow = page.getByRole('region', { name: 'Act now' })
+  await actNow.getByRole('button', { name: 'Stuck query' }).click()
+  const detail = page.locator('[data-inbox-detail]')
+  // The steps are numbered, each with its SQL to copy.
+  const steps = detail.getByRole('region', { name: 'What to do' })
+  await expect(steps).toBeVisible()
+  await expect(steps).toContainText('pg_cancel_backend')
   await expect(
-    tiles.getByText('SELECT pg_cancel_backend(<pid>);')
+    steps.getByRole('button', { name: 'Copy' }).first()
   ).toBeVisible()
-  await stuck.hover()
-  await stuck.getByRole('button', { name: 'Open query' }).click()
+  // The header's one solid action opens the query on the Database page.
+  await detail.getByRole('link', { name: /^Open/ }).first().click()
   await expect(page).toHaveURL(/\/database\?.*query=c0ffee0e2e00/)
 
   await page.goto('/inbox')
-  // Reports list at the bottom of Watch, past its first rows.
-  const watch = page.getByRole('region', { name: 'Watch' })
-  const more = watch.getByRole('button', { name: /^Show \d+ more/ })
-  if (await more.count()) await more.click()
-  const report = watch
-    .getByRole('article')
-    .filter({ has: page.getByRole('heading', { name: 'Checkup ready' }) })
-  await report.hover()
-  await report.getByRole('button', { name: 'Open report' }).click()
+  await page
+    .getByRole('region', { name: 'Queue' })
+    .getByRole('button', { name: 'Daily report ready' })
+    .click()
+  await detail.getByRole('link', { name: 'Open report' }).click()
   await expect(page).toHaveURL(/\/database\?.*view=report/)
-  await expect(page.getByTestId('day-snapshot')).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Daily report' })
+  ).toBeVisible()
 })
 
-test('the latest daily snapshot reads as one day, top to bottom', async ({
+test('the daily report reads as one document with its menu', async ({
   page,
 }) => {
-  await page.goto('/database?target=e2e-guard')
-  const latest = page.getByRole('button', {
-    name: /^Latest daily snapshot, .*Open the day$/,
-  })
-  await expect(latest).toBeVisible()
-  await latest.click()
-  await expect(page).toHaveURL(/\/database\?.*view=report/)
-  // A date title, no headline sentence, and a bar to jump between sections.
-  await expect(page.getByTestId('snapshot-title')).toHaveText(
-    /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), \w+ \d+$/
-  )
-  await expect(page.getByTestId('day-snapshot')).not.toContainText(
-    /written at|night after/
-  )
-  await expect(page.getByTestId('report-verdict')).toHaveCount(0)
-  const sections = page.getByRole('navigation', { name: 'Report sections' })
-  await expect(sections).toBeVisible()
-  await sections.getByRole('button', { name: /^What happened/ }).click()
+  await page.goto('/database?target=e2e-guard&view=report')
   await expect(
-    page.getByRole('heading', { name: 'What happened' })
-  ).toBeInViewport()
-  // Health comes first, then the day's numbers and the day in brief, then what to change,
-  // the chart, events and queries.
-  const order = [
-    'Database health',
-    'The day in numbers',
-    'The day in brief',
-    'What to change',
-    'Queries per second',
-    'Spikes',
-    'What happened',
-    'Queries to look at',
-  ]
-  for (const name of order)
-    await expect(page.getByRole('heading', { name })).toBeVisible()
-  const headings = await page
-    .getByTestId('day-snapshot')
-    .locator('h2')
-    .allTextContents()
-  expect(headings.filter((text) => order.includes(text))).toEqual(order)
-  await expect(page.getByTestId('day-chart')).toBeVisible()
-  await expect(page.getByTestId('day-number')).toHaveCount(6)
-  await expect(page.getByTestId('snapshot-timeline')).toContainText(
-    'Got slower'
-  )
+    page.getByRole('heading', { name: 'Daily report' })
+  ).toBeVisible()
+  const report = page.getByTestId('report-document')
+  await expect(report).toBeVisible()
+  await expect(report.getByRole('region', { name: 'The day' })).toBeVisible()
   // What to change lives on Actions; the report points there.
   await expect(
     page
       .getByTestId('report-actions-now')
       .getByRole('button', { name: 'Open Actions' })
   ).toBeVisible()
-  await expect(page.getByTestId('health-overview')).toBeVisible()
-  // A query in what happened opens in place; the Database page is secondary.
-  await page
-    .getByTestId('snapshot-timeline')
-    .locator('[data-query-key]')
-    .first()
-    .click()
-  const panel = page.getByTestId('query-panel')
-  await expect(panel).toBeVisible()
-  await expect(page).toHaveURL(/view=report/)
   await expect(
-    panel.getByRole('button', { name: /Open in Database/ })
+    page.getByRole('heading', { level: 1, name: 'e2e-guard' })
   ).toBeVisible()
-  // A tile puts its reading on the chart; the metric switch covers the rest.
-  await page.getByTestId('day-number').nth(3).click()
-  await expect(page.getByTestId('day-chart')).toHaveAttribute(
-    'data-view',
-    'cache_hit_ratio'
-  )
-  await page.getByRole('radio', { name: 'Latency' }).click()
-  await expect(page.getByTestId('day-chart')).toHaveAttribute(
-    'data-view',
-    'latency'
-  )
-  const download = page.waitForEvent('download')
-  await page.getByTestId('download-csv').click()
-  expect((await download).suggestedFilename()).toMatch(/-queries-.*\.csv$/)
-  // The day list.
+
+  // The day menu lists the reports; the kebab holds print and export.
   await page.getByTestId('day-picker-trigger').click()
   await expect(page.getByRole('menuitem').first()).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Report menu' }).click()
+  for (const name of ['Print', 'Copy as Markdown'])
+    await expect(page.getByRole('menuitem', { name })).toBeVisible()
+  await expect(
+    page.getByRole('menuitem', { name: 'Run the report now' })
+  ).toHaveCount(0)
+  const download = page.waitForEvent('download')
+  await page.getByRole('menuitem', { name: 'Download CSV' }).click()
+  expect((await download).suggestedFilename()).toMatch(/\.csv$/)
 })
 
-test('a query benchmarks from its detail, with Readyset as an option', async ({
+test('the report switches to Detailed and remembers the choice', async ({
+  page,
+}) => {
+  await page.goto('/database?target=e2e-guard&view=report')
+  const report = page.getByTestId('report-document')
+  await expect(report).toHaveAttribute('data-view', 'quick')
+  const views = page.getByRole('tablist', { name: 'Report view' })
+  try {
+    await views.getByRole('tab', { name: 'Detailed' }).click()
+    await expect(report).toHaveAttribute('data-view', 'detailed')
+    await expect(
+      report.getByRole('region', { name: 'What changed' })
+    ).toBeVisible()
+    await expect(
+      report.getByRole('region', { name: 'Settings audit' })
+    ).toBeVisible()
+    // The choice is the report_view preference: a reload opens on Detailed.
+    await page.reload()
+    await expect(page.getByTestId('report-document')).toHaveAttribute(
+      'data-view',
+      'detailed'
+    )
+  } finally {
+    await page.request.put('/api/settings/preferences', {
+      data: { report_view: 'quick' },
+    })
+  }
+})
+
+test('an old benchmark link opens the query and offers the benchmark', async ({
   page,
   browserErrors,
 }) => {
-  await page.route('**/api/cache/sandbox', (route) =>
-    route.fulfill({
-      json: { docker_installed: true, docker_running: true, phase: 'idle' },
-    })
-  )
-  // The monitored query has no Query Library record, so that lookup returns 404.
-  acceptBrowserError(
-    browserErrors,
-    'Failed to load resource: the server responded with a status of 404 (Not Found)'
-  )
-  // An old drawer link opens the selected query on its Benchmarks section.
+  acceptBrowserError(browserErrors, NOT_FOUND)
+  // The old drawer's bench/select params are rewritten to the open query.
   await page.goto('/database?target=e2e-guard&bench=compare&select=orders-e2e')
   await expect(page).toHaveURL(/query=orders-e2e/)
   await expect(page).not.toHaveURL(/bench=|select=/)
-  const detail = page.getByTestId('query-detail')
-  await expect(detail.getByRole('region', { name: 'Benchmarks' })).toBeVisible()
-
-  await detail
+  await expect(twoPane(page)).toHaveAttribute('data-open', 'true')
+  await page.keyboard.press('Escape')
+  await expect(twoPane(page)).not.toHaveAttribute('data-open', 'true')
+  // A scan's list has no toolbar. On a monitored database every fix's benchmark sits over
+  // the list.
+  await page.goto('/database?monitorFixture=ca-database&view=live')
+  await page
+    .getByTestId('query-section')
     .getByRole('button', { name: 'Benchmark', exact: true })
-    .first()
     .click()
-  const dialog = page.getByTestId('benchmark-dialog')
+  const dialog = page.getByRole('dialog')
   await expect(
-    dialog.getByRole('heading', { name: 'Benchmark queries' })
+    dialog.getByRole('heading', { name: /^Benchmark .* with fixes$/ })
   ).toBeVisible()
-  const picker = dialog.getByRole('region', {
-    name: 'Queries for this benchmark',
-  })
-  await expect(picker).toContainText('Pick queries (1 selected)')
-  const selected = picker.locator('[data-query-hash="orders-e2e"]')
-  await expect(selected).toContainText(ORDERS_SQL)
-  await expect(selected).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByTestId('benchmark-load-warning')).toContainText(
-    'This runs against your live database and adds load to it while it runs.'
-  )
-  await expect(dialog.getByRole('radio', { name: /Quick/ })).toBeChecked()
-  await dialog.getByRole('radio', { name: /Standard/ }).click()
-  await expect(page.getByTestId('benchmark-load-warning')).toContainText(
-    'Higher load'
-  )
-  const destinations = dialog.getByRole('radiogroup', { name: 'Where to run' })
   await expect(
-    destinations.getByRole('radio', { name: /Source only/ })
-  ).toBeChecked()
-  await expect(
-    destinations.getByRole('radio', { name: /Source plus Readyset/ })
+    dialog.getByRole('button', { name: 'Run benchmark' })
   ).toBeVisible()
-  const readysetOnly = destinations.getByRole('radio', {
-    name: /Readyset only/,
-  })
-  await expect(readysetOnly).toBeEnabled()
-  await readysetOnly.click()
-  await expect(readysetOnly).toBeChecked()
-  await expect(dialog).toContainText(
-    'The first Readyset run downloads a small container.'
-  )
-  await dialog.getByPlaceholder('Enter a representative value').fill('1')
-  await expect(
-    dialog.getByRole('button', { name: 'Start benchmark' })
-  ).toBeEnabled()
-  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
-  await expect(dialog).toBeHidden()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
 })
 
-test('agent activity reads as decisions, with statements behind technical details', async ({
+test('Activity lists what RDST did, filters by event and exports', async ({
   page,
 }) => {
   await page.goto('/')
-  await page.getByRole('link', { name: 'Agent audit' }).click()
+  await page
+    .locator('#app-sidebar')
+    .getByRole('link', { name: /^Activity/ })
+    .click()
   await expect(page).toHaveURL(/\/agent-activity/)
   await expect(
-    page.getByRole('region', { name: 'What RDST does on your database' })
-  ).toContainText('Only reads')
+    page.getByRole('heading', { level: 1, name: 'Activity' })
+  ).toBeVisible()
 
-  const analysis = page
-    .locator('[data-activity-key]')
-    .filter({ hasText: 'The agent analyzed SELECT on orders by customer_id.' })
-  await analysis.getByRole('button').first().click()
-  const detail = analysis.getByTestId('activity-detail')
-  await expect(detail).toContainText('Ran EXPLAIN ANALYZE with a 1.5 s timeout')
-  await expect(detail).toContainText('1 parameter sampled from live sessions')
-  // Statements and AI calls stay collapsed until asked for.
-  const statements = detail.getByRole('region', {
-    name: 'Statements on your database (2)',
-  })
-  await expect(statements).toHaveCount(0)
-  await detail.getByRole('button', { name: /Technical details/ }).click()
-  await expect(statements).toContainText(
-    'SELECT id, total FROM orders WHERE customer_id = ?'
-  )
+  // One line per thing done, newest day first; checks fold into one line a day
+  // per database, so the folded line is read on the first database.
   await expect(
-    detail.getByRole('region', { name: 'AI calls (1)' })
-  ).toContainText('z-ai/glm-5.3-flash')
-
-  // Attention checks fold into one line per day, which opens to hours, then checks.
+    page.getByRole('link', { name: /Analyzed SELECT on orders by customer_id/ })
+  ).toBeVisible()
   const checks = page
-    .locator('[data-activity-key^="attention_check:e2e-guard"]')
+    .getByRole('link', { name: /Checked for changes 3 checks/ })
     .first()
-  await expect(checks).toContainText(
-    'The agent ran 3 attention checks and found nothing new to file.'
-  )
-  await checks.getByRole('button').first().click()
-  const hour = checks.locator('[data-activity-key^="attention_check:"]')
-  await expect(hour).toHaveCount(1)
-  await expect(hour).toContainText('Ran 3 attention checks')
-  await hour.getByRole('button').first().click()
-  await expect(hour.locator('[data-activity-key^="entry:"]')).toHaveCount(3)
+  await expect(checks).toBeVisible()
+  await expect(page.getByText('Kept 90 days.')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Action: All actions' }).click()
+  await page.getByRole('button', { name: 'Events: All events' }).click()
   await page.getByRole('menuitem', { name: 'Deep analysis' }).click()
   await expect(page).toHaveURL(/action=deep_analysis/)
-  await expect(
-    page.locator('[data-activity-key^="attention_check"]')
-  ).toHaveCount(0)
+  await expect(checks).toHaveCount(0)
 
-  // The export takes a time range and keeps the page's filters.
-  await page.getByRole('button', { name: 'Export CSV' }).click()
+  // The export sits behind the kebab, takes a time range and keeps the filters.
+  await page.getByRole('button', { name: 'More actions' }).click()
+  await page.getByRole('menuitem', { name: 'Export CSV' }).click()
   const dialog = page.getByRole('dialog', { name: 'Export agent activity' })
   await dialog.getByRole('radio', { name: 'Today' }).click()
   const [download] = await Promise.all([
@@ -540,61 +426,26 @@ test('agent activity reads as decisions, with statements behind technical detail
   )
 })
 
-test('an Inbox query line opens that query zoomed to when it jumped', async ({
+test('an Inbox item opens the Database page on its time frame', async ({
   page,
   browserErrors,
 }) => {
-  // A query only monitoring has seen has no Query Library row for the detail to load.
-  acceptBrowserError(
-    browserErrors,
-    'Failed to load resource: the server responded with a status of 404 (Not Found)'
-  )
+  acceptBrowserError(browserErrors, NOT_FOUND)
   await page.goto('/inbox')
-  const alert = page.getByRole('article').filter({
-    has: page.getByRole('heading', { name: 'Traffic jumped on 2 queries' }),
-  })
-  // One burst, one item. Its traffic is measured back to normal, so it sits in Recovered as a
-  // compact row: the first query, a count of the rest, and the reason it recovered.
-  await expect(alert.getByText('and 1 other query')).toBeVisible()
-  const first = alert.getByRole('link', {
-    name: 'SELECT on sessions by token',
-  })
-  // The query's link carries the window in which its traffic jumped.
-  await expect(first).toHaveAttribute(
-    'href',
-    /query=0e2ea0000002.*zoom=\d+-\d+.*from=inbox%3A\d+/
-  )
-  await first.click()
-
-  // The Database page opens that query with the incident window and the item.
-  await expect(page).toHaveURL(
-    /\/database\?.*query=0e2ea0000002.*zoom=\d+-\d+.*from=inbox%3A\d+/
-  )
-  const banner = page.getByTestId('inbox-context')
-  await expect(banner).toContainText('From your Inbox')
-  await expect(banner).toContainText(
-    /This query.* (yesterday )?at \d{1,2}:\d{2} [AP]M\./
-  )
-  await expect(banner).not.toContainText(/One of \d+ queries|down 0%/)
-  await expect(banner.getByTestId('inbox-context-state')).toHaveText(
-    /^Calls measured back to normal (yesterday )?at \d{1,2}:\d{2} [AP]M\.$/
-  )
+  // One burst, one item, over the two queries whose traffic jumped.
+  await page
+    .getByRole('region', { name: 'Queue' })
+    .getByRole('button', { name: 'Traffic jumped on 2 queries' })
+    .click()
+  const detail = page.locator('[data-inbox-detail]')
+  await expect(detail).toBeVisible()
+  // Its place is the Database page zoomed to when it happened.
+  await detail.getByRole('link', { name: /^Open/ }).first().click()
+  await expect(page).toHaveURL(/\/database\?.*zoom=\d+-\d+/)
+  await expect(page).toHaveURL(/from=inbox/)
   await expect(
-    page.getByRole('heading', { name: /^Queries per second, from / })
+    page.getByRole('heading', { level: 1, name: 'e2e-guard' })
   ).toBeVisible()
-  await expect(page.getByTestId('chart-highlight').first()).toBeAttached()
-  // The window is the list's filter: a removable chip, every status shown.
-  await expect(page.getByTestId('time-frame-chip')).toContainText(
-    'From your Inbox'
-  )
-  await expect(page.getByTestId('filter-status')).toHaveText('Status')
-
-  await banner.getByRole('button', { name: 'Show the last 24 hours' }).click()
-  await expect(page).not.toHaveURL(/zoom=/)
-  await expect(page).toHaveURL(/range=24h/)
-  await banner.getByRole('button', { name: 'Dismiss' }).click()
-  await expect(banner).toHaveCount(0)
-  await expect(page).not.toHaveURL(/from=/)
 })
 
 test('a live refresh updates the database page in place, without layout shift', async ({
@@ -602,9 +453,8 @@ test('a live refresh updates the database page in place, without layout shift', 
 }) => {
   await mockPrerequisites(page, 'e2e-guard')
   await page.clock.install()
-  await page.goto('/database?target=e2e-guard')
-  await expect(page.getByTestId('monitor-query-row').first()).toBeVisible()
-  await expect(page.getByTestId('load-chart')).toBeVisible()
+  await page.goto('/database?target=e2e-guard&view=queries')
+  await expect(page.getByTestId('query-row').first()).toBeVisible()
   await page.evaluate(() => {
     const state = window as Window & {
       liveRefresh?: { cls: number; fetches: number; rows: Element[] }
@@ -612,7 +462,7 @@ test('a live refresh updates the database page in place, without layout shift', 
     const watch = {
       cls: 0,
       fetches: 0,
-      rows: [...document.querySelectorAll('[data-testid=monitor-query-row]')],
+      rows: [...document.querySelectorAll('[data-testid=query-row]')],
     }
     state.liveRefresh = watch
     new PerformanceObserver((list) => {
@@ -650,34 +500,28 @@ test('a live refresh updates the database page in place, without layout shift', 
   // Rows keep their nodes and nothing on the page moves.
   expect(after.kept).toBe(after.rows)
   expect(after.cls).toBeLessThan(0.01)
-  await expect(page.getByTestId('query-card-skeleton')).toHaveCount(0)
 })
 
-test('monitoring header offers off and settings without a separate analysis pause', async ({
+test('the settings pane turns monitoring off after a confirmation', async ({
   page,
 }) => {
   await page.request.put('/api/monitor/targets/e2e-guard/settings', {
     data: { enabled: true },
   })
   await mockPrerequisites(page, 'e2e-guard')
-  await page.goto('/database?target=e2e-guard')
-  await page.getByTestId('monitoring-menu-trigger').click()
-  const menu = page.getByTestId('monitoring-menu')
+  await page.goto('/database?target=e2e-guard&panel=settings')
+  const pane = page.getByRole('region', { name: 'Monitoring, e2e-guard' })
   await expect(
-    menu.getByRole('button', { name: 'Monitoring settings' })
-  ).toBeVisible()
-  await expect(
-    menu.getByRole('button', {
-      name: /Pause deep analysis|Resume deep analysis/,
-    })
-  ).toHaveCount(0)
-  await menu.getByRole('button', { name: /Turn off monitoring/ }).click()
+    pane.getByRole('switch', { name: 'Monitor this database' })
+  ).toBeChecked()
+  await pane.getByRole('button', { name: 'Stop monitoring' }).click()
   const confirmation = page.getByRole('dialog')
   await expect(confirmation).toContainText('Turn off monitoring for e2e-guard?')
   await confirmation
     .getByRole('button', { name: 'Turn off monitoring', exact: true })
     .click()
-  await expect(page.getByTestId('monitoring-menu-trigger')).toContainText(
-    'Monitoring off'
-  )
+  await expect(
+    page.getByRole('button', { name: 'Turn on monitoring' })
+  ).toBeVisible()
+  await expect(page.locator('[data-page-bar]')).toContainText('Not monitored')
 })

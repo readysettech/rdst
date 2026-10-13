@@ -262,14 +262,15 @@ def test_reason_reaches_monitor_pulse_inbox_and_driver(harness, tmp_path, monkey
     watch = ConnectionWatch(store)
     watch.observe("db", False, 1000)
     watch.collection("db", False, 1060)
+    assert not store.read("SELECT id FROM inbox_item")
+    watch.collection("db", False, 1120)
     body = json.loads(store.read("SELECT body_json FROM inbox_item")[0]["body_json"])
     assert body["error"] == reason
     assert reason in body["message"]
-    pulse = store.pulses("db")[0]
-    assert pulse["detail"] == reason
+    assert [pulse["detail"] for pulse in store.pulses("db")] == [reason, reason]
     store.set_settings("db", {"enabled": False})
-    watch.collection("db", False, 1120)
-    assert len(store.pulses("db")) == 1
+    watch.collection("db", False, 1180)
+    assert len(store.pulses("db")) == 2
 
     # A channel can fail after params were resolved but before the driver returns.
     monkeypatch.setattr(manager, "ensure_tunnel", lambda *args, **kwargs: ("127.0.0.1", 40000))

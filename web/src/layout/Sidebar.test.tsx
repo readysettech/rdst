@@ -1,59 +1,31 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { __resetSetupGuideStoreForTests } from '../features/setup/setupGuideStore'
 import { trackEvent } from '../lib/analytics'
-import {
-  __resetAuditSessionForTests,
-  beginAuditSession,
-  finishAuditSession,
-} from '../lib/auditSession'
-import { Sidebar } from './Sidebar'
+import type { ConfiguredDatabase } from '../lib/monitor/hooks'
+import { renderWithClient } from '../test-utils'
+import { SHOWN_DATABASES, Sidebar } from './Sidebar'
 
-const queryState = vi.hoisted(() => ({
-  accountStatus: null as {
-    signed_in: boolean
-    email?: string | null
-  } | null,
-  setupProgress: null as Record<string, unknown> | null,
-}))
+const routerState = vi.hoisted(() => ({ pathname: '/' }))
 
 vi.mock('@tanstack/react-router', () => ({
-  useRouterState: () => ({ location: { pathname: '/' } }),
+  useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
+    select({ location: { pathname: routerState.pathname } }),
   useNavigate: () => vi.fn(),
   Link: ({
     to,
+    search,
     children,
     ...rest
   }: {
     to: string
+    search?: Record<string, string>
     children?: ReactNode
   } & Record<string, unknown>) => (
-    <a href={to} {...rest}>
+    <a href={search ? `${to}?${new URLSearchParams(search)}` : to} {...rest}>
       {children}
     </a>
   ),
-}))
-
-vi.mock('@tanstack/react-query', () => ({
-  useQuery: ({ queryKey }: { queryKey: string[] }) => ({
-    data:
-      queryKey[0] === 'account-status'
-        ? queryState.accountStatus
-        : queryKey[0] === 'setup-progress'
-          ? queryState.setupProgress
-          : queryKey[0] === 'monitor' && queryKey[2] === 'settings'
-            ? { enabled: false }
-            : null,
-  }),
-  // Monitoring stays off in these tests, so the nav never shows Home.
-  useQueries: ({ queries }: { queries: unknown[] }) =>
-    queries.map(() => ({ data: { enabled: false }, isPending: false })),
-  useQueryClient: () => ({}),
-  useMutation: ({ mutationFn }: { mutationFn: () => Promise<unknown> }) => ({
-    mutate: () => void mutationFn(),
-    isPending: false,
-  }),
 }))
 
 const inboxUnread = vi.hoisted(() => ({ count: 0, actNow: 0, loading: false }))
@@ -61,395 +33,332 @@ vi.mock('../features/inbox/useInboxUnread', () => ({
   useInboxUnread: () => inboxUnread,
 }))
 
-vi.mock('../components/TargetDropdown', () => ({
-  TargetDropdown: () => <button type="button">target</button>,
-  TargetSync: () => null,
+const runs = vi.hoisted(() => ({ list: [] as { status: string }[] }))
+const reattach = vi.hoisted(() => vi.fn())
+vi.mock('../lib/backgroundRuns', () => ({
+  useBackgroundRuns: () => runs.list,
+  reattachBackgroundRuns: reattach,
 }))
 
-vi.mock('../components/ReportDialog', () => ({
-  ReportDialog: () => null,
+vi.mock('./SidebarAccountMenu', () => ({
+  SidebarAccountMenu: () => <a href="/account-login">khalid@readyset.io</a>,
 }))
 
-vi.mock('../components/TrialBalanceBadge', () => ({
-  TrialBalanceBadge: () => null,
-}))
-
+const selection = vi.hoisted(() => ({ target: 'demo' as string | null }))
 vi.mock('../hooks/useTarget', () => ({
-  useTarget: () => ({ target: 'demo', setTarget: vi.fn() }),
+  useDefaultTarget: () => selection.target,
 }))
 
-vi.mock('../lib/useSystemStatus', () => ({
-  useSystemStatus: () => ({ data: undefined }),
+const configured = vi.hoisted(() => ({
+  databases: [] as ConfiguredDatabase[],
+  doFirst: null as number | null,
+}))
+vi.mock('../lib/monitor/hooks', () => ({
+  configuredTargetsKey: ['configure-targets-hosts'],
+  useConfiguredDatabases: () => ({
+    databases: configured.databases,
+    doFirst: configured.doFirst,
+    isPending: false,
+    isError: false,
+  }),
+  useMonitorSettings: () => ({ data: { enabled: true } }),
+}))
+
+const pulse = vi.hoisted(() => vi.fn())
+vi.mock('../features/monitor-kit/useMonitorPulse', () => ({
+  useMonitorPulse: pulse,
+  useNow: () => Date.now() / 1000,
+}))
+
+const openAdd = vi.hoisted(() => vi.fn())
+vi.mock('../components/configure/addDatabase', () => ({
+  useOpenAddDatabase: () => openAdd,
+  onDatabasesChanged: () => () => {},
 }))
 
 vi.mock('../lib/analytics', () => ({
   trackEvent: vi.fn(),
 }))
 
-/** Wrapper with an external trigger so focus-return has a real target. */
-function Harness({ open, onClose }: { open: boolean; onClose: () => void }) {
-  return (
-    <div>
-      <button type="button" data-testid="hamburger">
-        menu
-      </button>
-      <Sidebar mobileOpen={open} onMobileClose={onClose} />
-    </div>
-  )
-}
-
-describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
-  afterEach(() => {
-    cleanup()
-    __resetAuditSessionForTests()
-    queryState.accountStatus = null
-  })
-
-  it('closes on Escape while open', () => {
-    const onClose = vi.fn()
-    render(<Sidebar mobileOpen onMobileClose={onClose} />)
-    fireEvent.keyDown(document, { key: 'Escape' })
-    expect(onClose).toHaveBeenCalledTimes(1)
-  })
-
-  it('dismisses from a control inside the drawer, not only the scrim', () => {
-    const onClose = vi.fn()
-    render(<Sidebar mobileOpen onMobileClose={onClose} />)
-    const inDrawer = screen
-      .getAllByRole('button', { name: 'Close navigation' })
-      .find((button) => button.closest('#app-sidebar'))
-    expect(inDrawer).toBeDefined()
-    fireEvent.click(inDrawer as HTMLElement)
-    expect(onClose).toHaveBeenCalledTimes(1)
-  })
-
-  it('does not listen for Escape while closed', () => {
-    const onClose = vi.fn()
-    render(<Sidebar mobileOpen={false} onMobileClose={onClose} />)
-    fireEvent.keyDown(document, { key: 'Escape' })
-    expect(onClose).not.toHaveBeenCalled()
-  })
-
-  it('moves focus to the first nav item on open and returns it to the trigger on close', () => {
-    const onClose = vi.fn()
-    const { rerender } = render(<Harness open={false} onClose={onClose} />)
-    screen.getByTestId('hamburger').focus()
-
-    rerender(<Harness open onClose={onClose} />)
-    const active = document.activeElement as HTMLElement
-    expect(active.tagName).toBe('A')
-    expect(active.getAttribute('href')).toBe('/database')
-
-    rerender(<Harness open={false} onClose={onClose} />)
-    expect(document.activeElement).toBe(screen.getByTestId('hamburger'))
-  })
-
-  it('traps Tab within scrim + drawer while open (background not tabbable)', () => {
-    render(<Sidebar mobileOpen onMobileClose={vi.fn()} />)
-    // Last focusable inside the drawer set: the footer Discord link.
-    const discord = screen.getByRole('link', { name: 'Join Discord' })
-    discord.focus()
-    fireEvent.keyDown(document, { key: 'Tab' })
-    // Wraps to the first element of the trap set — the scrim.
-    expect(
-      (document.activeElement as HTMLElement).getAttribute('aria-label')
-    ).toBe('Close navigation')
-
-    // Shift+Tab from the scrim wraps back to the last element.
-    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
-    expect(document.activeElement).toBe(discord)
-  })
-
-  it('shows the Discord invite directly below Give feedback', () => {
-    render(<Sidebar />)
-
-    const feedback = screen.getByRole('button', { name: /Give feedback/ })
-    const discord = screen.getByRole('link', { name: 'Join Discord' })
-    expect(discord.getAttribute('href')).toBe('https://discord.gg/QkET8JhRwt')
-    expect(discord.getAttribute('target')).toBe('_blank')
-    expect(discord.getAttribute('rel')).toBe('noreferrer')
-    expect(feedback.nextElementSibling).toBe(discord)
-  })
-
-  it('shows the desktop update action without backend version data', () => {
-    const install = vi.fn()
-    render(
-      <Sidebar
-        desktopUpdateState={{
-          status: 'ready',
-          version: '1.0.9',
-          downloadLinks: [],
-          progress: 100,
-        }}
-        onInstallUpdate={install}
-      />
-    )
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'Restart: Version 1.0.9 is ready',
-      })
-    )
-    expect(install).toHaveBeenCalledTimes(1)
-  })
-
-  it('keeps account setup out of the sidebar after the startup gate', () => {
-    render(<Sidebar />)
-
-    expect(
-      screen.queryByRole('button', { name: /Use the included AI/ })
-    ).toBeNull()
-    expect(screen.getByRole('link', { name: /Settings/ })).toBeTruthy()
-  })
-
-  it('shows only the signed-in Readyset account email above Settings', () => {
-    queryState.accountStatus = {
-      signed_in: true,
-      email: 'hosted@example.com',
-    }
-    render(<Sidebar />)
-
-    expect(screen.getByText('hosted@example.com')).toBeTruthy()
-
-    cleanup()
-    queryState.accountStatus = {
-      signed_in: false,
-      email: 'stale@example.com',
-    }
-    render(<Sidebar />)
-
-    expect(screen.queryByText('stale@example.com')).toBeNull()
-  })
-
-  it('shows no identity when the Readyset account has no email', () => {
-    queryState.accountStatus = { signed_in: true, email: null }
-    render(<Sidebar />)
-
-    expect(screen.queryByTestId('sidebar-account-email')).toBeNull()
-  })
-
-  it('sizes footer utilities below the daily nav (F5)', () => {
-    render(<Sidebar />)
-    const home = screen.getByRole('link', { name: /^Inbox/ })
-    const settings = screen.getByRole('link', { name: /Settings/ })
-    const discord = screen.getByRole('link', { name: 'Join Discord' })
-    expect(home.className).toContain('h-10')
-    expect(home.className).toContain('font-medium')
-    expect(settings.className).toContain('h-8')
-    expect(settings.className).toContain('font-normal')
-    expect(discord.className).toContain('h-8')
-    expect(discord.className).toContain('font-normal')
-    expect(discord.querySelector('svg')?.classList.contains('min-w-5')).toBe(
-      true
-    )
-  })
-
-  it('groups the footer into a status block and a utility block (F6)', () => {
-    render(<Sidebar />)
-    const status = screen.getByTestId('sidebar-footer-status')
-    const utilities = screen.getByTestId('sidebar-footer-utilities')
-    const settings = screen.getByRole('link', { name: /Settings/ })
-    expect(utilities.contains(settings)).toBe(true)
-    expect(
-      status.compareDocumentPosition(utilities) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-  })
-
-  it('gives nav links a focus-visible ring instead of the UA outline (F12)', () => {
-    render(<Sidebar />)
-    const home = screen.getByRole('link', { name: /^Inbox/ })
-    const docs = screen.getByRole('link', { name: 'Docs' })
-    expect(home.className).toContain('focus-visible:ring-2')
-    expect(docs.className).toContain('focus-visible:ring-2')
-  })
-
-  it('keeps a running health check off the nav (the page is off it too)', () => {
-    const sessionId = beginAuditSession({
-      kind: 'fleet',
-      targetLabel: '2 targets',
-      targetNames: ['alpha', 'beta'],
-      durationSeconds: 60,
-      startedAt: Date.now(),
-      phase: 'capture',
-      statusMessage: 'Capturing',
-      cancel: vi.fn(),
-    })
-
-    render(<Sidebar />)
-    expect(
-      screen.queryByRole('status', { name: 'Health check is running' })
-    ).toBeNull()
-    expect(screen.queryByRole('link', { name: /Health check/ })).toBeNull()
-    act(() => finishAuditSession(sessionId!))
-  })
+const db = (
+  name: string,
+  overrides: Partial<ConfiguredDatabase> = {}
+): ConfiguredDatabase => ({
+  name,
+  state: 'watching',
+  monitored: true,
+  actNow: 0,
+  toDo: 0,
+  ...overrides,
 })
 
-describe('Sidebar experimental surfaces (team decision: off the nav)', () => {
-  afterEach(cleanup)
+const renderSidebar = () => renderWithClient(<Sidebar />)
+const databaseNav = () => screen.getByRole('navigation', { name: 'Databases' })
 
-  it('does not list Code scan, Agents, Guards, or a group header', () => {
-    render(<Sidebar />)
-    expect(screen.queryByRole('link', { name: /Code scan/ })).toBeNull()
-    expect(screen.queryByRole('link', { name: /Agents/ })).toBeNull()
-    expect(screen.queryByRole('link', { name: /Guards/ })).toBeNull()
-    expect(screen.queryByText('Experimental')).toBeNull()
-    expect(screen.queryByText('Advanced')).toBeNull()
+afterEach(() => {
+  cleanup()
+  routerState.pathname = '/'
+  Object.assign(inboxUnread, { count: 0, actNow: 0 })
+  runs.list = []
+  selection.target = 'demo'
+  configured.databases = []
+  configured.doFirst = null
+  openAdd.mockClear()
+})
+
+describe('Sidebar', () => {
+  it('reattaches the runs this browser saved', () => {
+    reattach.mockClear()
+    renderSidebar()
+    expect(reattach).toHaveBeenCalledTimes(1)
   })
 
-  it('leads with Database and Inbox and lists no classic pages', () => {
-    render(<Sidebar />)
-    // One monitored database or none: Home stays off the nav.
-    const links = screen
-      .getAllByRole('link')
-      .map((link) => link.textContent)
-      .filter((text) => !text?.includes('Logo'))
-    expect(links.slice(0, 4)).toEqual([
-      'Database',
+  it('lists the global pages, the databases, the Platform card, then the secondary group', () => {
+    configured.databases = [db('demo')]
+    renderSidebar()
+    const links = screen.getAllByRole('link').map((link) => link.textContent)
+    expect(links).toEqual([
+      'Home',
       'Inbox',
-      'Agent audit',
+      'Actions',
       'Ask',
+      'demoWatching',
+      expect.stringContaining('Readyset Platform'),
+      'Activity',
+      'Settings',
+      'Help',
+      'khalid@readyset.io',
+    ])
+    const card = screen.getByTestId('platform-card')
+    expect(card.getAttribute('href')).toBe('/platform')
+    expect(card.querySelector('svg')).toBeTruthy()
+    expect(card.querySelector('[data-testid="platform-card-art"]')).toBeTruthy()
+    expect(card.innerHTML).not.toMatch(/#[0-9a-f]{6}/i)
+    expect(
+      screen.getByRole('link', { name: 'Help' }).getAttribute('href')
+    ).toBe('/help')
+    expect(screen.queryByRole('button', { name: /Switch target/ })).toBeNull()
+  })
+
+  it('opens the add dialog from the quiet plus beside the Databases caption', () => {
+    renderSidebar()
+    expect(screen.getByText('Databases')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Add database' }))
+    expect(openAdd).toHaveBeenCalledWith()
+  })
+
+  it('shows only the count beside the name; the state is read once, not shown', () => {
+    configured.databases = [
+      db('demo', { toDo: 5 }),
+      db('analytics', { toDo: 0 }),
+      db('replica', { state: 'cant_reach', toDo: 0 }),
+      db('staging', {
+        state: 'not_monitored',
+        monitored: false,
+        toDo: null,
+      }),
+      db('shop_main', { state: 'ai_paused', toDo: null }),
+    ]
+    renderSidebar()
+    const rows = within(databaseNav()).getAllByRole('link')
+    // Visible: the name and the count; the state word is screen-reader only.
+    expect(
+      rows.map((row) =>
+        [...row.querySelectorAll('span:not(.sr-only)')]
+          .map((span) => span.textContent)
+          .filter(Boolean)
+      )
+    ).toEqual([
+      ['demo', '5 to do'],
+      ['analytics'],
+      ['replica'],
+      ['staging'],
+      ['shop_main'],
+    ])
+    expect(rows[0].getAttribute('href')).toBe('/database?target=demo')
+    expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual([
+      'demo, Watching, 5 to do',
+      'analytics, Watching',
+      "replica, Can't reach",
+      'staging, Not monitored',
+      'shop_main, AI checks paused',
     ])
     expect(
-      screen.getByRole('link', { name: 'Database' }).getAttribute('href')
-    ).toBe('/database')
-    expect(screen.queryByRole('button', { name: 'Classic pages' })).toBeNull()
-    // Classic routes still answer deep links, but the nav never offers them.
-    for (const name of ['Queries', 'Schema', 'Health check', 'Benchmarks'])
-      expect(screen.queryByRole('link', { name })).toBeNull()
+      rows.map((row) =>
+        row.querySelector('[data-testid="radar"]')?.getAttribute('data-state')
+      )
+    ).toEqual(['watching', 'watching', 'unreachable', 'off', 'paused'])
+    expect(rows[3].className).toContain('text-content-layout-3')
   })
 
-  it.each([
-    { actNow: 0, tone: 'bg-surface-layout-2' },
-    { actNow: 1, tone: 'bg-surface-negative-soft' },
-  ])('tones the Inbox badge by act-now alerts ($actNow)', ({
-    actNow,
-    tone,
-  }) => {
-    Object.assign(inboxUnread, { count: 3, actNow })
-    render(<Sidebar />)
-    const badge = screen.getByTitle('3 unread')
-    expect(badge.className).toContain(tone)
-    Object.assign(inboxUnread, { count: 0, actNow: 0 })
+  it("opens the database's activity from its item", async () => {
+    configured.databases = [
+      db('demo', {
+        toDo: 10,
+        activity: {
+          kind: 'analyzing',
+          label: 'Analyzing SELECT on orders by status',
+          done: 4,
+          total: 10,
+          last_reading_at: Date.now() / 1000 - 30,
+          every_s: 60,
+        },
+      }),
+    ]
+    renderSidebar()
+    const item = within(databaseNav()).getByRole('link', { name: /^demo/ })
+    expect(item.getAttribute('aria-label')).toBe('demo, Watching, 10 to do')
+    expect(item.querySelector('[data-testid="radar-fill"]')).not.toBeNull()
+    act(() => item.focus())
+    const tip = await screen.findByRole('tooltip')
+    expect(tip.textContent).toContain('demo, actively monitoring')
+    expect(tip.textContent).toContain(
+      'Analyzing SELECT on orders by status, 4 of 10'
+    )
+    expect(tip.textContent).toContain('10 changes to do in Actions')
   })
-})
 
-describe('Sidebar nav_item_clicked analytics (E1)', () => {
-  afterEach(cleanup)
+  it('lights a database only on its own page', () => {
+    configured.databases = [db('demo'), db('analytics')]
+    renderSidebar()
+    expect(
+      within(databaseNav())
+        .getByRole('link', { name: /demo/ })
+        .getAttribute('aria-current')
+    ).toBeNull()
+    cleanup()
 
-  it('tracks the clicked item label', () => {
-    render(<Sidebar />)
-    fireEvent.click(screen.getByRole('link', { name: /Ask/ }))
+    routerState.pathname = '/database/reports/31'
+    renderSidebar()
+    expect(
+      within(databaseNav())
+        .getByRole('link', { name: /demo/ })
+        .getAttribute('aria-current')
+    ).toBe('page')
+    expect(
+      within(databaseNav())
+        .getByRole('link', { name: /analytics/ })
+        .getAttribute('aria-current')
+    ).toBeNull()
+  })
+
+  it('folds databases past eight under "N more"', () => {
+    configured.databases = Array.from({ length: SHOWN_DATABASES + 3 }, (_, i) =>
+      db(`db${i}`)
+    )
+    renderSidebar()
+    expect(within(databaseNav()).getAllByRole('link')).toHaveLength(
+      SHOWN_DATABASES
+    )
+    const more = screen.getByRole('button', { name: '3 more' })
+    expect(more.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(more)
+    expect(within(databaseNav()).getAllByRole('link')).toHaveLength(
+      SHOWN_DATABASES + 3
+    )
+    expect(screen.getByRole('button', { name: 'Fewer' })).toBeTruthy()
+  })
+
+  it('unfolds when the database on screen is past the fold', () => {
+    configured.databases = Array.from({ length: SHOWN_DATABASES + 2 }, (_, i) =>
+      db(`db${i}`)
+    )
+    selection.target = `db${SHOWN_DATABASES + 1}`
+    routerState.pathname = '/database'
+    renderSidebar()
+    expect(within(databaseNav()).getAllByRole('link')).toHaveLength(
+      SHOWN_DATABASES + 2
+    )
+  })
+
+  it('badges the Inbox only with items that need action now', () => {
+    Object.assign(inboxUnread, { count: 9, actNow: 0 })
+    renderSidebar()
+    expect(screen.queryByTitle(/need you/)).toBeNull()
+    cleanup()
+
+    Object.assign(inboxUnread, { count: 10, actNow: 1 })
+    renderSidebar()
+    const badge = screen.getByTitle('1 need you')
+    expect(badge.textContent).toBe('1')
+    expect(badge.className).toContain('bg-surface-negative-solid')
+    expect(screen.getByRole('link', { name: 'Inbox 1' })).toBeTruthy()
+  })
+
+  it('badges the do-first changes on Actions like the Inbox', () => {
+    configured.doFirst = 7
+    routerState.pathname = '/actions'
+    renderSidebar()
+    const actions = screen.getByRole('link', { name: 'Actions 7' })
+    expect(actions.getAttribute('href')).toBe('/actions')
+    expect(actions.getAttribute('aria-current')).toBe('page')
+    const badge = screen.getByTitle('7 to do, 7 first')
+    expect(badge.className).toContain('bg-surface-negative-solid')
+    expect(badge.className).toContain('text-(--neutral-white)')
+  })
+
+  it('counts every change the Actions page lists, not only the ones to do first', () => {
+    configured.doFirst = 3
+    configured.databases = [db('demo', { toDo: 4 })]
+    renderSidebar()
+    expect(screen.getByRole('link', { name: 'Actions 4' })).toBeTruthy()
+    expect(screen.getByTitle('4 to do, 3 first').className).toContain(
+      'bg-surface-negative-solid'
+    )
+  })
+
+  it('counts the changes to do on Actions when none is to do first', () => {
+    configured.doFirst = 0
+    configured.databases = [db('demo', { toDo: 3 }), db('shop', { toDo: 2 })]
+    renderSidebar()
+    expect(screen.getByRole('link', { name: 'Actions 5' })).toBeTruthy()
+    const count = screen.getByTitle('5 to do')
+    expect(count.className).not.toContain('bg-surface-negative-solid')
+    expect(screen.queryByTestId('nav-live-dot')).toBeNull()
+  })
+
+  it('breathes on Actions while a database builds its first plan', () => {
+    configured.databases = [db('demo', { building: true })]
+    renderSidebar()
+    const actions = screen.getByRole('link', {
+      name: /Actions Building your first plan/,
+    })
+    expect(within(actions).getByTestId('nav-live-dot')).toBeTruthy()
+  })
+
+  it('holds the selected database readings stream open', () => {
+    pulse.mockClear()
+    renderSidebar()
+    expect(pulse).toHaveBeenCalledWith('demo')
+  })
+
+  it('counts what is running on Activity', () => {
+    runs.list = [
+      { status: 'running' },
+      { status: 'done' },
+      { status: 'reconnecting' },
+    ]
+    renderSidebar()
+    expect(screen.getByRole('link', { name: 'Activity 2' })).toBeTruthy()
+  })
+
+  it('has no background or border of its own', () => {
+    renderSidebar()
+    const aside = document.getElementById('app-sidebar') as HTMLElement
+    expect(aside.className).not.toMatch(/\bbg-/)
+    expect(aside.className).not.toMatch(/\bborder-r\b/)
+  })
+
+  it('gives nav links the shared focus ring and tracks clicks', () => {
+    renderSidebar()
+    const ask = screen.getByRole('link', { name: 'Ask' })
+    expect(ask.className).toContain('focus-visible:ring-2')
+    ask.addEventListener('click', (event) => event.preventDefault(), {
+      once: true,
+    })
+    fireEvent.click(ask)
     expect(trackEvent).toHaveBeenCalledWith('nav_item_clicked', {
       label: 'Ask',
     })
-  })
-
-  it('tracks the Docs item', () => {
-    render(<Sidebar />)
-    fireEvent.click(screen.getByRole('link', { name: 'Docs' }))
-    expect(trackEvent).toHaveBeenCalledWith('nav_item_clicked', {
-      label: 'Docs',
-    })
-  })
-
-  it('tracks the Discord item', () => {
-    render(<Sidebar />)
-    const discord = screen.getByRole('link', { name: 'Join Discord' })
-    discord.addEventListener('click', (event) => event.preventDefault(), {
-      once: true,
-    })
-    fireEvent.click(discord)
-    expect(trackEvent).toHaveBeenCalledWith('nav_item_clicked', {
-      label: 'Discord',
-    })
-  })
-})
-
-describe('Sidebar value proposition (C1 / D-5)', () => {
-  afterEach(cleanup)
-
-  it('shows the one value-proposition line attached to the target selector', () => {
-    render(<Sidebar />)
-    expect(screen.getByText('Find slow queries. Prove the fix.')).toBeTruthy()
-  })
-})
-
-describe('Sidebar Docs affordance (C4)', () => {
-  afterEach(cleanup)
-
-  it('links to the docs site, opened in a new tab', () => {
-    render(<Sidebar />)
-    const docs = screen.getByRole('link', { name: 'Docs' })
-    expect(docs.getAttribute('href')).toBe('https://readyset.io/docs')
-    expect(docs.getAttribute('target')).toBe('_blank')
-    expect(docs.getAttribute('rel')).toBe('noreferrer')
-  })
-
-  it('places Docs near Settings and Give feedback in the footer', () => {
-    render(<Sidebar />)
-    const settings = screen.getByRole('link', { name: /Settings/ })
-    const docs = screen.getByRole('link', { name: 'Docs' })
-    const feedback = screen.getByRole('button', { name: /Give feedback/ })
-    expect(
-      settings.compareDocumentPosition(docs) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-    expect(
-      docs.compareDocumentPosition(feedback) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-  })
-})
-
-describe('Sidebar setup checklist (MG-03)', () => {
-  afterEach(() => {
-    cleanup()
-    queryState.setupProgress = null
-    localStorage.clear()
-    __resetSetupGuideStoreForTests()
-  })
-
-  const outstanding = { target: 'demo', connected: true }
-
-  it('docks the checklist in the footer above the utilities', () => {
-    queryState.setupProgress = outstanding
-    render(<Sidebar />)
-
-    const steps = screen.getByTestId('setup-steps')
-    const status = screen.getByTestId('sidebar-footer-status')
-    const utilities = screen.getByTestId('sidebar-footer-utilities')
-    expect(
-      status.compareDocumentPosition(steps) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-    expect(
-      steps.compareDocumentPosition(utilities) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-    // Chrome, not an overlay: it displaces nothing on the page it describes.
-    expect(steps.className).not.toContain('fixed')
-    expect(steps.textContent).toContain('1 of 2')
-  })
-
-  it('carries the same checklist inside the open mobile drawer', () => {
-    queryState.setupProgress = outstanding
-    render(<Harness open onClose={vi.fn()} />)
-
-    const drawer = document.getElementById('app-sidebar')
-    const steps = screen.getByTestId('setup-steps')
-    expect(drawer?.contains(steps)).toBe(true)
-    fireEvent.click(screen.getByTestId('setup-steps-toggle'))
-    // The drawer's Tab trap collects the links and buttons inside the aside,
-    // so the checklist's own controls are keyboard-reachable there.
-    expect(steps.querySelector('a[aria-current="step"]')).toBeTruthy()
-    expect(screen.getByTestId('setup-steps-dismiss').tagName).toBe('BUTTON')
-  })
-
-  it('leaves the way back once the checklist is hidden', () => {
-    queryState.setupProgress = outstanding
-    render(<Sidebar />)
-
-    fireEvent.click(screen.getByTestId('setup-steps-dismiss'))
-
-    expect(screen.queryByTestId('setup-steps')).toBeNull()
-    expect(screen.getByTestId('setup-guide-help-entry')).toBeTruthy()
   })
 })

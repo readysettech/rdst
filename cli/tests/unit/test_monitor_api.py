@@ -30,8 +30,9 @@ def test_inbox_actions_and_index_changes(monkeypatch, tmp_path):
     assert client.post(f"/api/monitor/inbox/{first['id']}/dismiss").json()["state"] == "dismissed"
     assert client.post(f"/api/monitor/inbox/{first['id']}/resolve").json()["state"] == "resolved"
     assert client.post(f"/api/monitor/inbox/{first['id']}/reopen").json()["state"] == "new"
-    assert client.post("/api/monitor/inbox/mark-all-seen?target=db").json()["updated"] == 2
-    assert len(client.get("/api/monitor/inbox?state=seen").json()["items"]) == 2
+    assert client.post(f"/api/monitor/inbox/{first['id']}/seen").json()["state"] == "seen"
+    assert len(client.get("/api/monitor/inbox?state=seen").json()["items"]) == 1
+    assert client.post("/api/monitor/inbox/mark-all-seen?target=db").status_code in (404, 405)
     assert client.get("/api/monitor/targets/db/index-changes").json()["changes"][0]["kind"] == "added"
     assert client.post("/api/monitor/inbox/999/resolve").status_code == 404
     assert client.post(f"/api/monitor/inbox/{first['id']}/snooze",
@@ -138,6 +139,7 @@ def test_judge_runs_returns_latest_and_validates_limit(monkeypatch, tmp_path):
 async def test_inbox_stream_emits_upsert_and_notified(monkeypatch, tmp_path):
     monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
     store = MonitorStore()
+    store.set_settings("db", {"quiet_hours": {"from_hour": 0, "to_hour": 0}})
     store.upsert_item("db", "stuck_query", "old", 0.9, "Stuck", {}, 100)
     class Request:
         headers = {}

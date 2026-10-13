@@ -162,7 +162,7 @@ async def test_add_target_duplicate(client):
         },
     )
     assert response.status_code == 409
-    assert response.json()["detail"] == "A target named existing already exists."
+    assert response.json()["detail"] == "A database named existing already exists."
 
 
 async def test_add_target_validation_error(client):

@@ -15,6 +15,7 @@ import {
   ModalDescription,
   ModalTitle,
 } from './modal'
+import { Scrollable } from './scrollable'
 
 export interface ConfirmDialogNotice {
   /** Accent of the tinted notice; defaults to `warning`. */
@@ -63,6 +64,14 @@ export interface ConfirmDialogProps {
   /** aria-describedby text; defaults to the notice message. */
   description?: string
   size?: 'base' | 'large'
+  /**
+   * `quiet`: the 480px raised dialog. A 17px title with the close mark, the subtitle
+   * and notice as plain paragraphs (no tinted box, no icon tile), and a footer with an
+   * optional `note`, the ghost cancel and one solid confirm without an icon.
+   */
+  tone?: 'default' | 'quiet'
+  /** Caption at the left of the footer (e.g. how long the action takes). */
+  note?: ReactNode
 }
 
 function resolveIconAccent(
@@ -114,6 +123,8 @@ export function ConfirmDialog({
   blockCloseWhileLoading,
   description,
   size = 'base',
+  tone = 'default',
+  note,
 }: ConfirmDialogProps) {
   const cancelRef = useRef<HTMLButtonElement>(null)
   const typedRef = useRef<HTMLInputElement>(null)
@@ -142,6 +153,119 @@ export function ConfirmDialog({
     onClose()
   }
 
+  const onOpenAutoFocus = (e: Event) => {
+    e.preventDefault()
+    if (requireTyped != null) {
+      typedRef.current?.focus()
+      return
+    }
+    cancelRef.current?.focus()
+  }
+
+  const typedField =
+    requireTyped != null ? (
+      <VStack className="gap-2 items-stretch">
+        <Text level="label-small" className="text-content-layout-2">
+          Type{' '}
+          <span className="font-medium text-content-layout-1">
+            {requireTyped}
+          </span>{' '}
+          to confirm
+        </Text>
+        <BaseInputText
+          ref={typedRef}
+          name="confirm-typed"
+          placeholder={requireTyped}
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          error={typed.length > 0 && typedMismatch}
+          autoComplete="off"
+        />
+      </VStack>
+    ) : null
+
+  const confirmButton = (icon?: IconStrokeName) => (
+    <Button
+      variant={confirmVariant}
+      modifier="solid"
+      icon={icon}
+      label={confirmLabel}
+      onClick={() => {
+        if (typedMismatch) return
+        onConfirm()
+      }}
+      disabled={confirmDisabled || typedMismatch}
+      loading={loading}
+    />
+  )
+
+  const cancelButton = (
+    <Button
+      ref={cancelRef}
+      variant="primary"
+      modifier="ghost"
+      label={cancelLabel}
+      onClick={onClose}
+      disabled={loading}
+    />
+  )
+
+  if (tone === 'quiet') {
+    const caption =
+      confirmDisabled && confirmDisabledReason ? confirmDisabledReason : note
+    return (
+      <Modal open={isOpen} onOpenChange={handleOpenChange}>
+        <ModalContentContainer open={isOpen}>
+          <ModalContent
+            tone="quiet"
+            className="flex max-h-[calc(100dvh-2rem)] flex-col"
+            hideClose={blockCloseWhileLoading && loading}
+            description={subtitle != null ? undefined : description}
+            {...(hasDescription ? {} : { 'aria-describedby': undefined })}
+            onOpenAutoFocus={onOpenAutoFocus}
+          >
+            <HStack className="shrink-0 flex-wrap items-center gap-2 pt-4.5 pr-14 pl-6">
+              <ModalTitle>{title}</ModalTitle>
+              {titleAccessory}
+            </HStack>
+            <Scrollable
+              rootClassName="min-h-0 flex-1"
+              className="px-6 pt-2 pb-5"
+            >
+              <VStack className="items-stretch gap-3">
+                {subtitle != null ? (
+                  <ModalDescription>{subtitle}</ModalDescription>
+                ) : null}
+                {notice ? (
+                  <Text level="body-small" className="text-content-layout-2">
+                    {notice.title ? `${notice.title} ` : null}
+                    {notice.message}
+                  </Text>
+                ) : null}
+                {typedField}
+                {children}
+              </VStack>
+            </Scrollable>
+            <HStack className="shrink-0 items-center gap-3 border-t border-border-layout-2 px-6 py-3.5">
+              <Text
+                level="caption"
+                className={
+                  confirmDisabled && confirmDisabledReason
+                    ? 'flex-1 text-content-warning-soft'
+                    : 'flex-1 text-content-layout-3'
+                }
+              >
+                {caption}
+              </Text>
+              {cancelButton}
+              {confirmButton()}
+            </HStack>
+          </ModalContent>
+        </ModalContentContainer>
+      </Modal>
+    )
+  }
+
   return (
     <Modal open={isOpen} onOpenChange={handleOpenChange}>
       <ModalContentContainer open={isOpen}>
@@ -166,14 +290,7 @@ export function ConfirmDialog({
           // The typed tier focuses its own input instead — equally safe, and
           // the one thing that turns the confirm from dead into live, so it
           // cannot read as a dialog that opened broken (§10).
-          onOpenAutoFocus={(e) => {
-            e.preventDefault()
-            if (requireTyped != null) {
-              typedRef.current?.focus()
-              return
-            }
-            cancelRef.current?.focus()
-          }}
+          onOpenAutoFocus={onOpenAutoFocus}
         >
           <header className="shrink-0 border-b-(length:--border-base) border-border-layout-1 px-6 py-5">
             <HStack className="items-start gap-3">
@@ -212,26 +329,7 @@ export function ConfirmDialog({
                   message={notice.message}
                 />
               ) : null}
-              {requireTyped != null ? (
-                <VStack className="gap-2 items-stretch">
-                  <Text level="label-small" className="text-content-layout-2">
-                    Type{' '}
-                    <span className="font-medium text-content-layout-1">
-                      {requireTyped}
-                    </span>{' '}
-                    to confirm
-                  </Text>
-                  <BaseInputText
-                    ref={typedRef}
-                    name="confirm-typed"
-                    placeholder={requireTyped}
-                    value={typed}
-                    onChange={(e) => setTyped(e.target.value)}
-                    error={typed.length > 0 && typedMismatch}
-                    autoComplete="off"
-                  />
-                </VStack>
-              ) : null}
+              {typedField}
               {children}
             </VStack>
           ) : null}
@@ -245,27 +343,13 @@ export function ConfirmDialog({
                 >
                   {confirmDisabledReason}
                 </Text>
+              ) : note ? (
+                <Text level="caption" className="mr-auto text-content-layout-3">
+                  {note}
+                </Text>
               ) : null}
-              <Button
-                ref={cancelRef}
-                variant="primary"
-                modifier="ghost"
-                label={cancelLabel}
-                onClick={onClose}
-                disabled={loading}
-              />
-              <Button
-                variant={confirmVariant}
-                modifier="solid"
-                icon={confirmIcon}
-                label={confirmLabel}
-                onClick={() => {
-                  if (typedMismatch) return
-                  onConfirm()
-                }}
-                disabled={confirmDisabled || typedMismatch}
-                loading={loading}
-              />
+              {cancelButton}
+              {confirmButton(confirmIcon)}
             </HStack>
           </footer>
         </ModalContent>

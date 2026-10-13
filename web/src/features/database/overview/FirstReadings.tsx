@@ -1,9 +1,7 @@
-// The first run on the Database page: a short plain intro above the live chart and three
-// steps (finding queries, the first deep analyses, tonight's report), each with an honest
-// loader and real progress. Once its steps are done it collapses to one line; after the
-// first hour it's gone. When the database hasn't run a query yet, a friendly card says RDST
-// is connected and waiting, and how to send it some traffic. Under reduced motion
-// everything is still.
+// The chart card in the first minutes: the bands drawn so far fill from the left over a
+// ten-minute window, and the line under it says when the rest arrives. Above it, the first
+// run's steps (finding queries, the first deep analyses, the first report) with an honest
+// loader each; before any query has run, a card says RDST is connected and waiting.
 import { cn } from '@rs/tailwind-base'
 import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
@@ -32,6 +30,59 @@ import {
   firstRun,
   type StepState,
 } from './firstReadingsModel'
+
+export const FIRST_RUN_WINDOW = 10 * 60
+
+/** Queries RDST has seen on the database that the first list does not show yet. */
+export function moreAsSeen(
+  seenTotal: number | undefined,
+  listed: number
+): number {
+  return Math.max(0, (seenTotal ?? 0) - listed)
+}
+
+/** "13 more as they are seen", in the pager's place while the first list fills. */
+export function FirstRunMore({
+  seenTotal,
+  listed,
+}: {
+  seenTotal: number | undefined
+  listed: number
+}) {
+  const more = moreAsSeen(seenTotal, listed)
+  if (!more) return null
+  return (
+    <Text as="p" level="caption" className="mt-3 text-content-layout-3">
+      {more} more as they are seen
+    </Text>
+  )
+}
+
+/** Ten minutes from the first reading, or longer once the readings pass it. */
+export function firstRunWindow(firstTs: number, now: number): [number, number] {
+  return [firstTs, Math.max(firstTs + FIRST_RUN_WINDOW, now)]
+}
+
+/** The first window's span in words: "First 10 min" while it fills, then "Last 14 min". */
+export function firstRunLabel(domain: [number, number], now: number): string {
+  const minutes = Math.max(1, Math.round((domain[1] - domain[0]) / 60))
+  return domain[1] > now ? `First ${minutes} min` : `Last ${minutes} min`
+}
+
+export interface FirstRunNoteProps {
+  /** No report yet: the first one runs tonight. */
+  firstReport: boolean
+}
+
+/** The line under the chart in the first hour: when the report arrives. */
+export function FirstRunNote({ firstReport }: FirstRunNoteProps) {
+  if (!firstReport) return null
+  return (
+    <Text as="p" level="caption" className="mt-3 text-content-layout-3">
+      Your first daily report runs tonight, just after midnight.
+    </Text>
+  )
+}
 
 /** Enough pulses to count every reading of a first run at the fastest cadence. */
 const PULSE_LIMIT = 50

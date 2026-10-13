@@ -430,6 +430,7 @@ class QueryDiscoveryCollector:
         # for its remaining lifetime; transient errors never set this.
         self._legacy_fallback = False
         self._source_unavailable: Optional[Dict[str, Any]] = None
+        self._reconnect_pending = False
         # Delta-lane state: baseline and cursor are restored together from
         # the store on collector start when a same-epoch baseline exists;
         # otherwise both start empty and the first sweep re-baselines.
@@ -699,6 +700,23 @@ class QueryDiscoveryCollector:
 
     def request_refresh(self) -> None:
         self._wake.set()
+
+    def reconnect(self) -> None:
+        """The saved connection settings changed: the next cycle opens a fresh connection,
+        probes the statement source again and measures rates from a new baseline."""
+        self._reconnect_pending = True
+
+    async def _apply_reconnect(self) -> None:
+        if not self._reconnect_pending:
+            return
+        async with self._collect_lock:
+            self._reconnect_pending = False
+            self._dispose_service()
+            self._dispose_connection()
+            self._legacy_fallback = False
+            self._source_unavailable = None
+            self._monitor_baseline_set = False
+            self._monitor_db_previous = None
 
     def _dispose_service(self) -> None:
         """Release the reused service so the next cycle starts fresh."""
@@ -2297,6 +2315,7 @@ class QueryDiscoveryCollector:
 
     async def collect_now(self) -> QueryDiscoveryEvent:
         """Collect one target snapshot and persist observations, never Saved intent."""
+        await self._apply_reconnect()
         if default_monitor_db_path().exists():
             settings = await asyncio.to_thread(MonitorStore().read,
                 "SELECT value FROM monitor_setting WHERE target=? AND key='enabled'", (self.target,))
@@ -2565,6 +2584,12 @@ class QueryDiscoveryCoordinator:
             collector.set_subscriber_state_callback(self._subscription_listener)
             self._collectors[target] = collector
         return collector
+
+    def reconnect(self, target: str) -> None:
+        """The target's connection settings changed; its collector reconnects next cycle."""
+        collector = self._collectors.get(target)
+        if collector is not None:
+            collector.reconnect()
 
     def publish_assessment_update(self, target: str) -> None:
         collector = self._collectors.get(target)

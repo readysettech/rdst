@@ -5,14 +5,12 @@
  */
 import type { Locator, Page } from '@playwright/test'
 import {
-  clearQueryRegistry,
   configureTestTarget,
   expect,
   setBackendFixtures,
   test,
 } from '../fixtures'
 import {
-  addQuery,
   type Box,
   boxesOf,
   clipped,
@@ -24,8 +22,6 @@ import {
   shot,
   widestOffenders,
 } from './_helpers'
-
-const SQL = 'SELECT id, email FROM users WHERE tenant_id = 42 ORDER BY id'
 
 const PII_GUARD = {
   name: 'pii-guard',
@@ -62,27 +58,9 @@ async function documentOverflow(page: Page) {
 }
 
 /**
- * F-49 - the Queries toolbar stays inside its container at phone width, so the
- * sort control can be reached by pointer.
- */
-test('viewports: the queries toolbar fits 390', async ({ page }) => {
-  await setup(page)
-  await clearQueryRegistry(page.request)
-  await addQuery(page, SQL)
-  await page.setViewportSize(PHONE)
-  await page.goto('/queries')
-
-  const sort = page.getByLabel('Order queries')
-  await expect(sort).toBeVisible()
-  expect(await clipped(sort), 'sort control clipped').toBe(false)
-  await expect(page.getByRole('button', { name: 'Filter' })).toBeVisible()
-  expect(await documentOverflow(page)).toBe(0)
-  await shot(page, 'viewports/queries-390')
-})
-
-/**
- * F-48 - the Ask header keeps its title, description and target switcher
- * on separate lines at phone width instead of painting them over each other.
+ * F-48 - the Ask header keeps its title, database filter and the line naming
+ * the database it asks on separate boxes at phone width instead of painting
+ * them over each other.
  */
 test('viewports: the Ask header does not overprint at 390', async ({
   page,
@@ -95,13 +73,11 @@ test('viewports: the Ask header does not overprint at 390', async ({
   await settle(page, 800)
 
   const header = page.locator('#main-content header').first()
-  const target = header.getByRole('button', { name: /^Switch target/ })
-  const description = header.getByText(
-    'Turn a database question into a verified answer and reusable SQL.'
-  )
-  await expect(target).toBeVisible()
+  const filter = header.getByRole('button', { name: /^Database: / })
+  const asks = header.getByText(/^Asks /)
+  await expect(filter).toBeVisible()
   expect(await clipped(title), 'title clipped').toBe(false)
-  expect(await clipped(target), 'target switcher clipped').toBe(false)
+  expect(await clipped(filter), 'database filter clipped').toBe(false)
 
   const box = async (locator: Locator): Promise<Box> => {
     const rect = await locator.boundingBox()
@@ -110,13 +86,14 @@ test('viewports: the Ask header does not overprint at 390', async ({
   }
   const titleBox = await box(title)
   expect(
-    overlaps(titleBox, await box(target)),
-    'target switcher over the title'
+    overlaps(titleBox, await box(filter)),
+    'database filter over the title'
   ).toBe(false)
-  expect(
-    overlaps(await box(description), await box(target)),
-    'target switcher over the description'
-  ).toBe(false)
+  if (await asks.isVisible())
+    expect(
+      overlaps(await box(asks), await box(filter)),
+      'database filter over the line naming the database'
+    ).toBe(false)
   expect(await widestOffenders(page)).toEqual([])
   expect(await documentOverflow(page)).toBe(0)
 })
@@ -210,9 +187,8 @@ test('viewports: no route overflows horizontally at 1024', async ({ page }) => {
   const offenders: string[] = []
   for (const path of [
     '/',
-    '/queries',
+    '/database',
     '/ask',
-    '/audit',
     '/cache',
     '/configure',
     '/guards',
@@ -259,20 +235,4 @@ test('viewports: the setup guide never covers a control', async ({ page }) => {
     }
   }
   expect(covered).toEqual([])
-})
-
-/** The page and card action rows wrap at 390 rather than pushing off screen. */
-test('viewports: action rows stay reachable at 390', async ({ page }) => {
-  await setup(page)
-  await clearQueryRegistry(page.request)
-  await addQuery(page, SQL)
-  await page.setViewportSize(PHONE)
-  await page.goto('/queries')
-
-  const analyze = page.getByRole('button', { name: 'Analyze' }).first()
-  await analyze.waitFor()
-  expect(await clipped(analyze), 'card Analyze clipped').toBe(false)
-  const add = page.getByRole('button', { name: 'Add query' }).first()
-  await expect(add).toBeVisible()
-  expect(await clipped(add), 'Add query clipped').toBe(false)
 })

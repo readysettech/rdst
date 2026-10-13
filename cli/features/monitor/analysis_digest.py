@@ -10,6 +10,7 @@ analyzer's own wording is labeled as an estimate.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from functools import lru_cache
 from typing import Any
@@ -44,6 +45,22 @@ def load_analysis(job: dict[str, Any] | None) -> Any | None:
 def _sentence(text: Any) -> str:
     """Whitespace-collapsed, never shortened: the header shows the analyzer's full words."""
     return " ".join(str(text or "").split())
+
+
+# Claims that hold only for an index storing columns beyond its key. The index plan builds
+# each index on its key columns alone, so an index fix's reasoning never makes them.
+_COVERING_CLAIM = re.compile(
+    r"\bINCLUDE\b|\bcovering\b|\bindex[- ]only\b|\bheap (?:fetch|lookup|access)|"
+    r"\b(?:available|stored|present|kept|contained|carried|read)\s+(?:in|from)\s+the\s+index\b|"
+    r"\bindex\s+entr(?:y|ies)\b|"
+    r"\bwithout\s+(?:visiting|touching|reading|going\s+back\s+to)\s+the\s+(?:table|heap)\b",
+    re.I)
+
+
+def index_why(text: Any) -> str:
+    """An index fix's reasoning, saying only what an index on its key columns does."""
+    sentences = re.split(r"(?<=[.!?])\s+", _sentence(text))
+    return " ".join(part for part in sentences if part and not _COVERING_CLAIM.search(part))
 
 
 def _nodes(plan: Any) -> list[dict[str, Any]]:
@@ -135,7 +152,7 @@ def _fixes(analysis: Any) -> list[dict[str, Any]]:
         fixes.append({"kind": "index",
                       "title": f"Add an index on {table}({columns})" if table and columns
                       else "Add an index",
-                      "sql": str(item["sql"]).strip(), "why": _sentence(item.get("rationale")),
+                      "sql": str(item["sql"]).strip(), "why": index_why(item.get("rationale")),
                       "expected_gain": _index_gain(item, testing)})
     for item in llm.get("rewrite_suggestions") or analysis.rewrite_suggestions or []:
         if not isinstance(item, dict) or not item.get("rewritten_sql"):

@@ -4,8 +4,7 @@ import { BaseInputTextarea } from '@rs/ui-new/base-input-textarea'
 import { Button } from '@rs/ui-new/button'
 import { Dropdown } from '@rs/ui-new/dropdown'
 import { Icon } from '@rs/ui-new/icon'
-import { Modal, ModalContent, ModalContentContainer } from '@rs/ui-new/modal'
-import { AnimatePresence, m } from '@rs/ui-new/motion'
+import { SegmentedControl } from '@rs/ui-new/segmented-control'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { toast } from '@rs/ui-new/use-toast'
@@ -19,6 +18,7 @@ import {
   type ReportSentiment,
   submitReport,
 } from '../lib/api'
+import { DialogShell } from './DialogShell'
 import { isValidEmail, normalizeEmail } from './emailValidation'
 
 interface ReportDialogProps {
@@ -27,40 +27,10 @@ interface ReportDialogProps {
   initialQueryHash?: string
 }
 
-type SentimentOption = {
-  value: ReportSentiment
-  label: string
-  icon: string
-  color: string
-  bgColor: string
-  borderColor: string
-}
-
-const sentimentOptions: SentimentOption[] = [
-  {
-    value: 'positive',
-    label: 'Great',
-    icon: '😊',
-    color: 'text-content-positive-soft',
-    bgColor: 'bg-surface-positive-soft',
-    borderColor: 'border-border-positive-soft',
-  },
-  {
-    value: 'neutral',
-    label: 'Okay',
-    icon: '😐',
-    color: 'text-content-info-soft',
-    bgColor: 'bg-surface-info-soft',
-    borderColor: 'border-border-info-soft',
-  },
-  {
-    value: 'negative',
-    label: 'Poor',
-    icon: '😞',
-    color: 'text-content-negative-soft',
-    bgColor: 'bg-surface-negative-soft',
-    borderColor: 'border-border-negative-soft',
-  },
+const sentimentOptions: Array<{ value: ReportSentiment; label: string }> = [
+  { value: 'positive', label: 'Great' },
+  { value: 'neutral', label: 'Okay' },
+  { value: 'negative', label: 'Poor' },
 ]
 
 export function ReportDialog({
@@ -197,382 +167,205 @@ export function ReportDialog({
     return singleLine.slice(0, maxLength) + '...'
   }
 
-  const currentSentiment = sentimentOptions.find((s) => s.value === sentiment)
+  const queryLabel = (query: QueryRegistryEntry) =>
+    query.tag || `Query ${query.hash.slice(0, 8)}`
 
   return (
-    <Modal open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <ModalContentContainer open={isOpen}>
-        <ModalContent
-          size="base"
-          className="gap-0 p-0 overflow-hidden"
-          title="Share your feedback"
-          description="Help us improve RDST for everyone"
-        >
-          {/* Header with gradient */}
-          <m.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-            className="relative px-6 pt-6 pb-5 bg-gradient-to-br from-surface-layout-2 to-surface-layout-1"
-          >
-            <div className="absolute inset-0 bg-gradient-to-br from-surface-primary-soft/5 to-transparent" />
-            <HStack className="gap-4 items-center relative">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center shadow-lg">
-                <Icon
-                  name="customer-support"
-                  label="Feedback"
-                  className="w-6 h-6 text-content-primary-soft"
-                />
-              </div>
-              <VStack className="gap-0.5 items-start">
-                <Text level="headline-4" className="text-content-layout-1">
-                  Share your feedback
-                </Text>
-                <Text level="body-small" className="text-content-layout-3">
-                  Help us improve RDST for everyone
-                </Text>
-              </VStack>
-            </HStack>
-          </m.div>
+    <DialogShell
+      open={isOpen}
+      onClose={onClose}
+      title="Give feedback"
+      note="Goes straight to the team."
+      action={
+        <>
+          <Button
+            variant="primary"
+            modifier="ghost"
+            label="Cancel"
+            onClick={onClose}
+            disabled={submitMutation.isPending}
+          />
+          <Button
+            variant="primary"
+            modifier="solid"
+            label="Send"
+            onClick={handleSubmit}
+            loading={submitMutation.isPending}
+            disabled={
+              submitMutation.isPending ||
+              !reason.trim() ||
+              !(verifiedEmail && !emailOverride ? verifiedEmail : email).trim()
+            }
+          />
+        </>
+      }
+    >
+      <VStack className="items-stretch gap-4">
+        <div>
+          <Text as="p" level="caption" className="mb-1.5 text-content-layout-3">
+            How was your experience?
+          </Text>
+          <SegmentedControl
+            aria-label="How was your experience?"
+            mode="radio"
+            value={sentiment}
+            onValueChange={setSentiment}
+            segments={sentimentOptions}
+          />
+        </div>
 
-          {/* Content */}
-          <div className="p-6 space-y-5">
-            {/* Sentiment Selection */}
-            <m.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.05 }}
-            >
-              <Text level="label-small" className="text-content-layout-2 mb-3">
-                How was your experience?
-              </Text>
-              <div className="grid grid-cols-3 gap-3">
-                {sentimentOptions.map((option, index) => {
-                  const isSelected = sentiment === option.value
-                  return (
-                    <m.button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setSentiment(option.value)}
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ duration: 0.2, delay: 0.1 + index * 0.05 }}
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 cursor-pointer ${
-                        isSelected
-                          ? `${option.bgColor} ${option.borderColor}`
-                          : 'bg-surface-layout-2 border-transparent hover:border-border-layout-2'
-                      }`}
+        <div>
+          <Text as="p" level="caption" className="mb-1.5 text-content-layout-3">
+            Related query (optional)
+          </Text>
+          <Dropdown open={dropdownOpen} onOpenChange={setDropdownOpen}>
+            <Dropdown.Trigger asChild>
+              <div className="flex cursor-pointer items-center justify-between gap-2 rounded-control bg-surface-layout-2 px-3.5 py-2.5 hover:bg-surface-raised">
+                {selectedQuery ? (
+                  <VStack className="min-w-0 items-start gap-0">
+                    <Text level="body-small" className="text-content-layout-1">
+                      {queryLabel(selectedQuery)}
+                    </Text>
+                    <Text
+                      level="mono-small"
+                      className="block max-w-[280px] truncate text-content-layout-3"
                     >
-                      <span className="text-2xl">{option.icon}</span>
-                      <Text
-                        level="label-small"
-                        className={
-                          isSelected ? option.color : 'text-content-layout-2'
-                        }
-                      >
-                        {option.label}
-                      </Text>
-                      {isSelected && (
-                        <m.div
-                          layoutId="sentiment-indicator"
-                          className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${option.bgColor} border ${option.borderColor} flex items-center justify-center`}
-                        >
-                          <Icon
-                            name="tick"
-                            label="Selected"
-                            className={`w-3 h-3 ${option.color}`}
-                          />
-                        </m.div>
-                      )}
-                    </m.button>
-                  )
-                })}
-              </div>
-            </m.div>
-
-            {/* Query Selection Dropdown */}
-            <m.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}
-            >
-              <Text level="label-small" className="text-content-layout-2 mb-2">
-                Related query{' '}
-                <span className="text-content-layout-3 font-normal">
-                  (optional)
-                </span>
-              </Text>
-              <Dropdown open={dropdownOpen} onOpenChange={setDropdownOpen}>
-                <Dropdown.Trigger asChild>
-                  <div className="flex justify-between items-center bg-surface-layout-2 border border-border-layout-1 rounded-xl px-4 py-3 cursor-pointer hover:border-border-layout-2 hover:bg-surface-raised transition-all duration-200 group">
-                    <div className="flex-1 min-w-0">
-                      {selectedQuery ? (
-                        <HStack className="gap-3 items-center">
-                          <div className="w-8 h-8 rounded-lg bg-surface-primary-soft/50 flex items-center justify-center shrink-0">
-                            <Icon
-                              name="querypilot"
-                              label="Query"
-                              className="w-4 h-4 text-content-primary-soft"
-                            />
-                          </div>
-                          <VStack className="gap-0 items-start min-w-0">
-                            <Text
-                              level="label-small"
-                              className="text-content-layout-1"
-                            >
-                              {selectedQuery.tag ||
-                                `Query ${selectedQuery.hash.slice(0, 8)}`}
-                            </Text>
-                            <Text
-                              level="mono-small"
-                              className="text-content-layout-3 truncate block max-w-[280px]"
-                            >
-                              {truncateSQL(selectedQuery.sql)}
-                            </Text>
-                          </VStack>
-                        </HStack>
-                      ) : (
-                        <HStack className="gap-3 items-center">
-                          <div className="w-8 h-8 rounded-lg bg-surface-raised flex items-center justify-center shrink-0">
-                            <Icon
-                              name="sparkles"
-                              label="General"
-                              className="w-4 h-4 text-content-layout-3"
-                            />
-                          </div>
-                          <Text
-                            level="body-small"
-                            className="text-content-layout-3"
-                          >
-                            None - General feedback
-                          </Text>
-                        </HStack>
-                      )}
-                    </div>
-                    <Icon
-                      name="chevron-down"
-                      label="Select query"
-                      size="small"
-                      className="text-content-layout-3 ml-2 shrink-0 transition-transform duration-200 group-hover:translate-y-0.5"
-                    />
-                  </div>
-                </Dropdown.Trigger>
-                <Dropdown.Content
-                  align="start"
-                  className="w-[calc(100%-2rem)] max-w-[468px]"
-                >
-                  <Dropdown.Item
-                    label="None - General feedback"
-                    onClick={() => {
-                      setSelectedQueryHash(null)
-                      setDropdownOpen(false)
-                    }}
-                  />
-                  {queries.length > 0 && <Dropdown.Separator />}
-                  {queries.map((query: QueryRegistryEntry) => (
-                    <Dropdown.ItemWithChildren
-                      key={query.hash}
-                      onClick={() => {
-                        setSelectedQueryHash(query.hash)
-                        setDropdownOpen(false)
-                      }}
-                    >
-                      <div className="space-y-0.5 py-1">
-                        <Text
-                          level="label-small"
-                          className="text-content-layout-1"
-                        >
-                          {query.tag || `Query ${query.hash.slice(0, 8)}`}
-                        </Text>
-                        <Text
-                          level="mono-small"
-                          className="text-content-layout-3 truncate block max-w-full"
-                        >
-                          {truncateSQL(query.sql, 60)}
-                        </Text>
-                      </div>
-                    </Dropdown.ItemWithChildren>
-                  ))}
-                  {queries.length === 0 && (
-                    <div className="px-3 py-2">
-                      <Text
-                        level="body-small"
-                        className="text-content-layout-3"
-                      >
-                        No queries in registry
-                      </Text>
-                    </div>
-                  )}
-                </Dropdown.Content>
-              </Dropdown>
-            </m.div>
-
-            {/* Include Options (shown when query selected) */}
-            <AnimatePresence>
-              {selectedQueryHash && (
-                <m.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="overflow-hidden"
-                >
-                  <div className="bg-surface-layout-2 rounded-xl p-4 space-y-3 border border-border-layout-1">
-                    <HStack className="gap-2 items-center mb-1">
-                      <Icon
-                        name="connect"
-                        label="Attachments"
-                        className="w-4 h-4 text-content-layout-3"
-                      />
-                      <Text
-                        level="label-small"
-                        className="text-content-layout-2"
-                      >
-                        Include with feedback
-                      </Text>
-                    </HStack>
-                    <div className="flex items-center justify-between py-1">
-                      <HStack className="gap-2 items-center">
-                        <Icon
-                          name="querypilot"
-                          label="SQL"
-                          className="w-4 h-4 text-content-layout-3"
-                        />
-                        <Text
-                          level="body-small"
-                          className="text-content-layout-2"
-                        >
-                          Query SQL
-                        </Text>
-                      </HStack>
-                      <BaseInputSwitch
-                        name="include-query"
-                        checked={includeQuery}
-                        onCheckedChange={setIncludeQuery}
-                      />
-                    </div>
-                    <div className="h-px bg-border-layout-1" />
-                    <div className="flex items-center justify-between py-1">
-                      <HStack className="gap-2 items-center">
-                        <Icon
-                          name="layers"
-                          label="Plan"
-                          className="w-4 h-4 text-content-layout-3"
-                        />
-                        <Text
-                          level="body-small"
-                          className="text-content-layout-2"
-                        >
-                          Execution plan
-                        </Text>
-                      </HStack>
-                      <BaseInputSwitch
-                        name="include-plan"
-                        checked={includePlan}
-                        onCheckedChange={setIncludePlan}
-                      />
-                    </div>
-                  </div>
-                </m.div>
-              )}
-            </AnimatePresence>
-
-            {/* Feedback Text */}
-            <m.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.15 }}
-            >
-              <Text level="label-small" className="text-content-layout-2 mb-2">
-                {sentiment === 'positive'
-                  ? 'What did RDST do well?'
-                  : sentiment === 'negative'
-                    ? 'What went wrong? How can we improve?'
-                    : 'Tell us about your experience'}
-              </Text>
-              <BaseInputTextarea
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="Share your thoughts..."
-                rows={4}
-                className="resize-none"
-              />
-            </m.div>
-
-            {/* Email */}
-            <m.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.2 }}
-            >
-              <Text level="label-small" className="text-content-layout-2 mb-2">
-                Email
-              </Text>
-              {verifiedEmail && !emailOverride ? (
-                <div className="rounded-xl border border-border-layout-1 bg-surface-layout-2 px-4 py-3">
-                  <Text level="body-small" className="text-content-layout-2">
-                    Sending as {verifiedEmail}
+                      {truncateSQL(selectedQuery.sql)}
+                    </Text>
+                  </VStack>
+                ) : (
+                  <Text level="body-small" className="text-content-layout-3">
+                    None - General feedback
                   </Text>
-                  <Button
-                    type="button"
-                    size="small"
-                    modifier="link"
-                    label="Use a different email"
-                    classMerge="mt-1 h-auto p-0"
-                    onClick={() => setEmailOverride(true)}
-                  />
-                </div>
-              ) : (
-                <BaseInputText
-                  name="feedback-email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  type="email"
-                  required
+                )}
+                <Icon
+                  name="chevron-down"
+                  label="Select query"
+                  size="small"
+                  className="shrink-0 text-content-layout-3"
                 />
+              </div>
+            </Dropdown.Trigger>
+            <Dropdown.Content
+              align="start"
+              className="w-[calc(100%-2rem)] max-w-[432px]"
+            >
+              <Dropdown.Item
+                label="None - General feedback"
+                onClick={() => {
+                  setSelectedQueryHash(null)
+                  setDropdownOpen(false)
+                }}
+              />
+              {queries.length > 0 && <Dropdown.Separator />}
+              {queries.map((query: QueryRegistryEntry) => (
+                <Dropdown.ItemWithChildren
+                  key={query.hash}
+                  onClick={() => {
+                    setSelectedQueryHash(query.hash)
+                    setDropdownOpen(false)
+                  }}
+                >
+                  <div className="space-y-0.5 py-1">
+                    <Text level="label-small" className="text-content-layout-1">
+                      {queryLabel(query)}
+                    </Text>
+                    <Text
+                      level="mono-small"
+                      className="block max-w-full truncate text-content-layout-3"
+                    >
+                      {truncateSQL(query.sql, 60)}
+                    </Text>
+                  </div>
+                </Dropdown.ItemWithChildren>
+              ))}
+              {queries.length === 0 && (
+                <div className="px-3 py-2">
+                  <Text level="body-small" className="text-content-layout-3">
+                    No queries in registry
+                  </Text>
+                </div>
               )}
-              <Text level="caption" className="text-content-layout-3 mt-1.5">
-                Required so we can follow up about your feedback
-              </Text>
-            </m.div>
-          </div>
+            </Dropdown.Content>
+          </Dropdown>
+          {selectedQueryHash && (
+            <div className="mt-2">
+              <HStack className="items-center justify-between py-1.5">
+                <Text level="body-small" className="text-content-layout-2">
+                  Query SQL
+                </Text>
+                <BaseInputSwitch
+                  name="include-query"
+                  aria-label="Query SQL"
+                  checked={includeQuery}
+                  onCheckedChange={setIncludeQuery}
+                />
+              </HStack>
+              <HStack className="items-center justify-between py-1.5">
+                <Text level="body-small" className="text-content-layout-2">
+                  Execution plan
+                </Text>
+                <BaseInputSwitch
+                  name="include-plan"
+                  aria-label="Execution plan"
+                  checked={includePlan}
+                  onCheckedChange={setIncludePlan}
+                />
+              </HStack>
+            </div>
+          )}
+        </div>
 
-          {/* Footer */}
-          <m.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.3, delay: 0.25 }}
-            className="px-6 py-4 bg-surface-layout-2 border-t border-border-layout-1 flex justify-between items-center"
-          >
-            <Button
-              modifier="ghost"
-              label="Cancel"
-              onClick={onClose}
-              disabled={submitMutation.isPending}
+        <div>
+          <Text as="p" level="caption" className="mb-1.5 text-content-layout-3">
+            {sentiment === 'positive'
+              ? 'What did RDST do well?'
+              : sentiment === 'negative'
+                ? 'What went wrong? How can we improve?'
+                : 'Tell us about your experience'}
+          </Text>
+          <BaseInputTextarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Share your thoughts..."
+            rows={4}
+            className="resize-none"
+          />
+        </div>
+
+        <div>
+          <Text as="p" level="caption" className="mb-1.5 text-content-layout-3">
+            Email
+          </Text>
+          {verifiedEmail && !emailOverride ? (
+            <HStack className="flex-wrap items-center gap-x-3 gap-y-1">
+              <Text level="body-small" className="text-content-layout-2">
+                Sending as {verifiedEmail}
+              </Text>
+              <Button
+                type="button"
+                size="small"
+                modifier="link"
+                label="Use a different email"
+                classMerge="h-auto p-0"
+                onClick={() => setEmailOverride(true)}
+              />
+            </HStack>
+          ) : (
+            <BaseInputText
+              name="feedback-email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              type="email"
+              required
             />
-            <Button
-              variant={
-                currentSentiment?.value === 'positive' ? 'rising' : 'primary'
-              }
-              label={submitMutation.isPending ? 'Sending...' : 'Send feedback'}
-              icon="arrow-up-right"
-              iconPosition="right"
-              onClick={handleSubmit}
-              loading={submitMutation.isPending}
-              disabled={
-                submitMutation.isPending ||
-                !reason.trim() ||
-                !(
-                  verifiedEmail && !emailOverride ? verifiedEmail : email
-                ).trim()
-              }
-            />
-          </m.div>
-        </ModalContent>
-      </ModalContentContainer>
-    </Modal>
+          )}
+          <Text as="p" level="caption" className="mt-1.5 text-content-layout-3">
+            Required so we can follow up about your feedback
+          </Text>
+        </div>
+      </VStack>
+    </DialogShell>
   )
 }

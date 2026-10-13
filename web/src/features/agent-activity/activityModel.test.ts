@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentActivityItem } from '@/lib/agentActivity'
 import { activitySearch, exportCsvUrl } from '@/lib/agentActivity'
 import {
+  activityLine,
   activityNote,
   activitySentence,
   allEntriesQuery,
   customBounds,
+  dayHeading,
   dayKey,
   dayLabel,
   expandQuery,
@@ -127,7 +129,7 @@ describe('activity sentences', () => {
       ts: MIDNIGHT + 60,
     })
     expect(activitySentence(nightly)).toBe(
-      'The agent ran the nightly checkup for Mon, Sep 28.'
+      'The agent wrote the daily report for Mon, Sep 28.'
     )
     const recorded = item({
       action: 'daily_snapshot',
@@ -136,8 +138,11 @@ describe('activity sentences', () => {
       period_end: MIDNIGHT + 3600 * 12,
     })
     expect(reportDay(recorded)).toEqual({ day: 'Tue, Sep 29', partial: true })
+    // A run asked for late in the day is still on request, not the daily report.
+    const late = { ...recorded, period_end: MIDNIGHT + 84_120 }
+    expect(reportDay(late)).toEqual({ day: 'Tue, Sep 29', partial: true })
     expect(activitySentence(recorded)).toBe(
-      'The agent ran a checkup for Tue, Sep 29 so far, on request.'
+      'The agent wrote a report for Tue, Sep 29 so far, on request.'
     )
   })
 
@@ -368,5 +373,93 @@ describe('technical details', () => {
     expect(technicalSummary({ statement_count: 0, ai_call_count: 0 })).toBe(
       'No statements, no AI calls'
     )
+  })
+})
+
+describe('activity lines', () => {
+  it('reads verb first, with one detail and the place the row opens', () => {
+    expect(activityLine(item({ finding: 'fix suggested' }))).toMatchObject({
+      text: 'Analyzed SELECT on events by props',
+      detail: 'fix suggested',
+      warn: false,
+      place: 'Analysis',
+    })
+    expect(
+      activityLine(
+        item({ outcome: 'failed', summary: 'TIMEOUT: Plan took too long.' })
+      )
+    ).toMatchObject({
+      text: "Couldn't finish analyzing SELECT on events by props",
+      detail: 'Plan took too long',
+      warn: true,
+    })
+    expect(activityLine(rollup({ count: 12, items_filed: 0 }))).toMatchObject({
+      text: 'Checked for changes',
+      detail: '12 checks, nothing new',
+      warn: false,
+      place: 'Database',
+    })
+    expect(activityLine(rollup({ count: 4, failed: 2 }))).toMatchObject({
+      detail: "2 of 4 didn't complete",
+      warn: true,
+    })
+    const classified = (fields: Partial<AgentActivityItem>) =>
+      activityLine(
+        rollup({ action: 'classification', fold: 'classification', ...fields })
+      )
+    expect(classified({ count: 8, done: 5, failed: 1 })).toMatchObject({
+      text: 'Classified 5 queries',
+      detail: "2 set aside, 1 didn't complete",
+      warn: true,
+    })
+    expect(classified({ count: 3, done: 0, failed: 3 })).toMatchObject({
+      text: "Couldn't classify 3 queries",
+      detail: null,
+      warn: true,
+    })
+    expect(
+      activityLine(
+        item({
+          action: 'daily_snapshot',
+          subject: 'Nightly',
+          period_start: new Date(2026, 9, 7).getTime() / 1000,
+          period_end: new Date(2026, 9, 8).getTime() / 1000,
+          finding: '9 fixes ready',
+          report_id: 31,
+        })
+      )
+    ).toMatchObject({
+      text: 'Daily report for October 7',
+      detail: '9 fixes ready',
+      place: 'Report',
+      link: { to: '/database', search: { view: 'report', report: '31' } },
+    })
+    expect(
+      activityLine(item({ action: 'daily_snapshot', subject: 'On request' }))
+    ).toMatchObject({ text: 'Report ran', detail: 'on request' })
+    expect(
+      activityLine(
+        item({ action: 'explain_actions', subject: '2 index changes' })
+      )
+    ).toMatchObject({
+      text: 'Explained why 2 index changes matter on Actions',
+      warn: false,
+      place: 'Actions',
+      link: { to: '/actions', search: { db: 'shop' } },
+    })
+    expect(
+      activityLine(
+        item({ action: 'ask', question: 'Which posts have no owner?' })
+      )
+    ).toMatchObject({
+      text: 'Answered "Which posts have no owner?"',
+      place: 'Ask',
+    })
+  })
+
+  it('heads a day group with Today, Yesterday, then the date', () => {
+    expect(dayHeading(dayKey(NOON), NOON)).toBe('Today')
+    expect(dayHeading(dayKey(NOON - 86_400), NOON)).toBe('Yesterday')
+    expect(dayHeading(dayKey(NOON - 3 * 86_400), NOON)).toBe('September 26')
   })
 })

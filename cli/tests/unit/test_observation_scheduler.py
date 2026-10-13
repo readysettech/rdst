@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from features.monitor.api import routes as monitor_routes
-from features.monitor.connection import ConnectionWatch
+from features.monitor.connection import LOST_AFTER_FAILURES, ConnectionWatch
 from shared.monitor.monitor_store import MonitorStore
 
 from features.query_registry import scheduler as scheduler_module
@@ -824,9 +824,10 @@ async def test_monitored_connection_recovers_on_next_reading(tmp_path, monkeypat
         await asyncio.wait_for(run_tick(scheduler, schedule, clock), 2)
         if first_failure is None:
             first_failure = clock.now
-        if schedule.consecutive_failures == 2:
-            assert clock.now - first_failure <= 60
-            assert store.read("SELECT state FROM inbox_item WHERE subject='lost_connection'")
+        filed = store.read("SELECT state FROM inbox_item WHERE subject='lost_connection'")
+        assert bool(filed) == (schedule.consecutive_failures >= LOST_AFTER_FAILURES)
+        if schedule.consecutive_failures == LOST_AFTER_FAILURES:
+            assert clock.now - first_failure <= (LOST_AFTER_FAILURES - 1) * interval
         assert 0 < schedule.next_due - clock.now <= interval
         assert 0 < scheduler._backoff.retry_after("demo") <= interval
         assert not scheduler._backoff.acquire("demo")

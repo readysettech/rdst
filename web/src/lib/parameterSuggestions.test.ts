@@ -102,11 +102,11 @@ describe('buildParameterSuggestions', () => {
 
     expect(suggestions[':status']).toEqual({
       value: 'paid',
-      provenance: 'Schema enum · orders.status',
+      provenance: 'Schema enum, orders.status',
     })
     expect(suggestions[':shop']).toEqual({
       value: '1',
-      provenance: 'Schema type · orders.shop_id',
+      provenance: 'Schema type, orders.shop_id',
     })
     expect(suggestions[':email']).toBeUndefined()
   })
@@ -115,8 +115,8 @@ describe('buildParameterSuggestions', () => {
     const sql = 'SELECT * FROM orders LIMIT $1 OFFSET $2'
     expect(buildParameterSuggestions(sql, detectParameters(sql), null)).toEqual(
       {
-        $1: { value: '100', provenance: 'Query shape · LIMIT' },
-        $2: { value: '0', provenance: 'Query shape · OFFSET' },
+        $1: { value: '100', provenance: 'Query shape, LIMIT' },
+        $2: { value: '0', provenance: 'Query shape, OFFSET' },
       }
     )
   })
@@ -126,9 +126,9 @@ describe('buildParameterSuggestions', () => {
       'SELECT PERCENTILE_DISC($1) WITHIN GROUP (ORDER BY reputation), PERCENTILE_CONT($2) WITHIN GROUP (ORDER BY reputation) FROM users LIMIT $3'
     expect(buildParameterSuggestions(sql, detectParameters(sql), null)).toEqual(
       {
-        $1: { value: '0.5', provenance: 'Query shape · percentile' },
-        $2: { value: '0.5', provenance: 'Query shape · percentile' },
-        $3: { value: '100', provenance: 'Query shape · LIMIT' },
+        $1: { value: '0.5', provenance: 'Query shape, percentile' },
+        $2: { value: '0.5', provenance: 'Query shape, percentile' },
+        $3: { value: '100', provenance: 'Query shape, LIMIT' },
       }
     )
   })
@@ -144,11 +144,11 @@ describe('buildParameterSuggestions', () => {
 
     expect(suggestions.$1).toEqual({
       value: 'active',
-      provenance: 'Schema enum · users.status',
+      provenance: 'Schema enum, users.status',
     })
     expect(suggestions.$2).toEqual({
       value: 'paid',
-      provenance: 'Schema enum · orders.status',
+      provenance: 'Schema enum, orders.status',
     })
   })
 
@@ -171,7 +171,7 @@ describe('buildParameterSuggestions', () => {
 
     expect(suggestions.$1).toEqual({
       value: 'free',
-      provenance: 'Schema enum · users.plan',
+      provenance: 'Schema enum, users.plan',
     })
     expect(suggestions.$2).toBeUndefined()
   })
@@ -181,7 +181,7 @@ describe('buildParameterSuggestions', () => {
       'SELECT shop_id FROM orders GROUP BY shop_id HAVING COUNT(*) > $1'
     expect(buildParameterSuggestions(sql, detectParameters(sql), null)).toEqual(
       {
-        $1: { value: '1', provenance: 'Query shape · COUNT comparison' },
+        $1: { value: '1', provenance: 'Query shape, COUNT comparison' },
       }
     )
   })
@@ -192,7 +192,7 @@ describe('buildParameterSuggestions', () => {
     expect(
       buildParameterSuggestions(sql, detectParameters(sql), SCHEMA)
     ).toEqual({
-      $1: { value: 'paid', provenance: 'Schema enum · orders.status' },
+      $1: { value: 'paid', provenance: 'Schema enum, orders.status' },
     })
   })
 
@@ -200,7 +200,7 @@ describe('buildParameterSuggestions', () => {
     const sql = 'SELECT DATE_TRUNC($1, created_at) FROM orders'
     expect(buildParameterSuggestions(sql, detectParameters(sql), null)).toEqual(
       {
-        $1: { value: 'day', provenance: 'Query shape · DATE_TRUNC unit' },
+        $1: { value: 'day', provenance: 'Query shape, DATE_TRUNC unit' },
       }
     )
   })
@@ -209,7 +209,7 @@ describe('buildParameterSuggestions', () => {
     const sql = 'SELECT ROUND(avg_price, $1) FROM orders'
     expect(buildParameterSuggestions(sql, detectParameters(sql), null)).toEqual(
       {
-        $1: { value: '2', provenance: 'Query shape · ROUND precision' },
+        $1: { value: '2', provenance: 'Query shape, ROUND precision' },
       }
     )
   })
@@ -219,7 +219,7 @@ describe('buildParameterSuggestions', () => {
       'SELECT SUM(amount) OVER (ORDER BY created_at ROWS BETWEEN $1 PRECEDING AND CURRENT ROW) FROM orders'
     expect(buildParameterSuggestions(sql, detectParameters(sql), null)).toEqual(
       {
-        $1: { value: '5', provenance: 'Query shape · window frame' },
+        $1: { value: '5', provenance: 'Query shape, window frame' },
       }
     )
   })
@@ -230,8 +230,8 @@ describe('buildParameterSuggestions', () => {
     expect(
       buildParameterSuggestions(sql, detectParameters(sql), SCHEMA)
     ).toEqual({
-      $1: { value: 'active', provenance: 'Schema enum · users.status' },
-      $2: { value: 'active', provenance: 'Schema enum · users.status' },
+      $1: { value: 'active', provenance: 'Schema enum, users.status' },
+      $2: { value: 'active', provenance: 'Schema enum, users.status' },
     })
   })
 
@@ -239,7 +239,7 @@ describe('buildParameterSuggestions', () => {
     const sql = "SELECT * FROM users WHERE location LIKE ('%' || $1 || '%')"
     expect(buildParameterSuggestions(sql, detectParameters(sql), null)).toEqual(
       {
-        $1: { value: '%', provenance: 'Query shape · LIKE pattern' },
+        $1: { value: '%', provenance: 'Query shape, LIKE pattern' },
       }
     )
   })
@@ -256,15 +256,15 @@ describe('buildParameterSuggestions', () => {
     expect(suggestions.$1).toBeUndefined()
     expect(suggestions.$2).toEqual({
       value: '0.5',
-      provenance: 'Query shape · percentile',
+      provenance: 'Query shape, percentile',
     })
     expect(suggestions.$3).toEqual({
       value: '1',
-      provenance: 'Schema type · users.reputation',
+      provenance: 'Schema type, users.reputation',
     })
     expect(suggestions.$4).toEqual({
       value: '100',
-      provenance: 'Query shape · LIMIT',
+      provenance: 'Query shape, LIMIT',
     })
   })
 })

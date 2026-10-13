@@ -38,6 +38,9 @@ export type Endpoint =
   | 'limit'
   | 'aiMonitoring'
   | 'work'
+  | 'home'
+  | 'benchmarkFixes'
+  | 'cancelAnalysis'
 
 export type EndpointStatus = 'stub' | 'live'
 
@@ -72,13 +75,16 @@ export const CONTRACT_STATUS: Record<Endpoint, EndpointStatus> = {
   limit: 'live',
   aiMonitoring: 'live',
   work: 'live',
+  home: 'live',
+  benchmarkFixes: 'live',
+  cancelAnalysis: 'live',
 }
 
 export const FIXTURE_DELAY_MS = 300
 
 // Force fixtures for every endpoint (screenshots, demos, offline work):
 // `?monitorFixture=<scenario>` in the URL or localStorage `rdst_monitor_fixture`.
-// Scenario names are FixtureScenario in ./fixtures.
+// Scenario names are FixtureScenario in ./fixtures and CaScenario in ./fixturesCa.
 const FIXTURE_PARAM = 'monitorFixture'
 const FIXTURE_STORAGE_KEY = 'rdst_monitor_fixture'
 

@@ -42,7 +42,7 @@ OWNER_HOST = socket.gethostname()
 
 # Allow five seconds of scheduling jitter around the normal one-minute cadence.
 COLLECTION_GAP_SECONDS = 65
-SCHEMA_VERSION = 30
+SCHEMA_VERSION = 32
 SAMPLES_PER_QUERY = 5
 RESOLUTIONS = (60, 300, 3600, 86400)
 # Full detail follows the same retention for every query in the first tier.
@@ -82,8 +82,8 @@ VACUUM_BATCH_PAGES = 256
 BOOL_SETTINGS = {"enabled": False, "deep_analysis": False, "execute": False,
                  "auto_analyze_new": True, "nightly_report": True}
 ATTENTION_INTERVALS_MIN = (5, 15, 60)
-DEFAULT_ANALYSIS_DAILY_CAP = 10
-DEFAULT_NEWCOMER_DAILY_CAP = 25
+DEFAULT_ANALYSIS_DAILY_CAP = 15
+DEFAULT_NEWCOMER_DAILY_CAP = 100
 DEFAULT_ATTENTION_EVERY_MIN = 5
 DEFAULT_NIGHTLY_HOUR = 0
 DEFAULT_PUSH_DAILY_CAP = 3
@@ -92,13 +92,21 @@ DEV_LEARNING_PERIOD_MAX_S = 86400
 # Delivery levels, lowest first (NOTIFICATION_MODEL.md): digest items only reach the daily
 # report, inbox items are listed without a push, notify items also push.
 DELIVERY_LEVELS = ("digest", "inbox", "notify")
-# Types the inbox no longer carries: index attribution and report-only findings.
-RETIRED_TYPES = ("fix_available", "fix_confirmed", "fix_no_effect", "one_fix_several_queries")
+# Types the inbox no longer carries: per-query index attribution and report-only findings.
+# A confirmed fix is filed again as one closed item per applied action (actions.verify).
+RETIRED_TYPES = ("fix_available", "fix_no_effect", "one_fix_several_queries")
 # What notifies, per database (`notify_events` setting). An event that's off still files its
 # item; it just never pushes. Database unreachable never counts toward or waits on the daily cap.
 NOTIFY_EVENTS = {"database_unreachable": True, "database_recovered": False,
                  "monitoring_setup": True, "stuck_query": True, "database_events": True,
-                 "query_changes": True}
+                 "query_changes": True, "daily_report": True}
+# Pushes are held between these local hours (`quiet_hours` setting); the Inbox still fills.
+# Equal hours mean no quiet hours. Database unreachable is never held.
+DEFAULT_QUIET_HOURS = {"from_hour": 23, "to_hour": 7}
+# Minute-detail readings (the 5-minute rollup) are kept this many days unless the
+# `keep_readings_days` preference says otherwise.
+DEFAULT_KEEP_READINGS_DAYS = 7
+KEEP_READINGS_CHOICES = (7, 30, 90)
 DATABASE_EVENT_TYPES = ("connections_near_max", "lock_contention", "rollback_or_deadlock_spike",
                         "cache_hit_ratio_drop")
 UNCAPPED_PUSH_SQL = "NOT (i.type='monitoring_issue' AND i.subject='lost_connection')"
@@ -204,7 +212,7 @@ CREATE TABLE judge_run (id INTEGER PRIMARY KEY, target TEXT NOT NULL, ts INTEGER
 CREATE TABLE analyze_job (id INTEGER PRIMARY KEY, target TEXT NOT NULL, query_key TEXT NOT NULL,
  reason TEXT NOT NULL CHECK (reason IN ('new','top15_stale','user','report')),
  state TEXT NOT NULL CHECK (state IN ('queued','running','done','failed','skipped')),
- priority REAL NOT NULL, param_source TEXT CHECK (param_source IN ('sampled','table_sampled','none')),
+ priority REAL NOT NULL, param_source TEXT CHECK (param_source IN ('sampled','table_sampled','none','estimated')),
  mode TEXT CHECK (mode IN ('analyze','explain')), enqueued_at INTEGER NOT NULL,
  started_at INTEGER, finished_at INTEGER, error TEXT, analysis_ref TEXT);
 CREATE TABLE report_run (id INTEGER PRIMARY KEY, target TEXT NOT NULL, ts INTEGER NOT NULL,
@@ -276,7 +284,7 @@ CREATE TABLE IF NOT EXISTS action (id INTEGER PRIMARY KEY AUTOINCREMENT, target 
  key TEXT NOT NULL, type TEXT NOT NULL CHECK (type IN ('add_index','drop_index','rewrite_query',
  'change_setting','run_maintenance','try_caching')),
  state TEXT NOT NULL CHECK (state IN ('open','snoozed','dismissed','applied','confirmed',
- 'no_effect','retired')),
+ 'no_effect','retired','undone')),
  score REAL NOT NULL, payload_json TEXT NOT NULL, why TEXT, opened_at INTEGER NOT NULL,
  updated_at INTEGER NOT NULL, closed_at INTEGER, closed_reason TEXT, snoozed_until INTEGER,
  dismiss_reason TEXT, UNIQUE (target,key));
@@ -424,9 +432,82 @@ def notify_event(type: str, subject: str) -> str:
         return "database_unreachable" if subject == "lost_connection" else "monitoring_setup"
     if type == "stuck_query":
         return "stuck_query"
-    if type in DATABASE_EVENT_TYPES or type == "daily_summary":
+    if type in ("daily_summary", "report_ready"):
+        return "daily_report"
+    if type in DATABASE_EVENT_TYPES:
         return "database_events"
     return "query_changes"
+
+
+def in_quiet_hours(hours: dict[str, Any] | None, ts: int) -> bool:
+    """Whether local time `ts` falls in the quiet window [from_hour, to_hour), which may
+    wrap past midnight; equal hours mean no quiet window."""
+    if not isinstance(hours, dict):
+        return False
+    try:
+        start, end = int(hours.get("from_hour", 0)), int(hours.get("to_hour", 0))
+    except (TypeError, ValueError):
+        return False
+    if start == end:
+        return False
+    hour = datetime.fromtimestamp(ts).hour
+    return start <= hour < end if start < end else hour >= start or hour < end
+
+
+def _quiet_hours(conn: sqlite3.Connection, target: str) -> dict[str, Any]:
+    row = conn.execute("SELECT value FROM monitor_setting WHERE target=? AND key='quiet_hours'",
+                       (target,)).fetchone()
+    try:
+        saved = _valid_quiet_hours(json.loads(row[0])) if row else None
+    except ValueError:
+        saved = None
+    return saved if saved is not None else dict(DEFAULT_QUIET_HOURS)
+
+
+def _valid_quiet_hours(value: Any) -> dict[str, int] | None:
+    if not isinstance(value, dict) or set(value) != {"from_hour", "to_hour"}:
+        return None
+    hours = {}
+    for key in ("from_hour", "to_hour"):
+        hour = value[key]
+        if isinstance(hour, bool) or not isinstance(hour, int) or not 0 <= hour <= 23:
+            return None
+        hours[key] = hour
+    return hours
+
+
+_PREFERENCES_CACHE: dict[str, Any] = {"at": 0.0, "value": {}}
+
+
+def read_preferences(path: Path | None = None, *, now: float | None = None) -> dict[str, Any]:
+    """The `[preferences]` section of the RDST config file (theme, font size, how long to
+    keep readings), read at most once a minute."""
+    moment = time.time() if now is None else now
+    if path is None and moment - _PREFERENCES_CACHE["at"] < 60:
+        return dict(_PREFERENCES_CACHE["value"])
+    config = path or shared_constants.rdst_data_dir() / "config.toml"
+    found: dict[str, Any] = {}
+    try:
+        import toml
+
+        data = toml.load(config) if Path(config).exists() else {}
+        section = data.get("preferences")
+        found = dict(section) if isinstance(section, dict) else {}
+    except Exception:
+        found = {}
+    if path is None:
+        _PREFERENCES_CACHE.update(at=moment, value=dict(found))
+    return found
+
+
+def keep_readings_days(preferences: dict[str, Any] | None = None) -> int:
+    value = (preferences if preferences is not None else read_preferences()).get("keep_readings_days")
+    return int(value) if value in KEEP_READINGS_CHOICES else DEFAULT_KEEP_READINGS_DAYS
+
+
+def reading_retention(preferences: dict[str, Any] | None = None) -> dict[int, int]:
+    """RETENTION with the 5-minute rollup kept as long as the preference says."""
+    return {**RETENTION, 300: keep_readings_days(preferences) * 86400}
 
 
 def _notify_events(conn: sqlite3.Connection, target: str) -> dict[str, bool]:
@@ -554,7 +635,10 @@ def _retire_legacy_items(conn: sqlite3.Connection, ts: int) -> None:
                           not (body.get("rollbacks_per_min") if isinstance(body, dict) else 0) and
                           isinstance(numbers, dict) and
                           not (numbers.get("rollbacks") or numbers.get("deadlocks")))
-        retire = (row["type"] in RETIRED_TYPES or
+        # Index attribution's fix_confirmed items carried no detected index; the redesign's do.
+        legacy_fix = (row["type"] == "fix_confirmed" and
+                      not (isinstance(body, dict) and body.get("detected_at")))
+        retire = (row["type"] in RETIRED_TYPES or legacy_fix or
                   (row["type"] in ("rollback_or_deadlock_spike", "cache_hit_ratio_drop") and
                    row["subject"] != "database") or empty_database)
         if not retire:
@@ -566,6 +650,35 @@ def _retire_legacy_items(conn: sqlite3.Connection, ts: int) -> None:
             conn.execute("INSERT INTO inbox_event (item_id,ts,kind,detail_json) VALUES (?,?,?,?)",
                          (row["id"], ts, "resolved",
                           json.dumps({"action": "resolve", "retired": True})))
+
+
+def _allow_undone_actions(conn: sqlite3.Connection) -> None:
+    """Schema 31: an action a user undid keeps its own state. SQLite can't change a CHECK in
+    place, so the table is rebuilt with the same rows and ids; events keep pointing at them."""
+    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='action'"
+                       ).fetchone()
+    if sql is None or "'undone'" in sql[0]:
+        return
+    create = re.sub(r"CREATE TABLE\s+(IF NOT EXISTS\s+)?\"?action\"?", "CREATE TABLE action_v31",
+                    sql[0], count=1, flags=re.IGNORECASE)
+    create = create.replace("'no_effect','retired')", "'no_effect','retired','undone')", 1)
+    conn.execute(create)
+    conn.execute("INSERT INTO action_v31 SELECT * FROM action")
+    conn.execute("DROP TABLE action")
+    conn.execute("ALTER TABLE action_v31 RENAME TO action")
+
+
+def _retire_fix_items(conn: sqlite3.Connection, ts: int) -> None:
+    """Schema 31: fixes live in Actions. The open fixes item closes, and so do confirmations
+    still measuring, since the actions check files the outcome now."""
+    rows = conn.execute("SELECT id FROM inbox_item WHERE type IN ('fixes_ready','fix_confirmed') "
+                        "AND state NOT IN ('resolved','dismissed')").fetchall()
+    for row in rows:
+        conn.execute("UPDATE inbox_item SET state='resolved',resolved_at=?,resolved_by='code',"
+                     "updated_at=? WHERE id=?", (ts, ts, row[0]))
+        conn.execute("INSERT INTO inbox_event (item_id,ts,kind,detail_json) VALUES (?,?,?,?)",
+                     (row[0], ts, "resolved", json.dumps({"action": "resolve", "retired": True,
+                                                          "schema": 31})))
 
 
 def _close_legacy_items(conn: sqlite3.Connection, ts: int) -> None:
@@ -732,6 +845,22 @@ def _repair_open_items(conn: sqlite3.Connection) -> None:
                                     (keeper["id"],)).fetchone())
 
 
+def _target_tables(conn: sqlite3.Connection) -> list[str]:
+    tables = [row[0] for row in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+    return [table for table in tables
+            if "target" in {row[1] for row in conn.execute(f"PRAGMA table_info('{table}')")}]
+
+
+def _forget(conn: sqlite3.Connection, target: str) -> None:
+    conn.execute("DELETE FROM inbox_event WHERE item_id IN "
+                 "(SELECT id FROM inbox_item WHERE target=?)", (target,))
+    conn.execute("DELETE FROM action_event WHERE action_id IN "
+                 "(SELECT id FROM action WHERE target=?)", (target,))
+    for table in _target_tables(conn):
+        conn.execute(f'DELETE FROM "{table}" WHERE target=?', (target,))
+
+
 def _insert_pulse(conn: sqlite3.Connection, target: str, ts: int, kind: str, ok: bool,
                   detail: str) -> None:
     conn.execute("INSERT INTO monitor_pulse (target,ts,kind,ok,detail) VALUES (?,?,?,?,?)",
@@ -744,6 +873,10 @@ STORAGE_RETRY_S = 5.0
 
 class LocalMonitorLimitError(ValueError):
     """Enabling a database would exceed the local collection limit."""
+
+
+class DatabaseBusyError(RuntimeError):
+    """An analysis or a report is running for the database."""
 
 
 class MonitorStore:
@@ -825,6 +958,9 @@ class MonitorStore:
                                     replace_with_retry(str(staging), backup)
                             finally:
                                 staging.unlink(missing_ok=True)
+                    # Table rebuilds drop a parent while its rows are referenced; the keys are
+                    # checked as a whole before the commit instead.
+                    conn.execute("PRAGMA foreign_keys = OFF")
                     conn.execute("BEGIN IMMEDIATE")
                     try:
                         if version == 0:
@@ -865,6 +1001,9 @@ class MonitorStore:
                             for column in ("vacuumed_at", "analyzed_at"):
                                 if column not in columns:
                                     conn.execute(f"ALTER TABLE table_state ADD COLUMN {column} INTEGER")
+                        if version < 31:
+                            _allow_undone_actions(conn)
+                            _retire_fix_items(conn, int(time.time()))
                         if version < 2:
                             conn.execute("ALTER TABLE inbox_item ADD COLUMN snoozed_until INTEGER")
                         if version < 3:
@@ -1036,6 +1175,25 @@ class MonitorStore:
                                            ("owner_start", "REAL")):
                             if name not in columns:
                                 conn.execute(f"ALTER TABLE analyze_job ADD COLUMN {name} {kind}")
+                        if version < 32:
+                            sql = conn.execute("SELECT sql FROM sqlite_master WHERE name='analyze_job'").fetchone()[0]
+                            indexes = conn.execute(
+                                "SELECT sql FROM sqlite_master WHERE type='index' "
+                                "AND tbl_name='analyze_job' AND sql IS NOT NULL").fetchall()
+                            create = re.sub(r"CREATE TABLE\s+\S+", "CREATE TABLE analyze_job_estimated",
+                                            sql, count=1, flags=re.IGNORECASE)
+                            create = create.replace("'sampled','table_sampled','none')",
+                                                    "'sampled','table_sampled','none','estimated')")
+                            conn.execute(create)
+                            conn.execute("INSERT INTO analyze_job_estimated SELECT * FROM analyze_job")
+                            conn.execute("DROP TABLE analyze_job")
+                            conn.execute("ALTER TABLE analyze_job_estimated RENAME TO analyze_job")
+                            for index in indexes:
+                                conn.execute(index[0])
+                        broken = conn.execute("PRAGMA foreign_key_check").fetchall()
+                        if broken:
+                            raise StorageError(f"monitor.db migration left {len(broken)} rows "
+                                               f"without their parent in {broken[0][0]}")
                         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                         conn.execute("COMMIT")
                     except BaseException:
@@ -1157,9 +1315,17 @@ class MonitorStore:
         values["push_daily_cap"] = default_push_daily_cap()
         values["dev_learning_period_s"] = None
         values["notify_events"] = dict(NOTIFY_EVENTS)
+        values["quiet_hours"] = dict(DEFAULT_QUIET_HOURS)
         for row in self.read("SELECT key,value FROM monitor_setting WHERE target=?", (target,)):
             key, value = row["key"], row["value"]
-            if key == "notify_events":
+            if key == "quiet_hours":
+                try:
+                    saved = _valid_quiet_hours(json.loads(value))
+                except ValueError:
+                    saved = None
+                if saved is not None:
+                    values[key] = saved
+            elif key == "notify_events":
                 try:
                     saved = json.loads(value)
                 except ValueError:
@@ -1196,18 +1362,33 @@ class MonitorStore:
     def forget_target(self, target: str) -> None:
         """Drop everything stored for a removed target, so a database added again under the
         same name starts fresh."""
+        self._write(lambda conn: _forget(conn, target))
+
+    def rename_target(self, old: str, new: str) -> None:
+        """Move everything stored for a database to its new name in one transaction. Rows
+        left under the new name by an earlier database are dropped first. The old name keeps
+        monitoring off, so a cycle queued under it before the rename stops at its first read.
+        An analysis or report running under the old name refuses the rename: its result would
+        land under a name that no longer exists."""
         def write(conn: sqlite3.Connection) -> None:
-            conn.execute("DELETE FROM inbox_event WHERE item_id IN "
-                         "(SELECT id FROM inbox_item WHERE target=?)", (target,))
-            conn.execute("DELETE FROM action_event WHERE action_id IN "
-                         "(SELECT id FROM action WHERE target=?)", (target,))
-            tables = [row[0] for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
-            for table in tables:
-                columns = {row[1] for row in conn.execute(f"PRAGMA table_info('{table}')")}
-                if "target" in columns:
-                    conn.execute(f'DELETE FROM "{table}" WHERE target=?', (target,))
+            if conn.execute("SELECT 1 FROM analyze_job WHERE target=? AND state='running' "
+                            "UNION ALL SELECT 1 FROM report_run WHERE target=? "
+                            "AND state='running' LIMIT 1", (old, old)).fetchone():
+                raise DatabaseBusyError(
+                    f"{old} is running an analysis or a report. Rename it when that finishes.")
+            _forget(conn, new)
+            for table in _target_tables(conn):
+                conn.execute(f'UPDATE "{table}" SET target=? WHERE target=?', (new, old))
+            conn.execute("INSERT INTO monitor_setting (target,key,value) VALUES (?,'enabled','0')",
+                         (old,))
         self._write(write)
+
+    def busy(self, target: str) -> bool:
+        """Whether an analysis or a report is running for the database."""
+        return bool(self.read(
+            "SELECT 1 FROM analyze_job WHERE target=? AND state='running' UNION ALL "
+            "SELECT 1 FROM report_run WHERE target=? AND state='running' LIMIT 1",
+            (target, target)))
 
     def set_settings(self, target: str, values: dict[str, Any]) -> dict[str, Any]:
         stored: dict[str, str] = {}
@@ -1238,6 +1419,11 @@ class MonitorStore:
                                      ", ".join(NOTIFY_EVENTS))
                 stored[key] = json.dumps({**self.levers(target)["notify_events"], **value},
                                          sort_keys=True)
+            elif key == "quiet_hours":
+                hours = _valid_quiet_hours(value)
+                if hours is None:
+                    raise ValueError("quiet_hours takes from_hour and to_hour between 0 and 23")
+                stored[key] = json.dumps(hours, sort_keys=True)
             elif key == "dev_learning_period_s":
                 if (isinstance(value, bool) or not isinstance(value, int)
                         or not 0 <= value <= DEV_LEARNING_PERIOD_MAX_S):
@@ -1630,6 +1816,22 @@ class MonitorStore:
             (state, now, error, analysis_ref, mode, param_source, billable_calls,
              job_id, owner, attempt)).rowcount == 1)
 
+    def cancel_analysis(self, job_id: int, now: int) -> dict[str, Any] | None:
+        """Stop a queued or running job: it ends skipped with the error `cancelled`, so a
+        late finish from its worker no longer applies and nothing reads it as the query's
+        latest analysis. Returns the row, or None when it had already ended."""
+        def write(conn: sqlite3.Connection) -> dict[str, Any] | None:
+            changed = conn.execute(
+                "UPDATE analyze_job SET state='skipped',error='cancelled',finished_at=? "
+                "WHERE id=? AND state IN ('queued','running')", (now, job_id)).rowcount
+            row = conn.execute("SELECT * FROM analyze_job WHERE id=?", (job_id,)).fetchone()
+            if row is None or not changed:
+                return None
+            _insert_pulse(conn, row["target"], now, "analyze", True,
+                          f"Analysis cancelled for {row['query_key']}")
+            return dict(row)
+        return self._write(write)
+
     def record_user_analysis(self, target: str, key: str, text: str, now: int, *,
                              analysis_ref: str | None, mode: str | None) -> dict[str, Any]:
         """A query analyzed from pasted SQL: keep its text and its finished analysis.
@@ -1858,6 +2060,17 @@ class MonitorStore:
             "AND (? IS NULL OR target=?) ORDER BY severity DESC,updated_at DESC,id DESC",
             (state, state, target, target))
 
+    def item_events(self, item_ids: list[int]) -> dict[int, list[dict[str, Any]]]:
+        """Each item's own events, oldest first, in one read."""
+        if not item_ids:
+            return {}
+        placeholders = ",".join("?" for _ in item_ids)
+        found: dict[int, list[dict[str, Any]]] = {item_id: [] for item_id in item_ids}
+        for row in self.read(f"SELECT item_id,ts,kind,detail_json FROM inbox_event "
+                             f"WHERE item_id IN ({placeholders}) ORDER BY ts,id", tuple(item_ids)):
+            found.setdefault(row["item_id"], []).append(row)
+        return found
+
     def notified_at(self) -> dict[int, int]:
         """When each item last pushed, from its latest 'notified' event."""
         return {row["item_id"]: row["ts"] for row in self.read(
@@ -1999,6 +2212,11 @@ class MonitorStore:
                     conn.execute("INSERT INTO inbox_event (item_id,ts,kind,detail_json) "
                                  "VALUES (?,?,?,?)", (item_id, ts, "updated",
                                                       json.dumps({"push_skipped": "event_off"})))
+                elif event != "database_unreachable" and \
+                        in_quiet_hours(_quiet_hours(conn, target), ts):
+                    conn.execute("INSERT INTO inbox_event (item_id,ts,kind,detail_json) "
+                                 "VALUES (?,?,?,?)", (item_id, ts, "updated",
+                                                      json.dumps({"push_skipped": "quiet_hours"})))
                 elif event == "database_unreachable" or pushed < cap:
                     conn.execute("INSERT INTO inbox_event (item_id,ts,kind,detail_json) "
                                  "VALUES (?,?,?,?)", (item_id, ts, "notified", "{}"))
@@ -2059,7 +2277,9 @@ class MonitorStore:
                           int(action == "reopen"), item_id))
             kind = {"dismiss": "dismissed", "resolve": "resolved", "reopen": "reopened"}.get(action, "updated")
             conn.execute("INSERT INTO inbox_event (item_id,ts,kind,detail_json) VALUES (?,?,?,?)",
-                         (item_id, ts, kind, json.dumps({"action": action, "until": snooze_until})))
+                         (item_id, ts, kind, json.dumps({"action": action, "until": snooze_until,
+                                                         **({"by": resolved_by}
+                                                            if action == "resolve" else {})})))
             _pin_item(conn, conn.execute("SELECT * FROM inbox_item WHERE id=?",
                                         (item_id,)).fetchone())
             return dict(conn.execute("SELECT * FROM inbox_item WHERE id=?", (item_id,)).fetchone())
@@ -2243,11 +2463,23 @@ class MonitorStore:
         return len(rows)
 
     def sync_stuck_items(self, target: str, ts: int, stuck: list[dict[str, Any]]) -> None:
-        """Reconcile the code-only stuck rule after a successful activity sample."""
-        active = {row["query_key"] for row in stuck if row.get("query_key")}
-        for key in active:
-            self.upsert_item(target, "stuck_query", key, 0.9, "Stuck query",
-                             {"query_key": key}, ts)
+        """Reconcile the code-only stuck rule after a successful activity sample.
+
+        The item carries the statement's backend pid and how long it has run, so the
+        Inbox shows the real pid in its steps."""
+        active: dict[str, dict[str, Any]] = {}
+        for row in stuck:
+            key = row.get("query_key")
+            if key and (key not in active or float(row.get("duration_s") or 0) >
+                        float(active[key].get("duration_s") or 0)):
+                active[key] = row
+        for key, row in active.items():
+            body: dict[str, Any] = {"query_key": key}
+            if row.get("pid") is not None:
+                body["pid"] = int(row["pid"])
+            if row.get("duration_s") is not None:
+                body["duration_s"] = float(row["duration_s"])
+            self.upsert_item(target, "stuck_query", key, 0.9, "Stuck query", body, ts)
         for item in self.inbox(target=target):
             if (item["type"] == "stuck_query" and item["state"] != "resolved"
                     and item["subject"] not in active):
@@ -2641,7 +2873,7 @@ class MonitorStore:
         conn.execute("DELETE FROM stmt_series WHERE target=? AND res=60 "
                      "AND bucket_start<? AND " + _tail_period_sql("stmt_series", span=300) +
                      " AND " + _unpinned_sql("stmt_series", now), (target, now // 300 * 300))
-        for res, age in RETENTION.items():
+        for res, age in reading_retention().items():
             cutoff = (now - age) // res * res
             for table in ("stmt_series", "db_series"):
                 conn.execute(

@@ -113,7 +113,7 @@ export function DesktopUpdateControl({
 
         {state.status === 'downloading' && (
           <div className="space-y-1.5">
-            <Progress value={progress} max={100} />
+            <Progress tone="quiet" value={progress} max={100} />
             <Text as="p" level="caption" className="text-content-layout-2">
               {progress}% downloaded
             </Text>

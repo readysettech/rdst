@@ -217,6 +217,13 @@ class RunRegistry:
         handle.task.cancel()
         return True
 
+    def target_busy(self, target: str) -> bool:
+        """Whether any run for the target is still live."""
+        return any(
+            handle.target == target and handle.status not in TERMINAL_STATUSES
+            for handle in self._runs.values()
+        )
+
     def cancel_target(self, target: str) -> int:
         """Cancel every live run for a target and return the number signalled."""
         cancelled = 0

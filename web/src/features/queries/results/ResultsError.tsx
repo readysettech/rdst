@@ -37,7 +37,7 @@ export function ResultsError({
   if (invalidSql && onRecover) {
     action = {
       label: 'Back to queries',
-      onClick: () => onRecover('/queries'),
+      onClick: () => onRecover('/database'),
     }
   } else if (!modelTimeout) {
     const recovery = recoveryFor(errorClass)
@@ -56,6 +56,7 @@ export function ResultsError({
       transition={{ duration: 0.25 }}
     >
       <ErrorState
+        tone="quiet"
         errorClass={errorClass}
         title={title}
         message={modelTimeout ? MODEL_TIMEOUT_MESSAGE : envelope.message}

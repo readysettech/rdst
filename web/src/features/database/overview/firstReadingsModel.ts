@@ -1,5 +1,5 @@
 // The Database page's first run: a few plain steps for the minutes after monitoring is
-// turned on (finding queries, the first deep analyses, tonight's report), each with an
+// turned on (finding queries, the first deep analyses, the first report), each with an
 // honest state and real progress. Everything derives from the monitor API (settings,
 // health history, collector pulses, the query list and the analysis queue); nothing is
 // estimated beyond the collector interval and the stored levers.
@@ -129,7 +129,7 @@ export interface FirstRunModel {
    * show them unranked, so the page waits for the reading that ranks them. */
   measuring: boolean
   steps: FirstRunStep[]
-  /** Every step but tonight's report is done (or off): the panel collapses to one line. */
+  /** Every step but the first report is done (or off): the panel collapses to one line. */
   complete: boolean
 }
 
@@ -139,15 +139,6 @@ function collects(pulses: MonitorPulse[]) {
   return pulses
     .filter((pulse) => pulse.kind === 'collect')
     .sort((a, b) => b.ts - a.ts)
-}
-
-/** The next local wall-clock time at `hour`:00 after `now`. */
-export function nextLocalHour(now: number, hour: number): number {
-  const date = new Date(now * 1000)
-  date.setMinutes(0, 0, 0)
-  date.setHours(hour)
-  if (date.getTime() / 1000 <= now) date.setDate(date.getDate() + 1)
-  return Math.floor(date.getTime() / 1000)
 }
 
 /** "9:02:14 AM": first-run steps land seconds apart. */
@@ -311,11 +302,6 @@ export function firstRun(input: FirstRunInput): FirstRunModel {
     listed > 0 &&
     (input.queries ?? []).every((query) => !((query.qps ?? 0) > 0))
 
-  const reportAt =
-    settings?.nightly_report === false
-      ? null
-      : nextLocalHour(now, settings?.nightly_hour ?? 0)
-
   const deep = deepStep(input.queue, startAt, settings, Boolean(listed))
   const steps: FirstRunStep[] = [
     listed
@@ -339,21 +325,13 @@ export function firstRun(input: FirstRunInput): FirstRunModel {
           at: null,
         },
     deep,
-    reportAt == null
-      ? {
-          id: 'report',
-          label: 'Nightly checkup',
-          state: 'off',
-          meta: 'Turned off',
-          at: null,
-        }
-      : {
-          id: 'report',
-          label: 'Nightly checkup',
-          state: 'pending',
-          meta: null,
-          at: reportAt,
-        },
+    {
+      id: 'report',
+      label: 'First report',
+      state: 'pending',
+      meta: 'Tonight at midnight',
+      at: null,
+    },
   ]
   const complete =
     Boolean(listed) && (deep.state === 'done' || deep.state === 'off')

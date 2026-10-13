@@ -56,6 +56,13 @@ When an action or notice icon is provided, the header shows it in a semantic
 `IconTile`. The footer keeps Cancel (ghost) to the left of the confirm button.
 There is no close X (`hideClose`) — a confirm is a two-button decision.
 
+**Quiet tone.** `tone="quiet"` uses the `ModalContent tone="quiet"` shell (480px,
+raised). The title row is the 17px title with the close mark; `subtitle` and the
+`notice` render as plain `body-small` paragraphs in `content-layout-2` (no tinted
+box, no `IconTile`); the footer holds `note` (or the disabled reason) as a caption
+at the left, the ghost Cancel and one solid confirm, `negative` when destructive.
+`confirmIcon` is not drawn. The close mark hides while a blocked action runs.
+
 ---
 
 ## Code
@@ -81,6 +88,8 @@ There is no close X (`hideClose`) — a confirm is a two-button decision.
 | `blockCloseWhileLoading` | `boolean` | — | Ignore Escape/overlay dismiss while `loading`. |
 | `description` | `string` | — | Explicit sr-only `aria-describedby` when there's no `subtitle`. |
 | `size` | `'base' \| 'large'` | `'base'` | — |
+| `tone` | `'default' \| 'quiet'` | `'default'` | `quiet`: the 480px dialog (see Style). |
+| `note` | `ReactNode` | — | Footer caption at the left ("About 10 seconds."). |
 
 ### Example (typed-confirm)
 

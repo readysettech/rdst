@@ -23,7 +23,6 @@ export interface ResultsSearch {
   target?: string
   fast?: boolean
   params?: string
-  returnSearch?: string
   origin?: ResultsOrigin
   /** Registry hash of the query, needed to reach its stored analyses. */
   hash?: string
@@ -33,4 +32,6 @@ export interface ResultsSearch {
    * event carries.
    */
   analysisId?: string
+  /** The redesign fixture scenario, kept across the route. */
+  monitorFixture?: string
 }

@@ -81,6 +81,7 @@ async def test_automatic_lanes_hold_and_resume(authorization, monkeypatch, tmp_p
     assert jobs and all(job["state"] == "queued" for job in jobs)
     plan = queue_plan(store, "db", NOW)
     assert waiting_reason(plan, jobs[0]["id"]) == "Sign in to turn on AI monitoring"
+    assert plan["jobs"][jobs[0]["id"]]["held_reason"] == "sign_in"
     # A restart keeps the durable jobs held.
     store = MonitorStore(store.path, clock=lambda: NOW)
     queue = AnalyzeQueue(store, service=service, clock=lambda: NOW)

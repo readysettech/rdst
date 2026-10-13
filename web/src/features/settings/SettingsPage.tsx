@@ -1,35 +1,43 @@
-/**
- * Configure page - Manage database connection targets
- */
-
 import { Alert } from '@rs/ui-new/alert'
-import { Button } from '@rs/ui-new/button'
-import { ErrorState, InlineNotice } from '@rs/ui-new/error-state'
-import { Icon } from '@rs/ui-new/icon'
-import { m } from '@rs/ui-new/motion'
-import { SegmentedControl } from '@rs/ui-new/segmented-control'
+import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
+import { Button, buttonStyles } from '@rs/ui-new/button'
+import { ConfirmDialog } from '@rs/ui-new/confirm-dialog'
+import { ErrorState } from '@rs/ui-new/error-state'
+import { PageBar } from '@rs/ui-new/page-bar'
+import { PageContainer } from '@rs/ui-new/page-container'
+import { Pressable } from '@rs/ui-new/pressable'
 import { Show } from '@rs/ui-new/show'
-import { HStack, VStack } from '@rs/ui-new/stack'
-import { TabItemButton, TabList } from '@rs/ui-new/tab'
 import { Text } from '@rs/ui-new/text'
 import { toast } from '@rs/ui-new/use-toast'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useLocation, useNavigate, useRouter } from '@tanstack/react-router'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { SlotsElsewhere } from '@/features/monitor-kit/AiMonitoringStatus'
-import { useMonitoringLimit } from '@/lib/monitor/hooks'
 import {
-  AddTargetsDrawer,
-  ConfigureForm,
-  ConfigureTargetList,
-  DevSettingsSection,
-  MoveToGroupDialog,
-  SettingsSection,
-  TargetGroupView,
-} from '../../components/configure'
+  Link,
+  useLocation,
+  useNavigate,
+  useRouter,
+} from '@tanstack/react-router'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
+import { SlotsElsewhere } from '@/features/monitor-kit/AiMonitoringStatus'
+import { useMonitoringLimit, useMonitorSettings } from '@/lib/monitor/hooks'
+import { AddDatabaseDialog } from '../../components/configure/AddDatabaseDialog'
+import {
+  notifyDatabasesChanged,
+  onDatabasesChanged,
+  useOpenAddDatabase,
+} from '../../components/configure/addDatabase'
 import type { AddTab } from '../../components/configure/addTabs'
+import { DesktopUpdateControl } from '../../components/DesktopUpdateControl'
 import { EnvSecretsDialog } from '../../components/EnvSecretsDialog'
+import { ReportDialog } from '../../components/ReportDialog'
 import { TrialRegistrationDialog } from '../../components/TrialRegistrationDialog'
+import { useTarget } from '../../hooks/useTarget'
 import {
   type AnthropicKeyValidation,
   type EnvRequirement,
@@ -38,10 +46,8 @@ import {
   resetLocalData,
   setAiProvider,
 } from '../../lib/api'
-import {
-  clearAllBackgroundRuns,
-  startBootstrapRun,
-} from '../../lib/backgroundRuns'
+import { clearAllBackgroundRuns } from '../../lib/backgroundRuns'
+import { thisComputer } from '../../lib/desktop'
 import { classifyError } from '../../lib/errorContract'
 import { isSshErrorCategory, sshErrorCopy } from '../../lib/sshErrors'
 import { invalidateTargetQueries } from '../../lib/targetQueries'
@@ -52,62 +58,55 @@ import {
 import { fetchTunnelStatuses, testTunnel } from '../../lib/tunnels'
 import { useAnthropicValidity } from '../../lib/useAnthropicValidity'
 import { useConfigure } from '../../lib/useConfigure'
+import { useDesktopUpdates } from '../../lib/useDesktopUpdates'
 import { fetchFleetTargets, useFleetStatus } from '../../lib/useFleet'
 import { useSystemStatus } from '../../lib/useSystemStatus'
-import type {
-  ConfigureFormData,
-  ConfigureTarget,
-  ConfigureTargetDetail,
-} from '../../types/configure'
-import { selectGlobalTarget } from '../database/targetSelection'
+import type { ConfigureTargetDetail } from '../../types/configure'
+import {
+  desktopNotificationsEnabled,
+  onDesktopNotificationsChange,
+  setDesktopNotifications,
+} from '../inbox/desktopNotifications'
+import { formatBytes } from '../monitor-kit/format'
 import { AiKeyRouting } from './AiKeyRouting'
-import { SettingsHeader } from './SettingsHeader'
-import { StoragePrivacySection } from './StoragePrivacySection'
+import { ClearKeyringRow } from './ClearKeyringRow'
+import { DatabaseRows } from './DatabaseRows'
+import { DISCORD_INVITE_URL, DOCS_URL } from './links'
+import { PreferenceMenu } from './PreferenceMenu'
+import {
+  KEEP_READINGS,
+  keepReadingsLabel,
+  PREFERENCE_DEFAULTS,
+  usePreferences,
+  useUpdatePreferences,
+} from './preferences'
+import { SettingsGroup, SettingsRow } from './SettingsGroup'
 
 // Deep-link params for the routable notices (configure-and-identity return
-// trips): `edit` opens a connection's edit form, `section=ai` focuses the AI
-// key card, `returnTo` sends the user back to the feature after the fix, and
-// `add` opens the Add Targets drawer on that source tab (the relocation target
-// for the retired /fleet route), and `from` names the retired route that sent
-// the reader here so the arrival can be explained.
-// Parse-only — never throw here (keeps the app shell intact; B1 lesson).
+// trips): `edit` opens a connection's edit form, `section=ai` opens the AI
+// key dialog, `panel` scrolls to a group, `returnTo` sends the user back to
+// the feature after the fix, `add` is the add-database dialog's (it opens over
+// this page on that provider, for the retired /fleet route), and `from`
+// names the retired route that sent the reader here. Parse-only: never throw
+// here (keeps the app shell intact).
 export type ConfigureSearch = {
   edit?: string
   section?: 'ai'
   panel?: SettingsPanel
   returnTo?: string
-  add?: AddTab
+  /** The add-database dialog's request: 1 for the form, or a provider tab. */
+  add?: AddTab | 1
   from?: 'fleet' | 'dev-settings'
-}
-
-// A redirect that changes the mental model says so once on arrival. The
-// developer tools are a development-build section, so in a shipped build the
-// notice is what /dev-settings has to offer. [E-51, F-54, A-12]
-function movedNotice(from: ConfigureSearch['from']) {
-  if (from === 'fleet') {
-    return {
-      title: 'Fleet moved into Settings',
-      message:
-        'Targets, their groups and their connectivity are all managed here now.',
-    }
-  }
-  if (from === 'dev-settings' && !import.meta.env.DEV) {
-    return {
-      title: 'Developer settings are a development-build tool',
-      message:
-        'This build ships without them, so the link lands on Targets instead.',
-    }
-  }
-  return null
 }
 
 export type SettingsPanel = 'connections' | 'ai' | 'privacy' | 'developer'
 
-const settingsPanels: { value: SettingsPanel; label: string }[] = [
-  { value: 'connections', label: 'Targets' },
-  { value: 'ai', label: 'AI' },
-  { value: 'privacy', label: 'Data & privacy' },
-]
+const PANEL_ID: Record<SettingsPanel, string> = {
+  connections: 'connections',
+  ai: 'ai',
+  privacy: 'privacy',
+  developer: 'dev',
+}
 
 function keyValidationVariant(
   v: AnthropicKeyValidation
@@ -129,6 +128,18 @@ function keyValidationLabel(v: AnthropicKeyValidation): string {
   }
 }
 
+const ghostLink = buttonStyles({
+  variant: 'primary',
+  modifier: 'ghost',
+  size: 'small',
+}).root()
+
+const quietLink =
+  'border-b border-border-layout-2 hover:text-content-layout-1 hover:border-content-layout-2'
+
+const subscribePush = (listener: () => void) =>
+  onDesktopNotificationsChange(listener)
+
 export function SettingsPage({ search }: { search: ConfigureSearch }) {
   const queryClient = useQueryClient()
   const router = useRouter()
@@ -137,21 +148,6 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
   // /configure#dev deep-link so the effect fires once the redirect's hash is
   // applied, not racily at mount.
   const locationHash = useLocation({ select: (l) => l.hash })
-  const requestedPanel: SettingsPanel =
-    search.panel ??
-    (search.section === 'ai'
-      ? 'ai'
-      : locationHash === 'dev'
-        ? 'developer'
-        : 'connections')
-  const initialPanel: SettingsPanel =
-    requestedPanel === 'developer' && !import.meta.env.DEV
-      ? 'connections'
-      : requestedPanel
-  const [activePanel, setActivePanel] = useState<SettingsPanel>(initialPanel)
-  const arrival = movedNotice(search.from)
-  const [arrivalNoticeOpen, setArrivalNoticeOpen] = useState(Boolean(arrival))
-  const [showForm, setShowForm] = useState(false)
   const [editingTarget, setEditingTarget] =
     useState<ConfigureTargetDetail | null>(null)
   const [showAnthropicDialog, setShowAnthropicDialog] = useState(false)
@@ -159,6 +155,8 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
     string | null
   >(null)
   const [showTrialDialog, setShowTrialDialog] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const resetMutation = useMutation({
     mutationFn: resetLocalData,
     // A wiped ~/.rdst invalidates every piece of client state at once; a
@@ -170,38 +168,22 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
       window.location.reload()
     },
   })
-  const handleResetLocalData = () => {
-    resetMutation.mutate()
-  }
   // Which connection is being tested (drives the inline per-row spinner).
   const [testingTarget, setTestingTarget] = useState<string | null>(null)
-  const [testingTunnel, setTestingTunnel] = useState<string | null>(null)
-  const [testingForm, setTestingForm] = useState(false)
   const deepLinkHandledRef = useRef(false)
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [drawerTab, setDrawerTab] = useState<AddTab | undefined>()
-  // A target the manual form just added: the drawer shows its monitoring check.
-  const [moveTarget, setMoveTarget] = useState<ConfigureTarget | null>(null)
-  const [view, setView] = useState<'list' | 'groups'>('groups')
 
   const {
     listTargets,
     getTarget,
-    addTarget,
-    updateTarget,
     removeTarget,
     setDefaultTarget,
-    testConnection,
-    cancel: cancelConfigure,
     state: configureState,
     targets,
-    connectionTestResult,
     error,
-    loading,
   } = useConfigure()
   // 'idle' is "the list has not been asked for yet", which on first paint is
   // indistinguishable from "there are no targets" unless it is carried
-  // through to the list. [F-20]
+  // through to the list.
   const targetsPending =
     configureState === 'idle' || configureState === 'loading'
 
@@ -219,26 +201,11 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
       ),
     [fleetTargets]
   )
-  const groupOf = useCallback(
-    (target: ConfigureTarget) => fleetByName.get(target.name)?.group ?? null,
-    [fleetByName]
-  )
-  const groups = useMemo(() => {
-    const seen = new Set<string>()
-    for (const target of targets) {
-      const group = groupOf(target)
-      if (group) seen.add(group)
-    }
-    return [...seen]
-  }, [targets, groupOf])
-
   const {
     check,
-    state: connectivityState,
     results: connectivity,
     error: connectivityError,
   } = useFleetStatus()
-  const checking = connectivityState === 'running'
   const hasSshTargets = targets.some((target) => Boolean(target.ssh))
   const tunnelStatusQuery = useQuery({
     queryKey: ['tunnel-status'],
@@ -247,13 +214,6 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
     refetchOnWindowFocus: true,
     enabled: hasSshTargets,
   })
-  const tunnelStatuses = useMemo(
-    () =>
-      Object.fromEntries(
-        (tunnelStatusQuery.data ?? []).map((status) => [status.target, status])
-      ),
-    [tunnelStatusQuery.data]
-  )
   // The connectivity endpoint only knows fleet targets, so Readyset-proxy rows
   // are never checkable: name them explicitly rather than sweeping blind. Until
   // the fleet list answers, every row stays offerable so a slow or failing
@@ -286,9 +246,32 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
     checkAll()
   }, [checkableNames.length, checkAll])
 
+  // Databases added or given credentials in the add dialog: refresh the rows and
+  // re-check the connections that changed.
+  useEffect(
+    () =>
+      onDatabasesChanged((change) => {
+        void listTargets()
+        if (change.recheckAll) void checkAll()
+        else if (change.recheck?.length)
+          void check(undefined, change.recheck).then(refreshTunnelStatuses)
+      }),
+    [listTargets, checkAll, check, refreshTunnelStatuses]
+  )
+
   const statusQuery = useSystemStatus()
   const statusData = statusQuery.data
   const dataDirectory = statusData?.data_directory ?? null
+  const { target: selectedTarget } = useTarget()
+  const currentTarget =
+    selectedTarget ?? statusData?.default_target ?? targets[0]?.name ?? null
+  const monitorSettings = useMonitorSettings(currentTarget ?? '')
+  const updates = useDesktopUpdates()
+  const pushOn = useSyncExternalStore(
+    subscribePush,
+    desktopNotificationsEnabled,
+    () => false
+  )
 
   const { envRequirements, anthropicRequirement } = useTrialSource()
   const activeAiProvider =
@@ -309,8 +292,10 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
   const accountStatusQuery = useQuery({
     queryKey: ['account-status'],
     queryFn: fetchAccountStatus,
-    enabled: readysetAccountAvailable,
   })
+  const email = accountStatusQuery.data?.signed_in
+    ? accountStatusQuery.data.email
+    : null
   const aiProviderMutation = useMutation({
     mutationFn: setAiProvider,
     onSuccess: async ({ provider }) => {
@@ -350,60 +335,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
     anthropicKeyConfigured && activeAiProvider === 'claude'
   const keyValidityQuery = useAnthropicValidity(hasAnthropicKey)
   const keyValidity = keyValidityQuery.data
-  const keyChecking =
-    hasAnthropicKey && keyValidityQuery.isFetching && !keyValidity
-  // Guarded on hasAnthropicKey so a cached verdict for a previous provider
-  // cannot keep the rejected state alive.
-  const keyRejected =
-    hasAnthropicKey &&
-    keyValidity?.valid === false &&
-    keyValidity.reason === 'rejected'
 
-  // The tile is a status indicator: a configuration that can already answer
-  // reads positive, a rejected key negative, an in-flight probe neutral, and a
-  // configuration the user still has to finish warning. [A-11]
-  const aiStatusTone: 'positive' | 'negative' | 'warning' | 'neutral' =
-    keyRejected
-      ? 'negative'
-      : keyChecking
-        ? 'neutral'
-        : usingReadyset
-          ? readysetAccountConnected
-            ? 'positive'
-            : 'warning'
-          : anthropicRequirement?.satisfied
-            ? 'positive'
-            : 'warning'
-  const aiStatusTileTokens = {
-    positive: 'bg-surface-positive-soft text-content-positive-soft',
-    negative: 'bg-surface-negative-soft text-content-negative-soft',
-    warning: 'bg-surface-warning-soft text-content-warning-soft',
-    neutral: 'bg-surface-raised text-content-layout-2',
-  }[aiStatusTone]
-
-  const anthropicStatusTitle = usingReadyset
-    ? readysetAccountConnected
-      ? 'Using the included AI'
-      : 'Readyset sign-in required'
-    : keyRejected
-      ? 'Anthropic key rejected'
-      : keyChecking
-        ? 'Checking Anthropic key…'
-        : anthropicRequirement?.satisfied
-          ? 'Anthropic API key configured'
-          : 'Anthropic API key missing'
-
-  const anthropicStatusDescription = usingReadyset
-    ? readysetAccountConnected
-      ? 'Analyze, Ask, and Health check use your Readyset account.'
-      : 'Sign in again to use the included AI.'
-    : keyRejected
-      ? 'Anthropic rejected this key. Update it with a valid key to keep AI analysis working.'
-      : keyChecking
-        ? 'Verifying the key with Anthropic…'
-        : anthropicRequirement?.satisfied
-          ? 'You can replace your Anthropic API key here.'
-          : 'Set your own Anthropic API key to avoid interruptions and keep using AI analysis.'
   const anthropicDialogRequirements: EnvRequirement[] = useMemo(() => {
     if (!anthropicRequirement) {
       return []
@@ -421,14 +353,6 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
     }
     return [anthropicRequirement]
   }, [anthropicRequirement])
-  // Trigger copy matches the dialog it opens: update when a key is already in
-  // use, set on first setup.
-  const anthropicButtonLabel =
-    usingReadyset && anthropicKeyConfigured
-      ? 'Use Anthropic key'
-      : anthropicKeyConfigured
-        ? 'Update key'
-        : 'Set key'
 
   const handleUseReadyset = () => {
     if (readysetAccountAvailable) {
@@ -438,12 +362,13 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
     }
   }
 
-  const handleAnthropicAction = () => {
-    if (usingReadyset && anthropicKeyConfigured) {
-      aiProviderMutation.mutate('claude')
-    } else {
-      setShowAnthropicDialog(true)
+  const handleHostedChange = (on: boolean) => {
+    if (on) {
+      handleUseReadyset()
+      return
     }
+    if (anthropicKeyConfigured) aiProviderMutation.mutate('claude')
+    else setShowAnthropicDialog(true)
   }
 
   // Load targets on mount
@@ -452,57 +377,31 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
   }, [listTargets])
 
   // Deep-links from the routable notices: open a connection's edit form
-  // (?edit=name) or focus the AI key card (?section=ai). Runs once.
+  // (?edit=name) or the AI key dialog (?section=ai). Runs once.
   useEffect(() => {
     if (deepLinkHandledRef.current) return
     if (search.edit) {
-      setActivePanel('connections')
       deepLinkHandledRef.current = true
       const editTarget = search.edit
       void (async () => {
         const target = await getTarget(editTarget)
-        if (target) {
-          setEditingTarget(target)
-          setShowForm(true)
-        }
+        if (target) setEditingTarget(target)
       })()
     } else if (search.section === 'ai') {
       deepLinkHandledRef.current = true
-      setActivePanel('ai')
       setShowAnthropicDialog(true)
     }
   }, [search.edit, search.section, getTarget])
 
+  // ?panel= and #hash scroll to their group.
   useEffect(() => {
-    if (!search.panel) return
-    setActivePanel(
-      search.panel === 'developer' && !import.meta.env.DEV
-        ? 'connections'
-        : search.panel
-    )
-  }, [search.panel])
-
-  useEffect(() => {
-    if (locationHash === 'dev' && import.meta.env.DEV) {
-      setActivePanel('developer')
-    }
-    if (locationHash === 'connections') setActivePanel('connections')
-  }, [locationHash])
-
-  // ?add=aws|supabase|neon|digitalocean|csv (onboarding's discovery link, or
-  // an old /fleet?add= link) opens the Add Targets drawer directly on that
-  // tab. Runs once.
-  const addDeepLinkHandledRef = useRef(false)
-  useEffect(() => {
-    if (!search.add || addDeepLinkHandledRef.current) return
-    addDeepLinkHandledRef.current = true
-    setActivePanel('connections')
-    setDrawerTab(search.add)
-    setDrawerOpen(true)
-  }, [search.add])
+    const id = search.panel ? PANEL_ID[search.panel] : locationHash
+    if (!id) return
+    document.getElementById(id)?.scrollIntoView?.({ block: 'start' })
+  }, [search.panel, locationHash])
 
   // After a fix reached via a routable notice, send the user back to the
-  // feature they came from so the flow resumes in place. [USE-021, USE-077]
+  // feature they came from so the flow resumes in place.
   const returnToFeature = () => {
     if (search.returnTo) {
       router.history.push(search.returnTo)
@@ -519,11 +418,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
     })
   }
 
-  const handleAddClick = () => {
-    setEditingTarget(null)
-    setDrawerTab(undefined)
-    setDrawerOpen(true)
-  }
+  const openAddDatabase = useOpenAddDatabase()
 
   const handleEditClick = async (targetName: string) => {
     const target = await getTarget(targetName)
@@ -531,76 +426,28 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
       return
     }
     setEditingTarget(target)
-    setShowForm(true)
   }
 
-  const handleFormSubmit = async (data: ConfigureFormData) => {
-    try {
-      if (editingTarget) {
-        await updateTarget(editingTarget.name, data)
-      } else {
-        await addTarget(data)
-      }
-    } catch {
-      return
-    }
-    if (!editingTarget) {
-      // New target: kick off the background bootstrap; it never throws, and
-      // the sidebar chip tracks it. The next step is turning on monitoring:
-      // the new database's page opens with that dialog, which checks the
-      // prerequisites itself.
-      startBootstrapRun(data.name)
-      if (data.ssh) await tunnelStatusQuery.refetch()
-      cancelConfigure()
-      setDrawerOpen(false)
-      setDrawerTab(undefined)
-      selectGlobalTarget(data.name)
-      // The Database page sends a target-less install to onboarding, so it must
-      // see the new target before it opens.
-      await queryClient.refetchQueries({ queryKey: ['status'] })
-      void navigate({ to: '/database', search: { panel: 'enable' } })
-      return
-    }
-    if (data.ssh || editingTarget?.ssh) await tunnelStatusQuery.refetch()
-    setShowForm(false)
+  const handleEditSaved = async () => {
     setEditingTarget(null)
+    await refreshTunnelStatuses()
     // If we arrived here to fix a connection, resume the feature we came from.
     if (!returnToFeature()) clearSettingsAction('connections')
   }
 
-  const handleFormCancel = () => {
-    cancelConfigure()
-    setTestingForm(false)
-    setShowForm(false)
+  const handleEditClose = () => {
     setEditingTarget(null)
-    // Connection failures can route here from another feature. Cancelling the
+    // Connection failures can route here from another feature. Closing the
     // repair should be symmetrical with saving it: return to the owning
     // feature when one was provided, otherwise clean the action deep-link.
     if (!returnToFeature()) clearSettingsAction('connections')
   }
 
-  const handleManualFormCancel = () => {
-    cancelConfigure()
-    setTestingForm(false)
-    setDrawerOpen(false)
-    setDrawerTab(undefined)
-    if (!returnToFeature()) clearSettingsAction('connections')
-  }
-
-  const handleFormTest = async (data: ConfigureFormData) => {
-    setTestingForm(true)
-    try {
-      const result = await testConnection(data.name.trim() || 'form-test', data)
-      await tunnelStatusQuery.refetch()
-      return result
-    } finally {
-      setTestingForm(false)
-    }
-  }
-
   // Confirmation is handled by the styled ConfirmDialog inside the list.
   const handleDelete = async (targetName: string) => {
     await removeTarget(targetName)
+    // The sidebar and Home drop the removed database without a navigation.
+    notifyDatabasesChanged()
   }
 
   const handleSetDefault = async (targetName: string) => {
@@ -618,7 +465,6 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
   }
 
   const handleTunnelTest = async (targetName: string) => {
-    setTestingTunnel(targetName)
     try {
       const result = await testTunnel(targetName)
       await tunnelStatusQuery.refetch()
@@ -643,8 +489,6 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
             : 'Could not test the tunnel.',
         variant: 'negative',
       })
-    } finally {
-      setTestingTunnel(null)
     }
   }
 
@@ -658,28 +502,6 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
     await handleTest(targetName)
   }
 
-  const closeProviderPicker = () => {
-    cancelConfigure()
-    setTestingForm(false)
-    setDrawerOpen(false)
-    setDrawerTab(undefined)
-    if (!search.add) return
-    void navigate({
-      to: '/configure',
-      search: { panel: 'connections' },
-      replace: true,
-    })
-  }
-
-  const selectPanel = (panel: SettingsPanel) => {
-    setActivePanel(panel)
-    void navigate({
-      to: '/configure',
-      search: { panel },
-      replace: true,
-    })
-  }
-
   const passwordDialogRequirements = useMemo(
     () =>
       (envRequirements?.requirements ?? []).filter(
@@ -690,433 +512,356 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
     [envRequirements, passwordDialogTarget]
   )
 
-  const handleTestKey = () => {
-    void keyValidityQuery.refetch()
-  }
-
-  const countsLabel = `${targets.length} ${
-    targets.length === 1 ? 'target' : 'targets'
-  } · ${groups.length} ${groups.length === 1 ? 'group' : 'groups'}`
-
-  // Both views render the same row-cards; the grouped view only nests them
-  // under collapsible headers.
-  const renderTargets = (rows: ConfigureTarget[]) => (
-    <ConfigureTargetList
-      targets={rows}
-      onEdit={(target) => void handleEditClick(target.name)}
-      onTest={(name) => void handleTest(name)}
-      onDelete={handleDelete}
-      onSetDefault={handleSetDefault}
-      onAdd={handleAddClick}
-      onMoveToGroup={setMoveTarget}
-      isLoading={loading}
-      isPending={targetsPending}
-      connectivity={connectivity}
-      checkableTargets={checkableTargets}
-      testingTargetName={testingTarget}
-      onSetPassword={(target) => {
-        // A target added since the last read has no requirement in the cached list yet.
-        void queryClient.invalidateQueries({ queryKey: ['env-requirements'] })
-        setPasswordDialogTarget(target.name)
-      }}
-      onRetryConnection={async (target) => {
-        const checked = await check(undefined, [target.name])
-        await refreshTunnelStatuses()
-        return checked[target.name]?.status === 'ok'
-      }}
-      tunnelStatuses={tunnelStatuses}
-      testingTunnelName={testingTunnel}
-      onTestTunnel={(name) => void handleTunnelTest(name)}
-    />
-  )
-
-  const editingInitialData = editingTarget
-    ? {
-        name: editingTarget.name,
-        engine: editingTarget.engine,
-        host: editingTarget.host,
-        port: editingTarget.port,
-        database: editingTarget.database,
-        user: editingTarget.user,
-        password_env: editingTarget.password_env,
-        tls: editingTarget.tls,
-        read_only: editingTarget.read_only,
-        ssh: editingTarget.ssh,
-      }
-    : undefined
+  const readings = monitorSettings.data
+  const preferencesQuery = usePreferences()
+  const updatePreferences = useUpdatePreferences()
+  const preferences = preferencesQuery.data ?? PREFERENCE_DEFAULTS
+  const preferencesBusy = !preferencesQuery.data || updatePreferences.isPending
 
   return (
-    <div className="space-y-6 w-full">
-      <SettingsHeader />
-      {arrival && arrivalNoticeOpen && (
-        <InlineNotice
-          accent="info"
-          icon="info"
-          title={arrival.title}
-          message={arrival.message}
-          action={{
-            label: 'Got it',
-            onClick: () => setArrivalNoticeOpen(false),
-          }}
-        />
-      )}
-      <TabList aria-label="Settings sections" className="gap-6">
-        {[
-          ...settingsPanels,
-          ...(import.meta.env.DEV
-            ? [{ value: 'developer' as const, label: 'Developer' }]
-            : []),
-        ].map((panel) => (
-          <TabItemButton
-            key={panel.value}
-            id={`settings-tab-${panel.value}`}
-            aria-controls={`settings-panel-${panel.value}`}
-            layoutPrefix="settings-sections"
-            label={panel.label}
-            active={activePanel === panel.value}
-            onClick={() => selectPanel(panel.value)}
-          />
-        ))}
-      </TabList>
+    <>
+      <PageBar
+        title="Settings"
+        meta={<span>{thisComputer()}</span>}
+        actions={
+          currentTarget ? (
+            <Link
+              to="/database"
+              search={{ panel: 'settings' } as never}
+              className={ghostLink}
+            >
+              Monitoring settings for {currentTarget}
+            </Link>
+          ) : undefined
+        }
+      />
+      <PageContainer className="pt-9 pb-24">
+        <SettingsGroup id="account" title="Account">
+          <SettingsRow
+            title={email ?? 'Readyset account'}
+            line={email ? 'Signed in' : 'Not signed in'}
+          >
+            {email ? (
+              <Button
+                variant="primary"
+                modifier="ghost"
+                size="small"
+                label="Sign out"
+                loading={accountLogoutMutation.isPending}
+                onClick={() => accountLogoutMutation.mutate()}
+              />
+            ) : (
+              <Button
+                variant="primary"
+                modifier="ghost"
+                size="small"
+                label="Sign in"
+                onClick={() => void navigate({ to: '/account-login' })}
+              />
+            )}
+          </SettingsRow>
+        </SettingsGroup>
 
-      <div
-        id={`settings-panel-${activePanel}`}
-        role="tabpanel"
-        aria-labelledby={`settings-tab-${activePanel}`}
-      >
-        {/* ── Targets — primary section; Add moves in here ── */}
-        <Show when={activePanel === 'connections'}>
-          <SettingsSection
-            id="connections"
-            title="Targets"
-            description="Manage the databases RDST connects to and review their access."
-            action={
-              !showForm ? (
-                <Button
-                  variant="primary"
-                  modifier="solid"
-                  icon="add"
-                  iconPosition="left"
-                  label="Add target"
-                  onClick={handleAddClick}
+        <SettingsGroup id="ai" title="AI">
+          <SettingsRow
+            title="Hosted by Readyset"
+            line={
+              readysetAccountConnected
+                ? 'Analyze, Ask, and Health check use your Readyset account.'
+                : usingReadyset
+                  ? 'Sign in again to use the included AI.'
+                  : undefined
+            }
+          >
+            <BaseInputSwitch
+              name="ai-hosted"
+              aria-label="Hosted by Readyset"
+              checked={usingReadyset}
+              disabled={aiProviderMutation.isPending}
+              onCheckedChange={handleHostedChange}
+            />
+          </SettingsRow>
+          <SettingsRow
+            title="Use my own key"
+            line="Your provider bills you directly."
+          >
+            <Show when={hasAnthropicKey}>
+              <Button
+                variant="primary"
+                modifier="ghost"
+                size="small"
+                label="Test key"
+                loading={keyValidityQuery.isFetching}
+                onClick={() => void keyValidityQuery.refetch()}
+              />
+            </Show>
+            <Button
+              variant="primary"
+              modifier="ghost"
+              size="small"
+              label={anthropicKeyConfigured ? 'Update key' : 'Add key'}
+              onClick={() => setShowAnthropicDialog(true)}
+            />
+          </SettingsRow>
+          <Show
+            when={
+              Boolean(keyValidity) &&
+              hasAnthropicKey &&
+              !keyValidityQuery.isFetching
+            }
+          >
+            {keyValidity ? (
+              <div className="mt-3">
+                <Alert
+                  tone="quiet"
+                  variant={keyValidationVariant(keyValidity)}
+                  label={keyValidationLabel(keyValidity)}
                 />
+              </div>
+            ) : null}
+          </Show>
+          <div className="mt-3">
+            <AiKeyRouting
+              provider={activeAiProvider}
+              signedIn={Boolean(readysetAccountAvailable)}
+            />
+          </div>
+        </SettingsGroup>
+
+        <SettingsGroup id="notifications" title="Notifications">
+          <SettingsRow
+            title={`Push to ${thisComputer()}`}
+            line="Act now items and the daily report."
+          >
+            <BaseInputSwitch
+              name="push"
+              aria-label={`Push to ${thisComputer()}`}
+              checked={pushOn}
+              onCheckedChange={(on) => void setDesktopNotifications(on)}
+            />
+          </SettingsRow>
+          <Text as="p" level="caption" className="mt-1.5 text-content-layout-3">
+            Per-item choices are in the{' '}
+            <Link to="/inbox" className={quietLink}>
+              Inbox
+            </Link>
+            .
+          </Text>
+        </SettingsGroup>
+
+        <SettingsGroup title="Appearance">
+          {/* RDST draws dark only; a stored light, system or font size choice is kept but
+              not offered until it applies. */}
+          <SettingsRow title="Theme" line="Light colors are coming.">
+            <Text
+              as="span"
+              level="body-small"
+              className="text-content-layout-2"
+            >
+              Dark
+            </Text>
+          </SettingsRow>
+        </SettingsGroup>
+
+        <SettingsGroup id="privacy" title="Data">
+          <SettingsRow
+            title="Keep readings"
+            line={
+              readings
+                ? `${formatBytes(readings.size_bytes)} of ${formatBytes(readings.budget_bytes)} used.`
+                : undefined
+            }
+          >
+            <PreferenceMenu
+              label="Keep readings"
+              value={preferences.keep_readings_days}
+              options={KEEP_READINGS}
+              optionLabel={keepReadingsLabel}
+              disabled={preferencesBusy}
+              onChange={(keep_readings_days) =>
+                updatePreferences.mutate({ keep_readings_days })
+              }
+            />
+          </SettingsRow>
+          <SettingsRow
+            title="Local data"
+            line={`Readings, reports and analyses on ${thisComputer()}.`}
+          >
+            <Button
+              variant="primary"
+              modifier="ghost"
+              size="small"
+              label="Clear local data"
+              disabled={resetMutation.isPending || !dataDirectory}
+              onClick={() => setConfirmClear(true)}
+            />
+          </SettingsRow>
+          {statusQuery.isError && (
+            <div className="mt-3">
+              <ErrorState
+                tone="quiet"
+                errorClass={classifyError({
+                  code: '',
+                  message: 'Local storage details could not be loaded.',
+                })}
+                title="Local storage details couldn't be loaded"
+                message="RDST couldn't read its local data directory."
+                trustworthy="No local data was changed."
+                onRetry={() => void statusQuery.refetch()}
+              />
+            </div>
+          )}
+        </SettingsGroup>
+
+        <SettingsGroup
+          id="connections"
+          title="Databases"
+          action={
+            <Button
+              variant="primary"
+              modifier="ghost"
+              size="small"
+              label="Add a database"
+              onClick={() => openAddDatabase()}
+            />
+          }
+        >
+          <Show when={!!error}>
+            <div className="mb-3">
+              <ErrorState
+                tone="quiet"
+                errorClass={classifyError({
+                  code: '',
+                  message: error ?? '',
+                })}
+                title="Database action failed"
+                message="The last action on your databases could not complete."
+                trustworthy="Your saved databases are unchanged."
+                detail={error ?? undefined}
+                onRetry={() => void listTargets()}
+              />
+            </div>
+          </Show>
+          <Show when={!!connectivityError}>
+            <div className="mb-3">
+              <ErrorState
+                tone="quiet"
+                errorClass={classifyError({
+                  code: '',
+                  message: connectivityError ?? '',
+                })}
+                title="Connectivity check failed"
+                message="Readyset could not check which of your databases are reachable right now."
+                trustworthy="The database list is unaffected - only the live reachability of each row is stale."
+                detail={connectivityError ?? undefined}
+                onRetry={checkAll}
+              />
+            </div>
+          </Show>
+          <DatabaseRows
+            targets={targets}
+            pending={targetsPending}
+            connectivity={connectivity}
+            checkable={checkableTargets}
+            testingName={testingTarget}
+            onTest={(name) => void handleTest(name)}
+            onEdit={(name) => void handleEditClick(name)}
+            onSetDefault={(name) => void handleSetDefault(name)}
+            onRemove={(name) => void handleDelete(name)}
+            onSetPassword={(target) => {
+              // A target added since the last read has no requirement in the cached list yet.
+              void queryClient.invalidateQueries({
+                queryKey: ['env-requirements'],
+              })
+              setPasswordDialogTarget(target.name)
+            }}
+            onTestTunnel={(name) => void handleTunnelTest(name)}
+          />
+          <AddDatabaseDialog
+            request={null}
+            edit={editingTarget}
+            onClose={handleEditClose}
+            onSaved={() => void handleEditSaved()}
+          />
+          <TargetsSlotsElsewhere />
+        </SettingsGroup>
+
+        <SettingsGroup title="About">
+          <SettingsRow
+            title="Version"
+            line={
+              statusData?.version ? (
+                <span className="tabular-nums">{statusData.version}</span>
               ) : undefined
             }
           >
-            <VStack className="gap-4 items-stretch w-full">
-              {/* Error */}
-              <Show when={!!error}>
-                <m.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                >
-                  <ErrorState
-                    errorClass={classifyError({
-                      code: '',
-                      message: error ?? '',
-                    })}
-                    title="Target action failed"
-                    message="The last action on your targets could not complete."
-                    trustworthy="Your saved targets are unchanged."
-                    detail={error ?? undefined}
-                    onRetry={() => void listTargets()}
-                  />
-                </m.div>
-              </Show>
-
-              <Show when={!!connectivityError}>
-                <ErrorState
-                  errorClass={classifyError({
-                    code: '',
-                    message: connectivityError ?? '',
-                  })}
-                  title="Connectivity check failed"
-                  message="Readyset could not check which of your targets are reachable right now."
-                  trustworthy="The target list is unaffected - only the live reachability of each row is stale."
-                  detail={connectivityError ?? undefined}
-                  onRetry={checkAll}
-                />
-              </Show>
-
-              {/* Editing remains in context. New connections use the unified
-                  drawer so manual setup and integrations share one entry. */}
-              <Show when={showForm}>
-                <m.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
-                >
-                  <ConfigureForm
-                    key={
-                      editingTarget
-                        ? `edit-${editingTarget.name}`
-                        : 'new-target'
-                    }
-                    initialData={editingInitialData}
-                    onSubmit={handleFormSubmit}
-                    onTest={handleFormTest}
-                    onCancel={handleFormCancel}
-                    isLoading={loading}
-                    isTesting={testingForm}
-                    testResult={connectionTestResult}
-                  />
-                </m.div>
-              </Show>
-
-              <Show when={!showForm && targets.length > 0}>
-                <HStack className="gap-2 items-center flex-wrap">
-                  <HStack className="gap-3 items-center flex-wrap grow">
-                    <Show when={groups.length > 0}>
-                      <SegmentedControl
-                        aria-label="Target view"
-                        mode="radio"
-                        size="small"
-                        value={view}
-                        segments={[
-                          { value: 'list', label: 'List' },
-                          { value: 'groups', label: 'Groups' },
-                        ]}
-                        onValueChange={setView}
-                      />
-                    </Show>
-                    <Text level="caption" className="text-content-layout-3">
-                      {countsLabel}
-                    </Text>
-                  </HStack>
-                  <Button
-                    variant="primary"
-                    modifier="outline"
-                    size="small"
-                    icon="connect"
-                    iconPosition="left"
-                    label="Check all"
-                    loading={checking}
-                    disabled={checking || checkableNames.length === 0}
-                    onClick={checkAll}
-                  />
-                </HStack>
-              </Show>
-
-              {/* The list — and, at zero targets, its polished hero empty-state
-                (the "Add your first target" surface) render here. [VIS-102].
-                Connectivity and the unreachable notice render per row. */}
-              <Show when={!showForm}>
-                <m.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: 0.1 }}
-                >
-                  {view === 'groups' && targets.length > 0 ? (
-                    <TargetGroupView
-                      targets={targets}
-                      groupOf={groupOf}
-                      renderTargets={renderTargets}
-                      onHealthCheckGroup={(group) =>
-                        void navigate({
-                          to: '/audit',
-                          search: { scope: 'group', group },
-                        })
-                      }
-                    />
-                  ) : (
-                    renderTargets(targets)
-                  )}
-                </m.div>
-              </Show>
-            </VStack>
-          </SettingsSection>
-          <div className="mt-8">
-            <TargetsSlotsElsewhere />
-          </div>
-        </Show>
-
-        {/* ── AI keys — its own section (owner #4: no "just-floating" key card;
-            deep-link target id="ai" for ?section=ai). ── */}
-        {activePanel === 'ai' ? (
-          <SettingsSection
-            id="ai"
-            title="AI access"
-            description="Use the AI included with a Readyset account, or your own Anthropic key, for Analyze, Ask, and Health check insights."
-          >
-            <m.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2 }}
+            <DesktopUpdateControl
+              state={updates.state}
+              install={updates.install}
+            />
+          </SettingsRow>
+          <div className="flex gap-5 py-3.5 text-body-small text-content-layout-2">
+            <a
+              href={DOCS_URL}
+              target="_blank"
+              rel="noreferrer"
+              className={quietLink}
             >
-              <div className="rounded-xl border border-border-layout-1 bg-surface-layout-2/50 p-4 space-y-3">
-                <HStack className="flex-col items-stretch gap-3 tablet:flex-row tablet:items-start tablet:justify-between">
-                  <HStack className="min-w-0 gap-3 items-start">
-                    <div
-                      className={`w-9 h-9 rounded-xl flex items-center justify-center ${aiStatusTileTokens}`}
-                    >
-                      <Icon
-                        name={usingReadyset ? 'sparkles' : 'key'}
-                        label={usingReadyset ? 'Included AI' : 'Anthropic'}
-                        className="w-4 h-4"
-                      />
-                    </div>
-                    <VStack className="min-w-0 gap-0.5 items-start">
-                      <Text
-                        level="label-small"
-                        className="text-content-layout-1"
-                      >
-                        {anthropicStatusTitle}
-                      </Text>
-                      <Text
-                        level="body-small"
-                        className="text-content-layout-3"
-                      >
-                        {anthropicStatusDescription}
-                      </Text>
-                      {readysetAccountConnected &&
-                      accountStatusQuery.data?.email ? (
-                        <Text level="caption" className="text-content-layout-3">
-                          Signed in as {accountStatusQuery.data.email}
-                        </Text>
-                      ) : null}
-                    </VStack>
-                  </HStack>
-                  <HStack className="flex-wrap gap-2 items-center tablet:shrink-0">
-                    <Show when={readysetAccountConnected}>
-                      <Button
-                        variant="primary"
-                        modifier="ghost"
-                        label="Sign out"
-                        loading={accountLogoutMutation.isPending}
-                        onClick={() => accountLogoutMutation.mutate()}
-                      />
-                    </Show>
-                    <Show when={hasAnthropicKey}>
-                      <Button
-                        variant="primary"
-                        modifier="ghost"
-                        label={
-                          keyValidityQuery.isFetching ? 'Testing…' : 'Test key'
-                        }
-                        disabled={keyValidityQuery.isFetching}
-                        onClick={handleTestKey}
-                      />
-                    </Show>
-                    <Button
-                      variant="primary"
-                      modifier="ghost"
-                      label={
-                        readysetAccountConnected
-                          ? 'Switch Readyset account'
-                          : 'Use the included AI'
-                      }
-                      icon="sparkles"
-                      iconPosition="left"
-                      loading={
-                        aiProviderMutation.isPending &&
-                        aiProviderMutation.variables === 'readyset'
-                      }
-                      onClick={
-                        readysetAccountConnected
-                          ? () => setShowTrialDialog(true)
-                          : handleUseReadyset
-                      }
-                    />
-                    <Button
-                      variant="primary"
-                      modifier="outline"
-                      label={anthropicButtonLabel}
-                      icon="key"
-                      iconPosition="left"
-                      loading={
-                        aiProviderMutation.isPending &&
-                        aiProviderMutation.variables === 'claude'
-                      }
-                      onClick={handleAnthropicAction}
-                    />
-                  </HStack>
-                </HStack>
-                {/* While a (re-)test is in flight, keep an explicit "Checking
-                    key…" line in the status area instead of blinking to blank —
-                    so the Test-key loop reads button → checking → fresh verdict
-                    on every press, even when re-validating an already-valid key.
-                    Once it settles, the verdict Alert shows the result; a failed
-                    test stays visible as a negative/warning notice. [USE-008/071,
-                    VIS-119] */}
-                <Show when={hasAnthropicKey && keyValidityQuery.isFetching}>
-                  <Alert
-                    variant="informative"
-                    modifier="outline"
-                    loading
-                    label="Checking key with Anthropic…"
-                  />
-                </Show>
-                <Show
-                  when={Boolean(keyValidity) && !keyValidityQuery.isFetching}
-                >
-                  {keyValidity ? (
-                    <Alert
-                      variant={keyValidationVariant(keyValidity)}
-                      modifier="outline"
-                      label={keyValidationLabel(keyValidity)}
-                    />
-                  ) : null}
-                </Show>
-              </div>
-              <div className="mt-3">
-                <AiKeyRouting
-                  provider={activeAiProvider}
-                  signedIn={Boolean(readysetAccountAvailable)}
-                />
-              </div>
-            </m.div>
-          </SettingsSection>
-        ) : null}
+              Docs
+            </a>
+            <Pressable
+              className={`cursor-pointer ${quietLink}`}
+              onClick={() => setFeedbackOpen(true)}
+            >
+              Give feedback
+            </Pressable>
+            <a
+              href={DISCORD_INVITE_URL}
+              target="_blank"
+              rel="noreferrer"
+              className={quietLink}
+            >
+              Discord
+            </a>
+          </div>
+        </SettingsGroup>
 
-        {/* ── Storage & privacy — OPEN card, no collapse (owner decision #5;
-            undoes C-09's disclosure, keeps every line of content). ── */}
-        <Show when={activePanel === 'privacy'}>
-          {dataDirectory ? (
-            <StoragePrivacySection
-              dataDirectory={dataDirectory}
-              resetPending={resetMutation.isPending}
-              resetError={
-                resetMutation.error instanceof Error
-                  ? resetMutation.error.message
-                  : null
-              }
-              onReset={handleResetLocalData}
-            />
-          ) : statusQuery.isError ? (
-            <ErrorState
-              errorClass={classifyError({
-                code: '',
-                message: 'Local storage details could not be loaded.',
-              })}
-              title="Local storage details couldn't be loaded"
-              message="RDST couldn't read its local data directory."
-              trustworthy="No local data was changed."
-              onRetry={() => void statusQuery.refetch()}
-              retryLabel="Try again"
-            />
-          ) : (
-            <Alert
-              variant="informative"
-              modifier="outline"
-              loading
-              label="Loading local storage details…"
-            />
-          )}
-        </Show>
-
-        {/* ── Developer settings — merged from the retired /dev-settings route
-            (owner: "Dev Settings → Settings içine"). DEV-only, last section;
-            deep-link target id="dev" for /configure#dev. ── */}
-        {import.meta.env.DEV && activePanel === 'developer' ? (
-          <SettingsSection
-            id="dev"
-            title="Developer settings"
-            description="Tools and utilities available only in development mode."
-          >
-            <DevSettingsSection />
-          </SettingsSection>
+        {import.meta.env.DEV ? (
+          <SettingsGroup id="dev" title="Developer settings">
+            <ClearKeyringRow />
+          </SettingsGroup>
         ) : null}
-      </div>
+      </PageContainer>
+
+      <ConfirmDialog
+        tone="quiet"
+        isOpen={confirmClear}
+        onClose={() => setConfirmClear(false)}
+        onConfirm={() => resetMutation.mutate()}
+        title="Clear local data?"
+        subtitle={dataDirectory ?? undefined}
+        confirmLabel="Clear local data"
+        confirmVariant="negative"
+        loading={resetMutation.isPending}
+        blockCloseWhileLoading
+        notice={{
+          accent: 'negative',
+          title: "This can't be undone",
+          message:
+            "This deletes RDST's local configuration and history. It also deletes schema descriptions and stored RDST keys. Your ~/.ssh directory is unchanged.",
+        }}
+      >
+        {resetMutation.error instanceof Error ? (
+          <Text level="body-small" className="text-content-negative-soft">
+            {resetMutation.error.message}
+          </Text>
+        ) : null}
+      </ConfirmDialog>
+
+      <ReportDialog
+        isOpen={feedbackOpen}
+        onClose={() => setFeedbackOpen(false)}
+      />
 
       <EnvSecretsDialog
         isOpen={passwordDialogTarget !== null}
@@ -1128,49 +873,6 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
           setPasswordDialogTarget(null)
           if (target) void publishSavedPassword(target)
         }}
-      />
-
-      <AddTargetsDrawer
-        open={drawerOpen}
-        initialTab={drawerTab}
-        manualContent={
-          <ConfigureForm
-            key="new-connection-drawer"
-            onSubmit={handleFormSubmit}
-            onTest={handleFormTest}
-            onCancel={handleManualFormCancel}
-            existingNames={targets.map((target) => target.name)}
-            submitError={error}
-            isLoading={loading}
-            isTesting={testingForm}
-            testResult={connectionTestResult}
-            submitLabel="Add target"
-            showHeader={false}
-            stickyFooter
-            reviewWritePrivilegesOnSubmit
-          />
-        }
-        onClose={closeProviderPicker}
-        onTargetsAdded={() => void listTargets()}
-        onCredentialsClosed={checkAll}
-        onRecheckTargets={(names) => {
-          if (names.length > 0) {
-            void (async () => {
-              await check(undefined, names)
-              await refreshTunnelStatuses()
-            })()
-          }
-        }}
-      />
-
-      <MoveToGroupDialog
-        target={
-          moveTarget
-            ? { name: moveTarget.name, group: groupOf(moveTarget) }
-            : null
-        }
-        groups={groups}
-        onClose={() => setMoveTarget(null)}
       />
 
       <EnvSecretsDialog
@@ -1205,7 +907,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
           if (!returnToFeature()) clearSettingsAction('ai')
         }}
       />
-    </div>
+    </>
   )
 }
 

@@ -95,7 +95,16 @@
     "./interactive-row": "./src/components/element/interactive-row.tsx",
     "./pressable": "./src/components/element/pressable.tsx",
     "./icon-tile": "./src/components/element/icon-tile.tsx",
-    "./empty-state": "./src/components/feedback/empty-state.tsx"
+    "./empty-state": "./src/components/feedback/empty-state.tsx",
+    "./page-bar": "./src/components/element/page-bar.tsx",
+    "./page-container": "./src/components/element/page-container.tsx",
+    "./page-notices": "./src/components/element/page-notices.tsx",
+    "./metric-row": "./src/components/element/metric-row.tsx",
+    "./divided-list": "./src/components/element/divided-list.tsx",
+    "./two-pane": "./src/components/element/two-pane.tsx",
+    "./side-pane": "./src/components/element/side-pane.tsx",
+    "./status-line": "./src/components/element/status-line.tsx",
+    "./verdict": "./src/components/element/verdict.tsx"
   },
   "scripts": {
     "clean": "rm -rf node_modules"

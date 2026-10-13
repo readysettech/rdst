@@ -253,7 +253,7 @@ function suggestionForColumn(
   if (enumValue) {
     return {
       value: enumValue,
-      provenance: `Schema enum · ${table}.${column.name}`,
+      provenance: `Schema enum, ${table}.${column.name}`,
     }
   }
 
@@ -261,7 +261,7 @@ function suggestionForColumn(
   if (/\b(bool|boolean)\b/.test(dataType)) {
     return {
       value: 'TRUE',
-      provenance: `Schema type · ${table}.${column.name}`,
+      provenance: `Schema type, ${table}.${column.name}`,
     }
   }
   if (
@@ -271,7 +271,7 @@ function suggestionForColumn(
   ) {
     return {
       value: '1',
-      provenance: `Schema type · ${table}.${column.name}`,
+      provenance: `Schema type, ${table}.${column.name}`,
     }
   }
   return null
@@ -300,13 +300,13 @@ function queryShapeSuggestion(
   if (clause) {
     return {
       value: clause.toUpperCase() === 'LIMIT' ? '100' : '0',
-      provenance: `Query shape · ${clause.toUpperCase()}`,
+      provenance: `Query shape, ${clause.toUpperCase()}`,
     }
   }
   // The percentile fraction is structurally bounded to [0, 1]; the median is
   // the canonical representative value.
   if (/\bPERCENTILE_(?:CONT|DISC)\s*\(\s*$/i.test(before)) {
-    return { value: '0.5', provenance: 'Query shape · percentile' }
+    return { value: '0.5', provenance: 'Query shape, percentile' }
   }
   // An aggregate compared directly (typically in HAVING) is a count-style
   // threshold; one is the smallest value that still filters anything.
@@ -316,28 +316,28 @@ function queryShapeSuggestion(
   if (aggregate) {
     return {
       value: '1',
-      provenance: `Query shape · ${aggregate.toUpperCase()} comparison`,
+      provenance: `Query shape, ${aggregate.toUpperCase()} comparison`,
     }
   }
   // DATE_TRUNC's first argument is a unit string, not a value comparison.
   if (/\bDATE_TRUNC\s*\(\s*$/i.test(before)) {
-    return { value: 'day', provenance: 'Query shape · DATE_TRUNC unit' }
+    return { value: 'day', provenance: 'Query shape, DATE_TRUNC unit' }
   }
   // ROUND's second argument is a decimal-place count.
   if (/\bROUND\s*\(\s*[^,()]*,\s*$/i.test(before)) {
-    return { value: '2', provenance: 'Query shape · ROUND precision' }
+    return { value: '2', provenance: 'Query shape, ROUND precision' }
   }
   // A window frame bound (`ROWS BETWEEN $n PRECEDING`) is a row count.
   if (
     /\bROWS?\s+BETWEEN\s*$/i.test(before) &&
     /^\s*(?:PRECEDING|FOLLOWING)\b/i.test(after)
   ) {
-    return { value: '5', provenance: 'Query shape · window frame' }
+    return { value: '5', provenance: 'Query shape, window frame' }
   }
   // A parameter concatenated into a LIKE pattern (`LIKE ('%' || $1 || '%')`)
   // is a search substring; the wildcard itself is the only shape-safe guess.
   if (withinLikeConcat(sql, offset)) {
-    return { value: '%', provenance: 'Query shape · LIKE pattern' }
+    return { value: '%', provenance: 'Query shape, LIKE pattern' }
   }
   return null
 }

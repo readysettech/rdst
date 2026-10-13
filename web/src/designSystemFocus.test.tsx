@@ -1,9 +1,12 @@
 // One focus treatment, on every primitive a keyboard user can land on, and no
 // transition that would let the ring fade in behind the caret. [MG-04, MG-05]
 import { Button } from '@rs/ui-new/button'
+import { DividedList, ListRow } from '@rs/ui-new/divided-list'
 import { controlTransition, focusRing } from '@rs/ui-new/focus'
 import { InteractiveRow } from '@rs/ui-new/interactive-row'
+import { Metric, MetricRow } from '@rs/ui-new/metric-row'
 import { Pressable } from '@rs/ui-new/pressable'
+import { SidePane } from '@rs/ui-new/side-pane'
 import { TabItemButton, TabList } from '@rs/ui-new/tab'
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -82,5 +85,55 @@ describe('shared focus ring', () => {
     // `outline-none` unconditionally would suppress the ring for every input
     // modality, which is how the tabs came to have no indicator at all.
     expect(classesOf(tab)).not.toContain('outline-none')
+  })
+
+  it('is on an interactive ListRow, on the link the row renders', () => {
+    render(
+      <DividedList columns="1fr auto">
+        <ListRow asChild interactive>
+          <a href="/inbox">Stuck query filed</a>
+        </ListRow>
+        <ListRow>
+          <span>Monitoring starts</span>
+        </ListRow>
+      </DividedList>
+    )
+    const row = screen.getByRole('link', { name: 'Stuck query filed' })
+    expectFocusRing(row)
+    expectRingNotTransitioned(row)
+    expect(
+      screen.getByText('Monitoring starts').parentElement?.className
+    ).not.toContain('focus-visible:ring-2')
+  })
+
+  it('is on a selectable Metric, which is a button', () => {
+    render(
+      <MetricRow>
+        <Metric
+          label="Queries per second"
+          value="11.7"
+          onSelect={() => {}}
+          selected
+        />
+      </MetricRow>
+    )
+    const metric = screen.getByRole('button', { name: /Queries per second/ })
+    expectFocusRing(metric)
+    expect(metric.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('is on the side pane controls', () => {
+    render(
+      <SidePane
+        aria-label="Stuck query on demo"
+        onPrev={() => {}}
+        onNext={() => {}}
+        onClose={() => {}}
+      >
+        <p>body</p>
+      </SidePane>
+    )
+    for (const name of ['Previous', 'Next', 'Close'])
+      expectFocusRing(screen.getByRole('button', { name }))
   })
 })

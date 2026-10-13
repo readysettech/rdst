@@ -22,6 +22,7 @@ import type {
   InboxAdvice,
   InboxDelivery,
   InboxItem,
+  InboxItemView,
   InboxLink,
   InboxPage,
   InboxQuery,
@@ -833,9 +834,15 @@ export function healthFixture(
       values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : 0
     const qps = avg(live.map((p) => p.qps as number))
     const meanMs = avg(live.map((p) => p.mean_ms as number))
+    const peak = live.reduce<HealthPoint | null>(
+      (best, p) => (!best || (p.qps ?? 0) > (best.qps ?? 0) ? p : best),
+      null
+    )
     return {
       qps: round(qps, 2),
       mean_ms: round(meanMs, 3),
+      qps_peak: peak?.qps ?? null,
+      qps_peak_at: peak?.ts ?? null,
       db_time_ms: round(qps * meanMs * live.length * res, 1),
       active_conns_peak: live.length
         ? Math.max(...live.map((p) => p.active_conns as number))
@@ -1016,7 +1023,16 @@ export function pulsesFixture(
       state: 'live',
     },
   ]
-  return { pulses: pulses.slice(0, limit) }
+  return {
+    pulses: pulses.slice(0, limit),
+    activity: {
+      kind: 'reading',
+      label: 'Reading query statistics',
+      last_reading_at: lastTick,
+      every_s: 60,
+      next_check_at: lastTick - 118 + 300,
+    },
+  }
 }
 
 export function nextPulseFixture(
@@ -1094,7 +1110,9 @@ export function settingsFixture(scenario: FixtureScenario): MonitorSettings {
       stuck_query: true,
       database_events: true,
       query_changes: true,
+      daily_report: true,
     },
+    quiet_hours: { from_hour: 23, to_hour: 7 },
     size_bytes:
       scenario === 'long_history'
         ? 61_800_000
@@ -1199,6 +1217,9 @@ interface InboxSpec {
   delivery?: InboxDelivery
   subject?: string
   body?: Record<string, unknown>
+  /** Where it opens, when not the type's usual place. */
+  link?: InboxLink
+  view?: Partial<InboxItemView>
 }
 
 function trend(label: string, filedAt: number, base: number, jump: number) {
@@ -1413,7 +1434,7 @@ export function inboxItems(
     {
       type: 'daily_summary',
       severity: 0.4,
-      title: 'Checkup ready',
+      title: 'Daily report ready',
       summary:
         'Two range queries on orders.status carry most of the load; one query sleeps 180 s a call.',
       ago: 14 * HOUR + 20 * MIN,
@@ -1424,7 +1445,7 @@ export function inboxItems(
     {
       type: 'daily_summary',
       severity: 0.4,
-      title: 'Checkup ready',
+      title: 'Daily report ready',
       summary: 'The database is steady; one index would help three queries.',
       ago: 14 * HOUR + 25 * MIN,
       target: 'aurora-pg',
@@ -1520,7 +1541,7 @@ export function inboxItems(
     [
       'daily_summary',
       0.4,
-      'Checkup ready',
+      'Daily report ready',
       'The database is steady; nothing needs you.',
     ],
     [
@@ -1550,11 +1571,61 @@ export function inboxItems(
       delivery: 'inbox',
     }
   })
+  // The bridges to Actions: one Changes ready event, and a change that did not move.
+  const bridges: InboxSpec[] = [
+    {
+      type: 'changes_ready',
+      severity: 0.6,
+      title: `3 changes ready on ${FIXTURE_TARGET}`,
+      summary:
+        '1 to do first, starting with index orders (status, created_at).',
+      ago: 9 * HOUR,
+      subject: 'plan',
+      state: 'seen',
+      delivery: 'notify',
+      body: { db: FIXTURE_TARGET, count: 3, do_first: 1 },
+      link: { kind: 'actions', target: FIXTURE_TARGET, label: 'Open Actions' },
+      view: {
+        kind: 'changes_ready',
+        band: 'watch',
+        changes: {
+          count: 3,
+          do_first: 1,
+          titles: [
+            'Index orders (status, created_at)',
+            'Index customers (email)',
+            'Lower idle_in_transaction_session_timeout',
+          ],
+          action_ids: [11, 12, 13],
+        },
+      },
+    },
+    {
+      type: 'no_change_yet',
+      severity: 0.3,
+      title: 'No change yet: SELECT on customers by email',
+      summary: '9.8 ms before, 9.6 ms after over 120 calls.',
+      ago: 27 * HOUR,
+      keys: [K.fixNoEffect],
+      state: 'resolved',
+      resolvedBy: 'code',
+      delivery: 'inbox',
+      body: {
+        action_id: 12,
+        detected_at: now - 27 * HOUR - 3 * DAY,
+        before_ms: 9.8,
+        after_ms: 9.6,
+        calls: 120,
+      },
+      link: { kind: 'actions', target: FIXTURE_TARGET, label: 'Open Applied' },
+      view: { kind: 'no_change_yet', band: 'closed' },
+    },
+  ]
   const specByKey = new Map(SPECS.map((spec) => [queryKey(spec.sql), spec]))
   const specs =
     scenario === 'first_hour'
       ? open.slice(0, 2)
-      : [...open, ...recovered, ...muted, ...done]
+      : [...open, ...recovered, ...muted, ...done, ...bridges]
   return specs.map((spec, index) => {
     const created = now - spec.ago
     const target = spec.target ?? FIXTURE_TARGET
@@ -1612,8 +1683,9 @@ export function inboxItems(
       ),
       delivery: spec.delivery ?? 'inbox',
       relevance_rule: (spec.body?.relevance_rule as RelevanceRule) ?? null,
-      link: fixtureLink(spec, target, keys),
+      link: spec.link ?? fixtureLink(spec, target, keys),
       advice: finished ? null : (ADVICE[spec.type] ?? null),
+      ...spec.view,
     }
   })
 }

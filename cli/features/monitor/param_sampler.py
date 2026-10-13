@@ -74,6 +74,11 @@ class ParamSampler:
         self._sample_connection: Any = None
         self._next_poll: dict[str, tuple[float, float]] = {}
         self._inflight: asyncio.Task | None = None
+        # Databases whose connection settings changed; their next pass reconnects.
+        self._stale: set[str] = set()
+
+    def reconnect(self, target: str) -> None:
+        self._stale.add(target)
 
     async def start(self) -> None:
         if self._task is None and self.interval_s > 0:
@@ -115,6 +120,8 @@ class ParamSampler:
     def tick(self) -> bool:
         """One pass over monitored targets; True when some target still wants samples."""
         busy = False
+        while self._stale:
+            self._close(self._stale.pop())
         targets = self.store.monitored_targets()
         for target in (set(self._connections) | set(self._wanted) | set(self._next_poll)
                        | set(self._last_error)) - targets:

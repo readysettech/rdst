@@ -266,6 +266,37 @@ def test_coordinator_reuses_one_collector_per_target():
     assert coordinator.collector_for("demo") is first
     assert coordinator.collector_for("analytics") is not first
     assert created == ["demo", "analytics"]
+    coordinator.reconnect("demo")
+    coordinator.reconnect("unknown")
+    assert first._reconnect_pending is True
+    assert coordinator.collector_for("analytics")._reconnect_pending is False
+
+
+@pytest.mark.asyncio
+async def test_a_connection_change_reconnects_on_the_next_cycle(tmp_path):
+    rules = pg_rules(2000.0, [pg_stat_row(111, calls=5, total=100.0)],
+                     text_rows=[pg_text_row(111, "SELECT * FROM users")])
+    opened: list[FakeConnection] = []
+    refused = [False]
+
+    def factory(target):
+        if refused[0]:
+            raise OSError("connection refused")
+        opened.append(FakeConnection(rules))
+        return opened[-1], "postgresql"
+
+    collector = two_phase_collector(tmp_path, factory)
+    await collector.collect_now()
+    await collector.collect_now()
+    assert len(opened) == 1
+    # The saved port changed to one that refuses: the reused connection is not read again.
+    refused[0] = True
+    collector.reconnect()
+    event = await collector.collect_now()
+    assert opened[0].closed and event.event == "discovery_error"
+    refused[0] = False
+    assert (await collector.collect_now()).event == "discovery_update"
+    assert len(opened) == 2
 
 
 @pytest.mark.asyncio

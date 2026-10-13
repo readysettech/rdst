@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen } from '@testing-library/react'
+import { cleanup, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { keyRoutingLines } from '@/features/settings/AiKeyRouting'
 import { settingsFixture } from '@/lib/monitor/fixtures'
@@ -53,16 +53,7 @@ const {
   monitoringStatus,
   needsUserAction,
 } = await import('./aiMonitoring')
-const { AiMonitoringPanel, AiMonitoringTag, AllowanceNotice } = await import(
-  './AiMonitoringStatus'
-)
-const { EnableMonitoringDialog } = await import(
-  '@/features/database/settings/EnableMonitoringDialog'
-)
-
-const { MonitoringMenu } = await import(
-  '@/features/database/settings/MonitoringSwitch'
-)
+const { AllowanceNotice } = await import('./AiMonitoringStatus')
 
 const limit = (extra: Partial<MonitoringLimit> = {}): MonitoringLimit => ({
   in_use: 2,
@@ -126,218 +117,13 @@ describe('limit words', () => {
 
   it('says which key covers what', () => {
     expect(keyRoutingLines('claude', true)).toEqual([
-      'Your Anthropic key covers Analyze, Ask, deep analysis and nightly checkups.',
+      'Your Anthropic key covers Analyze, Ask, deep analysis and nightly reports.',
       'Quick checks and monitoring alerts always run through Readyset and use your Readyset allowance.',
     ])
     expect(keyRoutingLines('readyset', true)[0]).toMatch(
       /Readyset account covers Analyze/
     )
     expect(keyRoutingLines(null, false)[0]).toMatch(/Sign in to Readyset/)
-  })
-})
-
-describe('AI monitoring status', () => {
-  it('labels a local-only database distinctly', () => {
-    renderWithClient(<AiMonitoringTag state="local" />)
-    expect(screen.getByTestId('ai-monitoring-state').textContent).toBe(
-      'Local monitoring only'
-    )
-  })
-
-  it('offers to ask again from a local-only database', () => {
-    state.limit = limit({ in_use: 3, full: true })
-    renderWithClient(<AiMonitoringPanel target="db" state="local" />)
-    expect(screen.getByText('AI monitoring on 3 of 3 databases')).toBeTruthy()
-    expect(
-      screen.getByRole('button', { name: 'Turn on AI monitoring' })
-    ).toBeTruthy()
-  })
-})
-
-describe('turn-on dialog', () => {
-  it('explains AI monitoring when signed in', () => {
-    state.limit = limit()
-    renderWithClient(
-      <EnableMonitoringDialog target="db" open onClose={() => undefined} />
-    )
-    expect(
-      screen.getByText(
-        "You're signed in, so turning on monitoring includes AI checks through Readyset."
-      )
-    ).toBeTruthy()
-    expect(screen.queryByTestId('ai-monitoring-full')).toBeNull()
-    expect(
-      screen.getByRole('button', { name: 'Turn on monitoring' })
-    ).toBeTruthy()
-  })
-
-  it('keeps the turn-on choice based on sign-in when slots are full', () => {
-    state.limit = limit({ in_use: 3, full: true, target_fits: false })
-    renderWithClient(
-      <EnableMonitoringDialog target="db" open onClose={() => undefined} />
-    )
-    expect(
-      screen.getByRole('switch', { name: 'Include deep analysis' })
-    ).toBeTruthy()
-    expect(
-      screen.getByText(
-        "You're signed in, so turning on monitoring includes AI checks through Readyset."
-      )
-    ).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Turn on monitoring' }))
-    expect(state.mutate).toHaveBeenCalledWith(
-      expect.objectContaining({ enabled: true }),
-      expect.anything()
-    )
-  })
-})
-
-describe('turn-on dialog choices', () => {
-  it('loads preferences before confirmation and keeps edits until reopening', () => {
-    state.settings = null
-    const view = renderWithClient(
-      <EnableMonitoringDialog target="db" open onClose={() => undefined} />
-    )
-    expect(
-      screen
-        .getByRole('button', { name: 'Turn on monitoring' })
-        .hasAttribute('disabled')
-    ).toBe(true)
-    state.settings = {
-      ...settingsFixture('localdev'),
-      enabled: false,
-      enabled_at: null,
-      configured: true,
-      deep_analysis: false,
-      execute: false,
-      analysis_mode: 'plans_only',
-    }
-    view.rerender(
-      <EnableMonitoringDialog target="db" open onClose={() => undefined} />
-    )
-    const deep = screen.getByRole('switch', { name: 'Include deep analysis' })
-    expect(deep.getAttribute('aria-checked')).toBe('false')
-    fireEvent.click(deep)
-    state.settings = { ...state.settings }
-    view.rerender(
-      <EnableMonitoringDialog target="db" open onClose={() => undefined} />
-    )
-    expect(deep.getAttribute('aria-checked')).toBe('true')
-    view.rerender(
-      <EnableMonitoringDialog
-        target="db"
-        open={false}
-        onClose={() => undefined}
-      />
-    )
-    view.rerender(
-      <EnableMonitoringDialog target="db" open onClose={() => undefined} />
-    )
-    expect(
-      screen
-        .getByRole('switch', { name: 'Include deep analysis' })
-        .getAttribute('aria-checked')
-    ).toBe('false')
-  })
-
-  it.each([
-    'plans_only',
-    undefined,
-  ] as const)('keeps saved analysis choices with mode %s', (analysisMode) => {
-    state.settings = {
-      ...settingsFixture('localdev'),
-      enabled: false,
-      enabled_at: null,
-      configured: true,
-      deep_analysis: false,
-      execute: false,
-      analysis_mode: analysisMode,
-    } as MonitorSettings
-    renderWithClient(
-      <EnableMonitoringDialog target="db" open onClose={() => undefined} />
-    )
-    expect(
-      screen
-        .getByRole('switch', { name: 'Include deep analysis' })
-        .getAttribute('aria-checked')
-    ).toBe('false')
-    fireEvent.click(screen.getByRole('button', { name: 'Turn on monitoring' }))
-    expect(state.mutate).toHaveBeenCalledWith(
-      { enabled: true, deep_analysis: false, execute: false },
-      expect.anything()
-    )
-  })
-
-  it('starts with deep analysis on, warns about EXPLAIN ANALYZE, and locks the choice when off', () => {
-    state.limit = limit()
-    renderWithClient(
-      <EnableMonitoringDialog target="db" open onClose={() => undefined} />
-    )
-    const deep = screen.getByRole('switch', { name: 'Include deep analysis' })
-    expect(deep.getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByTestId('explain-analyze-warning').textContent).toContain(
-      'RDST will run EXPLAIN ANALYZE on problem queries'
-    )
-    fireEvent.click(deep)
-    expect(screen.queryByTestId('explain-analyze-warning')).toBeNull()
-    for (const radio of screen.getAllByRole('radio'))
-      expect(
-        radio.hasAttribute('disabled') ||
-          radio.getAttribute('data-disabled') !== null
-      ).toBe(true)
-  })
-
-  it('makes signing in the main action when signed out', () => {
-    state.limit = limit({ signed_in: false, known: false, limit: null })
-    renderWithClient(
-      <EnableMonitoringDialog target="db" open onClose={() => undefined} />
-    )
-    expect(
-      screen.getByRole('button', { name: 'Sign in to turn on AI monitoring' })
-    ).toBeTruthy()
-    expect(screen.getByTestId('ai-monitoring-sign-in').textContent).toContain(
-      "You're signed out, so monitoring runs locally"
-    )
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Turn on local monitoring' })
-    )
-    expect(state.mutate).toHaveBeenCalledWith(
-      expect.objectContaining({ enabled: true }),
-      expect.anything()
-    )
-  })
-
-  it('never implies an own key replaces signing in', () => {
-    state.limit = limit({ signed_in: false, own_key: true, known: false })
-    renderWithClient(
-      <EnableMonitoringDialog target="db" open onClose={() => undefined} />
-    )
-    expect(screen.getByTestId('ai-monitoring-sign-in').textContent).toContain(
-      "It doesn't replace signing in."
-    )
-  })
-})
-
-describe('monitoring location', () => {
-  it.each([
-    ['win32', 'system tray'],
-    ['linux', 'system tray'],
-    ['darwin', 'menu bar'],
-  ])('uses the platform words on %s', (platform, location) => {
-    window.rdstDesktop = { isDesktop: true, platform }
-    state.limit = limit()
-    renderWithClient(
-      <EnableMonitoringDialog target="db" open onClose={() => undefined} />
-    )
-    expect(
-      screen.getByText(
-        `Monitoring keeps running in the ${location} after you close this window.`
-      )
-    ).toBeTruthy()
-    expect(
-      screen.getByRole('switch', { name: 'Include deep analysis' })
-    ).toBeTruthy()
-    expect(screen.getByText('When RDST analyzes a problem query')).toBeTruthy()
   })
 })
 
@@ -442,37 +228,5 @@ describe('one monitoring status for every surface', () => {
     })
     expect(signedOut.label).toBe('AI off: signed out')
     expect(needsUserAction(signedOut)).toBe(true)
-  })
-})
-
-describe('database monitoring menu', () => {
-  it('offers monitoring off with confirmation and the settings', () => {
-    renderWithClient(
-      <MonitoringMenu
-        target="db"
-        settings={{ enabled: true, deep_analysis: true } as MonitorSettings}
-        status={monitoringStatus({ enabled: true, ai: 'on' })}
-        onEnable={vi.fn()}
-        onOpenSettings={vi.fn()}
-      />
-    )
-    fireEvent.click(screen.getByTestId('monitoring-menu-trigger'))
-    const menu = screen.getByTestId('monitoring-menu')
-    expect(menu.textContent).toContain('Turn off monitoring')
-    expect(menu.textContent).toContain('Monitoring settings')
-    expect(menu.textContent).not.toMatch(/Turn (on|off) deep analysis/)
-    expect(screen.getByTestId('monitoring-menu-detail').textContent).toBe(
-      monitoringStatus({ enabled: true, ai: 'on' }).detail
-    )
-    fireEvent.click(screen.getByRole('button', { name: /Turn off monitoring/ }))
-    expect(screen.getByRole('dialog').textContent).toContain(
-      'Turn off monitoring for db?'
-    )
-    expect(state.mutate).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Turn off monitoring' }))
-    expect(state.mutate).toHaveBeenCalledWith(
-      { enabled: false },
-      expect.anything()
-    )
   })
 })

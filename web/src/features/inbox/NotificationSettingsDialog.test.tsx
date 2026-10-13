@@ -1,5 +1,4 @@
 import {
-  act,
   cleanup,
   fireEvent,
   screen,
@@ -7,8 +6,6 @@ import {
   within,
 } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DesktopNotificationsBanner } from '@/components/DesktopNotificationsBanner'
-import type { DesktopNotificationHealth } from '@/lib/desktop'
 import {
   getSettings,
   resetStubState,
@@ -16,148 +13,180 @@ import {
 } from '@/lib/monitor/api'
 import { setFixtureOverride } from '@/lib/monitor/contract'
 import { renderWithClient } from '@/test-utils'
-import { NotificationSettingsDialog } from './NotificationSettingsDialog'
-
-function renderDialog() {
-  return renderWithClient(
-    <NotificationSettingsDialog
-      open
-      onClose={() => {}}
-      target="demo"
-      rules={[]}
-      loading={false}
-      names={new Map()}
-    />
-  )
-}
+import {
+  NotificationSettings,
+  quietHoursChoice,
+  quietHoursFor,
+} from './NotificationSettingsDialog'
 
 beforeEach(() => {
   setFixtureTiming(0)
   resetStubState()
-  setFixtureOverride('localdev')
+  setFixtureOverride('ca-inbox')
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  )
+  pushTo(true)
 })
+
+/** Push to this computer, as Settings stores it: the browser's choice and the OS permission. */
+function pushTo(on: boolean) {
+  vi.stubGlobal('Notification', {
+    permission: 'granted',
+    requestPermission: () => Promise.resolve('granted'),
+  })
+  localStorage.setItem('rdst_inbox_desktop_notifications', on ? '1' : '0')
+}
 
 afterEach(() => {
   cleanup()
   setFixtureOverride(undefined)
   vi.unstubAllGlobals()
-  delete window.rdstDesktop
+  localStorage.clear()
 })
 
-describe('NotificationSettingsDialog', () => {
-  it.each([
-    'linux_no_daemon',
-    'toast_failed',
-  ])('shares notification health with the banner for %s', async (reason) => {
-    const health: DesktopNotificationHealth = {
-      blocked: true,
-      reason,
-      message: "System notifications aren't available.",
-      trayLabel: null,
-      settingsUrl: null,
-      checkedAt: 1,
-    }
-    const listeners: ((health: DesktopNotificationHealth) => void)[] = []
-    window.rdstDesktop = {
-      isDesktop: true,
-      platform: 'linux',
-      notifications: {
-        getHealth: async () => health,
-        onHealthChange: (listener) => {
-          listeners.push(listener)
-          return () => {}
-        },
-        openSettings: vi.fn(),
-      },
-    }
-    renderDialog()
-    renderWithClient(<DesktopNotificationsBanner />)
-    const channel = screen.getByText('System notifications.').closest('li')!
-    await waitFor(() =>
-      expect(within(channel).getByText('Not available')).toBeTruthy()
-    )
-    expect(
-      await screen.findByTestId('desktop-notifications-banner')
-    ).toBeTruthy()
-    act(() => {
-      for (const listener of listeners)
-        listener({ ...health, blocked: false, reason: null, message: null })
-    })
-    expect(within(channel).getByText('Available')).toBeTruthy()
-    expect(screen.queryByTestId('desktop-notifications-banner')).toBeNull()
-  })
+async function openPopover() {
+  renderWithClient(<NotificationSettings target="demo" />)
+  fireEvent.click(screen.getByRole('button', { name: 'Notifications' }))
+  return screen.findByRole('dialog', { name: 'Notifications' })
+}
 
-  it.each([
-    'denied',
-    'unsupported',
-    'granted',
-    'default',
-  ])('uses browser support and permission %s', (permission) => {
-    vi.stubGlobal(
-      'Notification',
-      permission === 'unsupported' ? undefined : { permission }
+describe('NotificationSettings', () => {
+  it('opens from the bell with three switches, one caption and the quiet hours', async () => {
+    await openPopover()
+    const actNow = await screen.findByLabelText('Act now items')
+    await waitFor(() =>
+      expect(actNow.getAttribute('aria-checked')).toBe('true')
     )
-    if (permission === 'unsupported')
-      Reflect.deleteProperty(window, 'Notification')
-    renderDialog()
-    const channel = screen.getByText('This browser.').closest('li')!
+    expect(screen.getByLabelText('Fixes ready')).toBeTruthy()
     expect(
-      within(channel).getByText(
-        ['granted', 'default'].includes(permission)
-          ? 'Available'
-          : 'Not available'
+      screen.getByLabelText('Daily report').getAttribute('aria-checked')
+    ).toBe('true')
+    expect(
+      screen.getByText(
+        'Pushed once as a desktop notification. Nothing is sent by email.'
       )
     ).toBeTruthy()
     expect(
-      within(
-        screen.getByText('System notifications.').closest('li')!
-      ).getByText('Not available')
+      screen.getByRole('button', { name: 'Quiet hours: 11 PM to 7 AM' })
     ).toBeTruthy()
   })
 
-  it('in a browser, points to the desktop app and keeps the browser switch', async () => {
-    renderDialog()
-    expect(
-      await screen.findByText(/desktop app shows system notifications/)
-    ).toBeTruthy()
-    expect(screen.getByLabelText('Browser notifications')).toBeTruthy()
-    expect(screen.getByText(/Email and phone/)).toBeTruthy()
-  })
-
-  it('in the desktop app, system notifications are the switch and browser ones are hidden', async () => {
-    const set = vi.fn(async (enabled: boolean) => enabled)
-    window.rdstDesktop = {
-      isDesktop: true,
-      platform: 'win32',
-      getNotificationsEnabled: async () => true,
-      setNotificationsEnabled: set,
+  it('reads Push to this computer as Settings does: off, no switch reads on', async () => {
+    pushTo(false)
+    await openPopover()
+    const push = screen.getByLabelText('Push to this computer')
+    expect(push.getAttribute('aria-checked')).toBe('false')
+    for (const label of ['Act now items', 'Fixes ready', 'Daily report']) {
+      const row = screen.getByLabelText(label)
+      expect(row.getAttribute('aria-checked')).toBe('false')
+      expect(row.hasAttribute('disabled')).toBe(true)
     }
-    renderDialog()
-    const system = await screen.findByLabelText('System notifications')
+    expect(
+      screen.getByText(
+        'Push to this computer is off, so nothing is pushed. Nothing is sent by email.'
+      )
+    ).toBeTruthy()
+
+    fireEvent.click(push)
     await waitFor(() =>
-      expect(system.getAttribute('aria-checked')).toBe('true')
+      expect(
+        screen.getByLabelText('Act now items').getAttribute('aria-checked')
+      ).toBe('true')
     )
-    expect(screen.queryByLabelText('Browser notifications')).toBeNull()
-    fireEvent.click(system)
-    await waitFor(() => expect(set).toHaveBeenCalledWith(false))
+    expect(localStorage.getItem('rdst_inbox_desktop_notifications')).toBe('1')
   })
 
-  it('lists what notifies, with database unreachable on by default', async () => {
-    renderDialog()
-    const unreachable = await screen.findByLabelText('Database unreachable')
-    await waitFor(() =>
-      expect(unreachable.getAttribute('aria-checked')).toBe('true')
+  it('sends a test notification while push is on', async () => {
+    const shown = vi.fn()
+    vi.stubGlobal(
+      'Notification',
+      Object.assign(shown, {
+        permission: 'granted',
+        requestPermission: () => Promise.resolve('granted'),
+      })
     )
-    const resumed = screen.getByLabelText('Monitoring resumed')
-    expect(resumed.getAttribute('aria-checked')).toBe('false')
-    fireEvent.click(resumed)
-    await waitFor(async () =>
-      expect(
-        (await getSettings('demo')).notify_events?.database_recovered
-      ).toBe(true)
+    await openPopover()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Send a test notification' })
     )
+    expect(shown).toHaveBeenCalledWith('RDST test notification', {
+      body: undefined,
+      tag: undefined,
+    })
+  })
+
+  it('says the switches come with a database when there is none', async () => {
+    renderWithClient(<NotificationSettings />)
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications' }))
+    await screen.findByRole('dialog', { name: 'Notifications' })
     expect(
-      (await getSettings('demo')).notify_events?.database_unreachable
-    ).toBe(true)
+      screen.getByText(
+        'Add a database to choose what it pushes. Nothing is sent by email.'
+      )
+    ).toBeTruthy()
+    expect(screen.queryByLabelText('Act now items')).toBeNull()
+  })
+
+  it('writes a switch to the database settings', async () => {
+    await openPopover()
+    const fixes = await screen.findByLabelText('Fixes ready')
+    await waitFor(() => expect(fixes.getAttribute('aria-checked')).toBe('true'))
+    fireEvent.click(fixes)
+    await waitFor(async () =>
+      expect((await getSettings('demo')).notify_events?.query_changes).toBe(
+        false
+      )
+    )
+    expect((await getSettings('demo')).notify_events?.stuck_query).toBe(true)
+  })
+
+  it('writes the daily report switch to the database settings', async () => {
+    await openPopover()
+    const daily = await screen.findByLabelText('Daily report')
+    await waitFor(() => expect(daily.getAttribute('aria-checked')).toBe('true'))
+    fireEvent.click(daily)
+    await waitFor(async () =>
+      expect((await getSettings('demo')).notify_events?.daily_report).toBe(
+        false
+      )
+    )
+    expect((await getSettings('demo')).quiet_hours).toEqual({
+      from_hour: 23,
+      to_hour: 7,
+    })
+  })
+
+  it('opens the mute rules, each with Unmute, with or without a database', async () => {
+    renderWithClient(<NotificationSettings />)
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Show mute rules' })
+    )
+    const dialog = await screen.findByRole('dialog', { name: 'Mute rules' })
+    await waitFor(() =>
+      expect(
+        within(dialog).getAllByRole('button', { name: 'Unmute' }).length
+      ).toBe(3)
+    )
+    expect(screen.queryByRole('dialog', { name: 'Notifications' })).toBeNull()
+  })
+
+  it('reads the quiet hours from the settings and maps the menu to hours', () => {
+    expect(quietHoursChoice(undefined)).toBe('11 PM to 7 AM')
+    expect(quietHoursChoice({ from_hour: 23, to_hour: 7 })).toBe(
+      '11 PM to 7 AM'
+    )
+    expect(quietHoursChoice({ from_hour: 0, to_hour: 0 })).toBe('Off')
+    expect(quietHoursFor('Off')).toEqual({ from_hour: 0, to_hour: 0 })
+    expect(quietHoursFor('11 PM to 7 AM')).toEqual({
+      from_hour: 23,
+      to_hour: 7,
+    })
   })
 })

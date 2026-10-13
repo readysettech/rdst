@@ -1,7 +1,7 @@
 import json
 import sqlite3
 
-from shared.monitor.monitor_store import MonitorStore, SCHEMA_VERSION, _SCHEMA
+from shared.monitor.monitor_store import MonitorStore, SCHEMA_VERSION, _SCHEMA, _SCHEMA_V28
 
 
 def test_v1_store_migrates_without_losing_inbox(tmp_path):
@@ -159,3 +159,57 @@ def test_v18_rekey_follows_library_identities_and_keeps_colliding_rows(tmp_path)
     assert all(json.loads(row["body_json"])["query_key"] in (new, row["subject"])
                for row in migrated.read("SELECT subject, body_json FROM inbox_item"))
     assert path.with_name("monitor.db.pre-v18.bak").exists()
+
+
+def test_v30_action_rebuild_keeps_events_pointing_at_their_action(tmp_path):
+    path = tmp_path / "monitor.db"
+    with sqlite3.connect(path) as conn:
+        for statement in _SCHEMA.split(";"):
+            if statement.strip():
+                conn.execute(statement)
+        # The action table as schema 30 wrote it: no 'undone' state yet.
+        for statement in _SCHEMA_V28.split(";"):
+            if statement.strip():
+                conn.execute(statement.replace(",'undone'", ""))
+        conn.execute("INSERT INTO action (id,target,key,type,state,score,payload_json,opened_at,"
+                     "updated_at) VALUES (7,'db','posts:owneruserid','add_index','applied',0.4,"
+                     "'{}',1,2)")
+        conn.execute("INSERT INTO action_event (action_id,ts,kind,detail_json) VALUES (7,2,"
+                     "'applied','{}')")
+        conn.execute("PRAGMA user_version=30")
+    store = MonitorStore(path)
+    assert store.read("SELECT action_id,kind FROM action_event") == [{"action_id": 7,
+                                                                       "kind": "applied"}]
+    assert store.read("SELECT id,state FROM action") == [{"id": 7, "state": "applied"}]
+    store._write(lambda conn: conn.execute("UPDATE action SET state='undone' WHERE id=7"))
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+
+
+def test_v31_analysis_jobs_preserve_history_and_accept_estimated_parameters(tmp_path):
+    path = tmp_path / "monitor.db"
+    store = MonitorStore(path)
+    queued = store.enqueue_analysis("db", "q", "user", 1, 1)
+    with sqlite3.connect(path) as conn:
+        sql = conn.execute("SELECT sql FROM sqlite_master WHERE name='analyze_job'").fetchone()[0]
+        indexes = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' "
+                               "AND tbl_name='analyze_job' AND sql IS NOT NULL").fetchall()
+        conn.execute(sql.replace('"analyze_job"', 'analyze_job_v31').replace(
+            ",\'estimated\'", ""))
+        conn.execute("INSERT INTO analyze_job_v31 SELECT * FROM analyze_job")
+        conn.execute("DROP TABLE analyze_job")
+        conn.execute("ALTER TABLE analyze_job_v31 RENAME TO analyze_job")
+        for index in indexes:
+            conn.execute(index[0])
+        conn.execute("PRAGMA user_version=31")
+    migrated = MonitorStore(path)
+    job = migrated.claim_analysis("db", 2)
+    assert job["id"] == queued["id"]
+    assert migrated.finish_analysis(job["id"], "done", 3, owner=job["owner"],
+                                    attempt=job["attempt"], mode="explain", param_source="estimated")
+    assert migrated.analyze_jobs("db")[0]["param_source"] == "estimated"
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        assert conn.execute("SELECT sql FROM sqlite_master WHERE type='index' "
+                            "AND tbl_name='analyze_job' AND sql IS NOT NULL").fetchall() == indexes

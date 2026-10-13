@@ -48,6 +48,13 @@ async def _to_thread(target: str, function: Callable[..., Any], *args: Any) -> A
     return await _work(target).run(target, function, *args)
 
 
+async def _model_thread(target: str, function: Callable[..., Any], *args: Any) -> Any:
+    """A model call never touches the database, so it runs outside the target's lock and a
+    slow model does not hold up monitor passes."""
+    _work(target).guard.check()
+    return await asyncio.to_thread(function, *args)
+
+
 async def stop_report_threads() -> None:
     work = list(_thread_work.items())
     await asyncio.gather(*(entry.stop() for _, entry in work))
@@ -496,13 +503,49 @@ def _local_day(ts: int) -> str:
 HEADLINE_QUIET_S = 7 * 86400
 
 
+def _month_day(ts: int) -> str:
+    moment = datetime.fromtimestamp(ts)
+    return f"{moment.strftime('%B')} {moment.day}"
+
+
+def _report_day_label(report: dict[str, Any], ts: int) -> str:
+    start = ((report.get("snapshot") or {}).get("period") or {}).get("start")
+    return _month_day(int(start) if isinstance(start, int) else ts)
+
+
+def _analysis_count(report: dict[str, Any]) -> int:
+    return len([item for item in (report.get("computed") or {}).get("analyses") or []
+                if isinstance(item, dict) and not item.get("provisional")])
+
+
+def _file_on_request_report(store: MonitorStore, target: str, run_id: int, ts: int, *,
+                            first: bool) -> None:
+    """One report_ready item per on-request run, Inbox only; the first report pushes once.
+    Earlier open report items close."""
+    row = store.report(run_id)
+    report = json.loads(row["report_json"] or "{}") if row else {}
+    label = _report_day_label(report, ts)
+    title = f"First report for {label} is ready" if first else f"Report for {label} is ready"
+    body = {"report_id": run_id, "summary": str(report.get("summary") or ""),
+            "analyses": _analysis_count(report), "first": first}
+    item = store.upsert_item(target, "report_ready", f"run:{run_id}", .6, title, body, ts,
+                             delivery="notify" if first else "inbox")
+    for other in store.read("SELECT id FROM inbox_item WHERE target=? AND type='report_ready' "
+                            "AND id!=? AND state NOT IN ('resolved','dismissed')",
+                            (target, item["id"])):
+        store.action_item(other["id"], "resolve", ts, resolved_by="code")
+
+
 def _file_report_items(store: MonitorStore, target: str, run_id: int, ts: int,
-                       narrative: dict[str, Any], trigger: str) -> None:
-    """File measured health findings and one report notification for new bad findings."""
-    if trigger != "nightly":
-        return
+                       narrative: dict[str, Any], trigger: str, *, first: bool = False) -> None:
+    """File the report's own item. A nightly run pushes its report when it has new bad
+    findings; an on-request run files report_ready in the Inbox, and the first report pushes
+    once. Fixes are Actions, announced by their own Changes ready event."""
     from features.monitor.db_actions import SECTION_OF
 
+    if trigger != "nightly":
+        _file_on_request_report(store, target, run_id, ts, first=first)
+        return
     row = store.report(run_id)
     report = json.loads(row["report_json"] or "{}") if row else {}
     collectors = (report.get("computed") or {}).get("health_collectors") or {}
@@ -535,11 +578,12 @@ def _file_report_items(store: MonitorStore, target: str, run_id: int, ts: int,
     headlines = [action for action in actions
                  if action["severity"] == "bad" and checked(action["check"], action["id"])
                  and f"db:{action['id']}" in opened]
-    body = {"report_id": run_id, "summary": narrative["summary"]}
-    title = "Checkup ready"
+    body = {"report_id": run_id, "summary": narrative["summary"],
+            "analyses": _analysis_count(report)}
+    # The report keeps its own title so its row never reads like the action it headlines.
+    title = f"Daily report for {_report_day_label(report, ts)} is ready"
     if headlines:
-        title = headlines[0]["title"] if len(headlines) == 1 else f"{len(headlines)} things to fix on {target}"
-        body.update(headline_title=title, headline_summary=headlines[0]["finding"] +
+        body.update(headline_title=headlines[0]["title"], headline_summary=headlines[0]["finding"] +
                     (f" Plus {len(headlines) - 1} more in today's report." if len(headlines) > 1 else ""))
     existing = next((item for item in store.inbox(target=target)
                      if item["type"] == "daily_summary" and item["subject"] == _local_day(ts)), None)
@@ -655,7 +699,8 @@ async def run_report(target: str, trigger: Literal["nightly", "user"], *,
                      explain: Callable[[str, str], dict[str, Any]] = plain_explain,
                      collect: Callable[[str], tuple[dict[str, Any], dict[str, Any]]] = _collect_context,
                      narrate: Callable[[dict[str, Any]], dict[str, Any]] = _narrate,
-                     claimed_run: dict[str, Any] | None = None) -> dict[str, Any]:
+                     claimed_run: dict[str, Any] | None = None,
+                     first_report: bool = False) -> dict[str, Any]:
     from features.monitor.presentation import display_name
 
     _work(target, restart=True)
@@ -849,7 +894,7 @@ async def run_report(target: str, trigger: Literal["nightly", "user"], *,
                     # Local-only, a used-up allowance or a recent refusal: no model call.
                     raise RuntimeError("AI_PAUSED: AI monitoring is paused for this database")
                 narrative = _bound_narrative(
-                    validate_narrative(await _to_thread(target, narrate, context)), context)
+                    validate_narrative(await _model_thread(target, narrate, context)), context)
                 narrative_error = None
             except Exception as exc:
                 logger.warning("Report narrative unavailable for %s: %s", target, exc)
@@ -907,7 +952,8 @@ async def run_report(target: str, trigger: Literal["nightly", "user"], *,
                                     "Report written")
         except Exception:
             logger.debug("Report pulse not recorded for %s", target, exc_info=True)
-        await asyncio.to_thread(_file_report_items, store, target, run_id, now, narrative, trigger)
+        await asyncio.to_thread(_file_report_items, store, target, run_id, now, narrative, trigger,
+                                first=first_report)
         return _present(store.report(run_id))
     except asyncio.CancelledError:
         cancelled = run_id in _cancel_requested
@@ -950,8 +996,10 @@ def _present(row: dict[str, Any] | None) -> dict[str, Any]:
             "progress": json.loads(row["progress_json"] or "null")}
 
 
-def present_report(row: dict[str, Any], store: MonitorStore) -> dict[str, Any]:
-    """The contract DatabaseReport: no internal counters or raw collector payloads."""
+def present_report(row: dict[str, Any], store: MonitorStore, *,
+                   view: str = "quick") -> dict[str, Any]:
+    """The contract DatabaseReport: no internal counters or raw collector payloads. The
+    detailed view adds its sections under `detailed`; both views read one payload."""
     from features.monitor.presentation import (
         fix_title, health_label, health_status, health_value, lead_with_finding, mentioned_keys,
         query_refs,
@@ -1035,7 +1083,19 @@ def present_report(row: dict[str, Any], store: MonitorStore) -> dict[str, Any]:
                 f"AND query_key IN ({placeholders})", (row["target"], *sorted(missing)))})
         refs = query_refs(keys, texts, names)
     period = _period_of(row)
-    return {"id": row["id"], "target": row["target"], "ts": row["ts"], "trigger": row["trigger"],
+    fixed = store.read("SELECT * FROM inbox_item WHERE target=? AND type='fix_confirmed' "
+                       "AND state='resolved' AND resolved_at>=? ORDER BY resolved_at DESC LIMIT 20",
+                       (row["target"], period[0]))
+    limits = store.read("SELECT max_conns FROM db_series WHERE target=? AND res=60 "
+                        "AND max_conns IS NOT NULL ORDER BY bucket_start DESC LIMIT 1",
+                        (row["target"],))
+    page = report_v2.view(row, report if isinstance(report, dict) else None, body, store,
+                          signed_in=database_limit._signed_in(), fixed=fixed,
+                          engine=str((day or {}).get("engine") or "postgresql"),
+                          max_conns=limits[0]["max_conns"] if limits else None,
+                          detailed=view == "detailed")
+    return {**page, "id": row["id"], "target": row["target"], "ts": row["ts"],
+            "trigger": row["trigger"],
             "state": row["state"], "provisional": bool(row["provisional"]),
             "finished_at": row.get("finished_at"), "period_start": period[0],
             "period_end": period[1], "period_partial": period[2],
@@ -1363,7 +1423,7 @@ class ReportScheduler:
                 target, run = args
                 work = run_report(target, "user" if kind == "first" else "nightly",
                                   store=self.store, clock=self.clock, claimed_run=run,
-                                  wake_queue=_wake_analyze_queue)
+                                  wake_queue=_wake_analyze_queue, first_report=kind == "first")
             run_id = None if kind == "retry" else args[1]["id"]
             task = asyncio.create_task(self._in_slot(work, run_id))
             self._runs.add(task)
@@ -1401,7 +1461,7 @@ class ReportScheduler:
                 "monitor", "web", operation="monitor_report",
             ):
                 narrative = _bound_narrative(
-                    validate_narrative(await _to_thread(target, _narrate, report["computed"])),
+                    validate_narrative(await _model_thread(target, _narrate, report["computed"])),
                     report["computed"])
             if isinstance(report.get("snapshot"), dict):
                 checks = health_findings(report["snapshot"])

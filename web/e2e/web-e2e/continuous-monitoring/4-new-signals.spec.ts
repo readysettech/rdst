@@ -7,6 +7,7 @@ import {
   findItem,
   hold,
   hook,
+  inboxDetail,
   inboxRow,
   items,
   ok,
@@ -49,9 +50,19 @@ test('held locks file a lock item that names the blocker, notifies once and reco
     await openInbox(page)
     const row = await revealRow(page, item.id)
     await expect(row).toContainText('Queries waiting on locks')
+    await expect(row.getByTestId('inbox-item-database')).toHaveText(item.target)
     await expect(
-      page.getByRole('region', { name: 'Urgent', exact: true })
+      page.getByRole('region', { name: 'Act now', exact: true })
     ).toContainText('Queries waiting on locks')
+    // A database-wide item shows the open action that would likely fix it, when one is open.
+    const fix = (item as typeof item & { action?: { title: string } | null })
+      .action
+    if (fix) {
+      await row.click()
+      await expect(
+        inboxDetail(page, item.id).getByTestId('item-likely-fix')
+      ).toContainText(fix.title)
+    }
     await hold(10)
     expect(
       (await hook.events(request, item.id)).filter(
@@ -150,7 +161,8 @@ test('a nightly checkup opens an action for a new bad finding and pushes once', 
   )!
   expect(summary).toBeTruthy()
   expect(summary.delivery).toBe('notify')
-  expect(summary.title).toBe(vacuum.title)
+  expect(summary.title).toMatch(/^Daily report for .* is ready$/)
+  expect(body(summary).headline_title).toBe(vacuum.title)
   await eventually(
     testInfo,
     'health-notification',
@@ -164,7 +176,10 @@ test('a nightly checkup opens an action for a new bad finding and pushes once', 
   await page.goto(`/inbox?item=${summary.id}`)
   const row = inboxRow(page, summary.id)
   await expect(row).toBeVisible({ timeout: 30_000 })
-  await expect(row).toContainText(vacuum.title)
+  await expect(row).toHaveAttribute('aria-current', 'true')
+  const detail = inboxDetail(page, summary.id)
+  await expect(detail).toContainText(vacuum.title)
+  await expect(detail.getByRole('link', { name: 'Open report' })).toBeVisible()
   // The action was already open, so the next night's checkup doesn't push it again.
   expect((await hook.nightly(request)).state).toBe('done')
   await hold(10)

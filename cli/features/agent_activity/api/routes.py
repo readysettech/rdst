@@ -13,7 +13,7 @@ from fastapi.responses import Response
 from features.agent_activity.api import models
 from features.agent_activity.api.models import AgentAction, AgentGroup, AgentOutcome
 from features.monitor.api.models import documented
-from shared.agent_activity.store import AgentActivityStore
+from shared.agent_activity.store import RETENTION_DAYS, AgentActivityStore
 
 router = APIRouter()
 
@@ -48,7 +48,7 @@ def agent_activity(
                           utc_offset=utc_offset)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return {**page, "targets": store.targets()}
+    return {**page, "targets": store.targets(), "retention_days": RETENTION_DAYS}
 
 
 def _day(ts: int, utc_offset: int) -> str:

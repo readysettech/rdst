@@ -147,23 +147,13 @@ test('promotes the index the planner verified with hypopg', async ({
   })
   await openResults(page)
 
-  await expect(
-    page.getByText('Recommended next step', { exact: true })
-  ).toBeVisible()
   // The planner-verified composite index wins over the guessed "high" one.
+  const fix = page.getByRole('region', { name: 'Fix', exact: true })
+  await expect(fix.getByRole('code')).toHaveText(
+    'CREATE INDEX idx_orders_customer_status ON orders (customer_id, status)'
+  )
   await expect(
-    page.getByText('Planner-verified', { exact: true })
-  ).toBeVisible()
-  await expect(
-    page.getByText(
-      /hypopg check: the planner uses this index \(Bitmap Index Scan\)\. Planner estimate 49,586 to 36 \(99\.9% lower\)/
-    )
-  ).toBeVisible()
-  // The index the planner ignores is still listed, with an explicit verdict.
-  await expect(
-    page.getByText(
-      /hypopg check: the planner would not use this index for this query/
-    )
+    fix.getByText('Planner uses it: cost 49,586 to 36')
   ).toBeVisible()
 })
 
@@ -185,15 +175,10 @@ test('explains how to enable planner verification when hypopg is missing', async
   })
   await openResults(page)
 
-  await expect(
-    page.getByText('Recommended next step', { exact: true })
-  ).toBeVisible()
-  await expect(page.getByText('Planner-verified', { exact: true })).toHaveCount(
-    0
-  )
-  await expect(
-    page.getByText(/hypopg check unavailable: hypopg is available/)
-  ).toBeVisible()
+  const fix = page.getByRole('region', { name: 'Fix', exact: true })
+  await expect(fix).toBeVisible()
+  await expect(fix.getByText(/Planner uses it/)).toHaveCount(0)
+  // The guidance names the statement that turns planner verification on.
   await expect(
     page.getByText('CREATE EXTENSION IF NOT EXISTS hypopg;')
   ).toBeVisible()
@@ -272,6 +257,6 @@ test('offers sampled real values for a templated query before analyzing', async 
     target: 'e2e-guard',
   })
   await expect(
-    page.getByText('Recommended next step', { exact: true })
+    page.getByRole('img', { name: 'Plan score 32 out of 100' })
   ).toBeVisible()
 })

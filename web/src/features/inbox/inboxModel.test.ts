@@ -2,10 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { muteRuleInput, muteScopes } from '@/features/monitor-kit/MuteMenu'
 import {
   alertTypeLabel,
-  bandFor,
-  countsAsUnread,
   describeRule,
-  itemBand,
   ruleMatches,
 } from '@/features/monitor-kit/severity'
 import {
@@ -18,20 +15,32 @@ import {
 } from '@/lib/monitor/api'
 import { setFixtureOverride } from '@/lib/monitor/contract'
 import { FIXTURE_TARGET, inboxItems } from '@/lib/monitor/fixtures'
+import { at, CA_NOW } from '@/lib/monitor/fixturesCa'
 import type { InboxItem, MuteRule } from '@/lib/monitor/types'
-import { adviceSteps } from './adviceSteps'
-import { itemLink, linkRoute } from './inboxLinks'
+import { fixRoute, itemLink, itemRoute, linkRoute } from './inboxLinks'
 import {
-  closedLabel,
+  asideItems,
+  bandOf,
+  closedGroups,
+  closedSentence,
+  detailMeta,
+  emptySentence,
   formatStampTime,
-  groupItems,
-  groupSummary,
+  inboxClock,
   inboxCounts,
-  itemPlace,
-  recentlyClosedItems,
-  sentStamp,
-  shapeOpen,
+  isMuted,
+  keptClosed,
+  kindOf,
+  noChangeText,
+  openGroups,
+  queueTime,
+  rowMeta,
+  runningText,
+  sameWords,
   summaryTokens,
+  timePhrase,
+  wholeSentences,
+  withoutDatabase,
 } from './inboxModel'
 
 const NOW = 1_790_611_200
@@ -44,110 +53,173 @@ beforeEach(() => {
 
 afterEach(() => setFixtureOverride(undefined))
 
-async function openInbox() {
-  const [{ items }, { rules }] = await Promise.all([
-    getInbox({ state: 'open', include_muted: true }),
-    getMuteRules(),
+async function redesignInbox() {
+  setFixtureOverride('ca-inbox')
+  const [open, done] = await Promise.all([
+    getInbox({ state: 'open' }),
+    getInbox({ state: 'done' }),
   ])
-  return { items, rules, shaped: shapeOpen(items, rules) }
+  return { open: open.items, closed: done.items }
 }
 
-describe('severity bands', () => {
-  it('maps severity and type to act now, watch and FYI', () => {
-    expect(bandFor('latency_regression', 0.9)).toBe('act_now')
-    expect(bandFor('stuck_query', 0.3)).toBe('act_now')
-    expect(bandFor('latency_regression', 0.7)).toBe('watch')
-    expect(bandFor('latency_regression', 0.4)).toBe('fyi')
-    expect(bandFor('query_improved', 0.7)).toBe('fyi')
-  })
-
-  it('lists the fixture as Act now and Watch, with FYI last in Watch', async () => {
-    expect(inboxItems(NOW)).toHaveLength(47)
-    const { shaped } = await openInbox()
-    const { act_now, watch } = shaped.sections
-    expect([act_now.count, watch.count]).toEqual([2, 7])
-    // Recoveries from the last day list apart from the open alerts.
-    expect(shaped.recovered).toHaveLength(2)
-    // FYI rows sort after every real Watch row.
-    const bands = watch.groups.map((group) => itemBand(group.lead))
-    expect(bands.indexOf('fyi')).toBeGreaterThan(bands.lastIndexOf('watch'))
-    // Three stopped queries filed minutes apart collapse into one row.
-    const stopped = watch.groups.find((group) => group.items.length > 1)
-    expect(stopped?.items).toHaveLength(3)
-    expect(stopped && groupSummary(stopped)).toMatch(
-      /^3 alerts like this on localdev, filed within \d+ min of each other$/
-    )
-  })
-
-  it('gives the tabs, sections and badge one set of counts', async () => {
-    const { items, rules, shaped } = await openInbox()
-    const counts = inboxCounts(items, rules)
-    expect(counts).toEqual(shaped.counts)
-    expect(counts.open).toBe(counts.actNow + counts.watch)
-    expect(counts.actNow).toBe(shaped.sections.act_now.count)
-    expect(counts.watch).toBe(shaped.sections.watch.count)
-    expect(counts.muted).toBe(shaped.muted.length)
-    // Every open alert lands in exactly one place.
-    const listed =
-      counts.open + counts.muted + counts.snoozed + shaped.recovered.length
-    expect(listed).toBe(items.length)
-  })
-
-  it('places recoveries and closed alerts apart from the live sections', () => {
-    const [item] = inboxItems(NOW)
-    expect(itemPlace({ ...item, severity_band: 'act_now' })).toBe('act_now')
-    expect(itemPlace({ ...item, severity_band: 'fyi' })).toBe('watch')
-    expect(itemPlace({ ...item, severity_band: 'recovered' })).toBe('resolved')
-    expect(itemPlace({ ...item, state: 'dismissed' })).toBe('resolved')
-  })
-
-  it('counts unread only for new, unmuted act now and watch items', () => {
-    const [episode] = inboxItems(NOW)
-    expect(countsAsUnread(episode)).toBe(true)
-    expect(countsAsUnread({ ...episode, state: 'seen' })).toBe(false)
-    expect(countsAsUnread({ ...episode, muted_by: 3 })).toBe(false)
+describe('bands and kinds', () => {
+  it('reads the redesign fields and derives them for older items', () => {
+    const [older] = inboxItems(NOW)
+    expect(bandOf({ ...older, band: 'watch' })).toBe('watch')
+    expect(kindOf({ ...older, kind: 'fixes_ready' })).toBe('fixes_ready')
+    const stuck = {
+      ...older,
+      type: 'stuck_query',
+      severity: 0.9,
+      kind: undefined,
+      band: undefined,
+    }
+    expect(kindOf(stuck)).toBe('stuck_query')
+    expect(bandOf(stuck)).toBe('act_now')
+    expect(bandOf({ ...stuck, state: 'resolved' })).toBe('closed')
     expect(
-      countsAsUnread({ ...episode, severity: 0.2, severity_band: 'fyi' })
-    ).toBe(false)
+      kindOf({ ...older, type: 'latency_regression', kind: undefined })
+    ).toBe('other')
+    for (const type of ['changes_ready', 'no_change_yet'])
+      expect(kindOf({ ...older, type, kind: undefined })).toBe(type)
+  })
+
+  it('lets the state win over the band the item was fetched with', async () => {
+    const { open, closed } = await redesignInbox()
+    expect(bandOf({ ...open[0], state: 'resolved' })).toBe('closed')
+    expect(bandOf({ ...closed[0], state: 'new' })).toBe('watch')
+  })
+
+  it('counts open items once, leaving muted, snoozed and closed ones out', async () => {
+    const { open, closed } = await redesignInbox()
+    const counts = inboxCounts([...open, ...closed], [])
+    expect(counts).toMatchObject({ open: 2, actNow: 1, watch: 1 })
+    expect(inboxCounts([{ ...open[0], state: 'snoozed' }], []).snoozed).toBe(1)
   })
 })
 
-describe('grouping', () => {
-  it('keeps singletons as item rows and orders groups by urgency', () => {
-    const items = inboxItems(NOW).slice(0, 12)
-    const groups = groupItems(items)
-    expect(groups[0].lead.type).toBe('many_queries_changed')
-    expect(groups.find((group) => group.id.startsWith('item:'))).toBeTruthy()
+describe('queue groups', () => {
+  it('lists Act now then Watch on Open, closed items staying behind Closed', async () => {
+    const { open, closed } = await redesignInbox()
+    const groups = openGroups([...open, ...closed])
+    expect(groups.map((group) => [group.label, group.items.length])).toEqual([
+      ['Act now', 1],
+      ['Watch', 1],
+    ])
+    expect(groups[0].items[0].title).toBe('Stuck query on demo')
+    expect(groups[1].items[0].kind).toBe('changes_ready')
   })
 
-  it('lists recoveries and alerts closed in the last 24 hours, newest first, once', () => {
-    const done = inboxItems(NOW).filter((item) => item.state === 'resolved')
-    const [listed] = done
-    const old = { ...done[1], resolved_at: NOW - 25 * 3600 }
-    const recovered = {
-      ...inboxItems(NOW)[0],
-      id: 9999,
-      state: 'resolved' as const,
-      severity_band: 'recovered' as const,
-      resolved_at: NOW - 60,
-    }
-    const live = {
-      ...inboxItems(NOW)[0],
-      id: 9998,
-      severity_band: 'watch' as const,
-    }
-    const recent = recentlyClosedItems(
-      [listed, recovered, live],
-      [...done.slice(2), old, listed],
-      NOW
+  it('leaves out a group with nothing in it', () => {
+    expect(openGroups([])).toEqual([])
+  })
+
+  it('groups Closed by Today, Yesterday and Earlier this week, kept 7 days', async () => {
+    const { closed } = await redesignInbox()
+    const groups = closedGroups(closed, CA_NOW)
+    expect(groups.map((group) => [group.label, group.items.length])).toEqual([
+      ['Today', 3],
+      ['Yesterday', 3],
+      ['Earlier this week', 2],
+    ])
+    expect(groups[0].items.map((item) => item.id)).toEqual([5, 4, 13])
+    expect(keptClosed(closed, at(9, 56, 0, 8))).toEqual([])
+  })
+
+  it('uses the fixture clock while a redesign scenario is on', () => {
+    setFixtureOverride('ca-inbox')
+    expect(inboxClock()).toBe(CA_NOW)
+    setFixtureOverride('localdev')
+    expect(Math.abs(inboxClock() - Date.now() / 1000)).toBeLessThan(5)
+  })
+})
+
+describe('row and header words', () => {
+  it('shows the clock today, the clock with AM or PM yesterday, the weekday before', () => {
+    expect(queueTime(at(9, 55), CA_NOW)).toBe('9:55')
+    expect(queueTime(at(0, 0), CA_NOW)).toBe('12:00')
+    expect(queueTime(at(16, 31, 0, -1), CA_NOW)).toBe('4:31 PM')
+    expect(queueTime(at(14, 25, 0, -2), CA_NOW)).toBe('Tue')
+    expect(queueTime(at(14, 25, 0, -9), CA_NOW)).toBe('Sep 29')
+  })
+
+  it('says how long a stuck statement has run, only while it runs', async () => {
+    const { open, closed } = await redesignInbox()
+    const stuck = open.find((item) => item.kind === 'stuck_query') as InboxItem
+    expect(runningText(stuck, CA_NOW)).toBe('running 4 min')
+    expect(runningText({ ...stuck, running_s: null }, CA_NOW)).toBe(
+      'running 2 min'
     )
-    const ids = recent.map((item) => item.id)
-    expect(ids.filter((id) => id === listed.id)).toHaveLength(1)
-    expect(ids[0]).toBe(recovered.id)
-    expect(ids).not.toContain(old.id)
-    expect(ids).not.toContain(live.id)
-    const times = recent.map((item) => item.resolved_at ?? item.updated_at)
-    expect(times).toEqual([...times].sort((a, b) => b - a))
+    expect(runningText(closed[0], CA_NOW)).toBeNull()
+    expect(rowMeta(stuck)).toBe('COUNT on posts with pg_sleep')
+    expect(rowMeta(closed[0])).toBe(closed[0].summary)
+  })
+
+  it('leaves the database out of the caption, which shows it under the time', async () => {
+    const { closed } = await redesignInbox()
+    expect(withoutDatabase('staging, 41.2 ms to 3.4 ms', 'staging')).toBe(
+      '41.2 ms to 3.4 ms'
+    )
+    expect(withoutDatabase('3 of 8 checks need you on demo.', 'demo')).toBe(
+      '3 of 8 checks need you.'
+    )
+    expect(withoutDatabase('demographics grew', 'demo')).toBe(
+      'demographics grew'
+    )
+    const staging = closed.find((item) => item.id === 7) as InboxItem
+    expect(rowMeta(staging)).toBe('41.2 ms to 3.4 ms')
+  })
+
+  it('says what a change that did not move still costs', async () => {
+    const { closed } = await redesignInbox()
+    const none = closed.find((item) => item.kind === 'no_change_yet')
+    expect(noChangeText(none as InboxItem)).toBe(
+      'index applied October 6, still 14 ms after 2 days'
+    )
+    expect(rowMeta(none as InboxItem)).toBe(
+      'index applied October 6, still 14 ms after 2 days'
+    )
+    const bare = { ...(none as InboxItem), body_json: '{}' }
+    expect(noChangeText(bare)).toBeNull()
+    expect(rowMeta(bare)).toBe(bare.summary)
+  })
+
+  it('names the database and the moment in the detail header', async () => {
+    const { open, closed } = await redesignInbox()
+    expect(detailMeta(open[0])).toBe('demo, filed 9:55 AM')
+    expect(detailMeta(open[1])).toBe('demo, filed 9:51 AM')
+    expect(detailMeta(closed[0])).toBe('demo, closed 9:48 AM')
+  })
+
+  it('sums up the open queue for the empty detail panel', () => {
+    expect(emptySentence(1, 1)).toBe('1 item needs you, 1 to watch.')
+    expect(emptySentence(2, 0)).toBe('2 items need you, 0 to watch.')
+    expect(emptySentence(0, 3)).toBe('Nothing needs you, 3 to watch.')
+  })
+
+  it('counts the closed list for its empty panel', () => {
+    expect(closedSentence(1)).toBe('1 item closed in the last 7 days.')
+    expect(closedSentence(0)).toBe('Nothing closed in the last 7 days.')
+  })
+
+  it('treats a summary that repeats the title as the same words', () => {
+    expect(sameWords('Stuck query ended.', 'Stuck query ended')).toBe(true)
+    expect(sameWords('Ran for 9 min.', 'Stuck query ended')).toBe(false)
+    expect(sameWords(null, 'Stuck query ended')).toBe(false)
+  })
+})
+
+describe('time phrases', () => {
+  it('names today, yesterday and older days', () => {
+    const now = new Date(2026, 8, 29, 11, 40).getTime() / 1000
+    const today = new Date(2026, 8, 29, 9, 42).getTime() / 1000
+    const yesterday = new Date(2026, 8, 28, 23, 5).getTime() / 1000
+    const older = new Date(2026, 8, 26, 16, 10).getTime() / 1000
+    expect(formatStampTime(today, now)).toBe('9:42 AM')
+    expect(formatStampTime(yesterday, now)).toBe('yesterday 11:05 PM')
+    expect(formatStampTime(older, now)).toBe('Sep 26, 4:10 PM')
+    expect(timePhrase('at', yesterday, now)).toBe('yesterday at 11:05 PM')
+    expect(timePhrase('by', older, now)).toBe('on Sep 26 by 4:10 PM')
   })
 })
 
@@ -192,17 +264,20 @@ describe('mute rules', () => {
     }
     const rule = await createMuteRule(muteRuleInput(subject, scope, 'week'))
     expect(rule.until).not.toBeNull()
-    let { shaped } = await openInbox()
-    expect(shaped.muted.map((muted) => muted.id)).toContain(item.id)
-    expect(
-      Object.values(shaped.sections).flatMap((section) =>
-        section.groups.flatMap((group) => group.items.map((i) => i.id))
-      )
-    ).not.toContain(item.id)
+    const muted = async () => {
+      const [{ items }, { rules }] = await Promise.all([
+        getInbox({ state: 'open', include_muted: true }),
+        getMuteRules(),
+      ])
+      const listed = items.find((candidate) => candidate.id === item.id)
+      return listed ? isMuted(listed, rules) : false
+    }
+    expect(await muted()).toBe(true)
+    const { items } = await getInbox({ state: 'open' })
+    expect(items.map((candidate) => candidate.id)).not.toContain(item.id)
 
     await deleteMuteRule(rule.id)
-    ;({ shaped } = await openInbox())
-    expect(shaped.muted.map((muted) => muted.id)).not.toContain(item.id)
+    expect(await muted()).toBe(false)
   })
 
   it('matches on target, type and query, and ignores expired rules', () => {
@@ -224,7 +299,7 @@ describe('mute rules', () => {
       ruleMatches({ ...base, type: null, query_key: 'other' }, item, NOW)
     ).toBe(false)
     expect(describeRule({ ...base, target: null })).toBe(
-      'Query got slower on all targets'
+      'Query got slower on all databases'
     )
   })
 })
@@ -317,111 +392,34 @@ describe('deep links', () => {
     ).toBe('/account-login')
   })
 
+  it('opens Actions on the database, a measured change on Applied', async () => {
+    const { open, closed } = await redesignInbox()
+    const ready = open.find((item) => item.kind === 'changes_ready')
+    expect(itemRoute(ready as InboxItem)).toEqual({
+      to: '/actions',
+      search: { db: 'demo' },
+    })
+    const none = closed.find((item) => item.kind === 'no_change_yet')
+    expect(itemRoute(none as InboxItem)).toEqual({
+      to: '/actions',
+      search: { db: 'demo', scope: 'applied' },
+    })
+    expect(
+      fixRoute({
+        ...(ready as InboxItem),
+        action: {
+          id: 4,
+          title: 'Raise max_connections',
+          type: 'change_setting',
+        },
+      })
+    ).toEqual({ to: '/actions', search: { db: 'demo', action: '4' } })
+  })
+
   it('falls back to the query row for items without a link', () => {
     const { link: _link, ...legacy } = base
     const single = { ...legacy, query_keys: ['k1'] } as InboxItem
     expect(itemLink(single)).toMatchObject({ kind: 'query', query_key: 'k1' })
-  })
-})
-
-describe('what you can do', () => {
-  it('splits SQL out of a step so it can be copied', () => {
-    expect(
-      adviceSteps([
-        'Cancel it: SELECT pg_cancel_backend(<pid>);',
-        'Check the service that runs it.',
-      ])
-    ).toEqual([
-      { text: 'Cancel it', sql: 'SELECT pg_cancel_backend(<pid>);' },
-      { text: 'Check the service that runs it.', sql: null },
-    ])
-  })
-})
-
-describe('closed labels', () => {
-  const [item] = inboxItems(NOW)
-  const closed = NOW - 3600
-  const time = formatStampTime(closed, NOW)
-  it('says how it ended, as observed', () => {
-    const base = { ...item, state: 'resolved' as const, resolved_at: closed }
-    expect(
-      closedLabel(
-        { ...base, resolved_by: 'code', severity_band: 'recovered' },
-        NOW
-      )
-    ).toBe(`Every query back to normal at ${time}`)
-    expect(
-      closedLabel(
-        { ...base, type: 'query_stopped_running', resolved_by: 'code' },
-        NOW
-      )
-    ).toBe(`Running again at ${time}`)
-    expect(closedLabel({ ...base, resolved_by: 'user' }, NOW)).toBe(
-      `You resolved it at ${time}`
-    )
-    expect(
-      closedLabel({ ...base, state: 'dismissed', resolved_by: null }, NOW)
-    ).toBe(`Dismissed at ${time}`)
-    expect(
-      closedLabel(
-        { ...base, resolved_at: closed - 86_400, resolved_by: 'user' },
-        NOW
-      )
-    ).toMatch(/^You resolved it (yesterday at|on \w{3} \d+ at) /)
-  })
-})
-
-describe('sent time', () => {
-  // Local times, so the checks hold in any time zone.
-  const at = (day: number, hour: number, minute: number) =>
-    new Date(2026, 8, day, hour, minute).getTime() / 1000
-  const now = at(28, 22, 30)
-  const item = (patch: Partial<InboxItem>): InboxItem => ({
-    ...inboxItems(NOW, 'localdev')[0],
-    delivery: 'notify',
-    muted_by: null,
-    created_at: at(28, 21, 42),
-    updated_at: at(28, 21, 42),
-    ...patch,
-  })
-
-  it('names today, yesterday and older days', () => {
-    expect(formatStampTime(at(28, 21, 42), now)).toBe('9:42 PM')
-    expect(formatStampTime(at(27, 23, 5), now)).toBe('yesterday 11:05 PM')
-    expect(formatStampTime(at(26, 16, 10), now)).toBe('Sep 26, 4:10 PM')
-    expect(
-      formatStampTime(new Date(2025, 8, 26, 16, 10).getTime() / 1000, now)
-    ).toBe('Sep 26, 2025, 4:10 PM')
-  })
-
-  it('says Sent for pushed alerts, at the push when the backend reports it', () => {
-    expect(sentStamp(item({}), now).label).toBe('Sent 9:42 PM')
-    const reopened = sentStamp(item({ notified_at: at(28, 22, 5) }), now)
-    expect(reopened.label).toBe('Sent 10:05 PM')
-    expect(reopened.title).toContain('Filed ')
-  })
-
-  it('says where an alert went when nothing was pushed', () => {
-    expect(sentStamp(item({ delivery: 'digest' }), now).label).toBe(
-      'Filed 9:42 PM, in the daily digest'
-    )
-    expect(sentStamp(item({ delivery: 'inbox' }), now).label).toBe(
-      'Filed 9:42 PM, no alert sent'
-    )
-    expect(sentStamp(item({ notified_at: null }), now).label).toBe(
-      'Filed 9:42 PM, no alert sent'
-    )
-    expect(sentStamp(item({ muted_by: 3 }), now).label).toBe(
-      'Filed 9:42 PM, muted'
-    )
-  })
-
-  it('keeps the full timestamps for the tooltip', () => {
-    const stamp = sentStamp(item({ updated_at: at(28, 22, 20) }), now)
-    expect(stamp.title.split('\n')).toHaveLength(2)
-    expect(stamp.title).toMatch(/^Sent .*2026.*9:42:00 PM/)
-    expect(stamp.title).toMatch(/Last updated .*10:20:00 PM/)
-    expect(stamp.iso).toBe(new Date(at(28, 21, 42) * 1000).toISOString())
   })
 })
 
@@ -437,4 +435,50 @@ describe('several-query links', () => {
       })
     ).toEqual({ to: '/database', search: { target: 'db', queries: 'a1,b2' } })
   })
+})
+
+describe('items set aside', () => {
+  it('splits muted and snoozed open items and words the count', async () => {
+    const { open } = await redesignInbox()
+    const [stuck, fixes] = open
+    const rule: MuteRule = {
+      id: 9,
+      target: 'demo',
+      query_key: null,
+      type: 'stuck_query',
+      until: null,
+      created_at: CA_NOW,
+      note: null,
+      matched_count: 0,
+    }
+    const aside = asideItems([stuck, { ...fixes, state: 'snoozed' }], [rule])
+    expect(aside.muted.map((item) => item.id)).toEqual([stuck.id])
+    expect(aside.snoozed.map((item) => item.id)).toEqual([fixes.id])
+    expect(asideItems(open, []).muted).toEqual([])
+  })
+})
+
+it('keeps a row meta that only restates the title off the row', () => {
+  const item = inboxItems(NOW).find((row) => row.type === 'daily_summary')
+  const legacy = {
+    ...(item as NonNullable<typeof item>),
+    title: 'Raise work_mem so sorts stay in memory',
+    summary: 'Raise work_mem so sorts stay in memory.',
+  }
+  expect(rowMeta(legacy)).toBe('')
+})
+
+it('shows only whole sentences from a snippet that stops mid-sentence', () => {
+  expect(
+    wholeSentences(
+      '9 queries have a fix, led by SELECT on orders. Latency spi...'
+    )
+  ).toBe('9 queries have a fix, led by SELECT on orders.')
+  expect(wholeSentences('The nightly report is ready.')).toBe(
+    'The nightly report is ready.'
+  )
+  expect(wholeSentences('Latency spiked at 6 PM and the queries behi...')).toBe(
+    null
+  )
+  expect(wholeSentences(null)).toBe(null)
 })

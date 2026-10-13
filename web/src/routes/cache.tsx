@@ -12,7 +12,7 @@ type LegacyPerformanceTestView = PerformanceTestView | 'quick'
 
 export const Route = createFileRoute('/cache')({
   // `view` is retained as a compatibility alias for existing links. Quick-test
-  // links move back to the owning query in the unified Queries workspace;
+  // links move back to the owning query in the Database query list;
   // legacy `benchmark` links continue to open Load test.
   validateSearch: (
     search: Record<string, unknown>
@@ -33,8 +33,8 @@ export const Route = createFileRoute('/cache')({
   beforeLoad: ({ search }) => {
     if (search.view !== 'quick') return
     throw redirect({
-      to: '/queries',
-      search: search.hash ? { hash: search.hash } : {},
+      to: '/database',
+      search: search.hash ? { focus: search.hash } : {},
       replace: true,
     })
   },

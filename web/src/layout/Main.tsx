@@ -1,66 +1,82 @@
-import * as ScrollArea from '@rs/ui-new/scroll'
+import { PageBar } from '@rs/ui-new/page-bar'
+import { PageContainer } from '@rs/ui-new/page-container'
+import { Scrollable } from '@rs/ui-new/scrollable'
 import { useLayoutEffect, useRef } from 'react'
+import type { RouteLayout } from './routeLayout'
+
+/** Titles for the pages that still carry their own heading under the shell's bar. */
+const LEGACY_TITLES: Record<string, string> = {
+  '/database': 'Database',
+  '/scan': 'Code scan',
+  '/cache': 'Benchmarks',
+  '/benchmark': 'Benchmarks',
+  '/schema': 'Schema',
+  '/guards': 'Guards',
+  '/onboarding': 'Get started',
+}
+
+export function legacyTitle(pathname: string): string {
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
+  if (LEGACY_TITLES[path]) return LEGACY_TITLES[path]
+  if (path.startsWith('/database')) return 'Database'
+  return 'Not found'
+}
 
 interface MainProps {
   children: React.ReactNode
   /** The page's path: a new page starts at the top; search params alone keep the place. */
   scrollKey?: string
+  layout?: RouteLayout
+  /** The bar title for a `legacy` route. */
+  fallbackTitle?: string
 }
 
-export function Main({ children, scrollKey }: MainProps) {
-  const viewport = useRef<HTMLDivElement>(null)
+/**
+ * The canvas: the one rounded surface inset 12px from the page tone, with the
+ * sidebar's right edge as its left margin. It scrolls the page; a `split`
+ * route gets the bare area instead and draws its own panels.
+ */
+export function Main({
+  children,
+  scrollKey,
+  layout = 'legacy',
+  fallbackTitle = '',
+}: MainProps) {
+  const canvas = useRef<HTMLDivElement>(null)
   const shownKey = useRef(scrollKey)
   useLayoutEffect(() => {
     if (shownKey.current === scrollKey) return
     shownKey.current = scrollKey
-    if (viewport.current) viewport.current.scrollTop = 0
+    if (canvas.current) canvas.current.scrollTop = 0
   }, [scrollKey])
-  return (
-    <ScrollArea.Root asChild>
+
+  if (layout === 'split')
+    return (
       <main
-        // The ScrollArea root is `overflow-y-hidden`, but hidden containers are
-        // still scrollable programmatically: an anchor/hash jump (or any
-        // scrollIntoView) scrolls EVERY scrollable ancestor, so the root ends up
-        // offset and drags the scroll viewport out of view. The user can never
-        // scroll it back — the page looks frozen with dead space until a reload.
-        // Pin the root at the origin so only the viewport ever scrolls.
-        onScroll={(event) => {
-          const root = event.currentTarget
-          if (root.scrollTop !== 0) root.scrollTop = 0
-          if (root.scrollLeft !== 0) root.scrollLeft = 0
-        }}
-        // Sidebar offset only from tablet up; below that the sidebar is
-        // off-canvas so content spans full width (responsive chrome, T19).
-        className="relative tablet:pl-64 desktop:pl-80 h-[calc(100dvh-56px)] overflow-y-hidden bg-surface-layout-2"
+        id="main-content"
+        data-layout="split"
+        className="my-3 mr-3 flex min-h-0 min-w-0 flex-1 flex-col"
       >
-        {/* Radix's direct child is a `display:table; min-width:100%`
-            measurement wrapper. Keep it as a table so its height tracks
-            dynamically expanding report content, but pin it to the viewport
-            with fixed table layout. That prevents wide descendants from
-            shrink-wrapping it past the sidebar-narrowed viewport and clipping
-            feature CTAs at 1280×720 (P21/P22/P23). */}
-        <ScrollArea.Viewport
-          ref={viewport}
-          className="w-full h-full overflow-auto custom-scrollbar [&>div]:!w-full [&>div]:!table-fixed"
-        >
-          {/* Fluid content column: w-full + max-w + min-w-0, never the fixed
-              `container` width (which computes off the viewport, ignoring the
-              320px sidebar). Centered by mx-auto on wide screens. */}
-          <div
-            id="main-content"
-            className="p-6 w-full max-w-7xl min-w-0 mx-auto"
-          >
-            {children}
-          </div>
-        </ScrollArea.Viewport>
-        <ScrollArea.Scrollbar
-          className="absolute flex select-none touch-none bg-border-layout-2 transition-[background,width] duration-fast ease-base w-2 hover:w-4 data-[orientation=vertical]:w-2 data-[orientation=vertical]:hover:w-4"
-          orientation="vertical"
-        >
-          <ScrollArea.Thumb className="relative flex-1 bg-content-layout-disabled transition-[background] duration-fast ease-base hover:bg-content-layout-3" />
-        </ScrollArea.Scrollbar>
-        <ScrollArea.Corner />
+        {children}
       </main>
-    </ScrollArea.Root>
+    )
+
+  return (
+    <main
+      id="main-content"
+      data-layout={layout}
+      className="relative my-3 mr-3 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-canvas border border-border-layout-soft bg-surface-layout-1"
+    >
+      <Scrollable rootClassName="min-h-0 flex-1" viewportRef={canvas}>
+        {layout === 'legacy' ? (
+          <>
+            <PageBar title={fallbackTitle} titleAs="p" />
+            <PageContainer className="pt-9 pb-24">{children}</PageContainer>
+          </>
+        ) : (
+          children
+        )}
+      </Scrollable>
+    </main>
   )
 }

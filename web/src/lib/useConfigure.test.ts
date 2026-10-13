@@ -27,10 +27,10 @@ vi.mock('./api', () => ({
   setEnvSecret: vi.fn(),
 }))
 
+import { setEnvSecret } from './api'
+import { api } from './client'
 // Import after the mock so the hook picks up the mocked client.
 import { useConfigure } from './useConfigure'
-import { api } from './client'
-import { setEnvSecret } from './api'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -85,9 +85,11 @@ describe('useConfigure unknown events', () => {
   it('ignores unknown events without setting error', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        sseResponse('event: unknown\ndata: {"message":"x"}\n\n')
-      )
+      vi
+        .fn()
+        .mockResolvedValue(
+          sseResponse('event: unknown\ndata: {"message":"x"}\n\n')
+        )
     )
 
     const wrapper = queryClientWrapper()
@@ -187,11 +189,13 @@ describe('useConfigure unknown events', () => {
   })
 
   it('sends unsaved SSH form values in the connection-test payload', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      sseResponse(
-        'event: connection_test\ndata: {"target_name":"draft","status":"success"}\n\n'
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        sseResponse(
+          'event: connection_test\ndata: {"target_name":"draft","status":"success"}\n\n'
+        )
       )
-    )
     vi.stubGlobal('fetch', fetchMock)
     const wrapper = queryClientWrapper()
     const { result } = renderHook(() => useConfigure(), { wrapper })
@@ -266,6 +270,42 @@ describe('useConfigure unknown events', () => {
       expect.objectContaining({ params: { path: { name: 'prod' } } })
     )
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['status'] })
+  })
+
+  it.each([
+    [{ detail: 'Already added as shop_main.' }],
+    [
+      {
+        detail: {
+          message: 'Already added as shop_main.',
+          code: 'DATABASE_ALREADY_ADDED',
+        },
+      },
+    ],
+    [{ message: 'Already added as shop_main.' }],
+  ])('shows the server reason for a rejected add (%j)', async (body) => {
+    // openapi-fetch has already read the body, so the reason travels as `error`.
+    const response = jsonResponse(body, 409)
+    await response.text()
+    vi.mocked(api.POST).mockResolvedValueOnce({ error: body, response } as any)
+
+    const { result } = renderHook(() => useConfigure(), {
+      wrapper: queryClientWrapper(),
+    })
+
+    await act(async () => {
+      await expect(
+        result.current.addTarget({
+          name: 'dup',
+          engine: 'postgresql',
+          host: '127.0.0.1',
+          port: 15434,
+          database: 'ci_shop',
+          user: 'rdst',
+        })
+      ).rejects.toThrow('Already added as shop_main.')
+    })
+    expect(result.current.error).toBe('Already added as shop_main.')
   })
 
   it('loads full target details for edit without dropping hidden fields', async () => {

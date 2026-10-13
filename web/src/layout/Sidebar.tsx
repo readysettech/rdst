@@ -1,103 +1,57 @@
-import { tv } from '@rs/tailwind-base'
+import { cn, tv } from '@rs/tailwind-base'
 import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { focusRing } from '@rs/ui-new/focus'
 import { Icon } from '@rs/ui-new/icon'
 import { IconButton } from '@rs/ui-new/icon-button'
-import { ReadysetLogo } from '@rs/ui-new/logo'
 import { Pressable } from '@rs/ui-new/pressable'
 import { Scrollable } from '@rs/ui-new/scrollable'
-import { HStack } from '@rs/ui-new/stack'
-import { Text } from '@rs/ui-new/text'
+import { useQueryClient } from '@tanstack/react-query'
 import { Link, useRouterState } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
-import { ActivityPulse } from '../components/audit/ActivityPulse'
-import { BackgroundRuns } from '../components/BackgroundRuns'
-import { DesktopUpdateControl } from '../components/DesktopUpdateControl'
-import { ReportDialog } from '../components/ReportDialog'
-import { TargetSync } from '../components/TargetDropdown'
+import { useEffect, useState } from 'react'
+import {
+  onDatabasesChanged,
+  useOpenAddDatabase,
+} from '../components/configure/addDatabase'
+import { ACTIVE_RUN } from '../features/agent-activity/RunningNow'
 import { useInboxUnread } from '../features/inbox/useInboxUnread'
-import { SetupGuideHelpEntry } from '../features/setup/SetupGuideHelpEntry'
-import { SetupSteps } from '../features/setup/SetupSteps'
-import { useMonitoredTargets } from '../hooks/useMonitoredTargets'
+import { RADAR_STATE, Radar, RadarTooltip } from '../features/monitor-kit/Radar'
+import { useMonitorPulse } from '../features/monitor-kit/useMonitorPulse'
+import { DATABASE_WORD } from '../features/shared/filters/DatabaseFilter'
+import { useDefaultTarget } from '../hooks/useTarget'
 import { trackEvent } from '../lib/analytics'
-import type { DesktopUpdateState } from '../lib/desktop'
-import { useSystemStatus } from '../lib/useSystemStatus'
-import { VALUE_PROPOSITION } from '../lib/valueProposition'
+import {
+  reattachBackgroundRuns,
+  useBackgroundRuns,
+} from '../lib/backgroundRuns'
+import {
+  type ConfiguredDatabase,
+  configuredTargetsKey,
+  useConfiguredDatabases,
+  useMonitorSettings,
+} from '../lib/monitor/hooks'
+import '../features/monitor-kit/charts/monitorKit.css'
+import { PlatformCard } from './PlatformCard'
 import { SidebarAccountMenu } from './SidebarAccountMenu'
-
-const sidebarStyles = tv({
-  base: [
-    // Full-width drawer below tablet; a narrower rail from tablet up so the
-    // 1024px floor keeps a readable content column, back to 320px at desktop.
-    'w-80 tablet:w-64 desktop:w-80',
-    'flex',
-    'flex-col',
-    'border-r border-border-layout-1',
-    'left-0',
-    'z-30',
-    // Off-canvas below tablet; slides in when opened, always shown at tablet+
-    // (responsive chrome, T19). No overflow trap — the frame degrades, it
-    // doesn't clip.
-    'transition-transform duration-200 ease-base',
-    '-translate-x-full tablet:translate-x-0',
-  ],
-  variants: {
-    isElectronMac: {
-      true: [
-        'absolute',
-        'inset-y-0',
-        'h-full',
-        'bg-surface-layout-1',
-        'border-border-layout-1',
-      ],
-      false: ['fixed', 'top-0', 'h-dvh', 'bg-surface-layout-1'],
-    },
-    mobileOpen: {
-      // Overrides the base -translate-x-full at mobile; harmless at tablet+.
-      true: ['translate-x-0'],
-    },
-  },
-})
 
 const navItemStyles = tv({
   base: [
-    'flex',
-    'items-center',
-    'gap-2',
-    'px-2',
-    'py-1',
-    'rounded-lg',
-    'text-sm',
-    'text-content-layout-2',
-    // box-shadow is left out on purpose: the focus ring must be on screen the
-    // instant the caret arrives, not 150ms later.
-    'transition-[background-color,color]',
-    'duration-150',
-    'w-full',
-    'hover:bg-surface-layout-2',
-    'hover:text-content-layout-1',
+    'flex items-center gap-2.5 rounded-control px-2.5 text-content-layout-2',
+    // The focus ring is painted the instant the caret arrives, so box-shadow
+    // stays out of the transition.
+    'transition-[background-color,color] duration-150',
+    'hover:bg-surface-layout-1 hover:text-content-layout-1',
     ...focusRing,
-    'group',
   ],
   variants: {
     active: {
-      true: [
-        'bg-surface-primary-soft',
-        'text-content-primary-soft',
-        'hover:bg-surface-primary-soft-hover',
-        'hover:text-content-primary-soft',
-      ],
+      true: 'bg-surface-layout-1 text-content-layout-1',
     },
-    // Daily nav vs. footer utility (F5): utilities sit visibly subordinate to
-    // the primary list — shorter and normal weight, same alignment and hover.
-    size: {
-      nav: ['h-10', 'font-medium'],
-      footer: ['h-8', 'font-normal'],
+    group: {
+      primary: 'py-1.75 text-body-small',
+      secondary: 'py-1.5 text-caption',
     },
   },
-  defaultVariants: {
-    size: 'nav',
-  },
+  defaultVariants: { group: 'primary' },
 })
 
 interface NavItem {
@@ -106,437 +60,310 @@ interface NavItem {
   to: string
 }
 
-const homeItem: NavItem = { label: 'Home', icon: 'dashboard', to: '/' }
-
-// The daily nav, top to bottom: Database (it follows the global target), Inbox, Agent
-// audit, Ask, Readyset Caching (the demo). Home leads it only while 2+ databases are
-// monitored; with one, `/` opens the Database page. Other pages stay off the nav; their routes still answer direct
-// links, and a running health check shows in the footer's background runs.
 const primaryItems: NavItem[] = [
-  { label: 'Database', icon: 'database', to: '/database' },
+  { label: 'Home', icon: 'dashboard', to: '/' },
   { label: 'Inbox', icon: 'notification', to: '/inbox' },
-  { label: 'Agent audit', icon: 'user-shield', to: '/agent-activity' },
-  { label: 'Ask', icon: 'sparkles', to: '/ask' },
-  { label: 'Readyset Caching', icon: 'querypilot', to: '/demo' },
+  { label: 'Actions', icon: 'tick-double', to: '/actions' },
+  { label: 'Ask', icon: 'message-multiple', to: '/ask' },
 ]
 
-// Configuration stays off the daily nav: Settings is a footer utility, never a
-// top-level or Experimental nav item (configure-and-identity step 2 / T17).
-// [USE-030, USE-034]
-const settingsItem: NavItem = {
-  label: 'Settings',
-  icon: 'settings',
-  to: '/configure',
+const secondaryItems: NavItem[] = [
+  { label: 'Activity', icon: 'observe', to: '/agent-activity' },
+  { label: 'Settings', icon: 'settings', to: '/configure' },
+  { label: 'Help', icon: 'info', to: '/help' },
+]
+
+/** Databases listed before the rest fold under "N more". */
+export const SHOWN_DATABASES = 8
+
+function Badge({ count, title }: { count: number; title: string }) {
+  return (
+    <span
+      className="ml-auto inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-pill bg-surface-negative-solid px-1.5 text-label-extra-small tabular-nums text-(--neutral-white)"
+      title={title}
+    >
+      {count}
+    </span>
+  )
 }
 
-const DISCORD_INVITE_URL = 'https://discord.gg/QkET8JhRwt'
-
-// Third-party marks stay app-local; the shared icon catalog excludes logos.
-function DiscordMark({ className }: { className?: string }) {
+function Count({
+  children,
+  title,
+}: {
+  children: React.ReactNode
+  title?: string
+}) {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-      className={className}
+    <span
+      className="ml-auto shrink-0 text-label-extra-small tabular-nums text-content-layout-3"
+      title={title}
     >
-      <path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03ZM8.02 15.331c-1.182 0-2.157-1.085-2.157-2.418 0-1.334.956-2.419 2.157-2.419 1.21 0 2.176 1.094 2.157 2.42 0 1.333-.956 2.417-2.157 2.417Zm7.974 0c-1.182 0-2.157-1.085-2.157-2.418 0-1.334.955-2.419 2.157-2.419 1.21 0 2.176 1.094 2.157 2.42 0 1.333-.946 2.417-2.157 2.417Z" />
-    </svg>
+      {children}
+    </span>
+  )
+}
+
+/** A breathing dot: work under way that will land here (the first plan being built). */
+function LiveDot({ label }: { label: string }) {
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      data-testid="nav-live-dot"
+      className="h-1.5 w-1.5 shrink-0 rounded-full bg-content-rising-plain mk-breathe"
+    />
   )
 }
 
 function NavLink({
   item,
   active,
-  running = false,
+  group = 'primary',
   badge,
-  badgeUrgent = false,
-  size = 'nav',
-  onNavigate,
+  count,
+  countTitle,
+  live,
 }: {
   item: NavItem
   active: boolean
-  running?: boolean
-  badge?: number
-  /** Red when something needs action now; neutral otherwise (color is for state). */
-  badgeUrgent?: boolean
-  size?: 'nav' | 'footer'
-  onNavigate?: () => void
+  group?: 'primary' | 'secondary'
+  /** Items that call for action now: Inbox items that need you, changes to do first. */
+  badge?: { count: number; title: string }
+  /** A quiet count: things running, changes to do. */
+  count?: number | null
+  countTitle?: string
+  /** Names the live dot, shown while work for this page is under way. */
+  live?: string | null
 }) {
   return (
     <Link
       to={item.to}
       aria-current={active ? 'page' : undefined}
-      className={navItemStyles({ active, size })}
-      onClick={() => {
-        trackEvent('nav_item_clicked', { label: item.label })
-        onNavigate?.()
-      }}
+      className={navItemStyles({ active, group })}
+      onClick={() => trackEvent('nav_item_clicked', { label: item.label })}
     >
-      <Icon
-        name={item.icon}
-        label=""
-        className={`w-4 h-4 transition-transform group-hover:scale-110 ${
-          active ? 'text-content-primary-soft' : 'text-content-layout-3'
-        }`}
-      />
+      <Icon name={item.icon} label="" size="small" className="opacity-80" />
       <span>{item.label}</span>
-      {!!badge && (
-        <span
-          className={`ml-auto rounded-pill px-2 text-xs tabular-nums ${
-            badgeUrgent
-              ? 'bg-surface-negative-soft text-content-negative-soft'
-              : 'bg-surface-layout-2 text-content-layout-2'
-          }`}
-          title={`${badge} unread`}
-        >
-          {badge}
-        </span>
-      )}
-      {running && (
-        <span className="ml-auto">
-          <ActivityPulse label={`${item.label} is running`} />
-        </span>
-      )}
+      {live && <LiveDot label={live} />}
+      {!!badge?.count && <Badge {...badge} />}
+      {!badge?.count && !!count && <Count title={countTitle}>{count}</Count>}
     </Link>
+  )
+}
+
+/** The right edge of a database row: its changes to do. The state lives in the tooltip. */
+function databaseNote(db: ConfiguredDatabase): string | null {
+  return db.toDo ? `${db.toDo} to do` : null
+}
+
+function DatabaseLink({
+  db,
+  active,
+}: {
+  db: ConfiguredDatabase
+  active: boolean
+}) {
+  const word = db.state ? DATABASE_WORD[db.state] : null
+  const note = databaseNote(db)
+  const state = db.state ? RADAR_STATE[db.state] : 'off'
+  return (
+    <RadarTooltip
+      state={state}
+      activity={db.activity}
+      name={db.name}
+      toDo={db.toDo}
+      side="right"
+    >
+      <Link
+        to="/database"
+        search={{ target: db.name } as never}
+        aria-current={active ? 'page' : undefined}
+        aria-label={[db.name, word, note].filter(Boolean).join(', ')}
+        className={cn(
+          navItemStyles({ active }),
+          !db.monitored && !active && 'text-content-layout-3'
+        )}
+        onClick={() => trackEvent('nav_item_clicked', { label: 'Database' })}
+      >
+        <Radar
+          state={state}
+          activity={db.activity}
+          name={db.name}
+          tooltip={false}
+        />
+        <span className="min-w-0 truncate">{db.name}</span>
+        {word && <span className="sr-only">{word}</span>}
+        {note && <Count>{note}</Count>}
+      </Link>
+    </RadarTooltip>
+  )
+}
+
+/** The configured databases: monitored first, more than eight folded under "N more". */
+function DatabaseList({
+  databases,
+  activeName,
+}: {
+  databases: ConfiguredDatabase[]
+  activeName: string | null
+}) {
+  const [unfolded, setUnfolded] = useState(false)
+  const activeIndex = databases.findIndex((db) => db.name === activeName)
+  const open = unfolded || activeIndex >= SHOWN_DATABASES
+  const shown = open ? databases : databases.slice(0, SHOWN_DATABASES)
+  const folded = databases.length - SHOWN_DATABASES
+  return (
+    <nav aria-label="Databases" className="flex flex-col gap-1">
+      {shown.map((db) => (
+        <DatabaseLink key={db.name} db={db} active={db.name === activeName} />
+      ))}
+      {folded > 0 && (
+        <Pressable
+          type="button"
+          aria-expanded={open}
+          className={cn(navItemStyles(), 'text-content-layout-3')}
+          onClick={() => setUnfolded(!open)}
+        >
+          <Icon
+            name={open ? 'chevron-up' : 'chevron-down'}
+            label=""
+            size="small"
+            className="opacity-80"
+          />
+          <span>{open ? 'Fewer' : `${folded} more`}</span>
+        </Pressable>
+      )}
+    </nav>
   )
 }
 
 interface SidebarProps {
   isElectronMac?: boolean
-  /** Open state for the off-canvas mobile drawer (<768px). */
-  mobileOpen?: boolean
-  /** Dismiss the mobile drawer (backdrop tap, nav click, Escape). */
-  onMobileClose?: () => void
-  desktopUpdateState?: DesktopUpdateState | null
-  onInstallUpdate?: () => void
 }
 
-export function Sidebar({
-  isElectronMac = false,
-  mobileOpen = false,
-  onMobileClose,
-  desktopUpdateState = null,
-  onInstallUpdate = () => undefined,
-}: SidebarProps) {
-  const router = useRouterState()
-  const currentPath = router.location.pathname
-  const [reportOpen, setReportOpen] = useState(false)
+/**
+ * The sidebar on the page tone, flush with the canvas: the four pages that cover every
+ * database, one item per configured database, the Readyset Platform card, then the
+ * secondary group and the account line.
+ */
+export function Sidebar({ isElectronMac = false }: SidebarProps) {
+  const currentPath = useRouterState({
+    select: (state) => state.location.pathname,
+  })
+  // The Database page's selection: kept on a configured database, and its readings
+  // stream held open here so arriving on the page never restarts them.
+  const selected = useDefaultTarget()
+  const selectedSettings = useMonitorSettings(selected ?? '')
+  useMonitorPulse(selectedSettings.data?.enabled ? selected : null)
 
-  const { data: status } = useSystemStatus()
+  const { databases, doFirst } = useConfiguredDatabases()
+  // Actions counts the changes its page lists, in the alert tone while some are to do
+  // first, and breathes while a database builds its first plan.
+  const toDo =
+    databases.reduce((sum, db) => sum + (db.toDo ?? 0), 0) || (doFirst ?? 0)
+  const first = doFirst ?? 0
+  const building = databases.some((db) => db.monitored && db.building)
   const inboxUnread = useInboxUnread()
-  const showHome = useMonitoredTargets().monitored.length >= 2
-
-  // Dismiss the off-canvas mobile drawer after any navigation (stable ref so
-  // the effect keys only on the path, not the callback identity; skip the
-  // mount pass — this closes on route CHANGE, not on first render).
-  const closeRef = useRef(onMobileClose)
-  closeRef.current = onMobileClose
-  const isFirstPathRef = useRef(true)
-  useEffect(() => {
-    if (isFirstPathRef.current) {
-      isFirstPathRef.current = false
-      return
-    }
-    closeRef.current?.()
-  }, [currentPath])
-
-  // Mobile-drawer keyboard behavior (chrome prescription: the drawer is a
-  // modal-like surface, so it must be fully keyboard-operable and must not
-  // leave the dimmed background tabbable [USE-077, USE-090; VIS-030/034]):
-  //  - Escape closes the drawer;
-  //  - focus moves to the first nav item on open and returns to the invoking
-  //    hamburger on close;
-  //  - Tab is trapped within scrim + drawer while open.
-  const asideRef = useRef<HTMLElement>(null)
-  const scrimRef = useRef<HTMLButtonElement>(null)
-  useEffect(() => {
-    if (!mobileOpen) return
-    const previouslyFocused = document.activeElement as HTMLElement | null
-    asideRef.current?.querySelector<HTMLElement>('nav a')?.focus()
-
-    const focusables = (): HTMLElement[] => {
-      const inAside = asideRef.current
-        ? Array.from(
-            asideRef.current.querySelectorAll<HTMLElement>(
-              'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
-            )
-          )
-        : []
-      return scrimRef.current ? [scrimRef.current, ...inAside] : inAside
-    }
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      // A dialog opened from the drawer (e.g. Give Feedback) brings its own
-      // Radix focus trap — never fight it.
-      if (
-        (document.activeElement as HTMLElement | null)?.closest(
-          '[role="dialog"]'
-        )
-      ) {
-        return
-      }
-      if (e.key === 'Escape') {
-        closeRef.current?.()
-        return
-      }
-      if (e.key !== 'Tab') return
-      const els = focusables()
-      if (els.length === 0) return
-      const active = document.activeElement as HTMLElement | null
-      const idx = active ? els.indexOf(active) : -1
-      if (idx === -1) {
-        // Focus escaped (or never entered) — pull it back inside.
-        e.preventDefault()
-        ;(e.shiftKey ? els[els.length - 1] : els[0]).focus()
-        return
-      }
-      if (e.shiftKey && idx === 0) {
-        e.preventDefault()
-        els[els.length - 1].focus()
-      } else if (!e.shiftKey && idx === els.length - 1) {
-        e.preventDefault()
-        els[0].focus()
-      }
-    }
-    document.addEventListener('keydown', onKeyDown, true)
-
-    // If the viewport grows past the tablet breakpoint while open, the sidebar
-    // becomes static — drop the drawer state so the trap can't linger.
-    let mq: MediaQueryList | undefined
-    const onMqChange = () => {
-      if (mq?.matches) closeRef.current?.()
-    }
-    if (typeof window.matchMedia === 'function') {
-      mq = window.matchMedia('(min-width: 48rem)')
-      mq.addEventListener('change', onMqChange)
-    }
-
-    return () => {
-      document.removeEventListener('keydown', onKeyDown, true)
-      mq?.removeEventListener('change', onMqChange)
-      // Return focus to the invoking control (the hamburger).
-      previouslyFocused?.focus?.()
-    }
-  }, [mobileOpen])
+  const openAddDatabase = useOpenAddDatabase()
+  const queryClient = useQueryClient()
+  // What Activity lists under Running now: this browser's runs, and each database's
+  // analysis or report in progress.
+  const running =
+    useBackgroundRuns().filter((run) => ACTIVE_RUN.has(run.status)).length +
+    databases.filter(
+      (db) =>
+        db.activity?.kind === 'analyzing' || db.activity?.kind === 'report'
+    ).length
+  // Runs this browser saved (a load test, a comparison) reload once per app start.
+  useEffect(() => reattachBackgroundRuns(), [])
+  useEffect(
+    () =>
+      onDatabasesChanged(() => {
+        void queryClient.invalidateQueries({ queryKey: configuredTargetsKey })
+        void queryClient.invalidateQueries({ queryKey: ['monitor', 'home'] })
+      }),
+    [queryClient]
+  )
 
   const isActive = (item: NavItem) =>
     currentPath === item.to ||
-    (item.to === '/database' && currentPath.startsWith('/database/')) ||
-    // The Queries workspace owns the analysis result route.
-    (item.to === '/queries' && currentPath === '/results') ||
-    // `/benchmark` remains as a compatibility route, but its navigation owner
-    // is the unified Benchmarks workspace.
-    (item.to === '/cache' && currentPath === '/benchmark')
+    (item.to !== '/' && currentPath.startsWith(`${item.to}/`))
+  const onDatabasePage =
+    currentPath === '/database' || currentPath.startsWith('/database/')
 
   return (
-    <>
-      {/* Scrim behind the open mobile drawer; tap to dismiss. Tablet+ never
-          shows it (the sidebar is always in-flow there). */}
-      {mobileOpen && (
-        <Pressable
-          ref={scrimRef}
-          type="button"
-          aria-label="Close navigation"
-          onClick={onMobileClose}
-          className="fixed inset-0 z-20 bg-surface-scrim tablet:hidden"
+    <aside
+      id="app-sidebar"
+      className="flex h-dvh w-58 shrink-0 flex-col gap-1 px-3.5 pt-5.5 pb-4.5"
+    >
+      {/* On desktop mac the window traffic lights get their own draggable strip. */}
+      {isElectronMac && <div className="draggable-region h-8 shrink-0" />}
+
+      <nav aria-label="Primary" className="no-drag flex flex-col gap-1">
+        {primaryItems.map((item) => (
+          <NavLink
+            key={item.to}
+            item={item}
+            active={isActive(item)}
+            badge={
+              item.to === '/inbox'
+                ? {
+                    count: inboxUnread.actNow,
+                    title: `${inboxUnread.actNow} need you`,
+                  }
+                : item.to === '/actions' && first > 0
+                  ? { count: toDo, title: `${toDo} to do, ${first} first` }
+                  : undefined
+            }
+            count={item.to === '/actions' ? toDo : undefined}
+            countTitle={item.to === '/actions' ? `${toDo} to do` : undefined}
+            live={
+              item.to === '/actions' && building
+                ? 'Building your first plan'
+                : null
+            }
+          />
+        ))}
+      </nav>
+
+      <div className="mt-5 flex h-6 items-center pr-1 pl-2.5 text-caption text-content-layout-3">
+        <span>Databases</span>
+        <IconButton
+          icon="add"
+          label="Add database"
+          variant="primary"
+          modifier="ghost"
+          size="small"
+          classMerge="ml-auto h-5.5 w-5.5 min-w-5.5 text-content-layout-3"
+          onClick={() => openAddDatabase()}
         />
-      )}
-      <aside
-        ref={asideRef}
-        id="app-sidebar"
-        className={sidebarStyles({ isElectronMac, mobileOpen })}
+      </div>
+      <Scrollable rootClassName="min-h-0 flex-1">
+        <DatabaseList
+          databases={databases}
+          activeName={onDatabasePage ? selected : null}
+        />
+      </Scrollable>
+
+      <PlatformCard className="mt-auto mb-3" />
+
+      <nav
+        aria-label="Secondary"
+        className="flex flex-col gap-1 border-t border-border-layout-soft pt-3.5"
       >
-        {/* On desktop mac the window traffic lights get their own draggable
-          strip above the brand row. */}
-        {isElectronMac && <div className="draggable-region h-8 shrink-0" />}
-
-        {/* Brand row, with the drawer's own dismiss beside it: below tablet the scrim is a
-          70px strip, so touch needs an explicit control [USE-090]. */}
-        <TargetSync />
-        <div className="draggable-region h-14 shrink-0 border-b border-border-layout-1">
-          <HStack className="no-drag h-full min-w-0 items-center gap-2 px-4">
-            <Link
-              to="/"
-              className="flex min-w-0 flex-1 items-center gap-2 rounded-lg text-content-layout-1 outline-none focus-visible:shadow-focus"
-            >
-              <ReadysetLogo width={20} height={20} />
-              <Text level="label-large" className="font-semibold">
-                RDST
-              </Text>
-            </Link>
-            <div className="tablet:hidden">
-              <IconButton
-                icon="close"
-                label="Close navigation"
-                variant="primary"
-                modifier="ghost"
-                size="small"
-                tooltip={false}
-                onClick={onMobileClose}
-              />
-            </div>
-          </HStack>
-        </div>
-
-        {/* The one value-proposition line (C1 / D-5): the sidebar is the single owner of
-          "what is this app" (USE-050). */}
-        <div className="no-drag px-4 pt-3 pb-2">
-          <Text level="caption" className="text-content-layout-3">
-            {VALUE_PROPOSITION}
-          </Text>
-        </div>
-
-        {/* Navigation — persistent scrollbar keeps the full list reachable
-          below the fold at 1280×720. [QW2] */}
-        <Scrollable className="min-h-0 flex-1" type="auto">
-          <nav className="flex flex-col gap-2 p-2">
-            <div className="flex flex-col gap-1">
-              {showHome && (
-                <NavLink
-                  key={homeItem.to}
-                  item={homeItem}
-                  active={isActive(homeItem)}
-                />
-              )}
-              {primaryItems.map((item) => (
-                <NavLink
-                  key={item.to}
-                  item={item}
-                  active={isActive(item)}
-                  badge={item.to === '/inbox' ? inboxUnread.count : undefined}
-                  badgeUrgent={item.to === '/inbox' && inboxUnread.actNow > 0}
-                />
-              ))}
-            </div>
-
-            {/* Dev Settings is no longer a nav entry: its tools merged into
-                the Settings page (Developer settings section, /configure#dev).
-                The /dev-settings route now redirects there. [USE-097] */}
-          </nav>
-        </Scrollable>
-
-        {/* Footer — status (who's signed in, what's running,
-          app update) and utilities (upsell + links) are separate groups: the
-          gap between groups exceeds the gap within either one (F6, VIS-036). */}
-        <div className="shrink-0 p-2 border-t border-border-layout-1">
-          <div data-testid="sidebar-footer-status" className="space-y-1">
-            <SidebarAccountMenu onNavigate={onMobileClose} />
-            <BackgroundRuns />
-            {desktopUpdateState && (
-              <div className="flex justify-end px-3 py-2">
-                <DesktopUpdateControl
-                  state={desktopUpdateState}
-                  install={onInstallUpdate}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* The setup checklist, above the utilities: chrome that sits beside
-              the page rather than an overlay on top of it, in the drawer as
-              much as on the desktop sidebar. It retires itself once every step
-              is done, and the utility below brings it back once hidden. */}
-          <SetupSteps />
-
-          <div
-            data-testid="sidebar-footer-utilities"
-            className="mt-4 space-y-1"
-          >
-            {/* Settings recedes here as a quiet utility, out of the daily nav. */}
-            <NavLink
-              item={settingsItem}
-              active={isActive(settingsItem)}
-              size="footer"
-            />
-            {/* Docs — kept as a hand-roll: it reuses navItemStyles so it reads as
-                a sibling of the NavLinks above while opening the docs site in a
-                new tab rather than navigating in-app (C4). No help-center
-                build-out here, just the one reachable link. Icon label is empty
-                (decorative) so the composed accessible name reads just "Docs",
-                not a duplicate of the visible text. */}
-            <a
-              href="https://readyset.io/docs"
-              target="_blank"
-              rel="noreferrer"
-              onClick={() => trackEvent('nav_item_clicked', { label: 'Docs' })}
-              className={navItemStyles({
-                size: 'footer',
-                className: 'cursor-pointer',
-              })}
-            >
-              <Icon
-                name="info"
-                label=""
-                aria-hidden="true"
-                className="w-4 h-4 text-content-layout-3 group-hover:scale-110 transition-transform"
-              />
-              <span>Docs</span>
-            </a>
-            {/* The dismissed setup guide's only way back (D). Absent unless it
-                was dismissed with steps still outstanding, so a finished install
-                never carries a dead utility. */}
-            <SetupGuideHelpEntry
-              className={navItemStyles({
-                size: 'footer',
-                className: 'cursor-pointer',
-              })}
-            />
-            {/* Give Feedback — kept as a hand-roll: it reuses navItemStyles so it
-              reads as a sibling of the NavLinks above while opening a dialog
-              rather than navigating; a ui-new Button would break that shared
-              nav-item styling. */}
-            <Pressable
-              type="button"
-              onClick={() => setReportOpen(true)}
-              className={navItemStyles({
-                size: 'footer',
-                className: 'cursor-pointer',
-              })}
-            >
-              {/* Distinct feedback glyph, reserved for this action alone
-                (chrome prescription #9, VIS-008/010). */}
-              <Icon
-                name="customer-support"
-                label=""
-                className="w-4 h-4 text-content-layout-3 group-hover:scale-110 transition-transform"
-              />
-              <span>Give feedback</span>
-            </Pressable>
-            <a
-              href={DISCORD_INVITE_URL}
-              target="_blank"
-              rel="noreferrer"
-              onClick={() =>
-                trackEvent('nav_item_clicked', { label: 'Discord' })
-              }
-              className={navItemStyles({
-                size: 'footer',
-                className: 'cursor-pointer',
-              })}
-            >
-              <DiscordMark className="w-4 h-4 min-w-5 text-content-layout-3 group-hover:scale-110 transition-transform" />
-              <span>Join Discord</span>
-            </a>
-
-            {status?.version && (
-              <div className="px-3 py-2" title={`v${status.version}`}>
-                <Text
-                  level="caption"
-                  className="truncate text-content-layout-3"
-                >
-                  v{status.version}
-                </Text>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <ReportDialog
-          isOpen={reportOpen}
-          onClose={() => setReportOpen(false)}
-        />
-      </aside>
-    </>
+        {secondaryItems.map((item) => (
+          <NavLink
+            key={item.to}
+            item={item}
+            active={isActive(item)}
+            group="secondary"
+            count={item.to === '/agent-activity' ? running : undefined}
+          />
+        ))}
+        <SidebarAccountMenu />
+      </nav>
+    </aside>
   )
 }

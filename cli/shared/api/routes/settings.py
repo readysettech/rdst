@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -185,6 +185,61 @@ async def set_email(request: Request, body: EmailRequest) -> EmailUpdateResponse
         verified=False,
         verification_started=True,
     )
+
+
+Theme = Literal["dark", "light", "system"]
+FontSize = Literal["default", "large"]
+KeepReadingsDays = Literal[7, 30, 90]
+ReportView = Literal["quick", "detailed"]
+
+
+class Preferences(BaseModel):
+    """App preferences kept in the RDST config file's [preferences] section."""
+    theme: Theme = "dark"
+    font_size: FontSize = "default"
+    # How long minute-detail readings stay (the monitor store's 5-minute rollup).
+    keep_readings_days: KeepReadingsDays = 7
+    # The Report page's last view, for every database and day.
+    report_view: ReportView = "quick"
+
+
+class PreferencesUpdate(BaseModel):
+    theme: Theme | None = None
+    font_size: FontSize | None = None
+    keep_readings_days: KeepReadingsDays | None = None
+    report_view: ReportView | None = None
+
+
+def _read_preferences(cfg: TargetsConfig) -> Preferences:
+    section = cfg._data.get("preferences")
+    try:
+        return Preferences.model_validate(section if isinstance(section, dict) else {})
+    except ValueError:
+        return Preferences()
+
+
+@router.get("/preferences")
+async def get_preferences(request: Request) -> Preferences:
+    require_local_request(request)
+    cfg = TargetsConfig()
+    cfg.load()
+    return _read_preferences(cfg)
+
+
+@router.put("/preferences")
+async def put_preferences(request: Request, body: PreferencesUpdate) -> Preferences:
+    """Change the preferences sent; the rest keep their values."""
+    require_local_request(request)
+    cfg = TargetsConfig()
+    cfg.load()
+    current = _read_preferences(cfg)
+    updated = current.model_copy(update=body.model_dump(exclude_none=True))
+    cfg._data["preferences"] = updated.model_dump()
+    cfg.save()
+    from shared.monitor.monitor_store import _PREFERENCES_CACHE
+
+    _PREFERENCES_CACHE.update(at=0.0, value={})
+    return updated
 
 
 class ResetLocalDataResponse(BaseModel):

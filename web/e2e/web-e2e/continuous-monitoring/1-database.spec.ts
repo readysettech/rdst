@@ -4,6 +4,7 @@ import {
   base,
   eventually,
   ok,
+  openActions,
   openDatabase,
   queryParam,
   type Shape,
@@ -137,21 +138,31 @@ test('every query shape gets a Jev classification', async ({
     expect(priority_score).toBeLessThanOrEqual(100)
   }
 
-  // A row opens onto its details and classification.
+  // A linked query opens in the detail pane, its row marked current.
   const heavy = [shapes.h01_orders_by_status_channel, ...live()]
     .filter((shape) => shape.role === 'heavy')
     .find((shape) => !paused.includes(shape.key))!.key
   await openDatabase(page, `&${queryParam(heavy)}`)
   const row = page.locator(`[id="query-${heavy}"]`)
-  await expect(row.locator('button[aria-label="Details"]')).toHaveAttribute(
-    'aria-expanded',
+  await expect(row).toHaveAttribute('aria-current', 'true')
+  await expect(page.locator('[data-two-pane]')).toHaveAttribute(
+    'data-open',
     'true'
   )
-  await expect(page.getByTestId('jev-assessment')).toBeVisible()
-  await expect(page.getByTestId('jev-waiting')).toHaveCount(0)
+  const pane = page.locator('[data-two-pane] > div').nth(1)
+  await expect(pane.getByRole('heading', { level: 2 })).toBeVisible()
+  // The pane offers Analyze (and Estimate fix gain once there's a fix), or Cancel while
+  // the query's first analysis is still running.
+  await expect(
+    pane
+      .getByRole('button', { name: /^Analyze( again)?$/ })
+      .or(pane.getByRole('button', { name: 'Estimate fix gain' }))
+      .or(pane.getByRole('button', { name: 'Cancel' }))
+      .first()
+  ).toBeVisible()
 })
 
-test('the query list pages, switches metrics and highlights a page-3 query', async ({
+test('the query list pages, switches the chart and opens a row in the pane', async ({
   page,
   request,
 }) => {
@@ -163,77 +174,65 @@ test('the query list pages, switches metrics and highlights a page-3 query', asy
     (row) => !['write', 'ddl'].includes(row.analyzable_code)
   ).length
   await openDatabase(page, '&range=1h')
-  await expect(page.getByTestId('load-chart')).toBeVisible()
-  const pages = page.getByRole('navigation', { name: 'Query pages' })
-  // The navigation shows a window of pages that always reaches the last one.
-  await expect(
-    pages.getByRole('button', {
-      name: `Page ${Math.ceil(listed / 10)}`,
-      exact: true,
-    })
-  ).toBeVisible()
+  await expect(page.getByTestId('load-card')).toBeVisible()
+  const rows = page.getByTestId('query-row')
+  await expect(rows.first()).toBeVisible()
+  const firstPage = await rows.count()
+  expect(firstPage).toBeGreaterThan(0)
+  expect(firstPage).toBeLessThanOrEqual(listed)
+  // More queries than one page: the pager says so and walks forward.
+  if (listed > firstPage) {
+    await expect(page.getByRole('button', { name: 'Next' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Previous' })).toHaveCount(0)
+  }
 
-  for (const [name, metric, heading] of [
-    ['Latency', 'latency', /^Latency, /],
-    ['Time spent', 'time', /^Time spent, /],
-    ['Queries/s', 'calls', /^Queries per second, /],
+  const series = page.getByRole('radiogroup', { name: 'Chart series' })
+  for (const [name, metric] of [
+    ['Latency', 'latency'],
+    ['Time spent', 'time'],
+    ['Queries/s', 'calls'],
   ] as const) {
-    const radio = page
-      .getByRole('radiogroup', { name: 'Chart metric' })
-      .getByRole('radio', { name })
+    const radio = series.getByRole('radio', { name })
     await radio.click()
     await expect(radio).toHaveAttribute('aria-checked', 'true')
-    await expect(page.locator('#load-hero-title')).toHaveText(heading)
     if (metric !== 'calls')
       await expect(page).toHaveURL(new RegExp(`metric=${metric}`))
   }
-  const connections = page
-    .getByRole('region', { name: 'Database health' })
-    .getByRole('button', { name: /^Connections: / })
+  // A health number stands in for the series until Queries per second is picked again.
+  const health = page.getByRole('region', { name: 'Database health' })
+  const connections = health.getByRole('button', { name: /Connections/ })
   await connections.click()
   await expect(connections).toHaveAttribute('aria-pressed', 'true')
   await expect(page).toHaveURL(/health=connections/)
-  const calls = page
-    .getByRole('radiogroup', { name: 'Chart metric' })
-    .getByRole('radio', { name: 'Queries/s' })
-  await calls.click()
-  await expect(calls).toHaveAttribute('aria-checked', 'true')
-  await expect(connections).toHaveAttribute('aria-pressed', 'false')
-
-  // Page 3 keeps the list in view and a row there draws its own line.
-  await pages.getByRole('button', { name: 'Page 3' }).click()
-  await expect(pages.getByRole('button', { name: 'Page 3' })).toHaveAttribute(
-    'aria-current',
-    'page'
-  )
-  await expect(page.getByTestId('query-section')).toBeInViewport({ ratio: 0.1 })
-  const rows = page.getByTestId('monitor-query-row')
-  await expect(rows).toHaveCount(10)
-  // Live updates can reorder the page, so the raised row names the query.
-  await rows.nth(2).hover()
-  const raised = page.locator(
-    '[data-testid="monitor-query-row"][data-raised="true"]'
-  )
-  await expect(raised).toHaveCount(1)
-  const key = await raised.getAttribute('data-query-hash')
-  const row = page.locator(`[id="query-${key}"]`)
   await expect(
-    page
-      .getByTestId('load-chart')
-      .locator(`[data-overlay="${key}"], [data-band="${key}"]`)
-      .first()
-  ).toBeAttached()
-  // Open, it stays highlighted; with the hero scrolled away, the sticky chart
-  // names it.
-  await row.locator('button[aria-label="Details"]').click()
+    page.getByRole('heading', { level: 2, name: 'Connections' })
+  ).toBeVisible()
+  await health.getByRole('button', { name: /Queries per second/ }).click()
+  await expect(connections).toHaveAttribute('aria-pressed', 'false')
+  await expect(series).toBeVisible()
+
+  // A row opens in the pane beside the list and names itself in the URL.
+  const third = rows.nth(Math.min(2, firstPage - 1))
+  const key = (await third.getAttribute('id'))!.replace(/^query-/, '')
+  await third.click()
   await expect.poll(() => searchParam(page, 'query')).toBe(key)
-  await page.getByTestId('query-pages').scrollIntoViewIfNeeded()
-  await page.mouse.move(720, 450)
-  await expect(async () => {
-    await page.mouse.wheel(0, 500)
-    await expect(page.getByTestId('load-strip')).toBeVisible({ timeout: 1_000 })
-  }).toPass({ timeout: 15_000 })
-  await expect(page.getByTestId('load-strip-highlight')).not.toBeEmpty()
+  await expect(third).toHaveAttribute('aria-current', 'true')
+  await expect(page.locator('[data-two-pane]')).toHaveAttribute(
+    'data-open',
+    'true'
+  )
+  // The page never scrolls as a whole; each panel scrolls on its own.
+  expect(
+    await page.evaluate(() => {
+      const scroller = document.scrollingElement
+      return Boolean(scroller && scroller.scrollHeight > innerHeight + 2)
+    })
+  ).toBe(false)
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[data-two-pane]')).not.toHaveAttribute(
+    'data-open',
+    'true'
+  )
 
   // A write is analyzed through the search for its rows, never run.
   const write = shapes.w1_set_order_status.key
@@ -279,40 +278,84 @@ test('a checkup feeds Actions, and Reports keeps to the nightly days', async ({
   )!
   expect(qps.value).toBeGreaterThan(0)
   expect(qps.prior).toBeGreaterThan(0)
-  await openDatabase(page, '&view=actions')
-  await expect(page.getByTestId('actions-status')).toContainText('Updated')
+  // An old link to the Database page's Actions tab lands on Actions for this database.
+  await selectTarget(page)
+  await page.goto(`/database?target=${encodeURIComponent(target)}&view=actions`)
+  await expect(page).toHaveURL(
+    new RegExp(`/actions\\?(.*&)?db=${encodeURIComponent(target)}(&|$)`)
+  )
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Actions' })
+  ).toBeVisible()
 
-  // Reports shows the nightly days only; the checkup fed Actions.
+  // The Report tab shows the nightly days only; the checkup fed Actions.
   await openDatabase(page, '&view=report')
-  const snapshot = page.getByTestId('day-snapshot')
-  await expect(snapshot).toHaveAttribute(
+  const document = page.getByTestId('report-document')
+  await expect(document).toHaveAttribute(
     'data-report-id',
     String(nightly!.id),
-    {
-      timeout: 30_000,
-    }
+    { timeout: 30_000 }
   )
-  const sections = page.getByRole('navigation', { name: 'Report sections' })
-  await expect(sections).toBeVisible()
-  await expect(sections.locator('[data-section]').first()).toHaveAttribute(
-    'data-section',
-    'snapshot-health'
-  )
+  await expect(page.getByRole('region', { name: 'The day' })).toBeVisible()
   await expect(page.getByTestId('report-actions-now')).toBeVisible()
   const download = page.waitForEvent('download')
-  await page.getByTestId('download-csv').first().click()
+  await page.getByRole('button', { name: 'Report menu' }).click()
+  await page.getByRole('menuitem', { name: 'Download CSV' }).click()
   expect((await download).suggestedFilename()).toMatch(/\.csv$/)
+  // The download leaves the report menu open; close it before opening the day menu.
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menu')).toHaveCount(0)
+
+  // The day menu lists yesterday's nightly report and no checkup for today. A row's text
+  // runs the date into its Latest tag ("Oct 11Latest"), so the day ends at the next non-digit.
+  const dayLabel = (ts: number) =>
+    new RegExp(
+      `\\b${new Date(ts * 1000).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+      })}(?!\\d)`
+    )
   await page.getByTestId('day-picker-trigger').click()
+  await expect(page.getByRole('menu')).toBeVisible()
   const days = page.getByRole('menuitem')
-  await expect(days.filter({ hasText: /Yesterday/ })).toHaveCount(1)
-  await expect(days.filter({ hasText: /Today/ })).toHaveCount(0)
+  await expect(days.filter({ hasText: dayLabel(yesterday) })).toHaveCount(1)
+  await expect(
+    days.filter({ hasText: dayLabel(localDayStart(0)) })
+  ).toHaveCount(0)
   await page.keyboard.press('Escape')
   await expect(
     page.getByText(/couldn.t load|something went wrong/i)
   ).toHaveCount(0)
 
+  // Detailed reads the same report with the day before under each number; the
+  // switch is the report_view preference, left on Quick for the next spec.
+  const detailed = await ok<{
+    copy_count: number
+    detailed: {
+      tiles: { metric: string }[]
+      health_checks: { check: string }[]
+    } | null
+  }>(request.get(`${base}/report/${nightly!.id}?view=detailed`))
+  expect(detailed.detailed?.tiles.map((tile) => tile.metric)).toEqual([
+    'qps',
+    'mean_ms',
+    'p95_ms',
+    'connections',
+    'cache_hit',
+    'rollbacks_deadlocks',
+  ])
+  expect(detailed.detailed?.health_checks.length).toBeGreaterThan(0)
+  const views = page.getByRole('tablist', { name: 'Report view' })
+  await views.getByRole('tab', { name: 'Detailed' }).click()
+  await expect(document).toHaveAttribute('data-view', 'detailed')
+  await expect(
+    page.getByRole('region', { name: 'Settings audit' })
+  ).toBeVisible()
+  await views.getByRole('tab', { name: 'Quick' }).click()
+  await expect(document).toHaveAttribute('data-view', 'quick')
+
   // The checkup also refreshed the actions: the shop's heavy queries filter on columns
-  // with no index, so the index plan adds at least one and the Indexes tab explains it.
+  // with no index, so the index plan adds at least one and Actions lists it under Index.
   type Plan = { add: { table: string; columns: string[] }[] } | null
   const plan = await eventually(
     testInfo,
@@ -322,12 +365,27 @@ test('a checkup feeds Actions, and Reports keeps to the nightly days', async ({
     { timeout: 6 * 60_000, interval: 5_000 }
   )
   expect(plan!.add.length).toBeGreaterThan(0)
-  await openDatabase(page, '&view=actions&section=indexes')
+  // The index plan's old address lands on Actions for this database.
+  await page.goto(`/database?target=${encodeURIComponent(target)}&view=indexes`)
+  await expect(page).toHaveURL(
+    new RegExp(`/actions\\?(.*&)?db=${encodeURIComponent(target)}(&|$)`)
+  )
+  // The checkup fed the plan: it says when it was updated.
+  await openActions(page)
+  await expect(page.getByTestId('actions-status')).toContainText(/updated/i)
+  // The plan lists its index adds under Indexes, each led by its verb.
+  const indexes = page
+    .getByTestId('plan-group')
+    .filter({ has: page.getByRole('heading', { name: 'Indexes' }) })
   await expect(
-    page.getByRole('tablist', { name: 'Kinds of change' })
-  ).toContainText('Indexes')
-  await expect(page.getByTestId('action-story')).toContainText('Add')
-  await expect(page.getByTestId('index-plan-add').first()).toBeVisible()
+    indexes.getByTestId('plan-verb').filter({ hasText: 'Add' }).first()
+  ).toBeVisible()
+  // A link that names a kind narrows to it, as one chip that clears it.
+  await openActions(page, '&kind=index')
+  await expect(page.getByRole('button', { name: 'Index, clear' })).toBeVisible()
+  await expect(
+    page.getByTestId('plan-verb').filter({ hasText: 'Add' }).first()
+  ).toBeVisible()
 })
 
 test('agent activity lists the analyses, classifications, checks and reports', async ({
@@ -380,15 +438,20 @@ test('agent activity lists the analyses, classifications, checks and reports', a
   await page.goto(
     `/agent-activity?target=${encodeURIComponent(target)}&range=7d`
   )
-  const entries = page.locator('[data-activity-key]')
-  await expect(entries.first()).toBeVisible()
-  const entry = page.locator('[data-activity-key^="entry:"]').first()
-  await entry.getByRole('button').first().click()
-  const detail = page.getByTestId('activity-detail').first()
-  await expect(detail).toBeVisible()
-  await detail.getByRole('button', { name: /Technical details/ }).click()
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Activity' })
+  ).toBeVisible()
+  // One line per thing done, each a link to its place; analyses name their query.
+  await expect(
+    page.getByRole('link', { name: /\bAnalyzed / }).first()
+  ).toBeVisible()
+  await expect(
+    page.getByRole('link', { name: /Checked for changes/ }).first()
+  ).toBeVisible()
+  await expect(page.getByText('Kept 90 days.')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Export CSV' }).click()
+  await page.getByRole('button', { name: 'More actions' }).click()
+  await page.getByRole('menuitem', { name: 'Export CSV' }).click()
   const dialog = page.getByRole('dialog', { name: 'Export agent activity' })
   await dialog.getByRole('radio', { name: '7 days' }).click()
   const download = page.waitForEvent('download')

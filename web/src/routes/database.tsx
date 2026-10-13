@@ -17,6 +17,8 @@ export type DatabaseSearch = {
   tab?: string
   filter?: string
   sort?: string
+  /** Query list Status filter (all, fix, analyzing, healthy, stuck). */
+  status?: string
   q?: string
   /** Query list table filter. */
   table?: string
@@ -37,10 +39,10 @@ export type DatabaseSearch = {
   /** `settings` opens the monitoring settings sheet, `setup` the prerequisites check and
    * `enable` the turn-on dialog. */
   panel?: string
-  /** The tab: `actions`, `indexes`, `queries` (or `live`) or `report`; `report` picks one
-   * (default latest). */
+  /** The tab: `live` (or `queries`) or `report`; `report` picks one (default latest).
+   * `actions` and `indexes` redirect to /actions. */
   view?: string
-  /** An action to open on the Actions tab, from an Inbox item's likely fix. */
+  /** An action to open, from an Inbox item's likely fix. */
   action?: string
   report?: string
   /** Hero metric (`load`, `calls`, `latency`) and a health chart in its place. */
@@ -56,6 +58,7 @@ const KEYS = [
   'tab',
   'filter',
   'sort',
+  'status',
   'q',
   'table',
   'queries',
@@ -75,7 +78,16 @@ const KEYS = [
   'monitorFixture',
 ] as const
 
+function selectedTarget(): string | undefined {
+  try {
+    return window.localStorage.getItem('rdst_selected_target') || undefined
+  } catch {
+    return undefined
+  }
+}
+
 export const Route = createFileRoute('/database')({
+  staticData: { layout: 'split' },
   validateSearch: (search: Record<string, unknown>): DatabaseSearch => {
     const out: DatabaseSearch = {}
     for (const key of KEYS) {
@@ -86,6 +98,16 @@ export const Route = createFileRoute('/database')({
     return out
   },
   beforeLoad: ({ search }) => {
+    // Actions moved to its own page; old links to the tab land there on this database.
+    if (search.view === 'actions' || search.view === 'indexes') {
+      if (search.target) selectGlobalTarget(search.target)
+      const db = search.target ?? selectedTarget()
+      throw redirect({
+        to: '/actions',
+        search: db ? { db } : {},
+        replace: true,
+      })
+    }
     const legacy = withoutLegacyBenchmarkParams(search)
     if (!search.target && !legacy) return
     if (search.target) selectGlobalTarget(search.target)

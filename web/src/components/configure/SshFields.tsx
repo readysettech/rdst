@@ -1,6 +1,7 @@
 import { BaseInputSelect } from '@rs/ui-new/base-input-select'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
+import { Scrollable } from '@rs/ui-new/scrollable'
 import { VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useEffect, useMemo, useState } from 'react'
@@ -296,7 +297,9 @@ export function SshFields({
       {(hostMode === 'manual' || hostOptions.length === 0) && (
         <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4">
           <div>
-            <FieldLabel htmlFor={`${idPrefix}-host`}>Jump host</FieldLabel>
+            <FieldLabel htmlFor={`${idPrefix}-host`}>
+              {hostOptions.length > 0 ? 'Address' : 'Jump host'}
+            </FieldLabel>
             <BaseInputText
               id={`${idPrefix}-host`}
               name={`${idPrefix}-host`}
@@ -430,32 +433,37 @@ export function SshFields({
                 disabled={disabled || browserLoading}
               />
             </div>
-            <VStack className="gap-1 items-stretch max-h-52 overflow-y-auto rounded-lg border border-border-layout-1 p-2">
-              {browserDirectory?.entries.map((entry) => (
-                <Button
-                  key={entry.path}
-                  variant="primary"
-                  modifier="ghost"
-                  size="small"
-                  fullWidth
-                  label={`${entry.is_dir ? 'Open folder' : 'Select file'}: ${entry.name}`}
-                  onClick={() => {
-                    if (entry.is_dir) {
-                      loadBrowserDirectory(entry.path)
-                    } else {
-                      update({ profile: '', key_path: entry.path })
-                      setKeyMode('select')
-                    }
-                  }}
-                  disabled={disabled || browserLoading}
-                />
-              ))}
-              {!browserLoading && browserDirectory?.entries.length === 0 && (
-                <Text level="caption" className="text-content-layout-3">
-                  This folder is empty.
-                </Text>
-              )}
-            </VStack>
+            <Scrollable
+              rootClassName="rounded-lg border border-border-layout-1"
+              className="max-h-52 p-2"
+            >
+              <VStack className="gap-1 items-stretch">
+                {browserDirectory?.entries.map((entry) => (
+                  <Button
+                    key={entry.path}
+                    variant="primary"
+                    modifier="ghost"
+                    size="small"
+                    fullWidth
+                    label={`${entry.is_dir ? 'Open folder' : 'Select file'}: ${entry.name}`}
+                    onClick={() => {
+                      if (entry.is_dir) {
+                        loadBrowserDirectory(entry.path)
+                      } else {
+                        update({ profile: '', key_path: entry.path })
+                        setKeyMode('select')
+                      }
+                    }}
+                    disabled={disabled || browserLoading}
+                  />
+                ))}
+                {!browserLoading && browserDirectory?.entries.length === 0 && (
+                  <Text level="caption" className="text-content-layout-3">
+                    This folder is empty.
+                  </Text>
+                )}
+              </VStack>
+            </Scrollable>
             {browserLoading && (
               <Text level="caption" className="text-content-layout-3">
                 Loading files…

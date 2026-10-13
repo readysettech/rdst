@@ -50,6 +50,14 @@ use it (source gap, tracked in the P3 plan).
 Content is top-aligned (`items-start`) so multi-line messages read well. Loading
 swaps the leading icon for a `Spinner`.
 
+**Quiet tone.** `tone="quiet"` renders the inline-alert line instead: a
+`bg-surface-layout-2` row (`rounded-panel`, `px-3.5 py-3`, no border), a 14px
+glyph, and `body-small` text. The variant's status tone (`negative`, `warning`,
+`positive`; the rest are neutral) colors only the glyph and the label. `modifier`,
+`size` and `iconPosition` do not apply, there is no `cursor-pointer` or press
+scale, and `onClick` is not wired. `children` sit at the right of the line (a
+ghost action).
+
 ---
 
 ## Code
@@ -67,7 +75,8 @@ swaps the leading icon for a `Spinner`.
 | `loading` | `boolean` | `false` | Shows a spinner in the icon slot. |
 | `disabled` | `boolean` | `false` | Dims and blocks pointer. |
 | `fullWidth` | `boolean` | `false` | Stretches to container width. |
-| `onClick` | `() => void` | — | Optional; the whole banner is clickable. |
+| `onClick` | `() => void` | — | Optional; the whole banner is clickable (default tone only). |
+| `tone` | `'default' \| 'quiet'` | `'default'` | `quiet`: the inline-alert line (see Style). |
 | `children` | `ReactNode` | — | Trailing content (action, detail). |
 | `className` | `string` | — | Extra classes. |
 
@@ -82,6 +91,15 @@ import { Alert } from '@rs/ui-new/alert'
   iconPosition="left"
   label="Couldn't save changes. Check your connection and try again."
 />
+
+<Alert
+  tone="quiet"
+  variant="warning"
+  icon="alert"
+  label="localhost:5432 refused the connection. Is PostgreSQL running?"
+>
+  <Button modifier="ghost" size="small" label="Fix connection" onClick={repair} />
+</Alert>
 ```
 
 ---

@@ -1,4 +1,4 @@
-import { test as base, expect } from './fixtures'
+import { test as base, expect, mainContent } from './fixtures'
 
 // Other product tests assume AI is configured. Exercise the real startup
 // boundary instead of installing that shared prerequisite mock.
@@ -10,7 +10,7 @@ const test = base.extend({
 })
 
 for (const source of ['missing', 'trial'] as const) {
-  test(`shows the full-screen provider choice for ${source} credentials`, async ({
+  test(`shows the provider choice in place of Home for ${source} credentials`, async ({
     page,
   }) => {
     await page.route('**/api/env/requirements', (route) =>
@@ -32,21 +32,24 @@ for (const source of ['missing', 'trial'] as const) {
       })
     )
     await page.goto('/')
-    const welcome = page.getByRole('heading', {
-      name: 'Choose how RDST uses AI',
-    })
+    // The gate stands in for Home inside the app shell.
+    const main = mainContent(page)
+    const welcome = main.getByText(
+      'Set up AI to get fixes and the daily report.'
+    )
     await expect(welcome).toBeVisible()
+    await expect(main.getByText('Hosted by Readyset')).toBeVisible()
     await expect(
-      page.getByRole('button', { name: 'Sign up or sign in', exact: true })
+      main.getByRole('button', { name: 'Sign in', exact: true })
     ).toBeVisible()
+    await expect(main.getByText('Use my own key')).toBeVisible()
     await expect(
-      page.getByRole('button', { name: 'Add Anthropic key', exact: true })
+      main.getByRole('button', { name: 'Add key', exact: true })
     ).toBeVisible()
-    // The welcome replaces the app rather than adding an inline notice.
-    await expect(page.locator('#main-content')).toHaveCount(0)
+    await expect(main.getByRole('region', { name: 'Today' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: /skip/i })).toHaveCount(0)
     await page.reload()
     await expect(welcome).toBeVisible()
-    await expect(page.locator('#main-content')).toHaveCount(0)
+    await expect(main.getByRole('region', { name: 'Today' })).toHaveCount(0)
   })
 }

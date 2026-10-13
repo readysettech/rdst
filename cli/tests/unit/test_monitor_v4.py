@@ -128,6 +128,24 @@ def test_load_breakdown_bands_top_queries_and_matches_row_colors(client, store):
     assert SELF_KEY not in rows
 
 
+def test_load_ranked_by_calls_keeps_the_time_ranking_colors(client, store):
+    # The last query by time is the busiest by calls; the rest fall with time.
+    texts = {key: f"SELECT count(*) FROM t{index} WHERE c{index} = $1"
+             for index, key in enumerate(KEYS)}
+    for minute in range(30):
+        rows = [{"query_key": key, "calls": 1000 if index == 10 else 100 - index * 5,
+                 "total_ms": 10.0 * (len(KEYS) - index)}
+                for index, key in enumerate(KEYS)]
+        store.record("db", NOW - (30 - minute) * 60, rows, texts, [],
+                     _db(sum(row["calls"] for row in rows)))
+    bands = client.get("/api/monitor/targets/db/load?range=1h&rank=calls").json()["bands"]
+    assert [band["key"] for band in bands[:8]] == [KEYS[10], *KEYS[:7]]
+    # The seven shared with the time ranking keep its colors; the newcomer takes the free one.
+    assert [band["color_index"] for band in bands[:8]] == [7, 0, 1, 2, 3, 4, 5, 6]
+    assert bands[-1]["key"] == "other"
+    assert client.get("/api/monitor/targets/db/load?rank=size").status_code == 422
+
+
 def test_load_ranges_resolution_and_availability(client, store):
     _seed(store, minutes=150)
     body = client.get("/api/monitor/targets/db/load?range=5m").json()
@@ -377,7 +395,8 @@ async def test_run_streams_real_stages_and_writes_report_v2(client, store, monke
     health = {item["check"]: item for item in body["health"]}
     assert health["vacuum_bloat"]["matters"] and "VACUUM" in health["vacuum_bloat"]["action"]
     assert health["connections"]["action"] is None
-    assert body["since_yesterday"][0]["label"] == "Database load"
+    # Readings began half an hour ago: nothing moved against a day that has none.
+    assert body["since_yesterday"] == []
     history_rows = client.get("/api/monitor/targets/db/report/history").json()["reports"]
     # A daily snapshot is listed by its day, not by a verdict sentence.
     assert history_rows[0]["verdict"] == "" and history_rows[0]["period_partial"] is True

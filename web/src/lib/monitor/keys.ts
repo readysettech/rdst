@@ -1,7 +1,14 @@
 // TanStack Query keys for /api/monitor. Every per-target key starts with
 // ['monitor', target] so switching or invalidating a target is one prefix, and every
 // ranged read carries its range.
-import type { ApiRange, InboxQuery, MonitorRange, TimeWindow } from './types'
+import type {
+  ApiRange,
+  InboxQuery,
+  LoadRank,
+  MonitorRange,
+  ReportViewMode,
+  TimeWindow,
+} from './types'
 
 export const monitorKeys = {
   all: ['monitor'] as const,
@@ -29,12 +36,18 @@ export const monitorKeys = {
     ] as const,
   queryAnalysis: (target: string, key: string) =>
     ['monitor', target, 'query-analysis', key] as const,
-  load: (target: string, range: ApiRange, window?: TimeWindow) =>
+  load: (
+    target: string,
+    range: ApiRange,
+    window?: TimeWindow,
+    rank: LoadRank = 'time'
+  ) =>
     [
       'monitor',
       target,
       'load',
       window ? `${window.from}-${window.to}` : range,
+      rank,
     ] as const,
   loadLatency: (
     target: string,
@@ -62,8 +75,12 @@ export const monitorKeys = {
   reports: (target: string) => ['monitor', target, 'reports'] as const,
   reportHistory: (target: string, limit: number, daily = false) =>
     ['monitor', target, 'reports', 'history', limit, daily] as const,
-  report: (target: string, id: number | 'latest' | 'daily') =>
-    ['monitor', target, 'reports', id] as const,
+  report: (
+    target: string,
+    id: number | 'latest' | 'daily',
+    view: ReportViewMode = 'quick'
+  ) => ['monitor', target, 'reports', id, view] as const,
+  reportView: ['monitor', 'preferences', 'report_view'] as const,
   inboxAll: ['monitor', 'inbox'] as const,
   inboxItem: (id: number) => ['monitor', 'inbox', 'item', id] as const,
   inbox: (query: InboxQuery = {}) =>
@@ -80,4 +97,7 @@ export const monitorKeys = {
   limit: (target?: string) => ['monitor', 'limit', target ?? 'all'] as const,
   limitAll: ['monitor', 'limit'] as const,
   work: ['monitor', 'work'] as const,
+  home: (target?: string) => ['monitor', 'home', target ?? 'all'] as const,
+  benchmarkFixes: (target: string, keys: string[]) =>
+    ['monitor', target, 'benchmark-fixes', keys.join(',')] as const,
 }

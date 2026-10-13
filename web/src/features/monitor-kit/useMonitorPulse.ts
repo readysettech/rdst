@@ -2,8 +2,6 @@
 //
 // Usage:
 //   const pulse = useMonitorPulse(target)
-//   <MonitorHeartbeat pulse={pulse} />
-//   <DatabaseGlyph beat={pulse.beat} ... />
 // Seeds from GET /pulse?limit=5, then appends each `pulse` event from the target's
 // stream. Every collector pulse refetches that target's live readings and reports so
 // the page moves with the real tick. `now` comes from one app-wide clock that ticks once
@@ -18,6 +16,7 @@ import { monitorKeys } from '@/lib/monitor/keys'
 import { serverOffset } from '@/lib/monitor/serverClock'
 import type {
   ConnectionProblem,
+  DatabaseActivity,
   MonitorLiveState,
   MonitorPulse,
 } from '@/lib/monitor/types'
@@ -44,6 +43,8 @@ export interface MonitorPulseState {
   now: number
   /** The reading timer: where this target is between its last and next reading. */
   clock: ReadingClock
+  /** What monitoring is doing on the database now, from the newest pulse. */
+  activity?: DatabaseActivity | null
   /** Increments on every pulse received live (drives one-shot animations). */
   beat: number
   isLoading: boolean
@@ -190,6 +191,10 @@ export function useMonitorPulse(target: string | null): MonitorPulseState {
       seed.data?.first_reading ?? last?.first_reading ?? false
     const delayReason = seed.data?.delay_reason ?? last?.delay_reason ?? null
     const connectionProblem = seed.data?.connection_problem ?? null
+    const activity =
+      (live.length ? last?.activity : seed.data?.activity) ??
+      last?.activity ??
+      null
     const setupBlocked = Boolean(
       seed.data?.setup_blocked ?? last?.setup_blocked
     )
@@ -214,6 +219,7 @@ export function useMonitorPulse(target: string | null): MonitorPulseState {
       nextAt,
       now,
       clock: readingClock(lastAt, nextAt, now),
+      activity,
       beat,
       isLoading: Boolean(target) && seed.isPending,
     }

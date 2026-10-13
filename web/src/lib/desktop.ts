@@ -82,6 +82,11 @@ export function isDesktopMac(): boolean {
   )
 }
 
+/** The machine RDST runs on, as copy names it: "this Mac" in the macOS app. */
+export function thisComputer(): string {
+  return isDesktopMac() ? 'this Mac' : 'this computer'
+}
+
 export function isDesktopRuntime(): boolean {
   return window.rdstDesktop?.isDesktop === true
 }

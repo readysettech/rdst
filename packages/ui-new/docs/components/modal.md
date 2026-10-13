@@ -53,6 +53,15 @@ foundations/color layer model). Enter/exit animate opacity + scale via
 | `extra-large` | `max-w-4xl` |
 | `full` | `max-w-full`, full height |
 
+**Quiet tone.** `ModalContent tone="quiet"` is the 480px raised dialog:
+`max-w-120`, `bg-surface-primary-soft`, `border-border-layout-2`,
+`shadow-elevation-3`, no padding of its own, and the close mark at
+`top-4.5 right-4`. `ModalTitle` and `ModalDescription` inside it follow the tone
+without a prop: the title is `headline-5` (17px), the description
+`content-layout-2`. Lay the dialog out as a title row (`pt-4.5 pl-6 pr-14`), a
+body (`px-6 pt-2 pb-5`) and a footer on a top hairline (`px-6 py-3.5`) holding a
+caption, the ghost escape and one solid action.
+
 ---
 
 ## Code
@@ -63,7 +72,7 @@ foundations/color layer model). Enter/exit animate opacity + scale via
 | --- | --- |
 | `Modal` | Root; controls open state. Props: `open`, `onOpenChange`, `blockClose`. |
 | `ModalTrigger` | Radix `Dialog.Trigger`. |
-| `ModalContent` | Portalled content panel. Key props below. |
+| `ModalContent` | Portalled content panel. Key props below; `tone: 'default' \| 'quiet'` picks the shell. |
 | `ModalContentContainer` | Wraps content in `AnimatePresence` for exit anim. |
 | `ModalTitle` / `ModalDescription` | Titled/description slots (accessible). |
 | `ModalClose` | Radix `Dialog.Close`. |

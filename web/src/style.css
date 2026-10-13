@@ -28,7 +28,6 @@
 
 @layer custom {
   :root {
-    --sidebar-transform: translateX(-320px);
     -webkit-font-smoothing: antialiased;
   }
 
@@ -250,5 +249,148 @@
 @media (prefers-reduced-motion: no-preference) {
   .rdst-heartbeat {
     animation: rdst-heartbeat 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+}
+
+/* The working indicator: a dot in a faint ring. While monitoring is on a sector sweeps the
+   ring once per 6.4 s and blips appear where readings land; the ring fills clockwise with
+   the first hour's analyses. The first blip plays once per reading. Reduced motion keeps the
+   still ring. */
+.rdst-radar {
+  --radar-inset: -5px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--color-content-positive-plain);
+}
+.rdst-radar[data-size="large"] {
+  --radar-inset: -3px;
+  width: 22px;
+  height: 22px;
+}
+.rdst-radar[data-state="paused"] {
+  color: var(--color-content-warning-plain);
+}
+.rdst-radar[data-state="unreachable"] {
+  color: var(--color-content-negative-plain);
+}
+.rdst-radar[data-state="off"] {
+  color: var(--color-content-layout-3);
+}
+.rdst-radar-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.rdst-radar-ring,
+.rdst-radar-sweep,
+.rdst-radar-fill {
+  position: absolute;
+  inset: var(--radar-inset);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.rdst-radar-ring {
+  border: 1px solid color-mix(in oklab, currentColor 28%, transparent);
+}
+.rdst-radar-sweep {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg 250deg,
+    color-mix(in oklab, currentColor 55%, transparent) 360deg
+  );
+  mask: radial-gradient(circle, transparent 38%, black 40%);
+  opacity: 0;
+}
+.rdst-radar-fill {
+  background: conic-gradient(
+    currentColor 0deg var(--radar-fill, 0deg),
+    transparent var(--radar-fill, 0deg)
+  );
+  mask: radial-gradient(circle, transparent 62%, black 64%);
+  opacity: 0.9;
+}
+.rdst-radar-blip {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0;
+  pointer-events: none;
+}
+.rdst-radar-blip[data-blip="1"] {
+  left: 1px;
+  top: 2px;
+}
+.rdst-radar-blip[data-blip="2"] {
+  right: 0;
+  top: 11px;
+}
+.rdst-radar-blip[data-blip="3"] {
+  left: 9px;
+  top: -2px;
+}
+.rdst-radar[data-size="large"] .rdst-radar-blip[data-blip="1"] {
+  left: 2px;
+  top: 3px;
+}
+.rdst-radar[data-size="large"] .rdst-radar-blip[data-blip="2"] {
+  right: 1px;
+  top: 14px;
+}
+.rdst-radar[data-size="large"] .rdst-radar-blip[data-blip="3"] {
+  left: 13px;
+  top: -1px;
+}
+
+@keyframes rdst-radar-sweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes rdst-radar-blip {
+  0%,
+  8% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  12% {
+    opacity: 1;
+    transform: scale(1.3);
+  }
+  45% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rdst-radar-sweeping .rdst-radar-sweep {
+    opacity: 0.9;
+    animation: rdst-radar-sweep 6.4s linear infinite;
+    animation-delay: var(--radar-delay, 0s);
+  }
+  .rdst-radar-sweeping .rdst-radar-blip {
+    animation: rdst-radar-blip 6.4s linear infinite;
+  }
+  .rdst-radar-sweeping .rdst-radar-blip[data-blip="1"] {
+    animation-iteration-count: 1;
+  }
+  .rdst-radar-sweeping .rdst-radar-blip[data-blip="2"] {
+    animation-delay: calc(var(--radar-delay, 0s) + 3.8s);
+  }
+  .rdst-radar-sweeping .rdst-radar-blip[data-blip="3"] {
+    animation-delay: calc(var(--radar-delay, 0s) + 5.8s);
   }
 }

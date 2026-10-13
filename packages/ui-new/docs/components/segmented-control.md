@@ -67,7 +67,7 @@ they stay legible when their segment is active.
 | --- | --- | --- |
 | `value` | `string` | Selected segment value (controlled). |
 | `onValueChange` | `(value: string) => void` | Fired on click or keyboard selection. |
-| `segments` | `Array<{ value; label; icon? }>` | `icon` is an `IconStrokeName`. |
+| `segments` | `Array<{ value; label; icon?; count? }>` | `icon` is an `IconStrokeName`; `count` renders after the label in the quiet tone (`text-content-layout-3`). |
 | `mode` | `'tabs' \| 'radio'` | Default `'tabs'`. |
 | `size` | `'base' \| 'small'` | Default `'base'`. |
 | `disabled` | `boolean` | Disables the whole group. |

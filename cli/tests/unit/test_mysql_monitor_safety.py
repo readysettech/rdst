@@ -48,3 +48,29 @@ def test_mysql_rows_returned_are_the_actual_rows_not_the_estimate():
     assert _extract_mysql_rows_returned([{"EXPLAIN": limited}]) == 20
     estimate_only = "-> Filter: (orders.status = 'new')  (cost=12 rows=180)\n"
     assert _extract_mysql_rows_returned([{"EXPLAIN": estimate_only}]) == 180
+
+
+def test_mysql_missing_values_produce_plain_explain(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from features.analyze.functions import explain_analysis
+    from features.analyze.parameter_suggestions import plan_only_sql
+
+    sql = ("SELECT id, status, total, created_at FROM orders WHERE customer_id = ? "
+           "ORDER BY created_at DESC LIMIT ?")
+    filled = plan_only_sql(sql, "mysql")
+    conn = MagicMock()
+    conn.__enter__.return_value = conn
+    cursor = conn.cursor.return_value.__enter__.return_value
+    cursor.fetchone.return_value = {"EXPLAIN": '{"query_block": {"select_id": 1}}'}
+    monkeypatch.setattr(explain_analysis, "resolve_connection_params", lambda **kw: {"password": ""})
+    monkeypatch.setattr(explain_analysis, "_mysql_connection", lambda *args: conn)
+    monkeypatch.setattr(explain_analysis, "_mysql_restore_table_case", lambda cur, run, sql: sql)
+    result = explain_analysis._execute_mysql_explain_analyze(
+        filled, {}, fast_mode=True, statement_timeout_ms=1000)
+    assert result["success"] and result["explain_analyze_skipped"]
+    statements = [call.args[0] for call in cursor.execute.call_args_list]
+    assert len(statements) == 1
+    assert "EXPLAIN FORMAT=JSON" in statements[0]
+    assert "customer_id = 1" in statements[0] and statements[0].endswith("LIMIT 10")
+    assert "ANALYZE" not in statements[0]

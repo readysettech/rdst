@@ -3,7 +3,6 @@ import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
 import { HStack, VStack } from '@rs/ui-new/stack'
-import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -255,17 +254,12 @@ export function CredentialsStep({
 
   return (
     <VStack className="gap-5 items-stretch" data-testid="credentials-step">
-      <VStack className="gap-1 items-stretch">
-        <Text level="headline-4" className="text-content-layout-1">
-          Set credentials
-        </Text>
-        <Text level="body-small" className="text-content-layout-3">
-          Review each username and database, then enter the passwords.
-        </Text>
-      </VStack>
+      <Text level="body-small" className="text-content-layout-2">
+        Review each username and database, then enter the passwords.
+      </Text>
 
       {targets.length > 1 && (
-        <VStack className="gap-3 items-stretch rounded-xl border border-border-layout-1 bg-surface-layout-2/30 p-4">
+        <VStack className="gap-3 items-stretch rounded-control bg-surface-layout-2 p-4">
           <Text level="label-small" className="text-content-layout-1">
             Apply these credentials to all selected databases
           </Text>
@@ -339,7 +333,7 @@ export function CredentialsStep({
           {effectivePrivateGroups.map((group) => (
             <div
               key={group.key}
-              className="rounded-xl border border-border-layout-1 bg-surface-layout-2/30 p-4"
+              className="rounded-control bg-surface-layout-2 p-4"
             >
               <VStack className="gap-3 items-stretch">
                 <Text level="label-small" className="text-content-layout-1">
@@ -348,7 +342,7 @@ export function CredentialsStep({
                 {group.targetNames.map((targetName) => (
                   <div
                     key={targetName}
-                    className="rounded-lg border border-border-layout-1 bg-surface-layout-1 p-3"
+                    className="border-t border-border-layout-2 pt-3"
                   >
                     <VStack className="gap-3 items-stretch">
                       <Text
@@ -381,71 +375,45 @@ export function CredentialsStep({
           />
         )}
         {groupedTargets.map(({ group: groupName, targets: members }) => (
-          <div
-            key={groupName || 'ungrouped'}
-            className="rounded-xl border border-border-layout-1 bg-surface-layout-1 p-4"
-          >
-            <VStack className="gap-3 items-stretch">
-              <HStack className="gap-2.5 items-center flex-wrap border-b border-border-layout-1 pb-3">
-                <div className="w-8 h-8 rounded-lg bg-surface-layout-2 flex items-center justify-center shrink-0">
-                  <Icon
-                    name={groupName ? 'layers' : 'database'}
-                    label=""
-                    aria-hidden="true"
-                    className="w-4 h-4 text-content-layout-2"
-                  />
-                </div>
-                <VStack className="gap-0 items-start">
-                  <Text level="label-medium" className="text-content-layout-1">
-                    {groupName || 'Ungrouped'}
-                  </Text>
-                  <Text level="caption" className="text-content-layout-3">
-                    {members.length === 1
-                      ? '1 instance'
-                      : `${members.length} instances`}
-                    {groupName ? ' in this cluster' : ''}
-                  </Text>
-                </VStack>
+          <div key={groupName || 'ungrouped'}>
+            <VStack className="items-stretch">
+              <HStack className="gap-2 items-center flex-wrap pb-2">
+                <Text level="label-small" className="text-content-layout-1">
+                  {groupName || 'Ungrouped'}
+                </Text>
+                <Text level="caption" className="text-content-layout-3">
+                  {members.length === 1
+                    ? '1 instance'
+                    : `${members.length} instances`}
+                  {groupName ? ' in this cluster' : ''}
+                </Text>
               </HStack>
               {members.map((target) => {
                 const result = connectivity[target.name]
                 return (
                   <div
                     key={target.name}
-                    className="rounded-lg border border-border-layout-1 bg-surface-layout-2/40 p-3"
+                    className="border-t border-border-layout-2 py-3"
                   >
                     <VStack className="gap-2 items-stretch">
                       <HStack className="justify-between gap-3 items-start">
                         <VStack className="gap-0.5 items-start min-w-0">
-                          <HStack className="gap-2 items-center flex-wrap">
-                            <Text
-                              level="label-small"
-                              className="text-content-layout-1"
-                            >
-                              {target.name}
-                            </Text>
-                            <Tag
-                              size="small"
-                              variant="neutral"
-                              modifier="ghost"
-                              label={
-                                ENGINE_LABELS[target.engine] ?? target.engine
-                              }
-                            />
-                            {roleOf(target) && (
-                              <Tag
-                                size="small"
-                                variant="informative"
-                                modifier="ghost"
-                                label={roleOf(target) as string}
-                              />
-                            )}
-                          </HStack>
+                          <Text
+                            level="label-small"
+                            className="text-content-layout-1"
+                          >
+                            {target.name}
+                          </Text>
                           <Text
                             level="caption"
                             className="text-content-layout-3 truncate max-w-full"
                           >
-                            {target.host}
+                            {[
+                              `${ENGINE_LABELS[target.engine] ?? target.engine} at ${target.host}`,
+                              roleOf(target),
+                            ]
+                              .filter(Boolean)
+                              .join(', ')}
                           </Text>
                         </VStack>
                         {result && (
@@ -558,12 +526,12 @@ export function CredentialsStep({
                             Password
                           </Text>
                           {target.password_secret_arn ? (
-                            <Tag
-                              size="small"
-                              variant="neutral"
-                              modifier="ghost"
-                              label="Credentials stored in AWS Secrets Manager"
-                            />
+                            <Text
+                              level="caption"
+                              className="text-content-layout-2"
+                            >
+                              Credentials stored in AWS Secrets Manager
+                            </Text>
                           ) : (
                             <BaseInputText
                               name={`credentials-password-${target.name}`}
@@ -635,7 +603,7 @@ export function CredentialsStep({
         <Alert
           variant="warning"
           modifier="outline"
-          label="The imported targets are still loading. Try opening this step again."
+          label="The imported databases are still loading. Try opening this step again."
         />
       )}
       {error && <Alert variant="negative" modifier="outline" label={error} />}
@@ -671,8 +639,6 @@ export function CredentialsStep({
             variant="primary"
             modifier="solid"
             label={onDone ? 'Continue' : 'Done'}
-            icon={onDone ? 'arrow-right' : 'tick'}
-            iconPosition="right"
             onClick={onDone ?? onClose}
           />
         ) : (
@@ -684,8 +650,6 @@ export function CredentialsStep({
                 ? 'Checking connectivity'
                 : 'Save and check'
             }
-            icon="connect"
-            iconPosition="right"
             loading={working}
             disabled={
               working ||

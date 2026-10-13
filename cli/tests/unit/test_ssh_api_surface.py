@@ -375,5 +375,5 @@ async def test_configure_add_rejects_a_duplicate_name_without_touching_its_passw
 
     assert first.json()["success"] is True
     assert duplicate.status_code == 409
-    assert duplicate.json()["detail"] == "A target named prod already exists."
+    assert duplicate.json()["detail"] == "A database named prod already exists."
     assert stored == []

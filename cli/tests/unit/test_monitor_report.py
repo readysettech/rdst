@@ -4,6 +4,7 @@ import asyncio
 import json
 import selectors
 import threading
+from datetime import datetime
 
 import pytest
 from pydantic import ValidationError
@@ -47,6 +48,25 @@ async def test_report_thread_shutdown_serializes_restart():
     await stopping
     await new
     assert restarted.is_set()
+
+
+async def test_model_thread_skips_the_target_lock_but_honours_stop():
+    from features.monitor import run_guard
+
+    def lock_is_free():
+        lock = run_guard._locks.setdefault("db", threading.Lock())
+        if not lock.acquire(blocking=False):
+            return False
+        lock.release()
+        return True
+
+    assert await reports._model_thread("db", lock_is_free)
+    reports._work("db", restart=True).guard.stopped.set()
+    calls = []
+    with pytest.raises(asyncio.CancelledError):
+        await reports._model_thread("db", calls.append, 1)
+    assert calls == []
+    await reports.stop_report_threads()
 
 
 class Clock:
@@ -264,8 +284,11 @@ async def test_llm_failure_ships_computed_sections_and_unique_summary(tmp_path):
     assert result["report_json"]["narrative_error"] == "LLM down"
     assert result["report_json"]["computed"]["deltas"]["24h"]["database"]["calls"]["current"] == 10
     assert result["report_json"]["narrative_retry_at"] == NOW + 900
-    # Only the nightly report files a "Checkup ready" item.
-    assert not [item for item in store.inbox(target="db") if item["type"] == "daily_summary"]
+    # Only the nightly report files the daily report item; a run on request files its own
+    # report_ready item in the Inbox, without a push.
+    items = store.inbox(target="db")
+    assert [(item["type"], item["delivery"]) for item in items] == [("report_ready", "inbox")]
+    assert not [event for event in store.inbox_events() if event["kind"] == "notified"]
 
 
 @pytest.mark.asyncio
@@ -274,7 +297,7 @@ async def test_report_findings_stay_in_the_report(tmp_path):
     _seed(store, 2)
     result = await _run(store, Clock())
     assert result["report_json"]["one_fix_several_queries"][0]["table"] == "orders"
-    assert store.inbox(target="db") == []
+    assert [item["type"] for item in store.inbox(target="db")] == ["report_ready"]
 
 
 def test_nightly_report_files_one_daily_report_item_without_a_push(tmp_path):
@@ -283,15 +306,16 @@ def test_nightly_report_files_one_daily_report_item_without_a_push(tmp_path):
         reports._file_report_items(store, "db", run_id, NOW, {"summary": "All steady."},
                                    "nightly")
     items = store.inbox(target="db")
+    when = datetime.fromtimestamp(NOW)
     assert [(item["type"], item["title"], item["delivery"]) for item in items] == [
-        ("daily_summary", "Checkup ready", "inbox")]
+        ("daily_summary", f"Daily report for {when.strftime('%B')} {when.day} is ready", "inbox")]
     assert json.loads(items[0]["body_json"])["report_id"] == 8
     assert not [event for event in store.inbox_events() if event["kind"] == "notified"]
 
 
 def test_digest_lists_quiet_findings_and_pushes_over_budget(tmp_path):
     store = _store(tmp_path)
-    store.set_settings("db", {"push_daily_cap": 1})
+    store.set_settings("db", {"push_daily_cap": 1, "quiet_hours": {"from_hour": 0, "to_hour": 0}})
     store.upsert_item("db", "query_improved", "q00", .4, "Query improved",
                       {"query_key": "q00"}, NOW - 100, delivery="digest")
     store.upsert_item("db", "latency_regression", "q01", .8, "Query latency increased",
@@ -511,6 +535,69 @@ async def test_report_counts_call_even_when_narrative_fails(tmp_path):
         narrate=narrate)
     assert result["report_json"]["narrative_error"] == "Invalid model answer"
     assert result["billable_calls"] == 1
+
+
+@pytest.mark.asyncio
+async def test_narrative_runs_outside_the_target_lock(tmp_path):
+    from features.monitor.run_guard import RunGuard
+
+    store = _store(tmp_path)
+    _seed(store)
+    ran = threading.Event()
+    other_job_ran = []
+
+    def narrate(context):
+        # A monitor pass for the same database runs while the model is still answering.
+        threading.Thread(target=RunGuard().run, args=("db", ran.set), daemon=True).start()
+        other_job_ran.append(ran.wait(2))
+        return _narrative(context)
+
+    clock = Clock()
+    result = await reports.run_report(
+        "db", "user", store=store, clock=clock, sleep=clock.advance,
+        explain=lambda target, sql: {"plan": ["scan"]},
+        collect=lambda target: ({"engine": "postgresql"}, {"tables": {}}),
+        narrate=narrate)
+    assert other_job_ran == [True]
+    assert result["state"] == "done"
+    assert result["report_json"]["summary"] == "Review orders"
+
+
+@pytest.mark.asyncio
+async def test_narrative_timeout_ships_the_computed_narrative(tmp_path, monkeypatch, caplog):
+    import requests
+    from shared.llm_manager.base import ProviderRequest
+    from shared.llm_manager.hosted_provider import HostedProvider
+    from shared.llm_manager.inference_attribution import attribution_for
+
+    store = _store(tmp_path)
+    _seed(store)
+    timeouts = []
+
+    def post(*_args, timeout, **_kwargs):
+        timeouts.append(timeout)
+        raise requests.Timeout("read timed out")
+
+    monkeypatch.setattr("shared.llm_manager.hosted_provider._HTTP_SESSION.post", post)
+
+    def narrate(context):
+        request = ProviderRequest(model="", messages=[{"role": "user", "content": "report"}],
+                                  extra={"_rdst_attribution": attribution_for("monitor_report")})
+        return HostedProvider().complete(request, api_key="token")
+
+    clock = Clock()
+    result = await reports.run_report(
+        "db", "user", store=store, clock=clock, sleep=clock.advance,
+        explain=lambda target, sql: {"plan": ["scan"]},
+        collect=lambda target: ({"engine": "postgresql"}, {"tables": {}}),
+        narrate=narrate)
+    assert timeouts == [120]
+    assert result["state"] == "done"
+    report = result["report_json"]
+    assert "read timed out" in report["narrative_error"]
+    assert report["summary"] == reports._computed_narrative(report["computed"])["summary"]
+    assert len([record for record in caplog.records
+                if record.getMessage().startswith("Report narrative unavailable")]) == 1
 
 
 @pytest.mark.asyncio

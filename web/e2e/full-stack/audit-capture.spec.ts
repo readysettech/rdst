@@ -1,7 +1,7 @@
 import {
   acceptBrowserError,
+  addDatabaseThroughDialog,
   clearTargets,
-  continueWhenMonitoringReady,
   expect,
   test,
 } from '../fixtures'
@@ -32,30 +32,19 @@ test('capture window closes on schedule and reports phase timings', async ({
 
   await clearTargets(page.request)
 
-  await page.goto('/onboarding')
-  await expect(
-    page.getByRole('heading', { name: 'Start with Readyset' })
-  ).toBeVisible()
-  await page.locator('[name="name"]').fill('postgres-e2e')
-  await page.locator('[name="host"]').fill(host)
-  await page.locator('[name="port"]').fill(String(port))
-  await page.locator('[name="database"]').fill('rdst_test')
-  await page.locator('[name="user"]').fill('rdst_test')
-  await page
-    .locator('[name="password"]')
-    .fill(process.env.RDST_E2E_DB_PASSWORD ?? 'rdst_e2e_password')
-  await page.getByRole('button', { name: 'Test & connect' }).click()
-  const writableAccount = page.getByRole('dialog', {
-    name: 'Use this database account?',
+  await addDatabaseThroughDialog(page, {
+    host,
+    port: String(port),
+    database: 'rdst_test',
+    user: 'rdst_test',
+    password: process.env.RDST_E2E_DB_PASSWORD ?? 'rdst_e2e_password',
   })
-  await expect(writableAccount).toBeVisible()
-  await writableAccount.getByRole('button', { name: 'Add target' }).click()
-  await continueWhenMonitoringReady(page, 'postgres-e2e')
+  await page.goto('/')
   await expect(page).toHaveURL('/')
 
   const started = await page.request.post('/api/audit/capture', {
     data: {
-      target: 'postgres-e2e',
+      target: 'rdst_test',
       duration: 12,
       analysis: false,
       readyset: false,
@@ -110,7 +99,7 @@ test('capture window closes on schedule and reports phase timings', async ({
   expect(summary.total_duration_ms).toBeGreaterThan(timings.capture)
 
   // The finished run lands in the saved-run history the Reports tab reads.
-  const runs = await page.request.get('/api/audit/runs?target=postgres-e2e')
+  const runs = await page.request.get('/api/audit/runs?target=rdst_test')
   expect(runs.ok()).toBe(true)
   const { runs: savedRuns } = (await runs.json()) as {
     runs: Array<{ run_id: string; duration_seconds: number }>

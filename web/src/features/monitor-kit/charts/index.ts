@@ -5,7 +5,6 @@
 //   StackedLoadChart  'Where the time goes': stacked bands per query, band hover/select
 //   overlayModel      the highlighted query: its band, or its own line over the stack
 //   loadModel         load per query from /queries series (loadFromQueries, formatPercent, timeShareRows)
-//   RangeControl      honest range picker with disabled segments + reasons
 //   rangeModel        availableRanges, clampRange, domainFor, resolutionFor, ticksFor...
 //   chartTheme        SERIES_COLOR, TONE_COLOR
 //   markers           markerTone, splitMarkers, clusterMarkers, MarkerGlyphIcon
@@ -75,9 +74,9 @@ export {
   type PauseCause,
   pauseAt,
 } from './pauseModel'
-export { RangeControl, type RangeControlProps } from './RangeControl'
 export * from './rangeModel'
 export {
+  type ChartMarkLine,
   StackedLoadChart,
   type StackedLoadChartProps,
   type StackSeries,

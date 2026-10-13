@@ -18,10 +18,11 @@ export function TargetConnectivityNotice({
   if (isChecking) {
     return (
       <InlineNotice
+        tone="quiet"
         errorClass="database"
         accent="info"
-        title="Checking the target"
-        message={`Verifying that ${target || 'the selected target'} is reachable before starting.`}
+        title={target ? `Checking ${target}` : 'Checking the database'}
+        message={`Verifying that ${target || 'the selected database'} is reachable before starting.`}
       />
     )
   }
@@ -30,12 +31,12 @@ export function TargetConnectivityNotice({
 
   return (
     <InlineNotice
+      tone="quiet"
       errorClass="database"
       title={`Can't reach ${failure.target}`}
-      message="RDST stopped before starting this request. Check the target or its connection settings, then try again."
+      message="RDST stopped before starting this request. Check the database or its connection settings, then try again."
       action={{
-        label: 'Open target settings',
-        icon: 'database-settings',
+        label: 'Open database settings',
         onClick: () => {
           const returnTo = `${window.location.pathname}${window.location.search}`
           navigate({

@@ -167,6 +167,32 @@ class AnalysisResultsRegistry:
         stored["display_payload"] = payload
         return self._store.update_analysis_payload(query_hash, analysis_id, stored)
 
+    def attach_parameters(
+        self,
+        query_hash: str,
+        analysis_id: str,
+        parameters: List[Dict[str, str]],
+        source: Optional[str],
+    ) -> bool:
+        """Record the values a stored analysis ran its query with, beside its results view.
+
+        Each parameter is ``{"name": placeholder, "value": SQL literal}``, in the order the
+        query uses them; ``source`` says where the values came from.
+
+        Returns:
+            True when the stored analysis was updated.
+        """
+        stored = self._store.analysis_payload(query_hash, analysis_id)
+        if stored is None:
+            return False
+        display = stored.get("display_payload")
+        stored["display_payload"] = {
+            **(display if isinstance(display, dict) else {}),
+            "parameters": parameters,
+            "param_source": source,
+        }
+        return self._store.update_analysis_payload(query_hash, analysis_id, stored)
+
     def get_latest_analysis(self, query_hash: str) -> Optional[AnalysisResult]:
         """
         Get the most recent analysis result for a query.

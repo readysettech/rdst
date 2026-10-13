@@ -72,6 +72,7 @@ def test_inbox_actions_are_logged_unique_and_capped(seed, tmp_path):
 def test_dismissed_episode_stays_silent_while_it_continues(tmp_path):
     """Dismissed + still happening = no notification, at any severity, for any time."""
     store = MonitorStore(tmp_path / "monitor.db")
+    store.set_settings("db", {"quiet_hours": {"from_hour": 0, "to_hour": 0}})
     item = store.upsert_item("db", "regression", "q", 0.2, "Changed", {}, 100)
     store.action_item(item["id"], "dismiss", 101)
     for ts, severity in ((102, 0.5), (104, 0.8), (101 + 7 * 86400, 1.0)):
@@ -84,6 +85,7 @@ def test_dismissed_episode_stays_silent_while_it_continues(tmp_path):
 
 def test_dismissed_episode_returns_as_a_new_episode_when_2x_worse(tmp_path):
     store = MonitorStore(tmp_path / "monitor.db")
+    store.set_settings("db", {"quiet_hours": {"from_hour": 0, "to_hour": 0}})
     item = store.upsert_item("db", "regression", "q", 0.2, "Changed", {}, 100)
     store.action_item(item["id"], "dismiss", 101)
     returned = store.upsert_item("db", "regression", "q", 0.5, "Changed", {}, 102,
@@ -99,6 +101,7 @@ def test_dismissed_episode_returns_as_a_new_episode_when_2x_worse(tmp_path):
 
 def test_resolved_by_rdst_then_recurred_is_a_new_episode(tmp_path):
     store = MonitorStore(tmp_path / "monitor.db")
+    store.set_settings("db", {"quiet_hours": {"from_hour": 0, "to_hour": 0}})
     item = store.upsert_item("db", "regression", "q", 0.5, "Changed", {}, 100)
     store.action_item(item["id"], "resolve", 200, resolved_by="code", measured_recovery=True)
     assert store.upsert_item("db", "regression", "q", 0.5, "Changed", {"again": 1},

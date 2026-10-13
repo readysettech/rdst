@@ -5,6 +5,7 @@ import { Button } from '../element/button'
 import { HStack, VStack } from '../element/stack'
 import { Text } from '../element/text'
 import { Icon } from '../svg/icon'
+import { quietLineRecipe } from './quiet-line'
 
 /**
  * The six failure classes of the shared error contract (B7/T24). Each maps to
@@ -128,6 +129,98 @@ const accentTextRecipe = tv({
 type AccentVariant = VariantProps<typeof surfaceRecipe>
 
 /**
+ * `default`: the accent card (or page) treatment. `quiet`: the inline-alert line, a sunk
+ * row with a 14px glyph and the status tone on the lead sentence only.
+ */
+export type NoticeTone = 'default' | 'quiet'
+
+const QUIET_STATUS = {
+  negative: 'negative',
+  warning: 'warning',
+  info: 'neutral',
+} as const
+
+/** The `tone="quiet"` rendering shared by ErrorState and InlineNotice. */
+function QuietNotice({
+  accent,
+  icon,
+  title,
+  titleAs,
+  message,
+  trustworthy,
+  action,
+  onRetry,
+  retryLabel,
+  detail,
+  className,
+}: ErrorFields & {
+  accent: Accent
+  icon?: IconStrokeName
+  retryLabel: string
+  className?: string
+}) {
+  const detailId = useId()
+  const styles = quietLineRecipe({ status: QUIET_STATUS[accent] })
+  const glyph = icon ?? (accent === 'info' ? 'info' : 'alert')
+  return (
+    <div role="alert" className={styles.root({ class: className })}>
+      {/* Decorative when a visible title exists; labelled only in the no-title case. */}
+      <Icon
+        name={glyph}
+        label={title ? '' : 'Notice'}
+        aria-hidden={title ? 'true' : undefined}
+        className={styles.glyph()}
+      />
+      <div className="min-w-0 flex-1">
+        {title && (
+          <Text
+            as={titleAs ?? 'h3'}
+            level="body-small"
+            className={styles.lead()}
+          >
+            {title}
+          </Text>
+        )}
+        <Text
+          level="body-small"
+          className={title ? 'text-content-layout-2' : styles.lead()}
+        >
+          {message}
+        </Text>
+        {trustworthy && (
+          <Text level="caption" className="text-content-layout-3">
+            {trustworthy}
+          </Text>
+        )}
+        {detail && <DetailExpander detail={detail} id={detailId} />}
+      </div>
+      {(action || onRetry) && (
+        <HStack className="-my-1 shrink-0 items-center gap-1">
+          {action && (
+            <Button
+              variant="primary"
+              modifier="ghost"
+              size="small"
+              label={action.label}
+              onClick={action.onClick}
+            />
+          )}
+          {onRetry && (
+            <Button
+              variant="primary"
+              modifier="ghost"
+              size="small"
+              label={retryLabel}
+              onClick={onRetry}
+            />
+          )}
+        </HStack>
+      )}
+    </div>
+  )
+}
+
+/**
  * "Technical details" disclosure — the contract's expander for raw technical
  * text (driver output, correlation ids). Exported so section-level surfaces
  * (e.g. the analyze cacheability card) can keep raw text out of primary copy.
@@ -178,6 +271,11 @@ export interface ErrorStateProps extends ErrorFields {
   layout?: 'card' | 'page'
   /** Small overline above the title on the page layout (e.g. "404"). */
   eyebrow?: string
+  /**
+   * `quiet` renders the inline-alert line in either layout: no tile, badge or eyebrow,
+   * ghost actions without icons. The class still picks the status tone.
+   */
+  tone?: NoticeTone
   className?: string
 }
 
@@ -192,6 +290,7 @@ function ErrorStateImpl({
   icon,
   layout = 'card',
   eyebrow,
+  tone = 'default',
   title,
   titleAs,
   message,
@@ -206,6 +305,24 @@ function ErrorStateImpl({
   const accent: Accent = meta.accent
   const glyph = icon ?? meta.icon
   const detailId = useId()
+
+  if (tone === 'quiet') {
+    return (
+      <QuietNotice
+        accent={accent}
+        icon={icon}
+        title={title}
+        titleAs={titleAs}
+        message={message}
+        trustworthy={trustworthy}
+        action={action}
+        onRetry={onRetry}
+        retryLabel={retryLabel}
+        detail={detail}
+        className={className}
+      />
+    )
+  }
 
   if (layout === 'page') {
     // Full-page state: centered vertical composition with generous whitespace;
@@ -390,6 +507,8 @@ export interface InlineNoticeProps extends ErrorFields {
   /** Override the class-derived accent (e.g. a warning for a soft notice). */
   accent?: Accent
   icon?: IconStrokeName
+  /** `quiet` renders the inline-alert line (see {@link ErrorStateProps.tone}). */
+  tone?: NoticeTone
   className?: string
 }
 
@@ -403,6 +522,7 @@ function InlineNoticeImpl({
   errorClass = 'database',
   accent: accentOverride,
   icon,
+  tone = 'default',
   title,
   titleAs,
   message,
@@ -417,6 +537,24 @@ function InlineNoticeImpl({
   const accent: Accent = accentOverride ?? meta.accent
   const glyph = icon ?? meta.icon
   const detailId = useId()
+
+  if (tone === 'quiet') {
+    return (
+      <QuietNotice
+        accent={accent}
+        icon={icon}
+        title={title}
+        titleAs={titleAs}
+        message={message}
+        trustworthy={trustworthy}
+        action={action}
+        onRetry={onRetry}
+        retryLabel={retryLabel}
+        detail={detail}
+        className={className}
+      />
+    )
+  }
 
   return (
     <div

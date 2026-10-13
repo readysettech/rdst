@@ -1,10 +1,10 @@
 /**
  * Shared machinery for the UX regression suite.
  *
- * Consolidated from the six audit packs: the SSE frame builder and capture
- * mocks (health check), the comparison event builders and sandbox states
- * (benchmarks), the scrolling screenshot and clip/overflow probes (layout),
- * the per-route structural probe and focus walk (cross-cutting sweeps).
+ * Consolidated from the six audit packs: the comparison event builders and
+ * sandbox states (benchmarks), the scrolling screenshot and clip/overflow
+ * probes (layout), the per-route structural probe and focus walk
+ * (cross-cutting sweeps).
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -20,7 +20,6 @@ import {
   configureTestTarget,
   expect,
   mockAiKeyReady,
-  mockConnectivityOk,
 } from '../fixtures'
 
 // Evidence.
@@ -63,6 +62,15 @@ export async function shotScroll(page: Page, name: string, max = 4) {
   if (!SHOTS) return
   const scroller = await page.evaluateHandle(() => {
     const main = document.querySelector('#main-content') as HTMLElement | null
+    const viewports = main
+      ? Array.from(
+          main.querySelectorAll<HTMLElement>(
+            '[data-radix-scroll-area-viewport]'
+          )
+        )
+      : []
+    const inner = viewports.find((el) => el.scrollHeight > el.clientHeight + 20)
+    if (inner) return inner
     let node: HTMLElement | null = main
     while (node) {
       if (node.scrollHeight > node.clientHeight + 20) return node
@@ -135,19 +143,18 @@ export interface RouteSpec {
 /** Every user-facing destination. `id` doubles as the artifact filename stem. */
 export const ROUTES: RouteSpec[] = [
   { id: 'index', path: '/' },
-  { id: 'queries', path: '/queries' },
+  { id: 'database', path: '/database' },
   {
     id: 'results',
     path: '/results?query=SELECT%20id%20FROM%20users%20WHERE%20id%20%3D%201&target=e2e-guard',
   },
   { id: 'ask', path: '/ask' },
-  { id: 'audit', path: '/audit' },
   { id: 'cache', path: '/cache' },
   { id: 'schema', path: '/schema' },
   { id: 'configure', path: '/configure' },
   { id: 'configure-connections', path: '/configure#connections' },
   { id: 'demo', path: '/demo' },
-  { id: 'onboarding', path: '/onboarding' },
+  { id: 'add-database', path: '/?add=1' },
   { id: 'account-login', path: '/account-login' },
   { id: 'guards', path: '/guards' },
   { id: 'scan', path: '/scan' },
@@ -156,11 +163,13 @@ export const ROUTES: RouteSpec[] = [
 /** Legacy URLs that keep working by redirecting. */
 export const REDIRECTS: RouteSpec[] = [
   { id: 'agents', path: '/agents', lands: '/ask' },
-  { id: 'analyze', path: '/analyze', lands: '/queries' },
+  { id: 'analyze', path: '/analyze', lands: '/database' },
   { id: 'fleet', path: '/fleet', lands: '/configure' },
+  { id: 'onboarding', path: '/onboarding', lands: '/' },
   { id: 'dev-settings', path: '/dev-settings', lands: '/configure' },
   { id: 'benchmark', path: '/benchmark', lands: '/cache' },
-  { id: 'top', path: '/top', lands: '/queries' },
+  { id: 'top', path: '/top', lands: '/database' },
+  { id: 'demo', path: '/demo', lands: '/platform' },
 ]
 
 // Query registry.
@@ -513,161 +522,6 @@ export async function selectQueryByHash(page: Page, hash: string) {
     .click()
 }
 
-// Health check: background runs and fleet.
-
-/** The registry promotes each event's `type` to the SSE `event:` frame name. */
-export function runEvents(
-  events: Array<Record<string, unknown>>,
-  { end = 'done' }: { end?: string | null } = {}
-): string {
-  const frames = events.map((event) => {
-    const { type, ...rest } = event as { type: string }
-    return `event: ${type}\ndata: ${JSON.stringify(rest)}\n\n`
-  })
-  if (end)
-    frames.push(`event: run_end\ndata: ${JSON.stringify({ status: end })}\n\n`)
-  return frames.join('')
-}
-
-/**
- * Serve a background capture run: the POST hands back a run id, the events
- * endpoint replays `events`. `holdMs` keeps the stream open so running states
- * stay on screen long enough to observe.
- */
-export async function mockCaptureRun(
-  page: Page,
-  events: Array<Record<string, unknown>>,
-  { runId = 'run_capture_1', end = 'done' as string | null, holdMs = 0 } = {}
-) {
-  await page.route('**/api/audit/capture', (route) =>
-    route.fulfill({ json: { run_id: runId, reused: false } })
-  )
-  await page.route(`**/api/runs/${runId}/events*`, async (route) => {
-    if (holdMs) await new Promise((r) => setTimeout(r, holdMs))
-    await route
-      .fulfill({
-        headers: { 'content-type': 'text/event-stream' },
-        body: runEvents(events, { end }),
-      })
-      .catch(() => undefined)
-  })
-}
-
-/**
- * A capture whose start request never resolves: the run session is open (the
- * store begins it before the POST) and the stream never closes, so the running
- * UI stays on screen until the returned `release` is called.
- */
-export async function mockGatedCaptureStart(page: Page): Promise<() => void> {
-  let release: () => void = () => undefined
-  const gate = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  await page.route('**/api/audit/capture', async (route) => {
-    await gate
-    await route
-      .fulfill({ json: { run_id: 'never', reused: false } })
-      .catch(() => undefined)
-  })
-  return release
-}
-
-export async function mockFleetTargets(
-  page: Page,
-  members: Array<Record<string, unknown>>,
-  groups: Array<Record<string, unknown>> = []
-) {
-  await page.route('**/api/fleet/targets*', (route) =>
-    route.fulfill({ json: { members, groups, count: members.length } })
-  )
-}
-
-export function member(name: string, extra: Record<string, unknown> = {}) {
-  return {
-    name,
-    engine: 'postgresql',
-    host: `${name}.internal`,
-    port: 5432,
-    database: 'application',
-    user: 'rdst_e2e',
-    password_env: 'TEST_DB_PASSWORD',
-    has_password: true,
-    group: null,
-    ...extra,
-  }
-}
-
-/** Standard /audit setup: one healthy target, satisfied AI gate, ok preflight. */
-export async function prepareAuditPage(
-  page: Page,
-  requirements: Record<string, unknown> = {}
-) {
-  await configureTestTarget(page, { hasPassword: true })
-  await mockAiKeyReady(page)
-  await mockConnectivityOk(page)
-  await page.route('**/api/audit/requirements*', (route) =>
-    route.fulfill({
-      json: {
-        target: 'e2e-guard',
-        engine: 'postgresql',
-        query_stats: 'ok',
-        detail: 'Query statistics are available',
-        remediation: null,
-        docker_available: true,
-        ...requirements,
-      },
-    })
-  )
-  await page.goto('/audit')
-  await expect(
-    page.getByRole('heading', { name: 'Health Check' })
-  ).toBeVisible()
-}
-
-export async function selectTarget(page: Page, name = 'e2e-guard') {
-  await page
-    .getByRole('checkbox', { name: `Select ${name}` })
-    .click({ force: true })
-}
-
-/** A saved capture run detail payload (workload shape) with a health analysis. */
-export function savedCaptureRun(runId: string) {
-  return {
-    run_id: runId,
-    target_name: 'e2e-guard',
-    engine: 'postgresql',
-    started_at: '2026-09-01T09:00:00Z',
-    duration_seconds: 60,
-    queries: [
-      {
-        query_hash: 'abc123',
-        sql: 'SELECT * FROM orders WHERE customer_id = $1',
-        calls: 1200,
-        total_time_ms: 4800,
-        mean_time_ms: 4,
-      },
-    ],
-    summary: { unique_queries: 1, total_executions: 1200 },
-    health_analysis: {
-      health_score: 72,
-      health_label: 'Fair',
-      executive_summary: 'Connection headroom is fine; two queries dominate.',
-      top_findings: [
-        {
-          severity: 'warn',
-          title: 'One query is 62% of database time',
-          body: 'The orders lookup dominates total execution time.',
-        },
-        {
-          severity: 'ok',
-          title: 'Connection headroom is healthy',
-          body: 'The pool has room for bursts.',
-        },
-      ],
-    },
-  }
-}
-
 // Network shaping.
 
 /** Endpoints the shell itself needs; failing them replaces the whole app. */
@@ -1001,7 +855,7 @@ export async function layoutProblems(page: Page): Promise<LayoutProblem[]> {
       if (style.visibility === 'hidden' || style.display === 'none') continue
       const rect = el.getBoundingClientRect()
       if (rect.width < 4 || rect.height < 4) continue
-      // Off-canvas chrome (the closed mobile drawer) is not a layout problem.
+      // Off-canvas chrome is not a layout problem.
       if (rect.right < 0 || rect.left > innerWidth) continue
       // Decorative backdrops carry no content to lose.
       if (el.closest('[aria-hidden="true"]')) continue

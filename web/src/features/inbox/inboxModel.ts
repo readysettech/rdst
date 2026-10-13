@@ -1,9 +1,21 @@
-// Pure shaping for the Inbox page: the Act now and Watch sections, same-type groups,
-// the counts every view shares, recently closed alerts and the number highlighting in
-// one-line summaries. Timestamps are Unix
-// seconds.
-import type { InboxItem, MuteRule } from '@/lib/monitor/types'
+// Pure shaping for the Inbox: which band an item sits in, the queue groups on Open and
+// Closed, the times each row and header show, and the counts every view shares.
+// Timestamps are Unix seconds.
+import { fixtureOverride } from '@/lib/monitor/contract'
+import { asCaScenario, caFixtures } from '@/lib/monitor/fixturesCa'
+import type {
+  InboxBand,
+  InboxItem,
+  InboxKind,
+  MuteRule,
+} from '@/lib/monitor/types'
+import { plural } from '../monitor-kit/format'
 import { itemBand, ruleMatches } from '../monitor-kit/severity'
+
+const DAY = 86_400
+
+/** Closed items stay this long. */
+export const CLOSED_KEEP_S = 7 * DAY
 
 /** Items a live mute rule covers, even before the backend re-files them as muted. */
 export function isMuted(item: InboxItem, rules: MuteRule[] | undefined) {
@@ -11,88 +23,48 @@ export function isMuted(item: InboxItem, rules: MuteRule[] | undefined) {
   return Boolean(rules?.some((rule) => ruleMatches(rule, item)))
 }
 
-export interface InboxGroup {
-  /** Stable id: the group key, or `item:<id>` for a single item. */
-  id: string
-  items: InboxItem[]
-  lead: InboxItem
-}
-
-/** The Inbox tabs. Open lists Act now, Watch, then what recovered in the last 24 hours. */
-export type InboxView = 'open' | 'act_now' | 'watch'
-
-/** The two live sections. FYI items list at the bottom of Watch as low-priority rows. */
-export type LiveBand = 'act_now' | 'watch'
-
-export interface InboxSection {
-  band: LiveBand
-  groups: InboxGroup[]
-  count: number
-  unread: number
-}
-
-const GROUP_WINDOW = 6 * 3600
-
-const byUrgency = (a: InboxItem, b: InboxItem) =>
-  b.severity - a.severity || b.created_at - a.created_at
-
-/** FYI rows sort after real Watch rows, whatever their severity. */
-const lowPriority = (item: InboxItem) => Number(itemBand(item) === 'fyi')
-
-/**
- * Items of one type on one target collapse into one row while each was filed within 6 h of
- * the previous one, so items filed minutes apart always share a row.
- */
-export function groupItems(items: InboxItem[]): InboxGroup[] {
-  const groups = new Map<string, InboxItem[]>()
-  const lastAt = new Map<string, { key: string; at: number }>()
-  for (const item of [...items].sort((a, b) => a.created_at - b.created_at)) {
-    let key = item.group_key
-    if (!key) {
-      const kind = `${item.type}:${item.target}`
-      const open = lastAt.get(kind)
-      key =
-        open && item.created_at - open.at <= GROUP_WINDOW
-          ? open.key
-          : `${kind}:${item.created_at}`
-      lastAt.set(kind, { key, at: item.created_at })
-    }
-    const members = groups.get(key)
-    if (members) members.push(item)
-    else groups.set(key, [item])
-  }
-  return [...groups.entries()]
-    .map(([key, members]) => {
-      const sorted = [...members].sort((a, b) => b.created_at - a.created_at)
-      return {
-        id: sorted.length > 1 ? key : `item:${sorted[0].id}`,
-        items: sorted,
-        lead: [...sorted].sort(byUrgency)[0],
-      }
-    })
-    .sort(
-      (a, b) =>
-        lowPriority(a.lead) - lowPriority(b.lead) || byUrgency(a.lead, b.lead)
-    )
-}
-
-const isClosed = (item: InboxItem) =>
+export const isClosed = (item: InboxItem) =>
   item.state === 'resolved' || item.state === 'dismissed'
 
-/** Where an open-list item belongs: Act now, Watch (FYI included) or closed. */
-export function itemPlace(item: InboxItem): LiveBand | 'resolved' {
-  const band = itemBand(item)
-  if (
-    band === 'recovered' ||
-    item.status === 'back_to_normal' ||
-    item.status === 'closed' ||
-    isClosed(item)
-  )
-    return 'resolved'
-  return band === 'act_now' ? 'act_now' : 'watch'
+/**
+ * The redesign band; older backends without the view fields derive it. The state wins, so an
+ * item closed or reopened in place reads its new band before the next fetch.
+ */
+export function bandOf(item: InboxItem): InboxBand {
+  if (isClosed(item)) return 'closed'
+  if (item.band && item.band !== 'closed') return item.band
+  if (item.status === 'closed' && !item.band) return 'closed'
+  return itemBand(item) === 'act_now' ? 'act_now' : 'watch'
 }
 
-/** The numbers every count shows: tabs, section headers and the sidebar badge. */
+export function kindOf(item: InboxItem): InboxKind {
+  if (item.kind) return item.kind
+  switch (item.type) {
+    case 'stuck_query':
+    case 'fixes_ready':
+    case 'report_ready':
+    case 'fix_confirmed':
+    case 'traffic_spike':
+    case 'monitoring_issue':
+    case 'changes_ready':
+    case 'no_change_yet':
+      return item.type
+    default:
+      return 'other'
+  }
+}
+
+/** When the item closed; open items read their latest update. */
+export const closedAt = (item: InboxItem) =>
+  item.resolved_at ?? item.status_at ?? item.updated_at
+
+/** The wall clock, or the fixture's own clock when a redesign scenario is on. */
+export function inboxClock(): number {
+  const scenario = asCaScenario(fixtureOverride())
+  return scenario ? caFixtures(scenario).now : Date.now() / 1000
+}
+
+/** The numbers every count shows: the header, the tabs and the sidebar badge. */
 export interface InboxCounts {
   /** Act now plus Watch: live, unmuted, not snoozed. */
   open: number
@@ -102,66 +74,28 @@ export interface InboxCounts {
   snoozed: number
 }
 
-/** One source for every count, so the tabs, the sections and the badge agree. */
 export function inboxCounts(
   items: InboxItem[],
   rules: MuteRule[] | undefined
 ): InboxCounts {
   const counts = { open: 0, actNow: 0, watch: 0, muted: 0, snoozed: 0 }
   for (const item of items) {
-    const place = itemPlace(item)
-    if (place === 'resolved') continue
+    const band = bandOf(item)
+    if (band === 'closed') continue
     if (isMuted(item, rules)) counts.muted += 1
     else if (item.state === 'snoozed') counts.snoozed += 1
-    else if (place === 'act_now') counts.actNow += 1
+    else if (band === 'act_now') counts.actNow += 1
     else counts.watch += 1
   }
   counts.open = counts.actNow + counts.watch
   return counts
 }
 
-export interface OpenInbox {
-  sections: Record<LiveBand, InboxSection>
-  /** Measured back to normal, listed on Open for 24 hours. */
-  recovered: InboxItem[]
-  snoozed: InboxItem[]
-  muted: InboxItem[]
-  counts: InboxCounts
+export interface QueueGroup {
+  id: string
+  label: string
+  items: InboxItem[]
 }
-
-/** Splits the open list into Act now and Watch, recoveries, snoozed and muted items. */
-export function shapeOpen(
-  items: InboxItem[],
-  rules: MuteRule[] | undefined
-): OpenInbox {
-  const muted: InboxItem[] = []
-  const snoozed: InboxItem[] = []
-  const recovered: InboxItem[] = []
-  const live: Record<LiveBand, InboxItem[]> = { act_now: [], watch: [] }
-  for (const item of items) {
-    const place = itemPlace(item)
-    if (place === 'resolved') recovered.push(item)
-    else if (isMuted(item, rules)) muted.push(item)
-    else if (item.state === 'snoozed') snoozed.push(item)
-    else live[place].push(item)
-  }
-  const section = (band: LiveBand): InboxSection => ({
-    band,
-    groups: groupItems(live[band]),
-    count: live[band].length,
-    unread: live[band].filter((item) => item.state === 'new').length,
-  })
-  return {
-    sections: { act_now: section('act_now'), watch: section('watch') },
-    recovered,
-    snoozed: snoozed.sort(byUrgency),
-    muted: muted.sort((a, b) => b.created_at - a.created_at),
-    counts: inboxCounts(items, rules),
-  }
-}
-
-/** Recovered and closed alerts stay on Open this long; the daily report is the history. */
-const RECENT_CLOSE = 86_400
 
 function dayStart(ts: number) {
   const date = new Date(ts * 1000)
@@ -169,115 +103,210 @@ function dayStart(ts: number) {
   return date.getTime() / 1000
 }
 
-// An open item measured back to normal counts from when its readings recovered.
-const closedAt = (item: InboxItem) =>
-  item.resolved_at ?? item.status_at ?? item.updated_at
+const newestFirst = (a: InboxItem, b: InboxItem) => b.created_at - a.created_at
+const latestClosedFirst = (a: InboxItem, b: InboxItem) =>
+  closedAt(b) - closedAt(a)
 
-/**
- * Recoveries still on the open list plus alerts closed in the last 24 hours, each once,
- * most recently closed first.
- */
-export function recentlyClosedItems(
-  openItems: InboxItem[],
-  doneItems: InboxItem[],
-  now: number
-): InboxItem[] {
+/** Closed items still within the week they are kept, once each, newest first. */
+export function keptClosed(items: InboxItem[], now: number): InboxItem[] {
   const byId = new Map<number, InboxItem>()
-  for (const item of [...doneItems, ...openItems])
-    if (
-      itemPlace(item) === 'resolved' &&
-      // Open ones back to normal stay until RDST or you close them.
-      (!isClosed(item) || closedAt(item) >= now - RECENT_CLOSE)
-    )
+  for (const item of items)
+    if (bandOf(item) === 'closed' && closedAt(item) >= now - CLOSED_KEEP_S)
       byId.set(item.id, item)
-  // Open ones still wait on you (resolve), so they lead.
-  return [...byId.values()].sort(
-    (a, b) =>
-      Number(isClosed(a)) - Number(isClosed(b)) || closedAt(b) - closedAt(a)
-  )
+  return [...byId.values()].sort(latestClosedFirst)
+}
+
+/** Open: Act now, then Watch; closed items live behind Closed. A group with nothing is left out. */
+export function openGroups(open: InboxItem[]): QueueGroup[] {
+  const groups: QueueGroup[] = [
+    {
+      id: 'act_now',
+      label: 'Act now',
+      items: open
+        .filter((item) => bandOf(item) === 'act_now')
+        .sort(newestFirst),
+    },
+    {
+      id: 'watch',
+      label: 'Watch',
+      items: open.filter((item) => bandOf(item) === 'watch').sort(newestFirst),
+    },
+  ]
+  return groups.filter((group) => group.items.length > 0)
+}
+
+/** Closed: Today, Yesterday, Earlier this week. */
+export function closedGroups(closed: InboxItem[], now: number): QueueGroup[] {
+  const today = dayStart(now)
+  const yesterday = today - DAY
+  const kept = keptClosed(closed, now)
+  const groups: QueueGroup[] = [
+    {
+      id: 'today',
+      label: 'Today',
+      items: kept.filter((item) => closedAt(item) >= today),
+    },
+    {
+      id: 'yesterday',
+      label: 'Yesterday',
+      items: kept.filter(
+        (item) => closedAt(item) >= yesterday && closedAt(item) < today
+      ),
+    },
+    {
+      id: 'earlier',
+      label: 'Earlier this week',
+      items: kept.filter((item) => closedAt(item) < yesterday),
+    },
+  ]
+  return groups.filter((group) => group.items.length > 0)
+}
+
+/** The time an item shows in the queue: when it was filed, or when it closed. */
+export function queueStamp(item: InboxItem): number {
+  return bandOf(item) === 'closed' ? closedAt(item) : item.created_at
+}
+
+/** "9:55 AM". */
+export function clock12(ts: number): string {
+  return new Date(ts * 1000).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+/** "9:55", the day's own clock. */
+export function shortClock(ts: number): string {
+  const date = new Date(ts * 1000)
+  return `${date.getHours() % 12 || 12}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+/** A queue row's time: "9:55" today, "4:31 PM" yesterday, "Tue" earlier this week. */
+export function queueTime(ts: number, now: number): string {
+  const today = dayStart(now)
+  const start = dayStart(ts)
+  if (start >= today) return shortClock(ts)
+  if (start >= today - DAY) return clock12(ts)
+  if (start >= today - 6 * DAY)
+    return new Date(ts * 1000).toLocaleDateString('en-US', { weekday: 'short' })
+  return new Date(ts * 1000).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+/** "running 4 min" for a stuck statement still going. */
+export function runningText(item: InboxItem, now: number): string | null {
+  if (kindOf(item) !== 'stuck_query' || bandOf(item) === 'closed') return null
+  const seconds = item.running_s ?? now - item.created_at
+  const minutes = Math.max(1, Math.round(seconds / 60))
+  return `running ${plural(minutes, 'min', 'min')}`
+}
+
+const escapeRegExp = (text: string) =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** A caption without its database, which the row shows under the time: "demo, 3 of 8" -> "3 of 8". */
+export function withoutDatabase(text: string, target: string): string {
+  if (!target) return text
+  const name = escapeRegExp(target)
+  return text
+    .replace(new RegExp(`^${name}(, |: )`), '')
+    .replace(new RegExp(` on ${name}(?=[.,]|$)`), '')
+}
+
+/** The item's backend body, parsed when it arrives as text. */
+export function bodyOf(item: InboxItem): Record<string, unknown> {
+  if (typeof item.body_json !== 'string') return item.body_json ?? {}
+  try {
+    return JSON.parse(item.body_json) as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+const num = (value: unknown) => (typeof value === 'number' ? value : null)
+
+/** "14 ms", "9.6 ms". */
+function msText(ms: number): string {
+  return `${ms < 10 ? Number(ms.toFixed(1)) : Math.round(ms)} ms`
 }
 
 /**
- * How an alert ended, in the words of what was observed: 'Back to normal at 8:07 PM',
- * 'Running again at 8:07 PM', 'You resolved it at 8:07 PM'.
+ * A No change yet item in a line: "index applied October 6, still 14 ms after 2 days". Null
+ * when the backend did not send the change's time and latency.
  */
-export function closedLabel(item: InboxItem, now = Date.now() / 1000): string {
-  const at = timePhrase('at', closedAt(item), now)
-  if (item.state === 'dismissed') return `Dismissed ${at}`
-  const byRdst =
-    itemBand(item) === 'recovered' ||
-    item.resolved_by === 'code' ||
-    item.resolved_by === 'jev'
-  if (!byRdst) return `You resolved it ${at}`
-  if (item.type === 'daily_summary') return `Replaced by a newer report ${at}`
-  return recoveryPhrase(item, closedAt(item), now)
-}
-
-const RECOVERY_LATENCY_TYPES = new Set([
-  'latency_regression',
-  'plan_change',
-  'table_slowdown',
-  'slow_creep',
-  'query_improved',
-])
-
-const RECOVERY_CALLS_TYPES = new Set(['traffic_spike'])
-
-/** The reading an item watches: 'Latency', 'Calls', 'Cache hit ratio', or null. */
-export function itemMetric(item: InboxItem): string | null {
-  if (RECOVERY_LATENCY_TYPES.has(item.type)) return 'Latency'
-  if (RECOVERY_CALLS_TYPES.has(item.type)) return 'Calls'
-  if (item.type === 'cache_hit_ratio_drop') return 'Cache hit ratio'
-  if (item.type === 'rollback_or_deadlock_spike') return 'Rollbacks'
-  if (item.type === 'connections_near_max') return 'Connections'
-  if (item.type === 'lock_contention') return 'Lock waits'
-  if (item.type === 'many_queries_changed') {
-    const metrics = new Set(
-      (item.incident?.queries ?? []).map((query) => query.metric)
-    )
-    const [only] = metrics
-    if (metrics.size === 1 && only)
-      return only === 'latency' ? 'Latency' : 'Calls'
-    const metric = item.measurement?.metric
-    if (
-      !item.incident?.queries.length &&
-      (metric === 'latency' || metric === 'calls')
-    )
-      return metric === 'latency' ? 'Latency' : 'Calls'
-  }
-  return null
+export function noChangeText(item: InboxItem): string | null {
+  const body = bodyOf(item)
+  const applied = num(body.detected_at)
+  const after = num(body.after_ms) ?? item.after_ms ?? null
+  if (applied == null || after == null) return null
+  const days = Math.max(1, Math.round((closedAt(item) - applied) / DAY))
+  const type = typeof body.action_type === 'string' ? body.action_type : ''
+  const what =
+    body.index_label || body.index_name || type.includes('index')
+      ? 'index'
+      : 'change'
+  const date = new Date(applied * 1000).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+  })
+  return `${what} applied ${date}, still ${msText(after)} after ${plural(days, 'day')}`
 }
 
 /**
- * How it ended, naming what went back to normal: 'Latency back to normal at 11:25 PM',
- * 'Running again at 8:07 PM'.
+ * A queue row's meta line: the query for a stuck statement, what a change did not move,
+ * the summary otherwise; never the database, which has its own column.
  */
-export function recoveryPhrase(
-  item: InboxItem,
-  ts: number,
-  now = Date.now() / 1000
-): string {
-  const at = timePhrase('at', ts, now)
-  switch (item.type) {
-    case 'query_stopped_running':
-      return `Running again ${at}`
-    case 'new_heavy_query':
-      return `Stopped running ${at}`
-    case 'stuck_query':
-      return `Finished ${at}`
-    case 'monitoring_issue':
-      return `Working again ${at}`
-    case 'many_queries_changed': {
-      const metric = itemMetric(item)
-      return metric
-        ? `${metric} back to normal on every query ${at}`
-        : `Every query back to normal ${at}`
-    }
-    default: {
-      const metric = itemMetric(item)
-      return metric ? `${metric} back to normal ${at}` : `Back to normal ${at}`
-    }
+export function rowMeta(item: InboxItem): string {
+  const kind = kindOf(item)
+  if (kind === 'stuck_query' && bandOf(item) !== 'closed')
+    return item.subject_label
+  if (kind === 'no_change_yet') {
+    const text = noChangeText(item)
+    if (text) return text
   }
+  const meta = withoutDatabase(item.summary, item.target)
+  return meta.replace(/\.$/, '') === item.title ? '' : meta
+}
+
+/** The summary's complete sentences: a row's snippet can stop mid-sentence. */
+export function wholeSentences(text: string | null | undefined): string | null {
+  if (!text) return null
+  const cut = text.match(/(\.\.\.|\u2026)$/)
+  if (!cut) return text
+  const kept = text.slice(0, -cut[0].length)
+  const end = kept.lastIndexOf('. ')
+  return end === -1 ? null : kept.slice(0, end + 1)
+}
+
+/** The detail header's facts: "demo, filed 9:55 AM", "demo, closed 8:12 AM". */
+export function detailMeta(item: InboxItem): string {
+  if (bandOf(item) === 'closed')
+    return `${item.target}, closed ${clock12(closedAt(item))}`
+  return `${item.target}, filed ${clock12(item.created_at)}`
+}
+
+/** "1 item needs you, 1 to watch." for the detail panel with nothing selected. */
+export function emptySentence(actNow: number, watch: number): string {
+  const needs =
+    actNow === 0
+      ? 'Nothing needs you'
+      : `${plural(actNow, 'item')} ${actNow === 1 ? 'needs' : 'need'} you`
+  return `${needs}, ${watch} to watch.`
+}
+
+/** "2 items closed in the last 7 days." for the Closed view's empty panel. */
+export function closedSentence(closed: number): string {
+  return closed === 0
+    ? 'Nothing closed in the last 7 days.'
+    : `${plural(closed, 'item')} closed in the last 7 days.`
+}
+
+/** True when two lines say the same words, ignoring case and a final period. */
+export function sameWords(a: string | null | undefined, b: string): boolean {
+  const norm = (text: string) => text.trim().replace(/\.$/, '').toLowerCase()
+  return a != null && norm(a) === norm(b)
 }
 
 /** 'at 9:42 PM', 'yesterday at 9:42 PM', 'on Sep 26 at 4:10 PM'. */
@@ -324,102 +353,33 @@ export function summaryTokens(summary: string): SummaryToken[] {
   return tokens
 }
 
-/** One line for a group: "3 alerts like this on localdev, filed within 4 min of each other". */
-export function groupSummary(group: InboxGroup): string {
-  const { items } = group
-  const oldest = items[items.length - 1].created_at
-  const span = items[0].created_at - oldest
-  const window =
-    span < 60
-      ? 'at the same time'
-      : span < 3600
-        ? `within ${Math.max(1, Math.round(span / 60))} min of each other`
-        : `within ${Math.round(span / 3600)} h of each other`
-  return `${items.length} alerts like this on ${group.lead.target}, filed ${window}`
-}
-
-export interface SentStamp {
-  /** 'Sent' for pushed alerts, 'Filed' for everything else. */
-  verb: 'Sent' | 'Filed'
-  /** '9:42 PM', 'yesterday 11:05 PM', 'Sep 27, 4:10 PM'. */
-  when: string
-  /** Why nothing was pushed: 'in the daily digest', 'no alert sent', 'muted'. */
-  note: string | null
-  /** The whole caption: 'Sent 9:42 PM', 'Filed 9:42 PM, in the daily digest'. */
-  label: string
-  /** Without the note, for tight rows: 'Filed 9:42 PM'. */
-  short: string
-  /** Full timestamps for the tooltip. */
-  title: string
-  /** ISO 8601, for the time element. */
-  iso: string
-  ts: number
-}
-
-const clock = (date: Date) =>
-  date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-
 /** A moment in words, as precise as the reader needs next to today's date. */
 export function formatStampTime(ts: number, now = Date.now() / 1000): string {
   const date = new Date(ts * 1000)
   const today = dayStart(now)
   const start = dayStart(ts)
-  if (start === today) return clock(date)
-  if (start === dayStart(today - 1)) return `yesterday ${clock(date)}`
+  if (start === today) return clock12(ts)
+  if (start === dayStart(today - 1)) return `yesterday ${clock12(ts)}`
   const sameYear = date.getFullYear() === new Date(now * 1000).getFullYear()
   const day = date.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
     ...(sameYear ? {} : { year: 'numeric' }),
   })
-  return `${day}, ${clock(date)}`
+  return `${day}, ${clock12(ts)}`
 }
 
-const fullTime = (ts: number) =>
-  new Date(ts * 1000).toLocaleString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-    timeZoneName: 'short',
-  })
-
-/**
- * When the alert went out. A pushed alert is 'Sent' at its latest push
- * (`notified_at`, or the filing time from backends that don't send it); anything
- * that was never pushed is 'Filed' and says where it went instead.
- */
-export function sentStamp(item: InboxItem, now = Date.now() / 1000): SentStamp {
-  const pushed = item.delivery === 'notify' && item.muted_by === null
-  const notifiedAt = item.notified_at
-  const sent = pushed && notifiedAt !== null
-  const ts = sent ? (notifiedAt ?? item.created_at) : item.created_at
-  const verb = sent ? 'Sent' : 'Filed'
-  const note =
-    item.muted_by !== null
-      ? 'muted'
-      : item.delivery === 'digest'
-        ? 'in the daily digest'
-        : sent
-          ? null
-          : 'no alert sent'
-  const when = formatStampTime(ts, now)
-  const lines = [`${verb} ${fullTime(ts)}${note ? `, ${note}` : ''}`]
-  if (verb === 'Sent' && ts !== item.created_at)
-    lines.push(`Filed ${fullTime(item.created_at)}`)
-  if (item.updated_at - Math.max(ts, item.created_at) >= 60)
-    lines.push(`Last updated ${fullTime(item.updated_at)}`)
-  return {
-    verb,
-    when,
-    note,
-    label: note ? `${verb} ${when}, ${note}` : `${verb} ${when}`,
-    short: `${verb} ${when}`,
-    title: lines.join('\n'),
-    iso: new Date(ts * 1000).toISOString(),
-    ts,
+/** Open items the queue keeps aside: muted by a rule, or snoozed. */
+export function asideItems(
+  items: InboxItem[],
+  rules: MuteRule[] | undefined
+): { muted: InboxItem[]; snoozed: InboxItem[] } {
+  const muted: InboxItem[] = []
+  const snoozed: InboxItem[] = []
+  for (const item of items) {
+    if (bandOf(item) === 'closed') continue
+    if (isMuted(item, rules)) muted.push(item)
+    else if (item.state === 'snoozed') snoozed.push(item)
   }
+  return { muted: muted.sort(newestFirst), snoozed: snoozed.sort(newestFirst) }
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { AnalyzeJob, InboxItem, MonitorQuery } from '@/lib/monitor/types'
 import type { Analyzability } from './analyzability'
 import {
+  analysisLine,
   attentionCount,
   changeWords,
   fixReason,
@@ -351,4 +352,83 @@ describe('fixReason and jobLine', () => {
 it('counts queries with an open Inbox item', () => {
   const signals = inboxSignals([item({})], undefined, NOW)
   expect(attentionCount([query(), query({ key: 'bbb' })], signals)).toBe(1)
+})
+
+describe('analysisLine', () => {
+  const last = (
+    fields: Partial<NonNullable<MonitorQuery['last_analysis']>>
+  ): MonitorQuery =>
+    query({
+      last_analysis: {
+        state: 'queued',
+        finished_at: null,
+        analysis_ref: null,
+        mode: '',
+        param_source: null,
+        reason: null,
+        ...fields,
+      },
+    })
+
+  it('says why an analysis is on hold and offers Analyze now', () => {
+    const job = {
+      state: 'queued',
+      reason: 'new',
+      queue_state: 'held',
+      reason_text: 'Sign in to turn on AI monitoring',
+    } as AnalyzeJob
+    expect(analysisLine(last({ queue_state: 'held' }), job, NOW)).toEqual({
+      text: 'On hold: Sign in to turn on AI monitoring.',
+      tone: 'neutral',
+      action: 'analyze_now',
+    })
+    expect(
+      analysisLine(
+        last({ queue_state: 'held' }),
+        { ...job, reason: 'user' },
+        NOW
+      )?.action
+    ).toBeNull()
+  })
+
+  it('says when a queued analysis starts', () => {
+    const job = {
+      state: 'queued',
+      reason: 'new',
+      queue_state: 'today',
+      estimated_start_at: NOW + 360,
+    } as AnalyzeJob
+    expect(analysisLine(last({}), job, NOW)?.text).toBe('Queued, about 6 min')
+  })
+
+  it('gives the failure reason with Retry, and a retry on its way calmly', () => {
+    expect(
+      analysisLine(last({ state: 'failed', reason: 'Plan failed' }), null, NOW)
+    ).toEqual({
+      text: "The last analysis didn't finish. Plan failed.",
+      tone: 'negative',
+      action: 'retry',
+    })
+    expect(
+      analysisLine(
+        last({ state: 'failed', error_kind: 'retrying', retry_at: null }),
+        null,
+        NOW
+      )
+    ).toEqual({ text: 'Retrying soon.', tone: 'neutral', action: null })
+    expect(analysisLine(last({ state: 'done' }), null, NOW)).toBeNull()
+  })
+
+  it('reads a held job by its reason', () => {
+    expect(
+      jobLine(
+        {
+          state: 'queued',
+          queue_state: 'held',
+          reason_text: 'Monitoring is off',
+        } as AnalyzeJob,
+        NOW
+      )
+    ).toBe('Monitoring is off')
+  })
 })

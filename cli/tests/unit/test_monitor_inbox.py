@@ -5,6 +5,7 @@ from shared.monitor.monitor_store import MonitorStore
 
 def test_inbox_state_machine_cap_and_dismissed_return(tmp_path):
     store = MonitorStore(tmp_path / "monitor.db")
+    store.set_settings("db", {"quiet_hours": {"from_hour": 0, "to_hour": 0}})
     ts = 1000
     item = store.upsert_item("db", "stuck_query", "q", 0.5, "Stuck", {"n": 1}, ts,
                              notify_cap=1)
@@ -39,6 +40,7 @@ def test_inbox_state_machine_cap_and_dismissed_return(tmp_path):
 
 def test_notification_cap_per_target_per_day(tmp_path):
     store = MonitorStore(tmp_path / "monitor.db")
+    store.set_settings("db", {"quiet_hours": {"from_hour": 0, "to_hour": 0}})
     for i in range(3):
         store.upsert_item("db", "monitoring_issue", str(i), 1, "Issue", {}, 100 + i,
                           notify_cap=2)
@@ -47,6 +49,7 @@ def test_notification_cap_per_target_per_day(tmp_path):
 
 def test_material_group_update_notifies_within_cap(tmp_path):
     store = MonitorStore(tmp_path / "monitor.db")
+    store.set_settings("db", {"quiet_hours": {"from_hour": 0, "to_hour": 0}})
     item = store.upsert_item("db", "many_queries_changed", "database", .9,
                              "Many queries changed", {"query_keys": ["a", "b"]},
                              100, notify_cap=2)
@@ -103,3 +106,16 @@ def test_sign_in_resolves_sign_in_items_for_every_target(tmp_path):
     states = {item["subject"]: item["state"] for t in ("a", "b") for item in store.inbox(target=t)}
     assert states == {"jev_login": "resolved", "llm_login": "resolved", "password": "new"}
     assert store.resolve_sign_in_items(300) == 0
+
+
+def test_history_keeps_who_closed_an_item_across_a_reopen(tmp_path):
+    from features.monitor.presentation import item_history
+
+    store = MonitorStore(tmp_path / "monitor.db")
+    item = store.upsert_item("db", "monitoring_issue", "q", 0.5, "Issue", {}, 100, notify=False)
+    store.action_item(item["id"], "resolve", 110, resolved_by="code")
+    store.action_item(item["id"], "reopen", 120)
+    row = store.inbox(target="db")[0]
+    events = [event for event in store.inbox_events() if event["item_id"] == item["id"]]
+    texts = [entry["text"] for entry in item_history(row, {}, events)]
+    assert texts[:2] == ["Reopened", "Item closed by RDST"]

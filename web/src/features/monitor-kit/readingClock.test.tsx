@@ -1,8 +1,16 @@
-import { act, render, renderHook } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { noteServerDate, resetServerClock, serverOffset } from '@/lib/monitor/serverClock'
-import { PulseHalo } from './PulseHalo'
-import { type MonitorPulseState, nextReadingAt, readingClock, useNow } from './useMonitorPulse'
+import {
+  noteServerDate,
+  resetServerClock,
+  serverOffset,
+} from '@/lib/monitor/serverClock'
+import {
+  type MonitorPulseState,
+  nextReadingAt,
+  readingClock,
+  useNow,
+} from './useMonitorPulse'
 
 beforeEach(() => resetServerClock())
 afterEach(() => vi.useRealTimers())
@@ -15,8 +23,14 @@ it('measures progress between the last reading and the next', () => {
     due: false,
   })
   // Late: full and due, never past full.
-  expect(readingClock(1000, 1060, 1090)).toMatchObject({ progress: 1, due: true })
-  expect(readingClock(null, null, 5)).toMatchObject({ progress: 0, remaining: null })
+  expect(readingClock(1000, 1060, 1090)).toMatchObject({
+    progress: 1,
+    due: true,
+  })
+  expect(readingClock(null, null, 5)).toMatchObject({
+    progress: 0,
+    remaining: null,
+  })
 })
 
 it('ticks every view on one shared clock', () => {
@@ -61,23 +75,11 @@ function pulse(lastAt: number, nextAt: number, now: number): MonitorPulseState {
   }
 }
 
-const progress = (container: HTMLElement) =>
-  Number(container.querySelector('[data-progress]')?.getAttribute('data-progress'))
-
-it('finishes the ring when a reading lands early, then starts again', () => {
-  vi.useFakeTimers()
-  const { container, rerender } = render(<PulseHalo pulse={pulse(1000, 1060, 1030)} />)
-  expect(progress(container)).toBeCloseTo(0.5)
-  // The next reading lands halfway: the old ring completes first.
-  rerender(<PulseHalo pulse={pulse(1030, 1090, 1030)} />)
-  expect(progress(container)).toBe(1)
-  act(() => vi.advanceTimersByTime(400))
-  expect(progress(container)).toBe(0)
-})
-
 it('prefers the scheduled reading time and falls back to the estimate', () => {
   const reading = pulse(1000, 1060, 1005).last!
   expect(nextReadingAt({ ...reading, next_reading_at: 1010 })).toBe(1010)
   expect(nextReadingAt({ ...reading, next_reading_at: undefined })).toBe(1060)
-  expect(nextReadingAt({ ...reading, state: 'paused', next_reading_at: null })).toBeNull()
+  expect(
+    nextReadingAt({ ...reading, state: 'paused', next_reading_at: null })
+  ).toBeNull()
 })

@@ -905,7 +905,7 @@ describe('Compare query cards', () => {
 
     expect(
       screen.getByRole('link', { name: 'View query' }).getAttribute('href')
-    ).toBe('/queries')
+    ).toBe('/database')
     expect(screen.getByText(/hash one/)).toBeTruthy()
   })
 

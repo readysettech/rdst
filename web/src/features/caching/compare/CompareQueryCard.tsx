@@ -143,8 +143,8 @@ function ViewQueryAction({
   return (
     <Text level="label-small">
       <Link
-        to="/queries"
-        search={{ analyze: queryHash, tab: 'overview' }}
+        to="/database"
+        search={{ query: queryHash }}
         className="text-content-primary-solid hover:underline"
       >
         View query

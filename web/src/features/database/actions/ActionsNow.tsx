@@ -1,12 +1,10 @@
-// The report's pointer to Actions: what's open there right now, by kind. Reports describe a
-// day; what to change lives on Actions, so the two never disagree.
-import { cn } from '@rs/tailwind-base'
+// The Daily report's pointer to Actions: what's open there right now, by kind. The report
+// describes a day; what to change lives on Actions, so the two never disagree.
 import { Button } from '@rs/ui-new/button'
+import { Text } from '@rs/ui-new/text'
 import { useNavigate } from '@tanstack/react-router'
 import { useActions, useIndexPlan } from '@/lib/monitor/actions'
-import { CARD, Section } from '../reports/snapshotKit'
-import { changeCount, flat } from './ActionsTab'
-import { CATEGORIES } from './actionsModel'
+import { CATEGORIES, changeCount, flat } from './actionsModel'
 
 export function ActionsNow({ target }: { target: string }) {
   const page = useActions(target).data
@@ -24,40 +22,43 @@ export function ActionsNow({ target }: { target: string }) {
   })).filter((category) => category.id !== 'caching' || category.count)
   const total = changeCount(page, plan)
   return (
-    <Section id="snapshot-actions" title="What to change">
+    <section aria-labelledby="snapshot-actions">
+      <div className="border-b border-border-layout-2 pb-3">
+        <h3
+          id="snapshot-actions"
+          className="text-headline-3 text-content-layout-1"
+        >
+          What to change
+        </h3>
+      </div>
       <div
-        className={cn(
-          CARD,
-          'flex flex-wrap items-center justify-between gap-4 px-5 py-4'
-        )}
+        className="flex flex-wrap items-center justify-between gap-4 border-b border-border-layout-2 py-4"
         data-testid="report-actions-now"
       >
-        <div className="space-y-1">
-          <p className="text-body-medium text-content-layout-1">
+        <div>
+          <Text as="p" level="body-medium" className="text-content-layout-1">
             {total
               ? `${total} ${total === 1 ? 'change is' : 'changes are'} open on Actions right now.`
               : 'Nothing to change right now.'}
-          </p>
-          <p className="text-body-small text-content-layout-3">
+          </Text>
+          <Text as="p" level="caption" className="mt-0.5 text-content-layout-3">
             {counts
               .map((category) => `${category.label} ${category.count}`)
-              .join(' · ')}
-          </p>
+              .join(', ')}
+          </Text>
         </div>
         <Button
+          variant="primary"
           label="Open Actions"
           size="small"
-          modifier="outline"
+          modifier="ghost"
           icon="arrow-right"
           iconPosition="right"
           onClick={() =>
-            void navigate({
-              to: '/database' as never,
-              search: { target, view: 'actions' } as never,
-            })
+            void navigate({ to: '/actions', search: { db: target } })
           }
         />
       </div>
-    </Section>
+    </section>
   )
 }

@@ -82,6 +82,8 @@ type Segment<T extends string = string> = {
   value: T
   label: string
   icon?: IconStrokeName
+  /** A count after the label in the quiet tone ("Open 3"); null or absent shows none. */
+  count?: number | null
 }
 
 type SegmentedControlProps<T extends string> = {
@@ -262,6 +264,12 @@ function SegmentedControlImpl<T extends string>({
               />
             )}
             <span>{segment.label}</span>
+            {segment.count != null && (
+              <span className="text-content-layout-3 tabular-nums">
+                {' '}
+                {segment.count}
+              </span>
+            )}
           </button>
         )
       })}

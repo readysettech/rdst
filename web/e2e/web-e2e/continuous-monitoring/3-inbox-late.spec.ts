@@ -7,6 +7,8 @@ import {
   hold,
   hook,
   type InboxItem,
+  inboxBadge,
+  inboxDetail,
   items,
   judgeUntil,
   ok,
@@ -142,7 +144,9 @@ test('a new heavy query files once it has ranked with the top queries', async ({
   test.setTimeout(5 * 60_000)
   await hook.phase(request, 'new_heavy', true)
   try {
-    await hold(45)
+    // The query leaves the digest once two checks in a row rank it in the hour's top ten,
+    // which takes it about a minute and a half of running on a quiet agent.
+    await hold(60)
     // The key the collector records for it; until then the shape only has its text's hash,
     // which a MySQL digest identity needn't share.
     const heavy = (
@@ -162,60 +166,45 @@ test('a new heavy query files once it has ranked with the top queries', async ({
         const item = findItem(current, 'new_heavy_query', heavy)
         return Boolean(item && item.delivery !== 'digest')
       },
-      6,
+      8,
       10
     )
     const item = findItem(all, 'new_heavy_query', heavy)!
     await openInbox(page)
     const row = await revealRow(page, item.id)
 
-    // Snooze moves it into Snoozed; reopening brings it back.
-    await row.hover()
-    await row.getByRole('button', { name: 'More ways to close' }).click()
-    await page.getByRole('menuitem', { name: 'Snooze for 1 hour' }).click()
-    await expect(row).toHaveCount(0)
-    await expect
-      .poll(
-        async () =>
-          (await items(request)).find((entry) => entry.id === item.id)?.state
-      )
-      .toBe('snoozed')
-    await page.reload()
-    const snoozed = page.getByRole('region', { name: 'Snoozed' })
-    await snoozed.getByRole('button', { name: 'Show snoozed' }).click()
-    await expect(
-      snoozed.locator(`article[data-inbox-item="${item.id}"]`)
-    ).toBeVisible()
-    expect(
-      (await request.post(`/api/monitor/inbox/${item.id}/reopen`)).ok()
-    ).toBe(true)
-    await page.reload()
-    await revealRow(page, item.id)
-
-    // Filtering by database keeps this target's items.
-    await page
-      .getByTestId('inbox-database-filter')
-      .getByRole('button', { name: new RegExp(`^${target}\\b`) })
-      .click()
-    await expect(page).toHaveURL(new RegExp(`target=${target}`))
-    await revealRow(page, item.id)
-
-    // The sidebar badge counts unread items among the open ones, and
-    // marking everything seen leaves none unread.
-    const badge = page
-      .getByRole('link', { name: /Inbox/ })
-      .locator('[title$="unread"]')
-    const unread = Number(await badge.textContent())
-    const open = (await items(request, 'state=open')).length
-    expect(unread).toBeGreaterThan(0)
-    expect(unread).toBeLessThanOrEqual(open)
-    await page.getByRole('button', { name: 'Mark all seen' }).click()
+    // Opening the item marks it seen.
+    await row.click()
+    await expect(row).toHaveAttribute('aria-current', 'true')
+    await expect(inboxDetail(page, item.id)).toBeVisible()
     await expect
       .poll(
         async () =>
           (await items(request)).find((entry) => entry.id === item.id)?.state
       )
       .toBe('seen')
+
+    // Filtering by database keeps this target's items; the row names its database.
+    await page
+      .getByRole('group', { name: 'Filters' })
+      .getByRole('button', { name: /^Database: / })
+      .click()
+    await page
+      .getByRole('menuitem', { name: new RegExp(`^${target}\\b`) })
+      .click()
+    await expect(page).toHaveURL(new RegExp(`db=${target}`))
+    await expect(
+      (await revealRow(page, item.id)).getByTestId('inbox-item-database')
+    ).toHaveText(target)
+
+    // The sidebar badge counts the open items that need action now, and
+    // shows only while there are any.
+    const actNow = (await items(request, 'state=open')).filter(
+      (entry) => entry.severity_band === 'act_now'
+    ).length
+    const badge = inboxBadge(page)
+    if (actNow > 0) await expect(badge).toHaveText(String(actNow))
+    else await expect(badge).toHaveCount(0)
   } finally {
     await hook.phase(request, 'new_heavy', false)
   }
@@ -245,13 +234,13 @@ test('a cut connection files at once, notifies, marks the chart and clears on re
       )
     )
     expect(item!.severity_band).toBe('act_now')
-    expect(item!.delivery).toBe('notify')
+    expect(item!.delivery).toBe('inbox')
     await selectTarget(page)
     await page.goto('/inbox')
     await expect(
       page
-        .getByRole('region', { name: 'Urgent' })
-        .locator(`article[data-inbox-item="${item!.id}"]`)
+        .getByRole('region', { name: 'Act now' })
+        .locator(`[data-inbox-item="${item!.id}"]`)
     ).toBeVisible()
     // Hold the outage long enough to leave a gap in the minute readings.
     await new Promise((settle) => setTimeout(settle, 45_000))
@@ -266,13 +255,12 @@ test('a cut connection files at once, notifies, marks the chart and clears on re
     { timeout: 90_000 }
   )
   expect(lost(cleared)!.id).toBe(item!.id)
-  // The outage went out as a system notification, and its return closed it.
+  // The outage filed in the Inbox with no push (that waits an hour); its return closed it.
   const events = (await hook.events(request, item!.id)).map(
     (event) => event.kind
   )
-  expect(events).toEqual(
-    expect.arrayContaining(['created', 'notified', 'resolved'])
-  )
+  expect(events).toEqual(expect.arrayContaining(['created', 'resolved']))
+  expect(events).not.toContain('notified')
   const health = await ok<{
     outages: { start: number; end: number | null; cause: string }[]
   }>(request.get(`${base}/health?range=15m`))

@@ -64,6 +64,8 @@ export interface AgentActivityPage {
   items: AgentActivityItem[]
   next_cursor?: string | null
   targets: string[]
+  /** How many days the log keeps. */
+  retention_days?: number
 }
 
 export interface AgentStatement {

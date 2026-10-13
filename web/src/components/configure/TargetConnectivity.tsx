@@ -104,44 +104,44 @@ export function UnreachableNotice({
 
   return (
     <div className="rounded-lg border border-border-warning-soft bg-surface-warning-soft/15 px-3 py-2">
-        <HStack className="gap-2 items-center flex-wrap">
-          <Icon
-            name="alert"
-            label=""
-            aria-hidden="true"
-            className="w-4 h-4 text-content-warning-soft shrink-0"
+      <HStack className="gap-2 items-center flex-wrap">
+        <Icon
+          name="alert"
+          label=""
+          aria-hidden="true"
+          className="w-4 h-4 text-content-warning-soft shrink-0"
+        />
+        <div className="flex-1 min-w-48">
+          <ConnectionFailureActions
+            failure={{
+              target: target.name,
+              message: error,
+              category: result?.category,
+              code: result?.code,
+            }}
+            passwordRequired={passwordIssue}
+            onSetPassword={
+              onSetPassword ? () => onSetPassword(target) : undefined
+            }
+            onRetry={onRetry ? () => onRetry(target) : undefined}
           />
-          <div className="flex-1 min-w-48">
-            <ConnectionFailureActions
-              failure={{
-                target: target.name,
-                message: error,
-                category: result?.category,
-                code: result?.code,
-              }}
-              passwordRequired={passwordIssue}
-              onSetPassword={
-                onSetPassword ? () => onSetPassword(target) : undefined
-              }
-              onRetry={onRetry ? () => onRetry(target) : undefined}
-            />
-          </div>
-          {error && !passwordIssue && (
-            <Button
-              type="button"
-              size="small"
-              modifier="link"
-              label={detailsOpen ? 'Hide details' : 'Details'}
-              classMerge="h-auto p-0"
-              onClick={() => setDetailsOpen((open) => !open)}
-            />
-          )}
-        </HStack>
-        {detailsOpen && error && !passwordIssue && (
-          <pre className="mt-2 text-xs text-content-layout-3 whitespace-pre-wrap break-all">
-            {error}
-          </pre>
+        </div>
+        {error && !passwordIssue && (
+          <Button
+            type="button"
+            size="small"
+            modifier="link"
+            label={detailsOpen ? 'Hide details' : 'Details'}
+            classMerge="h-auto p-0"
+            onClick={() => setDetailsOpen((open) => !open)}
+          />
         )}
+      </HStack>
+      {detailsOpen && error && !passwordIssue && (
+        <pre className="mt-2 text-xs text-content-layout-3 whitespace-pre-wrap break-all">
+          {error}
+        </pre>
+      )}
     </div>
   )
 }

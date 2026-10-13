@@ -107,29 +107,18 @@
   .mk-particle { animation: none; opacity: 0; }
 }
 
-/* Load bands (StackedLoadChart, query rows). Identity colors for the top 8 only, each
-   distinct; everything else is neutral grey. No red: color here is identity. */
+/* Load bands (StackedLoadChart, query rows): the identity ramp, eight cool hues for
+   the top 8 and the neutral series-0 for everything else. Color here is identity. */
 :root {
-  --mk-band-1: var(--violet-light-11);
-  --mk-band-2: var(--blue-light-11);
-  --mk-band-3: var(--orange-light-11);
-  --mk-band-4: var(--plum-light-11);
-  --mk-band-5: var(--grass-light-11);
-  --mk-band-6: var(--yellow-light-11);
-  --mk-band-7: var(--brown-light-11);
-  --mk-band-8: var(--indigo-light-11);
-  --mk-band-other: var(--sand-light-9);
-}
-[data-color-mode="dark"] {
-  --mk-band-1: var(--violet-dark-11);
-  --mk-band-2: var(--blue-dark-11);
-  --mk-band-3: var(--orange-dark-11);
-  --mk-band-4: var(--plum-dark-11);
-  --mk-band-5: var(--grass-dark-11);
-  --mk-band-6: var(--yellow-dark-11);
-  --mk-band-7: var(--brown-dark-11);
-  --mk-band-8: var(--indigo-dark-11);
-  --mk-band-other: var(--sand-dark-9);
+  --mk-band-1: var(--color-series-1);
+  --mk-band-2: var(--color-series-2);
+  --mk-band-3: var(--color-series-3);
+  --mk-band-4: var(--color-series-4);
+  --mk-band-5: var(--color-series-5);
+  --mk-band-6: var(--color-series-6);
+  --mk-band-7: var(--color-series-7);
+  --mk-band-8: var(--color-series-8);
+  --mk-band-other: var(--color-series-0);
 }
 
 /* Left-to-right reveal for chart draw-in (a clip rect scales from 0). */

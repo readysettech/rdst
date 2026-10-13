@@ -2,9 +2,10 @@
 // second, screen-reader-only copy of that label to the name. [MG-06, F-46]
 import { BaseInputCheckboxRow } from '@rs/ui-new/base-input-checkbox'
 import { Icon } from '@rs/ui-new/icon'
+import { Metric, MetricRow } from '@rs/ui-new/metric-row'
+import { StatusLine } from '@rs/ui-new/status-line'
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { SectionCard } from './components/audit/report/ReportPrimitives'
 import { ExperimentalBanner } from './components/ExperimentalBanner'
 
 afterEach(cleanup)
@@ -28,22 +29,39 @@ describe('decorative icons', () => {
     expect(container.textContent).toBe('Unreachable')
   })
 
-  it('leaves a section card announcing its title once', () => {
-    const { container } = render(
-      <SectionCard icon="document-validation" title="Top findings">
-        <p>body</p>
-      </SectionCard>
-    )
-    expect(
-      screen.getByRole('heading', { name: 'Top findings' }).textContent
-    ).toBe('Top findings')
-    expect(container.textContent).toBe('Top findingsbody')
-  })
-
   it('leaves the experimental banner announcing its word once', () => {
     const { container } = render(<ExperimentalBanner name="Guards" />)
     expect(container.textContent?.startsWith('Experimental')).toBe(true)
     expect(container.textContent?.match(/Experimental/g)).toHaveLength(1)
+  })
+})
+
+describe('status surfaces', () => {
+  it('reads a metric as its label, number and context once', () => {
+    const { container } = render(
+      <MetricRow>
+        <Metric
+          label="Cache hit"
+          value="12.5"
+          unit="%"
+          tone="warning"
+          reason="shared_buffers is the default"
+        />
+      </MetricRow>
+    )
+    expect(container.textContent).toBe(
+      'Cache hit12.5%shared_buffers is the default'
+    )
+  })
+
+  it('keeps the still dot out of the sentence and the caption', () => {
+    const { container } = render(
+      <StatusLine tone="off" caption="Watching 0 databases.">
+        No database yet.
+      </StatusLine>
+    )
+    expect(container.textContent).toBe('No database yet.Watching 0 databases.')
+    expect(container.querySelector('[aria-hidden="true"]')).toBeTruthy()
   })
 })
 

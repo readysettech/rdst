@@ -146,6 +146,7 @@ def test_jev_payload_and_api_include_metrics(tmp_path):
 
 def test_lock_contention_open_sustain_recover_and_no_flap(tmp_path, monkeypatch):
     store = MonitorStore(tmp_path / "monitor.db")
+    store.set_settings("db", {"quiet_hours": {"from_hour": 0, "to_hour": 0}})
     monitor = loop.MonitorLoop(store=store, sampler=object())
     captured = []
     monkeypatch.setattr(loop, "_top_blocker", lambda target: captured.append(target) or {
@@ -186,6 +187,7 @@ def test_lock_contention_respects_push_cap(tmp_path, monkeypatch):
     store = MonitorStore(tmp_path / "monitor.db")
     monitor = loop.MonitorLoop(store=store, sampler=object())
     monkeypatch.setattr(loop, "_top_blocker", lambda target: None)
+    store.set_settings("db", {"quiet_hours": {"from_hour": 0, "to_hour": 0}})
     store.upsert_item("db", "connections_near_max", "database", 0.9, "Connections", {}, 60)
     store.set_settings("db", {"push_daily_cap": 1})
     for ts in (60, 120, 180, 240, 300):

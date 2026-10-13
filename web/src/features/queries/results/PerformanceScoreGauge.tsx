@@ -1,10 +1,10 @@
+// The plan score: 37 ticks over a half circle light up in order to the score on open,
+// neutral in color, the number in the middle and "Plan score" under it.
 import { animate, m, useMotionValue, useReducedMotion } from '@rs/ui-new/motion'
-import { HStack, VStack } from '@rs/ui-new/stack'
+import { VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { getTransition } from '@rs/ui-new/transition'
 import { useEffect, useRef } from 'react'
-import { resultToneStyles } from './resultStyles'
-import { getScoreTone, type ResultTone } from './resultsSelectors'
 
 const SEGMENT_COUNT = 37
 const CENTER_X = 160
@@ -16,13 +16,6 @@ const START_ANGLE = 180
 const GAUGE_DURATION_SECONDS = 1.1
 const GAUGE_DELAY_SECONDS = 0.16
 
-const scoreToneColors: Record<ResultTone, string> = {
-  negative: 'var(--color-content-negative-soft)',
-  warning: 'var(--color-content-warning-soft)',
-  informative: 'var(--color-content-info-soft)',
-  positive: 'var(--color-content-positive-soft)',
-}
-
 function polarPoint(radius: number, angle: number) {
   const radians = (angle * Math.PI) / 180
   return {
@@ -31,16 +24,9 @@ function polarPoint(radius: number, angle: number) {
   }
 }
 
-export function PerformanceScoreGauge({
-  score,
-  tone,
-}: {
-  score: number
-  tone: ResultTone
-}) {
+export function PerformanceScoreGauge({ score }: { score: number }) {
   const clampedScore = Math.min(100, Math.max(0, score))
   const shouldReduceMotion = useReducedMotion()
-  const style = resultToneStyles[tone]
   const markerSweep = (clampedScore / 100) * 180
   const markerStart = polarPoint(MARKER_RADIUS, START_ANGLE)
   const entrance = {
@@ -51,7 +37,6 @@ export function PerformanceScoreGauge({
     ...getTransition('cubicSlow'),
     duration: GAUGE_DURATION_SECONDS,
   }
-  const gaugeRef = useRef<HTMLDivElement>(null)
   const markerRef = useRef<SVGGElement>(null)
   const scoreRef = useRef<HTMLSpanElement>(null)
   const markerMotion = useMotionValue(0)
@@ -64,12 +49,8 @@ export function PerformanceScoreGauge({
       )
 
       const animatedScore = (angle / 180) * 100
-      const animatedTone = getScoreTone(animatedScore)
       if (scoreRef.current) {
         scoreRef.current.textContent = Math.round(animatedScore).toString()
-      }
-      if (gaugeRef.current) {
-        gaugeRef.current.style.color = scoreToneColors[animatedTone]
       }
     })
 
@@ -92,12 +73,14 @@ export function PerformanceScoreGauge({
   }, [markerMotion, markerSweep, shouldReduceMotion])
 
   return (
-    <VStack className="w-full max-w-84 items-center gap-3">
+    <VStack
+      data-testid="plan-score"
+      className="w-50 shrink-0 items-center gap-2"
+    >
       <div
-        ref={gaugeRef}
         role="img"
-        aria-label={`Performance score ${score} out of 100`}
-        className="relative w-full text-content-negative-soft transition-colors duration-slow ease-in-out"
+        aria-label={`Plan score ${score} out of 100`}
+        className="relative w-full text-content-layout-1"
       >
         <svg aria-hidden="true" viewBox="0 0 320 165" className="block w-full">
           <path
@@ -121,9 +104,7 @@ export function PerformanceScoreGauge({
                 x2={end.x}
                 y2={end.y}
                 strokeWidth="4"
-                className={
-                  active ? 'stroke-current' : 'stroke-border-layout-1/70'
-                }
+                className={active ? 'stroke-current' : 'stroke-border-layout-2'}
                 initial={
                   shouldReduceMotion
                     ? false
@@ -184,14 +165,11 @@ export function PerformanceScoreGauge({
           <Text
             ref={scoreRef}
             as="span"
-            level="stat-hero"
-            className="text-content-layout-1"
+            level="display-small"
+            className="tabular-nums text-content-layout-1"
           >
             {shouldReduceMotion ? score : 0}
           </Text>
-          {/* <Text as="span" level="headline-2" className="text-content-layout-1">
-            %
-          </Text> */}
         </m.div>
       </div>
 
@@ -214,14 +192,13 @@ export function PerformanceScoreGauge({
               }
         }
       >
-        <HStack className="items-center justify-center gap-1">
-          <Text level="label-small" className="text-content-layout-1">
-            Query score
-          </Text>
-          <Text level="label-small" className={style.text}>
-            {score} / 100
-          </Text>
-        </HStack>
+        <Text
+          as="span"
+          level="label-extra-small"
+          className="font-normal text-content-layout-3"
+        >
+          Plan score
+        </Text>
       </m.div>
     </VStack>
   )

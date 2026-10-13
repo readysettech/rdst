@@ -127,6 +127,8 @@ export type TabButtonItemProps = {
   id?: string
   /** Id of the panel this tab controls. */
   'aria-controls'?: string
+  /** What the view holds, after the label in the quiet tone; null or absent shows none. */
+  count?: number | null
 } & TabBaseItemProps
 
 export const TabItemButton = ({
@@ -141,6 +143,7 @@ export const TabItemButton = ({
   hint,
   id,
   'aria-controls': ariaControls,
+  count,
   ...restProps
 }: TabButtonItemProps) => {
   const transition = getTransition()
@@ -171,6 +174,9 @@ export const TabItemButton = ({
       <HStack>
         {leftIcon && <Icon name={leftIcon} label="" aria-hidden="true" />}
         {label}
+        {count != null && (
+          <span className="tabular-nums text-content-layout-3">{count}</span>
+        )}
       </HStack>
       {rightIcon && <Icon name={rightIcon} label="" aria-hidden="true" />}
       {active && !registerActiveTab && (

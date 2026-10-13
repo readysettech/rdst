@@ -1,23 +1,24 @@
-import { Button } from '@rs/ui-new/button'
-import { Card } from '@rs/ui-new/card'
+// The Ask page's body: the question box, then whatever the question is doing (the
+// steps, a choice to make, the answer, a failure), the first visit's three questions,
+// and the Earlier list.
+import { DividedList, ListRow } from '@rs/ui-new/divided-list'
 import { Icon } from '@rs/ui-new/icon'
-import { m } from '@rs/ui-new/motion'
-import { HStack, VStack } from '@rs/ui-new/stack'
+import { Pressable } from '@rs/ui-new/pressable'
 import { Text } from '@rs/ui-new/text'
-import { getTransition } from '@rs/ui-new/transition'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AskClarification } from '../features/ask/AskClarification'
-import { AskComposer } from '../features/ask/AskComposer'
-import { AskErrorState } from '../features/ask/AskErrorState'
-import { AskHistory } from '../features/ask/AskHistory'
-import { AskProgress } from '../features/ask/AskProgress'
-import { AskResult } from '../features/ask/AskResult'
+import { AskAnswer } from '../features/ask/AskAnswer'
+import { AskBox, type AskEmphasis } from '../features/ask/AskBox'
+import { AskChoice } from '../features/ask/AskChoice'
+import { AskEarlier } from '../features/ask/AskEarlier'
+import { AskFailure } from '../features/ask/AskFailure'
+import { AskSteps } from '../features/ask/AskSteps'
+import { hasPlaceholders } from '../features/ask/askModel'
 import { fetchAskExamples, fetchAskHistory } from '../lib/api'
 import { useAsk } from '../lib/ask'
-import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
-import { TrialRegistrationDialog } from './TrialRegistrationDialog'
+
+const SUGGESTIONS = 3
 
 interface AskPanelProps {
   initialQuestion?: string
@@ -28,8 +29,45 @@ interface AskPanelProps {
   beforeRun?: () => Promise<boolean>
 }
 
-function sourceLabel(source: string | undefined): string {
-  return source === 'semantic' ? 'semantic layer' : 'live introspection'
+function Suggestions({
+  examples,
+  disabled,
+  onPick,
+}: {
+  examples: string[]
+  disabled: boolean
+  onPick: (question: string) => void
+}) {
+  if (examples.length === 0) return null
+  return (
+    <DividedList columns="1fr auto" className="mt-5">
+      {examples.slice(0, SUGGESTIONS).map((example) => (
+        <ListRow
+          key={example}
+          asChild
+          interactive
+          className="min-h-10.5 py-1.5"
+        >
+          <Pressable
+            data-testid="ask-suggestion"
+            disabled={disabled}
+            className="w-full text-left"
+            onClick={() => onPick(example)}
+          >
+            <span className="min-w-0 truncate text-body-small text-content-layout-2">
+              {example}
+            </span>
+            <Icon
+              name="chevron-right"
+              label=""
+              size="small"
+              className="justify-self-end text-content-layout-3"
+            />
+          </Pressable>
+        </ListRow>
+      ))}
+    </DividedList>
+  )
 }
 
 export function AskPanel({
@@ -39,11 +77,13 @@ export function AskPanel({
   disabled = false,
   beforeRun,
 }: AskPanelProps) {
-  const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [question, setQuestion] = useState(initialQuestion ?? '')
   const [askedTarget, setAskedTarget] = useState<string | null>(null)
-  const [showTrialDialog, setShowTrialDialog] = useState(false)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  // A question sent by link leaves the URL once it is asked.
+  const fromLink = useRef(Boolean(initialQuestion))
   const {
     ask,
     resumeWithAnswers,
@@ -57,38 +97,59 @@ export function AskPanel({
     error,
     reset,
   } = useAsk()
+  const runsAgainst = target ?? null
 
-  const examplesQuery = useQuery({
+  const examples = useQuery({
     queryKey: ['ask', 'examples', target],
-    queryFn: () => fetchAskExamples(target!),
+    queryFn: () => fetchAskExamples(target as string),
     staleTime: 5 * 60_000,
-    enabled: !!target,
+    enabled: Boolean(target),
   })
-  const historyQuery = useQuery({
+  const history = useQuery({
     queryKey: ['ask', 'history', target],
     queryFn: () => fetchAskHistory(target, 50),
-    enabled: !!target,
+    enabled: Boolean(target),
   })
+  // A finished question joins Earlier questions.
+  useEffect(() => {
+    if (state === 'complete')
+      void queryClient.invalidateQueries({ queryKey: ['ask', 'history'] })
+  }, [state, queryClient])
 
-  const handleSubmit = useCallback(async () => {
-    if (disabled || !question.trim()) return
-    if (beforeRun && !(await beforeRun())) return
-    setAskedTarget(target ?? null)
-    await ask({ question: question.trim(), target: target || undefined })
-  }, [ask, beforeRun, disabled, question, target])
-
-  const handleRetry = useCallback(async () => {
-    if (disabled || !question.trim()) return
-    const retryTarget = askedTarget ?? target ?? null
-    if (beforeRun && !(await beforeRun())) return
-    setAskedTarget(retryTarget)
-    await ask({
-      question: question.trim(),
-      target: retryTarget || undefined,
-    })
-  }, [ask, askedTarget, beforeRun, disabled, question, target])
-
-  const handleClarificationSubmit = useCallback(
+  const submit = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim()
+      if (disabled || !trimmed || !runsAgainst) return
+      if (beforeRun && !(await beforeRun())) return
+      if (fromLink.current) {
+        fromLink.current = false
+        void navigate({
+          to: '/ask',
+          search: ((prev: Record<string, unknown>) => ({
+            ...prev,
+            sql: undefined,
+            params: undefined,
+          })) as never,
+          replace: true,
+        })
+      }
+      setAskedTarget(runsAgainst)
+      await ask({ question: trimmed, target: runsAgainst })
+    },
+    [ask, beforeRun, disabled, runsAgainst, navigate]
+  )
+  const askAgain = useCallback(
+    (text: string) => {
+      setQuestion(text)
+      void submit(text)
+    },
+    [submit]
+  )
+  const edit = useCallback(() => {
+    reset()
+    inputRef.current?.focus()
+  }, [reset])
+  const choose = useCallback(
     async (answers: Record<string, string>) => {
       if (disabled) return
       if (beforeRun && !(await beforeRun())) return
@@ -97,56 +158,8 @@ export function AskPanel({
     [beforeRun, disabled, resumeWithAnswers]
   )
 
-  const handleNewQuestion = useCallback(() => {
-    reset()
-    setQuestion('')
-  }, [reset])
-
-  const handleRefine = useCallback(() => {
-    reset()
-  }, [reset])
-
-  const handleExampleClick = useCallback(
-    (example: string) => {
-      if (!disabled) setQuestion(example)
-    },
-    [disabled]
-  )
-
-  const handleReask = useCallback(
-    async (pastQuestion: string) => {
-      if (disabled || !pastQuestion.trim()) return
-      if (beforeRun && !(await beforeRun())) return
-      setQuestion(pastQuestion)
-      setAskedTarget(target ?? null)
-      await ask({
-        question: pastQuestion.trim(),
-        target: target || undefined,
-      })
-    },
-    [ask, beforeRun, disabled, target]
-  )
-
-  const handleAnalyze = useCallback(() => {
-    const sql = result?.sql || sqlGenerated?.sql
-    if (!sql) return
-    const answerTarget = schemaLoaded?.target || askedTarget || target
-    navigate({
-      to: '/results',
-      search: { query: sql, target: answerTarget || undefined, origin: 'ask' },
-    })
-  }, [result, sqlGenerated, schemaLoaded, askedTarget, target, navigate])
-
-  const handleViewInQueries = useCallback(() => {
-    navigate({
-      to: '/database',
-      search: { query: result?.query_hash || undefined },
-    })
-  }, [navigate, result?.query_hash])
-
-  // Sending replaces the composer with the outcome, so the keyboard has to be
-  // told where it went: focus lands on the outcome region and a live region
-  // names it, instead of dropping to <body>. [C-20]
+  // The answer replaces the steps, so the keyboard is told where it went: focus lands
+  // on the outcome and a live region names it.
   const outcomeRef = useRef<HTMLDivElement>(null)
   const outcome =
     state === 'complete' && result
@@ -160,7 +173,8 @@ export function AskPanel({
     if (outcome) outcomeRef.current?.focus()
   }, [outcome])
 
-  const isLoading = state === 'loading' || state === 'generating'
+  const busy = state === 'loading' || state === 'generating'
+  const answeredFrom = schemaLoaded?.target || askedTarget || target || ''
   const executedSql = result?.sql ?? sqlGenerated?.sql ?? ''
   const limitAdded =
     result?.limit_added ??
@@ -170,177 +184,110 @@ export function AskPanel({
         /\blimit\b/i.test(result.sql) &&
         !/\blimit\b/i.test(sqlGenerated.sql)
     )
-  // An unresolved target is never silently swapped for another database: the
-  // composer says there is none and the run action stays closed. [F-26]
-  const runsAgainst = target ?? null
-  const answeredFrom =
-    schemaLoaded?.target || askedTarget || target || 'the selected target'
+  const emphasis: AskEmphasis =
+    state === 'clarification_needed'
+      ? 'ghost'
+      : state === 'error'
+        ? 'outline'
+        : 'solid'
+  const items = history.data?.items ?? []
+  const firstVisit =
+    state === 'idle' &&
+    !history.isLoading &&
+    !targetResolving &&
+    items.length === 0
 
   return (
-    <VStack className="gap-6 w-full">
-      {state === 'idle' && (
-        <m.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={getTransition()}
-          className="grid w-full gap-4 laptop:grid-cols-3"
-        >
-          <div className="min-w-0 laptop:col-span-2">
-            <AskComposer
-              question={question}
-              target={runsAgainst}
-              disabled={disabled || !runsAgainst}
-              examples={examplesQuery.data?.examples ?? []}
-              examplesLoading={examplesQuery.isLoading || targetResolving}
-              examplesError={examplesQuery.isError}
-              onQuestionChange={setQuestion}
-              onSubmit={() => void handleSubmit()}
-              onExample={handleExampleClick}
-              onRetryExamples={() => void examplesQuery.refetch()}
-            />
-          </div>
-          <div className="min-w-0">
-            <AskHistory
-              items={historyQuery.data?.items ?? []}
-              disabled={disabled}
-              loading={historyQuery.isLoading || targetResolving}
-              error={historyQuery.isError}
-              onReask={(pastQuestion) => void handleReask(pastQuestion)}
-              onRetry={() => void historyQuery.refetch()}
-            />
-          </div>
-        </m.div>
+    <div className="w-full">
+      {hasPlaceholders(question) && !busy && (
+        <Text as="p" level="caption" className="mb-3 text-content-layout-3">
+          This query has parameters. Say which values to use.
+        </Text>
       )}
-
-      {isLoading && (
-        <m.div
-          className="w-full"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={getTransition()}
-        >
-          <AskProgress
-            status={status}
-            schemaLoaded={schemaLoaded}
-            question={question}
-            onCancel={cancel}
-          />
-        </m.div>
+      <AskBox
+        question={question}
+        target={runsAgainst}
+        disabled={disabled}
+        submitDisabled={!runsAgainst}
+        busy={busy}
+        emphasis={emphasis}
+        inputRef={inputRef}
+        onChange={setQuestion}
+        onSubmit={() => void submit(question)}
+      />
+      {firstVisit && (
+        <Suggestions
+          examples={examples.data?.examples ?? []}
+          disabled={disabled}
+          onPick={setQuestion}
+        />
       )}
-
-      {state === 'cancelled' && (
-        <Card className="w-full">
-          <Card.Content className="p-6">
-            <HStack className="items-center justify-between gap-4 flex-wrap">
-              <HStack className="items-center gap-3">
-                <div className="flex size-10 items-center justify-center rounded-xl bg-surface-layout-2">
-                  <Icon
-                    name="close"
-                    label="Cancelled"
-                    className="size-5 text-content-layout-2"
-                  />
-                </div>
-                <VStack className="items-start gap-1">
-                  <Text level="subtitle-1" className="text-content-layout-1">
-                    Question cancelled
-                  </Text>
-                  <Text level="body-small" className="text-content-layout-3">
-                    Nothing changed in {answeredFrom}. Your question is ready to
-                    run again.
-                  </Text>
-                </VStack>
-              </HStack>
-              <HStack className="items-center gap-2">
-                <Button
-                  variant="primary"
-                  modifier="ghost"
-                  label="Edit question"
-                  onClick={handleRefine}
-                />
-                <Button
-                  variant="primary"
-                  modifier="solid"
-                  label="Run again"
-                  icon="observe"
-                  iconPosition="left"
-                  onClick={() => void handleRetry()}
-                />
-              </HStack>
-            </HStack>
-          </Card.Content>
-        </Card>
-      )}
-
+      {busy && <AskSteps phase={status?.phase} onCancel={cancel} />}
       <div
         ref={outcomeRef}
         tabIndex={-1}
         data-testid="ask-outcome"
-        className="w-full outline-none"
+        className="outline-none"
       >
         <span aria-live="polite" className="sr-only">
           {outcome}
         </span>
         {state === 'clarification_needed' && clarification && (
-          <m.div
-            className="w-full"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={getTransition()}
-          >
-            <AskClarification
-              question={question}
-              questions={clarification.questions}
-              onSubmit={handleClarificationSubmit}
-              onEditQuestion={handleRefine}
-              disabled={disabled}
-            />
-          </m.div>
-        )}
-
-        {state === 'complete' && result && (
-          <AskResult
-            question={question}
-            result={result}
-            sqlGenerated={sqlGenerated}
-            answeredFrom={answeredFrom}
-            provenanceSource={sourceLabel(schemaLoaded?.source)}
-            savedTag={result.query_tag || ''}
-            executedSql={executedSql}
-            limitAdded={limitAdded}
-            onViewInQueries={handleViewInQueries}
-            onAnalyze={handleAnalyze}
-            onRefine={handleRefine}
-            onNewQuestion={handleNewQuestion}
+          <AskChoice
+            clarification={clarification}
+            disabled={disabled}
+            onRun={(answers) => void choose(answers)}
           />
         )}
-
+        {state === 'complete' && result && (
+          <AskAnswer
+            result={result}
+            answeredFrom={answeredFrom}
+            explanation={sqlGenerated?.explanation ?? null}
+            executedSql={executedSql}
+            limitAdded={limitAdded}
+            onOpenInDatabase={
+              result.query_hash
+                ? () =>
+                    void navigate({
+                      to: '/database',
+                      search: { query: result.query_hash } as never,
+                    })
+                : null
+            }
+            onAnalyze={() =>
+              void navigate({
+                to: '/results',
+                search: {
+                  query: executedSql,
+                  target: answeredFrom || undefined,
+                  origin: 'ask',
+                },
+              })
+            }
+            onAskAgain={() => askAgain(question)}
+            onEdit={edit}
+          />
+        )}
         {state === 'error' && error && (
-          <m.div
-            className="w-full"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={getTransition()}
-          >
-            <AskErrorState
-              error={error}
-              question={question}
-              target={target}
-              onRetry={handleRetry}
-              onRefine={handleRefine}
-              onStartTrial={() => setShowTrialDialog(true)}
-            />
-          </m.div>
+          <AskFailure
+            error={error}
+            target={askedTarget ?? target ?? null}
+            sql={executedSql}
+            limitAdded={limitAdded}
+            onEdit={edit}
+            onRetry={() => void submit(question)}
+          />
         )}
       </div>
-
-      <TrialRegistrationDialog
-        isOpen={showTrialDialog}
-        onClose={() => setShowTrialDialog(false)}
-        onSuccess={() => {
-          void invalidateTrialRelatedQueries(queryClient)
-          setShowTrialDialog(false)
-        }}
+      <AskEarlier
+        items={items}
+        target={runsAgainst}
+        loading={history.isLoading || targetResolving}
+        disabled={disabled || busy}
+        nowMs={Date.now()}
+        onAskAgain={askAgain}
       />
-    </VStack>
+    </div>
   )
 }

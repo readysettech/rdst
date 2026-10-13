@@ -74,8 +74,8 @@ describe('cache route validateSearch', () => {
 
     expect(thrown).toMatchObject({
       options: {
-        to: '/queries',
-        search: { hash: 'query-1' },
+        to: '/database',
+        search: { focus: 'query-1' },
         replace: true,
       },
     })

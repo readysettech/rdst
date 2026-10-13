@@ -50,31 +50,45 @@ describe('AI provider startup gate', () => {
 
   afterEach(cleanup)
 
-  it('leads with sign-in and keeps an own key secondary', () => {
+  it('keeps the page bar and offers hosted sign-in or an own key', () => {
     renderWithClient(
-      <AiProviderGate gate={{ status: 'blocked', reason: 'missing' }} />,
+      <AiProviderGate
+        title="Ask"
+        gate={{ status: 'blocked', reason: 'missing' }}
+      />,
       createTestQueryClient()
     )
 
+    expect(screen.getByRole('heading', { name: 'Ask', level: 1 })).toBeTruthy()
     expect(
-      screen.getByRole('heading', { name: 'Choose how RDST uses AI' })
+      screen.getByText('Set up AI to get fixes and the daily report.')
     ).toBeTruthy()
-    // Sign-in is the one primary path; an own key is a small secondary option
-    // that says what it covers, and nothing on the screen talks about money.
-    expect(screen.getByTestId('ai-access-sign-in').textContent).toContain(
-      'AI monitoring needs a Readyset account'
-    )
-    expect(screen.getByTestId('ai-access-own-key').textContent).toContain(
-      'covers deep analysis and reports'
-    )
+    expect(screen.getByText('Hosted by Readyset')).toBeTruthy()
+    expect(screen.getByText('Use my own key')).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/\bfree\b|trial|credit/i)
+    expect(document.body.textContent).not.toMatch(/change this later/i)
     expect(screen.queryByRole('button', { name: /skip/i })).toBeNull()
+    // One solid action, no icons on the actions.
+    const signIn = screen.getByRole('button', { name: 'Sign in' })
+    expect(signIn.querySelector('svg')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Sign up or sign in' }))
+    fireEvent.click(signIn)
     expect(screen.getByText('Readyset account login')).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add Anthropic key' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add key' }))
     expect(screen.getByText('Anthropic key setup')).toBeTruthy()
+  })
+
+  it('says why the saved key stopped working', () => {
+    renderWithClient(
+      <AiProviderGate gate={{ status: 'blocked', reason: 'invalid' }} />,
+      createTestQueryClient()
+    )
+    expect(
+      screen.getByText(
+        'Anthropic rejected the saved key. Add a valid key or sign in to Readyset.'
+      )
+    ).toBeTruthy()
   })
 
   it('does not flash the application while credentials are being checked', () => {
@@ -84,9 +98,7 @@ describe('AI provider startup gate', () => {
     )
 
     expect(screen.getByText('Checking your AI setup')).toBeTruthy()
-    expect(
-      screen.queryByRole('button', { name: 'Sign up or sign in' })
-    ).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull()
   })
 
   it('shows a retry action when setup discovery fails', () => {

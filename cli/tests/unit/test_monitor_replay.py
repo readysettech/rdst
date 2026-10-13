@@ -14,6 +14,7 @@ from features.monitor.attention import group_many
 from features.monitor.judge import AttentionJudge, reconcile_recovery
 from shared.llm_manager.jev_client import JevClientError
 from shared.llm_manager.inference_attribution import record_billable_call
+from shared.monitor import monitor_store
 from shared.monitor.monitor_store import MonitorStore
 from tests.unit.monitor_replay_fixtures import NOW, many_slowdowns, planted, series
 
@@ -46,6 +47,14 @@ def replay_gates(monkeypatch):
 
     monkeypatch.setattr(judge_module, "relevance", gate)
     monkeypatch.setattr(monitor_loop, "relevance", gate)
+
+
+@pytest.fixture(autouse=True)
+def no_quiet_hours(monkeypatch):
+    """Replay timestamps are fixed instants, so whether they land in the default quiet window
+    depends on the local timezone. Quiet hours have their own tests (test_w0b_contract.py);
+    here every push goes out when it is filed."""
+    monkeypatch.setattr(monitor_store, "DEFAULT_QUIET_HOURS", {"from_hour": 0, "to_hour": 0})
 
 
 class Clock:

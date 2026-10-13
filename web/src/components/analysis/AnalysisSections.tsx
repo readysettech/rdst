@@ -197,68 +197,6 @@ export function resolveRewriteTesting(
 }
 
 // ---------------------------------------------------------------------------
-// ScoreGauge — animated circular score indicator
-// ---------------------------------------------------------------------------
-
-export function ScoreGauge({
-  score,
-  size = 80,
-  variant: variantOverride,
-}: {
-  score: number
-  size?: number
-  // When set, the ring/number use this variant instead of the raw score band,
-  // so the gauge agrees with the surrounding rating verdict. [QW20]
-  variant?: StyleVariant
-}) {
-  const variant = variantOverride ?? getScoreVariant(score)
-  const style = variantStyles[variant]
-  const radius = (size - 8) / 2
-  const circumference = radius * 2 * Math.PI
-  const offset = circumference - (score / 100) * circumference
-
-  return (
-    <div className="relative" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90">
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="6"
-          className="text-surface-layout-2"
-        />
-        <m.circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          strokeWidth="6"
-          strokeLinecap="round"
-          className={style.text}
-          stroke="currentColor"
-          initial={{ strokeDashoffset: circumference }}
-          animate={{ strokeDashoffset: offset }}
-          style={{ strokeDasharray: circumference }}
-          transition={{ duration: 1, ease: 'easeOut', delay: 0.2 }}
-        />
-      </svg>
-      <div className="absolute inset-0 flex items-center justify-center">
-        <m.span
-          className={`${size >= 96 ? 'text-stat-hero' : 'text-xl font-bold'} tabular-nums ${style.text}`}
-          initial={{ opacity: 0, scale: 0.5 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.4, delay: 0.5 }}
-        >
-          {score}
-        </m.span>
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // MetricCard — small stat tile
 // ---------------------------------------------------------------------------
 
@@ -379,17 +317,6 @@ export function PerformanceSummarySection({
       <div className={`${ratingStyle.bg} p-6 border-b ${ratingStyle.border}`}>
         <HStack className="justify-between items-center">
           <HStack className="gap-5 items-center">
-            {perf.efficiency_score !== undefined && (
-              <ScoreGauge
-                score={perf.efficiency_score}
-                size={104}
-                variant={
-                  ratingVariant === 'informative'
-                    ? 'info'
-                    : (ratingVariant as StyleVariant)
-                }
-              />
-            )}
             <VStack className="gap-1 items-start">
               <Text level="headline-3" className="text-content-layout-1">
                 Performance summary

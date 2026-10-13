@@ -185,6 +185,31 @@ def mysql_table(schema: Any, table: Any) -> str:
     return f"`{str(schema).replace('`', '``')}`.{name}" if schema else name
 
 
+_CREATE_INDEX = re.compile(r"^(\s*CREATE\s+(?:UNIQUE\s+)?INDEX)(?!\s+CONCURRENTLY)\b", re.I)
+
+
+_INDEX_TARGET = re.compile(r"\bON\s+(?:ONLY\s+)?([\w.\"`]+)\s*\(([^)]*)\)", re.I)
+
+
+def index_target(sql: str | None) -> tuple[str | None, list[str]]:
+    """The table and leading columns a CREATE INDEX statement names, lower-cased."""
+    match = _INDEX_TARGET.search(sql or "")
+    if not match:
+        return None, []
+    table = match.group(1).split(".")[-1].strip('"`').lower()
+    columns = [part.strip().split()[0].strip('"`').lower()
+               for part in match.group(2).split(",") if part.strip()]
+    return table, columns
+
+
+def concurrent_index_sql(sql: str | None, engine: str = "postgresql") -> str | None:
+    """The index statement as RDST hands it out: on PostgreSQL, CREATE INDEX CONCURRENTLY,
+    which builds without blocking writes and cannot run inside a transaction."""
+    if not sql or engine == "mysql":
+        return sql
+    return _CREATE_INDEX.sub(lambda match: f"{match.group(1)} CONCURRENTLY", sql, count=1)
+
+
 def _action(**fields: Any) -> dict[str, Any]:
     base = {"rows": [], "sql": None, "setting": None, "restart": False, "caveat": None,
             "query_keys": []}
@@ -670,7 +695,8 @@ def health_overview(collectors: dict[str, Any] | None, numbers: dict[str, Any],
             status = "bad" if any(a["severity"] == "bad" for a in found) else "warn"
             value = found[0]["finding"].rstrip(".")
             if len(found) > 1:
-                value = f"{len(found)} things to change"
+                value = (f"{len(found)} settings off recommendation" if check == "settings"
+                         else f"{len(found)} things to change")
         elif section and (failed or section in errors or not isinstance(collectors.get(section), dict)):
             status, value = "unknown", "Not checked"
         else:

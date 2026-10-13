@@ -78,7 +78,9 @@ describe("development child launchers", () => {
     expect(desktopSource).toContain(
       'waitForUrl("Keyservice", `${keyserviceUrl}/health`, keyservice)',
     );
-    expect(viteSource).toContain("target: 'http://localhost:8787'");
+    expect(viteSource).toContain(
+      "target: `http://localhost:${process.env.RDST_API_PORT ?? '8787'}`",
+    );
   });
 
   it("kills whole child process trees on shutdown", () => {

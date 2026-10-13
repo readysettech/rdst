@@ -1,6 +1,7 @@
 // Where an inbox item opens. The backend decides the place (item.link); this maps it
 // to a route. Items from before links existed open the Database page.
 import type { InboxItem, InboxLink } from '@/lib/monitor/types'
+import { kindOf } from './inboxModel'
 import { incidentSearch } from './incidentModel'
 
 export interface LinkRoute {
@@ -53,6 +54,8 @@ export function linkRoute(link: InboxLink, queryKey?: string): LinkRoute {
       }
     case 'sign_in':
       return { to: '/account-login', search: {} }
+    case 'actions':
+      return { to: '/actions', search: { db: target } }
     default: {
       const search: Record<string, string> = { target }
       // Several queries: the list shows exactly these, not a status filter.
@@ -70,6 +73,13 @@ export function linkRoute(link: InboxLink, queryKey?: string): LinkRoute {
 export function itemRoute(item: InboxItem, queryKey?: string): LinkRoute {
   const link = itemLink(item)
   const route = linkRoute(link, queryKey)
+  // A measured change opens its row in Applied.
+  const kind = kindOf(item)
+  if (
+    route.to === '/actions' &&
+    (kind === 'no_change_yet' || kind === 'fix_confirmed')
+  )
+    return { ...route, search: { ...route.search, scope: 'applied' } }
   const onChart =
     route.to === '/database' && !route.search.view && !route.search.panel
   if (!onChart) return route
@@ -86,15 +96,11 @@ export function routeHref(route: LinkRoute): string {
   return search ? `${route.to}?${search}` : route.to
 }
 
-/** The Database page's Actions view, opened on the item's likely fix. */
+/** Actions narrowed to the item's database, opened on its likely fix. */
 export function fixRoute(item: InboxItem): LinkRoute | null {
   if (!item.action) return null
   return {
-    to: '/database',
-    search: {
-      target: item.target,
-      view: 'actions',
-      action: String(item.action.id),
-    },
+    to: '/actions',
+    search: { db: item.target, action: String(item.action.id) },
   }
 }

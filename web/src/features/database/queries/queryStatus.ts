@@ -222,7 +222,8 @@ export function jobLine(
   if (!job) return null
   if (job.state === 'running') return 'Analyzing now'
   if (job.state !== 'queued') return null
-  if (job.queue_state === 'held') return 'Waiting, automatic analysis is off'
+  if (job.queue_state === 'held')
+    return job.reason_text ?? 'Waiting, automatic analysis is off'
   if (job.estimated_start_at != null) {
     const minutes = Math.max(1, Math.round((job.estimated_start_at - now) / 60))
     return minutes >= 90
@@ -230,6 +231,67 @@ export function jobLine(
       : `Queued, about ${minutes} min`
   }
   return 'Queued'
+}
+
+export interface AnalysisLine {
+  text: string
+  tone: 'negative' | 'neutral'
+  /** retry: the last analysis failed. analyze_now: an automatic analysis is on hold. */
+  action: 'retry' | 'analyze_now' | null
+}
+
+const clockTime = (at: number) =>
+  new Date(at * 1000).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+
+const sentence = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`)
+
+/**
+ * One line on an analysis that's waiting or didn't finish: on hold and why, queued and
+ * when it starts, or the failure's reason. Null when there's nothing to say.
+ */
+export function analysisLine(
+  query: MonitorQuery,
+  job: AnalyzeJob | null | undefined,
+  now: number
+): AnalysisLine | null {
+  const analysis = query.last_analysis
+  const live = job?.state === 'queued' ? job : null
+  if (live || analysis?.state === 'queued') {
+    const held = (live?.queue_state ?? analysis?.queue_state) === 'held'
+    if (held) {
+      const why =
+        live?.reason_text ??
+        analysis?.reason ??
+        'Automatic analysis is off. Click Analyze now to run this one.'
+      return {
+        text: `On hold: ${sentence(why)}`,
+        tone: 'neutral',
+        action: live?.reason === 'user' ? null : 'analyze_now',
+      }
+    }
+    return {
+      text: jobLine(live, now) ?? 'Queued',
+      tone: 'neutral',
+      action: null,
+    }
+  }
+  if (analysis?.state !== 'failed') return null
+  if (analysis.error_kind === 'retrying')
+    return {
+      text: analysis.retry_at
+        ? `The AI service didn't answer this time. RDST tries again at ${clockTime(analysis.retry_at)}.`
+        : 'Retrying soon.',
+      tone: 'neutral',
+      action: null,
+    }
+  return {
+    text: `The last analysis didn't finish. ${sentence(analysis.reason ?? 'The analysis stopped before it wrote a result')}`,
+    tone: 'negative',
+    action: 'retry',
+  }
 }
 
 function status(

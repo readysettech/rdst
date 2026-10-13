@@ -1,7 +1,6 @@
 /**
- * The analysis screen: how many query blocks one Analyze produces, what the
- * block is called before and after a run, reading a stored analysis back, and
- * what a failed run says.
+ * The analysis screen: reading a stored analysis back, and what a failed run
+ * says.
  */
 import type { Page } from '@playwright/test'
 import {
@@ -24,7 +23,6 @@ import {
 test.use({ viewport: DESKTOP })
 
 const ORDERS = 'SELECT id, total FROM orders ORDER BY created_at DESC'
-const PARAM_SQL = 'SELECT id, email FROM users WHERE account_id = :account_id'
 const YESTERDAY = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString()
 
 const EXPLAIN_FAILURE = {
@@ -80,57 +78,6 @@ function resultsUrl(extra: Record<string, string> = {}) {
     ...extra,
   })}`
 }
-
-/**
- * B-04 - while the parameter form is collecting values it carries the query
- * itself, instead of repeating the same SQL under a second heading.
- */
-test('the parameter form owns the only query block', async ({ page }) => {
-  setBackendFixtures({ analyze: [{ events: successEvents, repeat: true }] })
-  const [hash] = await prepare(page, [PARAM_SQL])
-
-  await page.goto(`/queries?analyze=${hash}`)
-  const drawer = page.getByTestId('analyze-drawer')
-  await expect(drawer.getByTestId('parameter-form-inline')).toBeVisible({
-    timeout: 15_000,
-  })
-  await shot(page, 'results-parameter-form')
-
-  const body = await drawer.innerText()
-  expect(body).not.toContain('ORIGINAL QUERY')
-  expect(body).not.toContain('ANALYZED QUERY')
-  await expect(drawer.getByText('Analyzed query')).toHaveCount(0)
-  await expect(
-    drawer.locator('[data-testid="query-card-main-content"]')
-  ).toHaveCount(0)
-})
-
-/**
- * B-04 - the block is the query as written until a run exists, and only then
- * becomes the analyzed query.
- */
-test('the query block is only called analyzed once it has run', async ({
-  page,
-}) => {
-  setBackendFixtures({ analyze: [{ events: successEvents, repeat: true }] })
-  // Consent is unanswered, so nothing has been measured yet.
-  const [hash] = await prepare(page, [ORDERS], { consent: false })
-
-  await page.goto(`/queries?analyze=${hash}`)
-  const drawer = page.getByTestId('analyze-drawer')
-  await expect(drawer.getByTestId('analyze-consent-inline')).toBeVisible({
-    timeout: 15_000,
-  })
-  await expect(drawer.getByText('Query', { exact: true })).toBeVisible()
-  await expect(drawer.getByText('Analyzed query')).toHaveCount(0)
-
-  await drawer.getByRole('button', { name: 'Run analyze' }).click()
-  await expect(drawer.getByText('Analyzed query')).toBeVisible({
-    timeout: 20_000,
-  })
-  await expect(drawer.getByText('Query', { exact: true })).toHaveCount(0)
-  await shot(page, 'results-analyzed-query')
-})
 
 /**
  * B-12 - a stored analysis opens from its own id: the screen says when it ran

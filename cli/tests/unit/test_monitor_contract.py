@@ -473,7 +473,7 @@ def test_settings_levers_default_for_a_free_tier_and_validate(client, store):
     assert {key: settings[key] for key in (
         "deep_analysis", "auto_analyze_new", "analysis_daily_cap", "attention_every_min",
         "nightly_report", "nightly_hour")} == {
-        "deep_analysis": False, "auto_analyze_new": True, "analysis_daily_cap": 10,
+        "deep_analysis": False, "auto_analyze_new": True, "analysis_daily_cap": 15,
         "attention_every_min": 5, "nightly_report": True, "nightly_hour": 0}
     updated = client.put("/api/monitor/targets/db/settings", json={
         "analysis_daily_cap": 3, "attention_every_min": 60, "nightly_report": False,
@@ -509,7 +509,7 @@ def test_usage_counts_billable_work_per_day(client, store):
     assert {k: body["days"][-1][k] for k in ("jev_calls", "analyses", "reports",
                                              "billable_calls")} == {
         "jev_calls": 1, "analyses": 1, "reports": 1, "billable_calls": 5}
-    assert body["caps"] == {"jev_daily": 300, "analysis_daily": 10, "push_daily": 3}
+    assert body["caps"] == {"jev_daily": 300, "analysis_daily": 15, "push_daily": 3}
     assert client.get("/api/monitor/targets/db/usage?days=0").status_code == 422
 
 

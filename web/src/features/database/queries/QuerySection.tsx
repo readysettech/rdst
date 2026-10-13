@@ -1,1033 +1,693 @@
+// The Queries section of the Database page: one divided list, a neutral chip and the
+// fix line as each row's subtitle, with Status and Tables menus, search and the two
+// ghost actions in its toolbar. A row click opens the detail pane; while the pane is
+// open, or the list is narrow, the list keeps four columns. In the first minutes rows say
+// "Analyzing" and wait for their score and trend; without monitoring the list is a scan's
+// totals.
+import { cn } from '@rs/tailwind-base'
+import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
 import {
-  Dropdown,
-  DropdownContent,
-  DropdownItem,
-  DropdownTrigger,
-} from '@rs/ui-new/dropdown-rf'
-import { EmptyState } from '@rs/ui-new/empty-state'
-import { AnimatePresence, LayoutGroup } from '@rs/ui-new/motion'
-import { HStack, VStack } from '@rs/ui-new/stack'
+  DividedList,
+  type DividedListColumn,
+  ListRow,
+} from '@rs/ui-new/divided-list'
+import { Dropdown } from '@rs/ui-new/dropdown'
+import { ErrorState } from '@rs/ui-new/error-state'
+import { Icon } from '@rs/ui-new/icon'
+import { useReducedMotion } from '@rs/ui-new/motion'
+import { Pressable } from '@rs/ui-new/pressable'
+import { Skeleton } from '@rs/ui-new/skeleton'
+import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { MiniTrend } from '@/features/monitor-kit/charts'
+import { useElementWidth } from '@/features/monitor-kit/charts/chartHooks'
+import type { AnalyzeJob, MonitorQuery } from '@/lib/monitor/types'
 import {
-  Fragment,
-  type ReactNode,
-  useCallback,
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
-import {
-  QueryListErrorState,
-  QueryListSkeleton,
-} from '@/components/query-list-state'
-import {
-  fetchRange,
-  type LiveRange,
-  type LoadModel,
-  OTHER_COLOR,
-} from '@/features/monitor-kit/charts'
-import { fromScroll } from '@/features/monitor-kit/pointerIntent'
-import type { JevAssessmentSummary } from '@/lib/api'
-import {
-  useAnalyzeJobs,
-  useEnqueueAnalysis,
-  useInbox,
-  useMonitorQueries,
-  useMonitorQuery,
-} from '@/lib/monitor/hooks'
-import type {
-  AnalyzeQueueEntry,
-  HistorySpan,
-  MonitorQuery,
-} from '@/lib/monitor/types'
-import { useQueryRegistry } from '@/lib/useQueryRegistry'
-import { plural } from '../../monitor-kit/format'
-import { analyzability } from './analyzability'
-import { anchorRow, scrollParent } from './anchor'
-import { type Exclusion, exclusionSentence, exclusions } from './focusModel'
-import { jevRead } from './jev'
-import { LegendHeader, LegendRow } from './LegendRow'
-import { QueryDetail } from './QueryDetail'
-import { QueryToolbar, type TimeFrame } from './QueryToolbar'
-import {
-  FILTER_LABELS,
-  orderedRows,
-  type RowFacts,
-  recoveryCopy,
-  selectQueryList,
-  tableCounts,
-} from './querySelectors'
-import { inboxSignals, queryStatus } from './queryStatus'
-import {
-  alreadyQueuedNote,
-  classificationChip,
-  isWrite,
-  waitingJobs as jobsByQuery,
+  ACTIVITY_LABEL,
+  DASH,
+  dailyCalls,
+  deltaLabel,
+  filterRows,
+  formatSharePercent,
+  latencyText,
+  newestJobs,
+  PAGE_SIZE,
+  pagerLabel,
+  type RowActivity,
+  type RowSort,
   rowActivity,
-} from './rowActivity'
-import { stableOrder } from './stableOrder'
-import { useQueryListUrl } from './useQueryListUrl'
+  rowChip,
+  STATUS_FILTERS,
+  type StatusChip as StatusChipSpec,
+  scorePoor,
+  sectionMeta,
+  sortRows,
+  swatchColor,
+  tablesOf,
+} from '../databaseModel'
+import { FirstRunMore } from '../overview/FirstReadings'
+import type { ListFilters } from '../useDatabaseUrl'
+import { rowScore, scoreValue } from './ScorePill'
+
+export type QueryListMode = 'live' | 'first_run' | 'scan'
 
 export interface QuerySectionProps {
-  target: string
-  range: LiveRange
-  /** The hero's window (the range, or a zoom inside it). */
-  domain: [number, number]
-  /** Load per query in the window; rows re-scope to it and take its colors. */
-  model: LoadModel | null
-  /** 'in the last hour', 'from 2:10 to 2:25 PM'. */
-  scopeLabel: string
-  /** Band raised in the chart. */
+  rows: MonitorQuery[] | undefined
+  loading: boolean
+  error?: boolean
+  onRetry?: () => void
+  sort: RowSort
+  openKey: string | null
+  onOpen: (key: string) => void
   hoverKey: string | null
   onHoverKey: (key: string | null) => void
-  /** Rows the backend already ranked and re-scoped to the window. */
-  scopedRows?: MonitorQuery[] | null
-  /** The range is the list's first filter; it also scopes the chart above. */
-  onRangeChange?: (range: LiveRange) => void
-  ranges?: readonly LiveRange[]
-  history?: HistorySpan | null
-  /** The zoom window as a removable chip in the toolbar. */
-  timeFrame?: TimeFrame | null
-  /** Sets a custom time frame from the toolbar's picker. */
-  onCustomRange?: (window: [number, number]) => void
-  /** Opens "Analyze a query": paste SQL, analyze it, and add it to this list. */
-  onAnalyzeQuery?: () => void
-  /** A small copy of the hero for the sticky bar, once the hero has scrolled away. */
-  stickyChart?: ReactNode
+  /** The pane is open: trend and plan score leave until it closes. */
+  paneOpen: boolean
+  mode: QueryListMode
+  /** The one-off scan the rows came from, without monitoring. */
+  scanAt?: number | null
+  /** Queries seen so far on a first run, from the page meta; the rest are on their way. */
+  seenTotal?: number
+  /** The Status, Tables and search filters, from the URL. */
+  filters: ListFilters
+  onFiltersChange: (patch: Partial<ListFilters>) => void
+  onAnalyzeQuery: () => void
+  onBenchmark: () => void
+  /** A link shown at the right of the section title, such as the changes to do. */
+  aside?: ReactNode
+  /** The database's analysis jobs, polled faster than the rows: queued and running show
+   * on the row as soon as the queue moves. */
+  jobs?: AnalyzeJob[]
 }
 
-export const PAGE_SIZE = 10
-
-type JevCarrier = MonitorQuery & {
-  jev_assessment?: JevAssessmentSummary | null
+const COLUMNS = {
+  closed: 'minmax(280px,2.6fr) 84px 112px 136px 80px 110px 24px',
+  score: 'minmax(280px,2.6fr) 84px 112px 136px 80px 24px',
+  open: 'minmax(240px,2fr) 80px 112px 130px 24px',
+  scan: 'minmax(280px,2.6fr) 128px 112px 136px 24px',
 }
 
-/** The query as seen inside the window: share, time, calls and series re-scoped. */
-export function scopedQuery(
-  query: MonitorQuery,
-  model: LoadModel | null,
-  domain: [number, number]
-): MonitorQuery {
-  const series = query.series.filter(
-    (point) => point.ts >= domain[0] && point.ts <= domain[1]
-  )
-  if (!model) return { ...query, series }
-  const scope = model.scope.get(query.key)
-  if (!scope)
-    return { ...query, series, db_time_share: 0, db_time_ms: 0, qps: 0 }
-  return {
-    ...query,
-    series,
-    db_time_share: scope.share,
-    db_time_ms: scope.totalMs,
-    qps: scope.qps,
-    mean_ms: scope.meanMs ?? query.mean_ms,
-  }
+// The list's own width in a 1180 px and a 1080 px window: under them the 24 h trend, then
+// the plan score, leave the row.
+const TREND_MIN_WIDTH = 930
+const SCORE_MIN_WIDTH = 830
+
+const HEAD: Record<keyof typeof COLUMNS, DividedListColumn[]> = {
+  closed: [
+    { label: 'Query' },
+    { label: 'Calls/s', align: 'end' },
+    { label: 'Avg latency', align: 'end' },
+    { label: 'Share of time', align: 'end' },
+    { label: 'Plan score', align: 'end' },
+    { label: 'Latency, 24 h', align: 'end' },
+    { label: '' },
+  ],
+  score: [
+    { label: 'Query' },
+    { label: 'Calls/s', align: 'end' },
+    { label: 'Avg latency', align: 'end' },
+    { label: 'Share of time', align: 'end' },
+    { label: 'Plan score', align: 'end' },
+    { label: '' },
+  ],
+  open: [
+    { label: 'Query' },
+    { label: 'Calls/s', align: 'end' },
+    { label: 'Avg latency', align: 'end' },
+    { label: 'Share of time', align: 'end' },
+    { label: '' },
+  ],
+  scan: [
+    { label: 'Query' },
+    // A scan projects its recorded rate over a day.
+    { label: 'Calls a day (est.)', align: 'end' },
+    { label: 'Avg latency', align: 'end' },
+    { label: 'Share of time', align: 'end' },
+    { label: '' },
+  ],
 }
 
-function scrollToRow(key: string) {
-  window.requestAnimationFrame(() => {
-    document
-      .getElementById(`query-${key}`)
-      ?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' })
-  })
-}
+const TREND_COLOR = 'var(--color-content-layout-3)'
 
-/**
- * After a page change, bring the list's heading back just under the sticky toolbar
- * when it's out of view. The toolbar itself is sticky, so scrolling it into view
- * would scroll to where it sits unstuck, near the top of the page.
- */
-export function revealListTop(section: HTMLElement | null) {
-  const heading = section?.querySelector<HTMLElement>(
-    '[data-testid=query-list-sentence]'
-  )
-  if (!section || !heading) return
-  const bar = section.querySelector<HTMLElement>('[data-sticky-toolbar]')
-  const floor = (bar?.getBoundingClientRect().bottom ?? 0) + 8
-  const delta = heading.getBoundingClientRect().top - floor
-  if (delta >= 0 && delta < window.innerHeight - floor) return
-  const parent = scrollParent(section)
-  const options: ScrollToOptions = { top: delta, behavior: 'smooth' }
-  if (parent) parent.scrollBy?.(options)
-  else window.scrollBy?.(options)
-}
+const menuButton = {
+  variant: 'primary',
+  modifier: 'ghost',
+  size: 'small',
+  icon: 'chevron-down',
+  iconPosition: 'right',
+} as const
 
-function FirstReading() {
-  return (
-    <EmptyState
-      layout="compact"
-      icon="observe"
-      title="No queries recorded yet"
-      body="The first reading lands within a minute. Each query shows up here with its trend as soon as the database runs it."
+const menuContent = 'min-w-44 rounded-panel bg-surface-primary-soft p-1.5'
+const menuItem = 'h-8.5 rounded-md px-2.5 text-body-small'
+
+export function StatusChip({ chip }: { chip: StatusChipSpec | null }) {
+  const reduced = useReducedMotion()
+  if (!chip) return null
+  const tag = (
+    <Tag
+      size="small"
+      variant={chip.variant}
+      modifier={chip.modifier}
+      className="rounded-pill whitespace-nowrap"
+      label={chip.label}
     />
   )
+  if (!chip.activity) return tag
+  // An analysis on its way: a breathing dot while it runs, a hollow one until it starts.
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-1.5"
+      data-activity={chip.activity}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          'h-1.5 w-1.5 shrink-0 rounded-full',
+          chip.activity === 'running'
+            ? cn('bg-content-rising-plain', !reduced && 'mk-breathe')
+            : 'border border-content-layout-3'
+        )}
+      />
+      {tag}
+    </span>
+  )
 }
 
-/**
- * The Database page query list, which is also the hero chart's legend: each row's
- * swatch is its band's color, rows follow share of load in the chart's window, and
- * hovering either side raises the other. Rows expand in place to everything about
- * the query (charts, SQL, classification, deep analysis, benchmarks).
- */
+/** "Analyzing…" with a breathing dot while it runs, "Queued for analysis" with a hollow
+ * one until it starts. */
+function ActivityMark({ activity }: { activity: RowActivity }) {
+  const reduced = useReducedMotion()
+  return (
+    <output
+      data-activity={activity}
+      data-testid="row-activity"
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-caption',
+        activity === 'running'
+          ? 'text-content-layout-1'
+          : 'text-content-layout-2'
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          'h-2 w-2 shrink-0 rounded-full',
+          activity === 'running'
+            ? 'bg-content-rising-plain'
+            : 'border border-content-layout-2',
+          !reduced && 'mk-breathe'
+        )}
+      />
+      {ACTIVITY_LABEL[activity]}
+    </output>
+  )
+}
+
+/** A finished deep analysis, so a Healthy row reads as analyzed: its score when it has one. */
+function AnalyzedMark({ query }: { query: MonitorQuery }) {
+  const score = rowScore(query)
+  if (!score && query.last_analysis?.summary == null) return null
+  const value = score ? scoreValue(score) : null
+  return (
+    <span
+      className="shrink-0 whitespace-nowrap text-caption text-content-layout-3"
+      data-testid="row-analyzed"
+    >
+      {value != null ? `Analyzed, ${value}/100` : 'Analyzed'}
+    </span>
+  )
+}
+
+/** "Add index" in the second tone, the index itself in the first. */
+function FixLine({ query }: { query: MonitorQuery }) {
+  const fix = query.suggested_fix
+  if (!fix)
+    return (
+      <span className="min-w-0 truncate text-mono-small text-content-layout-2">
+        {query.text}
+      </span>
+    )
+  const match = /^(Add index)\s+(.*)$/.exec(fix.label)
+  return (
+    <span className="min-w-0 truncate text-mono-small text-content-layout-2">
+      {match ? (
+        <>
+          {match[1]} <span className="text-content-layout-1">{match[2]}</span>
+        </>
+      ) : (
+        fix.label
+      )}
+    </span>
+  )
+}
+
+function ShareBar({ share }: { share: number }) {
+  return (
+    <span className="flex items-center justify-end gap-2.5 tabular-nums">
+      <span className="h-1 w-16 overflow-hidden rounded-sm bg-surface-primary-soft-hover">
+        <span
+          className="block h-full bg-content-layout-3"
+          style={{ width: `${Math.max(1, Math.min(100, share * 100))}%` }}
+        />
+      </span>
+      {formatSharePercent(share)}
+    </span>
+  )
+}
+
+function Trend({ query }: { query: MonitorQuery }) {
+  const points = query.trend_24h ?? []
+  if (points.length < 3)
+    return (
+      <span className="text-right text-caption text-content-layout-3">
+        {DASH}
+      </span>
+    )
+  return (
+    <div className="h-7 w-25 justify-self-end">
+      <MiniTrend
+        ariaLabel={`Latency over 24 hours for ${query.display_name}`}
+        points={points.map((point) => ({ x: point.ts, y: point.mean_ms }))}
+        color={TREND_COLOR}
+        height={28}
+        resolution={3600}
+        yMin="auto"
+        interactive={false}
+        formatValue={(value) => `${latencyText(value)} ms`}
+      />
+    </div>
+  )
+}
+
+function QueryRow({
+  query,
+  job,
+  layout,
+  selected,
+  hovered,
+  onOpen,
+  onHover,
+}: {
+  query: MonitorQuery
+  job: AnalyzeJob | undefined
+  layout: keyof typeof COLUMNS
+  selected: boolean
+  hovered: boolean
+  onOpen: () => void
+  onHover: (hovering: boolean) => void
+}) {
+  const delta = deltaLabel(query.latency_delta_24h)
+  const scan = layout === 'scan'
+  const activity = rowActivity(query, job, !scan)
+  const chip = rowChip(query, !scan)
+  return (
+    <ListRow
+      asChild
+      interactive
+      className={cn(
+        'min-h-19 w-full py-4.5 text-left',
+        (selected || hovered) && 'bg-row-hover'
+      )}
+    >
+      <Pressable
+        id={`query-${query.key}`}
+        aria-current={selected || undefined}
+        onClick={onOpen}
+        onPointerEnter={() => onHover(true)}
+        onPointerLeave={() => onHover(false)}
+        data-testid="query-row"
+      >
+        <span className="min-w-0">
+          <span className="flex items-center gap-2.5 text-body-medium font-medium text-content-layout-1">
+            {!scan && (
+              <span
+                aria-hidden="true"
+                className="h-2 w-2 shrink-0 rounded-sm"
+                style={{ background: swatchColor(query.color_index) }}
+              />
+            )}
+            <span className="truncate">{query.display_name}</span>
+          </span>
+          <span className="mt-1.5 flex min-w-0 items-center gap-2">
+            {activity ? (
+              <ActivityMark activity={activity} />
+            ) : (
+              // The polled jobs settle a row the list hasn't refreshed yet.
+              <StatusChip chip={chip?.activity ? null : chip} />
+            )}
+            <AnalyzedMark query={query} />
+            <FixLine query={query} />
+          </span>
+        </span>
+        <span className="text-right text-body-small tabular-nums text-content-layout-1">
+          {scan ? dailyCalls(query) : query.qps.toFixed(2)}
+        </span>
+        <span className="text-right tabular-nums">
+          <span className="text-body-small text-content-layout-1">
+            {latencyText(query.mean_ms)}
+            <span className="ml-0.5 text-label-extra-small font-normal text-content-layout-3">
+              ms
+            </span>
+          </span>
+          {!scan && (
+            <span
+              className={cn(
+                'block text-label-extra-small font-normal',
+                delta.up ? 'text-content-warning-soft' : 'text-content-layout-3'
+              )}
+            >
+              {delta.text}
+            </span>
+          )}
+        </span>
+        <span className="text-body-small text-content-layout-1">
+          <ShareBar share={query.db_time_share} />
+        </span>
+        {(layout === 'closed' || layout === 'score') && (
+          <>
+            <span
+              className={cn(
+                'text-right text-caption tabular-nums',
+                scorePoor(query.plan_score)
+                  ? 'text-content-warning-soft'
+                  : 'text-content-layout-3'
+              )}
+            >
+              {query.plan_score ?? DASH}
+            </span>
+            {layout === 'closed' && <Trend query={query} />}
+          </>
+        )}
+        <Icon
+          name="chevron-right"
+          label=""
+          size="small"
+          className="justify-self-end text-content-layout-3"
+        />
+      </Pressable>
+    </ListRow>
+  )
+}
+
 export function QuerySection({
-  target,
-  range,
-  domain,
-  model,
-  scopeLabel,
+  rows,
+  loading,
+  error = false,
+  onRetry,
+  sort,
+  openKey,
+  onOpen,
   hoverKey,
   onHoverKey,
-  scopedRows = null,
-  onRangeChange,
-  ranges,
-  history,
-  timeFrame = null,
-  onCustomRange,
+  paneOpen,
+  mode,
+  scanAt = null,
+  seenTotal,
+  filters,
+  onFiltersChange,
   onAnalyzeQuery,
-  stickyChart = null,
+  onBenchmark,
+  aside,
+  jobs,
 }: QuerySectionProps) {
-  const url = useQueryListUrl()
-  const initialPage = useMonitorQueries(target, fetchRange(range))
-  const search = useDeferredValue(url.q)
-  const [pageIndex, setPageIndex] = useState(0)
-  const serverPaged = (initialPage.data?.total ?? 0) > 500
-  const remoteParams = {
-    q: [search, url.table].filter(Boolean).join(' '),
-    sort:
-      url.sort === 'qps'
-        ? 'qps'
-        : url.sort === 'latency'
-          ? 'mean_ms'
-          : url.sort === 'change'
-            ? 'change'
-            : url.sort.startsWith('score_')
-              ? url.sort
-              : 'db_time_share',
-    filter: url.filter,
-    keys: url.keys ?? undefined,
-    window: timeFrame ? { from: domain[0], to: domain[1] } : undefined,
-  }
-  const remotePage = useMonitorQueries(target, fetchRange(range), {
-    ...remoteParams,
-    enabled: serverPaged,
-    limit: PAGE_SIZE,
-    offset: pageIndex * PAGE_SIZE,
-  })
-  // A server-paged list asks where the focused query sits under the same filters and sort.
-  const located = useMonitorQueries(target, fetchRange(range), {
-    ...remoteParams,
-    enabled: serverPaged && Boolean(url.focusKey),
-    limit: 1,
-    offset: 0,
-    locate: url.focusKey ?? undefined,
-  })
-  const locatedAt = located.data?.located
-  const page = serverPaged ? remotePage : initialPage
-  const scrolledFor = useRef<string | null>(null)
+  const { status, table, q } = filters
+  const [page, setPage] = useState(0)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const [sectionRef, width] = useElementWidth<HTMLElement>(TREND_MIN_WIDTH)
+  const scan = mode === 'scan'
+  const layout: keyof typeof COLUMNS = scan
+    ? 'scan'
+    : paneOpen || (width > 0 && width < SCORE_MIN_WIDTH)
+      ? 'open'
+      : width > 0 && width < TREND_MIN_WIDTH
+        ? 'score'
+        : 'closed'
 
-  const linked = useMonitorQuery(
-    target,
-    serverPaged ? (url.openKey ?? url.focusKey ?? '') : '',
-    fetchRange(range),
-    timeFrame ? { from: domain[0], to: domain[1] } : undefined
-  )
-  const rawQueries = useMemo(() => {
-    const rows = page.data?.queries
-    if (
-      !serverPaged ||
-      !linked.data ||
-      rows?.some((row) => row.key === linked.data?.key) ||
-      (linked.data.key !== url.openKey && linked.data.key !== url.focusKey)
-    )
-      return rows
-    return [linked.data, ...(rows ?? [])]
-  }, [page.data?.queries, serverPaged, linked.data, url.openKey, url.focusKey])
-  const queries = useMemo(
-    () =>
-      (serverPaged ? null : scopedRows) ??
-      rawQueries?.map((query) => scopedQuery(query, model, domain)),
-    [serverPaged, scopedRows, rawQueries, model, domain]
-  )
-  const registryRows = useQueryRegistry(500, target)
-  const jevByKey = useMemo(() => {
-    const map = new Map<string, JevAssessmentSummary | null | undefined>()
-    for (const entry of registryRows.queries)
-      map.set(entry.hash, entry.jev_assessment)
-    return map
-  }, [registryRows.queries])
-  // Needs attention and Watch come from open Inbox items, digest included.
-  const inbox = useInbox({ state: 'open', target, include_digest: true })
-  const signals = useMemo(
-    () => inboxSignals(inbox.data?.items, target),
-    [inbox.data, target]
-  )
-  const jobs = useAnalyzeJobs(target)
-  const waitingJobs = useMemo(() => {
-    return jobsByQuery(jobs.data ?? { jobs: [] })
-  }, [jobs.data])
-  // Classification per row: the monitor row's assessment, else the Query Library entry.
-  const jevFor = useCallback(
-    (query: MonitorQuery) =>
-      jevRead(
-        query,
-        (query as JevCarrier).jev_assessment ?? jevByKey.get(query.key) ?? null
-      ),
-    [jevByKey]
-  )
-  const factsOf = useMemo(() => {
-    const cache = new WeakMap<MonitorQuery, RowFacts>()
-    const now = Date.now() / 1000
-    return (query: MonitorQuery): RowFacts => {
-      const hit = cache.get(query)
-      if (hit) return hit
-      const facts = {
-        status: queryStatus(query, {
-          signal: signals.get(query.key),
-          gate: analyzability(query),
-          job: waitingJobs.get(query.key),
-          now,
-        }),
-        classification: jevFor(query).assessment,
-        analyzed: query.last_analysis?.state === 'done',
-      }
-      cache.set(query, facts)
-      return facts
+  // The box filters on each keystroke and writes the URL on a short delay; a URL
+  // change from outside (back, a link) resets the box unless the user is typing.
+  const [search, setSearch] = useState(q)
+  const typing = useRef(false)
+  useEffect(() => {
+    if (!typing.current) setSearch(q)
+  }, [q])
+  useEffect(() => {
+    if (search === q) {
+      typing.current = false
+      return
     }
-  }, [signals, waitingJobs, jevFor])
-  // Writes stay in the chart's totals and can still alert; the list hides them until asked.
-  const [writesOn, setWritesOn] = useState(false)
-  const writeKeys = useMemo(
-    () =>
-      new Set(
-        (queries ?? [])
-          .filter((query) => isWrite(analyzability(query)))
-          .map((query) => query.key)
-      ),
-    [queries]
-  )
-  const showWrites =
-    writesOn || Boolean(url.openKey && writeKeys.has(url.openKey))
-  const listed = useMemo(
-    () =>
-      showWrites || !writeKeys.size
-        ? queries
-        : queries?.filter((query) => !writeKeys.has(query.key)),
-    [queries, showWrites, writeKeys]
-  )
-  const view = useMemo(() => {
-    const selected = selectQueryList(listed ?? [], {
-      search,
-      filter: url.filter,
-      sort: url.sort,
-      factsOf,
-    })
-    return serverPaged
-      ? { ...selected, rows: listed ?? [], quiet: [], tail: [] }
-      : selected
-  }, [serverPaged, listed, search, url.filter, url.sort, factsOf])
-  const queriesByKey = useMemo(
-    () => new Map((queries ?? []).map((query) => [query.key, query])),
-    [queries]
-  )
-  const { open: openRow, setTab } = url
-  const toggle = useCallback(
-    (key: string) => {
-      anchorRow(key)
-      openRow(url.openKey === key ? null : key)
-    },
-    [openRow, url.openKey]
-  )
-  const enqueue = useEnqueueAnalysis(target)
-  // A click on a query already in line says where it stands, for a few seconds.
-  const [clickNote, setClickNote] = useState<{
-    key: string
-    text: string
-  } | null>(null)
-  useEffect(() => {
-    if (!clickNote) return
-    const timer = setTimeout(() => setClickNote(null), 4000)
-    return () => clearTimeout(timer)
-  }, [clickNote])
-  const { mutate: enqueueKey } = enqueue
-  const analyzeRow = useCallback(
-    (key: string) => {
-      enqueueKey(key, {
-        onSuccess: (job) => {
-          if (job.already_queued)
-            setClickNote({ key, text: alreadyQueuedNote(job) })
-        },
-      })
-    },
-    [enqueueKey]
-  )
-  // The target's classifier is at work once any row has an assessment.
-  const classifying = useMemo(
-    () => (queries ?? []).some((query) => query.assessment != null),
-    [queries]
-  )
-
-  const bandKeys = useMemo(
-    () =>
-      new Set(
-        (model?.bands ?? [])
-          .filter((band) => !band.isOther)
-          .map((band) => band.key)
-      ),
-    [model]
-  )
-  const raisedBand = hoverKey && bandKeys.has(hoverKey) ? hoverKey : null
-
-  const narrowed =
-    Boolean(search.trim()) ||
-    url.filter !== 'all' ||
-    Boolean(url.table) ||
-    Boolean(url.keys)
-  const freshOrdered = useMemo(
-    () =>
-      serverPaged
-        ? (listed ?? [])
-        : orderedRows(view, url.sort, url.table, url.keys),
-    [serverPaged, listed, view, url.sort, url.table, url.keys]
-  )
-  // Rows hold their places between readings and re-rank with a margin when one lands,
-  // so the list doesn't shuffle while the first readings settle. A new sort, filter or
-  // range takes the plain order at once.
-  const reading = Math.max(
-    history?.last_ts ?? 0,
-    initialPage.data?.history?.last_ts ?? 0
-  )
-  const viewKey = `${range}|${timeFrame ? domain.join('-') : ''}|${search}|${url.filter}|${url.table}|${url.sort}|${url.keys}|${writesOn}`
-  const rowSource = scopedRows ?? rawQueries
-  const shownOrder = useRef<{
-    keys: string[]
-    view: string
-    reading: number | null
-    source: typeof rowSource
-  } | null>(null)
-  const ordered = useMemo(() => {
-    if (serverPaged) return freshOrdered
-    const before = shownOrder.current
-    const same = before?.view === viewKey
-    const rows = stableOrder(
-      same ? (before?.keys ?? null) : null,
-      freshOrdered,
-      url.sort,
-      !same || before?.reading !== reading || before?.source !== rowSource,
-      undefined,
-      url.openKey
-    )
-    shownOrder.current = {
-      keys: rows.map((row) => row.key),
-      view: viewKey,
-      reading,
-      source: rowSource,
-    }
-    return rows
-  }, [
-    serverPaged,
-    freshOrdered,
-    viewKey,
-    url.sort,
-    reading,
-    rowSource,
-    url.openKey,
-  ])
-  const tables = useMemo(() => tableCounts(listed ?? []), [listed])
-
-  // Pages of ten. Any change of window or filters starts again at the first page. The key
-  // names the window by its range and zoom, never by its label: a new reading grows the
-  // label ("last 4 minutes") and must leave the page, and any open query, where they are.
-  const matching = serverPaged ? (page.data?.total ?? 0) : ordered.length
-  const pages = Math.max(1, Math.ceil(matching / PAGE_SIZE))
-  const filterKey = `${range}|${timeFrame?.label ?? ''}|${search}|${url.filter}|${url.table}|${url.sort}|${url.keys}|${showWrites}`
-  useEffect(() => setPageIndex(0), [filterKey])
-  // After that reset: a server-paged list opens the page the focused query sits on.
-  const locating =
-    serverPaged && Boolean(url.focusKey) && !located.isPlaceholderData
-  useEffect(() => {
-    if (locating && typeof locatedAt === 'number')
-      setPageIndex(Math.floor(locatedAt / PAGE_SIZE))
-  }, [locating, locatedAt, filterKey])
-  const current = Math.min(pageIndex, pages - 1)
-  const pageNumbers = [
-    ...new Set([
-      0,
-      ...Array.from({ length: 5 }, (_, index) => current + index - 2).filter(
-        (index) => index >= 0 && index < pages
-      ),
-      pages - 1,
-    ]),
-  ].sort((a, b) => a - b)
-  const first = current * PAGE_SIZE
-  const shown = serverPaged ? ordered : ordered.slice(first, first + PAGE_SIZE)
-  const sectionRef = useRef<HTMLElement>(null)
-  // A new page starts with every row closed.
-  const goToPage = (next: number) => {
-    if (url.openKey) openRow(null)
-    setPageIndex(next)
-    window.requestAnimationFrame(() => revealListTop(sectionRef.current))
-  }
-
-  // The Analyses list points at a query: open the page it sits on, scroll it into view
-  // and highlight it, with filters and sort left alone. When the filters hide it, the
-  // notice says which ones and "Show it" clears only those.
-  const [highlightKey, setHighlightKey] = useState<string | null>(null)
-  const focusedFor = useRef<string | null>(null)
-  const focusKey = url.focusKey
-  const { clearFocus } = url
-  useEffect(() => {
-    if (!focusKey) focusedFor.current = null
-  }, [focusKey])
-  useEffect(() => {
-    if (!focusKey || !queries || focusedFor.current === focusKey) return
-    if (serverPaged) {
-      // Wait for the server to say where it sits, then for that page to load.
-      if (
-        located.isFetching ||
-        located.isPlaceholderData ||
-        located.data?.located === undefined
-      )
-        return
-      const at = located.data.located
-      if (
-        typeof at === 'number' &&
-        (Math.floor(at / PAGE_SIZE) !== pageIndex ||
-          !page.data?.queries.some((query) => query.key === focusKey))
-      )
-        return
-    }
-    const index = ordered.findIndex((query) => query.key === focusKey)
-    if (index < 0) return
-    focusedFor.current = focusKey
-    if (!serverPaged) {
-      const target = Math.floor(index / PAGE_SIZE)
-      if (target !== pageIndex && url.openKey && url.openKey !== focusKey)
-        openRow(null)
-      setPageIndex(target)
-    }
-    setHighlightKey(focusKey)
-    window.setTimeout(() => scrollToRow(focusKey), 60)
-    clearFocus()
-  }, [
-    focusKey,
-    queries,
-    ordered,
-    serverPaged,
-    located.isFetching,
-    located.isPlaceholderData,
-    located.data,
-    page.data?.queries,
-    pageIndex,
-    url.openKey,
-    openRow,
-    clearFocus,
-  ])
-  useEffect(() => {
-    if (!highlightKey) return
-    const timer = window.setTimeout(() => setHighlightKey(null), 3000)
+    typing.current = true
+    const timer = window.setTimeout(() => {
+      typing.current = false
+      onFiltersChange({ q: search })
+    }, 250)
     return () => window.clearTimeout(timer)
-  }, [highlightKey])
-  const focusQuery = focusKey
-    ? (queriesByKey.get(focusKey) ??
-      (linked.data?.key === focusKey ? linked.data : undefined))
-    : undefined
-  const hiddenBy: Exclusion[] | null =
-    focusKey && queries && !ordered.some((query) => query.key === focusKey)
-      ? focusQuery
-        ? exclusions(focusQuery, {
-            search,
-            filter: url.filter,
-            table: url.table,
-            keys: url.keys,
-            writesHidden: !showWrites,
-            isWrite: writeKeys.has(focusKey),
-            factsOf,
-          })
-        : []
-      : null
-  const showFocused = () => {
-    for (const reason of hiddenBy ?? []) {
-      if (reason === 'writes') setWritesOn(true)
-      if (reason === 'picked') url.clearKeys()
-      if (reason === 'table') url.setTable(null)
-      if (reason === 'search') url.setQ('')
-      if (reason === 'filter') url.setFilter('all')
+  }, [search, q, onFiltersChange])
+
+  const all = useMemo(() => sortRows(rows ?? [], sort), [rows, sort])
+  const shown = useMemo(
+    () => filterRows(all, { status, table, q: search }),
+    [all, status, table, search]
+  )
+  const filtering = status !== 'all' || table !== null || search.trim() !== ''
+  const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE))
+  const current = Math.min(page, pages - 1)
+  const pageRows = shown.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE)
+  const tables = useMemo(() => tablesOf(all), [all])
+  const jobFor = useMemo(() => newestJobs(jobs), [jobs])
+
+  // The open row stays on screen: its page is the current one.
+  useEffect(() => {
+    if (!openKey) return
+    const at = shown.findIndex((row) => row.key === openKey)
+    if (at >= 0) setPage(Math.floor(at / PAGE_SIZE))
+  }, [openKey, shown])
+
+  // "/" focuses the search box, from anywhere but another field.
+  useEffect(() => {
+    if (scan) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey)
+        return
+      const target = event.target
+      if (
+        target instanceof Element &&
+        target.closest('input, textarea, [contenteditable="true"]')
+      )
+        return
+      event.preventDefault()
+      searchRef.current?.focus()
     }
-  }
-  // The notice is the answer to the click, so it comes into view like the row would.
-  const noticeShown = Boolean(focusKey && hiddenBy)
-  const noticeRef = useRef<HTMLOutputElement | null>(null)
-  useEffect(() => {
-    if (noticeShown)
-      noticeRef.current?.scrollIntoView?.({
-        block: 'center',
-        behavior: 'smooth',
-      })
-  }, [noticeShown])
-  const focusNotice =
-    focusKey && hiddenBy ? (
-      <output
-        ref={noticeRef}
-        className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-panel border border-border-primary-soft bg-surface-primary-soft/30 px-3 py-2"
-        data-testid="focus-hidden"
-      >
-        <Text
-          level="body-small"
-          className="min-w-0 flex-1 text-content-layout-1"
-        >
-          {hiddenBy.length
-            ? exclusionSentence(
-                focusQuery?.display_name || 'This query',
-                hiddenBy,
-                { filter: url.filter, table: url.table }
-              )
-            : `${focusQuery?.display_name || 'This query'} didn't run ${scopeLabel}.`}
-        </Text>
-        {hiddenBy.length ? (
-          <Button
-            variant="primary"
-            modifier="outline"
-            size="small"
-            label="Show it"
-            onClick={showFocused}
-          />
-        ) : timeFrame ? (
-          <Button
-            variant="primary"
-            modifier="outline"
-            size="small"
-            label="Remove the time frame"
-            onClick={timeFrame.onClear}
-          />
-        ) : null}
-        <Button
-          variant="primary"
-          modifier="ghost"
-          size="small"
-          label="Dismiss"
-          onClick={clearFocus}
-        />
-      </output>
-    ) : null
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [scan])
 
-  // A deep link (Inbox, report, chart band) opens the page its row is on and
-  // scrolls the row into view once the list has it.
-  useEffect(() => {
-    const key = url.openKey
-    if (!key || !queries || scrolledFor.current === key) return
-    if (!queriesByKey.has(key)) return
-    const index = ordered.findIndex((query) => query.key === key)
-    if (index < 0) return
-    scrolledFor.current = key
-    if (!serverPaged) setPageIndex(Math.floor(index / PAGE_SIZE))
-    scrollToRow(key)
-  }, [serverPaged, url.openKey, queries, queriesByKey, ordered])
-
-  const renderRow = (query: MonitorQuery) => {
-    const open = url.openKey === query.key
-    const gate = analyzability(query)
-    const jev = jevFor(query)
-    const { status } = factsOf(query)
-    const chip = classificationChip(jev.assessment)
-    const activity = rowActivity({
-      query,
-      gate,
-      job: waitingJobs.get(query.key),
-      classification: jev.assessment,
-      classifying,
-      note: clickNote?.key === query.key ? clickNote.text : null,
-    })
-    return (
-      <LegendRow
-        key={query.key}
-        query={query}
-        color={model ? model.colorFor(query.key) : OTHER_COLOR}
-        status={status}
-        activity={activity}
-        finding={chip?.label ?? null}
-        findingClear={chip?.clear ?? false}
-        highlighted={highlightKey === query.key}
-        onAnalyze={
-          gate.ok && query.last_analysis?.state !== 'done'
-            ? () => analyzeRow(query.key)
-            : undefined
-        }
-        onOpenAnalysis={() => openRow(query.key, 'analysis')}
-        open={open}
-        raised={hoverKey === query.key}
-        dimmed={Boolean(raisedBand) && raisedBand !== query.key}
-        onToggle={toggle}
-        onHover={onHoverKey}
-        expansion={
-          open ? (
-            <QueryDetail
-              query={query}
-              target={target}
-              tab={url.tab}
-              range={fetchRange(range)}
-              domain={domain}
-              jev={jev.assessment}
-              jevWaiting={jev.waitingReason}
-              onTabChange={setTab}
-            />
-          ) : undefined
-        }
-      />
-    )
-  }
-
-  let body: ReactNode
-  if (page.isPending) {
-    body = <QueryListSkeleton count={5} />
-  } else if (page.isError && !page.data) {
-    body = (
-      <QueryListErrorState
-        title="Queries couldn't be loaded"
-        message="RDST couldn't read the monitored queries for this target."
-        trustworthy="Monitoring keeps recording in the background."
-        error={page.error}
-        onRetry={() => void page.refetch()}
-      />
-    )
-  } else if ((!queries || queries.length === 0) && timeFrame && !narrowed) {
-    body = (
-      <EmptyState
-        layout="compact"
-        icon="search"
-        title="No queries ran in this time frame"
-        body={`Nothing was recorded ${scopeLabel}.`}
-        action={{
-          label: 'Remove the time frame',
-          icon: 'close',
-          onClick: timeFrame.onClear,
-        }}
-      />
-    )
-  } else if ((!queries || queries.length === 0) && !narrowed) {
-    body = <FirstReading />
-  } else if (queries?.length && !listed?.length) {
-    body = (
-      <EmptyState
-        layout="compact"
-        icon="observe"
-        title="Only writes so far"
-        body="The list hides writes. They still count in the chart above."
-        action={{
-          label: `Show writes (${writeKeys.size})`,
-          onClick: () => setWritesOn(true),
-        }}
-      />
-    )
-  } else if (ordered.length === 0) {
-    const copy = recoveryCopy({
-      filter: url.filter,
-      search,
-      total: serverPaged
-        ? (initialPage.data?.total ?? 0)
-        : (listed?.length ?? 0),
-      searchedCount:
-        serverPaged && !search.trim()
-          ? (initialPage.data?.total ?? 0)
-          : view.searched.length,
-    })
-    body = (
-      <EmptyState
-        layout="compact"
-        icon={copy.clear === 'filter' ? 'filter-remove' : 'search'}
-        title={
-          url.keys && !search.trim() && url.filter === 'all'
-            ? 'None of these queries ran in this time frame'
-            : url.table && !search.trim()
-              ? `No queries on ${url.table}`
-              : copy.title
-        }
-        body={
-          url.keys && !search.trim() && url.filter === 'all'
-            ? `RDST recorded none of the ${plural(url.keys.length, 'query', 'queries')} from this alert ${scopeLabel}.`
-            : copy.body
-        }
-        action={
-          url.keys
-            ? {
-                label: 'Show every query',
-                icon: 'filter-remove',
-                onClick: url.clearKeys,
-              }
-            : url.table
-              ? {
-                  label: 'All tables',
-                  icon: 'filter-remove',
-                  onClick: () => url.setTable(null),
-                }
-              : copy.clear === 'filter'
-                ? {
-                    label: `Remove '${FILTER_LABELS[url.filter]}'`,
-                    icon: 'filter-remove',
-                    onClick: () => url.setFilter('all'),
-                  }
-                : {
-                    label: 'Clear search',
-                    icon: 'close',
-                    onClick: () => url.setQ(''),
-                  }
-        }
-      />
-    )
-  } else {
-    body = (
-      <LayoutGroup>
-        <VStack
-          className="items-stretch gap-2"
-          data-testid="monitor-query-list"
-          // A hover left on a row that scrolled away clears once the pointer moves.
-          onPointerMove={(event) => {
-            if (
-              hoverKey &&
-              !fromScroll(event) &&
-              !(event.target as HTMLElement).closest('[data-query-hash]')
-            )
-              onHoverKey(null)
-          }}
-        >
-          <LegendHeader />
-          {/* A new page or filter swaps the rows at once; within one list a row that
-              ranks in fades in. */}
-          <AnimatePresence initial={false} key={`${current}|${filterKey}`}>
-            {shown.map(renderRow)}
-          </AnimatePresence>
-          {pages > 1 ? (
-            <nav
-              aria-label="Query pages"
-              className="flex flex-wrap items-center justify-between gap-2 pt-2"
-              data-testid="query-pages"
-            >
-              <Text
-                level="caption"
-                className="tabular-nums text-content-layout-3"
-              >
-                {first + 1} to {first + shown.length} of {matching}
-              </Text>
-              <HStack className="items-center gap-1">
-                <Button
-                  variant="primary"
-                  modifier="ghost"
-                  size="small"
-                  icon="chevron-left"
-                  iconPosition="left"
-                  label="Previous"
-                  disabled={current === 0}
-                  onClick={() => goToPage(current - 1)}
-                />
-                {pageNumbers.map((index, position) => (
-                  <Fragment key={index}>
-                    {position > 0 && index - pageNumbers[position - 1] > 1 ? (
-                      <Text level="caption" aria-hidden="true">
-                        ...
-                      </Text>
-                    ) : null}
-                    <Button
-                      variant="primary"
-                      modifier={index === current ? 'outline' : 'ghost'}
-                      size="small"
-                      label={String(index + 1)}
-                      aria-label={`Page ${index + 1}`}
-                      aria-current={index === current ? 'page' : undefined}
-                      onClick={() => goToPage(index)}
-                      className="min-w-8 tabular-nums"
-                    />
-                  </Fragment>
-                ))}
-                <Button
-                  variant="primary"
-                  modifier="ghost"
-                  size="small"
-                  icon="chevron-right"
-                  iconPosition="right"
-                  label="Next"
-                  disabled={current >= pages - 1}
-                  onClick={() => goToPage(current + 1)}
-                />
-              </HStack>
-            </nav>
-          ) : null}
-        </VStack>
-      </LayoutGroup>
-    )
-  }
+  const statusLabel =
+    STATUS_FILTERS.find((entry) => entry.value === status)?.label ?? 'All'
 
   return (
     <section
       ref={sectionRef}
-      aria-label="Queries"
-      className="flex flex-col gap-4"
+      aria-labelledby="queries-title"
       data-testid="query-section"
+      className={cn(scan ? 'mt-12' : 'mt-11')}
     >
-      <div
-        data-sticky-toolbar
-        className="sticky top-0 z-20 -mx-2 space-y-2 rounded-b-card bg-surface-layout-2/95 px-2 pt-2 pb-2 backdrop-blur"
-      >
-        {/* Hangs below the bar instead of growing it, so the list never shifts
-            when the hero scrolls away. */}
-        {stickyChart ? (
-          <div className="mk-fade absolute inset-x-2 top-full hidden pt-1 tablet:block">
-            {stickyChart}
-          </div>
-        ) : null}
-        {narrowed ||
-        (initialPage.data?.total ?? 0) > 0 ||
-        (queries?.length ?? 0) > 0 ? (
-          <QueryToolbar
-            range={range}
-            onRangeChange={onRangeChange}
-            ranges={ranges}
-            history={history}
-            timeFrame={timeFrame}
-            domain={domain}
-            onCustomRange={onCustomRange}
-            search={url.q}
-            onSearchChange={url.setQ}
-            filter={url.filter}
-            onFilterChange={url.setFilter}
-            sort={url.sort}
-            onSortChange={url.setSort}
-            counts={view.counts}
-            tables={tables}
-            table={url.table}
-            onTableChange={url.setTable}
-            picked={url.keys}
-            onClearPicked={url.clearKeys}
-          />
-        ) : null}
-      </div>
-      <HStack className="flex-wrap items-baseline gap-x-2 gap-y-1">
-        <Text
-          as="h2"
-          level="subtitle-1"
-          className="text-content-layout-1"
-          data-testid="query-list-sentence"
+      <div className="flex items-baseline gap-3">
+        <h2
+          id="queries-title"
+          className="text-headline-5 text-content-layout-1"
         >
           Queries
-        </Text>
-        {page.isFetching && !page.isPending ? (
-          <span className="sr-only" aria-live="polite">
-            Updating queries
-          </span>
-        ) : null}
-        <AnalyzedRecently
-          jobs={jobs.data?.queue?.recent}
-          shownKeys={shown.map((query) => query.key)}
-          onShow={url.showQuery}
-        />
-        {writeKeys.size ? (
+        </h2>
+        {rows && (
+          <Text as="span" level="caption" className="text-content-layout-3">
+            {sectionMeta(all, { sort, firstRun: mode === 'first_run', scanAt })}
+          </Text>
+        )}
+        {aside && <span className="ml-auto">{aside}</span>}
+      </div>
+
+      {!scan && (
+        <div className="mt-3.5 flex items-center gap-2">
+          <Dropdown>
+            <Dropdown.Trigger asChild>
+              <Button
+                {...menuButton}
+                label={`Status: ${statusLabel}`}
+                data-testid="status-menu"
+              />
+            </Dropdown.Trigger>
+            <Dropdown.Content align="start" className={menuContent}>
+              {STATUS_FILTERS.map((entry) => (
+                <Dropdown.Item
+                  key={entry.value}
+                  label={entry.label}
+                  active={entry.value === status}
+                  className={menuItem}
+                  onClick={() => {
+                    onFiltersChange({ status: entry.value })
+                    setPage(0)
+                  }}
+                />
+              ))}
+            </Dropdown.Content>
+          </Dropdown>
+          <Dropdown>
+            <Dropdown.Trigger asChild>
+              <Button
+                {...menuButton}
+                label={table ? `Tables: ${table}` : 'Tables'}
+                data-testid="tables-menu"
+              />
+            </Dropdown.Trigger>
+            <Dropdown.Content align="start" className={menuContent}>
+              <Dropdown.Item
+                label="All tables"
+                active={table === null}
+                className={menuItem}
+                onClick={() => {
+                  onFiltersChange({ table: null })
+                  setPage(0)
+                }}
+              />
+              {tables.map((name) => (
+                <Dropdown.Item
+                  key={name}
+                  label={name}
+                  active={name === table}
+                  className={menuItem}
+                  onClick={() => {
+                    onFiltersChange({ table: name })
+                    setPage(0)
+                  }}
+                />
+              ))}
+            </Dropdown.Content>
+          </Dropdown>
+          <div className="relative ml-auto w-60">
+            <BaseInputText
+              ref={searchRef}
+              aria-label="Search queries"
+              placeholder="Search"
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value)
+                setPage(0)
+              }}
+              className="h-7.5 pr-9 text-caption"
+            />
+            <kbd className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 rounded-sm border border-border-layout-2 px-1.5 text-mono-small text-content-layout-3">
+              /
+            </kbd>
+          </div>
           <Button
             variant="primary"
             modifier="ghost"
             size="small"
-            label={
-              showWrites
-                ? `Hide writes (${writeKeys.size})`
-                : `Show writes (${writeKeys.size})`
-            }
-            aria-pressed={showWrites}
-            onClick={() => setWritesOn(!showWrites)}
-            data-testid="writes-toggle"
-            className="self-center"
-          />
-        ) : null}
-        {onAnalyzeQuery ? (
-          <Button
-            variant="primary"
-            modifier="outline"
-            size="small"
-            icon="speedometer"
-            iconPosition="left"
             label="Analyze a query"
             onClick={onAnalyzeQuery}
-            className="ml-auto self-center"
           />
-        ) : null}
-      </HStack>
-      {focusNotice}
-      {body}
-      {page.isError && page.data ? (
-        <HStack className="items-center justify-center gap-2">
-          <Text level="caption" className="text-content-warning-soft">
-            Showing the last readings. The latest refresh failed.
+          <Button
+            variant="primary"
+            modifier="ghost"
+            size="small"
+            label="Benchmark"
+            onClick={onBenchmark}
+          />
+        </div>
+      )}
+
+      {error && !rows ? (
+        <div className="mt-4">
+          <ErrorState
+            tone="quiet"
+            title="Queries didn't load"
+            message="RDST couldn't read this database's queries."
+            onRetry={onRetry}
+          />
+        </div>
+      ) : loading && !rows ? (
+        <div className="mt-4 space-y-3" aria-busy="true">
+          <Skeleton className="h-16 w-full rounded-panel" />
+          <Skeleton className="h-16 w-full rounded-panel" />
+          <Skeleton className="h-16 w-full rounded-panel" />
+        </div>
+      ) : rows && rows.length === 0 ? (
+        <Text as="p" level="caption" className="mt-3.5 text-content-layout-3">
+          No queries recorded yet.
+        </Text>
+      ) : filtering && shown.length === 0 ? (
+        <div className="mt-3.5 flex items-center gap-3">
+          <Text as="p" level="caption" className="text-content-layout-3">
+            No queries match these filters.
           </Text>
           <Button
             variant="primary"
             modifier="ghost"
             size="small"
-            label="Try again"
-            onClick={() => void page.refetch()}
+            label="Clear filters"
+            onClick={() => {
+              setSearch('')
+              onFiltersChange({ status: 'all', table: null, q: '' })
+              setPage(0)
+            }}
           />
-        </HStack>
-      ) : null}
-    </section>
-  )
-}
-
-/** How long a finished analysis stays in "Analyzed recently". */
-const RECENT_ANALYSIS_S = 30 * 60
-
-/**
- * Analyses that finished in the last half hour on queries this page doesn't show (a
- * reading moved them): one click brings each into view. Hidden when they're all here.
- */
-function AnalyzedRecently({
-  jobs,
-  shownKeys,
-  onShow,
-}: {
-  jobs: AnalyzeQueueEntry[] | undefined
-  shownKeys: string[]
-  onShow: (key: string) => void
-}) {
-  const now = Date.now() / 1000
-  const shown = new Set(shownKeys)
-  const seen = new Set<string>()
-  const offPage = (jobs ?? []).filter((job) => {
-    const fresh =
-      job.state === 'done' &&
-      job.finished_at != null &&
-      now - job.finished_at < RECENT_ANALYSIS_S
-    if (!fresh || shown.has(job.query_key) || seen.has(job.query_key))
-      return false
-    seen.add(job.query_key)
-    return true
-  })
-  if (!offPage.length) return null
-  return (
-    <Dropdown>
-      <DropdownTrigger asChild>
-        <Button
-          variant="primary"
-          modifier="ghost"
-          size="small"
-          label={`Analyzed recently (${offPage.length})`}
-          icon="chevron-down"
-          iconPosition="right"
-          className="self-center"
-          data-testid="analyzed-recently"
-        />
-      </DropdownTrigger>
-      <DropdownContent
-        align="start"
-        className="max-h-80 min-w-64 overflow-y-auto"
-      >
-        {offPage.map((job) => (
-          <DropdownItem
-            key={job.query_key}
-            onSelect={() => onShow(job.query_key)}
+        </div>
+      ) : (
+        <>
+          <DividedList
+            columns={COLUMNS[layout]}
+            head={HEAD[layout]}
+            className={cn('mt-3.5', scan && 'mt-3')}
           >
-            <span className="min-w-0 truncate">{job.display_name}</span>
-          </DropdownItem>
-        ))}
-      </DropdownContent>
-    </Dropdown>
+            {pageRows.map((query) => (
+              <QueryRow
+                key={query.key}
+                query={query}
+                job={jobFor.get(query.key)}
+                layout={layout}
+                selected={query.key === openKey}
+                hovered={query.key === hoverKey}
+                onOpen={() => onOpen(query.key)}
+                onHover={(hovering) => onHoverKey(hovering ? query.key : null)}
+              />
+            ))}
+          </DividedList>
+          {filtering ? (
+            <Text as="p" level="caption" className="mt-3 text-content-layout-3">
+              {shown.length} of {all.length} match
+            </Text>
+          ) : mode === 'first_run' ? (
+            <FirstRunMore seenTotal={seenTotal} listed={shown.length} />
+          ) : null}
+          {shown.length > PAGE_SIZE && (
+            <div className="mt-3.5 flex items-center justify-end gap-2.5">
+              <Text as="span" level="caption" className="text-content-layout-3">
+                {pagerLabel(current, shown.length)}
+              </Text>
+              {current > 0 && (
+                <Button
+                  variant="primary"
+                  modifier="ghost"
+                  size="small"
+                  label="Previous"
+                  onClick={() => setPage(current - 1)}
+                />
+              )}
+              {current < pages - 1 && (
+                <Button
+                  variant="primary"
+                  modifier="ghost"
+                  size="small"
+                  label="Next"
+                  onClick={() => setPage(current + 1)}
+                />
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </section>
   )
 }

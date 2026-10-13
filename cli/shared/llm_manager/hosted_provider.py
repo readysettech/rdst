@@ -187,8 +187,12 @@ class HostedProvider(Provider):
                         "Accept": "application/json",
                         **monitor_database_headers(),
                     },
+                    # A report narrative has a computed fallback, so a slow model gives up
+                    # sooner there.
                     timeout=(
                         600 if payload.get("attribution", {}).get("feature") == "audit"
+                        else 120
+                        if payload["attribution"].get("operation") == "monitor_report"
                         else 300
                     ),
                 )

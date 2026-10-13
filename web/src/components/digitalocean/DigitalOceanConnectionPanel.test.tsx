@@ -32,9 +32,7 @@ describe('DigitalOceanConnectionPanel compact', () => {
 
     renderWithClient(<DigitalOceanConnectionPanel compact />)
 
-    expect(
-      await screen.findByText('Connected to DigitalOcean with OAuth')
-    ).toBeTruthy()
+    expect(await screen.findByText('Signed in to DigitalOcean')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy()
   })
 
@@ -54,7 +52,7 @@ describe('DigitalOceanConnectionPanel compact', () => {
     expect(await screen.findByText('DigitalOcean')).toBeTruthy()
     expect(screen.queryByText('Connect DigitalOcean')).toBeNull()
     expect(
-      screen.getByText('Import your managed Postgres and MySQL databases')
+      screen.getByText('Import your managed PostgreSQL and MySQL databases')
     ).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
@@ -123,10 +121,14 @@ describe('DigitalOceanConnectionPanel', () => {
       await screen.findByRole('button', { name: 'Sign in with DigitalOcean' })
     )
 
-    const busy = await screen.findByRole('button', {
-      name: 'Waiting for browser approval',
-    })
-    expect(busy.hasAttribute('disabled')).toBe(true)
+    // The label stays; the button holds busy until the browser approves.
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole('button', { name: 'Sign in with DigitalOcean' })
+          .hasAttribute('disabled')
+      ).toBe(true)
+    )
     expect(
       await screen.findByText('Waiting for you to approve the request')
     ).toBeTruthy()
@@ -151,10 +153,14 @@ describe('DigitalOceanConnectionPanel', () => {
       await screen.findByRole('button', { name: 'Sign in with DigitalOcean' })
     )
 
-    expect(await screen.findByText('DigitalOcean sign-in failed')).toBeTruthy()
     expect(
-      screen.getByText('The DigitalOcean sign-in service is unavailable.')
+      await screen.findAllByText(
+        'The DigitalOcean sign-in service is unavailable.'
+      )
+    ).not.toHaveLength(0)
+    // Signing in again is the retry.
+    expect(
+      screen.getByRole('button', { name: 'Sign in with DigitalOcean' })
     ).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
   })
 })

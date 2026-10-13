@@ -47,6 +47,7 @@ from shared.db_connection import (
     rdst_self_marker,
     resolve_connection_params,
 )
+from features.analyze.parameter_suggestions import plan_only_sql
 from shared.query_registry.observation_store import record_execution_evidence
 from shared import analysis_lane
 
@@ -484,24 +485,45 @@ def _execute_postgres_explain_analyze(
                         # PostgreSQL 16+ can plan without choosing concrete
                         # parameter values. This is the appropriate plan for
                         # unattended plain-EXPLAIN fallback work.
-                        generic = "GENERIC_PLAN true, " if getattr(conn, "server_version", 0) >= 160000 else ""
-                        if has_pg_params and not generic:
-                            return {
-                                "success": False,
-                                "error": ("No real values were available for this query's "
-                                          "parameters, and PostgreSQL before 16 can't plan it "
-                                          "without them."),
-                                "explain_plan": None,
-                                "execution_time_ms": 0,
-                                "skipped_reason": "parameterized_query_from_digest",
-                            }
+                        version = getattr(conn, "server_version", 0)
+                        generic = "GENERIC_PLAN true, " if version >= 160000 else ""
                         explain_query = f"{_SELF_MARKER}EXPLAIN ({generic}VERBOSE true, COSTS true, FORMAT JSON) {sql}"
+                        prepared = None
+                        estimated = False
                         start_time = time.perf_counter()
-                        analysis_lane.execute(monitor_run, lambda: cursor.execute(explain_query))  # nosem
+                        if has_pg_params:
+                            analysis_lane.execute(monitor_run, lambda: cursor.execute(
+                                "SAVEPOINT rdst_plan"))
+                            try:
+                                if not generic:
+                                    explain_query = _prepare_generic_plan(cursor, monitor_run, sql, version)
+                                    if explain_query is None:
+                                        raise ValueError("Generic planning unavailable")
+                                    prepared = _GENERIC_PLAN_STATEMENT
+                                analysis_lane.execute(monitor_run, lambda: cursor.execute(explain_query))
+                            except Exception:
+                                analysis_lane.execute(monitor_run, lambda: cursor.execute(
+                                    "ROLLBACK TO SAVEPOINT rdst_plan"))
+                                prepared = None
+                                filled_sql = plan_only_sql(sql, "postgresql", conn=
+                                    analysis_lane.StatementConnection(conn, monitor_run),
+                                    timeout_ms=min(statement_timeout_ms or 2000, 2000))
+                                if statement_timeout_ms:
+                                    analysis_lane.execute(monitor_run, lambda: cursor.execute(
+                                        "SET LOCAL statement_timeout = %s", (statement_timeout_ms,)))
+                                explain_query = (f"{_SELF_MARKER}EXPLAIN (VERBOSE true, COSTS true, "
+                                                 f"FORMAT JSON) {filled_sql}")
+                                analysis_lane.execute(monitor_run, lambda: cursor.execute(explain_query))
+                                estimated = True
+                        else:
+                            analysis_lane.execute(monitor_run, lambda: cursor.execute(explain_query))  # nosem
                         end_time = time.perf_counter()
 
                         result = cursor.fetchone()
                         explain_plan_time_ms = (end_time - start_time) * 1000
+                        if prepared:
+                            analysis_lane.execute(
+                                monitor_run, lambda: cursor.execute(f"DEALLOCATE {prepared}"))
 
                         if result and result[0]:
                             explain_plan_data = result[0][0] if isinstance(result[0], list) else result[0]
@@ -516,7 +538,10 @@ def _execute_postgres_explain_analyze(
                                 "plan_format": "json",
                                 "explain_analyze_skipped": True,
                                 "skip_reason": "fast_mode - EXPLAIN ANALYZE skipped",
-                                "fallback_reason": "Using EXPLAIN plan only (fast mode)"
+                                "fallback_reason": ("Plan estimate using estimated parameter values; "
+                                                    "EXPLAIN ANALYZE was not run" if estimated else
+                                                    "Using EXPLAIN plan only (fast mode)"),
+                                "param_source": "estimated" if estimated else None
                             }
                         else:
                             return {
@@ -1276,6 +1301,31 @@ def _postgres_connection(conn_params):
         finally:
             if conn:
                 conn.close()
+
+
+_GENERIC_PLAN_STATEMENT = "rdst_generic_plan"
+
+
+def _prepare_generic_plan(cursor, monitor_run, sql: str, version: int) -> Optional[str]:
+    """Prepare `sql` and hold this transaction to generic plans, returning the EXPLAIN that
+    reads its plan. None when the server is older than 12 or cannot infer a parameter type;
+    the caller restores its savepoint before planning with literals."""
+    if version < 120000:
+        return None
+    try:
+        analysis_lane.execute(monitor_run, lambda: cursor.execute(
+            f"{_SELF_MARKER}PREPARE {_GENERIC_PLAN_STATEMENT} AS {sql}"))  # nosem
+        analysis_lane.execute(monitor_run, lambda: cursor.execute(
+            "SET LOCAL plan_cache_mode = force_generic_plan"))
+        analysis_lane.execute(monitor_run, lambda: cursor.execute(
+            "SELECT cardinality(parameter_types) FROM pg_prepared_statements WHERE name = %s",
+            (_GENERIC_PLAN_STATEMENT,)))
+        row = cursor.fetchone()
+    except Exception:
+        return None
+    nulls = ", ".join(["NULL"] * int(row[0] if row and row[0] else 0))
+    return (f"{_SELF_MARKER}EXPLAIN (VERBOSE true, COSTS true, FORMAT JSON) "
+            f"EXECUTE {_GENERIC_PLAN_STATEMENT}({nulls})")
 
 
 @contextmanager

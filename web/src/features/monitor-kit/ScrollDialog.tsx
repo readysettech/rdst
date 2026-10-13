@@ -10,6 +10,7 @@ import {
   ModalDescription,
   ModalTitle,
 } from '@rs/ui-new/modal'
+import { Scrollable } from '@rs/ui-new/scrollable'
 import type { ReactNode } from 'react'
 
 export function ScrollDialog({
@@ -57,12 +58,13 @@ export function ScrollDialog({
               </ModalDescription>
             ) : null}
           </div>
-          <div
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 tablet:px-6"
+          <Scrollable
+            rootClassName="min-h-0 flex-1"
+            className="overscroll-contain px-5 py-5 tablet:px-6"
             data-testid={testId ? `${testId}-body` : undefined}
           >
             {children}
-          </div>
+          </Scrollable>
           {footer ? (
             <div
               className={cn(

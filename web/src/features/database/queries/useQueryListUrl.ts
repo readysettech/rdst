@@ -23,6 +23,8 @@ type ListParams = {
   jev?: string
   /** A query to bring into view and highlight, leaving filters and sort as they are. */
   focus?: string
+  /** The page's side panel; written only to close it in the same write. */
+  panel?: undefined
 }
 
 const DEFAULTS = {
@@ -129,10 +131,16 @@ export function useQueryListUrl() {
     /** The Inbox item's queries the list is narrowed to, or null. */
     keys,
     clearKeys: () => write({ queries: undefined }),
-    open: (key: string | null, nextTab?: DetailTab) =>
+    /** Open one query's pane; `closePanel` also closes the page's side panel. */
+    open: (
+      key: string | null,
+      nextTab?: DetailTab,
+      { closePanel = false }: { closePanel?: boolean } = {}
+    ) =>
       write({
         query: key ?? undefined,
         tab: key ? (nextTab ?? tab) : undefined,
+        ...(closePanel ? { panel: undefined } : {}),
       }),
     setTab: (value: DetailTab) => write({ tab: value }),
   }

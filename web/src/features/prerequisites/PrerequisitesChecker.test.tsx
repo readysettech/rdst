@@ -211,7 +211,7 @@ describe('PrerequisitesChecker', () => {
     expect(onSkip).toHaveBeenCalled()
   })
 
-  it('finishes with the large check mark and a continue action', () => {
+  it('finishes on the ready tick and a continue action', () => {
     const onContinue = vi.fn()
     const onPhaseChange = vi.fn()
     const ready = result([
@@ -240,7 +240,10 @@ describe('PrerequisitesChecker', () => {
     expect(screen.queryByText('Passed')).toBeNull()
     expect(screen.getByText('query_text_size detail')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Skip for now' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(screen.getByText('Amazon RDS').tagName).toBe('P')
+    const continueButton = screen.getByRole('button', { name: 'Continue' })
+    expect(continueButton.querySelector('svg')).toBeNull()
+    fireEvent.click(continueButton)
     expect(onContinue).toHaveBeenCalled()
   })
 

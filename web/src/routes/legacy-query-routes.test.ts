@@ -5,14 +5,11 @@ const redirectSpy = vi.hoisted(() =>
     throw options
   })
 )
-const toastSpy = vi.hoisted(() => vi.fn())
 
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (options: unknown) => ({ options }),
   redirect: redirectSpy,
 }))
-
-vi.mock('@rs/ui-new/use-toast', () => ({ toast: toastSpy }))
 
 import { Route as AnalyzeRoute } from './analyze'
 import { Route as QueryRegistryRoute } from './query-registry'
@@ -27,53 +24,37 @@ function expectRedirect(beforeLoad: () => never, expected: unknown) {
 
 beforeEach(() => {
   redirectSpy.mockClear()
-  toastSpy.mockClear()
 })
 
 describe('legacy query route redirects', () => {
-  it('redirects /top to the Query Library sorted by slowest average', () => {
+  it('redirects /top to the Database query list', () => {
     const beforeLoad = TopRoute.options.beforeLoad as BeforeLoad
 
     expectRedirect(() => beforeLoad({ search: undefined as never }), {
-      to: '/queries',
-      search: { sort: 'slowest-average' },
+      to: '/database',
     })
   })
 
-  it('tells a /top bookmark where the view went', () => {
-    const beforeLoad = TopRoute.options.beforeLoad as BeforeLoad
-
-    expect(() => beforeLoad({ search: undefined as never })).toThrow()
-    expect(toastSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        title: 'Top queries now live in the Query Library',
-      })
-    )
-  })
-
-  it('redirects /analyze to the unified Queries library', () => {
+  it('redirects /analyze to the Database query list', () => {
     const beforeLoad = AnalyzeRoute.options.beforeLoad as BeforeLoad
 
     expectRedirect(() => beforeLoad({ search: undefined as never }), {
-      to: '/queries',
+      to: '/database',
     })
   })
 
-  it('preserves query-registry deep links without adding a filter', () => {
+  it('keeps a query-registry deep link focused on its query', () => {
     const validateSearch = QueryRegistryRoute.options.validateSearch as (
       search: Record<string, unknown>
-    ) => { hash?: string; run?: string }
+    ) => { hash?: string }
     const search = validateSearch({ hash: 'query-hash', run: 'run-id' })
     const beforeLoad = QueryRegistryRoute.options.beforeLoad as BeforeLoad<
       typeof search
     >
 
     expectRedirect(() => beforeLoad({ search }), {
-      to: '/queries',
-      search: {
-        hash: 'query-hash',
-        run: 'run-id',
-      },
+      to: '/database',
+      search: { focus: 'query-hash' },
     })
   })
 })

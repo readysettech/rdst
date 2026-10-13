@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from features.qpdemo.service import DemoService
+from features.qpdemo.service import DemoService, demo_facts
 from shared.api.guards import require_local_request
 
 router = APIRouter(prefix="/demo", tags=["demo"])
@@ -51,6 +51,14 @@ class SettingsBody(BaseModel):
 def preflight(request: Request):
     require_local_request(request)
     return _svc().preflight()
+
+
+@router.get("/facts")
+def facts(request: Request):
+    """What the demo builds: the orders rows, the PostgreSQL version, the workload's
+    query count and the first-run download, from the seed and workload metadata."""
+    require_local_request(request)
+    return demo_facts()
 
 
 @router.post("/provision")

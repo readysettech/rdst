@@ -106,7 +106,8 @@ def test_scheduler_and_capture_failures_become_monitoring_issues(monkeypatch, tm
     assert {item["subject"] for item in store.inbox("new")} == {
         "password_missing", "pg_stat_statements_missing"}
     monkeypatch.setenv("RDST_MONITOR_TEST_PASSWORD", "present")
-    for clock in (1120, 1180):
+    # The third failed check in a row files the lost connection.
+    for clock in (1120, 1180, 1240):
         active.clock = lambda clock=clock: clock
         active.cycle("db")
     assert {item["subject"] for item in store.inbox("new")} == {
@@ -137,13 +138,13 @@ async def test_connection_deadline_runs_without_an_attention_cycle(monkeypatch, 
     async def advance(seconds):
         if now[0] == 1000:
             assert store.inbox() == []
-            now[0] += 120
+            now[0] += 180
         else:
             active._stop.set()
     monkeypatch.setattr(monitor_loop.asyncio, "sleep", advance)
     await active._run_connections()
     assert store.inbox()[0]["subject"] == "lost_connection"
-    assert store.inbox()[0]["created_at"] == 1120
+    assert store.inbox()[0]["created_at"] == 1180
 
 
 def test_wired_loop_does_not_reobserve_a_failure_after_collection_recovers(monkeypatch, tmp_path):

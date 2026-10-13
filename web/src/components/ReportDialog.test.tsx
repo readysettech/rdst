@@ -36,6 +36,24 @@ describe('ReportDialog', () => {
     vi.unstubAllGlobals()
   })
 
+  it('asks in the shared dialog: sentiment segments, one plain Send', () => {
+    renderWithClient(<ReportDialog isOpen onClose={() => {}} />)
+
+    expect(screen.getByRole('heading', { name: 'Give feedback' })).toBeTruthy()
+    expect(screen.getByText('Goes straight to the team.')).toBeTruthy()
+    const segments = screen.getAllByRole('radio')
+    expect(segments.map((segment) => segment.textContent)).toEqual([
+      'Great',
+      'Okay',
+      'Poor',
+    ])
+    fireEvent.click(screen.getByRole('radio', { name: 'Great' }))
+    expect(screen.getByText('What did RDST do well?')).toBeTruthy()
+    const send = screen.getByRole('button', { name: 'Send' })
+    expect(send.className).not.toContain('rising')
+    expect(send.querySelector('svg')).toBeNull()
+  })
+
   it('requires an email before feedback can be sent', () => {
     renderWithClient(<ReportDialog isOpen onClose={() => {}} />)
 
@@ -46,7 +64,7 @@ describe('ReportDialog', () => {
     expect(
       (
         screen.getByRole('button', {
-          name: 'Send feedback',
+          name: 'Send',
         }) as HTMLButtonElement
       ).disabled
     ).toBe(true)
@@ -62,7 +80,7 @@ describe('ReportDialog', () => {
     fireEvent.change(screen.getByPlaceholderText('you@example.com'), {
       target: { value: 'not-an-email' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
     expect(submitReport).not.toHaveBeenCalled()
   })
@@ -78,7 +96,7 @@ describe('ReportDialog', () => {
     fireEvent.change(screen.getByPlaceholderText('you@example.com'), {
       target: { value: ' Feedback@Example.COM ' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
     await waitFor(() => {
       expect(submitReport).toHaveBeenCalledWith(
@@ -102,7 +120,7 @@ describe('ReportDialog', () => {
     fireEvent.change(screen.getByPlaceholderText('Share your thoughts...'), {
       target: { value: 'The analysis was useful.' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
     await waitFor(() => {
       expect(submitReport).toHaveBeenCalledWith(
@@ -125,11 +143,11 @@ describe('ReportDialog', () => {
     fireEvent.change(screen.getByPlaceholderText('Share your thoughts...'), {
       target: { value: 'The analysis was useful.' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     expect(submitReport).not.toHaveBeenCalled()
 
     fireEvent.change(emailInput, { target: { value: ' Grace@Example.COM ' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
     await waitFor(() => {
       expect(submitReport).toHaveBeenCalledWith(

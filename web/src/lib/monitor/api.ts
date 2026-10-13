@@ -6,6 +6,7 @@ import {
   type SubscribeOptions,
   subscribeShared,
 } from '@/lib/sse/sharedEventSource'
+import { resetActionStubState } from './actions'
 import { type Endpoint, fixtureOverride, usesFixtures } from './contract'
 import {
   analyzeJobsFixture,
@@ -14,7 +15,6 @@ import {
   fixtureNow,
   healthFixture,
   inboxItems,
-  isFreshRecovery,
   muteRulesFixture,
   nextPulseFixture,
   pulsesFixture,
@@ -25,6 +25,7 @@ import {
   settingsFixture,
   usageFixture,
 } from './fixtures'
+import { asCaScenario, caBase, caFixtures } from './fixturesCa'
 import {
   loadFixture,
   loadLatencyFixture,
@@ -39,15 +40,18 @@ import type {
   AnalyzeJob,
   AnalyzeJobPage,
   ApiRange,
+  BenchmarkFixesResult,
   CompareRunSummary,
   DatabaseReport,
   DeepAnalysisDigest,
+  HomeModel,
   InboxAction,
   InboxItem,
   InboxPage,
   InboxQuery,
   LatencyBreakdown,
   LoadBreakdown,
+  LoadRank,
   MonitorHealth,
   MonitoringLimit,
   MonitorPulse,
@@ -65,6 +69,7 @@ import type {
   QuerySeries,
   ReportEvent,
   ReportHistory,
+  ReportViewMode,
   TimeWindow,
 } from './types'
 
@@ -86,7 +91,19 @@ export function setFixtureTiming(delayMs: number, streamMs = delayMs) {
   streamStepMs = streamMs
 }
 
-const scenario = () => asScenario(fixtureOverride())
+const scenario = () => asScenario(caBase(fixtureOverride()))
+
+/** The redesign fixture set when a `ca-*` scenario is selected; its clock is fixed. */
+function ca() {
+  const name = asCaScenario(fixtureOverride())
+  return name ? caFixtures(name) : null
+}
+
+const clock = () => ca()?.now ?? fixtureNow()
+const allItems = (): InboxItem[] =>
+  ca()?.inbox() ?? inboxItems(clock(), scenario())
+const baseSettings = (target: string): MonitorSettings =>
+  ca()?.settings(target) ?? settingsFixture(scenario())
 
 async function fixture<T>(build: () => T): Promise<T> {
   if (fixtureDelayMs > 0)
@@ -151,10 +168,14 @@ const stubState = {
   nextReportId: 61,
   /** Stub runs that replayed to done: id -> finish time. */
   finished: new Map<number, number>(),
+  /** Query keys a stub enqueue put in the queue; a cancel takes them out. */
+  analyzing: new Set<string>(),
+  reportView: 'quick' as ReportViewMode,
 }
 
 /** Tests: forget stub writes. */
 export function resetStubState() {
+  resetActionStubState()
   stubState.muteRules = null
   stubState.nextRuleId = 100
   stubState.inbox.clear()
@@ -162,6 +183,28 @@ export function resetStubState() {
   stubState.cancelled.clear()
   stubState.nextReportId = 61
   stubState.finished.clear()
+  stubState.analyzing.clear()
+  stubState.reportView = 'quick'
+}
+
+/** A stub row while its analysis is queued: the status and a queued last_analysis. */
+function withAnalyzing<T extends MonitorQuery>(row: T): T {
+  if (!stubState.analyzing.has(row.key)) return row
+  return {
+    ...row,
+    status: 'analyzing',
+    last_analysis: {
+      state: 'queued',
+      finished_at: null,
+      analysis_ref: null,
+      mode: '',
+      param_source: null,
+      reason: null,
+      queue_state: 'today',
+      queue_position: 1,
+      summary: row.last_analysis?.summary ?? null,
+    },
+  }
 }
 
 /** A stub run that finished, served like the backend serves a done report. */
@@ -169,8 +212,9 @@ function finishedStubReport(id: number, target: string): DatabaseReport | null {
   const ts = stubState.finished.get(id)
   if (ts === undefined) return null
   const body =
-    reportFixture(scenario(), 'latest', fixtureNow(), target) ??
-    reportFixture('localdev', 'latest', fixtureNow(), target)
+    ca()?.report(target, 'latest') ??
+    reportFixture(scenario(), 'latest', clock(), target) ??
+    reportFixture('localdev', 'latest', clock(), target)
   return body && { ...body, id, ts, trigger: 'user', state: 'done' }
 }
 
@@ -187,7 +231,9 @@ export const getHealth = (
       json(
         `${base(target)}/health${query({ range, from: window?.from, to: window?.to })}`
       ),
-    () => healthFixture(scenario(), range, fixtureNow(), target)
+    () =>
+      ca()?.health(target, range) ??
+      healthFixture(scenario(), range, clock(), target)
   )
 
 // 5.2 pulse
@@ -196,7 +242,8 @@ export const getPulses = (target: string, limit = 5) =>
   pick<MonitorPulsePage>(
     'pulse',
     () => json(`${base(target)}/pulse${query({ limit })}`),
-    () => pulsesFixture(scenario(), fixtureNow(), limit)
+    () =>
+      ca()?.pulses(target, limit) ?? pulsesFixture(scenario(), clock(), limit)
   )
 
 export const collectNow = (target: string) =>
@@ -238,7 +285,12 @@ export const getQueries = (
             keys: options?.keys?.join(','),
           })
       ),
-    () => queriesV4Fixture(scenario(), range, fixtureNow())
+    () => {
+      const page =
+        ca()?.queries(target, range, limit, options?.offset ?? 0) ??
+        queriesV4Fixture(scenario(), range, clock())
+      return { ...page, queries: page.queries.map(withAnalyzing) }
+    }
   )
 
 /** One row, the same as in the list, even when the query didn't run in the range. */
@@ -256,9 +308,12 @@ export const getQuery = (
           query({ range, from: window?.from, to: window?.to })
       ),
     () => {
-      const row = queryV4Fixture(scenario(), key, range, fixtureNow())
+      const set = ca()
+      const row = set
+        ? set.query(target, key)
+        : queryV4Fixture(scenario(), key, range, clock())
       if (!row) throw new MonitorApiError(404, 'Query not found')
-      return row
+      return withAnalyzing(row)
     }
   )
 
@@ -268,7 +323,10 @@ export const getQueryAnalysis = (target: string, key: string) =>
     'queryAnalysis',
     () => json(`${base(target)}/queries/${enc(key)}/analysis`),
     () => {
-      const digest = queryAnalysisFixture(scenario(), key, fixtureNow())
+      const set = ca()
+      const digest = set
+        ? set.queryAnalysis(target, key)
+        : queryAnalysisFixture(scenario(), key, clock())
       if (!digest)
         throw new MonitorApiError(404, 'No finished analysis for this query')
       return digest
@@ -281,16 +339,19 @@ export const getLoad = (
   target: string,
   range: ApiRange,
   window?: TimeWindow,
-  top = 8
+  top = 8,
+  rank: LoadRank = 'time'
 ) =>
   pick<LoadBreakdown>(
     'load',
     () =>
       json(
         `${base(target)}/load` +
-          query({ range, top, from: window?.from, to: window?.to })
+          query({ range, top, from: window?.from, to: window?.to, rank })
       ),
-    () => loadFixture(scenario(), range, fixtureNow(), target, top, window)
+    () =>
+      ca()?.load(target, range, top, window) ??
+      loadFixture(scenario(), range, clock(), target, top, window)
   )
 
 export const getLoadLatency = (
@@ -311,8 +372,7 @@ export const getLoadLatency = (
             to: window?.to,
           })
       ),
-    () =>
-      loadLatencyFixture(scenario(), range, fixtureNow(), keys, target, window)
+    () => loadLatencyFixture(scenario(), range, clock(), keys, target, window)
   )
 
 export const getQuerySeries = (
@@ -327,7 +387,7 @@ export const getQuerySeries = (
       json(
         `${base(target)}/queries/${enc(key)}/series${query({ range, from: window?.from, to: window?.to })}`
       ),
-    () => seriesFixture(scenario(), key, range, fixtureNow())
+    () => seriesFixture(scenario(), key, range, clock())
   )
 
 // 5.11 analysis jobs
@@ -337,7 +397,7 @@ export const getAnalyzeJobs = (target: string, state?: AnalyzeJob['state']) =>
     'analyzeJobs',
     () => json(`${base(target)}/analyze-jobs${query({ state })}`),
     () => {
-      const page = analyzeJobsFixture(scenario(), fixtureNow())
+      const page = analyzeJobsFixture(scenario(), clock())
       return state
         ? { jobs: page.jobs.filter((job) => job.state === state) }
         : page
@@ -351,7 +411,7 @@ export const getQueryAnalyzeJobs = (target: string, key: string, limit = 5) =>
       json(
         `${base(target)}/queries/${enc(key)}/analyze-jobs${query({ limit })}`
       ),
-    () => analyzeJobsFixture(scenario(), fixtureNow(), key, limit)
+    () => analyzeJobsFixture(scenario(), clock(), key, limit)
   )
 
 export const enqueueAnalysis = (target: string, key: string) =>
@@ -360,7 +420,8 @@ export const enqueueAnalysis = (target: string, key: string) =>
     () =>
       json(`${base(target)}/queries/${enc(key)}/analyze`, { method: 'POST' }),
     () => {
-      const now = fixtureNow()
+      const now = clock()
+      stubState.analyzing.add(key)
       return {
         id: 1000 + (now % 1000),
         target,
@@ -380,6 +441,71 @@ export const enqueueAnalysis = (target: string, key: string) =>
     }
   )
 
+/** Stop a query's queued or running analysis; its latest analysis stays as it was. */
+export const cancelQueryAnalysis = (target: string, key: string) =>
+  pick<AnalyzeJob>(
+    'cancelAnalysis',
+    () =>
+      json(`${base(target)}/queries/${enc(key)}/analyze/cancel`, {
+        method: 'POST',
+      }),
+    () => {
+      if (!stubState.analyzing.has(key))
+        throw new MonitorApiError(409, 'This query has no analysis in progress')
+      stubState.analyzing.delete(key)
+      const now = clock()
+      return {
+        id: 1000 + (now % 1000),
+        target,
+        query_key: key,
+        reason: 'user',
+        state: 'skipped',
+        priority: 1,
+        param_source: null,
+        mode: null,
+        enqueued_at: now - 30,
+        started_at: null,
+        finished_at: now,
+        error: 'cancelled',
+        analysis_ref: null,
+        reason_text: 'Cancelled.',
+        cancelled: true,
+      }
+    }
+  )
+
+/** Stop one analyze job by id. */
+export const cancelAnalyzeJob = (target: string, jobId: number) =>
+  pick<AnalyzeJob>(
+    'cancelAnalysis',
+    () =>
+      json(`${base(target)}/analyze-jobs/${jobId}/cancel`, { method: 'POST' }),
+    () => {
+      const key = [...stubState.analyzing][0]
+      if (key === undefined)
+        throw new MonitorApiError(409, 'This analysis has already ended')
+      stubState.analyzing.delete(key)
+      const now = clock()
+      return {
+        id: jobId,
+        target,
+        query_key: key,
+        reason: 'user',
+        state: 'skipped',
+        priority: 1,
+        param_source: null,
+        mode: null,
+        enqueued_at: now - 30,
+        started_at: null,
+        finished_at: now,
+        error: 'cancelled',
+        analysis_ref: null,
+        reason_text: 'Cancelled.',
+        cancelled: true,
+      }
+    }
+  )
+
 /**
  * 5.12: make sure a monitored query has its Query Library row, so Compare against
  * Readyset (useCompareController) can select it. Idempotent.
@@ -390,6 +516,37 @@ export const ensureLibraryEntry = (target: string, key: string) =>
     () =>
       json(`${base(target)}/queries/${enc(key)}/library`, { method: 'POST' }),
     () => ({ hash: key, created: false })
+  )
+
+/** Before and after for each query with a fix; the backend says whether it timed them. */
+export const benchmarkFixes = (target: string, keys: string[]) =>
+  pick<BenchmarkFixesResult>(
+    'benchmarkFixes',
+    () =>
+      json(
+        `${base(target)}/benchmark-fixes`,
+        jsonBody('POST', { query_keys: keys })
+      ),
+    () => {
+      const set = ca()
+      if (set) return set.benchmarkFixes(target, keys)
+      return {
+        target,
+        ran_at: clock(),
+        runs: 20,
+        scratch_schema: false,
+        rows: keys.map((key) => ({
+          key,
+          name: key,
+          before_ms: null,
+          after_ms: null,
+          change_pct: null,
+          estimated: true,
+        })),
+        share: 0,
+        method: `Estimated from the planner on ${target}: each fix tested as a hypothetical index, before from the last 24 h.`,
+      }
+    }
   )
 
 /** Put a query analyzed from "Analyze a query" in the list, with its analysis. */
@@ -418,7 +575,7 @@ export const getSettings = (target: string) =>
   pick<MonitorSettings>(
     'settings',
     async () => withSettingsDefaults(await json(`${base(target)}/settings`)),
-    () => stubState.settings.get(target) ?? settingsFixture(scenario())
+    () => stubState.settings.get(target) ?? baseSettings(target)
   )
 
 export const putSettings = (target: string, update: MonitorSettingsUpdate) =>
@@ -429,8 +586,7 @@ export const putSettings = (target: string, update: MonitorSettingsUpdate) =>
         await json(`${base(target)}/settings`, jsonBody('PUT', update))
       ),
     () => {
-      const current =
-        stubState.settings.get(target) ?? settingsFixture(scenario())
+      const current = stubState.settings.get(target) ?? baseSettings(target)
       const next: MonitorSettings = {
         ...current,
         ...update,
@@ -456,16 +612,51 @@ export const getMonitoringLimit = (target?: string) =>
   pick<MonitoringLimit>(
     'limit',
     () => json(`${ROOT}/limit${query({ target })}`),
-    () => ({
-      in_use: 1,
-      limit: 3,
-      own_key: false,
-      known: true,
-      full: false,
-      signed_in: true,
-      target_fits: target ? true : null,
-      targets: [],
-    })
+    () =>
+      ca()?.limit(target) ?? {
+        in_use: 1,
+        limit: 3,
+        own_key: false,
+        known: true,
+        full: false,
+        signed_in: true,
+        target_fits: target ? true : null,
+        targets: [],
+      }
+  )
+
+/** Home (GET /api/monitor/home): the status line, the day card, every database, today. */
+export const getHome = (target?: string, signal?: AbortSignal) =>
+  pick<HomeModel>(
+    'home',
+    () => json(`${ROOT}/home${query({ target })}`, { signal }),
+    () => {
+      const set = ca()
+      if (set) return set.home()
+      const now = clock()
+      return {
+        status: {
+          state: 'quiet',
+          target: target ?? null,
+          needs_you: 0,
+          to_watch: 0,
+          headline: null,
+          link: null,
+          checks_ran_at: now - 120,
+          since: now - 3600,
+          last_reading_at: now - 23,
+          next_report_at: now + 3600,
+          watching: 1,
+        },
+        day: null,
+        databases: [],
+        not_monitored: 0,
+        today: [],
+        since_yesterday: { opened_closed: 0, fixes_confirmed: 0 },
+        recently_analyzed: [],
+        generated_at: now,
+      }
+    }
   )
 
 /** Monitoring's real work across every monitored database (GET /api/monitor/work). */
@@ -493,7 +684,7 @@ export const claimAiMonitoring = (target: string) =>
       ),
     () => {
       const next: MonitorSettings = {
-        ...(stubState.settings.get(target) ?? settingsFixture(scenario())),
+        ...(stubState.settings.get(target) ?? baseSettings(target)),
         ai_monitoring: 'on',
       }
       stubState.settings.set(target, next)
@@ -505,13 +696,13 @@ export const getUsage = (target: string, days = 7) =>
   pick<MonitorUsage>(
     'usage',
     () => json(`${base(target)}/usage${query({ days })}`),
-    () => usageFixture(scenario(), fixtureNow(), days)
+    () => usageFixture(scenario(), clock(), days)
   )
 
 // 5.6 mute rules
 
 function stubRules(): MuteRule[] {
-  stubState.muteRules ??= muteRulesFixture(fixtureNow()).rules
+  stubState.muteRules ??= muteRulesFixture(clock()).rules
   return stubState.muteRules
 }
 
@@ -521,7 +712,7 @@ export const getMuteRules = (target?: string) =>
     () => json(`${ROOT}/mute-rules${query({ target })}`),
     () => {
       const items = stubInbox({
-        items: inboxItems(fixtureNow(), scenario()),
+        items: allItems(),
       }).items
       return {
         rules: stubRules()
@@ -550,13 +741,13 @@ export const createMuteRule = (input: MuteRuleInput) =>
       const rule: MuteRule = {
         ...input,
         id: stubState.nextRuleId++,
-        created_at: fixtureNow(),
+        created_at: clock(),
         matched_count: 0,
       }
       stubRules().push(rule)
       // Like the backend, a new rule moves the open items it covers to Muted.
       const matched = stubInbox({
-        items: inboxItems(fixtureNow(), scenario()),
+        items: allItems(),
       }).items.filter((item) => item.muted_by === rule.id).length
       return { ...rule, matched_count: matched }
     }
@@ -579,7 +770,7 @@ function ruleCovers(rule: MuteRule, item: InboxItem): boolean {
     (rule.target === null || rule.target === item.target) &&
     (rule.type === null || rule.type === item.type) &&
     (rule.query_key === null || item.query_keys.includes(rule.query_key)) &&
-    (rule.until === null || rule.until > fixtureNow())
+    (rule.until === null || rule.until > clock())
   )
 }
 
@@ -611,9 +802,9 @@ export const getInbox = (inbox: InboxQuery = {}, signal?: AbortSignal) =>
       ),
     () => ({
       items: filterInbox(
-        stubInbox({ items: inboxItems(fixtureNow(), scenario()) }).items,
+        stubInbox({ items: allItems() }).items,
         inbox,
-        fixtureNow()
+        clock()
       ),
     })
   )
@@ -624,7 +815,7 @@ export const getInboxItem = (id: number, signal?: AbortSignal) =>
     () => json(`${ROOT}/inbox/${id}`, { signal }),
     () => {
       const item = stubInbox({
-        items: inboxItems(fixtureNow(), scenario()),
+        items: allItems(),
       }).items.find((candidate) => candidate.id === id)
       if (!item) throw new MonitorApiError(404, 'Inbox item not found')
       return item
@@ -648,11 +839,9 @@ export const inboxAction = (id: number, action: InboxAction, until?: number) =>
         jsonBody('POST', until ? { until } : {})
       ),
     () => {
-      const item = inboxItems(fixtureNow(), scenario()).find(
-        (candidate) => candidate.id === id
-      )
+      const item = allItems().find((candidate) => candidate.id === id)
       if (!item) throw new MonitorApiError(404, 'Inbox item not found')
-      const now = fixtureNow()
+      const now = clock()
       const current = { ...item, ...stubState.inbox.get(id) }
       if (
         action === 'seen' &&
@@ -681,37 +870,29 @@ export const inboxAction = (id: number, action: InboxAction, until?: number) =>
     }
   )
 
-export const markAllSeen = (target?: string) =>
-  pick<{ updated: number }>(
+/** Actions was opened for this database: its open Changes ready event closes. */
+export const actionsOpened = (target: string) =>
+  pick<{ target: string; closed: boolean }>(
     'inboxAction',
-    () =>
-      json(`${ROOT}/inbox/mark-all-seen${query({ target })}`, {
-        method: 'POST',
-      }),
+    () => json(`${base(target)}/actions/opened`, { method: 'POST' }),
     () => {
-      const items = stubInbox({
-        items: inboxItems(fixtureNow(), scenario()),
-      }).items.filter((item) => !target || item.target === target)
-      const fresh = items.filter((item) => item.state === 'new')
-      for (const item of fresh)
-        stubState.inbox.set(item.id, {
-          ...stubState.inbox.get(item.id),
-          state: 'seen',
-        })
-      const recoveries = items.filter((item) =>
-        isFreshRecovery(item, fixtureNow())
+      const now = clock()
+      const ready = stubInbox({ items: allItems() }).items.filter(
+        (item) =>
+          item.target === target &&
+          item.type === 'changes_ready' &&
+          item.state !== 'resolved' &&
+          item.state !== 'dismissed'
       )
-      for (const item of recoveries) {
-        const body =
-          typeof item.body_json === 'string'
-            ? (JSON.parse(item.body_json) as Record<string, unknown>)
-            : item.body_json
+      for (const item of ready)
         stubState.inbox.set(item.id, {
           ...stubState.inbox.get(item.id),
-          body_json: { ...body, recovery_seen_at: fixtureNow() },
+          state: 'resolved',
+          updated_at: now,
+          resolved_at: now,
+          resolved_by: 'code',
         })
-      }
-      return { updated: fresh.length + recoveries.length }
+      return { target, closed: ready.length > 0 }
     }
   )
 
@@ -724,7 +905,7 @@ export const startReport = (target: string) =>
     () => ({
       id: stubState.nextReportId++,
       target,
-      ts: fixtureNow(),
+      ts: clock(),
       trigger: 'user',
       state: 'running',
       provisional: false,
@@ -743,7 +924,7 @@ export const cancelReport = (target: string, id: number) =>
       return {
         id,
         target,
-        ts: fixtureNow(),
+        ts: clock(),
         trigger: 'user',
         state: 'cancelled',
         provisional: false,
@@ -762,9 +943,10 @@ export const getReportHistory = (target: string, limit = 10, daily = false) =>
         `${base(target)}/report/history${query(daily ? { limit, daily: 'true' } : { limit })}`
       ),
     () => {
-      const history = reportHistoryFixture(scenario(), fixtureNow(), limit)
-      const template = reportHistoryFixture('localdev', fixtureNow(), 1)
-        .reports[0]
+      const history =
+        ca()?.reportHistory(target, limit) ??
+        reportHistoryFixture(scenario(), clock(), limit)
+      const template = reportHistoryFixture('localdev', clock(), 1).reports[0]
       const runs = [...stubState.finished]
         .sort(([a], [b]) => b - a)
         .map(([id, ts]) => ({
@@ -779,25 +961,63 @@ export const getReportHistory = (target: string, limit = 10, daily = false) =>
 
 /**
  * `id` may be 'latest' (the newest run of any kind) or 'daily' (the newest nightly report).
- * Rejects with MonitorApiError(404) when there is no such report.
+ * `view` 'detailed' adds the Detailed sections. Rejects with MonitorApiError(404) when there
+ * is no such report.
  */
-export const getReport = (target: string, id: number | 'latest' | 'daily') =>
+export const getReport = (
+  target: string,
+  id: number | 'latest' | 'daily',
+  view: ReportViewMode = 'quick'
+) =>
   pick<DatabaseReport>(
     'report',
-    () =>
-      json(
+    () => {
+      const detailed = view === 'detailed' ? 'detailed' : undefined
+      return json(
         id === 'daily'
-          ? `${base(target)}/report/latest?daily=true`
-          : `${base(target)}/report/${id}`
-      ),
+          ? `${base(target)}/report/latest${query({ daily: 'true', view: detailed })}`
+          : `${base(target)}/report/${id}${query({ view: detailed })}`
+      )
+    },
     () => {
       const newest = Math.max(0, ...stubState.finished.keys())
       const latest = id === 'latest' || id === 'daily'
+      const set = ca()
       const report =
         finishedStubReport(latest ? newest : id, target) ??
-        reportFixture(scenario(), latest ? 'latest' : id, fixtureNow(), target)
+        (set
+          ? set.report(target, latest ? 'latest' : id)
+          : reportFixture(scenario(), latest ? 'latest' : id, clock(), target))
       if (!report) throw new MonitorApiError(404, 'Report not found')
-      return report
+      return view === 'detailed' ? report : { ...report, detailed: null }
+    }
+  )
+
+// The report view preference lives with the app preferences; fixtures keep it in memory
+// on the settings endpoint's side.
+const PREFERENCES = '/api/settings/preferences'
+
+export const getReportViewPreference = () =>
+  pick<ReportViewMode>(
+    'settings',
+    () =>
+      json<{ report_view?: ReportViewMode }>(PREFERENCES).then(
+        (preferences) => preferences.report_view ?? 'quick'
+      ),
+    () => stubState.reportView
+  )
+
+export const putReportViewPreference = (view: ReportViewMode) =>
+  pick<ReportViewMode>(
+    'settings',
+    () =>
+      json<{ report_view?: ReportViewMode }>(
+        PREFERENCES,
+        jsonBody('PUT', { report_view: view })
+      ).then((preferences) => preferences.report_view ?? view),
+    () => {
+      stubState.reportView = view
+      return view
     }
   )
 
@@ -857,7 +1077,7 @@ export function subscribePulse(
     })
   const current = scenario()
   const timer = setInterval(
-    () => onPulse(nextPulseFixture(current, fixtureNow())),
+    () => onPulse(nextPulseFixture(current, clock())),
     60_000
   )
   return () => clearInterval(timer)
@@ -913,7 +1133,7 @@ export function subscribeReportEvents(
     )
     return () => close()
   }
-  const events = reportEventsFixture(fixtureNow())
+  const events = reportEventsFixture(clock())
   let index = 0
   let timer: ReturnType<typeof setTimeout> | undefined
   const step = () => {
@@ -922,7 +1142,7 @@ export function subscribeReportEvents(
       onEvent({
         type: 'run',
         state: 'cancelled',
-        started_at: started.type === 'run' ? started.started_at : fixtureNow(),
+        started_at: started.type === 'run' ? started.started_at : clock(),
         elapsed_s: index,
       })
       return
@@ -931,7 +1151,7 @@ export function subscribeReportEvents(
     const event = events[index++]
     // Record the finish before announcing it, so a refetch on "done" finds the report.
     if (event.type === 'run' && event.state === 'done')
-      stubState.finished.set(id, fixtureNow())
+      stubState.finished.set(id, clock())
     onEvent(event)
     timer = setTimeout(step, streamStepMs)
   }

@@ -1,5 +1,5 @@
+import { Alert } from '@rs/ui-new/alert'
 import { BaseInputSelect } from '@rs/ui-new/base-input-select'
-import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
 import { CopyButton } from '@rs/ui-new/copy-button'
 import { InlineNotice } from '@rs/ui-new/error-state'
@@ -8,7 +8,7 @@ import { Spinner } from '@rs/ui-new/spinner'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import {
   FleetAwsLoginError,
   type FleetAwsLoginStatus,
@@ -22,7 +22,8 @@ import {
   startFleetAwsLogin,
   startFleetAwsSsoLogin,
 } from '../../lib/useFleet'
-import { COMPACT_CARD } from '../providers/cardShell'
+import { Field } from '../configure/Field'
+import { COMPACT_CARD, panelActions } from '../providers/cardShell'
 import { AwsLogo } from '../providers/ProviderLogos'
 
 export const awsIdentityLabel = (arn: string | null): string =>
@@ -37,89 +38,40 @@ const awsRoleFromArn = (arn: string | null): string | null => {
   return match ? match[1] : null
 }
 
-function Field({
-  label,
-  name,
-  value,
-  placeholder,
-  helper,
-  onChange,
-}: {
-  label: string
-  name: string
-  value: string
-  placeholder?: string
-  helper?: string
-  onChange: (value: string) => void
-}) {
+// The wizard's connect step and the profile picker share this: names the failure and
+// offers the AWS CLI fallback command to copy. Signing in again retries.
+function AwsErrorBlock({ error }: { error: FleetAwsLoginError }) {
   return (
-    <div>
-      <Text level="caption" className="text-content-layout-3 mb-1 block">
-        {label}
-      </Text>
-      <BaseInputText
-        name={name}
-        value={value}
-        placeholder={placeholder}
-        onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-          onChange(event.target.value)
+    <VStack className="gap-2 items-stretch">
+      <Alert
+        variant="negative"
+        modifier="ghost"
+        icon="alert"
+        iconPosition="left"
+        label={
+          error.code === 'aws_cli_missing'
+            ? 'AWS CLI is not installed. Install AWS CLI v2, then try again.'
+            : error.message
         }
       />
-      {helper && (
-        <Text level="caption" className="text-content-layout-3 mt-1 block">
-          {helper}
-        </Text>
+      {error.fallbackCommand && (
+        <HStack className="gap-2 items-center rounded-control bg-surface-layout-2 px-3 py-2">
+          <Text
+            asChild
+            level="mono-small"
+            className="min-w-0 flex-1 break-all text-content-layout-2"
+          >
+            <code>{error.fallbackCommand}</code>
+          </Text>
+          <CopyButton text={error.fallbackCommand} />
+        </HStack>
       )}
-    </div>
+    </VStack>
   )
 }
 
-// Full-width error block shared by the wizard's connect step and the profile
-// picker: names the failure, offers the AWS-CLI fallback command to copy, and a
-// caller-supplied retry.
-function AwsErrorBlock({
-  error,
-  onRetry,
-  retryLabel = 'Try again',
-}: {
-  error: FleetAwsLoginError
-  onRetry: () => void
-  retryLabel?: string
-}) {
-  return (
-    <div className="rounded-lg border border-border-negative-soft bg-surface-negative-soft/20 p-3">
-      <VStack className="gap-2 items-stretch">
-        <Text level="label-small" className="text-content-negative-soft">
-          {error.code === 'aws_cli_missing'
-            ? 'AWS CLI is not installed'
-            : 'AWS sign-in failed'}
-        </Text>
-        <Text level="body-small" className="text-content-layout-2">
-          {error.code === 'aws_cli_missing'
-            ? 'Install AWS CLI v2, then try again.'
-            : error.message}
-        </Text>
-        {error.fallbackCommand && (
-          <HStack className="gap-2 items-center rounded bg-surface-layout-2 px-3 py-2">
-            <code className="text-xs text-content-layout-2 break-all flex-1">
-              {error.fallbackCommand}
-            </code>
-            <CopyButton text={error.fallbackCommand} />
-          </HStack>
-        )}
-        <HStack>
-          <Button
-            variant="primary"
-            modifier="outline"
-            size="small"
-            label={retryLabel}
-            onClick={onRetry}
-          />
-        </HStack>
-      </VStack>
-    </div>
-  )
-}
+const FIELD_LABEL = 'mb-1 block text-caption text-content-layout-3'
+const SELECT_TRIGGER = 'h-8.5 bg-surface-layout-2 text-body-small'
 
 type WizardStep = 'connect' | 'account' | 'role'
 
@@ -133,12 +85,16 @@ function AwsSsoWizard({
   onCancel,
   onConnected,
   defaultRegion,
+  actions,
 }: {
   canCancel: boolean
   onCancel: () => void
   onConnected: (profile: string) => Promise<unknown> | void
   defaultRegion?: string | null
+  actions?: HTMLElement | null
 }) {
+  const accountSelectId = useId()
+  const roleSelectId = useId()
   const [step, setStep] = useState<WizardStep>('connect')
   const [startUrl, setStartUrl] = useState('')
   const [region, setRegion] = useState(defaultRegion || 'us-east-1')
@@ -149,7 +105,9 @@ function AwsSsoWizard({
   const [loginStatus, setLoginStatus] = useState<FleetAwsLoginStatus | null>(
     null
   )
-  const [signInError, setSignInError] = useState<FleetAwsLoginError | null>(null)
+  const [signInError, setSignInError] = useState<FleetAwsLoginError | null>(
+    null
+  )
 
   const [accounts, setAccounts] = useState<FleetAwsSsoAccount[] | null>(null)
   const [accountsError, setAccountsError] = useState<string | null>(null)
@@ -174,7 +132,9 @@ function AwsSsoWizard({
         setAccounts(result.accounts)
       }
     } catch (caught) {
-      setAccountsError(caught instanceof Error ? caught.message : String(caught))
+      setAccountsError(
+        caught instanceof Error ? caught.message : String(caught)
+      )
       setAccounts([])
     }
   }, [])
@@ -295,7 +255,10 @@ function AwsSsoWizard({
       // A deterministic name means a conflict is a profile for this exact
       // account and role that already exists: sign in with it rather than
       // asking the user to invent a different name.
-      if (caught instanceof FleetAwsLoginError && caught.code === 'profile_exists') {
+      if (
+        caught instanceof FleetAwsLoginError &&
+        caught.code === 'profile_exists'
+      ) {
         await onConnected(profileName)
       } else {
         setFinalizeError(
@@ -317,42 +280,51 @@ function AwsSsoWizard({
   const selectedAccount = accounts?.find((a) => a.account_id === accountId)
   const stepLabel =
     step === 'connect'
-      ? 'Step 1 of 3 - Connect'
+      ? 'Sign in with AWS SSO (step 1 of 3)'
       : step === 'account'
-        ? 'Step 2 of 3 - Choose account'
-        : 'Step 3 of 3 - Choose role'
+        ? 'Choose an account (step 2 of 3)'
+        : 'Choose a role (step 3 of 3)'
+  const cancel = canCancel && (
+    <Button
+      variant="primary"
+      modifier="ghost"
+      label="Cancel"
+      onClick={onCancel}
+    />
+  )
 
   return (
     <VStack className="gap-3 items-stretch">
-      <VStack className="gap-1 items-start">
-        <Text level="label-small" className="text-content-layout-1">
-          Connect AWS with SSO
-        </Text>
-        <Text level="caption" className="text-content-layout-3">
-          {stepLabel}
-        </Text>
-      </VStack>
+      <Text
+        as="p"
+        level="caption"
+        className="mt-2 mb-1.5 text-content-layout-3"
+      >
+        {stepLabel}
+      </Text>
 
       {loginId ? (
-        <VStack className="gap-3 items-start">
+        <VStack className="gap-2 items-start">
           <HStack className="gap-2 items-center">
             <Spinner size="base" />
-            <Text level="label-small" className="text-content-layout-1">
+            <Text level="body-small" className="text-content-layout-1">
               Complete the sign-in in the browser window we opened
             </Text>
           </HStack>
-          <Text level="body-small" className="text-content-layout-2">
+          <Text level="caption" className="text-content-layout-3">
             {loginStatus?.detail || 'Waiting for AWS SSO...'}
           </Text>
           {loginStatus?.verification_url && (
-            <a
-              href={loginStatus.verification_url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-sm text-content-primary-soft hover:underline"
-            >
-              Open the AWS verification page
-            </a>
+            <Text asChild level="body-small">
+              <a
+                href={loginStatus.verification_url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-content-primary-soft underline-offset-4 hover:underline"
+              >
+                Open the AWS verification page
+              </a>
+            </Text>
           )}
         </VStack>
       ) : step === 'connect' ? (
@@ -366,7 +338,7 @@ function AwsSsoWizard({
             name="aws-sso-start-url"
             value={startUrl}
             placeholder="https://my-company.awsapps.com/start"
-            helper="Your organization's AWS access portal, e.g. https://my-company.awsapps.com/start - from IAM Identity Center or your admin"
+            helper="Your organization's AWS access portal, from IAM Identity Center or your admin."
             onChange={setStartUrl}
           />
           <div>
@@ -379,98 +351,53 @@ function AwsSsoWizard({
               onClick={() => setShowAdvanced((v) => !v)}
             />
             {showAdvanced && (
-              <div className="mt-2 w-full max-w-64">
-                <Field
-                  label="Region"
-                  name="aws-sso-region"
-                  value={region}
-                  placeholder="us-east-1"
-                  helper="AWS region of your IAM Identity Center."
-                  onChange={setRegion}
-                />
-              </div>
+              <Field
+                label="Region"
+                name="aws-sso-region"
+                value={region}
+                placeholder="us-east-1"
+                helper="AWS region of your IAM Identity Center."
+                onChange={setRegion}
+                className="mt-2"
+              />
             )}
           </div>
-          <HStack className="gap-2 items-center">
-            <Button
-              variant="primary"
-              modifier="solid"
-              label={starting ? 'Opening browser...' : 'Sign in with AWS'}
-              disabled={starting || !startUrl.trim() || !region.trim()}
-              onClick={() => void beginSignIn()}
-            />
-            {canCancel && (
-              <Button
-                variant="primary"
-                modifier="ghost"
-                size="small"
-                label="Cancel"
-                onClick={onCancel}
-              />
-            )}
-          </HStack>
         </VStack>
       ) : step === 'account' ? (
-        <VStack className="gap-3 items-stretch">
-          {accounts === null ? (
-            <HStack className="gap-2 items-center">
-              <Spinner size="base" />
-              <Text level="caption" className="text-content-layout-3">
-                Loading accounts…
-              </Text>
-            </HStack>
-          ) : accountsError ? (
-            <VStack className="gap-2 items-start">
-              <Text level="body-small" className="text-content-negative-soft">
-                {accountsError}
-              </Text>
-              <Button
-                variant="primary"
-                modifier="outline"
-                size="small"
-                label="Sign in again"
-                onClick={backToConnect}
-              />
-            </VStack>
-          ) : (
-            <div>
-              <Text
-                level="caption"
-                className="text-content-layout-3 mb-1.5 block"
-              >
-                Account
-              </Text>
-              <BaseInputSelect
-                name="aws-sso-account"
-                value={accountId}
-                placeholder="Select an account"
-                onValueChange={selectAccount}
-                options={accounts.map((account) => ({
-                  value: account.account_id,
-                  label: `${account.account_name} (${account.account_id})`,
-                }))}
-              />
-            </div>
-          )}
-          <HStack className="gap-2">
-            <Button
-              variant="primary"
-              modifier="ghost"
-              size="small"
-              label="Back"
-              onClick={backToConnect}
-            />
-            {canCancel && (
-              <Button
-                variant="primary"
-                modifier="ghost"
-                size="small"
-                label="Cancel"
-                onClick={onCancel}
-              />
-            )}
+        accounts === null ? (
+          <HStack className="gap-2 items-center">
+            <Spinner size="base" />
+            <Text level="caption" className="text-content-layout-3">
+              Loading accounts...
+            </Text>
           </HStack>
-        </VStack>
+        ) : accountsError ? (
+          <Alert
+            variant="negative"
+            modifier="ghost"
+            icon="alert"
+            iconPosition="left"
+            label={accountsError}
+          />
+        ) : (
+          <div>
+            <label htmlFor={accountSelectId} className={FIELD_LABEL}>
+              Account
+            </label>
+            <BaseInputSelect
+              id={accountSelectId}
+              name="aws-sso-account"
+              value={accountId}
+              placeholder="Select an account"
+              onValueChange={selectAccount}
+              triggerClassName={SELECT_TRIGGER}
+              options={accounts.map((account) => ({
+                value: account.account_id,
+                label: `${account.account_name} (${account.account_id})`,
+              }))}
+            />
+          </div>
+        )
       ) : (
         <VStack className="gap-3 items-stretch">
           {selectedAccount && (
@@ -483,82 +410,92 @@ function AwsSsoWizard({
             <HStack className="gap-2 items-center">
               <Spinner size="base" />
               <Text level="caption" className="text-content-layout-3">
-                Loading roles…
+                Loading roles...
               </Text>
             </HStack>
           ) : rolesError ? (
-            <VStack className="gap-2 items-start">
-              <Text level="body-small" className="text-content-negative-soft">
-                {rolesError}
-              </Text>
-              <Button
-                variant="primary"
-                modifier="outline"
-                size="small"
-                label="Choose a different account"
-                onClick={goToAccounts}
-              />
-            </VStack>
+            <Alert
+              variant="negative"
+              modifier="ghost"
+              icon="alert"
+              iconPosition="left"
+              label={rolesError}
+            />
           ) : (
             <div>
-              <Text
-                level="caption"
-                className="text-content-layout-3 mb-1.5 block"
-              >
+              <label htmlFor={roleSelectId} className={FIELD_LABEL}>
                 Role
-              </Text>
+              </label>
               <BaseInputSelect
+                id={roleSelectId}
                 name="aws-sso-role"
                 value={roleName}
                 placeholder="Select a role"
                 onValueChange={setRoleName}
+                triggerClassName={SELECT_TRIGGER}
                 options={roles.map((role) => ({ value: role, label: role }))}
               />
             </div>
           )}
           {finalizeError && (
-            <Text level="body-small" className="text-content-negative-soft">
-              {finalizeError}
-            </Text>
-          )}
-          <HStack className="gap-2 items-center">
-            <Button
-              variant="primary"
-              modifier="solid"
-              label={
-                finalizing ? 'Creating...' : 'Create profile and connect'
-              }
-              disabled={finalizing || !roleName}
-              onClick={() => void createProfile()}
-            />
-            <Button
-              variant="primary"
+            <Alert
+              variant="negative"
               modifier="ghost"
-              size="small"
-              label="Back"
-              onClick={goToAccounts}
+              icon="alert"
+              iconPosition="left"
+              label={finalizeError}
             />
-            {canCancel && (
-              <Button
-                variant="primary"
-                modifier="ghost"
-                size="small"
-                label="Cancel"
-                onClick={onCancel}
-              />
-            )}
-          </HStack>
+          )}
         </VStack>
       )}
 
-      {signInError && (
-        <AwsErrorBlock
-          error={signInError}
-          onRetry={() => {
-            setSignInError(null)
-            void beginSignIn()
-          }}
-        />
+      {signInError && <AwsErrorBlock error={signInError} />}
+
+      {panelActions(
+        actions,
+        step === 'connect' ? (
+          <>
+            {cancel}
+            <Button
+              variant="primary"
+              modifier="solid"
+              label="Sign in with AWS SSO"
+              aria-label="Sign in with AWS SSO"
+              loading={starting || Boolean(loginId)}
+              disabled={!startUrl.trim() || !region.trim()}
+              onClick={() => void beginSignIn()}
+            />
+          </>
+        ) : step === 'account' ? (
+          <>
+            <Button
+              variant="primary"
+              modifier="ghost"
+              label="Back to start URL"
+              onClick={backToConnect}
+            />
+            {cancel}
+          </>
+        ) : (
+          <>
+            <Button
+              variant="primary"
+              modifier="ghost"
+              label="Back to accounts"
+              onClick={goToAccounts}
+            />
+            {cancel}
+            <Button
+              variant="primary"
+              modifier="solid"
+              label="Create profile and connect"
+              aria-label="Create profile and connect"
+              loading={finalizing}
+              disabled={!roleName}
+              onClick={() => void createProfile()}
+            />
+          </>
+        )
       )}
     </VStack>
   )
@@ -571,6 +508,8 @@ export function AwsConnectionPanel({
   onRegionPrefill,
   compact = false,
   onSignIn,
+  actions,
+  onWizardOpenChange,
 }: {
   enabled?: boolean
   profile?: string
@@ -580,7 +519,12 @@ export function AwsConnectionPanel({
   compact?: boolean
   /** Where the compact signed-out row sends the user to actually sign in. */
   onSignIn?: () => void
+  /** The host dialog's footer, where the panel's buttons render. */
+  actions?: HTMLElement | null
+  /** The create-profile wizard opened or closed. */
+  onWizardOpenChange?: (open: boolean) => void
 }) {
+  const profileSelectId = useId()
   const [localProfile, setLocalProfile] = useState('')
   const selectedProfile = profile ?? localProfile
   const setProfile = onProfileChange ?? setLocalProfile
@@ -633,6 +577,10 @@ export function AwsConnectionPanel({
       setShowAddProfile(true)
     }
   }, [compact, aws])
+
+  useEffect(() => {
+    onWizardOpenChange?.(!compact && showAddProfile)
+  }, [compact, showAddProfile, onWizardOpenChange])
 
   const beginLogin = useCallback(
     async (profileName: string) => {
@@ -727,7 +675,7 @@ export function AwsConnectionPanel({
         errorClass="rdst-service"
         title="Couldn't check AWS credentials"
         message={error instanceof Error ? error.message : String(error)}
-        trustworthy="Your fleet inventory and saved reports are unaffected."
+        trustworthy="Your databases and saved reports are unaffected."
         onRetry={() => void refetch()}
       />
     )
@@ -741,10 +689,7 @@ export function AwsConnectionPanel({
   // routes into the drawer, so it never opens the wizard here.
   if (!compact && showAddProfile) {
     return (
-      <div
-        data-testid="aws-connection-panel"
-        className="rounded-xl border border-border-layout-1 bg-surface-layout-1 p-4"
-      >
+      <div data-testid="aws-connection-panel">
         <AwsSsoWizard
           canCancel={aws.available_profiles.length > 0 || aws.has_credentials}
           onCancel={() => setShowAddProfile(false)}
@@ -754,6 +699,7 @@ export function AwsConnectionPanel({
             await refetch()
           }}
           defaultRegion={aws.region}
+          actions={actions}
         />
       </div>
     )
@@ -771,29 +717,44 @@ export function AwsConnectionPanel({
     // which profile serves a given target's health check (discovery tags
     // targets with the account, and the audit preflight blocks targets whose
     // account differs from the signed-in one).
-    const identityDetail = [awsRoleFromArn(aws.identity_arn), aws.account]
-      .filter(Boolean)
-      .join(' - ')
-    // In a Connections grid column the profile control gets its own
-    // full-width row; the wider settings/drawer layout keeps it capped.
+    const role = awsRoleFromArn(aws.identity_arn)
+    const identityDetail =
+      role && aws.account
+        ? `Role ${role} in account ${aws.account}`
+        : role
+          ? `Role ${role}`
+          : aws.account
+            ? `Account ${aws.account}`
+            : null
+    // The profile select, with the account and role it maps to under it.
     const profileField = (className: string) =>
-      aws.available_profiles.length > 0 && (
+      (aws.available_profiles.length > 0 || identityDetail) && (
         <div className={className}>
-          <Text level="caption" className="text-content-layout-3 mb-1.5 block">
-            Profile
-          </Text>
-          <BaseInputSelect
-            name="fleet-discover-profile"
-            value={selectedProfile}
-            onValueChange={setProfile}
-            // Profile names run long (e.g. AdministratorAccess-<account>); keep
-            // the value on one truncated, left-aligned line in the narrow card.
-            triggerClassName="[&>span]:min-w-0 [&>span]:text-left [&>span]:whitespace-nowrap"
-            options={aws.available_profiles.map((name) => ({
-              value: name,
-              label: name,
-            }))}
-          />
+          {aws.available_profiles.length > 0 && (
+            <>
+              <label htmlFor={profileSelectId} className={FIELD_LABEL}>
+                Profile
+              </label>
+              <BaseInputSelect
+                id={profileSelectId}
+                name="fleet-discover-profile"
+                value={selectedProfile}
+                onValueChange={setProfile}
+                // Profile names run long (e.g. AdministratorAccess-<account>); keep
+                // the value on one truncated, left-aligned line.
+                triggerClassName={`${SELECT_TRIGGER} [&>span]:min-w-0 [&>span]:text-left [&>span]:whitespace-nowrap`}
+                options={aws.available_profiles.map((name) => ({
+                  value: name,
+                  label: name,
+                }))}
+              />
+            </>
+          )}
+          {identityDetail && (
+            <Text as="p" level="caption" className="mt-1 text-content-layout-3">
+              {identityDetail}
+            </Text>
+          )}
         </div>
       )
     if (compact)
@@ -809,17 +770,13 @@ export function AwsConnectionPanel({
             <Icon
               name="tick-double"
               label="Signed in"
-              className="w-4 h-4 text-content-positive-soft shrink-0"
+              size="small"
+              className="shrink-0 text-content-positive-soft"
             />
             <Text level="caption" className="text-content-positive-soft">
-              Signed in as {awsIdentityLabel(aws.identity_arn)}
+              Signed in to AWS as {awsIdentityLabel(aws.identity_arn)}
             </Text>
           </HStack>
-          {identityDetail && (
-            <Text level="caption" className="text-content-layout-3">
-              {identityDetail}
-            </Text>
-          )}
           {profileField('w-full')}
           <Button
             variant="primary"
@@ -828,52 +785,45 @@ export function AwsConnectionPanel({
             className="mt-auto"
             icon="logout"
             iconPosition="left"
-            label={signingOut ? 'Signing out...' : 'Sign out'}
+            label="Sign out"
             loading={signingOut}
             onClick={signOut}
           />
         </div>
       )
     return (
-      <div data-testid="aws-connection-panel">
-        <VStack className="gap-3 items-stretch">
-          <HStack className="gap-2 items-center flex-wrap">
-            <AwsLogo size={16} className="text-content-layout-2" />
-            <Icon
-              name="tick-double"
-              label="Signed in"
-              className="w-4 h-4 text-content-positive-soft shrink-0"
-            />
-            <Text level="caption" className="text-content-positive-soft">
-              Signed into AWS as {awsIdentityLabel(aws.identity_arn)}
-            </Text>
-            <Button
-              variant="primary"
-              modifier="outline"
-              size="small"
-              icon="logout"
-              iconPosition="left"
-              label={signingOut ? 'Signing out...' : 'Sign out'}
-              loading={signingOut}
-              onClick={signOut}
-            />
-          </HStack>
-          {identityDetail && (
-            <Text level="caption" className="text-content-layout-3">
-              {identityDetail}
-            </Text>
-          )}
-          {profileField('w-full max-w-96 pt-1')}
+      <VStack
+        className="gap-3 items-stretch"
+        data-testid="aws-connection-panel"
+      >
+        <HStack className="gap-2 items-center">
+          <AwsLogo size={16} className="shrink-0 text-content-layout-2" />
+          <Text
+            level="body-small"
+            className="min-w-0 flex-1 truncate text-content-layout-1"
+          >
+            Signed in to AWS as {awsIdentityLabel(aws.identity_arn)}
+          </Text>
           <Button
-            type="button"
+            variant="primary"
+            modifier="ghost"
             size="small"
-            modifier="link"
-            label="Add another account or role"
-            classMerge="h-auto self-start p-0"
-            onClick={() => setShowAddProfile(true)}
+            icon="logout"
+            label="Sign out"
+            loading={signingOut}
+            onClick={signOut}
           />
-        </VStack>
-      </div>
+        </HStack>
+        {profileField('w-full')}
+        <Button
+          type="button"
+          size="small"
+          modifier="link"
+          label="Add another account or role"
+          classMerge="h-auto self-start p-0"
+          onClick={() => setShowAddProfile(true)}
+        />
+      </VStack>
     )
   }
 
@@ -889,7 +839,7 @@ export function AwsConnectionPanel({
           </Text>
         </HStack>
         <Text level="caption" className="text-content-layout-3">
-          Import RDS and Aurora instances
+          Import RDS and Aurora databases
         </Text>
         <Button
           variant="primary"
@@ -907,91 +857,71 @@ export function AwsConnectionPanel({
     )
 
   return (
-    <VStack
-      className="gap-4 items-stretch rounded-xl border border-border-layout-1 bg-surface-layout-1 p-4"
-      data-testid="aws-connection-panel"
-    >
+    <VStack className="gap-3 items-stretch" data-testid="aws-connection-panel">
       {loginId ? (
-        <VStack className="gap-3 items-start">
+        <VStack className="gap-2 items-start">
           <HStack className="gap-2 items-center">
             <Spinner size="base" />
-            <Text level="label-small" className="text-content-layout-1">
+            <Text level="body-small" className="text-content-layout-1">
               Complete the sign-in in the browser window we opened
             </Text>
           </HStack>
-          <Text level="body-small" className="text-content-layout-2">
-            {loginStatus?.detail || 'Waiting for AWS SSO…'}
+          <Text level="caption" className="text-content-layout-3">
+            {loginStatus?.detail || 'Waiting for AWS SSO...'}
           </Text>
           {loginStatus?.verification_url && (
-            <a
-              href={loginStatus.verification_url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-sm text-content-primary-soft hover:underline"
-            >
-              Open the AWS verification page
-            </a>
+            <Text asChild level="body-small">
+              <a
+                href={loginStatus.verification_url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-content-primary-soft underline-offset-4 hover:underline"
+              >
+                Open the AWS verification page
+              </a>
+            </Text>
           )}
         </VStack>
-      ) : aws.available_profiles.length > 0 && !showAddProfile ? (
-        <VStack className="gap-3 items-stretch">
-          <VStack className="gap-1 items-start">
-            <Text level="label-small" className="text-content-layout-1">
-              Sign into AWS
-            </Text>
+      ) : aws.available_profiles.length > 0 ? (
+        <>
+          <HStack className="gap-2 items-start">
+            <AwsLogo
+              size={16}
+              className="mt-0.5 shrink-0 text-content-layout-2"
+            />
             <Text level="body-small" className="text-content-layout-2">
               Sign in with AWS SSO so we can read details about your imported
               databases.
             </Text>
-          </VStack>
-          <div className="w-full max-w-96">
-            <Text
-              level="caption"
-              className="text-content-layout-3 mb-1.5 block"
-            >
+          </HStack>
+          <div>
+            <label htmlFor={profileSelectId} className={FIELD_LABEL}>
               Profile
-            </Text>
+            </label>
             <BaseInputSelect
+              id={profileSelectId}
               name="fleet-discover-profile"
               value={selectedProfile || aws.available_profiles[0]}
               onValueChange={setProfile}
+              triggerClassName={SELECT_TRIGGER}
               options={aws.available_profiles.map((name) => ({
                 value: name,
                 label: name,
               }))}
             />
           </div>
-          <HStack className="gap-2 items-center">
-            <Button
-              variant="primary"
-              modifier="solid"
-              label={starting ? 'Opening browser…' : 'Sign in with AWS SSO'}
-              disabled={starting}
-              onClick={() =>
-                void beginLogin(selectedProfile || aws.available_profiles[0])
-              }
-            />
-            <Button
-              type="button"
-              size="small"
-              modifier="link"
-              label="Add another profile"
-              classMerge="h-auto p-0"
-              onClick={() => setShowAddProfile(true)}
-            />
-            <Button
-              variant="primary"
-              modifier="ghost"
-              size="small"
-              label={isFetching ? 'Checking…' : 'Check again'}
-              disabled={isFetching}
-              onClick={() => void refetch()}
-            />
-          </HStack>
-        </VStack>
+          <Button
+            type="button"
+            size="small"
+            modifier="link"
+            label="Add another profile"
+            classMerge="h-auto self-start p-0"
+            onClick={() => setShowAddProfile(true)}
+          />
+        </>
       ) : (
         <AwsSsoWizard
-          canCancel={aws.available_profiles.length > 0}
+          canCancel={false}
           onCancel={() => setShowAddProfile(false)}
           onConnected={async (createdProfile) => {
             setShowAddProfile(false)
@@ -999,17 +929,33 @@ export function AwsConnectionPanel({
             await refetch()
           }}
           defaultRegion={aws.region}
+          actions={actions}
         />
       )}
-      {loginError && (
-        <AwsErrorBlock
-          error={loginError}
-          onRetry={() => {
-            setLoginError(null)
-            void beginLogin(selectedProfile || aws.available_profiles[0])
-          }}
-        />
-      )}
+      {loginError && <AwsErrorBlock error={loginError} />}
+      {aws.available_profiles.length > 0 &&
+        panelActions(
+          actions,
+          <>
+            <Button
+              variant="primary"
+              modifier="ghost"
+              label="Check again"
+              loading={isFetching}
+              onClick={() => void refetch()}
+            />
+            <Button
+              variant="primary"
+              modifier="solid"
+              label="Sign in with AWS SSO"
+              aria-label="Sign in with AWS SSO"
+              loading={starting || Boolean(loginId)}
+              onClick={() =>
+                void beginLogin(selectedProfile || aws.available_profiles[0])
+              }
+            />
+          </>
+        )}
     </VStack>
   )
 }

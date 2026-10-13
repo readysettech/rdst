@@ -1,7 +1,7 @@
 import {
   acceptBrowserError,
+  addDatabaseThroughDialog,
   clearTargets,
-  continueWhenMonitoringReady,
   expect,
   test,
 } from '../fixtures'
@@ -20,34 +20,23 @@ test('configures Postgres and bootstraps its schema through the UI', async ({
 
   await clearTargets(page.request)
 
-  await page.goto('/onboarding')
-  await expect(
-    page.getByRole('heading', { name: 'Start with Readyset' })
-  ).toBeVisible()
-  await page.locator('[name="name"]').fill('postgres-e2e')
-  await page.locator('[name="host"]').fill(host)
-  await page.locator('[name="port"]').fill(String(port))
-  await page.locator('[name="database"]').fill('rdst_test')
-  await page.locator('[name="user"]').fill('rdst_test')
-  await page
-    .locator('[name="password"]')
-    .fill(process.env.RDST_E2E_DB_PASSWORD ?? 'rdst_e2e_password')
-  await page.getByRole('button', { name: 'Test & connect' }).click()
-  const writableAccount = page.getByRole('dialog', {
-    name: 'Use this database account?',
+  await addDatabaseThroughDialog(page, {
+    host,
+    port: String(port),
+    database: 'rdst_test',
+    user: 'rdst_test',
+    password: process.env.RDST_E2E_DB_PASSWORD ?? 'rdst_e2e_password',
   })
-  await expect(writableAccount).toBeVisible()
-  await writableAccount.getByRole('button', { name: 'Add target' }).click()
-  await continueWhenMonitoringReady(page, 'postgres-e2e')
+  await page.goto('/')
 
   await expect(page).toHaveURL('/')
 
   // Connecting starts schema discovery in the background. Poll the API for
   // the discovered tables instead of racing the bootstrap request fired by
-  // the onboarding page.
+  // the add-database dialog.
   await expect(async () => {
     const schemaResponse = await page.request.get(
-      '/api/schema?target=postgres-e2e'
+      '/api/schema?target=rdst_test'
     )
     expect(schemaResponse.ok()).toBe(true)
     await expect(schemaResponse.json()).resolves.toMatchObject({
@@ -64,7 +53,7 @@ test('configures Postgres and bootstraps its schema through the UI', async ({
   // racing the run from the UI.
   await expect(async () => {
     const status = await page.request.get(
-      '/api/semantic-layer/status?target=postgres-e2e'
+      '/api/semantic-layer/status?target=rdst_test'
     )
     expect(status.ok()).toBe(true)
     expect((await status.json()).exists).toBe(true)

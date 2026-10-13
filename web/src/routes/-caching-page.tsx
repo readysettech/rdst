@@ -32,12 +32,7 @@ export function CachingPage({
   selectedRunId?: string
 }) {
   const navigate = useNavigate()
-  const findQueries = () =>
-    navigate({
-      to: '/queries',
-      search: { view: 'high-impact' },
-      replace: false,
-    })
+  const findQueries = () => navigate({ to: '/database', replace: false })
 
   return (
     <WorkspaceLayout
@@ -64,8 +59,8 @@ export function CachingPage({
           initialQueryHash={deepLinkHash}
           onOpenQueries={() =>
             navigate({
-              to: '/queries',
-              search: deepLinkHash ? { hash: deepLinkHash } : {},
+              to: '/database',
+              search: deepLinkHash ? { focus: deepLinkHash } : {},
               replace: false,
             })
           }

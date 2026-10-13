@@ -72,7 +72,9 @@ def test_explanations_are_planned_apart_from_checkups(tmp_path, monkeypatch):
     monkeypatch.setattr(report.database_limit, "_signed_in", lambda: True)
     monkeypatch.setattr(report.action_explain, "due", lambda store, target, now: True)
     scheduler = report.ReportScheduler(store, clock=lambda: START + 7200)
-    assert scheduler._plan(START + 7200) == [("explain", ("db",))]
+    # The first report may be claimed in the same tick; the explanation is its own entry.
+    plan = scheduler._plan(START + 7200)
+    assert [entry for entry in plan if entry[0] != "first"] == [("explain", ("db",))]
     scheduler._explaining.add("db")
     # One call at a time per database.
     assert scheduler._plan(START + 7260) == []

@@ -21,7 +21,12 @@ from features.configure.events import (
 from features.configure.models import ConfigureInput, ConfigureOptions
 from features.configure.service import ConfigureService
 from shared.api.guards import require_local_request
-from shared.config.targets import TargetsConfig
+from shared.config.targets import (
+    TargetsConfig,
+    default_port_for,
+    normalize_db_type,
+    validate_target_name,
+)
 from shared.password_resolver import derive_password_env, store_target_password
 from shared.secret_store_service import SecretStoreService
 
@@ -89,6 +94,7 @@ class AddTargetRequest(BaseModel):
 class UpdateTargetRequest(BaseModel):
     """Request body for updating a target."""
 
+    name: Optional[str] = Field(default=None, description="A new name; omitted keeps it.")
     target: TargetData
 
     @model_validator(mode="before")
@@ -199,6 +205,41 @@ def _password_env_for_request(
     return None
 
 
+def _connection_identity(target: dict) -> tuple:
+    """What makes two saved connections the same database: engine, address, database, user,
+    and the jump host they go through."""
+    engine = normalize_db_type(target.get("engine")) or "postgresql"
+    try:
+        port = int(target.get("port") or default_port_for(engine))
+    except (TypeError, ValueError):
+        port = target.get("port")
+    ssh = target.get("ssh") or {}
+    return (
+        engine,
+        str(target.get("host") or "").strip().casefold(),
+        port,
+        str(target.get("database") or "").strip(),
+        str(target.get("user") or "").strip(),
+        str(ssh.get("profile") or ssh.get("host") or "").casefold(),
+    )
+
+
+def _saved_as(cfg: TargetsConfig, target: dict) -> Optional[str]:
+    """The name an identical connection is already saved under, if any."""
+    wanted = _connection_identity(target)
+    return next(
+        (name for name in cfg.list_targets() if _connection_identity(cfg.get(name) or {}) == wanted),
+        None,
+    )
+
+
+def _name_taken(cfg: TargetsConfig, name: str, keep: Optional[str] = None) -> bool:
+    return any(
+        existing != keep and existing.casefold() == name.casefold()
+        for existing in cfg.list_targets()
+    )
+
+
 def _store_submitted_password(
     target: TargetData, password_env: Optional[str]
 ) -> None:
@@ -278,6 +319,8 @@ def _event_to_sse(event: ConfigureEvent) -> dict:
             data["password_env"] = event.password_env
         if event.privileges is not None:
             data["privileges"] = event.privileges
+        if event.query_capture is not None:
+            data["query_capture"] = event.query_capture
         return {
             "event": "connection_test",
             "data": json.dumps(data),
@@ -399,8 +442,11 @@ async def add_target(
     # target's saved password.
     existing = TargetsConfig()
     existing.load()
-    if existing.get(request.name) is not None:
-        raise HTTPException(409, f"A target named {request.name} already exists.")
+    if _name_taken(existing, request.name):
+        raise HTTPException(409, f"A database named {request.name} already exists.")
+    saved_as = _saved_as(existing, request.target.model_dump())
+    if saved_as is not None:
+        raise HTTPException(409, f"Already added as {saved_as}.")
     service = ConfigureService()
     input_data = ConfigureInput(target_name=request.name)
     password_env = _password_env_for_request(request.name, request.target)
@@ -452,6 +498,18 @@ async def update_target(
     cfg = TargetsConfig()
     cfg.load()
     existing = cfg.get(name) or {}
+    new_name = (request.name or "").strip() or name
+    if new_name != name:
+        try:
+            validate_target_name(new_name)
+        except ValueError:
+            raise HTTPException(422, "Use up to 64 letters, numbers, dots, underscores or "
+                                     "hyphens, starting with a letter or number.")
+        if _name_taken(cfg, new_name, keep=name):
+            raise HTTPException(409, f"A database named {new_name} already exists.")
+        blocker = service.rename_blocker(name)
+        if blocker:
+            raise HTTPException(409, blocker)
     password_env = _password_env_for_request(name, request.target, existing)
     _store_submitted_password(request.target, password_env)
     input_data = ConfigureInput(target_name=name)
@@ -488,10 +546,19 @@ async def update_target(
             error = event
 
     if result:
+        from features.monitor.loop import connection_changed
+
+        connection_changed(name, getattr(http_request.app.state, "monitor_scheduler", None))
+    if result and new_name != name:
+        try:
+            await service.rename_target(name, new_name)
+        except Exception as exc:
+            return ErrorResponse(message=f"Saved the connection, but couldn't rename it: {exc}")
+    if result:
         return TargetResponse(
             success=True,
             message=result.message,
-            target_name=result.target_name,
+            target_name=new_name,
         )
     elif error:
         return ErrorResponse(message=error.message)

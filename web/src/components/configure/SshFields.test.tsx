@@ -285,6 +285,24 @@ describe('SshFields', () => {
     })
   })
 
+  it('labels the typed address apart from the jump host choice', async () => {
+    vi.mocked(fetchSshProfiles).mockResolvedValue([
+      {
+        name: 'production-bastion',
+        host: 'bastion.prod.test',
+        port: 22,
+        user: 'ops',
+        key_path: '/keys/prod',
+      },
+    ])
+    render(<Harness onSubmit={vi.fn()} />)
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Jump host' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Enter manually' }))
+    expect(screen.getByLabelText('Address')).toBeTruthy()
+    expect(screen.getAllByLabelText('Jump host')).toHaveLength(1)
+  })
+
   it('shows the current edit-mode jump host as the selected option', () => {
     render(
       <Harness

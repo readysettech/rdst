@@ -31,11 +31,11 @@ export function DesktopNotificationsBanner() {
     setHidden(true)
   }
   return (
-    <div className="mb-4" data-testid="desktop-notifications-banner">
+    <div data-testid="desktop-notifications-banner">
       <InlineNotice
+        tone="quiet"
         errorClass="user-config"
         accent="warning"
-        icon="notification"
         title="Notifications are off"
         message={health.message}
         trustworthy="The Inbox still lists every alert."
@@ -43,13 +43,12 @@ export function DesktopNotificationsBanner() {
           health.settingsUrl
             ? {
                 label: 'Turn on notifications',
-                icon: 'settings',
                 onClick: () => getDesktopNotifications()?.openSettings(),
               }
             : undefined
         }
         onRetry={hide}
-        retryLabel="Hide for now"
+        retryLabel="Hide"
       />
     </div>
   )

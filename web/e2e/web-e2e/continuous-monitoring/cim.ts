@@ -220,15 +220,25 @@ export async function selectTarget(page: Page) {
   }, target)
 }
 
+/** The Database page on the test database: Live unless `params` asks for the Report. */
 export async function openDatabase(page: Page, params = '') {
   await selectTarget(page)
-  // Without a view the page picks Actions once there is a plan; these specs mean Queries.
-  const view = params.includes('view=') ? '' : '&view=queries'
-  await page.goto(
-    `/database?target=${encodeURIComponent(target)}${params}${view}`
-  )
+  await page.goto(`/database?target=${encodeURIComponent(target)}${params}`)
+  // A database that isn't monitored yet has no views, only the row that turns monitoring on.
+  const views = page.getByRole('tablist', { name: 'Database views' })
   await expect(
-    page.getByRole('tablist', { name: 'Database view' })
+    views.or(page.getByRole('button', { name: 'Turn on monitoring' })).first()
+  ).toBeVisible()
+  // Live and Report; the changes to make live on the global Actions page.
+  if (await views.isVisible())
+    await expect(views.getByRole('tab')).toHaveCount(2)
+}
+
+/** The global Actions page narrowed to the test database. */
+export async function openActions(page: Page, params = '') {
+  await page.goto(`/actions?db=${encodeURIComponent(target)}${params}`)
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Actions' })
   ).toBeVisible()
 }
 
@@ -253,7 +263,7 @@ export function searchParam(page: Page, name: string): string | null {
 }
 
 export function inboxRow(page: Page, id: number) {
-  return page.locator(`article[data-inbox-item="${id}"]`)
+  return page.locator(`[data-inbox-item="${id}"]`)
 }
 
 export function findItem(
@@ -276,22 +286,29 @@ export async function openInbox(page: Page) {
   await selectTarget(page)
   await page.goto('/inbox')
   await expect(
-    page.getByRole('button', { name: 'Mark all seen' })
+    page.getByRole('heading', { level: 1, name: 'Inbox' })
   ).toBeVisible()
 }
 
-/** An item's row, unfolding the group or capped band that holds it. */
+/** An item's queue row. */
 export async function revealRow(page: Page, id: number) {
   const row = inboxRow(page, id)
-  await expect(async () => {
-    if (!(await row.isVisible())) {
-      for (const more of await page
-        .getByRole('button', { name: /^Show (\d+ alerts|\d+ more)$/ })
-        .all()) {
-        await more.click()
-      }
-    }
-    await expect(row).toBeVisible({ timeout: 2_000 })
-  }).toPass({ timeout: 30_000 })
+  await expect(row).toBeVisible({ timeout: 30_000 })
   return row
+}
+
+/** The detail panel of the selected item. */
+export function inboxDetail(page: Page, id: number) {
+  return page.locator(`[data-inbox-detail="${id}"]`)
+}
+
+/**
+ * The sidebar's Inbox badge: the open items that need action now. Absent when
+ * none do.
+ */
+export function inboxBadge(page: Page) {
+  return page
+    .locator('#app-sidebar')
+    .getByRole('link', { name: /^Inbox/ })
+    .locator('[title$="need you"]')
 }

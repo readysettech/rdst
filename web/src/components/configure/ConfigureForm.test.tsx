@@ -4,308 +4,60 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from '@testing-library/react'
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ConfigureForm } from './ConfigureForm'
+import {
+  type Advanced,
+  AdvancedFields,
+  advancedConnection,
+  advancedFrom,
+  defaultPasswordEnv,
+  nameError,
+} from './ConfigureForm'
 
-function connectionUri(query = '') {
-  const password = 'sec' + 'ret'
+afterEach(cleanup)
+
+function Harness({ initial }: { initial: Advanced }) {
+  const [value, setValue] = useState(initial)
   return (
-    'postgresql://' + `alice:${password}@db.example.com:5432/app_db${query}`
+    <>
+      <AdvancedFields
+        value={value}
+        engine={value.engine ?? 'postgresql'}
+        onChange={setValue}
+      />
+      <output data-testid="value">
+        {JSON.stringify(advancedConnection(value))}
+      </output>
+    </>
   )
 }
 
-function selectMysql() {
-  fireEvent.click(screen.getAllByRole('combobox')[0])
-  fireEvent.click(screen.getByRole('option', { name: 'MySQL' }))
-}
+const shown = () =>
+  JSON.parse(screen.getByTestId('value').textContent ?? '{}') as Record<
+    string,
+    unknown
+  >
 
-describe('ConfigureForm connection URL parsing', () => {
-  afterEach(() => {
-    cleanup()
-  })
+describe('AdvancedFields', () => {
+  it('stays collapsed until asked for, then shows engine, jump host and TLS', () => {
+    render(<Harness initial={advancedFrom()} />)
 
-  it('enables TLS when parsing a PostgreSQL URL with sslmode=require', () => {
-    const onSubmit = vi.fn()
+    const toggle = screen.getByRole('button', { name: /Advanced/ })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
 
-    render(<ConfigureForm onSubmit={onSubmit} />)
-
-    fireEvent.change(
-      screen.getByPlaceholderText('postgresql://user@host:5432/database'),
-      {
-        target: {
-          value: connectionUri('?sslmode=require'),
-        },
-      }
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add target' }))
-
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        engine: 'postgresql',
-        host: 'db.example.com',
-        port: 5432,
-        database: 'app_db',
-        user: 'alice',
-        password: 'secret',
-        tls: true,
-      })
-    )
-  })
-
-  it('does not expose an internal password lookup name', () => {
-    const onSubmit = vi.fn()
-
-    render(<ConfigureForm onSubmit={onSubmit} />)
-
-    fireEvent.change(
-      screen.getByPlaceholderText('postgresql://user@host:5432/database'),
-      {
-        target: {
-          value: connectionUri(),
-        },
-      }
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
-    fireEvent.change(screen.getByPlaceholderText('my-database'), {
-      target: { value: 'customer prod' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Add target' }))
-
-    const submitted = onSubmit.mock.calls[0][0]
-    expect(submitted.name).toBe('customer prod')
-    expect(submitted.password).toBe('secret')
-    expect(submitted.password_env).toBeUndefined()
-  })
-})
-
-describe('ConfigureForm required markers', () => {
-  it('marks the minority: nothing on the required block, "(optional)" on the rest', () => {
-    render(<ConfigureForm onSubmit={vi.fn()} onCancel={vi.fn()} />)
-
-    // Seven fields all carried "*", so the marker said nothing. [A-18]
-    for (const label of ['Target name', 'Host', 'Port', 'Database', 'User']) {
-      expect(screen.getByLabelText(label)).toBeTruthy()
-      expect(screen.queryByLabelText(`${label} *`)).toBeNull()
-    }
-  })
-})
-
-describe('ConfigureForm engine defaults', () => {
-  afterEach(cleanup)
-
-  it('switches an untouched port and placeholders to the MySQL defaults', () => {
-    render(<ConfigureForm />)
-
-    selectMysql()
-
-    expect((screen.getByLabelText('Port') as HTMLInputElement).value).toBe(
-      '3306'
-    )
-    expect(screen.getByPlaceholderText('mysql.example.com')).toBeTruthy()
-    expect(screen.getByPlaceholderText('root')).toBeTruthy()
-  })
-
-  it('preserves a manually edited port when the engine changes', () => {
-    render(<ConfigureForm />)
-    fireEvent.change(screen.getByLabelText('Port'), {
-      target: { value: '15432' },
-    })
-
-    selectMysql()
-
-    expect((screen.getByLabelText('Port') as HTMLInputElement).value).toBe(
-      '15432'
-    )
-  })
-
-  it('keeps Cancel enabled during loading and delegates cancellation', () => {
-    const onCancel = vi.fn()
-    render(<ConfigureForm isLoading onCancel={onCancel} />)
-
-    const cancel = screen.getByRole('button', { name: 'Cancel' })
-    expect((cancel as HTMLButtonElement).disabled).toBe(false)
-    fireEvent.click(cancel)
-
-    expect(onCancel).toHaveBeenCalled()
-  })
-
-  it('does not render the unenforced read-only toggle', () => {
-    render(<ConfigureForm />)
-    expect(screen.queryByRole('switch', { name: /read.only/i })).toBeNull()
-  })
-})
-
-describe('ConfigureForm sandbox behavior', () => {
-  afterEach(() => {
-    cleanup()
-  })
-
-  it('does not expose or submit a persistent Readyset deployment option', () => {
-    const onSubmit = vi.fn()
-
-    render(<ConfigureForm onSubmit={onSubmit} />)
-
+    expect(screen.getByRole('combobox', { name: 'Engine' })).toBeTruthy()
+    expect(screen.getByText('SSH jump host')).toBeTruthy()
+    expect(screen.getByRole('switch', { name: 'TLS encryption' })).toBeTruthy()
     expect(
-      screen.queryByRole('switch', { name: 'Deploy Readyset now' })
-    ).toBeNull()
-
-    fireEvent.change(
-      screen.getByPlaceholderText('postgresql://user@host:5432/database'),
-      {
-        target: {
-          value: connectionUri(),
-        },
-      }
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add target' }))
-
-    const submitted = onSubmit.mock.calls[0]?.[0]
-    expect(submitted).toBeDefined()
-    expect(submitted).not.toHaveProperty('deploy')
-  })
-
-  it('does not expose persistent deployment while editing a target', () => {
-    render(
-      <ConfigureForm
-        initialData={{
-          name: 'imdb',
-          engine: 'postgresql',
-          host: 'localhost',
-          port: 5432,
-          database: 'imdb',
-          user: 'postgres',
-        }}
-      />
-    )
-
-    expect(
-      screen.queryByRole('switch', { name: 'Deploy Readyset now' })
+      screen.queryByRole('switch', { name: 'Verify TLS certificate' })
     ).toBeNull()
   })
 
-  it('confirms after an explicit writable connection test without retesting', async () => {
-    const onSubmit = vi.fn()
-    const onTest = vi.fn().mockResolvedValue({
-      target: 'app_db',
-      connected: true,
-      databaseEngine: 'postgresql',
-      privileges: {
-        writable: true,
-        evidence: 'PostgreSQL role is a superuser.',
-      },
-    })
-
-    render(
-      <ConfigureForm
-        onSubmit={onSubmit}
-        onTest={onTest}
-        reviewWritePrivilegesOnSubmit
-        testResult={{
-          target: 'app_db',
-          connected: true,
-          databaseEngine: 'postgresql',
-          privileges: {
-            writable: true,
-            evidence: 'PostgreSQL role is a superuser.',
-          },
-        }}
-      />
-    )
-
-    fireEvent.change(
-      screen.getByPlaceholderText('postgresql://user@host:5432/database'),
-      { target: { value: connectionUri() } }
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
-
-    await waitFor(() => expect(onTest).toHaveBeenCalledOnce())
-    expect(screen.getByText('Read-only access highly recommended')).toBeTruthy()
-    expect(
-      screen.queryByText('Administrator SQL for a read-only user')
-    ).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Proceed anyway' })).toBeNull()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Add target' }))
-
-    expect(onTest).toHaveBeenCalledOnce()
-    expect(onSubmit).not.toHaveBeenCalled()
-    const dialog = screen.getByRole('dialog')
-    expect(
-      within(dialog).getByRole('heading', {
-        name: 'Use this database account?',
-      })
-    ).toBeTruthy()
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add target' }))
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        database: 'app_db',
-        user: 'alice',
-        password: 'secret',
-      })
-    )
-  })
-
-  it('confirms a writable role when adding before testing', async () => {
-    const onSubmit = vi.fn()
-    const onTest = vi.fn().mockResolvedValue({
-      target: 'app_db',
-      connected: true,
-      databaseEngine: 'postgresql',
-      privileges: {
-        writable: true,
-        evidence: 'PostgreSQL role is a superuser.',
-      },
-    })
-
-    render(
-      <ConfigureForm
-        onSubmit={onSubmit}
-        onTest={onTest}
-        reviewWritePrivilegesOnSubmit
-      />
-    )
-
-    fireEvent.change(
-      screen.getByPlaceholderText('postgresql://user@host:5432/database'),
-      { target: { value: connectionUri() } }
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add target' }))
-
-    expect(
-      await screen.findByRole('heading', {
-        name: 'Use this database account?',
-      })
-    ).toBeTruthy()
-    expect(onTest).toHaveBeenCalledOnce()
-    expect(onSubmit).not.toHaveBeenCalled()
-    const dialog = screen.getByRole('dialog')
-    expect(
-      within(dialog).getByRole('button', { name: 'View read-only setup' })
-    ).toBeTruthy()
-
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add target' }))
-
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        database: 'app_db',
-        user: 'alice',
-        password: 'secret',
-      })
-    )
-  })
-})
-
-describe('ConfigureForm SSH jump host', () => {
-  afterEach(cleanup)
-
-  it('discovers SSH keys only after the section is expanded', async () => {
+  it('discovers SSH keys only after Advanced is opened', async () => {
+    // Key discovery reads ~/Downloads, which macOS asks about; it must wait for the user.
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async (url) =>
@@ -313,241 +65,104 @@ describe('ConfigureForm SSH jump host', () => {
           String(url).startsWith('/api/tunnel/ssh-keys') ? { options: [] } : []
         )
       )
-    const sshKeyRequests = () =>
+    const keyRequests = () =>
       fetchMock.mock.calls.filter(([url]) =>
         String(url).startsWith('/api/tunnel/ssh-keys')
       )
     try {
-      render(<ConfigureForm />)
+      render(<Harness initial={advancedFrom()} />)
       await new Promise((resolve) => setTimeout(resolve, 300))
-      expect(sshKeyRequests()).toHaveLength(0)
-
-      fireEvent.click(
-        screen.getByRole('button', { name: /Connect via SSH jump host/ })
-      )
-      await waitFor(() => expect(sshKeyRequests()).toHaveLength(1))
+      expect(keyRequests()).toHaveLength(0)
+      fireEvent.click(screen.getByRole('button', { name: /Advanced/ }))
+      await waitFor(() => expect(keyRequests()).toHaveLength(1))
     } finally {
       fetchMock.mockRestore()
     }
   })
 
-  it('expands an existing target SSH configuration by default', () => {
-    render(
-      <ConfigureForm
-        initialData={{
-          name: 'private-db',
-          engine: 'postgresql',
-          host: 'db.internal',
-          port: 5432,
-          database: 'app',
-          user: 'readonly',
-          ssh: {
-            host: 'old-bastion.example.com',
-            port: 22,
-            user: 'ec2-user',
-          },
-        }}
-      />
-    )
+  it('reveals verification and the CA path under TLS, and clears them when TLS goes off', () => {
+    render(<Harness initial={advancedFrom()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Advanced/ }))
 
-    expect(
-      screen
-        .getByRole('button', { name: /Connect via SSH jump host/ })
-        .getAttribute('aria-expanded')
-    ).toBe('true')
+    fireEvent.click(screen.getByRole('switch', { name: 'TLS encryption' }))
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Verify TLS certificate' })
+    )
+    fireEvent.change(screen.getByLabelText('TLS CA path (optional)'), {
+      target: { value: ' /ca.pem ' },
+    })
+    expect(shown()).toMatchObject({
+      tls: true,
+      tls_verify: true,
+      tls_ca: '/ca.pem',
+    })
+
+    fireEvent.click(screen.getByRole('switch', { name: 'TLS encryption' }))
+    expect(shown()).toMatchObject({ tls: false, tls_verify: false })
   })
 
-  it('submits SSH fields as a nested target configuration', () => {
-    const onSubmit = vi.fn()
-    render(
-      <ConfigureForm
-        initialData={{
-          name: 'private-db',
-          engine: 'postgresql',
-          host: 'db.internal',
-          port: 5432,
-          database: 'app',
-          user: 'readonly',
-        }}
-        onSubmit={onSubmit}
-      />
-    )
+  it('carries a typed jump host as the nested SSH configuration', () => {
+    render(<Harness initial={advancedFrom()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Advanced/ }))
 
-    fireEvent.click(
-      screen.getByRole('button', { name: /Connect via SSH jump host/ })
-    )
     fireEvent.change(screen.getByLabelText('Jump host'), {
       target: { value: 'bastion.example.com' },
     })
     fireEvent.change(screen.getByLabelText('SSH user'), {
       target: { value: 'ec2-user' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Update target' }))
 
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ssh: {
-          host: 'bastion.example.com',
-          port: 22,
-          user: 'ec2-user',
-          key_path: undefined,
-        },
-      })
-    )
-  })
-
-  it('removes SSH configuration when the jump host is cleared', () => {
-    const onSubmit = vi.fn()
-    render(
-      <ConfigureForm
-        initialData={{
-          name: 'private-db',
-          engine: 'postgresql',
-          host: 'db.internal',
-          port: 5432,
-          database: 'app',
-          user: 'readonly',
-          ssh: {
-            host: 'old-bastion.example.com',
-            port: 22,
-            user: 'ec2-user',
-          },
-        }}
-        onSubmit={onSubmit}
-      />
-    )
-
-    fireEvent.click(screen.getByRole('combobox', { name: 'Jump host' }))
-    fireEvent.click(screen.getByRole('option', { name: 'Enter manually' }))
-    fireEvent.change(screen.getByRole('textbox', { name: 'Jump host' }), {
-      target: { value: '' },
+    expect(shown().ssh).toEqual({
+      host: 'bastion.example.com',
+      port: 22,
+      user: 'ec2-user',
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Update target' }))
-
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({ ssh: undefined })
-    )
-  })
-
-  it('tests current edit values including unsaved SSH settings', () => {
-    const onTest = vi.fn()
-    render(
-      <ConfigureForm
-        initialData={{
-          name: 'private-db',
-          engine: 'postgresql',
-          host: 'db.internal',
-          port: 5432,
-          database: 'app',
-          user: 'readonly',
-        }}
-        onTest={onTest}
-      />
-    )
-
-    fireEvent.click(
-      screen.getByRole('button', { name: /Connect via SSH jump host/ })
-    )
-    fireEvent.change(screen.getByLabelText('Jump host'), {
-      target: { value: 'new-bastion.example.com' },
-    })
-    fireEvent.click(screen.getByLabelText('Key path'))
-    fireEvent.click(screen.getByRole('option', { name: 'Enter path manually' }))
-    fireEvent.change(screen.getByLabelText('Key path'), {
-      target: { value: '~/.ssh/new.pem' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
-
-    expect(onTest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'private-db',
-        ssh: expect.objectContaining({
-          host: 'new-bastion.example.com',
-          key_path: '~/.ssh/new.pem',
-        }),
-      })
-    )
-  })
-
-  it('tests current add-form values before saving', () => {
-    const onTest = vi.fn()
-    render(<ConfigureForm onTest={onTest} />)
-
-    fireEvent.change(
-      screen.getByPlaceholderText('postgresql://user@host:5432/database'),
-      {
-        target: {
-          value: connectionUri(),
-        },
-      }
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
-
-    expect(onTest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'app_db',
-        host: 'db.example.com',
-        password: 'secret',
-      })
-    )
   })
 })
 
-describe('ConfigureForm duplicate target names', () => {
-  afterEach(() => {
-    cleanup()
+describe('advancedFrom', () => {
+  it('reads a saved database and leaves the engine to the form when none is saved', () => {
+    expect(advancedFrom().engine).toBeNull()
+    const saved = advancedFrom({
+      engine: 'mysql',
+      tls: true,
+      tls_verify: true,
+      tls_ca: '/ca.pem',
+      ssh: { host: 'bastion', port: 2222 },
+    })
+    expect(saved).toMatchObject({
+      engine: 'mysql',
+      tls: true,
+      tlsVerify: true,
+      tlsCa: '/ca.pem',
+    })
+    expect(advancedConnection(saved).ssh).toEqual({
+      host: 'bastion',
+      port: 2222,
+    })
+  })
+})
+
+describe('nameError', () => {
+  it('accepts an empty or a free name and refuses a taken one in any case', () => {
+    expect(nameError('', ['shop'])).toBeNull()
+    expect(nameError('storefront', ['shop'])).toBeNull()
+    expect(nameError('SHOP', ['shop'])).toBe(
+      'A database named SHOP already exists.'
+    )
   })
 
-  it('refuses a taken name while typing and never submits it', () => {
-    const onSubmit = vi.fn()
-    const onTest = vi.fn()
-    render(
-      <ConfigureForm
-        onSubmit={onSubmit}
-        onTest={onTest}
-        existingNames={['demoshop']}
-      />
-    )
-    fireEvent.change(
-      screen.getByPlaceholderText('postgresql://user@host:5432/database'),
-      { target: { value: connectionUri() } }
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
-    fireEvent.change(screen.getByLabelText('Target name'), {
-      target: { value: 'demoshop ' },
-    })
-
-    expect(screen.getByTestId('cfg-name-error').textContent).toBe(
-      'A target named demoshop already exists.'
-    )
-    const add = screen.getByRole('button', { name: 'Add target' })
-    expect((add as HTMLButtonElement).disabled).toBe(true)
-    expect(
-      (
-        screen.getByRole('button', {
-          name: 'Test connection',
-        }) as HTMLButtonElement
-      ).disabled
-    ).toBe(true)
-    fireEvent.submit(add.closest('form') as HTMLFormElement)
-    expect(onSubmit).not.toHaveBeenCalled()
-
-    fireEvent.change(screen.getByLabelText('Target name'), {
-      target: { value: 'demoshop-2' },
-    })
-    expect(screen.queryByTestId('cfg-name-error')).toBeNull()
+  it('refuses names that can not be saved', () => {
+    for (const name of ['my shop', '-shop', 'shop.', 'x'.repeat(65)])
+      expect(nameError(name, [])).toBe(
+        'Use up to 64 letters, numbers, dots, underscores or hyphens, starting with a letter or number.'
+      )
   })
+})
 
-  it('shows why the last save failed', () => {
-    render(
-      <ConfigureForm
-        onSubmit={vi.fn()}
-        submitError="A target named prod already exists."
-      />
-    )
-    expect(screen.getByTestId('cfg-submit-error').textContent).toBe(
-      'A target named prod already exists.'
-    )
+describe('defaultPasswordEnv', () => {
+  it('derives the hidden password name from the database name', () => {
+    expect(defaultPasswordEnv('ci-shop.2')).toBe('RDST_CI_SHOP_2_PASSWORD')
+    expect(defaultPasswordEnv('  ')).toBe('')
   })
 })

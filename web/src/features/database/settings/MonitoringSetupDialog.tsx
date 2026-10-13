@@ -1,12 +1,13 @@
 // "Monitoring setup" (`/database?panel=setup`, the Inbox "Check setup" link): the live
 // prerequisites checker for a target that is already monitored. It polls while the
-// user fixes things elsewhere, offers the connection editor when the database can't
-// be reached, and finishes on the green check.
+// user fixes things elsewhere and finishes on the green tick.
 import { Button } from '@rs/ui-new/button'
-import { ScrollDialog } from '@/features/monitor-kit/ScrollDialog'
-import { PrerequisitesChecker } from '@/features/prerequisites'
-import { ConnectionRepair } from './ConnectionRepair'
-import { useConnectionRepair } from './EnableMonitoringDialog'
+import { ModalDescription } from '@rs/ui-new/modal'
+import {
+  PrerequisitesChecker,
+  usePrerequisites,
+} from '@/features/prerequisites'
+import { DialogShell } from '../../../components/DialogShell'
 
 export function MonitoringSetupDialog({
   target,
@@ -17,36 +18,30 @@ export function MonitoringSetupDialog({
   open: boolean
   onClose: () => void
 }) {
-  const repair = useConnectionRepair(target, open)
-  const { prerequisites } = repair
+  const prerequisites = usePrerequisites(target, { enabled: open })
   return (
-    <ScrollDialog
+    <DialogShell
       open={open}
       onClose={onClose}
       title="Monitoring setup"
-      description={`RDST checks what ${target} lets it read. Fix a step and it checks again on its own.`}
-      footer={
-        <div className="flex justify-end">
-          <Button label="Done" modifier="ghost" onClick={onClose} />
-        </div>
+      action={
+        <Button
+          variant="primary"
+          modifier="ghost"
+          label="Done"
+          onClick={onClose}
+        />
       }
       testId="monitoring-setup"
     >
-      <div className="space-y-6">
-        <PrerequisitesChecker
-          target={target}
-          state={prerequisites}
-          layout="panel"
-        />
-        {prerequisites.phase === 'unreachable' || repair.editing ? (
-          <ConnectionRepair
-            target={target}
-            editing={repair.editing}
-            onEditingChange={repair.setEditing}
-            onSaved={prerequisites.recheck}
-          />
-        ) : null}
-      </div>
-    </ScrollDialog>
+      <ModalDescription className="mb-4">
+        {`RDST checks what ${target} lets it read. Fix a step and it checks again on its own.`}
+      </ModalDescription>
+      <PrerequisitesChecker
+        target={target}
+        state={prerequisites}
+        layout="panel"
+      />
+    </DialogShell>
   )
 }

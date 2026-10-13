@@ -1,6 +1,5 @@
-export { InboxContextBanner } from './InboxContextBanner'
-export { incidentWindow, parseFrom } from './incidentModel'
 export { InboxPage } from './InboxPage'
+export { incidentWindow, parseFrom } from './incidentModel'
 export {
   type InboxUnread,
   useInboxStream,

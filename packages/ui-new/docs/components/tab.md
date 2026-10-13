@@ -67,6 +67,7 @@ Exports: `TabItem` (link), `TabItemButton` (button), `TabList`,
 | `hint` | `string` | Why the tab is unavailable — the button's `title`, shown on hover. |
 | `id` | `string` | Tab id — wire the panel's `aria-labelledby` to it. |
 | `aria-controls` | `string` | Id of the panel this tab controls. |
+| `count` | `number \| null` | What the view holds, after the label in `text-content-layout-3`; null or absent shows none. |
 
 `TabItem` takes the same base props plus TanStack Router `LinkComponentProps`
 (`to`, `activeProps`, …) and renders a `<Link>` with the underline shown on the

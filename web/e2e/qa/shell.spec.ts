@@ -1,10 +1,10 @@
 /**
- * The app shell: sidebar navigation, the mobile drawer, the target switcher,
- * the legacy-route redirects and the Home layout.
+ * The app shell: the sidebar on the page tone with the canvas beside it, the
+ * database list, the legacy-route redirects and the Home layout.
  *
  * Consolidated from the pack A navigation flow and the W4B shell/home
- * verification. Each test asserts the shipped behaviour; the doc comment names
- * the finding it protects.
+ * verification, then moved onto the Continuous Analysis shell. Each test
+ * asserts the shipped behaviour; the doc comment names the finding it protects.
  */
 import {
   acceptBrowserError,
@@ -15,25 +15,32 @@ import {
   setBackendFixtures,
   test,
 } from '../fixtures'
-import {
-  DESKTOP,
-  NARROW,
-  PHONE,
-  REDIRECTS,
-  readySandbox,
-  settle,
-  shot,
-} from './_helpers'
+import { DESKTOP, NARROW, REDIRECTS, readySandbox, shot } from './_helpers'
 
-/** Every daily nav destination, with the page title it must agree with. */
+/** Every nav destination, with the page title it must agree with. */
 const NAV = [
+  { path: '/', label: 'Home', heading: 'Home' },
   { path: '/inbox', label: 'Inbox', heading: 'Inbox' },
-  { path: '/database', label: 'Database', heading: 'e2e-guard' },
-  { path: '/agent-activity', label: 'Agent audit', heading: 'Agent audit' },
+  { path: '/actions', label: 'Actions', heading: 'Actions' },
   { path: '/ask', label: 'Ask', heading: 'Ask' },
-  { path: '/demo', label: 'Readyset Caching' },
+  { path: '/agent-activity', label: 'Activity', heading: 'Activity' },
   { path: '/configure', label: 'Settings', heading: 'Settings' },
+  { path: '/help', label: 'Help', heading: 'Help' },
 ] as const
+
+/** A nav link's name: its label, with the Inbox badge or a quiet count after it. */
+function navLink(page: import('@playwright/test').Page, label: string) {
+  return page
+    .locator('#app-sidebar')
+    .getByRole('link', { name: new RegExp(`^${label}( ?\\d+)?$`) })
+}
+
+/** The test database's item under the Databases caption, named first. */
+function databaseLink(page: import('@playwright/test').Page) {
+  return page
+    .getByRole('navigation', { name: 'Databases' })
+    .getByRole('link', { name: /^e2e-guard/ })
+}
 
 /** Fixtures every workspace on the nav reads once on arrival. */
 function shellFixtures() {
@@ -81,41 +88,6 @@ test('the sidebar focus ring is on screen the instant focus arrives', async ({
   expect(painted.length).toBeGreaterThan(0)
 })
 
-/** A-26 - the mobile drawer carries a close control and keeps its footer inside. */
-test('the mobile drawer carries a close control and keeps its footer inside', async ({
-  page,
-}) => {
-  await page.setViewportSize(PHONE)
-  setBackendFixtures()
-  await configureTestTarget(page, { hasPassword: true })
-  // One database: Home redirects here, and a navigation closes the drawer.
-  await page.goto('/database')
-
-  const hamburger = page.getByRole('button', { name: 'Open navigation' })
-  await hamburger.click()
-  const drawer = page.locator('#app-sidebar')
-  const close = drawer.getByRole('button', { name: 'Close navigation' })
-  await expect(close).toBeVisible()
-
-  await drawer.getByTestId('setup-steps-toggle').click()
-  await settle(page, 600)
-  const geometry = await page.evaluate(() => {
-    const aside = document.querySelector('#app-sidebar') as HTMLElement
-    const utilities = document.querySelector(
-      '[data-testid="sidebar-footer-utilities"]'
-    ) as HTMLElement
-    return {
-      asideBottom: aside.getBoundingClientRect().bottom,
-      utilitiesBottom: utilities.getBoundingClientRect().bottom,
-    }
-  })
-  expect(geometry.utilitiesBottom).toBeLessThanOrEqual(geometry.asideBottom + 1)
-  await shot(page, 'shell-mobile-drawer')
-
-  await close.click()
-  await expect(hamburger).toHaveAttribute('aria-expanded', 'false')
-})
-
 /**
  * A-23 / MG-07 - the page a nav item leads to is named with the words the user
  * clicked.
@@ -138,26 +110,98 @@ test('every nav destination resolves, marks itself current, and keeps its name',
 
   for (const item of NAV) {
     await page.goto(item.path)
-    const link = page
-      .locator('#app-sidebar')
-      .getByRole('link', { name: item.label, exact: true })
-    await expect(link).toHaveAttribute('aria-current', 'page')
-    if ('heading' in item) {
-      await expect(
-        page.getByRole('heading', { level: 1, name: item.heading })
-      ).toBeVisible()
-    }
+    await expect(navLink(page, item.label)).toHaveAttribute(
+      'aria-current',
+      'page'
+    )
+    await expect(
+      page.getByRole('heading', { level: 1, name: item.heading })
+    ).toBeVisible()
   }
+
+  // A database's page is current under the Databases caption, named by the database.
+  await databaseLink(page).click()
+  await expect(page).toHaveURL(/\/database/)
+  await expect(databaseLink(page)).toHaveAttribute('aria-current', 'page')
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'e2e-guard' })
+  ).toBeVisible()
+
+  // The Readyset Platform card leads to its page.
+  await page
+    .locator('#app-sidebar')
+    .getByRole('link', { name: /^Readyset Platform/ })
+    .click()
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Readyset Platform' })
+  ).toBeVisible()
 })
 
 /**
- * F-54 - the retired URLs keep working, and the two that land somewhere that
- * looks unrelated say what happened: /agents carries its hand-off to Ask and
- * /top carries the ordering the bookmark asked for.
+ * The shell is the sidebar flush on the page tone and one rounded canvas
+ * beside it: no header bar above the page, the primary group of four, one item
+ * per database, the Platform card, and the secondary group with the account
+ * line at the bottom.
  */
-test('legacy routes land on their current homes and explain the move', async ({
+test('the shell is a sidebar and a canvas, with the two nav groups', async ({
   page,
 }) => {
+  await page.setViewportSize(DESKTOP)
+  setBackendFixtures()
+  await configureTestTarget(page, { hasPassword: true })
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
+
+  const primary = page.getByRole('navigation', { name: 'Primary' })
+  await expect(primary.getByRole('link')).toHaveText([
+    'Home',
+    /^Inbox\d*$/,
+    /^Actions\d*$/,
+    'Ask',
+  ])
+  await expect(databaseLink(page)).toBeVisible()
+  await expect(
+    page
+      .locator('#app-sidebar')
+      .getByRole('link', { name: /^Readyset Platform/ })
+  ).toBeVisible()
+  const secondary = page.getByRole('navigation', { name: 'Secondary' })
+  await expect(secondary.getByRole('link', { name: /^Activity/ })).toBeVisible()
+  await expect(secondary.getByRole('link', { name: 'Settings' })).toBeVisible()
+  await expect(secondary.getByRole('link', { name: 'Help' })).toBeVisible()
+  // Signed out, the account line is the way to the sign-in page.
+  await expect(page.getByTestId('sidebar-sign-in')).toHaveText('Sign in')
+
+  // The page bar sits inside the canvas; nothing stands above it.
+  await expect(page.locator('#main-content [data-page-bar]')).toBeVisible()
+  await expect(page.locator('body > div > header')).toHaveCount(0)
+  const geometry = await page.evaluate(() => {
+    const sidebar = document
+      .querySelector('#app-sidebar')!
+      .getBoundingClientRect()
+    const main = document
+      .querySelector('#main-content')!
+      .getBoundingClientRect()
+    return {
+      sidebarLeft: sidebar.left,
+      gap: main.left - sidebar.right,
+      inset: main.top,
+      radius: getComputedStyle(document.querySelector('#main-content')!)
+        .borderTopLeftRadius,
+    }
+  })
+  expect(geometry.sidebarLeft).toBe(0)
+  expect(geometry.gap).toBeLessThanOrEqual(1)
+  expect(geometry.inset).toBe(12)
+  expect(geometry.radius).not.toBe('0px')
+  await shot(page, 'shell-home')
+})
+
+/**
+ * F-54 - the retired URLs keep working, and /top carries the ordering the
+ * bookmark asked for.
+ */
+test('legacy routes land on their current homes', async ({ page }) => {
   await page.setViewportSize(DESKTOP)
   shellFixtures()
   await configureTestTarget(page, { hasPassword: true })
@@ -172,13 +216,12 @@ test('legacy routes land on their current homes and explain the move', async ({
 
   await page.goto('/agents')
   await expect(page).toHaveURL(/from=agents/)
-  await expect(page.getByText('Agents was retired')).toBeVisible()
-
-  await page.goto('/top')
-  await expect(page).toHaveURL(/sort=slowest-average/)
 })
 
-/** A-20 - an install with no database is named in the user's words. */
+/**
+ * A-20 - an install with no database is named in the user's words: the
+ * Databases caption stands over an empty list, with the way to add one beside it.
+ */
 test('an install with no database is named in plain words', async ({
   page,
 }) => {
@@ -187,34 +230,20 @@ test('an install with no database is named in plain words', async ({
   await clearTargets(page.request)
   await page.goto('/')
 
-  // Home opens Connect, the next step, instead of naming an empty list.
-  await expect(page).toHaveURL(/\/onboarding/)
+  const sidebar = page.locator('#app-sidebar')
+  await expect(sidebar.getByText('Databases', { exact: true })).toBeVisible()
   await expect(
-    page.getByRole('heading', { name: 'Start with Readyset', exact: true })
+    page.getByRole('navigation', { name: 'Databases' }).getByRole('link')
+  ).toHaveCount(0)
+  await expect(
+    sidebar.getByRole('button', { name: 'Add database' })
   ).toBeVisible()
-  await expect(page.getByText('No Targets', { exact: true })).toHaveCount(0)
+  await expect(sidebar.getByText(/targets/i)).toHaveCount(0)
 })
 
 /**
- * A-40 - the demo stays one link away from every page, in the daily nav as Readyset Caching.
- */
-test('the demo is Readyset Caching in the sidebar nav', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 })
-  setBackendFixtures()
-  await configureTestTarget(page, { hasPassword: true })
-  await page.goto('/database')
-
-  const nav = page.locator('#app-sidebar nav')
-  await expect(
-    nav.getByRole('link', { name: /^Readyset Caching/ })
-  ).toHaveCount(1)
-  await nav.getByRole('link', { name: /^Readyset Caching/ }).click()
-  await expect(page).toHaveURL(/\/demo/)
-})
-
-/**
- * D-17 - at the stated 1024x720 minimum the sidebar narrows so the content
- * column stays wide enough to read.
+ * D-17 - at the stated 1024x720 minimum the content column stays wide enough
+ * to read and nothing scrolls sideways.
  */
 test('the content column stays readable at the 1024 floor', async ({
   page,
@@ -241,21 +270,21 @@ test('the content column stays readable at the 1024 floor', async ({
 })
 
 /**
- * A-25 - the target switcher carries the way on to managing targets, so a
- * single-target install has a next step rather than a popover with one row.
+ * A-25 - the sidebar carries the way on to adding a database, so a
+ * single-database install has a next step beside its one database.
  */
-test('A-25 - the target switcher offers a way to manage targets', async ({
-  page,
-}) => {
+test('A-25 - the sidebar offers a way to add a database', async ({ page }) => {
   await page.setViewportSize(DESKTOP)
   setBackendFixtures()
   await configureTestTarget(page, { hasPassword: true })
   await page.goto('/')
 
-  // The switcher lives in the Database page header.
-  await page.getByRole('button', { name: /Switch target/ }).click()
+  await page
+    .locator('#app-sidebar')
+    .getByRole('button', { name: 'Add database' })
+    .click()
   await expect(
-    page.getByRole('menuitem', { name: /Manage targets|Add target/ })
+    page.getByRole('dialog', { name: 'Add a database' })
   ).toBeVisible()
 })
 

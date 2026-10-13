@@ -2,7 +2,6 @@ import {
   acceptBrowserError,
   configureTestTarget,
   expect,
-  mockPrerequisites,
   setBackendFixtures,
   test,
 } from './fixtures'
@@ -61,19 +60,12 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
   await configureTestTarget(page, { hasPassword: true })
 
   await page.goto('/configure')
-  // The settings drawer keeps its disabled submit button mounted while closed.
-  // Select the page-level trigger explicitly so Playwright strict mode does not
-  // confuse it with the hidden form action.
-  await page
-    .getByRole('button', { name: 'Add target', exact: true })
-    .first()
-    .click()
-  await page.getByRole('tab', { name: 'Manual setup' }).click()
-  await page.locator('[name="name"]').fill('needs-key-db')
-  await page.locator('[name="host"]').fill('database.external.test')
-  await page.locator('[name="database"]').fill('application')
-  await page.locator('[name="user"]').fill('rdst_e2e')
-  await page.locator('[name="password"]').fill('test-password')
+  await page.getByRole('button', { name: 'Add a database' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Add a database' })
+  await dialog.locator('[name="host"]').fill('database.external.test')
+  await dialog.locator('[name="database"]').fill('needs-key-db')
+  await dialog.locator('[name="user"]').fill('rdst_e2e')
+  await dialog.locator('[name="password"]').fill('test-password')
 
   await page.route('**/api/configure/targets/needs-key-db/test', (route) =>
     route.fulfill({
@@ -93,33 +85,24 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
       ].join('\n'),
     })
   )
-  await mockPrerequisites(page, 'needs-key-db')
-  await page.getByRole('button', { name: 'Add target' }).last().click()
-
-  const jobsTrigger = page.getByTestId('jobs-trigger')
-  const missingAiAccess = 'Sign in to Readyset or add your own Anthropic key.'
-  await expect(jobsTrigger).toContainText('Setting up needs-key-db')
-  await expect(jobsTrigger).toContainText(missingAiAccess)
-  await expect(page.getByTestId('job-warning-icon')).toBeVisible()
-  // The next step is the turn-on dialog on the new database's page; leave it for now.
-  await page
-    .getByRole('dialog', { name: 'Turn on monitoring for needs-key-db' })
-    .getByRole('button', { name: 'Not now' })
-    .click()
-  await jobsTrigger.click()
-
-  const parkedJob = page.locator(
-    '[data-testid^="background-run-bootstrap_needs-key-db_"]'
+  const started = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === '/api/bootstrap'
   )
-  await expect(parkedJob).toHaveCount(1)
-  await expect(page.getByText('1 job needs attention')).toBeVisible()
-  await expect(parkedJob).toContainText(missingAiAccess)
-  await parkedJob.click()
+  await dialog.getByRole('button', { name: 'Add and monitor' }).click()
+  const { run_id: runId } = (await (await started).json()) as {
+    run_id: string
+  }
+  const runStatus = async () => {
+    const response = await page.request.get(`/api/bootstrap/runs/${runId}`)
+    return ((await response.json()) as { status: string }).status
+  }
 
-  await expect(
-    page.getByRole('heading', { name: 'Sign in to Readyset' })
-  ).toBeVisible()
-  await page.getByRole('button', { name: 'Cancel' }).click()
+  // Setup parks on the missing key while the new database's page opens.
+  await expect(page).toHaveURL(/\/database/)
+  await expect.poll(runStatus).toBe('needs_key')
+
   await page.goto('/configure?section=ai')
 
   await expect(
@@ -132,5 +115,5 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
 
   // The fixture has no polling path: reaching completion proves that
   // /api/env/set asked RunRegistry to wake the parked needs_key handle.
-  await expect(jobsTrigger).toContainText('needs-key-db is ready')
+  await expect.poll(runStatus).toBe('done')
 })

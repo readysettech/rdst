@@ -1,18 +1,17 @@
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { createTestQueryClient, renderWithClient } from '@/test-utils';
-
-import { EnvSecretsDialog } from './EnvSecretsDialog';
-import { setEnvSecret } from '../lib/api';
+import { createTestQueryClient, renderWithClient } from '@/test-utils'
+import { setEnvSecret } from '../lib/api'
+import { EnvSecretsDialog } from './EnvSecretsDialog'
 
 vi.mock('../lib/api', async () => {
-  const actual = await vi.importActual('../lib/api');
+  const actual = await vi.importActual('../lib/api')
   return {
     ...actual,
     setEnvSecret: vi.fn(),
-  };
-});
+  }
+})
 
 /**
  * The dialog under an exhausted trial: the one requirement shape the rerender
@@ -35,28 +34,42 @@ function exhaustedDialog(onClose: () => void, isOpen = true) {
         },
       ]}
     />
-  );
+  )
 }
 
 describe('EnvSecretsDialog', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-  });
+    vi.clearAllMocks()
+  })
 
   afterEach(() => {
-    cleanup();
-  });
+    cleanup()
+  })
+
+  it('is the quiet dialog: one title, the masking note in the footer, a plain save', () => {
+    renderWithClient(exhaustedDialog(vi.fn()))
+
+    expect(
+      screen.getByRole('heading', { name: 'Update Anthropic API key' })
+    ).toBeTruthy()
+    expect(
+      screen.getByText('Secrets are masked and never shown after submission.')
+    ).toBeTruthy()
+    const save = screen.getByRole('button', { name: 'Save secrets' })
+    expect(save.querySelector('svg')).toBeNull()
+    expect(screen.getByLabelText('Anthropic API key')).toBeTruthy()
+  })
 
   it('renders missing requirements and submits masked values', async () => {
-    const onSuccess = vi.fn();
-    const onClose = vi.fn();
+    const onSuccess = vi.fn()
+    const onClose = vi.fn()
 
     vi.mocked(setEnvSecret).mockResolvedValue({
       success: true,
       name: 'PROD_DB_PASSWORD',
       persisted: true,
       session_only: false,
-    });
+    })
 
     renderWithClient(
       <EnvSecretsDialog
@@ -74,26 +87,26 @@ describe('EnvSecretsDialog', () => {
           },
         ]}
       />
-    );
+    )
 
-    const input = screen.getByPlaceholderText('Enter Password (prod)');
-    expect((input as HTMLInputElement).type).toBe('text');
-    expect((input as HTMLInputElement).autocomplete).toBe('off');
-    expect(input.getAttribute('data-1p-ignore')).toBe('true');
-    expect(input.getAttribute('data-lpignore')).toBe('true');
-    fireEvent.change(input, { target: { value: 'my-secret' } });
-    fireEvent.click(screen.getByRole('button', { name: /Save secrets/i }));
+    const input = screen.getByPlaceholderText('Enter Password (prod)')
+    expect((input as HTMLInputElement).type).toBe('text')
+    expect((input as HTMLInputElement).autocomplete).toBe('off')
+    expect(input.getAttribute('data-1p-ignore')).toBe('true')
+    expect(input.getAttribute('data-lpignore')).toBe('true')
+    fireEvent.change(input, { target: { value: 'my-secret' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save secrets/i }))
 
     await waitFor(() => {
       expect(setEnvSecret).toHaveBeenCalledWith({
         name: 'PROD_DB_PASSWORD',
         value: 'my-secret',
         persist: true,
-      });
-    });
-    expect(onSuccess).toHaveBeenCalledTimes(1);
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
+      })
+    })
+    expect(onSuccess).toHaveBeenCalledTimes(1)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
 
   it('explains session-only target password storage when keyring is unavailable', () => {
     renderWithClient(
@@ -111,64 +124,80 @@ describe('EnvSecretsDialog', () => {
           },
         ]}
       />
-    );
+    )
 
     expect(
       screen.getByText(
         /No OS keychain found\. Re-enter the password after RDST restarts\./i
       )
-    ).toBeTruthy();
-    expect(screen.getByLabelText('Password (prod)')).toBeTruthy();
-    expect(screen.queryByText(/config\.toml/i)).toBeNull();
-    expect(screen.queryByText(/Save between restarts/i)).toBeNull();
-  });
+    ).toBeTruthy()
+    expect(screen.getByLabelText('Password (prod)')).toBeTruthy()
+    expect(screen.queryByText(/config\.toml/i)).toBeNull()
+    expect(screen.queryByText(/Save between restarts/i)).toBeNull()
+  })
 
   it('preserves typed values and validation state when parent rerenders while open', async () => {
-    const onClose = vi.fn();
-    const queryClient = createTestQueryClient();
+    const onClose = vi.fn()
+    const queryClient = createTestQueryClient()
 
-    const { rerender } = renderWithClient(exhaustedDialog(onClose), queryClient);
+    const { rerender } = renderWithClient(exhaustedDialog(onClose), queryClient)
 
-    const input = screen.getByPlaceholderText('Enter Anthropic API key');
-    fireEvent.change(input, { target: { value: 'sk-ant-typed' } });
-    fireEvent.click(screen.getByRole('button', { name: /Save secrets/i }));
+    const input = screen.getByPlaceholderText('Enter Anthropic API key')
+    fireEvent.change(input, { target: { value: 'sk-ant-typed' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save secrets/i }))
 
-    rerender(exhaustedDialog(onClose));
+    rerender(exhaustedDialog(onClose))
 
-    expect((screen.getByPlaceholderText('Enter Anthropic API key') as HTMLInputElement).value).toBe(
-      'sk-ant-typed'
-    );
-  });
+    expect(
+      (
+        screen.getByPlaceholderText(
+          'Enter Anthropic API key'
+        ) as HTMLInputElement
+      ).value
+    ).toBe('sk-ant-typed')
+  })
 
   it('preserves validation state when parent rerenders while open', () => {
-    const onClose = vi.fn();
-    const queryClient = createTestQueryClient();
+    const onClose = vi.fn()
+    const queryClient = createTestQueryClient()
 
-    const { rerender } = renderWithClient(exhaustedDialog(onClose), queryClient);
+    const { rerender } = renderWithClient(exhaustedDialog(onClose), queryClient)
 
-    fireEvent.click(screen.getByRole('button', { name: /Save secrets/i }));
-    expect(screen.getByText(/Enter at least one secret value before saving\./i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Save secrets/i }))
+    expect(
+      screen.getByText(/Enter at least one secret value before saving\./i)
+    ).toBeTruthy()
 
-    rerender(exhaustedDialog(onClose));
+    rerender(exhaustedDialog(onClose))
 
-    expect(screen.getByText(/Enter at least one secret value before saving\./i)).toBeTruthy();
-  });
+    expect(
+      screen.getByText(/Enter at least one secret value before saving\./i)
+    ).toBeTruthy()
+  })
 
   it('resets form state after close and reopen', () => {
-    const onClose = vi.fn();
-    const queryClient = createTestQueryClient();
+    const onClose = vi.fn()
+    const queryClient = createTestQueryClient()
 
-    const { rerender } = renderWithClient(exhaustedDialog(onClose), queryClient);
+    const { rerender } = renderWithClient(exhaustedDialog(onClose), queryClient)
 
-    const input = screen.getByPlaceholderText('Enter Anthropic API key');
-    fireEvent.change(input, { target: { value: 'sk-ant-typed' } });
-    fireEvent.click(screen.getByRole('button', { name: /Save secrets/i }));
+    const input = screen.getByPlaceholderText('Enter Anthropic API key')
+    fireEvent.change(input, { target: { value: 'sk-ant-typed' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save secrets/i }))
 
-    rerender(exhaustedDialog(onClose, false));
+    rerender(exhaustedDialog(onClose, false))
 
-    rerender(exhaustedDialog(onClose));
+    rerender(exhaustedDialog(onClose))
 
-    expect((screen.getByPlaceholderText('Enter Anthropic API key') as HTMLInputElement).value).toBe('');
-    expect(screen.queryByText(/Enter at least one secret value before saving\./i)).toBeNull();
-  });
-});
+    expect(
+      (
+        screen.getByPlaceholderText(
+          'Enter Anthropic API key'
+        ) as HTMLInputElement
+      ).value
+    ).toBe('')
+    expect(
+      screen.queryByText(/Enter at least one secret value before saving\./i)
+    ).toBeNull()
+  })
+})

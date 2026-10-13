@@ -1,9 +1,8 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
-// Analysis is a Query Library action rather than a separate collection. Keep
-// Keep old bookmarks working by landing in the unified query library.
+// Analysis is an action on the Database page's query list; old bookmarks land there.
 export const Route = createFileRoute('/analyze')({
   beforeLoad: () => {
-    throw redirect({ to: '/queries' })
+    throw redirect({ to: '/database' })
   },
 })

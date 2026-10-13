@@ -5,7 +5,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
-import { throwIfNotOk } from './httpError';
+import { throwIfApiError } from './httpError';
 import type {
   ConfigureTarget,
   ConfigureTargetDetail,
@@ -95,7 +95,7 @@ export function useConfigure(): UseConfigureReturn {
     [],
   );
 
-  // Invalidate the status query so TargetDropdown updates
+  // Invalidate the status query so the database lists update
   const invalidateStatus = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['status'] });
   }, [queryClient]);
@@ -110,7 +110,7 @@ export function useConfigure(): UseConfigureReturn {
 
     try {
       const result = await api.GET('/api/configure/targets', { signal: controller.signal });
-      await throwIfNotOk(result.response, 'Failed to list targets');
+      throwIfApiError(result.response, result.error, "Couldn't load the databases");
       const data = result.data;
       if (!data) throw new Error('Missing response body');
       // Union narrow: ErrorResponse has `message`; TargetListResponse has `targets`.
@@ -124,7 +124,7 @@ export function useConfigure(): UseConfigureReturn {
       if (err instanceof Error && err.name === 'AbortError') {
         return;
       }
-      const errorMessage = err instanceof Error ? err.message : 'Failed to list targets';
+      const errorMessage = err instanceof Error ? err.message : "Couldn't load the databases";
       setError(errorMessage);
       setState('error');
     } finally {
@@ -145,7 +145,7 @@ export function useConfigure(): UseConfigureReturn {
         params: { path: { name } },
         signal: controller.signal,
       });
-      await throwIfNotOk(result.response, 'Failed to load target');
+      throwIfApiError(result.response, result.error, "Couldn't load the database");
       const data = result.data;
       if (!data) throw new Error('Missing response body');
       if (!('target_name' in data)) {
@@ -183,7 +183,7 @@ export function useConfigure(): UseConfigureReturn {
       if (err instanceof Error && err.name === 'AbortError') {
         return null;
       }
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load target';
+      const errorMessage = err instanceof Error ? err.message : "Couldn't load the database";
       setError(errorMessage);
       setState('error');
       return null;
@@ -221,10 +221,10 @@ export function useConfigure(): UseConfigureReturn {
         },
         signal: controller.signal,
       });
-      await throwIfNotOk(result.response, 'Failed to add target');
+      throwIfApiError(result.response, result.error, "Couldn't add the database");
       if (!result.data) throw new Error('Missing response body');
       if (!result.data.success) {
-        throw new Error(result.data.message || 'Failed to add target');
+        throw new Error(result.data.message || "Couldn't add the database");
       }
 
       setState('success');
@@ -235,7 +235,7 @@ export function useConfigure(): UseConfigureReturn {
       if (err instanceof Error && err.name === 'AbortError') {
         throw err;
       }
-      const errorMessage = err instanceof Error ? err.message : 'Failed to add target';
+      const errorMessage = err instanceof Error ? err.message : "Couldn't add the database";
       setError(errorMessage);
       setState('error');
       throw err;
@@ -257,6 +257,7 @@ export function useConfigure(): UseConfigureReturn {
       const result = await api.PUT('/api/configure/targets/{name}', {
         params: { path: { name } },
         body: {
+          name: data.name !== name ? data.name : undefined,
           target: {
             engine: data.engine,
             host: data.host,
@@ -273,10 +274,10 @@ export function useConfigure(): UseConfigureReturn {
         },
         signal: controller.signal,
       });
-      await throwIfNotOk(result.response, 'Failed to update target');
+      throwIfApiError(result.response, result.error, "Couldn't save the database");
       if (!result.data) throw new Error('Missing response body');
       if (!result.data.success) {
-        throw new Error(result.data.message || 'Failed to update target');
+        throw new Error(result.data.message || "Couldn't save the database");
       }
 
       setState('success');
@@ -286,7 +287,7 @@ export function useConfigure(): UseConfigureReturn {
       if (err instanceof Error && err.name === 'AbortError') {
         return;
       }
-      const errorMessage = err instanceof Error ? err.message : 'Failed to update target';
+      const errorMessage = err instanceof Error ? err.message : "Couldn't save the database";
       setError(errorMessage);
       setState('error');
       throw err;
@@ -309,10 +310,10 @@ export function useConfigure(): UseConfigureReturn {
         params: { path: { name } },
         signal: controller.signal,
       });
-      await throwIfNotOk(result.response, 'Failed to remove target');
+      throwIfApiError(result.response, result.error, "Couldn't remove the database");
       if (!result.data) throw new Error('Missing response body');
       if (!result.data.success) {
-        throw new Error(result.data.message || 'Failed to remove target');
+        throw new Error(result.data.message || "Couldn't remove the database");
       }
 
       setState('success');
@@ -323,7 +324,7 @@ export function useConfigure(): UseConfigureReturn {
       if (err instanceof Error && err.name === 'AbortError') {
         return;
       }
-      const errorMessage = err instanceof Error ? err.message : 'Failed to remove target';
+      const errorMessage = err instanceof Error ? err.message : "Couldn't remove the database";
       setError(errorMessage);
       setState('error');
     } finally {
@@ -345,10 +346,10 @@ export function useConfigure(): UseConfigureReturn {
         body: { name },
         signal: controller.signal,
       });
-      await throwIfNotOk(result.response, 'Failed to set default target');
+      throwIfApiError(result.response, result.error, "Couldn't set the default database");
       if (!result.data) throw new Error('Missing response body');
       if (!result.data.success) {
-        throw new Error(result.data.message || 'Failed to set default target');
+        throw new Error(result.data.message || "Couldn't set the default database");
       }
 
       setState('success');
@@ -359,7 +360,7 @@ export function useConfigure(): UseConfigureReturn {
       if (err instanceof Error && err.name === 'AbortError') {
         return;
       }
-      const errorMessage = err instanceof Error ? err.message : 'Failed to set default target';
+      const errorMessage = err instanceof Error ? err.message : "Couldn't set the default database";
       setError(errorMessage);
       setState('error');
     } finally {

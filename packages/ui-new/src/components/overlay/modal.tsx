@@ -8,10 +8,12 @@ import {
   type ComponentPropsWithoutRef,
   type ComponentRef,
   cloneElement,
+  createContext,
   forwardRef,
   isValidElement,
   type ReactElement,
   type ReactNode,
+  useContext,
 } from 'react'
 import type { WithChildren } from '../../helpers/types'
 import { useDisclosure } from '../../hooks/use-disclosure'
@@ -98,13 +100,39 @@ const modalStyles = tv({
         content: ['w-full', 'max-w-full', 'max-h-[100dvh]', 'h-full'],
       },
     },
+    // `quiet`: the 480px raised dialog. No padding of its own (the caller lays out the
+    // title row, body and footer at 24px), a 17px title and the third-tone close mark.
+    tone: {
+      default: {},
+      quiet: {
+        content: [
+          'max-w-120',
+          'p-0',
+          'bg-surface-primary-soft',
+          'border-border-layout-2',
+          'shadow-elevation-3',
+        ],
+        title: ['h-auto', 'text-headline-5'],
+        description: ['text-content-layout-2'],
+        close: [
+          'top-4.5',
+          'right-4',
+          'focus-visible:ring-offset-surface-primary-soft',
+        ],
+      },
+    },
   },
   defaultVariants: {
     size: 'base',
+    tone: 'default',
   },
 })
 
 type ModalVariants = VariantProps<typeof modalStyles>
+type ModalTone = NonNullable<ModalVariants['tone']>
+
+// ModalContent's tone, so its title and description follow without a prop of their own.
+const ModalToneContext = createContext<ModalTone>('default')
 
 type ModalChildProps = {
   open?: boolean
@@ -204,6 +232,7 @@ export const ModalContent = forwardRef<
       sharedLayout,
       hideClose,
       size,
+      tone = 'default',
       className,
       overlayClassName,
       innerClassName,
@@ -215,7 +244,7 @@ export const ModalContent = forwardRef<
     ref
   ) => {
     const transition = getTransition()
-    const styles = modalStyles({ size })
+    const styles = modalStyles({ size, tone })
     // Guarantee an accessible name: fall back to an sr-only title only when the
     // author supplied neither a `title` prop nor a title element in the tree.
     const needsFallbackTitle = !title && !treeHasTitle(children)
@@ -279,7 +308,9 @@ export const ModalContent = forwardRef<
                 {description}
               </Dialog.Description>
             ) : null}
-            {children}
+            <ModalToneContext.Provider value={tone}>
+              {children}
+            </ModalToneContext.Provider>
             {!hideClose && (
               <Dialog.Close className={styles.close({ class: closeClassName })}>
                 <Icon name="close" label="Close modal" />
@@ -313,22 +344,28 @@ export const ModalBackdropWithPortal = () => {
 export const ModalTitle = ({
   className,
   ...props
-}: ComponentPropsWithoutRef<typeof Dialog.Title>) => (
-  <Dialog.Title
-    className={modalStyles().title({ class: className })}
-    {...props}
-  />
-)
+}: ComponentPropsWithoutRef<typeof Dialog.Title>) => {
+  const tone = useContext(ModalToneContext)
+  return (
+    <Dialog.Title
+      className={modalStyles({ tone }).title({ class: className })}
+      {...props}
+    />
+  )
+}
 
 export const ModalDescription = ({
   className,
   ...props
-}: ComponentPropsWithoutRef<typeof Dialog.Description>) => (
-  <Dialog.Description
-    className={modalStyles().description({ class: className })}
-    {...props}
-  />
-)
+}: ComponentPropsWithoutRef<typeof Dialog.Description>) => {
+  const tone = useContext(ModalToneContext)
+  return (
+    <Dialog.Description
+      className={modalStyles({ tone }).description({ class: className })}
+      {...props}
+    />
+  )
+}
 
 type ModalContentWithTextProps = {
   title: string

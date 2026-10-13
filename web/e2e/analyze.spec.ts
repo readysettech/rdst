@@ -122,7 +122,7 @@ async function prepareResultsPage(
   await page.goto(`/results?${search.toString()}`)
   if (consent) {
     await expect(
-      page.getByRole('heading', { name: 'Query analysis' })
+      page.getByRole('heading', { level: 1, name: /Full analysis/ })
     ).toBeVisible()
   } else {
     await expect(
@@ -167,11 +167,11 @@ test('gates the first EXPLAIN ANALYZE run behind explicit consent', async ({
       request.method() === 'POST' &&
       new URL(request.url()).pathname === '/api/analyze'
   )
-  await consentDialog.getByRole('button', { name: 'Run analyze' }).click()
+  await consentDialog.getByRole('button', { name: 'Analyze' }).click()
   await analysisRequest
 
   await expect(
-    page.getByText('Performance score', { exact: true })
+    page.getByRole('img', { name: 'Plan score 32 out of 100' })
   ).toBeVisible()
   expect(analysisCalls).toBe(1)
   await expect
@@ -232,36 +232,30 @@ test('submits SQL and renders streamed analysis results', async ({ page }) => {
     target: 'e2e-guard',
   })
   await expect(page).toHaveURL(/\/results(?:\?|$)/)
-  await expect(
-    page.getByRole('status', { name: 'Analysis in progress' })
-  ).toBeVisible()
+  // While the run streams, the gauge gives way to a ring and the steps.
+  await expect(page.getByRole('img', { name: 'Analyzing' })).toBeVisible()
+  await expect(page.getByRole('list', { name: 'Analysis steps' })).toBeVisible()
 
   await expect(
-    page.getByText('Performance score', { exact: true })
+    page.getByRole('img', { name: 'Plan score 32 out of 100' })
   ).toBeVisible()
   await expect(
-    page.getByText('Sequential scan reads too many rows')
+    page
+      .getByRole('region', { name: 'Plan', exact: true })
+      .getByText('Sequential scan reads too many rows')
   ).toBeVisible()
   await expect(
-    page.getByText('Recommended next step', { exact: true })
-  ).toBeVisible()
-  // The optimization-opportunities section collapsed into a quiet
-  // "More recommendations (N)" disclosure on the results page; open it and
-  // check the recommendation text it reveals.
-  await page.getByRole('button', { name: /More recommendations/ }).click()
+    page.getByRole('region', { name: 'Fix', exact: true }).getByRole('code')
+  ).toHaveText('CREATE INDEX idx_orders_customer_id ON orders (customer_id)')
   await expect(
-    page.getByText('Return only columns needed by the caller.')
+    page
+      .getByRole('region', { name: 'Also worth doing', exact: true })
+      .getByText('Return only columns needed by the caller.')
   ).toBeVisible()
+  // A static screen finds no blockers but is not a Readyset verification.
   await expect(
-    page.getByText('Readyset compatibility', { exact: true })
-  ).toBeVisible()
-  await expect(
-    page.getByText('No obvious Readyset blockers', { exact: true })
-  ).toBeVisible()
-  await expect(
-    page.getByText('Static check', { exact: true }).first()
-  ).toBeVisible()
-  await expect(page.getByText('Readyset verification required')).toBeVisible()
+    page.getByRole('region', { name: 'Readyset', exact: true })
+  ).toContainText('No blockers. Not verified yet.')
 
   await expect
     .poll(async () => {
@@ -320,7 +314,7 @@ test('shows a streamed failure and can retry the analysis', async ({
   await page.getByRole('button', { name: 'Try again' }).click()
 
   await expect(
-    page.getByText('Performance score', { exact: true })
+    page.getByRole('img', { name: 'Plan score 32 out of 100' })
   ).toBeVisible()
   expect(analysisCalls).toBe(2)
 })

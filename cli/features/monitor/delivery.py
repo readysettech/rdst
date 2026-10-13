@@ -11,9 +11,15 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from shared.monitor.monitor_store import MonitorStore
+from shared.monitor.monitor_store import MonitorStore, in_quiet_hours
 
 RELEVANT_RANK = 10
+
+
+def push_held_by_quiet_hours(store: MonitorStore, target: str, ts: int) -> bool:
+    """Whether a push at `ts` is held by the database's quiet hours. The item still files
+    in the Inbox; only the push is held. Database unreachable is never held."""
+    return in_quiet_hours(store.levers(target)["quiet_hours"], ts)
 RELEVANT_SHARE = 0.02
 DAY_S = 86400
 HOUR_S = 3600

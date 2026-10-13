@@ -2,20 +2,12 @@ import { Alert } from '@rs/ui-new/alert'
 import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
-import { Icon } from '@rs/ui-new/icon'
-import {
-  Modal,
-  ModalContent,
-  ModalContentContainer,
-  ModalDescription,
-  ModalTitle,
-} from '@rs/ui-new/modal'
-import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useMutation } from '@tanstack/react-query'
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react'
 import type { EnvRequirement } from '../lib/api'
 import { setEnvSecret } from '../lib/api'
+import { DialogShell } from './DialogShell'
 
 interface EnvSecretsDialogProps {
   isOpen: boolean
@@ -174,186 +166,154 @@ export function EnvSecretsDialog({
   }
 
   return (
-    <Modal open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <ModalContentContainer open={isOpen}>
-        <ModalContent size="base" className="p-0 overflow-hidden">
-          <ModalTitle className="sr-only">{dialogTitle}</ModalTitle>
-          <ModalDescription className="sr-only">
-            Enter the missing passwords or API keys.
-          </ModalDescription>
-          <div className="px-6 py-5 border-b border-border-layout-1 bg-surface-layout-2">
-            <HStack className="gap-3 items-center">
-              <div className="w-10 h-10 rounded-xl bg-surface-warning-soft flex items-center justify-center">
-                <Icon
-                  name="key"
-                  label="Secrets"
-                  className="w-5 h-5 text-content-warning-soft"
-                />
-              </div>
-              <VStack className="gap-0.5 items-start">
-                <Text level="headline-4" className="text-content-layout-1">
-                  {dialogTitle}
-                </Text>
-                <Text level="body-small" className="text-content-layout-3">
-                  Secrets are masked and never shown after submission.
-                </Text>
-              </VStack>
-            </HStack>
-          </div>
-          {anthropicProcessEnvShadow && (
-            <div className="px-6 pt-4">
-              <Alert
-                variant="warning"
-                modifier="outline"
-                label="A key supplied when RDST started will override this until the app restarts."
-              />
-            </div>
-          )}
+    <DialogShell
+      open={isOpen}
+      onClose={onClose}
+      title={dialogTitle}
+      description="Enter the missing passwords or API keys."
+      note="Secrets are masked and never shown after submission."
+      action={
+        <>
+          <Button
+            variant="primary"
+            modifier="ghost"
+            label="Cancel"
+            onClick={onClose}
+            disabled={setEnvSecretMutation.isPending}
+          />
+          <Button
+            variant="primary"
+            modifier="solid"
+            label="Save secrets"
+            onClick={handleSubmit}
+            loading={setEnvSecretMutation.isPending}
+            disabled={entries.length === 0 || setEnvSecretMutation.isPending}
+          />
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {anthropicProcessEnvShadow && (
+          <Alert
+            tone="quiet"
+            variant="warning"
+            icon="alert"
+            label="A key supplied when RDST started will override this until the app restarts."
+          />
+        )}
+        {!keyringAvailable && (
+          <Alert
+            tone="quiet"
+            variant="warning"
+            icon="alert"
+            label={
+              hasTargetPasswordEntries
+                ? 'No OS keychain found. Re-enter the password after RDST restarts.'
+                : 'No OS keychain found. Re-enter this value after RDST restarts.'
+            }
+          />
+        )}
+        {errorMessage && (
+          <Alert
+            tone="quiet"
+            variant="negative"
+            icon="alert"
+            label={errorMessage}
+          />
+        )}
 
-          <div className="p-6 space-y-4">
-            {!keyringAvailable && (
-              <Alert
-                variant="warning"
-                modifier="outline"
-                label={
-                  hasTargetPasswordEntries
-                    ? 'No OS keychain found. Re-enter the password after RDST restarts.'
-                    : 'No OS keychain found. Re-enter this value after RDST restarts.'
+        {entries.length === 0 ? (
+          <Text level="body-small" className="text-content-layout-2">
+            No missing secrets.
+          </Text>
+        ) : (
+          entries.map((entry, index) => (
+            <div key={entry.key} className="space-y-1.5">
+              <label htmlFor={`rdst-secret-${index}`} className="block">
+                <Text
+                  as="span"
+                  level="caption"
+                  className="text-content-layout-3"
+                >
+                  {entry.label}
+                </Text>
+              </label>
+              <BaseInputText
+                id={`rdst-secret-${index}`}
+                type="text"
+                name={`rdst-secret-${index}`}
+                autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                data-1p-ignore="true"
+                data-lpignore="true"
+                data-form-type="other"
+                inputMode="text"
+                style={maskedSecretStyle}
+                value={values[entry.envName] || ''}
+                onChange={(event) =>
+                  setValues((previous) => ({
+                    ...previous,
+                    [entry.envName]: event.target.value,
+                  }))
                 }
-              />
-            )}
-
-            {errorMessage && (
-              <Alert
-                variant="negative"
-                modifier="outline"
-                label={errorMessage}
-              />
-            )}
-
-            {entries.length === 0 ? (
-              <Alert
-                variant="positive"
-                modifier="outline"
-                label="No missing secrets."
-              />
-            ) : (
-              <div className="space-y-4">
-                {entries.map((entry, index) => (
-                  <div key={entry.key} className="space-y-1">
-                    <label htmlFor={`rdst-secret-${index}`}>
-                      <Text
-                        level="label-small"
-                        className="text-content-layout-2 block"
-                      >
-                        {entry.label}
-                      </Text>
-                    </label>
-                    <BaseInputText
-                      id={`rdst-secret-${index}`}
-                      type="text"
-                      name={`rdst-secret-${index}`}
-                      autoComplete="off"
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      data-1p-ignore="true"
-                      data-lpignore="true"
-                      data-form-type="other"
-                      inputMode="text"
-                      style={maskedSecretStyle}
-                      value={values[entry.envName] || ''}
-                      onChange={(event) =>
-                        setValues((previous) => ({
-                          ...previous,
-                          [entry.envName]: event.target.value,
-                        }))
-                      }
-                      placeholder={`Enter ${entry.label}`}
-                      disabled={setEnvSecretMutation.isPending}
-                    />
-                    <Text level="caption" className="text-content-layout-3">
-                      {entry.hint}
-                    </Text>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {onTrialRegister &&
-              (requirements.some((r) => r.kind === 'anthropic_api_key') ||
-                showManualAnthropicInput) && (
-                <div className="flex justify-center">
-                  <Button
-                    variant="primary"
-                    modifier="ghost"
-                    icon="sparkles"
-                    iconPosition="left"
-                    label={
-                      trialActionLabel ??
-                      "Don't have a key? Sign in to Readyset"
-                    }
-                    onClick={() => {
-                      onClose()
-                      onTrialRegister()
-                    }}
-                  />
-                </div>
-              )}
-
-            {keyringAvailable && (
-              <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/60 px-4 py-3 border border-border-layout-1">
-                <VStack className="gap-0.5 items-start">
-                  <Text level="label-small" className="text-content-layout-1">
-                    Save securely
-                  </Text>
-                  <Text level="caption" className="text-content-layout-3">
-                    Persist in OS keychain when available.
-                  </Text>
-                </VStack>
-                <BaseInputSwitch
-                  name="persist"
-                  checked={persist}
-                  onCheckedChange={setPersist}
-                  disabled={setEnvSecretMutation.isPending}
-                />
-              </div>
-            )}
-
-            {resultMessage && (
-              <Alert
-                variant="positive"
-                modifier="outline"
-                label={resultMessage}
-              />
-            )}
-          </div>
-
-          <div className="px-6 py-4 border-t border-border-layout-1 bg-surface-layout-2/40">
-            <HStack className="justify-end gap-3 items-center w-full">
-              <Button
-                variant="primary"
-                modifier="ghost"
-                label="Cancel"
-                onClick={onClose}
+                placeholder={`Enter ${entry.label}`}
                 disabled={setEnvSecretMutation.isPending}
               />
-              <Button
-                variant="primary"
-                modifier="solid"
-                label="Save secrets"
-                icon="tick"
-                iconPosition="right"
-                onClick={handleSubmit}
-                loading={setEnvSecretMutation.isPending}
-                disabled={
-                  entries.length === 0 || setEnvSecretMutation.isPending
-                }
-              />
-            </HStack>
+              <Text level="caption" className="text-content-layout-3">
+                {entry.hint}
+              </Text>
+            </div>
+          ))
+        )}
+
+        {keyringAvailable && (
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <Text level="body-small" className="text-content-layout-1">
+                Save securely
+              </Text>
+              <Text level="caption" className="text-content-layout-3">
+                Persist in OS keychain when available.
+              </Text>
+            </div>
+            <BaseInputSwitch
+              name="persist"
+              checked={persist}
+              onCheckedChange={setPersist}
+              disabled={setEnvSecretMutation.isPending}
+            />
           </div>
-        </ModalContent>
-      </ModalContentContainer>
-    </Modal>
+        )}
+
+        {resultMessage && (
+          <Alert
+            tone="quiet"
+            variant="positive"
+            icon="tick"
+            label={resultMessage}
+          />
+        )}
+
+        {onTrialRegister &&
+          (requirements.some((r) => r.kind === 'anthropic_api_key') ||
+            showManualAnthropicInput) && (
+            <Button
+              variant="primary"
+              modifier="ghost"
+              size="small"
+              className="-ml-3"
+              label={
+                trialActionLabel ?? "Don't have a key? Sign in to Readyset"
+              }
+              onClick={() => {
+                onClose()
+                onTrialRegister()
+              }}
+            />
+          )}
+      </div>
+    </DialogShell>
   )
 }

@@ -1,20 +1,14 @@
 import { Button } from '@rs/ui-new/button'
-import { CopyButton } from '@rs/ui-new/copy-button'
-import { Icon } from '@rs/ui-new/icon'
-import { AnimatePresence, m } from '@rs/ui-new/motion'
-import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
-import { getTransition } from '@rs/ui-new/transition'
-import { useQueryClient } from '@tanstack/react-query'
-import { useLocation, useNavigate } from '@tanstack/react-router'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useLocation } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import type { EnvRequirement } from '../lib/api'
+import { type EnvRequirement, fetchAccountStatus } from '../lib/api'
 import { TRIAL_EXHAUSTED_MESSAGE } from '../lib/errorContract'
 import {
   invalidateTrialRelatedQueries,
   useTrialSource,
 } from '../lib/trialQueries'
-import { useInitStatus } from '../lib/useInitStatus'
 import { useSystemStatus } from '../lib/useSystemStatus'
 import { EnvSecretsDialog } from './EnvSecretsDialog'
 import { TrialRegistrationDialog } from './TrialRegistrationDialog'
@@ -22,7 +16,6 @@ import { TrialRegistrationDialog } from './TrialRegistrationDialog'
 interface WarningConfig {
   title: string
   description: string
-  command?: string
   severity: 'error' | 'warning'
   actionLabel?: string
   actionType?: 'open-env-dialog' | 'open-trial-dialog'
@@ -88,6 +81,7 @@ function getWarningConfig(
   return null
 }
 
+/** One inline line: the sentence in its tone, then the actions as ghost buttons. */
 function ConfigBanner({
   config,
   onDismiss,
@@ -100,162 +94,76 @@ function ConfigBanner({
   onSecondaryAction?: () => void
 }) {
   const isError = config.severity === 'error'
-
   return (
-    <m.div
-      initial={{ opacity: 0, y: -8, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: -8, scale: 0.98 }}
-      transition={getTransition('springFast')}
-      className={`
-        relative overflow-hidden rounded-2xl mb-4
-        border-(length:--border-base)
-        ${
-          isError
-            ? 'bg-surface-negative-soft border-border-negative-soft'
-            : 'bg-surface-warning-soft border-border-warning-soft'
-        }
-      `}
+    <div
+      data-testid="config-notice"
+      className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1"
     >
-      {/* Subtle gradient accent line at top */}
-      <div
-        className={`
-          absolute top-0 left-0 right-0 h-[2px]
-          ${
-            isError
-              ? 'bg-gradient-to-r from-transparent via-content-negative-soft to-transparent'
-              : 'bg-gradient-to-r from-transparent via-content-warning-soft to-transparent'
-          }
-        `}
-      />
-
-      <div className="px-4 py-3">
-        <HStack className="gap-3 items-start justify-between">
-          {/* Left: Icon + Content */}
-          <HStack className="gap-3 items-start flex-1 min-w-0">
-            {/* Icon container */}
-            <div
-              className={`
-              flex-shrink-0 mt-0.5 p-1.5 rounded-lg
-              ${isError ? 'bg-surface-negative-soft' : 'bg-surface-warning-soft'}
-            `}
-            >
-              <Icon
-                name="alert"
-                label="Warning"
-                className={`
-                  w-4 h-4
-                  ${isError ? 'text-content-negative-soft' : 'text-content-warning-soft'}
-                `}
-              />
-            </div>
-
-            {/* Content */}
-            <VStack className="gap-2 items-start flex-1 min-w-0">
-              {/* Title + Description */}
-              <VStack className="gap-0.5 items-start">
-                <Text
-                  level="label-small"
-                  className={
-                    isError
-                      ? 'text-content-negative-soft'
-                      : 'text-content-warning-soft'
-                  }
-                >
-                  {config.title}
-                </Text>
-                <Text level="body-small" className="text-content-layout-2">
-                  {config.description}
-                </Text>
-              </VStack>
-
-              {config.command && (
-                <HStack
-                  className="
-                  gap-2 items-center w-full
-                  bg-surface-layout-2/50
-                  rounded-lg px-3 py-2
-                  border-(length:--border-base) border-border-layout-1
-                "
-                >
-                  <Text
-                    level="mono-small"
-                    className="text-content-layout-1 flex-1 truncate select-all"
-                  >
-                    {config.command}
-                  </Text>
-                  <CopyButton text={config.command} />
-                </HStack>
-              )}
-
-              {config.actionLabel && onAction && (
-                <HStack className="gap-2 items-center">
-                  <Button
-                    variant="primary"
-                    modifier="outline"
-                    label={config.actionLabel}
-                    icon={
-                      config.actionType === 'open-trial-dialog'
-                        ? 'sparkles'
-                        : 'key'
-                    }
-                    iconPosition="left"
-                    onClick={onAction}
-                  />
-                  {config.secondaryActionLabel && onSecondaryAction && (
-                    <Button
-                      variant="primary"
-                      modifier="ghost"
-                      label={config.secondaryActionLabel}
-                      icon="key"
-                      iconPosition="left"
-                      onClick={onSecondaryAction}
-                    />
-                  )}
-                </HStack>
-              )}
-            </VStack>
-          </HStack>
-
-          {/* Right: Dismiss button (only for warnings, not errors) */}
-          {!isError && onDismiss && (
-            <Button
-              label=""
-              icon="close"
-              iconPosition="icon"
-              modifier="ghost"
-              size="small"
-              onClick={onDismiss}
-              className="flex-shrink-0 opacity-60 hover:opacity-100"
-            />
-          )}
-        </HStack>
-      </div>
-    </m.div>
+      <Text
+        as="p"
+        level="body-small"
+        className={
+          isError ? 'text-content-negative-soft' : 'text-content-warning-soft'
+        }
+      >
+        {config.description}
+      </Text>
+      {config.actionLabel && onAction && (
+        <Button
+          variant="primary"
+          modifier="ghost"
+          size="small"
+          label={config.actionLabel}
+          onClick={onAction}
+        />
+      )}
+      {config.secondaryActionLabel && onSecondaryAction && (
+        <Button
+          variant="primary"
+          modifier="ghost"
+          size="small"
+          label={config.secondaryActionLabel}
+          onClick={onSecondaryAction}
+        />
+      )}
+      {!isError && onDismiss && (
+        <Button
+          variant="primary"
+          modifier="ghost"
+          size="small"
+          label="Hide"
+          onClick={onDismiss}
+        />
+      )}
+    </div>
   )
 }
 
+/** The shell's configuration notice. */
 export function ConfigWarning() {
+  return <AiAccessNotice />
+}
+
+function AiAccessNotice() {
   const queryClient = useQueryClient()
-  const navigate = useNavigate()
   const location = useLocation()
   const [dismissed, setDismissed] = useState<string | null>(null)
   const [showSecretsDialog, setShowSecretsDialog] = useState(false)
   const [showTrialDialog, setShowTrialDialog] = useState(false)
 
-  const {
-    data: status,
-    isLoading,
-    isFetching: statusFetching,
-    error,
-  } = useSystemStatus()
-  const { data: initStatus, isLoading: initLoading } = useInitStatus()
+  const { data: status, isLoading, error } = useSystemStatus()
   const { envRequirements, isTrialSource, trialStatus } = useTrialSource()
+  const account = useQuery({
+    queryKey: ['account-status'],
+    queryFn: fetchAccountStatus,
+  })
 
-  const missingAnthropicRequirements =
-    envRequirements?.requirements.filter(
-      (item) => !item.satisfied && item.kind === 'anthropic_api_key'
-    ) || []
+  // A Readyset sign-in provides the included AI: a stale requirement never asks for one.
+  const missingAnthropicRequirements = account.data?.signed_in
+    ? []
+    : envRequirements?.requirements.filter(
+        (item) => !item.satisfied && item.kind === 'anthropic_api_key'
+      ) || []
 
   const trialState: TrialState | undefined =
     isTrialSource &&
@@ -272,39 +180,6 @@ export function ConfigWarning() {
         }
       : undefined
 
-  useEffect(() => {
-    // A refetch in flight may be about to report a target that was just added.
-    if (isLoading || statusFetching || initLoading || !status || !initStatus)
-      return
-    if (
-      location.pathname === '/' ||
-      location.pathname === '/onboarding' ||
-      // Settings must stay reachable with zero targets: it's where the user
-      // manages keys, resets local data, and reaches the discovery drawer (CSV
-      // import + AWS), which is itself a way to connect databases. Redirecting
-      // it away traps a fresh or wiped install with no way back in.
-      location.pathname === '/configure' ||
-      location.pathname.startsWith('/demo')
-    )
-      return
-    // Targets are the one true signal: a database added from ANY surface
-    // (onboarding form, AWS discovery, CSV import) ends the lockout, even
-    // if the guided init flow never ran.
-    if (status.targets.length === 0) {
-      // Route to Connect preserving where the user was headed, so they land
-      // back there after connecting (configure-and-identity open-dep #4).
-      navigate({ to: '/onboarding', search: { redirect: location.pathname } })
-    }
-  }, [
-    isLoading,
-    statusFetching,
-    initLoading,
-    status,
-    initStatus,
-    location.pathname,
-    navigate,
-  ])
-
   // Reset dismissed state when status changes
   useEffect(() => {
     const config = getWarningConfig(missingAnthropicRequirements, trialState)
@@ -313,7 +188,7 @@ export function ConfigWarning() {
     }
   }, [missingAnthropicRequirements, trialState, dismissed])
 
-  if (isLoading) {
+  if (isLoading || account.isPending) {
     return null
   }
 
@@ -374,18 +249,14 @@ export function ConfigWarning() {
 
   return (
     <>
-      <AnimatePresence mode="wait">
-        <ConfigBanner
-          config={warningConfig}
-          onDismiss={() => setDismissed(warningConfig.title)}
-          onAction={warningConfig.actionType ? handleAction : undefined}
-          onSecondaryAction={
-            warningConfig.secondaryActionType
-              ? handleSecondaryAction
-              : undefined
-          }
-        />
-      </AnimatePresence>
+      <ConfigBanner
+        config={warningConfig}
+        onDismiss={() => setDismissed(warningConfig.title)}
+        onAction={warningConfig.actionType ? handleAction : undefined}
+        onSecondaryAction={
+          warningConfig.secondaryActionType ? handleSecondaryAction : undefined
+        }
+      />
       <EnvSecretsDialog
         isOpen={showSecretsDialog}
         onClose={() => setShowSecretsDialog(false)}

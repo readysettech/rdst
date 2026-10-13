@@ -46,7 +46,8 @@ Imports:
   container it is given, so the caller sizes it (`className`) rather than the
   component. Without a `value` it is indeterminate: a striped track that
   pulses under `motion-safe` and rests, still visibly unfilled, under
-  `prefers-reduced-motion`.
+  `prefers-reduced-motion`. `tone="quiet"` is a 4px track (`h-1`) with a
+  `content-layout-1` fill (and stripes), for waits that are status, not accent.
 - **CircularProgress** — an SVG ring that springs to `value`, showing the
   percentage; the ring turns `content-negative-plain` past 80%.
 
@@ -68,6 +69,7 @@ Imports:
 | `value` | `number` | — | Current value; omit for an indeterminate wait. |
 | `max` | `number` | `100` | The total `value` counts towards. |
 | `label` | `string` | — | Accessible name, when nothing nearby names the bar. |
+| `tone` | `'default' \| 'quiet'` | `'default'` | `quiet`: 4px track, first-tone fill. |
 | `className` | `string` | — | Sizes the track (width, height). |
 
 ### CircularProgress

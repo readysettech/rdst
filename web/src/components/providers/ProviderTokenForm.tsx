@@ -1,8 +1,9 @@
-import { BaseInputText } from '@rs/ui-new/base-input-text'
+import { Alert } from '@rs/ui-new/alert'
 import { Button } from '@rs/ui-new/button'
-import { HStack, VStack } from '@rs/ui-new/stack'
-import { Text } from '@rs/ui-new/text'
+import { VStack } from '@rs/ui-new/stack'
 import { useState } from 'react'
+import { Field } from '../configure/Field'
+import { panelActions } from './cardShell'
 import {
   asProviderFailure,
   type ProviderLoginFailure,
@@ -15,28 +16,31 @@ import {
  */
 export function ProviderTokenForm({
   name,
+  label,
   placeholder,
   caption,
   submitLabel,
-  submitBusyLabel,
   rejectedMessage,
   buttonSize,
   save,
   onSaved,
   onCancel,
+  actions,
 }: {
   name: string
+  label: string
   placeholder: string
   /** Says what kind of credential this is, where the field alone won't. */
   caption?: string
   submitLabel: string
-  submitBusyLabel: string
   /** Shown in place of the raw error when the provider rejected the value. */
   rejectedMessage: string
   buttonSize?: 'small'
   save: (token: string) => Promise<void>
   onSaved: () => Promise<unknown>
   onCancel?: () => void
+  /** The host dialog's footer, where the form's buttons render. */
+  actions?: HTMLElement | null
 }) {
   const [value, setValue] = useState('')
   const [saving, setSaving] = useState(false)
@@ -57,50 +61,51 @@ export function ProviderTokenForm({
   }
 
   return (
-    <VStack className="gap-2 items-stretch">
-      {caption && (
-        <Text level="caption" className="text-content-layout-3">
-          {caption}
-        </Text>
-      )}
-      <HStack className="gap-2 items-center">
-        <div className="flex-1 max-w-96">
-          <BaseInputText
-            name={name}
-            type="password"
-            value={value}
-            placeholder={placeholder}
-            autoComplete="off"
-            disabled={saving}
-            onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-              setValue(event.target.value)
-            }
-          />
-        </div>
-        <Button
-          variant="primary"
-          modifier="solid"
-          size={buttonSize}
-          label={saving ? submitBusyLabel : submitLabel}
-          loading={saving}
-          disabled={saving || !value.trim()}
-          onClick={() => void submit()}
-        />
-        {onCancel && (
-          <Button
-            type="button"
-            size="small"
-            modifier="link"
-            label="Cancel"
-            classMerge="h-auto p-0"
-            onClick={onCancel}
-          />
-        )}
-      </HStack>
+    <VStack className="gap-3 items-stretch">
+      <Field
+        label={label}
+        name={name}
+        type="password"
+        value={value}
+        placeholder={placeholder}
+        helper={caption}
+        disabled={saving}
+        onChange={setValue}
+      />
       {failure && (
-        <Text level="caption" className="text-content-negative-soft">
-          {failure.code === 'invalid_token' ? rejectedMessage : failure.message}
-        </Text>
+        <Alert
+          variant="negative"
+          modifier="ghost"
+          icon="alert"
+          iconPosition="left"
+          label={
+            failure.code === 'invalid_token' ? rejectedMessage : failure.message
+          }
+        />
+      )}
+      {panelActions(
+        actions,
+        <>
+          {onCancel && (
+            <Button
+              variant="primary"
+              modifier="ghost"
+              size={buttonSize}
+              label="Cancel"
+              onClick={onCancel}
+            />
+          )}
+          <Button
+            variant="primary"
+            modifier="solid"
+            size={buttonSize}
+            label={submitLabel}
+            aria-label={submitLabel}
+            loading={saving}
+            disabled={!value.trim()}
+            onClick={() => void submit()}
+          />
+        </>
       )}
     </VStack>
   )

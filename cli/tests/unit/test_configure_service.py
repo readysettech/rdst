@@ -648,6 +648,21 @@ def test_query_capture_probe_returns_direct_postgres_setup_steps():
     assert result["source"] == "pg_stat_statements"
     assert any("shared_preload_libraries" in step for step in result["instructions"])
     assert any("CREATE EXTENSION" in step for step in result["instructions"])
+    assert result["config"] == ["shared_preload_libraries = 'pg_stat_statements'"]
+    assert result["sql"] == ["CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"]
+
+
+def test_query_capture_probe_gives_mysql_config_line_when_performance_schema_is_off():
+    from features.configure.service import ConfigureService
+
+    cursor = Mock()
+    cursor.fetchone.return_value = ("performance_schema", "OFF")
+    connection = Mock()
+    connection.cursor.return_value = cursor
+    result = ConfigureService._query_capture_capability(connection, "mysql")
+    assert result["available"] is False
+    assert result["config"] == ["performance_schema=ON"]
+    assert result["sql"] == []
 
 
 def test_query_capture_probe_accepts_mysql_performance_schema():

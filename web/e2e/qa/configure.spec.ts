@@ -49,11 +49,10 @@ async function mockReadysetAccount(page: Page, email = 'qa@readyset.io') {
   )
 }
 
-/** Open the add-target drawer on its manual form. */
+/** Open the add-database dialog on its connection form. */
 async function openManualAddForm(page: Page) {
-  await page.getByRole('button', { name: 'Add target' }).first().click()
-  await page.getByRole('tab', { name: 'Manual setup' }).click()
-  await expect(page.locator('#cfg-host')).toBeVisible()
+  await page.getByRole('button', { name: 'Add a database' }).click()
+  await expect(page.locator('[name="host"]')).toBeVisible()
 }
 
 /** MG-15 - the targets section names one concept with one noun. */
@@ -66,18 +65,18 @@ test('the targets section speaks one noun', async ({ page }) => {
 
   await expect(page.getByRole('heading', { name: 'Targets' })).toBeVisible()
   await expect(
-    page.getByRole('button', { name: 'Add target' }).first()
+    page.getByRole('button', { name: 'Add a database' })
   ).toBeVisible()
   await expect(page.getByText('Database connections')).toHaveCount(0)
   await expect(page.getByText('Add connection')).toHaveCount(0)
 })
 
 /**
- * A-08 - the add-target drawer keeps its action row inside a 1280x800 window.
+ * A-08 - the add-database dialog keeps its action row inside a 1280x800 window.
  * A-18 - and no field carries a required asterisk, so the marker is gone
  * rather than meaningless.
  */
-test('the add-target drawer keeps its submit in view and marks no field required', async ({
+test('the add-database dialog keeps its submit in view and marks no field required', async ({
   page,
 }) => {
   await page.setViewportSize(DESKTOP)
@@ -87,9 +86,7 @@ test('the add-target drawer keeps its submit in view and marks no field required
   await page.goto('/configure')
   await openManualAddForm(page)
 
-  const submit = page
-    .getByRole('button', { name: 'Add target', exact: true })
-    .last()
+  const submit = page.getByRole('button', { name: 'Add and monitor' })
   const box = await submit.boundingBox()
   expect(box).not.toBeNull()
   expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(DESKTOP.height)
@@ -101,7 +98,7 @@ test('the add-target drawer keeps its submit in view and marks no field required
 })
 
 /** A-08 - the connection form stacks to one column and stays usable at 390. */
-test('the add-target form stacks to one column at 390', async ({ page }) => {
+test('the add-database form stacks to one column at 390', async ({ page }) => {
   await page.setViewportSize(PHONE)
   setBackendFixtures()
   await configureTestTarget(page, { hasPassword: true })
@@ -110,8 +107,8 @@ test('the add-target form stacks to one column at 390', async ({ page }) => {
   await openManualAddForm(page)
 
   const rows = await page.evaluate(() => {
-    const host = document.querySelector('#cfg-host') as HTMLElement
-    const port = document.querySelector('#cfg-port') as HTMLElement
+    const host = document.querySelector('[name="host"]') as HTMLElement
+    const port = document.querySelector('[name="port"]') as HTMLElement
     return {
       hostTop: Math.round(host.getBoundingClientRect().top),
       portTop: Math.round(port.getBoundingClientRect().top),
@@ -120,8 +117,7 @@ test('the add-target form stacks to one column at 390', async ({ page }) => {
   expect(rows.portTop).toBeGreaterThan(rows.hostTop)
 
   const box = await page
-    .getByRole('button', { name: 'Add target', exact: true })
-    .last()
+    .getByRole('button', { name: 'Add and monitor' })
     .boundingBox()
   expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(PHONE.height)
   expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(PHONE.width)
@@ -207,8 +203,8 @@ test('the signed-in identity opens an account menu that offers sign out', async 
   await page.getByRole('button', { name: 'Cancel' }).click()
 })
 
-/** A-16 - the sign-in dialog answers an invalid address under the field. */
-test('the sign-in dialog answers an invalid address under the field', async ({
+/** A-16 - the sign-in page answers an invalid address under the field. */
+test('the sign-in page answers an invalid address under the field', async ({
   page,
 }) => {
   await page.setViewportSize(DESKTOP)
@@ -216,20 +212,20 @@ test('the sign-in dialog answers an invalid address under the field', async ({
   await configureTestTarget(page, { hasPassword: true })
   await page.goto('/account-login')
 
-  const dialog = page.getByRole('dialog')
-  await expect(dialog).toBeVisible()
-  const email = dialog.locator('input[type="email"]')
+  const signIn = page.getByRole('main')
+  await expect(signIn).toBeVisible()
+  const email = signIn.locator('input[type="email"]')
   await email.fill('not-an-email')
   await email.blur()
 
-  await expect(dialog.getByText('Enter a valid email address.')).toBeVisible()
+  await expect(signIn.getByText('Enter a valid email address.')).toBeVisible()
   await expect(
-    dialog.getByRole('button', { name: 'Send sign-in link' })
+    signIn.getByRole('button', { name: 'Send sign-in link' })
   ).toBeDisabled()
 
   await email.fill('qa@readyset.io')
   await expect(
-    dialog.getByRole('button', { name: 'Send sign-in link' })
+    signIn.getByRole('button', { name: 'Send sign-in link' })
   ).toBeEnabled()
 })
 
@@ -247,17 +243,12 @@ test('a dead sign-in callback shows one state and a way to start over', async ({
   )
   await page.goto('/account-login?login_id=abc123')
 
-  const dialog = page.getByRole('dialog')
+  const signIn = page.getByRole('main')
   await expect(
-    dialog.getByText('This sign-in link has expired or was already used.')
+    signIn.getByText('This sign-in link has expired or was already used.')
   ).toBeVisible()
-  await expect(dialog.getByText('Sign-in could not be completed')).toBeVisible()
-  await expect(
-    dialog.getByText(/Completing your Readyset sign-in/)
-  ).toHaveCount(0)
-
-  await dialog.getByRole('button', { name: 'Start over' }).click()
-  await expect(dialog.locator('input[type="email"]')).toBeVisible()
+  await expect(signIn.getByText('Finishing sign-in...')).toHaveCount(0)
+  await expect(signIn.locator('input[type="email"]')).toBeVisible()
 })
 
 /**

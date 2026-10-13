@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from functools import lru_cache
 from typing import Any
 
@@ -222,26 +223,30 @@ def _spills(store: MonitorStore, target: str, now: int) -> dict[str, Any] | None
             "heavy": size >= HEAVY_SPILL_BYTES, "queries": keys}
 
 
+def files_action(action: dict[str, Any], spills: dict[str, Any] | None = None) -> bool:
+    """Whether a database finding becomes an action: maintenance always, a setting only when
+    the database shows the problem it fixes. One merely off a rule of thumb stays in the
+    report's settings audit."""
+    identity = str(action.get("id") or "")
+    if identity in MAINTENANCE_IDS:
+        return True
+    if not (identity.startswith("setting_") or identity in SETTING_IDS):
+        return False
+    name = (action.get("setting") or {}).get("name")
+    return (action.get("severity") == "bad" or identity in MEASURED_IDS
+            or (name in SPILL_SETTINGS and spills is not None)
+            or (name in BUFFER_SETTINGS and action.get("severity") == "warn"))
+
+
 def _database(actions: list[dict[str, Any]], window: dict[str, Any],
               spills: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     found = []
     for action in actions:
+        if not files_action(action, spills):
+            continue
         identity = str(action.get("id") or "")
-        if identity.startswith("setting_") or identity in SETTING_IDS:
-            kind = "change_setting"
-        elif identity in MAINTENANCE_IDS:
-            kind = "run_maintenance"
-        else:
-            continue
+        kind = "run_maintenance" if identity in MAINTENANCE_IDS else "change_setting"
         setting = action.get("setting") or {}
-        name = setting.get("name")
-        # A setting is an action only when the database shows the problem it fixes; one
-        # that's merely off a rule of thumb stays in the Reports health checks.
-        measured = (action.get("severity") == "bad" or identity in MEASURED_IDS
-                    or (name in SPILL_SETTINGS and spills is not None)
-                    or (name in BUFFER_SETTINGS and action.get("severity") == "warn"))
-        if kind == "change_setting" and not measured:
-            continue
         score = SEVERITY_SCORE.get(action.get("severity"), 0.01)
         summary, queries = action.get("finding"), action.get("query_keys") or []
         if spills and setting.get("name") in SPILL_SETTINGS:
@@ -290,13 +295,18 @@ def database_checked_at(store: MonitorStore, target: str, checkup_at: int | None
     return max(times) if times else None
 
 
+def planned_adds(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """The indexes the plan offers as actions. Adds past the plan's first few stay actions, so
+    a reshuffle in rank never retires them; one too small to be worth it stays among the
+    smaller wins, and one whose writes outweigh it is never offered."""
+    return [add for add in plan["add"] + plan.get("later", [])
+            if add["benefit"] >= MIN_ADD_BENEFIT and add.get("label") != "skip"]
+
+
 def candidates(store: MonitorStore, target: str, plan: dict[str, Any],
                queries: list[dict[str, Any]], database: list[dict[str, Any]]) -> list[dict[str, Any]]:
     window = {"observed_s": plan["observed_s"], "counter_age_s": plan["counter_age_s"]}
-    # Adds past the plan's first few stay actions, so a reshuffle in rank never retires them;
-    # one too small to be worth it stays among the smaller wins.
-    found = [_add_index(add, window) for add in plan["add"] + plan.get("later", [])
-             if add["benefit"] >= MIN_ADD_BENEFIT]
+    found = [_add_index(add, window) for add in planned_adds(plan)]
     found += [_drop_index(drop, window) for drop in plan["drop"] if _drop_worth_doing(drop)]
     found += _rewrites(store, target, queries, window)
     found += _database(database, window, _spills(store, target, plan["computed_at"]))
@@ -363,11 +373,17 @@ def _applied(store: MonitorStore, target: str, row: dict[str, Any], now: int,
 
 JEV_RETIRE_HOLD_S = 86400
 REOPEN_GROWTH = 1.5
+# A change the user says they made holds while its evidence (a week of readings) catches up.
+USER_APPLIED_HOLD_S = 7 * 86400
+# States only a user leaves: they hold whatever the plan lists, until Bring back.
+USER_CLOSED = ("dismissed", "undone")
 
 
 def _stays_closed(row: dict[str, Any], candidate: dict[str, Any], now: int,
                   database_refreshed: bool) -> bool:
     """Whether a closed action stays closed although its candidate is listed again."""
+    if row.get("closed_reason") == "user" and row["state"] != "retired":
+        return now - (row.get("closed_at") or now) < USER_APPLIED_HOLD_S
     if row["type"] in ("change_setting", "run_maintenance") and not database_refreshed:
         # Between checkups the database actions are the last checkup's, from before the fix.
         return row["state"] != "retired"
@@ -386,6 +402,7 @@ def reconcile(store: MonitorStore, target: str, now: int, found: list[dict[str, 
     between checkups those stay as they were rather than retiring.
     """
     stored = {row["key"]: row for row in store.actions(target)}
+    was_open = any(row["state"] == "open" for row in stored.values())
     snapshot = store.read("SELECT * FROM index_snapshot WHERE target=?", (target,))
     writes = []
     seen = set()
@@ -407,9 +424,11 @@ def reconcile(store: MonitorStore, target: str, now: int, found: list[dict[str, 
         # The checkup's order and Jev's read outlive the recompute that rebuilt the payload.
         kept = {name: row["payload"][name] for name in ("priority", "jev") if name in row["payload"]}
         candidate = {**candidate, "payload": {**candidate["payload"], **kept}}
+        held = ({"closed_at": row["closed_at"], "closed_reason": row["closed_reason"]}
+                if state in USER_CLOSED else {})
         writes.append({**candidate, "state": state, "opened_at": row["opened_at"],
                        "snoozed_until": row["snoozed_until"] if state == "snoozed" else None,
-                       "dismiss_reason": row["dismiss_reason"], **closed})
+                       "dismiss_reason": row["dismiss_reason"], **held, **closed})
     for key, row in stored.items():
         # A dismissal holds whatever the database does, until the user reopens it.
         if key in seen or row["state"] not in OPEN_STATES:
@@ -440,7 +459,9 @@ def reconcile(store: MonitorStore, target: str, now: int, found: list[dict[str, 
                              events=[*(write.get("events") or []), ("applied", detail)])
     if writes:
         store.write_actions(target, now, writes)
-    return store.actions(target, ("open",))
+    opened = store.actions(target, ("open",))
+    file_changes_ready(store, target, now, opened, was_open=was_open)
+    return opened
 
 
 def _maintenance_done(store: MonitorStore, target: str, row: dict[str, Any]) -> bool:
@@ -506,16 +527,21 @@ def refresh(store: MonitorStore, target: str, now: int, *,
 
 VERIFY_AFTER_S = 15 * 60
 VERIFY_GIVE_UP_S = 2 * 3600
+VERIFY_BEFORE_S = 7 * 86400
 VERIFY_MIN_CALLS = 20
 VERIFIED_GAIN = 0.2
 DROP_VERIFIED_GAIN = 0.05
+# The measurement starts a few minutes after the change, once the old plans have cleared.
+VERIFY_SETTLE_S = 300
 
 
 def verify(store: MonitorStore, target: str, now: int) -> None:
-    """Measure an applied index or rewrite: the queries it served, before and after the fix.
+    """Measure an applied index or rewrite: the queries it served over the 7 days before the
+    fix against at least 20 calls after it.
 
     Faster by a fifth or more confirms it; no gain by two hours after the fix says it didn't
-    help. Changes without queries to measure stay applied."""
+    help. Each outcome files one closed Inbox event: Fix confirmed or No change yet. Changes
+    without queries to measure stay applied."""
     from features.monitor.api.views import stmt_totals
 
     writes = []
@@ -526,19 +552,21 @@ def verify(store: MonitorStore, target: str, now: int) -> None:
                 now - closed < VERIFY_AFTER_S:
             continue
 
-        def mean(start: int, end: int) -> float | None:
+        def mean(start: int, end: int) -> tuple[float, int] | None:
             totals = stmt_totals(store, target, start, end, keys).values()
             calls = sum(int(total["calls"] or 0) for total in totals)
             spent = sum(float(total["total_ms"] or 0) for total in totals)
-            return spent / calls if calls >= VERIFY_MIN_CALLS else None
+            return (spent / calls, calls) if calls >= VERIFY_MIN_CALLS else None
 
-        before, after = mean(closed - 3600, closed), mean(closed + 300, now)
+        before = mean(closed - VERIFY_BEFORE_S, closed)
+        after = mean(closed + VERIFY_SETTLE_S, now)
         if before is None or after is None:
             continue
-        result = {"before_ms": round(before, 3), "after_ms": round(after, 3)}
+        result = {"before_ms": round(before[0], 3), "after_ms": round(after[0], 3),
+                  "calls": after[1], "at": now}
         # One index less is a smaller gain on each write than a new index is on a read.
         gain = DROP_VERIFIED_GAIN if row["type"] == "drop_index" else VERIFIED_GAIN
-        if after <= before * (1 - gain):
+        if after[0] <= before[0] * (1 - gain):
             state = "confirmed"
         elif now - closed >= VERIFY_GIVE_UP_S:
             state = "no_effect"
@@ -548,6 +576,53 @@ def verify(store: MonitorStore, target: str, now: int) -> None:
                        "events": [(state, result)]})
     if writes:
         store.write_actions(target, now, writes)
+        for write in writes:
+            _file_verification(store, target, now, write)
+
+
+def _file_verification(store: MonitorStore, target: str, now: int,
+                       row: dict[str, Any]) -> dict[str, Any] | None:
+    """One closed Inbox event per verified change: Fix confirmed (positive) or No change yet
+    (neutral). Neither pushes."""
+    from features.monitor.naming import target_names
+
+    stored = next((item for item in store.actions(target) if item["key"] == row["key"]), None)
+    if stored is None:
+        return None
+    payload, result = stored["payload"], stored["payload"].get("result") or {}
+    keys = list(payload.get("queries") or [])
+    names = target_names(store, target)
+    subject = names.get(keys[0]) if keys else None
+    columns = list(payload.get("columns") or [])
+    table = payload.get("table")
+    confirmed = stored["state"] == "confirmed"
+    body = {"action_id": stored["id"], "action_key": stored["key"], "action_type": stored["type"],
+            "action_title": payload.get("title"), "query_keys": keys,
+            "query_key": keys[0] if keys else None, "table": table, "columns": columns,
+            "index_name": payload.get("index_name") or _applied_index(store, stored["id"]),
+            "index_label": f"{table} ({', '.join(columns)})" if table and columns else
+            payload.get("title"),
+            "detected_at": int(stored.get("closed_at") or now),
+            "before_ms": result.get("before_ms"), "after_ms": result.get("after_ms"),
+            "calls": result.get("calls")}
+    if confirmed:
+        body["resolution"] = {"before": {"mean_ms": result.get("before_ms")},
+                              "after": {"mean_ms": result.get("after_ms")}}
+    kind = "fix_confirmed" if confirmed else "no_change_yet"
+    title = f"{'Fix confirmed' if confirmed else 'No change yet'}: " \
+            f"{subject or payload.get('title') or 'a change'}"
+    item = store.upsert_item(target, kind, f"action:{stored['id']}", 0.5 if confirmed else 0.3,
+                             title, body, now, delivery="inbox", reopen_resolved=True)
+    return store.action_item(item["id"], "resolve", now, resolved_by="code",
+                             measured_recovery=confirmed)
+
+
+def _applied_index(store: MonitorStore, action_id: int) -> str | None:
+    """The index the database showed when the action closed as applied."""
+    for event in reversed(store.action_events(action_id)):
+        if event["kind"] == "applied" and event["detail"].get("index_name"):
+            return str(event["detail"]["index_name"])
+    return None
 
 
 def _changes(plan: dict[str, Any]) -> set[str]:
@@ -580,21 +655,40 @@ def apply_explanations(store: MonitorStore, target: str, now: int,
             narrative["index_plan_explanation"], names)})
 
 
+VERBS = ("set_aside", "snooze", "dismiss", "reopen", "bring_back", "did_it", "undid_it")
+# Changes a user can say they undid: the ones applied, measured or not.
+UNDOABLE = ("applied", "confirmed", "no_effect")
+
+
 def set_state(store: MonitorStore, target: str, action_id: int, verb: str, now: int, *,
               until: int | None = None, reason: str | None = None) -> dict[str, Any] | None:
-    """A user's snooze, dismiss or reopen."""
+    """A user's verb on one action. Set aside (snooze is its older name) holds it until a date
+    with a reason; dismiss closes it with a reason; did_it marks it applied by the user, so
+    measuring starts; undid_it marks an applied change undone; bring_back (or reopen) opens
+    any of them again. None when the action doesn't exist."""
     rows = [row for row in store.actions(target) if row["id"] == action_id]
     if not rows:
         return None
     row = rows[0]
-    if verb == "snooze":
-        update = {"state": "snoozed", "snoozed_until": until or now + 7 * 86400}
+    if verb in ("snooze", "set_aside"):
+        update = {"state": "snoozed", "snoozed_until": until or now + 7 * 86400,
+                  "dismiss_reason": reason}
     elif verb == "dismiss":
         update = {"state": "dismissed", "dismiss_reason": reason, "closed_at": now,
                   "closed_reason": "dismissed"}
-    elif verb == "reopen":
+    elif verb in ("reopen", "bring_back"):
         update = {"state": "open", "snoozed_until": None, "dismiss_reason": None,
                   "closed_at": None, "closed_reason": None}
+    elif verb == "did_it":
+        if row["state"] in UNDOABLE:
+            return row
+        update = {"state": "applied", "snoozed_until": None, "closed_at": now,
+                  "closed_reason": "user"}
+    elif verb == "undid_it":
+        if row["state"] not in UNDOABLE:
+            raise ValueError("Only an applied change can be undone")
+        update = {"state": "undone", "dismiss_reason": reason, "closed_at": now,
+                  "closed_reason": "undone"}
     else:
         raise ValueError(f"Unknown action verb {verb}")
     store.write_actions(target, now, [{**row, **update,
@@ -606,9 +700,11 @@ INDEX_TYPES = ("add_index", "drop_index")
 MORE = 5
 
 
-def _card(row: dict[str, Any], names: dict[str, str]) -> dict[str, Any]:
+def _card(row: dict[str, Any], names: dict[str, str], minute_ms: float = 0.0) -> dict[str, Any]:
     payload = row["payload"]
     return {"id": row["id"], "key": row["key"], "type": row["type"], "state": row["state"],
+            "risk": risk(row), "effort": EFFORT.get(row["type"], "code"),
+            "saves_ms_per_min": saves_ms_per_min(row["score"], minute_ms), "tier": None,
             "score": row["score"], "title": payload["title"], "summary": payload["summary"],
             "note": payload.get("note"), "why": row.get("why"), "apply": payload["apply"],
             "sql": payload.get("sql"), "restart": bool(payload.get("restart")),
@@ -691,6 +787,11 @@ def _group(kind: str, cards: list[dict[str, Any]]) -> dict[str, Any]:
         cards = cards[:CARD_CHILDREN]
     sql = "\n".join(card["sql"] for card in cards if card["sql"])
     return {"id": None, "key": kind, "type": kind, "state": "open",
+            "risk": max((card["risk"] for card in cards), key=RISKS.index),
+            "effort": max((card["effort"] for card in cards), key=EFFORTS.index),
+            "saves_ms_per_min": round(sum(card["saves_ms_per_min"] for card in cards), 1),
+            "tier": min((card["tier"] for card in cards if card["tier"]), key=TIERS.index,
+                        default=None),
             "score": sum(card["score"] for card in cards), "title": title, "summary": summary,
             "note": None, "why": next((card["why"] for card in cards if card["why"]), None),
             "apply": "setting" if kind == "settings" else "run_sql", "sql": sql or None,
@@ -710,14 +811,35 @@ def _group(kind: str, cards: list[dict[str, Any]]) -> dict[str, Any]:
             "jev": max(card["jev"] for card in cards)}
 
 
+# Why the first pass's analyses wait while signed in, by AI-off reason.
+AI_PAUSED_TEXT = {
+    "limit": "Your account's AI slots are all in use, so the first analyses wait for a free one.",
+    "quota": "You've run out of AI usage for now, so the first analyses wait until it's raised.",
+}
+
+
 def _checkup_state(store: MonitorStore, target: str, now: int) -> dict[str, Any]:
-    """Where the checkups stand: the first pass of analyses, then the latest checkup."""
+    """Where the checkups stand: the first pass of analyses, then the latest checkup. While
+    the first pass's analyses wait for a sign-in or for AI to come back, `held` says so, and
+    `ai_reason` says why AI is off."""
+    from features.monitor import database_limit
+    from features.monitor.analyze_queue import SIGN_IN_FOR_MONITORING
     from features.monitor.report import first_pass
 
     progress = first_pass(store, target, now)
     if progress is not None and not progress["due"]:
+        held, held_text, ai_reason = None, None, None
+        if not database_limit._signed_in():
+            held, held_text = "sign_in", SIGN_IN_FOR_MONITORING
+        elif database_limit.paused(store, target, now):
+            quota = database_limit.ai_state(store, target) != "local" and \
+                database_limit.allowance_paused(store, "hosted", now) and \
+                not database_limit.own_key()
+            ai_reason = "quota" if quota else "limit"
+            held, held_text = "ai_paused", AI_PAUSED_TEXT[ai_reason]
         return {"state": "first_pass", "analyzed": progress["analyzed"], "total": progress["total"],
-                "due_by": progress["due_by"], "report_id": None, "finished_at": None}
+                "due_by": progress["due_by"], "report_id": None, "finished_at": None,
+                "held": held, "held_text": held_text, "ai_reason": ai_reason}
     rows = store.read("SELECT id,state,finished_at FROM report_run WHERE target=? AND sample=0 "
                       "ORDER BY id DESC LIMIT 1", (target,))
     latest = rows[0] if rows else None
@@ -795,7 +917,9 @@ def present(store: MonitorStore, target: str, now: int) -> dict[str, Any]:
 
     names = target_names(store, target)
     rows = store.actions(target)
-    cards = [_card(row, names) for row in rows if row["state"] == "open"]
+    minute_ms = database_minute(store, target, now)[0]
+    cards = [_card(row, names, minute_ms) for row in rows if row["state"] == "open"]
+    _tiers(cards, "tier")
     # One card per kind of change, so the page stays a short list however much there is to do.
     shown = []
     for kind, types in GROUPS.items():
@@ -920,3 +1044,476 @@ def present_plan(store: MonitorStore, target: str) -> dict[str, Any] | None:
     return {**plan, "add": adds, "drop": drops, "watch": watch, "set_aside": set_aside,
             "sql": "\n".join([add["sql"] for add in adds] + [drop["sql"] for drop in drops]),
             "rollback_sql": "\n".join(rollback) or None}
+
+
+# The plan across databases (ca-actions-plan.md decision 6): every open action ranked by the
+# database time it saves a minute, in three tiers, with what applying it risks and costs.
+
+DO_FIRST_SCORE = 0.1
+DO_FIRST_MAX = 3
+THEN_MIN_MS_PER_MIN = 1.0
+# A change saving less than this share of what the best one saves is a small win: worth
+# listing, not worth a quiet hour.
+LATER_SHARE_OF_TOP = 0.2
+TIERS = ("first", "then", "later")
+# Lowest first: ties in time saved go to the change that risks and costs less.
+RISKS = ("none", "writes", "locks", "restart")
+EFFORTS = ("copy_sql", "setting", "code")
+EFFORT = {"add_index": "copy_sql", "drop_index": "copy_sql", "run_maintenance": "copy_sql",
+          "change_setting": "setting", "rewrite_query": "code", "try_caching": "code"}
+KIND = {"add_index": "index", "drop_index": "index", "change_setting": "setting",
+        "run_maintenance": "maintenance", "rewrite_query": "rewrite", "try_caching": "caching"}
+KINDS = ("index", "setting", "maintenance", "rewrite")
+PLAN_WINDOW_S = 7 * 86400
+APPLIED_WINDOW_S = 30 * 86400
+APPLIED_LIMIT = 100
+APPLIED_STATES = ("applied", "confirmed", "no_effect")
+APPLIED_STATUS = {"applied": "measuring", "confirmed": "verified", "no_effect": "no_change",
+                  "undone": "undone"}
+CHANGES_SUBJECT = "plan"
+
+
+def _locks(sql: str | None) -> bool:
+    """A statement that blocks reads or writes while it runs: an index built or dropped
+    without CONCURRENTLY on PostgreSQL, VACUUM FULL, CLUSTER, REINDEX, OPTIMIZE TABLE."""
+    for statement in (sql or "").split(";"):
+        text = " ".join(statement.upper().split())
+        if text.startswith(("CREATE INDEX", "CREATE UNIQUE INDEX", "DROP INDEX", "REINDEX")) \
+                and "CONCURRENTLY" not in text:
+            return True
+        if text.startswith(("CLUSTER", "LOCK ", "OPTIMIZE TABLE")) or \
+                (text.startswith("VACUUM") and re.search(r"\bFULL\b", text)):
+            return True
+    return False
+
+
+def risk(row: dict[str, Any]) -> str:
+    """What applying a change risks besides its own work: `restart` for a setting that only
+    changes on a restart, `writes` for an index on a write-heavy table (every write maintains
+    it), `locks` for a drop or maintenance statement that blocks the table, else `none`."""
+    from features.monitor.index_plan import WRITE_HEAVY
+
+    payload = row["payload"]
+    if row["type"] == "change_setting":
+        restart = payload.get("restart") or payload.get("apply") == "config_restart"
+        return "restart" if restart else "none"
+    if row["type"] == "add_index":
+        cost = (payload.get("detail") or {}).get("write_cost") or {}
+        writes = max(float(cost.get("writes_per_s") or 0),
+                     float(cost.get("peak_writes_per_s") or 0) / 2)
+        return "writes" if writes >= WRITE_HEAVY or cost.get("hot_risk") else "none"
+    if row["type"] in ("drop_index", "run_maintenance") and _locks(payload.get("sql")):
+        return "locks"
+    return "none"
+
+
+def saves_ms_per_min(score: float, minute_ms: float) -> float:
+    """Database time a change saves a minute: the time its queries spend each minute, times
+    the reduction expected of the change.
+
+    An action's score is that reduction as a share of all database time. For an index it is
+    the plan's benefit, the sum over the queries it speeds up of share x expected gain; for a
+    rewrite, its query's share x the tested gain; settings, maintenance and drops carry a
+    fixed share per severity on the same scale. So saves_ms_per_min = score x minute_ms, where
+    minute_ms is the database time all queries spend a minute over the plan's window."""
+    return round(float(score) * minute_ms, 1)
+
+
+def database_minute(store: MonitorStore, target: str, now: int
+                    ) -> tuple[float, dict[str, dict[str, Any]]]:
+    """The database time queries spent a minute over the plan's window (the last 7 days, or
+    since readings began), and each query's totals in that window."""
+    from features.monitor.api.views import stmt_totals
+
+    start = now - PLAN_WINDOW_S
+    # The finest readings date the start; a rollup bucket starts before its first reading.
+    first = store.read("SELECT MIN(bucket_start) first FROM stmt_series WHERE target=? "
+                       "AND bucket_start>=? GROUP BY res ORDER BY res LIMIT 1", (target, start))
+    if not first or first[0]["first"] is None:
+        return 0.0, {}
+    meta = store.read("SELECT observed_since FROM stats_meta WHERE target=?", (target,))
+    since = max(start, int(meta[0]["observed_since"])) if meta else int(first[0]["first"])
+    totals = stmt_totals(store, target, start, now + 1)
+    spent = sum(float(row.get("total_ms") or 0) for row in totals.values())
+    return spent / max(60, now + 60 - since) * 60, totals
+
+
+def _rank_key(card: dict[str, Any]) -> tuple:
+    return (-card["saves_ms_per_min"], -card["score"], RISKS.index(card["risk"]),
+            EFFORTS.index(card["effort"]), card.get("database") or "", card["key"])
+
+
+def _tiers(cards: list[dict[str, Any]], field: str) -> None:
+    """Do first: open actions scoring 0.1 or more, at most three per database, by time saved
+    a minute, ties by risk then effort; a database whose best change scores at least half
+    that still has one thing to do first. Then: the rest saving at least a fifth of what the
+    best change saves. Later: the rest. Writes each card's tier to `field`; the list keeps
+    its order."""
+    taken: dict[str, int] = {}
+    top = max((card["saves_ms_per_min"] for card in cards), default=0.0)
+    floor = max(THEN_MIN_MS_PER_MIN, LATER_SHARE_OF_TOP * top)
+    for card in sorted(cards, key=_rank_key):
+        database = card.get("database") or ""
+        bar = DO_FIRST_SCORE / 2 if database not in taken else DO_FIRST_SCORE
+        if card["score"] >= bar and taken.get(database, 0) < DO_FIRST_MAX:
+            taken[database] = taken.get(database, 0) + 1
+            card[field] = "first"
+        else:
+            card[field] = "then" if card["saves_ms_per_min"] >= floor else "later"
+
+
+def do_first_keys(rows: list[dict[str, Any]]) -> list[str]:
+    """The keys in one database's Do first tier, from its open action rows. On one database
+    time saved orders as the score does."""
+    cards = [{"key": row["key"], "score": row["score"], "risk": risk(row),
+              "effort": EFFORT.get(row["type"], "code"), "saves_ms_per_min": 0.0}
+             for row in rows]
+    _tiers(cards, "tier")
+    return [card["key"] for card in sorted(cards, key=lambda card: (-card["score"], card["key"]))
+            if card["tier"] == "first"]
+
+
+def file_changes_ready(store: MonitorStore, target: str, now: int,
+                       opened: list[dict[str, Any]], *, was_open: bool = True
+                       ) -> dict[str, Any] | None:
+    """Keep the database's one Changes ready event in step with its plan (decision 2).
+
+    It files when the plan first becomes non-empty or gains a Do first change, and pushes
+    only for a Do first change; while open it keeps the count current. It closes by code
+    when the plan empties, or when Actions is opened for the database (`mark_opened`)."""
+    rows = store.read("SELECT * FROM inbox_item WHERE target=? AND type='changes_ready' "
+                      "AND subject=?", (target, CHANGES_SUBJECT))
+    item = rows[0] if rows else None
+    is_open = item is not None and item["state"] not in ("resolved", "dismissed")
+    if not opened:
+        if is_open:
+            store.action_item(item["id"], "resolve", now, resolved_by="code")
+        return None
+    previous = json.loads(item["body_json"]) if item else {}
+    first = do_first_keys(opened)
+    gained = sorted(set(first) - set(previous.get("do_first_keys") or []))
+    if not is_open and item is not None and was_open and not gained:
+        return None
+    ranked = sorted(opened, key=lambda row: (row["key"] not in first, -row["score"], row["key"]))
+    count = len(opened)
+    body = {"db": target, "count": count, "do_first": len(first), "do_first_keys": first,
+            "titles": [row["payload"].get("title") or row["key"] for row in ranked[:3]],
+            "action_ids": [row["id"] for row in ranked[:3]],
+            "filed_at": previous.get("filed_at", now) if is_open else now}
+    title = f"{count} {'change' if count == 1 else 'changes'} ready on {target}"
+    return store.upsert_item(target, "changes_ready", CHANGES_SUBJECT, 0.6, title, body, now,
+                             delivery="notify" if gained else "inbox", reopen_resolved=True)
+
+
+def mark_opened(store: MonitorStore, target: str, now: int) -> bool:
+    """The user opened Actions for this database: its Changes ready event closes."""
+    rows = store.read("SELECT id FROM inbox_item WHERE target=? AND type='changes_ready' "
+                      "AND subject=? AND state NOT IN ('resolved','dismissed')",
+                      (target, CHANGES_SUBJECT))
+    for row in rows:
+        store.action_item(row["id"], "resolve", now, resolved_by="code")
+    return bool(rows)
+
+
+def _engine_of(store: MonitorStore, target: str, plan: dict[str, Any] | None) -> str:
+    if plan and plan.get("engine"):
+        return str(plan["engine"])
+    meta = store.read("SELECT engine FROM stats_meta WHERE target=?", (target,))
+    return str(meta[0]["engine"]) if meta else "postgresql"
+
+
+def rollback_sql(row: dict[str, Any], engine: str) -> str | None:
+    """The SQL that reverses a change: drop an added index, rebuild a dropped one, set a
+    setting back to the value it had."""
+    payload = row["payload"]
+    detail = payload.get("detail") or {}
+    if row["type"] == "add_index":
+        return detail.get("undo_sql")
+    if row["type"] == "drop_index":
+        return detail.get("restore_sql")
+    setting = payload.get("setting") or {}
+    if row["type"] == "change_setting" and setting.get("name") and setting.get("current"):
+        from features.monitor.db_actions import setting_sql
+
+        return setting_sql(str(setting["name"]), str(setting["current"]), engine)
+    return None
+
+
+def _gains(row: dict[str, Any]) -> dict[str, float]:
+    """The expected share of each query's time a change saves, where the planner measured it.
+    A gain guessed from the analysis's impact label ranks the plan but is never shown."""
+    detail = row["payload"].get("detail") or {}
+    if row["type"] == "add_index":
+        return {helped["key"]: float(helped.get("gain") or 0)
+                for helped in detail.get("helps") or [] if helped.get("gain_pct") is not None}
+    if row["type"] == "rewrite_query" and detail.get("improvement_pct"):
+        gain = min(float(detail["improvement_pct"]), 99.0) / 100
+        return {key: gain for key in row["payload"].get("queries") or []}
+    return {}
+
+
+def plan_card(row: dict[str, Any], target: str, names: dict[str, str], minute_ms: float,
+              totals: dict[str, dict[str, Any]], engine: str) -> dict[str, Any]:
+    """One action as the global Actions page reads it."""
+    payload = row["payload"]
+    all_ms = sum(float(total.get("total_ms") or 0) for total in totals.values())
+    gains = _gains(row)
+    queries = []
+    for key in payload.get("queries") or []:
+        total = totals.get(key) or {}
+        calls, spent = float(total.get("calls") or 0), float(total.get("total_ms") or 0)
+        mean = spent / calls if calls else None
+        gain = gains.get(key)
+        queries.append({"key": key, "name": names.get(key) or key,
+                        "share": spent / all_ms if all_ms else 0.0, "mean_ms": mean,
+                        "expected_ms": mean * (1 - gain) if mean is not None and gain is not None
+                        else None})
+    result = payload.get("result") or {}
+    detail = payload.get("detail") or {}
+    return {"id": row["id"], "key": row["key"], "database": target, "type": row["type"],
+            "kind": KIND.get(row["type"], "index"), "state": row["state"], "priority": None,
+            "rank": None, "risk": risk(row), "effort": EFFORT.get(row["type"], "code"),
+            "saves_ms_per_min": saves_ms_per_min(row["score"], minute_ms),
+            "score": float(row["score"]), "title": payload.get("title") or row["key"],
+            "summary": payload.get("summary") or "", "note": payload.get("note"),
+            "why": row.get("why"), "apply": payload.get("apply") or "run_sql",
+            "sql": payload.get("sql"), "rollback_sql": rollback_sql(row, engine),
+            "restart": bool(payload.get("restart")), "confidence": payload.get("confidence"),
+            "table": payload.get("table"), "columns": list(payload.get("columns") or []),
+            "index_name": payload.get("index_name"), "setting": payload.get("setting") or None,
+            "queries": queries, "share": sum(query["share"] for query in queries),
+            "before_ms": result.get("before_ms"), "after_ms": result.get("after_ms"),
+            "write_cost": detail.get("write_cost") if row["type"] == "add_index" else None,
+            "steps": payload.get("steps"), "evidence": payload.get("evidence") or [],
+            "rows": payload.get("rows") or [],
+            "original": detail.get("original") if row["type"] == "rewrite_query" else None,
+            "opened_at": row["opened_at"],
+            "updated_at": row["updated_at"],
+            "set_aside_until": row.get("snoozed_until") if row["state"] == "snoozed" else None,
+            "closed_at": row.get("closed_at"), "reason": row.get("dismiss_reason"),
+            "checkup_rank": payload.get("priority")}
+
+
+def plan_cards(store: MonitorStore, target: str, now: int) -> list[dict[str, Any]]:
+    """Every action on one database as a plan card, the open ones tiered."""
+    from features.monitor.naming import target_names
+
+    rows = store.actions(target)
+    if not rows:
+        return []
+    names = target_names(store, target)
+    minute_ms, totals = database_minute(store, target, now)
+    engine = _engine_of(store, target, store.index_plan(target))
+    cards = [plan_card(row, target, names, minute_ms, totals, engine) for row in rows]
+    _tiers([card for card in cards if card["state"] == "open"], "priority")
+    return cards
+
+
+def _ranked(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(cards, key=lambda card: (TIERS.index(card["priority"]), *_rank_key(card)))
+
+
+def database_summary(store: MonitorStore, target: str, now: int,
+                     cards: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """One database's plan in numbers: changes to do, how many to do first, and the queries
+    an index or a rewrite would speed up with their share of database time."""
+    open_cards = [card for card in (plan_cards(store, target, now) if cards is None else cards)
+                  if card["state"] == "open"]
+    helped = {query["key"]: query["share"] for card in open_cards
+              if card["type"] in ("add_index", "rewrite_query") for query in card["queries"]}
+    return {"to_do": len(open_cards),
+            "do_first": sum(1 for card in open_cards if card["priority"] == "first"),
+            "fixes_ready": len(helped), "fixes_share": sum(helped.values()) if helped else None}
+
+
+def report_checks(store: MonitorStore, target: str) -> dict[str, Any] | None:
+    """The latest report's health checks counted as the report counts them, with the ones
+    needing you that have no change here, so Actions and the report agree on what it flags."""
+    from features.monitor.report import day_snapshot
+    from features.monitor.report_v2 import health_rows
+
+    rows = store.read("SELECT * FROM report_run WHERE target=? AND state='done' AND sample=0 "
+                      "AND report_json IS NOT NULL ORDER BY COALESCE(period_end,ts) DESC,id DESC "
+                      "LIMIT 1", (target,))
+    try:
+        report = json.loads(rows[0]["report_json"]) if rows else None
+    except ValueError:
+        return None
+    day = day_snapshot(report, rows[0]) if isinstance(report, dict) else None
+    if not day:
+        return None
+    health, fine = health_rows(day, [action for action in day.get("actions") or []
+                                     if isinstance(action, dict)], {})
+    needing = [row for row in health if row["needs_you"]]
+    return {"report_id": rows[0]["id"], "checks": len(health) + len(fine),
+            "needs_you": len(needing),
+            "not_in_actions": [{"check": row["check"], "label": row["label"],
+                                "finding": row["finding"]}
+                               for row in needing if not row["in_actions"]]}
+
+
+def global_page(store: MonitorStore, targets: list[str], now: int, *, db: str | None = None,
+                unmonitored: list[str] | None = None) -> dict[str, Any]:
+    """GET /actions: the open actions of every database in one ranked list (Do first, Then,
+    Later), narrowed to `db` when given, with the counts each filter choice would show."""
+    by_target = {target: plan_cards(store, target, now) for target in targets}
+    every = [card for target in targets for card in by_target[target]]
+    open_cards = _ranked([card for card in every if card["state"] == "open"])
+    scoped = [card for card in open_cards if db is None or card["database"] == db]
+    for rank, card in enumerate(scoped, 1):
+        card["rank"] = rank
+    in_scope = [target for target in targets if db is None or target == db]
+    plans = {target: store.index_plan(target) for target in in_scope}
+    computed = [plan["computed_at"] for plan in plans.values() if plan]
+    observed = [min(int(plan.get("observed_s") or 0), PLAN_WINDOW_S)
+                for plan in plans.values() if plan]
+    databases = [{"database": target, "monitored": target not in (unmonitored or []),
+                  "to_do": sum(1 for card in open_cards if card["database"] == target),
+                  "do_first": sum(1 for card in open_cards if card["database"] == target
+                                  and card["priority"] == "first"),
+                  "checkup": _checkup_state(store, target, now)} for target in targets]
+    databases += [{"database": name, "monitored": False, "to_do": 0, "do_first": 0,
+                   "checkup": None} for name in unmonitored or [] if name not in targets]
+    kinds = list(KINDS) + sorted({card["kind"] for card in scoped} - set(KINDS))
+    scoped_all = [card for card in every if db is None or card["database"] == db]
+    return {"db": db, "databases": databases, "unmonitored": list(unmonitored or []),
+            "updated_at": max(computed) if computed else None,
+            "observed_s": max(observed) if observed else None,
+            "counts": {"by_database": {row["database"]: row["to_do"] for row in databases},
+                       "by_kind": {kind: sum(1 for card in scoped if card["kind"] == kind)
+                                   for kind in kinds},
+                       **{tier: sum(1 for card in scoped if card["priority"] == tier)
+                          for tier in TIERS},
+                       "total": len(scoped)},
+            "cards": scoped,
+            "set_aside": [card for card in scoped_all if card["state"] == "snoozed"],
+            "dismissed": [card for card in scoped_all if card["state"] == "dismissed"],
+            "applied_count": sum(1 for card in scoped_all if card["state"] in APPLIED_STATES
+                                 and (card["closed_at"] or 0) >= now - APPLIED_WINDOW_S),
+            "keep": {target: len(plan.get("keep") or []) for target, plan in plans.items()
+                     if plan},
+            "left_out": {target: len(plan.get("skipped") or []) for target, plan in plans.items()
+                         if plan},
+            "report_checks": {target: checks for target in in_scope
+                              if (checks := report_checks(store, target)) is not None}}
+
+
+def _applied_at(store: MonitorStore, row: dict[str, Any]) -> int:
+    """When an undone change had been applied: its last applied event."""
+    for event in reversed(store.action_events(row["id"])):
+        if event["kind"] in ("applied", "did_it"):
+            return int(event["ts"])
+    return int(row.get("closed_at") or row["opened_at"])
+
+
+def _applied_row(store: MonitorStore, row: dict[str, Any], target: str, names: dict[str, str],
+                 engine: str, now: int, next_check_at: int | None) -> dict[str, Any]:
+    from features.monitor.api.views import stmt_totals
+
+    payload = row["payload"]
+    keys = list(payload.get("queries") or [])
+    undone = row["state"] == "undone"
+    applied_at = _applied_at(store, row) if undone else int(row.get("closed_at") or now)
+    settled = applied_at + VERIFY_SETTLE_S
+    before = stmt_totals(store, target, applied_at - VERIFY_BEFORE_S, applied_at, keys) \
+        if keys else {}
+    after = stmt_totals(store, target, settled, (row.get("closed_at") if undone else now) + 1,
+                        keys) if keys and now > settled else {}
+
+    def mean(totals: dict[str, Any]) -> float | None:
+        calls = float(totals.get("calls") or 0)
+        return float(totals.get("total_ms") or 0) / calls if calls else None
+
+    queries = [{"key": key, "name": names.get(key) or key,
+                "before_ms": mean(before.get(key) or {}), "after_ms": mean(after.get(key) or {}),
+                "calls_after": int((after.get(key) or {}).get("calls") or 0)} for key in keys]
+    result = payload.get("result") or {}
+    calls_after = sum(query["calls_after"] for query in queries)
+    before_ms = result.get("before_ms", mean({
+        "calls": sum(float(total.get("calls") or 0) for total in before.values()),
+        "total_ms": sum(float(total.get("total_ms") or 0) for total in before.values())}))
+    after_ms = result.get("after_ms", mean({
+        "calls": calls_after,
+        "total_ms": sum(float(total.get("total_ms") or 0) for total in after.values())}))
+    status = APPLIED_STATUS[row["state"]]
+    minutes = max(1.0, (now - settled) / 60)
+    saved = ((before_ms - after_ms) * calls_after / minutes
+             if status == "verified" and before_ms is not None and after_ms is not None
+             and calls_after else None)
+    return {"id": row["id"], "key": row["key"], "database": target, "type": row["type"],
+            "kind": KIND.get(row["type"], "index"), "title": payload.get("title") or row["key"],
+            "applied_at": applied_at, "by": "user" if row.get("closed_reason") == "user"
+            or _did_it(store, row) else "detected",
+            "source": row.get("closed_reason"), "status": status,
+            "queries": queries, "before_ms": before_ms, "after_ms": after_ms,
+            "calls_after": calls_after, "verified_at": result.get("at"),
+            "next_check_at": next_check_at if status == "measuring" and keys else None,
+            "rollback_sql": rollback_sql(row, engine), "saved_ms_per_min":
+            round(saved, 1) if saved is not None else None,
+            "undone_at": row.get("closed_at") if undone else None,
+            "reason": row.get("dismiss_reason") if undone else None}
+
+
+def _did_it(store: MonitorStore, row: dict[str, Any]) -> bool:
+    return any(event["kind"] == "did_it" for event in store.action_events(row["id"]))
+
+
+def applied_page(store: MonitorStore, targets: list[str], now: int, *,
+                 db: str | None = None) -> dict[str, Any]:
+    """GET /actions/applied: the changes applied in the last 30 days by day, newest first,
+    each measured against the 7 days before it; then the undone and dismissed ones with
+    their reasons, and the week's totals."""
+    from features.monitor.naming import target_names
+    from shared.monitor.monitor_store import local_day_bounds
+
+    rows, undone, dismissed = [], [], []
+    minutes, saved = 0.0, 0.0
+    for target in targets:
+        if db is not None and target != db:
+            continue
+        actions = store.actions(target)
+        if not actions:
+            continue
+        names = target_names(store, target)
+        plan = store.index_plan(target)
+        engine = _engine_of(store, target, plan)
+        minute_ms = database_minute(store, target, now)[0]
+        minutes += minute_ms
+        for row in actions:
+            closed = int(row.get("closed_at") or 0)
+            if closed < now - APPLIED_WINDOW_S:
+                continue
+            if row["state"] == "dismissed":
+                dismissed.append({"id": row["id"], "database": target, "type": row["type"],
+                                  "kind": KIND.get(row["type"], "index"),
+                                  "title": row["payload"].get("title") or row["key"],
+                                  "dismissed_at": closed, "reason": row.get("dismiss_reason")})
+                continue
+            if row["state"] not in (*APPLIED_STATES, "undone"):
+                continue
+            check = max(closed + VERIFY_AFTER_S, int((plan or {}).get("computed_at") or now)
+                        + STATS_EVERY_S, now)
+            entry = _applied_row(store, row, target, names, engine, now, check)
+            (undone if row["state"] == "undone" else rows).append(entry)
+            if entry["saved_ms_per_min"] and entry["applied_at"] >= now - 7 * 86400:
+                saved += entry["saved_ms_per_min"]
+    rows.sort(key=lambda entry: (-entry["applied_at"], -entry["id"]))
+    rows = rows[:APPLIED_LIMIT]
+    days: list[dict[str, Any]] = []
+    for entry in rows:
+        start = local_day_bounds(entry["applied_at"])[0]
+        if not days or days[-1]["start"] != start:
+            days.append({"start": start, "day": datetime.fromtimestamp(start).date().isoformat(),
+                         "rows": []})
+        days[-1]["rows"].append(entry)
+    week = [entry for entry in rows if entry["applied_at"] >= now - 7 * 86400]
+    return {"db": db, "since": min((entry["applied_at"] for entry in rows), default=None),
+            "days": days,
+            "undone": sorted(undone, key=lambda entry: -(entry["undone_at"] or 0)),
+            "dismissed": sorted(dismissed, key=lambda entry: -entry["dismissed_at"]),
+            "totals": {"changes_this_week": len(week),
+                       "verified": sum(1 for entry in week if entry["status"] == "verified"),
+                       "measuring": sum(1 for entry in week if entry["status"] == "measuring"),
+                       "no_change": sum(1 for entry in week if entry["status"] == "no_change"),
+                       "saved_ms_per_min": round(saved, 1),
+                       "saved_share": min(1.0, saved / minutes) if minutes else None}}

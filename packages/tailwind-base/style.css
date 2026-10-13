@@ -320,6 +320,41 @@
   --radius-panel: 0.75rem;
   --radius-control: 0.5rem;
   --radius-pill: 9999px;
+  /* The app canvas: the one rounded surface inset from the page tone. */
+  --radius-canvas: 1.125rem;
+
+  /* Metric numerals between stat-hero (48) and the headline scale: the page
+     metric row (28) and the compact card row (22), tabular at the component. */
+  --text-stat-large: 1.75rem;
+  --text-stat-large--line-height: 2.125rem;
+  --text-stat-large--font-weight: 500;
+  --text-stat-large--letter-spacing: -0.01em;
+
+  --text-stat-small: 1.375rem;
+  --text-stat-small--line-height: 1.75rem;
+  --text-stat-small--font-weight: 500;
+  --text-stat-small--letter-spacing: -0.01em;
+
+  /* Divided-list hover: the raised tone fading out at both row ends. */
+  --background-image-row-hover: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-surface-primary-soft) 4%,
+    var(--color-surface-primary-soft) 96%,
+    transparent
+  );
+
+  /* Series identity ramp for charts: eight cool hues plus the neutral rest.
+     Identity only; status stays with the positive / warning / negative families. */
+  --color-series-0: var(--series-0);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
+  --color-series-5: var(--series-5);
+  --color-series-6: var(--series-6);
+  --color-series-7: var(--series-7);
+  --color-series-8: var(--series-8);
 
   /* Keyframes */
   @keyframes enter {
@@ -782,6 +817,15 @@
     --content-viz-hit: var(--green-light-11);
     --content-viz-rollback: var(--tomato-light-11);
     --content-viz-neutral: var(--sand-light-9);
+    --series-1: #7C8CF8;
+    --series-2: #5EB1F0;
+    --series-3: #4CC2D9;
+    --series-4: #52B9A8;
+    --series-5: #9B8CF2;
+    --series-6: #C486E0;
+    --series-7: #B98BE8;
+    --series-8: #8AA7D9;
+    --series-0: var(--sand-light-8);
 
     --border-layout-1: var(--sand-light-5);
     --border-layout-2: var(--sand-light-6);
@@ -928,6 +972,15 @@
     --content-viz-hit: var(--green-dark-11);
     --content-viz-rollback: var(--tomato-dark-11);
     --content-viz-neutral: var(--sand-dark-9);
+    --series-1: #7C8CF8;
+    --series-2: #5EB1F0;
+    --series-3: #4CC2D9;
+    --series-4: #52B9A8;
+    --series-5: #9B8CF2;
+    --series-6: #C486E0;
+    --series-7: #B98BE8;
+    --series-8: #8AA7D9;
+    --series-0: #4a4846;
 
     --border-layout-1: var(--sand-dark-3);
     --border-layout-2: var(--sand-dark-4);

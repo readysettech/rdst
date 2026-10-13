@@ -1,86 +1,156 @@
-// The Database page (DESIGN_V4): one question, "what is my database spending its time
-// on, and what should I fix first?". The header carries identity and the one live
-// pulse. Actions lists the few changes worth making, by kind, with the whole index plan;
-// Queries is the load-by-query hero with the query list as its legend; Reports holds the
-// daily reports. Switching target crossfades the content; per-target query caches make
-// switching back instant.
+// The Database page: the bar with the radar, the name, the state caption and the engine; the
+// Live and Report tabs; four numbers above the chart card and the query list,
+// whose changes to do link to this database on the Actions page. The detail pane is a
+// second panel in the layout, closed by default, opened by a row, the gear (settings) or a
+// benchmark; each panel scrolls on its own.
+
+import { cn } from '@rs/tailwind-base'
+import { Alert } from '@rs/ui-new/alert'
+import { Button } from '@rs/ui-new/button'
 import { EmptyState } from '@rs/ui-new/empty-state'
 import { ErrorState } from '@rs/ui-new/error-state'
-import { AnimatePresence, m, useReducedMotion } from '@rs/ui-new/motion'
+import { IconButton } from '@rs/ui-new/icon-button'
+import { PageBar } from '@rs/ui-new/page-bar'
+import { PageContainer } from '@rs/ui-new/page-container'
 import { Skeleton } from '@rs/ui-new/skeleton'
+import { TabItemButton, TabList } from '@rs/ui-new/tab'
 import { Text } from '@rs/ui-new/text'
-import { useNavigate } from '@tanstack/react-router'
+import { TwoPane } from '@rs/ui-new/two-pane'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { DatabaseSwitcher } from '@/components/DatabaseSwitcher'
+import { useOpenAddDatabase } from '@/components/configure/addDatabase'
 import { QuerySection } from '@/features/database/queries'
-import { ReportView } from '@/features/database/reports'
-import { InboxContextBanner, incidentWindow } from '@/features/inbox'
-import { QueryContextBanner } from '@/features/inbox/InboxContextBanner'
 import {
-  bandColors,
-  buildOverlay,
-  ChartHighlightContext,
-  clampRange,
+  ReportView,
+  useReportRun,
+  useRunCompletion,
+} from '@/features/database/reports'
+import { MonitoringStatusAction } from '@/features/monitor-kit/AiMonitoringStatus'
+import {
+  monitoringStatus,
+  needsUserAction,
+} from '@/features/monitor-kit/aiMonitoring'
+import {
+  availableRanges,
+  chartPauses,
   domainFor,
   fetchRange,
-  LIVE_RANGES,
   type LiveRange,
   loadFromBreakdown,
   loadFromQueries,
-  pickHighlight,
   RANGE_SECONDS,
-  rangePhrase,
 } from '@/features/monitor-kit/charts'
-import {
-  DatabaseGlyph,
-  type GlyphTone,
-} from '@/features/monitor-kit/DatabaseGlyph'
+import { formatClock } from '@/features/monitor-kit/format'
+import { Radar, type RadarState } from '@/features/monitor-kit/Radar'
 import { useMonitorPulse } from '@/features/monitor-kit/useMonitorPulse'
+import type { SwitcherTone } from '@/features/shared/filters/DatabaseFilter'
 import { useTargetResolution } from '@/hooks/useTarget'
-import { useActions, useIndexPlan } from '@/lib/monitor/actions'
+import { fetchTargets } from '@/lib/api'
+import { actionKeys, useActions, useIndexPlan } from '@/lib/monitor/actions'
+import { fixtureOverride } from '@/lib/monitor/contract'
+import { asCaScenario, caFixtures } from '@/lib/monitor/fixturesCa'
 import {
-  useInboxItem,
+  useAnalyzeJobs,
+  useCancelAnalyzeJob,
+  useConfiguredDatabases,
+  useEnqueueAnalysis,
+  useInbox,
   useLoad,
   useMonitorHealth,
-  useMonitorQueries,
+  useMonitoringLimit,
   useMonitorQueriesIn,
   useMonitorQuery,
   useMonitorSettings,
-  useMonitorWork,
   useReport,
+  useReportHistory,
 } from '@/lib/monitor/hooks'
+import type { MonitorQuery } from '@/lib/monitor/types'
 import { useSystemStatus } from '@/lib/useSystemStatus'
 import {
-  ActionsTab,
   buildingFirstPlan,
   changeCount,
-} from './actions/ActionsTab'
+  planSqlFor,
+} from './actions/actionsModel'
 import { FirstPlanPointer } from './actions/FirstPlanPointer'
 import { AnalyzeQueryDialog } from './analyze/AnalyzeQueryDialog'
-import { DatabaseBenchmarksSection } from './benchmark/DatabaseBenchmarksSection'
-import { DatabaseHeader, useSignInNeeded } from './overview/DatabaseHeader'
+import { stepsForPhase } from './analyze/analyzingSteps'
+import { useFollowAnalyses } from './analyze/useFollowAnalyses'
+import { BenchmarkFixesDialog } from './benchmark/BenchmarkFixesDialog'
+import { BenchmarkResultPane } from './benchmark/BenchmarkResultPane'
+import { queriesWithFixes } from './benchmark/fixBenchmarkModel'
+import {
+  analysesWaitForSignIn,
+  analysisUnderWay,
+  barState,
+  chartMarkers,
+  engineLabel,
+  type HealthMetricId,
+  healthMetrics,
+  markerClock,
+  type RowSort,
+  sortRows,
+} from './databaseModel'
 import {
   FirstRunStrip,
+  firstRunLabel,
+  firstRunWindow,
   MeasuringQueries,
   useFirstRun,
   WaitingForQueries,
 } from './overview/FirstReadings'
-import { firstRunDomain, showFirstRun } from './overview/firstReadingsModel'
-import { overallTone, tileModels } from './overview/healthModel'
-import { LoadHero, LoadStrip } from './overview/LoadHero'
-import { ReportTeaser } from './overview/ReportTeaser'
+import { showFirstRun } from './overview/firstReadingsModel'
+import { HealthMetrics } from './overview/HealthMetrics'
+import { LoadCard } from './overview/LoadCard'
+import { QueryDetail } from './queries/QueryDetail'
 import { queryName } from './queries/querySelectors'
 import { useQueryListUrl } from './queries/useQueryListUrl'
-import { EnableMonitoringDialog } from './settings/EnableMonitoringDialog'
-import { MonitoringSettingsSheet } from './settings/MonitoringSettingsSheet'
-import { MonitoringSetupDialog } from './settings/MonitoringSetupDialog'
 import {
-  type DatabaseView as DatabaseTab,
-  fitZoom,
-  frameLabel,
-  useDatabaseUrl,
-  windowLabel,
-} from './useDatabaseUrl'
+  ConnectionRepair,
+  connectionWarning,
+} from './settings/ConnectionRepair'
+import { EnableMonitoringDialog } from './settings/EnableMonitoringDialog'
+import { MonitoringSettingsPane } from './settings/MonitoringSettingsPane'
+import { MonitoringSetupDialog } from './settings/MonitoringSetupDialog'
+import { type HealthPanel, useDatabaseUrl } from './useDatabaseUrl'
+
+const SEEN_KEY = 'rdst_report_seen'
+const PLAN_SEEN_KEY = 'rdst_actions_seen'
+const DAY = 86400
+const SIGN_IN_NOTE =
+  'AI checks need a Readyset sign-in, even with your own key.'
+const TOOLBAR_RANGES: readonly LiveRange[] = [
+  '15m',
+  '1h',
+  '24h',
+  '7d',
+  '30d',
+  'all',
+]
+
+const HEALTH_TO_PANEL: Record<HealthMetricId, HealthPanel | null> = {
+  qps: null,
+  connections: 'connections',
+  hit: 'hit',
+  rollback: 'rollback',
+}
+
+const RADAR_BY_TONE: Record<SwitcherTone, RadarState> = {
+  live: 'watching',
+  warning: 'paused',
+  negative: 'unreachable',
+  off: 'off',
+}
+
+/**
+ * The page's clock: the current minute, never behind the last reading. A redesign
+ * fixture is frozen on its own timeline, so the page follows that clock instead.
+ */
+function pageNow(wallClock: number, lastTs: number | null | undefined): number {
+  const scenario = asCaScenario(fixtureOverride())
+  if (scenario) return caFixtures(scenario).now
+  return Math.max(Math.floor(wallClock / 60) * 60, lastTs ?? 0)
+}
 
 /** True once `active` has held for `ms` (skeletons never flash on fast loads). */
 function useDelayed(active: boolean, ms = 100) {
@@ -94,90 +164,6 @@ function useDelayed(active: boolean, ms = 100) {
     return () => clearTimeout(timer)
   }, [active, ms])
   return shown
-}
-
-const SEEN_KEY = 'rdst_report_seen'
-const PLAN_SEEN_KEY = 'rdst_actions_seen'
-
-/** Whether this viewer has opened Actions since the first plan arrived (per target). */
-function usePlanSeen(target: string, ready: boolean, viewing: boolean) {
-  const key = `${PLAN_SEEN_KEY}:${target}`
-  const read = useCallback(() => {
-    try {
-      return window.localStorage.getItem(key) === '1'
-    } catch {
-      return false
-    }
-  }, [key])
-  const [seen, setSeen] = useState(read)
-  useEffect(() => setSeen(read()), [read])
-  useEffect(() => {
-    if (!ready || !viewing || seen) return
-    try {
-      window.localStorage.setItem(key, '1')
-    } catch {
-      // Storage can be unavailable; the pointer then shows until the next visit.
-    }
-    setSeen(true)
-  }, [key, ready, viewing, seen])
-  return seen
-}
-
-const STRIP_TITLE = {
-  calls: 'Queries per second',
-  latency: 'Latency',
-  time: 'Time spent',
-} as const
-
-/** The next range to try for a linked query the current range doesn't hold. */
-/** The smallest page range whose window reaches back to `start`. */
-export function rangeHolding(start: number, now: number): LiveRange {
-  for (const range of ['1h', '24h', '7d', '30d', '90d'] as const)
-    if (now - RANGE_SECONDS[range] <= start) return range
-  return 'all'
-}
-
-const RANGE_ORDER: readonly LiveRange[] = LIVE_RANGES
-/** The ranges the toolbar offers; links can still carry the others. */
-const TOOLBAR_RANGES: readonly LiveRange[] = [
-  '15m',
-  '1h',
-  '24h',
-  '7d',
-  '30d',
-  'all',
-]
-
-export function widerRange(range: LiveRange): LiveRange | null {
-  if (range === 'all') return null
-  if (range === '5m' || range === '15m' || range === '1h') return '24h'
-  return 'all'
-}
-
-const FIRST_RUN_HIDDEN_KEY = 'rdst_first_run_hidden'
-
-/** The first-run strip, hidden by this viewer for this turn-on (a per-viewer convenience). */
-function useFirstRunHidden(target: string, enabledAt: number | null) {
-  const key = `${FIRST_RUN_HIDDEN_KEY}:${target}`
-  const read = useCallback(() => {
-    try {
-      return window.localStorage.getItem(key)
-    } catch {
-      return null
-    }
-  }, [key])
-  const [hiddenFor, setHiddenFor] = useState<string | null>(read)
-  useEffect(() => setHiddenFor(read()), [read])
-  const hide = useCallback(() => {
-    const value = String(enabledAt ?? 'first')
-    try {
-      window.localStorage.setItem(key, value)
-    } catch {
-      // Storage can be unavailable; the strip then hides until the page reloads.
-    }
-    setHiddenFor(value)
-  }, [key, enabledAt])
-  return [hiddenFor === String(enabledAt ?? 'first'), hide] as const
 }
 
 /** The newest report this viewer opened, per target (a per-viewer convenience). */
@@ -205,594 +191,726 @@ function useReportSeen(
     }
     setSeen(latestId)
   }, [viewing, latestId, seen, target])
-  return latestId != null && seen != null
-    ? latestId > seen
-    : latestId != null && seen == null
+  return latestId != null && (seen == null || latestId > seen)
+}
+
+/** Whether this viewer has opened Actions since the first plan arrived (per target). */
+function usePlanSeen(target: string, ready: boolean) {
+  const key = `${PLAN_SEEN_KEY}:${target}`
+  const read = useCallback(() => {
+    try {
+      return window.localStorage.getItem(key) === '1'
+    } catch {
+      return false
+    }
+  }, [key])
+  const [seen, setSeen] = useState(read)
+  useEffect(() => setSeen(read()), [read])
+  const markSeen = useCallback(() => {
+    if (!ready || seen) return
+    try {
+      window.localStorage.setItem(key, '1')
+    } catch {
+      // Storage can be unavailable; the pointer then shows until the next visit.
+    }
+    setSeen(true)
+  }, [key, ready, seen])
+  return [seen, markSeen] as const
+}
+
+const LIVE_DOT =
+  "after:absolute after:top-3 after:-right-2.5 after:h-1.5 after:w-1.5 after:rounded-full after:bg-content-rising-plain after:content-['']"
+
+/** Names a tab's live dot for assistive tech; the dot itself is the tab's ::after. */
+function LiveDotLabel({ id, label }: { id: string; label: string }) {
+  return (
+    <span id={id} data-testid="tab-live-dot" className="sr-only">
+      {label}
+    </span>
+  )
+}
+
+interface BenchmarkRun {
+  ranAt: number
+  keys: string[]
 }
 
 function DatabaseView({ target }: { target: string }) {
   const page = useDatabaseUrl()
   const list = useQueryListUrl()
   const settings = useMonitorSettings(target)
-  const health = useMonitorHealth(
+  const health = useMonitorHealth(target, fetchRange(page.range))
+  const rows = useMonitorQueriesIn(target, page.range)
+  // The calls chart stacks the busiest queries; the others rank by execution time.
+  const load = useLoad(
     target,
-    fetchRange(page.range),
-    page.zoom ? { from: page.zoom[0], to: page.zoom[1] } : undefined
+    page.range,
+    undefined,
+    page.metric === 'calls' ? 'calls' : 'time'
   )
-  const queries = useMonitorQueries(target, fetchRange(page.range))
   const pulse = useMonitorPulse(target)
-  const signInNeeded = useSignInNeeded(pulse.state)
-  // What the Reports tab shows: the nightly reports.
+  const run = useReportRun(target)
+  // What the Report tab opens on: the newest daily report.
   const latest = useReport(target, 'daily')
+  const reports = useReportHistory(target)
+  const inbox = useInbox({ target })
+  const jobs = useAnalyzeJobs(target)
+  const enqueue = useEnqueueAnalysis(target)
+  const cancelAnalysis = useCancelAnalyzeJob(target)
+  const targets = useQuery({
+    queryKey: ['configure-targets-hosts'],
+    queryFn: fetchTargets,
+    staleTime: 60_000,
+  })
   const [hoverKey, setHoverKey] = useState<string | null>(null)
   const [enableOpen, setEnableOpen] = useState(false)
-  const [queueFocus, setQueueFocus] = useState(false)
-  const data = health.data
-  const history = data?.history ?? queries.data?.history
+  const [repairOpen, setRepairOpen] = useState(false)
+  const [benchmarkOpen, setBenchmarkOpen] = useState(false)
+  // The query pane estimates its own fix's gain; the list's button covers every fix.
+  const [benchmarkScope, setBenchmarkScope] = useState<string[] | null>(null)
+  const [benchmark, setBenchmark] = useState<BenchmarkRun | null>(null)
   const { range, setRange, setView, openReport } = page
-  // Queries carries the first run; Actions leads once the first plan is in.
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const actions = useActions(target)
   const indexPlan = useIndexPlan(target, true, actions.data?.computed_at).data
-  // Actions leads, the first run included: it shows the first plan being built, with the live
-  // load beside it. Queries leads only before monitoring has a checkup in sight.
-  const firstState = actions.data?.checkup?.state
-  const autoView: DatabaseTab =
-    (actions.data?.open_count ?? 0) > 0 ||
-    firstState === 'first_pass' ||
-    (firstState === 'done' && actions.data?.computed_at != null)
-      ? 'actions'
-      : 'live'
-  const view = page.requestedView ?? autoView
-  const navigate = useNavigate()
-  const showQuery = useCallback(
-    (key: string) =>
-      void navigate({
-        to: '/database',
-        search: (prev: Record<string, unknown>) => ({
-          ...prev,
-          view: 'live',
-          focus: key,
-        }),
-      } as never),
-    [navigate]
+  const view = page.requestedView === 'report' ? 'report' : 'live'
+  const planReady =
+    !buildingFirstPlan(actions.data) && actions.data?.computed_at != null
+  const [planSeen, markPlanSeen] = usePlanSeen(target, planReady)
+  // This database as the sidebar shows it: its state, and the count Actions shows.
+  const configured = useConfiguredDatabases().databases.find(
+    (db) => db.name === target
   )
-  // The first hour after turning monitoring on: timed steps above the live chart.
+  const planToDo = configured?.toDo
+  const openActions = planToDo ?? changeCount(actions.data, indexPlan)
+  // This database's slice of the Actions page.
+  const goToActions = useCallback(() => {
+    markPlanSeen()
+    void navigate({ to: '/actions', search: { db: target } } as never)
+  }, [markPlanSeen, navigate, target])
+  const analyses = useFollowAnalyses(target, jobs.data?.jobs)
+  const queriesLive = analyses.active.size > 0
+  const signIn = analysesWaitForSignIn(
+    actions.data?.checkup,
+    rows.data?.queries
+  )
+  const data = health.data
+  const history = data?.history ?? rows.data?.history
+  const enabled = settings.data?.enabled ?? true
+  const unmonitored = settings.data ? !settings.data.enabled : false
+  const outage = data?.outages?.find((entry) => entry.end === null) ?? null
+  const unreachable = pulse.state === 'connection_lost' || outage !== null
+  const now = pageNow(pulse.now, history?.last_ts)
+  const firstRun = enabled && showFirstRun(settings.data, history, now)
+  // The first minutes: the steps under way, and until the queries are known and ranked, a
+  // card in place of the chart or the list.
   const firstRunModel = useFirstRun({
     target,
     settings: settings.data,
     history,
     pulse,
-    queries: queries.data?.queries,
-    nextReadingAt: data?.next_reading_at,
+    queries: rows.data?.queries,
+    nextReadingAt: health.data?.next_reading_at,
   })
+  const waiting =
+    enabled && !unmonitored && firstRunModel.waitingForQueries && !rows.isError
+  const measuring =
+    firstRun && !unmonitored && firstRunModel.measuring && !rows.isError
+  const day = range === 'all' || RANGE_SECONDS[range] >= DAY
+  const recorded = history?.span_seconds ?? 0
+  // The first minutes keep one window until more than one range of readings is in.
+  const firstWindow = firstRun && recorded <= RANGE_SECONDS['15m']
 
-  // Honest ranges: a range beyond the stored history clamps to the largest enabled one.
-  useEffect(() => {
-    if (!history || health.isPlaceholderData) return
-    const clamped = clampRange<LiveRange>(range, history, LIVE_RANGES)
-    if (clamped !== range) setRange(clamped)
-  }, [history, health.isPlaceholderData, range, setRange])
-
-  // Arriving on a time frame (an Inbox link, a shared zoom) shows every query in it:
-  // the Status filter resets once per arrival.
-  const { arrive } = page
-  const arrivedFor = useRef<string | null>(null)
-  useEffect(() => {
-    const key = page.fromItem != null ? `from:${page.fromItem}` : ''
-    const first = arrivedFor.current === null
-    if (key === arrivedFor.current) return
-    arrivedFor.current = key
-    if ((key || (first && page.zoom)) && list.filter !== 'all')
-      arrive({ resetFilter: true })
-  }, [page.fromItem, page.zoom, list.filter, arrive])
-
-  const minute = Math.floor(pulse.now / 60) * 60
-  // Under five minutes of history, the chart spans the first reading and the next few
-  // minutes, so the first points draw at once with room to grow, the minute still
-  // filling up included.
-  const early = firstRunDomain(history, minute)
-  const earlyFrom = early?.[0] ?? null
-  const earlyTo = early?.[1] ?? null
-  const base = useMemo<[number, number]>(
+  // The chart spans what it has recorded: a span shorter than the range fills the plot.
+  // Before the first reading the first window starts now.
+  const chartHistory = load.data?.history ?? history
+  const domain = useMemo<[number, number]>(
     () =>
-      earlyFrom != null && earlyTo != null
-        ? [earlyFrom, earlyTo]
-        : domainFor(range, history, Math.max(minute, history?.last_ts ?? 0)),
-    [earlyFrom, earlyTo, range, history, minute]
+      firstWindow
+        ? firstRunWindow(chartHistory?.first_ts ?? now, now)
+        : domainFor(range, chartHistory, now),
+    [firstWindow, chartHistory, range, now]
   )
-  // In the first hour the minute still filling up draws too, rated over the time up to the
-  // latest reading. The first reading only sets the baseline, so rates start from it.
-  const { firstAt: readingFrom, lastAt: readingTo } = firstRunModel
-  const inFirstRun = showFirstRun(settings.data, history, pulse.now)
-  const coverage = useMemo(
-    () =>
-      inFirstRun && readingTo != null
-        ? {
-            from: readingFrom,
-            until: readingTo,
-          }
-        : null,
-    [inFirstRun, readingFrom, readingTo]
-  )
-  // A zoom is at least five minutes and anywhere in the recorded history; the range
-  // widens to hold it (a time frame from the Inbox can be days old).
-  const now = Math.max(minute, history?.last_ts ?? 0)
-  const zoom = useMemo(
-    () => (page.zoom ? fitZoom(page.zoom, now + 60, history?.first_ts) : null),
-    [page.zoom, now, history?.first_ts]
-  )
-  const domain = useMemo<[number, number]>(() => zoom ?? base, [base, zoom])
-  const zoomed = zoom != null
-
-  // The range grows to hold the zoom, as far as the recorded history goes.
-  useEffect(() => {
-    if (!zoom || !history || health.isPlaceholderData) return
-    const needed = clampRange<LiveRange>(
-      rangeHolding(zoom[0], now),
-      history,
-      LIVE_RANGES
-    )
-    if (RANGE_ORDER.indexOf(needed) > RANGE_ORDER.indexOf(range))
-      arrive({ range: needed })
-  }, [zoom, history, health.isPlaceholderData, now, range, arrive])
-  const onZoom = useCallback(
-    (next: [number, number]) =>
-      page.setZoom(fitZoom(next, now + 60, history?.first_ts)),
-    [page.setZoom, now, history?.first_ts]
-  )
-
-  // The backend's breakdown and window-ranked rows when it serves them (finer buckets
-  // inside a zoom); otherwise the same model from each query's series.
-  const window = zoomed ? { from: domain[0], to: domain[1] } : undefined
-  const load = useLoad(target, range, window)
-  const rowsIn = useMonitorQueriesIn(target, range, window)
-  const served = Boolean(
-    load.data && rowsIn.data && !load.isError && !rowsIn.isError
-  )
+  const rangeLabel = firstWindow ? firstRunLabel(domain, now) : undefined
   const model = useMemo(() => {
-    if (served && load.data)
-      return loadFromBreakdown(load.data, undefined, coverage)
-    return queries.data
-      ? loadFromQueries(queries.data.queries, domain, 8, queryName, undefined, {
-          coverage,
-        })
+    if (load.data && !load.isError) return loadFromBreakdown(load.data)
+    return rows.data
+      ? loadFromQueries(rows.data.queries, domain, 8, queryName)
       : null
-  }, [served, load.data, queries.data, domain, coverage])
-  // Queries/s picks its bands by call count, keeping each query's time-view color.
-  // Inside a zoom, the window's own rows carry series fine enough for it.
-  const callRows = served ? rowsIn.data?.queries : queries.data?.queries
-  const callsModel = useMemo(() => {
-    if (!callRows || !model) return null
-    return loadFromQueries(callRows, domain, 8, queryName, undefined, {
-      rankBy: 'calls',
-      pinned: bandColors(model),
-      coverage,
-    })
-  }, [callRows, model, domain, coverage])
-  const scopeLabel = zoomed
-    ? `from ${windowLabel(domain, now)}`
-    : `in the ${rangePhrase(range, history)}`
-  // The glyph's color is the database's health: how much the open actions matter, or a vital
-  // gone critical.
-  const severities = [
-    ...(actions.data?.actions ?? []),
-    ...(actions.data?.more ?? []),
-  ].map((card) => card.severity)
-  // Until the first plan, health isn't known yet: the glyph stays neutral.
-  const actionTone: GlyphTone =
-    actions.data?.computed_at == null
-      ? 'neutral'
-      : severities.includes('high')
-        ? 'negative'
-        : severities.includes('medium')
-          ? 'warning'
-          : 'positive'
-  const vitalsTone = useMemo(
-    () => (data ? overallTone(tileModels(data)) : 'positive'),
-    [data]
+  }, [load.data, load.isError, rows.data, domain])
+  const markers = useMemo(
+    () =>
+      chartMarkers({
+        health: data,
+        items: inbox.data?.items,
+        reports: reports.data?.reports,
+        domain,
+      }),
+    [data, inbox.data, reports.data, domain]
   )
-  // A vital in warning alone doesn't color it: Actions says whether there's anything to do.
-  const tone = vitalsTone === 'negative' ? 'negative' : actionTone
-  const work = useMonitorWork().data
-  const analyzing = Boolean(
-    work?.running.some((job) => job.target === target) ||
-      work?.queued.some((job) => job.target === target)
+  const pauses = useMemo(
+    () =>
+      model
+        ? chartPauses({
+            readings: model.xs.filter((_, i) =>
+              model.calls.some((row) => row[i] != null)
+            ),
+            res: model.res,
+            domain,
+            outages: data?.outages ?? [],
+            now,
+          })
+        : [],
+    [model, domain, data?.outages, now]
   )
-  const checkupState = actions.data?.checkup?.state
-  const planReady =
-    !buildingFirstPlan(actions.data) && actions.data?.computed_at != null
-  const planSeen = usePlanSeen(target, planReady, view === 'actions')
-
-  // A link from the Inbox carries its item: a banner says why you're here and every
-  // chart shades the incident window.
-  const inboxItem = useInboxItem(page.fromItem)
-  const fromItem =
-    inboxItem.data?.target === target && page.fromItem != null
-      ? inboxItem.data
+  const ranges = useMemo(
+    () => availableRanges(history, TOOLBAR_RANGES),
+    [history]
+  )
+  const cacheReason =
+    latest.data?.day?.tiles.find((tile) => tile.metric === 'cache_hit')
+      ?.reason ??
+    latest.data?.health?.find((row) => row.check === 'cache')?.detail ??
+    null
+  const metrics = useMemo(
+    () => (data ? healthMetrics(data, { day, cacheReason, firstRun }) : []),
+    [data, day, cacheReason, firstRun]
+  )
+  const selectedMetric: HealthMetricId = page.health ?? 'qps'
+  const bar = barState(settings.data, pulse, data, configured?.state)
+  // Why AI is off when the user has to act on it, with the way to fix it.
+  const aiStatus = monitoringStatus({
+    enabled: settings.data?.enabled,
+    ai: settings.data?.ai_monitoring,
+    reason: signIn ? 'signed_out' : settings.data?.ai_reason,
+    since: settings.data?.ai_since,
+    now: pulse.now,
+  })
+  const aiActionNeeded = Boolean(settings.data) && needsUserAction(aiStatus)
+  const limit = useMonitoringLimit(undefined, aiActionNeeded)
+  const engine = engineLabel(data)
+  const lastReading = data?.last_reading_at ?? pulse.clock.lastAt
+  const activity = pulse.activity
+    ? { ...pulse.activity, last_reading_at: lastReading }
+    : lastReading != null
+      ? {
+          kind: 'reading' as const,
+          label: 'Reading query statistics',
+          last_reading_at: lastReading,
+          every_s: pulse.clock.period,
+        }
       : null
-  const highlight = useMemo(() => {
-    const window = fromItem ? incidentWindow(fromItem, list.openKey) : null
-    return window
-      ? { start: window.start, end: window.end, label: 'From your Inbox' }
-      : null
-  }, [fromItem, list.openKey])
-
-  const banner = fromItem ? (
-    <InboxContextBanner
-      item={fromItem}
-      queryKey={list.openKey}
-      zoomed={zoomed}
-      onShowDay={page.showDay}
-      onDismiss={page.clearFrom}
-    />
-  ) : null
-  // An opened query shows the banner at the top of its detail, where the page lands;
-  // until its detail is on the page, the banner sits above the chart.
-  const [detailBanner, setDetailBanner] = useState(false)
-  const queryBanner =
-    banner && list.openKey
-      ? { queryKey: list.openKey, banner, onShown: setDetailBanner }
-      : null
+  const reason = data?.delay_reason ?? pulse.delayReason ?? null
+  const targetDetail = targets.data?.find((entry) => entry.name === target)
+  const warning = connectionWarning(
+    targetDetail?.host
+      ? {
+          host: targetDetail.host,
+          port: Number(targetDetail.port ?? 0),
+          engine: targetDetail.engine ?? data?.engine ?? 'postgresql',
+        }
+      : null,
+    reason
+  )
 
   const latestId = latest.data?.state === 'done' ? latest.data.id : null
+  const finishedId = run.status === 'done' ? run.reportId : null
+  // Any finished report opens the Report tab: the newest daily one, else the newest run.
+  const newestId =
+    latestId ??
+    (reports.data?.reports ?? []).reduce<{ id: number; ts: number } | null>(
+      (best, entry) => (!best || entry.ts > best.ts ? entry : best),
+      null
+    )?.id ??
+    finishedId
   const reportDot = useReportSeen(target, latestId, view === 'report')
-
-  // A link to a query outside the current range (a report opened on 15m) widens the
-  // range to the report's day, then to everything, until the row is there.
-  const listRows = served ? rowsIn.data?.queries : queries.data?.queries
-
-  // The charts always show the highlighted query: its band, or its own line from its
-  // series in the same window (the list's row when it's there, else fetched alone).
-  const heroModel = page.metric === 'calls' ? (callsModel ?? model) : model
-  const rowsByKey = useMemo(
-    () => new Map((listRows ?? []).map((query) => [query.key, query])),
-    [listRows]
-  )
-  const pick = pickHighlight(heroModel, {
-    openKey: list.openKey,
-    hoverKey,
-    hasSeries: (key) => rowsByKey.has(key),
+  const watchingRun = view === 'report'
+  useRunCompletion(target, run, {
+    watching: watchingRun,
+    onOpen: (id) => openReport(id),
   })
-  const overlayKey = pick?.mode === 'overlay' ? pick.key : null
-  const missing = overlayKey && !rowsByKey.has(overlayKey) ? overlayKey : ''
-  const lone = useMonitorQuery(target, missing, range, window)
-  const overlayRow = overlayKey
-    ? (rowsByKey.get(overlayKey) ??
-      (lone.data?.key === overlayKey ? lone.data : null))
+  // A finished run opens by id (the Report tab otherwise shows the daily report) and its
+  // findings move Actions.
+  const watchingReport = useRef(watchingRun)
+  watchingReport.current = watchingRun
+  useEffect(() => {
+    if (finishedId == null) return
+    void queryClient.invalidateQueries({ queryKey: actionKeys.actions(target) })
+    if (watchingReport.current) openReport(finishedId)
+  }, [finishedId, queryClient, target, openReport])
+
+  // The list's order follows the chart: by share, or by latency with the Latency series.
+  const sort: RowSort =
+    selectedMetric === 'qps' && page.metric === 'latency' ? 'latency' : 'share'
+  const ordered = useMemo(
+    () => sortRows(rows.data?.queries ?? [], sort),
+    [rows.data, sort]
+  )
+  const rowByKey = useMemo(
+    () => new Map(ordered.map((row) => [row.key, row])),
+    [ordered]
+  )
+  // A linked query outside the list (another range) is fetched on its own.
+  const missing =
+    list.openKey && !rowByKey.has(list.openKey) ? list.openKey : ''
+  const lone = useMonitorQuery(target, missing, range)
+  const openQuery: MonitorQuery | null = list.openKey
+    ? (rowByKey.get(list.openKey) ??
+      (lone.data?.key === list.openKey ? lone.data : null))
     : null
-  const overlay = useMemo(
-    () =>
-      buildOverlay(
-        heroModel,
-        page.metric,
-        overlayRow
-          ? {
-              key: overlayRow.key,
-              label: queryName(overlayRow),
-              series: overlayRow.series,
-            }
-          : null
-      ),
-    [heroModel, page.metric, overlayRow]
+  const openIndex = openQuery ? ordered.indexOf(openQuery) : -1
+  const walk = useCallback(
+    (step: 1 | -1) => {
+      if (!ordered.length) return
+      const next =
+        openIndex < 0
+          ? step > 0
+            ? 0
+            : ordered.length - 1
+          : Math.min(ordered.length - 1, Math.max(0, openIndex + step))
+      list.open(ordered[next].key)
+    },
+    [ordered, openIndex, list]
   )
-  const widened = useRef<string | null>(null)
-  const arriving = useRef<string | null>(null)
-  useEffect(() => {
-    arriving.current = list.openKey
-  }, [list.openKey])
-  useEffect(() => {
+
+  const settingsOpen = page.panel === 'settings'
+  const paneOpen = settingsOpen || benchmark !== null || openQuery !== null
+  // Closing the query pane hands focus back to its row, and again once a list the pane
+  // covered shows again.
+  const returnFocus = useRef<string | null>(null)
+  const closeQuery = useCallback(() => {
     const key = list.openKey
-    if (!key || arriving.current !== key || !listRows) return
-    if (rowsIn.isFetching || queries.isFetching) return
-    if (listRows.some((query) => query.key === key)) {
-      arriving.current = null
-      return
-    }
-    const next = widerRange(range)
-    if (!next || widened.current === `${key}:${next}`) return
-    widened.current = `${key}:${next}`
-    setRange(next)
-  }, [
-    list.openKey,
-    listRows,
-    rowsIn.isFetching,
-    queries.isFetching,
-    range,
-    setRange,
-  ])
-
-  // Once the hero scrolls away, a small copy rides in the list's sticky bar.
-  const [hero, setHero] = useState<HTMLDivElement | null>(null)
-  const [heroGone, setHeroGone] = useState(false)
+    returnFocus.current = key
+    list.open(null)
+    if (key) document.getElementById(`query-${key}`)?.focus()
+  }, [list])
   useEffect(() => {
-    if (!hero || typeof IntersectionObserver === 'undefined') {
-      setHeroGone(false)
-      return
+    if (paneOpen || !returnFocus.current) return
+    document.getElementById(`query-${returnFocus.current}`)?.focus()
+    returnFocus.current = null
+  }, [paneOpen])
+  const closePane = useCallback(() => {
+    if (settingsOpen) page.setPanel(null)
+    if (benchmark) setBenchmark(null)
+    if (list.openKey) closeQuery()
+  }, [settingsOpen, page, benchmark, list.openKey, closeQuery])
+
+  // Escape closes the pane; j and k walk the list.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const el = event.target
+      if (
+        el instanceof Element &&
+        el.closest('input, textarea, [contenteditable="true"], [role="dialog"]')
+      )
+        return
+      if (event.key === 'Escape' && paneOpen) closePane()
+      else if (event.key === 'j') walk(1)
+      else if (event.key === 'k') walk(-1)
     }
-    const observer = new IntersectionObserver(
-      ([entry]) =>
-        setHeroGone(!entry.isIntersecting && entry.boundingClientRect.top < 0),
-      { threshold: 0, rootMargin: '-120px 0px 0px 0px' }
-    )
-    observer.observe(hero)
-    return () => observer.disconnect()
-  }, [hero])
-  const showChart = useCallback(
-    () => hero?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' }),
-    [hero]
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [paneOpen, closePane, walk])
+
+  const analyzing = openQuery
+    ? analysisUnderWay(openQuery, !unmonitored) ||
+      analyses.active.has(openQuery.key) ||
+      (enqueue.isPending && enqueue.variables === openQuery.key)
+    : false
+  const fixRows = useMemo(() => queriesWithFixes(ordered), [ordered])
+  const benchmarkRows = useMemo(
+    () =>
+      benchmark
+        ? ordered.filter((row) => benchmark.keys.includes(row.key))
+        : [],
+    [benchmark, ordered]
   )
 
-  const showSkeleton = useDelayed(health.isPending || settings.isPending)
-  const enabled = settings.data?.enabled ?? true
-  const neverRecorded = Boolean(data) && !history?.first_ts
-  const [firstRunHidden, hideFirstRun] = useFirstRunHidden(
-    target,
-    settings.data?.first_hour_started_at ?? null
+  const selectKey = useCallback(
+    (key: string) => {
+      if (settingsOpen) page.setPanel(null)
+      setBenchmark(null)
+      list.open(key)
+    },
+    [settingsOpen, page, list]
   )
-  const firstRun = inFirstRun && !firstRunHidden
-  // Readings are in and nothing has run yet: the waiting card stands in for chart and list.
-  const waiting =
-    enabled && firstRunModel.waitingForQueries && !zoomed && !queries.isError
-  // Queries known, none measured yet: the list waits for the reading that ranks it.
-  const measuring =
-    enabled &&
-    inFirstRun &&
-    firstRunModel.measuring &&
-    !zoomed &&
-    !queries.isError
+  const benchmarkKeys = benchmarkScope ?? fixRows.map((row) => row.key)
+  const closeBenchmark = () => {
+    setBenchmarkOpen(false)
+    setBenchmarkScope(null)
+    if (page.panel === 'benchmark') page.setPanel(null)
+  }
+  const runBenchmark = () => {
+    setBenchmarkOpen(false)
+    setBenchmarkScope(null)
+    if (list.openKey) list.open(null, undefined, { closePanel: true })
+    else if (settingsOpen || page.panel === 'benchmark') page.setPanel(null)
+    setBenchmark({ ranAt: now, keys: benchmarkKeys })
+  }
   const checkAgain = () => {
     void health.refetch()
     void settings.refetch()
   }
-  // A query picked in the chart opens its row and brings it into view.
-  const selectBand = useCallback(
-    (key: string) => {
-      list.open(key)
-      globalThis.requestAnimationFrame(() =>
-        document
-          .getElementById(`query-${key}`)
-          ?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' })
-      )
-    },
-    [list]
-  )
 
-  // A query analyzed from "Analyze a query" opens once the dialog has left the URL,
-  // so the two URL writes don't race.
-  const [showKey, setShowKey] = useState<string | null>(null)
-  const panelOpen = page.panel === 'analyze'
-  useEffect(() => {
-    if (!showKey || panelOpen) return
-    setShowKey(null)
-    selectBand(showKey)
-  }, [showKey, panelOpen, selectBand])
+  const showSkeleton = useDelayed(health.isPending || settings.isPending)
+  const loadingPage = (health.isPending || settings.isPending) && !data
 
-  if ((health.isPending || settings.isPending) && !data)
-    return showSkeleton ? <PageSkeleton /> : <div className="min-h-96" />
+  const tabs =
+    (unmonitored && newestId == null) || loadingPage ? undefined : (
+      <TabList aria-label="Database views" className="border-b-0">
+        <TabItemButton
+          layoutPrefix="database"
+          label="Live"
+          active={view === 'live'}
+          onClick={() => setView('live')}
+          className={cn('h-10', queriesLive && LIVE_DOT)}
+          aria-describedby={queriesLive ? 'database-live-live' : undefined}
+        />
+        {queriesLive && (
+          <LiveDotLabel id="database-live-live" label="Analyses running" />
+        )}
+        <TabItemButton
+          layoutPrefix="database"
+          label="Report"
+          active={view === 'report'}
+          onClick={() =>
+            latestId == null && newestId != null
+              ? openReport(newestId)
+              : setView('report')
+          }
+          className={cn(
+            'h-10',
+            reportDot &&
+              view !== 'report' &&
+              "after:absolute after:top-3 after:-right-2.5 after:h-1.5 after:w-1.5 after:rounded-full after:bg-series-1 after:content-['']"
+          )}
+          data-report-dot={reportDot && view !== 'report' ? '' : undefined}
+        />
+      </TabList>
+    )
 
-  return (
-    <div className="space-y-5 pb-12">
-      <DatabaseHeader
-        target={target}
-        health={data}
-        settings={settings.data}
-        pulse={pulse}
-        glyphTone={tone}
-        view={view}
-        onViewChange={setView}
-        teaser={
-          view === 'live' ? (
-            <ReportTeaser
-              target={target}
-              onOpen={() => setView('report')}
-              className="max-w-xl"
-            />
-          ) : null
-        }
-        reportDot={reportDot}
-        openActions={changeCount(actions.data, indexPlan)}
-        actionsLive={
-          checkupState === 'first_pass' ||
-          (planReady && !planSeen && changeCount(actions.data) > 0)
-        }
-        queriesLive={analyzing}
-        switcher={<DatabaseSwitcher />}
-        signInNeeded={signInNeeded}
-        onOpenSettings={() => page.setPanel('settings')}
-        onEnable={() => setEnableOpen(true)}
-        onCheckAgain={checkAgain}
-      />
-
-      <AnimatePresence mode="wait" initial={false}>
-        <m.div
-          key={view}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1, transition: { duration: 0.2 } }}
-          exit={{ opacity: 0, transition: { duration: 0.12 } }}
-          className="space-y-5"
-        >
-          {view === 'report' ? (
-            <ReportView
-              target={target}
-              reportId={page.report}
-              onShowLatest={() => openReport('latest')}
-              onPick={(id) => openReport(id)}
-              onOpenActions={() => setView('actions')}
-            />
-          ) : !enabled && neverRecorded ? (
-            <div className="rounded-card border border-border-layout-1 bg-surface-layout-1">
-              <EmptyState
-                media={<DatabaseGlyph size={96} tone="neutral" />}
-                title={`Turn on monitoring for ${target}`}
-                body="RDST reads query statistics every minute, spots new and changed queries, and runs a nightly checkup. It only reads."
-                action={{
-                  label: 'Turn on monitoring',
-                  onClick: () => setEnableOpen(true),
-                }}
+  const pageBar = (
+    <PageBar
+      title={target}
+      leading={
+        loadingPage ? undefined : (
+          <Radar
+            state={RADAR_BY_TONE[bar.tone]}
+            activity={activity}
+            note={
+              bar.tone === 'warning' &&
+              (signIn || settings.data?.ai_reason === 'signed_out')
+                ? SIGN_IN_NOTE
+                : null
+            }
+            size="large"
+            label={`${target}, ${bar.word}`}
+          />
+        )
+      }
+      meta={
+        loadingPage ? undefined : (
+          <>
+            <span className="whitespace-nowrap">
+              {bar.tone === 'live' ? 'Actively monitoring' : bar.word}
+              {bar.since != null && `, since ${formatClock(bar.since)}`}
+            </span>
+            {aiActionNeeded && aiStatus.headline && (
+              <span
+                className="whitespace-nowrap text-content-warning-soft"
+                data-testid="ai-off-reason"
+              >
+                {aiStatus.headline}
+              </span>
+            )}
+            {firstRun && history ? (
+              <span className="whitespace-nowrap">
+                {Math.max(1, Math.round(history.span_seconds / 60))} min
+                recorded
+              </span>
+            ) : (
+              engine && <span>{engine}</span>
+            )}
+          </>
+        )
+      }
+      actions={
+        loadingPage || unmonitored ? undefined : (
+          <>
+            {aiActionNeeded && (
+              <MonitoringStatusAction
+                target={target}
+                status={aiStatus}
+                contact={limit.data?.contact}
               />
-            </div>
-          ) : view === 'actions' ? (
-            <ActionsTab
-              target={target}
-              section={page.section}
-              onSectionChange={page.setSection}
-              onShowQuery={showQuery}
-              onOpenQueries={() => setView('live')}
-              liveCard={
-                model ? (
-                  <LoadStrip
-                    model={model}
-                    metric="calls"
-                    domain={domain}
-                    res={model.res ?? data?.res ?? 60}
-                    title="Queries per second"
-                    hoverKey={hoverKey}
-                    onHoverKey={setHoverKey}
-                    focusKey={null}
-                    overlay={null}
-                    onSelectKey={showQuery}
-                    onShowChart={() => setView('live')}
-                  />
-                ) : (
-                  <Text
-                    as="p"
-                    level="body-small"
-                    className="text-content-layout-3"
-                  >
-                    Waiting for the first reading of your queries.
-                  </Text>
-                )
+            )}
+            <IconButton
+              icon="settings"
+              label="Monitoring settings"
+              variant="primary"
+              modifier="ghost"
+              size="small"
+              onClick={() =>
+                settingsOpen ? page.setPanel(null) : page.setPanel('settings')
               }
             />
-          ) : (
-            <ChartHighlightContext.Provider value={highlight}>
-              <QueryContextBanner.Provider value={queryBanner}>
-                <ReportTeaser
-                  target={target}
-                  onOpen={() => setView('report')}
-                  className="laptop:hidden"
-                />
-                {!(queryBanner && detailBanner) && banner}
-                <FirstPlanPointer
-                  page={actions.data}
-                  seen={planSeen}
-                  onOpenActions={() => setView('actions')}
-                />
-                {firstRun || waiting || measuring ? (
-                  <FirstRunStrip
-                    model={firstRunModel}
-                    now={pulse.now}
-                    onHide={waiting ? undefined : hideFirstRun}
-                    onOpenQueue={() => {
-                      setQueueFocus(true)
-                      page.setPanel('settings')
-                    }}
-                  />
-                ) : null}
-                {waiting ? (
-                  <WaitingForQueries
-                    target={target}
-                    model={firstRunModel}
-                    now={pulse.now}
-                  />
-                ) : health.isError && !data ? (
-                  <ErrorState
-                    title="Health readings didn't load"
-                    message="RDST couldn't read this target's health history. Queries below may still load."
-                    onRetry={() => void health.refetch()}
-                  />
-                ) : (
-                  <div ref={setHero} className="scroll-mt-4">
-                    <LoadHero
-                      model={model}
-                      callsModel={callsModel}
-                      health={data}
-                      loading={queries.isPending}
-                      domain={domain}
-                      scopeLabel={scopeLabel}
-                      zoomed={zoomed}
-                      onZoom={onZoom}
-                      onResetZoom={() => page.setZoom(null)}
-                      metric={page.metric}
-                      onMetricChange={page.setMetric}
-                      panel={page.health}
-                      onPanelChange={page.setHealth}
-                      hoverKey={hoverKey}
-                      onHoverKey={setHoverKey}
-                      focusKey={list.openKey}
-                      overlay={overlay}
-                      onSelectKey={selectBand}
-                    />
-                  </div>
-                )}
-                {waiting ? null : measuring ? (
-                  <MeasuringQueries />
-                ) : (
-                  <QuerySection
-                    target={target}
-                    range={range}
-                    domain={domain}
-                    model={model}
-                    scopeLabel={scopeLabel}
-                    hoverKey={hoverKey}
-                    onHoverKey={setHoverKey}
-                    scopedRows={served ? (rowsIn.data?.queries ?? null) : null}
-                    onRangeChange={setRange}
-                    ranges={TOOLBAR_RANGES}
-                    history={history}
-                    timeFrame={
-                      zoomed
-                        ? {
-                            label: frameLabel(domain, highlight, now),
-                            fromInbox: page.fromItem != null,
-                            onClear: () => page.setZoom(null),
-                          }
-                        : null
-                    }
-                    onCustomRange={onZoom}
-                    onAnalyzeQuery={() => page.setPanel('analyze')}
-                    stickyChart={
-                      heroGone && !page.health ? (
-                        <LoadStrip
-                          model={
-                            page.metric === 'calls'
-                              ? (callsModel ?? model)
-                              : model
-                          }
-                          metric={page.metric}
-                          domain={domain}
-                          res={model?.res ?? data?.res ?? 60}
-                          title={`${STRIP_TITLE[page.metric]}, ${scopeLabel.replace(/^in the /, '')}`}
-                          hoverKey={hoverKey}
-                          onHoverKey={setHoverKey}
-                          focusKey={list.openKey}
-                          overlay={overlay}
-                          onSelectKey={selectBand}
-                          onShowChart={showChart}
-                        />
-                      ) : null
-                    }
-                  />
-                )}
-                <DatabaseBenchmarksSection
-                  target={target}
-                  queries={queries.data?.queries}
-                />
-              </QueryContextBanner.Provider>
-            </ChartHighlightContext.Provider>
-          )}
-        </m.div>
-      </AnimatePresence>
+          </>
+        )
+      }
+      tabs={tabs}
+    />
+  )
 
-      <MonitoringSettingsSheet
-        target={target}
-        open={page.panel === 'settings'}
-        focus={queueFocus ? 'queue' : null}
-        onClose={() => {
-          setQueueFocus(false)
-          page.setPanel(null)
-        }}
+  const loadCard = (onSelect: (key: string) => void) => (
+    <LoadCard
+      selected={selectedMetric}
+      metric={page.metric}
+      onMetricChange={page.setMetric}
+      range={range}
+      ranges={ranges}
+      onRangeChange={setRange}
+      rangeLabel={rangeLabel}
+      rangeHint={
+        rangeLabel
+          ? 'More ranges open after 15 minutes of readings.'
+          : undefined
+      }
+      caption={
+        unreachable && outage
+          ? `no readings since ${markerClock(outage.start, 0)}`
+          : (load.data?.recorded_label ?? null)
+      }
+      model={model}
+      health={data}
+      domain={domain}
+      markers={markers}
+      pauses={pauses}
+      loading={load.isPending && rows.isPending}
+      hoverKey={hoverKey}
+      onHoverKey={setHoverKey}
+      focusKey={list.openKey}
+      onSelectKey={onSelect}
+      firstRun={firstRun ? { firstReport: newestId == null } : undefined}
+    />
+  )
+
+  const unreachableAlert = unreachable && (
+    <Alert
+      tone="quiet"
+      variant="warning"
+      className="-mt-3 mb-6 items-center"
+      label={
+        pulse.connectionProblem
+          ? `${pulse.connectionProblem.reason} ${pulse.connectionProblem.fix}`
+          : warning
+      }
+    >
+      <Button
+        variant="primary"
+        modifier="outline"
+        size="small"
+        label="Fix connection"
+        onClick={() => setRepairOpen(true)}
       />
+    </Alert>
+  )
+
+  const live = (
+    <PageContainer className="pt-9 pb-24">
+      {unreachableAlert}
+      {!unmonitored && !unreachable && (
+        <div className="mb-6 empty:hidden">
+          <FirstPlanPointer
+            page={actions.data}
+            seen={planSeen}
+            onOpenActions={goToActions}
+          />
+        </div>
+      )}
+      {(firstRun || waiting || measuring) && !unreachable && (
+        <div className="mb-6">
+          <FirstRunStrip model={firstRunModel} now={pulse.now} />
+        </div>
+      )}
+      {unmonitored ? (
+        <div className="flex items-center gap-4 border-y border-border-layout-2 py-5">
+          <Text as="p" level="body-medium" className="text-content-layout-2">
+            Turn on monitoring to see live numbers, fixes and a daily report.
+          </Text>
+          <Button
+            variant="primary"
+            modifier="solid"
+            label="Turn on monitoring"
+            className="ml-auto"
+            onClick={() => setEnableOpen(true)}
+          />
+        </div>
+      ) : waiting ? (
+        <WaitingForQueries
+          target={target}
+          model={firstRunModel}
+          now={pulse.now}
+        />
+      ) : health.isError && !data ? (
+        <ErrorState
+          tone="quiet"
+          title="Health readings didn't load"
+          message="RDST couldn't read this database's health history. Queries below may still load."
+          onRetry={() => void health.refetch()}
+        />
+      ) : data ? (
+        <>
+          <HealthMetrics
+            metrics={metrics}
+            selected={selectedMetric}
+            onSelect={(id) => page.setHealth(HEALTH_TO_PANEL[id])}
+            compact={paneOpen}
+            staleSince={unreachable ? (data.last_reading_at ?? null) : null}
+          />
+          {loadCard(selectKey)}
+        </>
+      ) : null}
+      {waiting ? null : measuring ? (
+        <div className="mt-6">
+          <MeasuringQueries />
+        </div>
+      ) : (
+        <QuerySection
+          rows={rows.data?.queries}
+          loading={rows.isPending}
+          error={rows.isError}
+          onRetry={() => void rows.refetch()}
+          sort={sort}
+          openKey={list.openKey}
+          onOpen={selectKey}
+          hoverKey={hoverKey}
+          onHoverKey={setHoverKey}
+          paneOpen={paneOpen}
+          mode={unmonitored ? 'scan' : firstRun ? 'first_run' : 'live'}
+          scanAt={unmonitored ? (rows.data?.history.first_ts ?? null) : null}
+          seenTotal={rows.data?.seen_total}
+          filters={{ status: page.status, table: page.table, q: page.q }}
+          onFiltersChange={page.setFilters}
+          onAnalyzeQuery={() => page.setPanel('analyze')}
+          onBenchmark={() => setBenchmarkOpen(true)}
+          jobs={jobs.data?.jobs}
+          aside={
+            openActions > 0 &&
+            !unmonitored && (
+              <Link
+                to="/actions"
+                search={{ db: target } as never}
+                onClick={markPlanSeen}
+                className="border-b border-border-layout-2 text-caption text-content-layout-3 hover:text-content-layout-1"
+              >
+                {openActions} {openActions === 1 ? 'change' : 'changes'} to do
+                in Actions
+              </Link>
+            )
+          }
+        />
+      )}
+    </PageContainer>
+  )
+
+  const pane = settingsOpen ? (
+    <MonitoringSettingsPane
+      target={target}
+      onClose={() => page.setPanel(null)}
+    />
+  ) : benchmark ? (
+    <BenchmarkResultPane
+      target={target}
+      queries={benchmarkRows}
+      ranAt={benchmark.ranAt}
+      now={now}
+      onRerun={() => setBenchmarkOpen(true)}
+      onClose={() => setBenchmark(null)}
+    />
+  ) : openQuery ? (
+    <QueryDetail
+      target={target}
+      query={openQuery}
+      now={now}
+      range={range}
+      planSql={planSqlFor(indexPlan, openQuery.key)}
+      monitored={!unmonitored}
+      job={
+        jobs.data?.jobs.find(
+          (job) => job.query_key === openQuery.key && job.state === 'queued'
+        ) ?? null
+      }
+      onClose={closeQuery}
+      onPrev={openIndex > 0 ? () => walk(-1) : undefined}
+      onNext={
+        openIndex >= 0 && openIndex < ordered.length - 1
+          ? () => walk(1)
+          : undefined
+      }
+      analyzing={
+        analyzing
+          ? {
+              steps: stepsForPhase(openQuery.last_analysis?.phase),
+              aboutSeconds: jobs.data?.queue?.average_run_s ?? null,
+            }
+          : null
+      }
+      onAnalyzeAgain={() =>
+        enqueue.mutate(openQuery.key, {
+          onSuccess: () => analyses.follow(openQuery.key),
+        })
+      }
+      onBenchmark={() => {
+        setBenchmarkScope([openQuery.key])
+        setBenchmarkOpen(true)
+      }}
+      onCancel={() => {
+        if (analyzing) cancelAnalysis.mutate(openQuery.key)
+        list.open(null)
+      }}
+    />
+  ) : null
+
+  return (
+    <>
+      <TwoPane
+        open={paneOpen}
+        className={cn(
+          paneOpen &&
+            'max-desktop:[&>div:first-child]:hidden max-desktop:[&>div:last-child]:ml-0 max-desktop:[&>div:last-child]:flex-1',
+          // From 1280 px the pane gives up width before the page drops under its minimum.
+          paneOpen &&
+            'desktop:[&>div:first-child]:min-w-[37.5rem] desktop:[&>div:last-child]:min-w-[25rem] desktop:[&>div:last-child]:shrink'
+        )}
+        primary={
+          <>
+            {pageBar}
+            {loadingPage ? (
+              showSkeleton ? (
+                <PageSkeleton />
+              ) : (
+                <div className="min-h-96" />
+              )
+            ) : view === 'report' ? (
+              <PageContainer className="pt-9 pb-24">
+                <ReportView
+                  target={target}
+                  reportId={page.report}
+                  run={run}
+                  onShowLatest={() => openReport('latest')}
+                  onPick={(id) => openReport(id)}
+                  onOpenActions={goToActions}
+                />
+              </PageContainer>
+            ) : (
+              live
+            )}
+          </>
+        }
+        secondary={pane}
+      />
+
       <MonitoringSetupDialog
         target={target}
         open={page.panel === 'setup'}
@@ -809,91 +927,115 @@ function DatabaseView({ target }: { target: string }) {
           if (page.panel === 'enable') page.setPanel(null)
         }}
       />
+      <ConnectionRepair
+        target={target}
+        open={repairOpen}
+        onClose={() => setRepairOpen(false)}
+        reason={pulse.connectionProblem?.reason ?? reason}
+        onSaved={checkAgain}
+      />
       <AnalyzeQueryDialog
         target={target}
         open={page.panel === 'analyze'}
         onClose={() => page.setPanel(null)}
-        onShowQuery={setShowKey}
+        onShowQuery={(key) => list.open(key, undefined, { closePanel: true })}
       />
-    </div>
+      <BenchmarkFixesDialog
+        count={benchmarkKeys.length}
+        title={benchmarkScope ? 'Estimate fix gain' : undefined}
+        open={benchmarkOpen || page.panel === 'benchmark'}
+        onClose={closeBenchmark}
+        onRun={runBenchmark}
+      />
+    </>
   )
 }
 
 function PageSkeleton() {
   return (
-    <div className="space-y-6" aria-busy="true">
-      <div className="flex items-center gap-4">
-        <Skeleton className="h-[72px] w-[72px] rounded-full" />
-        <div className="space-y-2">
-          <Skeleton className="h-7 w-40" />
-          <Skeleton className="h-4 w-72" />
-        </div>
-      </div>
-      <Skeleton className="h-10 w-full" />
-      <Skeleton className="h-[440px] w-full rounded-card" />
+    <PageContainer className="space-y-6 pt-9" aria-busy="true">
+      <Skeleton className="h-24 w-full" />
+      <Skeleton className="h-[260px] w-full rounded-card" />
       <Skeleton className="h-16 w-full rounded-panel" />
       <Skeleton className="h-16 w-full rounded-panel" />
-    </div>
+    </PageContainer>
+  )
+}
+
+function Shell({
+  title,
+  children,
+}: {
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <TwoPane
+      open={false}
+      primary={
+        <>
+          <PageBar title={title} />
+          <PageContainer className="pt-9 pb-24">{children}</PageContainer>
+        </>
+      }
+      secondary={null}
+    />
   )
 }
 
 export function DatabasePage() {
   const { target, isResolving, isUnavailable, refetch } = useTargetResolution()
   const status = useSystemStatus()
-  const navigate = useNavigate()
-  const reduceMotion = useReducedMotion()
+  const openAddDatabase = useOpenAddDatabase()
 
   if (!target) {
-    if (isResolving) return <PageSkeleton />
+    if (isResolving)
+      return (
+        <TwoPane
+          open={false}
+          primary={
+            <>
+              <PageBar title="Database" />
+              <PageSkeleton />
+            </>
+          }
+          secondary={null}
+        />
+      )
     if (isUnavailable)
       return (
-        <ErrorState
-          title="Targets didn't load"
-          message="RDST couldn't read the configured targets."
-          onRetry={() => void refetch()}
-        />
+        <Shell title="Database">
+          <ErrorState
+            tone="quiet"
+            title="Databases didn't load"
+            message="RDST couldn't read the configured databases."
+            onRetry={() => void refetch()}
+          />
+        </Shell>
       )
     const hasTargets = (status.data?.targets.length ?? 0) > 0
     return (
-      <div className="rounded-card border border-border-layout-1 bg-surface-layout-1">
+      <Shell title="Database">
         <EmptyState
-          media={<DatabaseGlyph size={96} tone="neutral" />}
-          title="Choose a target to monitor"
+          tone="quiet"
+          title={
+            hasTargets ? 'Choose a database to monitor' : 'No database yet.'
+          }
           body={
-            hasTargets
-              ? 'Pick a target in the selector at the top of the sidebar.'
-              : 'Add a target and RDST starts watching its queries.'
+            hasTargets ? 'Pick one under Databases in the sidebar.' : undefined
           }
           action={
             hasTargets
               ? undefined
               : {
-                  label: 'Add target',
-                  onClick: () => void navigate({ to: '/configure' }),
+                  label: 'Add a database',
+                  onClick: () => openAddDatabase(),
                 }
           }
         />
-      </div>
+      </Shell>
     )
   }
 
-  return (
-    <AnimatePresence mode="wait" initial={false}>
-      <m.div
-        key={target}
-        initial={{ opacity: 0, y: reduceMotion ? 0 : 6 }}
-        animate={{
-          opacity: 1,
-          y: 0,
-          transition: { duration: 0.2, ease: [0, 0, 0.2, 1] },
-        }}
-        exit={{
-          opacity: 0,
-          transition: { duration: 0.15, ease: [0.4, 0, 1, 1] },
-        }}
-      >
-        <DatabaseView target={target} />
-      </m.div>
-    </AnimatePresence>
-  )
+  return <DatabaseView key={target} target={target} />
 }

@@ -1,16 +1,18 @@
 import type { Page } from '@playwright/test'
 import {
   acceptBrowserError,
+  addDatabaseThroughDialog,
   clearTargets,
-  continueWhenMonitoringReady,
   expect,
+  mainContent,
   test,
 } from '../fixtures'
 import { signInWithEmail } from './sign-in'
 
 /** Live account enrollment, hosted inference, and sign-out coverage. */
 
-const TARGET = 'keyservice-e2e'
+// The add-database dialog names a database after its database name.
+const TARGET = 'rdst_test'
 
 async function resetLocalState(page: Page): Promise<void> {
   // Playwright retries reuse the RDST backend process. Reset server-side
@@ -21,17 +23,21 @@ async function resetLocalState(page: Page): Promise<void> {
   await clearTargets(page.request)
 }
 
-/** Signed-out users must choose a provider before entering the app. */
+/** Signed out with no key, Home is the AI choice inside the app shell. */
 async function expectSignedOutAiAccess(page: Page): Promise<void> {
   await page.goto('/')
+  const main = mainContent(page)
   await expect(
-    page.getByRole('heading', { name: 'Choose how RDST uses AI' })
+    main.getByText('Set up AI to get fixes and the daily report.')
   ).toBeVisible()
-  await expect(page.locator('#main-content')).toHaveCount(0)
   await expect(
-    page.getByRole('button', { name: 'Sign up or sign in' })
+    main.getByRole('button', { name: 'Sign in', exact: true })
   ).toBeVisible()
-  await expect(page.getByText(/Signed in as/)).toHaveCount(0)
+  await expect(
+    main.getByRole('button', { name: 'Add key', exact: true })
+  ).toBeVisible()
+  await expect(page.getByTestId('sidebar-sign-in')).toBeVisible()
+  await expect(page.getByTestId('sidebar-account-email')).toHaveCount(0)
 }
 
 test('account login unlocks hosted Ask and sign-out restores the AI access choice', async ({
@@ -49,7 +55,9 @@ test('account login unlocks hosted Ask and sign-out restores the AI access choic
   await expectSignedOutAiAccess(page)
 
   // The alternate BYOK path must remain usable without creating an account.
-  await page.getByRole('button', { name: 'Add Anthropic key' }).click()
+  await mainContent(page)
+    .getByRole('button', { name: 'Add key', exact: true })
+    .click()
   const keyDialog = page.getByRole('dialog')
   await expect(
     keyDialog.getByRole('heading', { name: 'Update Anthropic API key' })
@@ -75,33 +83,28 @@ test('account login unlocks hosted Ask and sign-out restores the AI access choic
       })
       await route.fulfill({ response })
     })
-    await signedInPage.goto('/onboarding')
-    await signedInPage.locator('[name="name"]').fill(TARGET)
-    await signedInPage
-      .locator('[name="host"]')
-      .fill(process.env.RDST_E2E_DB_HOST!)
-    await signedInPage
-      .locator('[name="port"]')
-      .fill(process.env.RDST_E2E_DB_PORT!)
-    await signedInPage.locator('[name="database"]').fill('rdst_test')
-    await signedInPage.locator('[name="user"]').fill('rdst_test')
-    await signedInPage
-      .locator('[name="password"]')
-      .fill(process.env.RDST_E2E_DB_PASSWORD!)
-    await signedInPage.getByRole('button', { name: 'Test & connect' }).click()
-    // The e2e role has write access, so RDST asks before adding it.
-    const writableAccount = signedInPage.getByRole('dialog', {
-      name: 'Use this database account?',
+    await addDatabaseThroughDialog(signedInPage, {
+      host: process.env.RDST_E2E_DB_HOST!,
+      port: process.env.RDST_E2E_DB_PORT!,
+      database: TARGET,
+      user: 'rdst_test',
+      password: process.env.RDST_E2E_DB_PASSWORD!,
     })
-    await expect(writableAccount).toBeVisible({ timeout: 60_000 })
-    await writableAccount.getByRole('button', { name: 'Add target' }).click()
-    await continueWhenMonitoringReady(signedInPage, TARGET)
+    // The dialog turns monitoring on, and a monitored database assesses only the
+    // queries monitoring picked. This spec assesses a query of its own, so
+    // monitoring goes off here; Ask works either way.
+    const monitoring = await signedInPage.request.put(
+      `/api/monitor/targets/${TARGET}/settings`,
+      { data: { enabled: false } }
+    )
+    expect(monitoring.ok()).toBe(true)
+    await signedInPage.goto('/')
 
     // Ask is available as soon as the target is connected. Semantic-layer
     // discovery deliberately continues in the background, so waiting for it
     // here would turn an unrelated model job into a prerequisite for Ask.
-    // A real database is tested, saved, and promoted before the app leaves
-    // onboarding; give that more than the fake backend's instant reply.
+    // A real database is tested, saved, and promoted before the dialog closes;
+    // give that more than the fake backend's instant reply.
     await expect(signedInPage).toHaveURL('/', { timeout: 60_000 })
     const targets = await signedInPage.request.get('/api/configure/targets')
     expect(targets.ok()).toBe(true)
@@ -114,20 +117,20 @@ test('account login unlocks hosted Ask and sign-out restores the AI access choic
 
   await test.step('run Ask through Readyset-hosted inference', async () => {
     await signedInPage.goto('/ask')
-    await signedInPage
-      .getByPlaceholder(
-        'For example: Which customers placed the most orders this month?'
-      )
+    const box = signedInPage.getByTestId('ask-box')
+    const ask = box.getByRole('button', { name: 'Ask', exact: true })
+    await box
+      .getByRole('textbox', { name: 'Question' })
       .fill('How many rows are in title_basics?')
-    await signedInPage.getByRole('button', { name: 'Get answer' }).click()
-    const answer = signedInPage.getByText('Answer', { exact: true })
-    const retry = signedInPage.getByRole('button', { name: 'Try again' })
-    const upstreamBusy = signedInPage.getByText(
+    await ask.click()
+    const answer = signedInPage.getByTestId('ask-answer')
+    const failure = signedInPage.getByTestId('ask-failure')
+    const upstreamBusy = failure.getByText(
       'The included AI is temporarily busy. Try again.'
     )
     let answered = false
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      await expect(answer.or(retry).first()).toBeVisible({ timeout: 180_000 })
+      await expect(answer.or(failure).first()).toBeVisible({ timeout: 180_000 })
       if (await answer.isVisible()) {
         answered = true
         break
@@ -146,15 +149,15 @@ test('account login unlocks hosted Ask and sign-out restores the AI access choic
         })
         break
       }
-      await retry.click()
+      // The box keeps the question after a failure; asking it again is the
+      // same run as the failure's own retry.
+      await ask.click()
     }
     if (!answered) return
-    await expect(answer).toBeVisible({ timeout: 180_000 })
-    await signedInPage
-      .getByRole('button', { name: /Show the SQL that ran/ })
-      .click()
+    await expect(answer).toContainText('Answered from')
+    await answer.getByRole('button', { name: /SQL that ran/ }).click()
     expect(
-      (await signedInPage.locator('.cm-content').innerText()).toLowerCase()
+      (await answer.getByTestId('ask-sql').innerText()).toLowerCase()
     ).toContain('title_basics')
   })
 
@@ -164,38 +167,30 @@ test('account login unlocks hosted Ask and sign-out restores the AI access choic
     // at this step while the keyservice records the call as a success, so this
     // has to run against a real host, and the failure text is asserted absent.
     await signedInPage.goto('/ask')
-    await signedInPage
-      .getByPlaceholder(
-        'For example: Which customers placed the most orders this month?'
-      )
+    const box = signedInPage.getByTestId('ask-box')
+    await box
+      .getByRole('textbox', { name: 'Question' })
       .fill('Show me the top titles')
-    await signedInPage.getByRole('button', { name: 'Get answer' }).click()
-    const clarification = signedInPage.getByText(
-      /One quick question|A few quick questions/
-    )
-    const answer = signedInPage.getByText('Answer', { exact: true })
+    await box.getByRole('button', { name: 'Ask', exact: true }).click()
+    const choice = signedInPage.getByTestId('ask-choice')
+    const answer = signedInPage.getByTestId('ask-answer')
     const clarifyFailure = signedInPage.getByText(
       'Failed while clarifying the question'
     )
-    await expect(
-      clarification.or(answer).or(clarifyFailure).first()
-    ).toBeVisible({ timeout: 180_000 })
+    await expect(choice.or(answer).or(clarifyFailure).first()).toBeVisible({
+      timeout: 180_000,
+    })
     await expect(clarifyFailure).not.toBeVisible()
-    if (await clarification.isVisible()) {
-      await expect(
-        signedInPage.getByText('You asked: Show me the top titles')
-      ).toBeVisible()
-      // One question or several: answer each with its first option, then
-      // ask for the answer from the last one.
-      for (let step = 0; step < 6; step += 1) {
-        await signedInPage.getByRole('radio').first().check()
-        const next = signedInPage.getByRole('button', { name: 'Next' })
-        if (await next.isVisible()) {
-          await next.click()
-          continue
-        }
-        await signedInPage.getByRole('button', { name: 'Get answer' }).click()
-        break
+    if (await choice.isVisible()) {
+      // One question or several, one at a time with the first option chosen:
+      // run with each until the last one asks for the answer.
+      for (let step = 0; step < 6 && (await choice.isVisible()); step += 1) {
+        const question = await choice.locator('p').first().innerText()
+        await choice.getByRole('button', { name: /^Run with / }).click()
+        await expect(choice.getByText(question, { exact: true })).toHaveCount(
+          0,
+          { timeout: 60_000 }
+        )
       }
       await expect(answer.or(clarifyFailure).first()).toBeVisible({
         timeout: 180_000,
@@ -226,27 +221,15 @@ test('account login unlocks hosted Ask and sign-out restores the AI access choic
         model: 'jev-1.13.0',
       })
     }).toPass({ timeout: 120_000 })
-    await signedInPage.goto(`/queries?q=${hash}`)
-    await expect(
-      signedInPage.getByText(
-        /^((High|Medium|Low|Unranked) priority|Limited classification)$/
-      )
-    ).toBeVisible({ timeout: 30_000 })
-    await signedInPage
-      .getByRole('button', { name: 'View classification' })
-      .click()
-    await expect(
-      signedInPage.getByText(
-        /The classification comes from the SQL and schema|RDST couldn't classify this query/
-      )
-    ).toBeVisible()
   })
 
   await test.step('sign out and require an AI access choice again', async () => {
     // `section=ai` is the recovery deep link and opens the Anthropic-key
     // dialog. The settings panel itself is selected with `panel=ai`.
     await signedInPage.goto('/configure?panel=ai')
-    await signedInPage.getByRole('button', { name: 'Sign out' }).click()
+    const account = signedInPage.getByRole('region', { name: 'Account' })
+    await account.getByRole('button', { name: 'Sign out' }).click()
+    await expect(account.getByText('Not signed in')).toBeVisible()
     await expectSignedOutAiAccess(signedInPage)
     const status = await signedInPage.request.get('/api/account/status')
     expect(status.ok()).toBe(true)

@@ -3,16 +3,30 @@
 // F-29]
 import { ErrorState, InlineNotice } from '@rs/ui-new/error-state'
 import { Page } from '@rs/ui-new/page'
+import { PageBar } from '@rs/ui-new/page-bar'
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-  SectionCard,
-  SupportingCard,
-} from './components/audit/report/ReportPrimitives'
 
 afterEach(cleanup)
 
 describe('page title', () => {
+  it('is the page bar level-1 heading', () => {
+    render(<PageBar title="Inbox" meta={<span>2 open</span>} />)
+    expect(
+      screen.getByRole('heading', { name: 'Inbox', level: 1 })
+    ).toBeTruthy()
+  })
+
+  it('stays with the page when the shell draws the bar for it', () => {
+    render(
+      <div>
+        <PageBar title="Queries" titleAs="p" />
+        <h1>Queries</h1>
+      </div>
+    )
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
+  })
+
   it('is the route level-1 heading', () => {
     render(
       <Page>
@@ -22,30 +36,6 @@ describe('page title', () => {
       </Page>
     )
     expect(screen.getByRole('heading', { name: 'Home', level: 1 })).toBeTruthy()
-  })
-})
-
-describe('audit report sections', () => {
-  it('gives each section card a level-2 heading', () => {
-    render(
-      <SectionCard icon="document-validation" title="Top findings">
-        <p>body</p>
-      </SectionCard>
-    )
-    expect(
-      screen.getByRole('heading', { name: 'Top findings', level: 2 })
-    ).toBeTruthy()
-  })
-
-  it('nests the supporting scores one level below the sections', () => {
-    render(
-      <SupportingCard icon="sparkles" title="Cache opportunity">
-        <p>body</p>
-      </SupportingCard>
-    )
-    expect(
-      screen.getByRole('heading', { name: 'Cache opportunity', level: 3 })
-    ).toBeTruthy()
   })
 })
 

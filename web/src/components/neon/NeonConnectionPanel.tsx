@@ -25,12 +25,15 @@ export function NeonConnectionPanel({
   enabled = true,
   compact = false,
   onSignIn,
+  actions,
 }: {
   enabled?: boolean
   /** Settings-page rendering: one quiet card per connection state. */
   compact?: boolean
   /** Where the compact signed-out card sends the user to enter a key. */
   onSignIn?: () => void
+  /** The host dialog's footer, where the panel's buttons render. */
+  actions?: HTMLElement | null
 }) {
   return (
     <ProviderConnectionPanel
@@ -39,24 +42,39 @@ export function NeonConnectionPanel({
       Logo={NeonLogo}
       client={client}
       pitch="Discover your Neon projects"
-      blurb="Paste a Neon API key - create one under Account settings > API keys in the Neon console."
+      blurb={
+        <>
+          Paste a Neon API key. Create one in the{' '}
+          <a
+            href="https://console.neon.tech"
+            target="_blank"
+            rel="noreferrer"
+            className="text-content-primary-soft underline-offset-4 hover:underline"
+          >
+            Neon console
+          </a>{' '}
+          under Account settings &gt; API keys.
+        </>
+      }
       connectedLine={() => 'Connected to Neon with an API key'}
       rejectedTitle="Neon rejected the saved API key"
       connectLabel="Connect"
-      credentialSlot={({ onSaved }) => (
+      credentialSlot={({ onSaved, actions: footer }) => (
         <ProviderTokenForm
           name="neon-api-key"
+          label="API key"
           placeholder="napi_..."
           submitLabel="Connect"
-          submitBusyLabel="Connecting..."
           rejectedMessage="That API key was rejected by Neon. Check it and try again."
           save={setFleetNeonKey}
           onSaved={onSaved}
+          actions={footer}
         />
       )}
       enabled={enabled}
       compact={compact}
       onSignIn={onSignIn}
+      actions={actions}
     />
   )
 }

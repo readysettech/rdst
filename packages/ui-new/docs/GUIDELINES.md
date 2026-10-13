@@ -27,6 +27,7 @@ Accessibility):
 
 - [Button](components/button.md) · [IconButton](components/icon-button.md) ·
   [Tag](components/tag.md) · [Alert](components/alert.md) ·
+  [ErrorState/InlineNotice](components/error-state.md) ·
   [Modal](components/modal.md) · [ConfirmDialog](components/confirm-dialog.md) ·
   [StatusRipple](components/status-ripple.md) ·
   [Spinner/Progress/Skeleton](components/spinner-progress-skeleton.md) ·

@@ -3,58 +3,24 @@ import { useToast } from '@rs/ui-new/use-toast'
 import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { trackEvent } from '@/lib/analytics'
+import { actionsOpened } from '@/lib/monitor/api'
 import { useInboxAction } from '@/lib/monitor/hooks'
 import type { InboxItem } from '@/lib/monitor/types'
 import { selectGlobalTarget } from '../database/targetSelection'
 import { analysisAgeBucket } from '../queries/results/storedAnalysis'
 import { itemLink, itemRoute, type LinkRoute } from './inboxLinks'
+import { kindOf } from './inboxModel'
 
-export type SnoozeFor = 'hour' | 'day' | 'week'
-
-export const SNOOZE_OPTIONS: {
-  value: SnoozeFor
-  label: string
-  back: string
-  seconds: number
-}[] = [
-  {
-    value: 'hour',
-    label: 'Snooze for 1 hour',
-    back: 'Back in 1 hour',
-    seconds: 3600,
-  },
-  {
-    value: 'day',
-    label: 'Snooze for 1 day',
-    back: 'Back tomorrow',
-    seconds: 86_400,
-  },
-  {
-    value: 'week',
-    label: 'Snooze for 1 week',
-    back: 'Back in a week',
-    seconds: 7 * 86_400,
-  },
-]
-
-export type CloseAction =
-  | { kind: 'resolve' }
-  | { kind: 'dismiss' }
-  | { kind: 'snooze'; for: SnoozeFor }
-
-const DONE_WORD = {
-  resolve: 'Resolved',
-  dismiss: 'Dismissed',
-  snooze: 'Snoozed',
-}
+/** The Inbox's own verbs: an event is handled (Resolve) or not; Reopen undoes it. */
+export type CloseAction = { kind: 'resolve' }
 
 function count(items: InboxItem[]) {
   return items.length === 1 ? '' : ` ${items.length} alerts`
 }
 
 /**
- * Resolve, dismiss and snooze with an optimistic exit and a 5 s undo toast. The
- * page filters pending `hidden` ids out so rows leave at once; undo reopens them.
+ * Resolve with an optimistic exit and a 5 s undo toast. The page filters pending `hidden`
+ * ids out so rows leave at once; undo reopens them.
  */
 export function useInboxActions() {
   const mutation = useInboxAction()
@@ -78,32 +44,24 @@ export function useInboxActions() {
     for (const id of ids) mutation.mutate({ id, action: 'reopen' })
   }
 
-  const close = (items: InboxItem[], action: CloseAction) => {
+  const close = (
+    items: InboxItem[],
+    action: CloseAction = { kind: 'resolve' }
+  ) => {
     if (items.length === 0) return
     const ids = items.map((item) => item.id)
     setVisible(ids, false)
-    const snooze =
-      action.kind === 'snooze'
-        ? SNOOZE_OPTIONS.find((option) => option.value === action.for)
-        : undefined
-    const until = snooze
-      ? Math.floor(Date.now() / 1000 + snooze.seconds)
-      : undefined
     Promise.all(
       ids.map((id) =>
         mutation
-          .mutateAsync({ id, action: action.kind, until })
+          .mutateAsync({ id, action: action.kind })
           .finally(() => setVisible([id], true))
       )
     )
       .then(() => {
         const handle = toast({
-          title: `${DONE_WORD[action.kind]}${count(items)}`,
-          description: snooze
-            ? snooze.back
-            : items.length === 1
-              ? items[0].title
-              : undefined,
+          title: `Resolved${count(items)}`,
+          description: items.length === 1 ? items[0].title : undefined,
           duration: 5000,
           action: (
             <Button
@@ -147,7 +105,20 @@ export function useInboxActions() {
       via,
     })
 
+  /**
+   * Opens Actions on the item's database. Opening it is what closes a Changes ready event,
+   * so the page tells the backend as it goes.
+   */
+  const openActions = (item: InboxItem) => {
+    opened(item, 'route')
+    markSeen([item])
+    // The Inbox refetches when it opens again, and the stream carries the close.
+    void actionsOpened(item.target).catch(() => undefined)
+    void navigate({ to: '/actions', search: { db: item.target } as never })
+  }
+
   const openInDatabase = (item: InboxItem, queryKey?: string) => {
+    if (kindOf(item) === 'changes_ready') return openActions(item)
     opened(item, 'database')
     markSeen([item])
     const link = itemLink(item)
@@ -187,6 +158,7 @@ export function useInboxActions() {
     reopen,
     markSeen,
     openInDatabase,
+    openActions,
     openRoute,
     acknowledge,
   }

@@ -128,7 +128,7 @@ def seed_monitor_fixture():
                           for key, base, share in (("orders-e2e", 20.0, 0.9),
                                                    ("count-e2e", 10.0, 0.09))}},
                       now - 300, delivery="inbox")
-    store.upsert_item(target, "daily_summary", "today", 0.4, "Checkup ready",
+    store.upsert_item(target, "daily_summary", "today", 0.4, "Daily report ready",
                       {"report_id": run["id"], "summary": "Orders lookup accounts for most "
                        "database time."}, now - 60, delivery="inbox")
     _seed_traffic_jump(store, target, now)
@@ -137,28 +137,57 @@ def seed_monitor_fixture():
     from shared.monitor.monitor_store import local_day_bounds
 
     start = min(local_day_bounds(now)[0], now - 3600)
-    day = snapshot.build(store, target, start, now + 60, now + 60, partial=True, collectors={
+    # The checks the Detailed report reads: bloat, connections, the settings audit, indexes.
+    collectors = {
         "vacuum_bloat": {"tables": [{"schema": "public", "table": "orders",
                                      "live_tuples": 8200, "dead_tuples": 1800,
                                      "dead_ratio_pct": 18.0, "status": "warn",
                                      "size_bytes": 64 * 1024 * 1024}]},
-        "connections": {"total_connections": 8, "max_connections": 100}})
+        "connections": {"total_connections": 8, "max_connections": 100},
+        "config_audit": {"settings": [
+            {"parameter": "shared_buffers", "current": "128MB", "recommended": "2GB",
+             "status": "warn", "note": "For 8 GB of memory."},
+            {"parameter": "work_mem", "current": "4MB", "recommended": "32MB", "status": "warn",
+             "note": "Sorts spill to disk."},
+            {"parameter": "random_page_cost", "current": "4", "recommended": "1.1",
+             "status": "warn", "note": "SSD storage."}]},
+        "index_health": {"total_indexes": 2, "unused_indexes": [], "duplicates": []}}
+    day = snapshot.build(store, target, start, now + 60, now + 60, partial=True,
+                         collectors=collectors)
     report = json.loads(store.report(run["id"])["report_json"])
-    store.update_report(run["id"], report={**report, "version": 3, "snapshot": day},
-                        period=(start, now + 60))
+    store.update_report(run["id"], report={
+        **report, "version": 3, "snapshot": day,
+        "computed": {**report["computed"], "health_collectors": collectors}},
+        period=(start, now + 60))
     _seed_agent_activity(target, now)
     return {"target": target}
 
 
 @monitor_fake_router.post("/seed-actions")
 def seed_actions_fixture():
-    """Actions and an index plan for e2e-guard, computed by the real code from seeded facts."""
+    """Actions and an index plan for e2e-guard, computed by the real code from seeded facts:
+    five index adds, one setting and one maintenance task in the plan; a verified change, an
+    undone one and two dismissed ones with reasons in Applied."""
     from features.monitor import actions
     from features.monitor.index_plan import build_plan
     from shared.monitor.monitor_store import MonitorStore
 
     store = MonitorStore()
     target, now = "e2e-guard", int(time.time())
+    # Readings for the queries the plan speeds up, so their shares and latencies are real.
+    texts = {"votes-e2e": "SELECT id, votetypeid FROM votes WHERE postid = $1",
+             "comments-e2e": "SELECT count(*) FROM comments WHERE postid = $1",
+             "posts-e2e": "SELECT id, title FROM posts WHERE owneruserid = $1 "
+                          "ORDER BY creationdate DESC",
+             "badges-e2e": "SELECT name FROM badges WHERE userid = $1"}
+    for offset in (-180, -120, -60):
+        store.record(target, now // 60 * 60 + offset,
+                     [{"query_key": key, "calls": calls, "total_ms": calls * mean, "rows": calls,
+                       "blks_hit": 100, "blks_read": 0}
+                      for key, calls, mean in (("votes-e2e", 180, 48.0),
+                                               ("comments-e2e", 140, 41.0),
+                                               ("posts-e2e", 60, 71.0), ("badges-e2e", 40, 52.0))],
+                     texts, [])
     store.sync_indexes(target, [
         {"schema": "public", "table": "orders", "index_name": "orders_pkey",
          "definition": "CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)"},
@@ -178,23 +207,35 @@ def seed_actions_fixture():
             "indexes": [{"schema": "public", "table": "orders", "index_name": name, "scans": scans,
                          "size_bytes": 1 << 19, "unique": name.endswith("pkey"),
                          "primary": name.endswith("pkey"), "last_scan_at": None}
-                        for name, scans in (("orders_pkey", 900), ("idx_orders_status_old", 0))],
+                        for name, scans in (("orders_pkey", 900), ("idx_orders_status_old", 40))],
             "settings": {"work_mem": {"value": "4096", "unit": "kB", "pending_restart": False}}})
+
+    def query(key, name, share, table, columns, gain):
+        return {"key": key, "name": name, "share": share, "kind": "select", "suggestions": [
+            {"table": table, "columns": columns, "gain_pct": gain, "verified": True}]}
+
     inputs = {"engine": "postgresql", "now": now, "observed_s": 3600, "counter_age_s": 40 * 86400,
               "existing": [
                   {"schema": "public", "table": "orders", "index_name": "orders_pkey",
                    "columns": ["id"], "unique": True, "primary": True, "scans": 900,
                    "window_scans": 900, "size_bytes": 1 << 19},
                   {"schema": "public", "table": "orders", "index_name": "idx_orders_status_old",
-                   "columns": ["status"], "scans": 0, "window_scans": 0, "size_bytes": 4 << 20}],
-              "tables": {"orders": {"writes_per_s": 0.8, "peak_writes_per_s": 1.5}},
-              "queries": [{"key": "orders-e2e", "name": "SELECT on orders by customer_id",
-                           "share": 0.9, "kind": "select", "suggestions": [
-                               {"table": "orders", "columns": ["customer_id"], "gain_pct": 92.0,
-                                "verified": True, "sql": "CREATE INDEX ON orders (customer_id)"}]}]}
+                   "columns": ["status"], "scans": 40, "window_scans": 40, "size_bytes": 4 << 20}],
+              "tables": {"orders": {"writes_per_s": 0.8, "peak_writes_per_s": 1.5},
+                         "votes": {"writes_per_s": 40.0, "peak_writes_per_s": 60.0}},
+              "queries": [
+                  query("orders-e2e", "SELECT on orders by customer_id", 0.46, "orders",
+                        ["customer_id"], 92.0),
+                  query("votes-e2e", "SELECT on votes by postid", 0.17, "votes", ["postid"], 88.0),
+                  query("comments-e2e", "COUNT on comments by postid", 0.12, "comments",
+                        ["postid"], 85.0),
+                  query("posts-e2e", "SELECT on posts by owneruserid", 0.08, "posts",
+                        ["owneruserid", "creationdate"], 70.0),
+                  query("badges-e2e", "SELECT on badges by userid", 0.04, "badges", ["userid"],
+                        60.0)]}
     plan = build_plan(inputs)
     plan["explanation"] = ("One index on orders speeds up the lookup that takes most of the "
-                           "database time, and dropping an unused index saves work on every insert.")
+                           "database time; four more cover the next busiest queries.")
     store.save_index_plan(target, plan)
     database = [{"id": "setting_work_mem", "title": "Raise work_mem so sorts stay in memory",
                  "severity": "bad", "finding": "work_mem is 4 MB.",
@@ -205,12 +246,51 @@ def seed_actions_fixture():
     found = actions.candidates(store, target, plan, [], database)
     actions.reconcile(store, target, now, found)
     rows = {row["type"]: row for row in store.actions(target)}
+    orders = next(row for row in store.actions(target) if row["payload"].get("table") == "orders")
     actions.apply_explanations(store, target, now, {"action_picks": [
-        {"action_id": f"a{rows['add_index']['id']}",
+        {"action_id": f"a{orders['id']}",
          "why": "The orders lookup takes most of the database time."},
         {"action_id": f"a{rows['change_setting']['id']}", "why": "Sorts spill to disk."},
         {"action_id": f"a{rows['run_maintenance']['id']}", "why": "orders has many dead rows."}]})
+    _seed_applied(store, target, now)
     return {"target": target}
+
+
+def _seed_applied(store, target: str, now: int) -> None:
+    """Applied's history: a verified index with its closed Fix confirmed, an undone index, and
+    two dismissed changes with their reasons."""
+    from features.monitor import actions
+
+    def index(key, table, columns, *, queries=(), extra=None, **fields):
+        name = f"idx_{table}_{'_'.join(columns)}"
+        return {"key": key, "type": "add_index", "score": 0.1, "opened_at": now - 3 * 86400,
+                **fields, "payload": {
+                    "title": f"Add an index on {table}({', '.join(columns)})", "summary": "",
+                    "apply": "run_sql", "table": table, "columns": columns,
+                    "queries": list(queries),
+                    "sql": f"CREATE INDEX CONCURRENTLY {name} ON {table} ({', '.join(columns)});",
+                    "detail": {"undo_sql": f"DROP INDEX CONCURRENTLY public.{name};"},
+                    **(extra or {})}}
+
+    verified = index("add:e2e-tags", "tags", ["count", "tagname"], state="confirmed",
+                     closed_at=now - 7200, closed_reason="index_added", queries=["count-e2e"],
+                     extra={"result": {"before_ms": 38.0, "after_ms": 4.1, "calls": 120,
+                                       "at": now - 3600}})
+    store.write_actions(target, now - 3600, [
+        verified,
+        index("add:e2e-posts-score", "posts", ["score"], state="undone",
+              closed_at=now - 3 * 86400, closed_reason="undone",
+              dismiss_reason="It slowed the nightly import."),
+        index("add:e2e-users-location", "users", ["location"], state="dismissed",
+              closed_at=now - 86400, closed_reason="dismissed",
+              dismiss_reason="One nightly report reads it, not worth a cost on every write."),
+        {"key": "db:setting_e2e_work_mem_64", "type": "change_setting", "state": "dismissed",
+         "score": 0.05, "opened_at": now - 4 * 86400, "closed_at": now - 2 * 86400,
+         "closed_reason": "dismissed", "dismiss_reason": "The host caps memory at 16 GB.",
+         "payload": {"title": "Raise work_mem to 64 MB", "summary": "", "apply": "setting",
+                     "setting": {"name": "work_mem", "current": "4MB", "target": "64MB"},
+                     "queries": []}}])
+    actions._file_verification(store, target, now - 3600, verified)
 
 
 def _seed_traffic_jump(store, target: str, now: int) -> None:

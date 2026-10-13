@@ -1,7 +1,6 @@
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { renderWithClient } from '@/test-utils'
-import { AwsConnectionPanel } from './AwsConnectionPanel'
 import {
   fetchFleetAwsSsoAccounts,
   fetchFleetAwsSsoRoles,
@@ -10,6 +9,7 @@ import {
   fleetAwsLogout,
   startFleetAwsSsoLogin,
 } from '../../lib/useFleet'
+import { AwsConnectionPanel } from './AwsConnectionPanel'
 
 vi.mock('../../lib/useFleet', () => ({
   fetchFleetAwsLogin: vi.fn(),
@@ -85,8 +85,7 @@ describe('AwsConnectionPanel', () => {
         ...SIGNED_IN,
         active_profile: 'production',
         available_profiles: ['development', 'production'],
-        identity_arn:
-          'arn:aws:sts::123456789012:assumed-role/production/mike',
+        identity_arn: 'arn:aws:sts::123456789012:assumed-role/production/mike',
         account: '123456789012',
       })
       .mockResolvedValueOnce({
@@ -98,15 +97,21 @@ describe('AwsConnectionPanel', () => {
 
     renderWithClient(<AwsConnectionPanel profile="production" />)
 
-    expect(await screen.findByText(/Signed into AWS as mike/)).toBeTruthy()
+    expect(await screen.findByText(/Signed in to AWS as mike/)).toBeTruthy()
     // The active profile's account and role are surfaced, not just its name.
-    expect(await screen.findByText('production - 123456789012')).toBeTruthy()
+    expect(
+      await screen.findByText('Role production in account 123456789012')
+    ).toBeTruthy()
     expect(fetchFleetAwsStatus).toHaveBeenCalledWith('production')
 
     fireEvent.click(screen.getByRole('button', { name: /Sign out/ }))
     await waitFor(() => expect(fleetAwsLogout).toHaveBeenCalledOnce())
     // With saved profiles present, signing out returns to the profile picker.
-    expect(await screen.findByText('Sign into AWS')).toBeTruthy()
+    expect(
+      await screen.findByText(
+        'Sign in with AWS SSO so we can read details about your imported databases.'
+      )
+    ).toBeTruthy()
   })
 
   it('runs the guided wizard: sign in, pick account, pick role, connect', async () => {
@@ -136,12 +141,16 @@ describe('AwsConnectionPanel', () => {
 
     const { container } = renderWithClient(<AwsConnectionPanel />)
 
-    expect(await screen.findByText('Connect AWS with SSO')).toBeTruthy()
+    expect(
+      await screen.findByText('Sign in with AWS SSO (step 1 of 3)')
+    ).toBeTruthy()
     fireEvent.change(
       container.querySelector('input[name="aws-sso-start-url"]')!,
       { target: { value: 'https://readyset.awsapps.com/start' } }
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in with AWS' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Sign in with AWS SSO' })
+    )
 
     await waitFor(() =>
       expect(fetchFleetAwsSsoAccounts).toHaveBeenCalledWith(
@@ -171,7 +180,7 @@ describe('AwsConnectionPanel', () => {
         role_name: 'AdministratorAccess',
       })
     )
-    expect(await screen.findByText(/Signed into AWS as mike/)).toBeTruthy()
+    expect(await screen.findByText(/Signed in to AWS as mike/)).toBeTruthy()
   })
 
   it('treats a duplicate profile as success and signs in with it', async () => {
@@ -207,12 +216,16 @@ describe('AwsConnectionPanel', () => {
 
     const { container } = renderWithClient(<AwsConnectionPanel />)
 
-    expect(await screen.findByText('Connect AWS with SSO')).toBeTruthy()
+    expect(
+      await screen.findByText('Sign in with AWS SSO (step 1 of 3)')
+    ).toBeTruthy()
     fireEvent.change(
       container.querySelector('input[name="aws-sso-start-url"]')!,
       { target: { value: 'https://dev.awsapps.com/start' } }
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in with AWS' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Sign in with AWS SSO' })
+    )
 
     await waitFor(() => expect(fetchFleetAwsSsoAccounts).toHaveBeenCalled())
     await pickOption(/dev \(111\)/)
@@ -224,6 +237,6 @@ describe('AwsConnectionPanel', () => {
     )
     // The duplicate is the same account + role, so it signs in rather than
     // asking the user to invent a different name.
-    expect(await screen.findByText(/Signed into AWS as mike/)).toBeTruthy()
+    expect(await screen.findByText(/Signed in to AWS as mike/)).toBeTruthy()
   })
 })

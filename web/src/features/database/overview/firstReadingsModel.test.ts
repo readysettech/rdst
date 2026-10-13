@@ -8,7 +8,6 @@ import {
   firstRun,
   firstRunDomain,
   isFirstRun,
-  nextLocalHour,
   showFirstRun,
 } from './firstReadingsModel'
 
@@ -332,9 +331,10 @@ describe('firstRun', () => {
       meta: '0 analyzed, 1 failed',
       sub: 'Needs sign-in',
     })
+    // The first report runs whatever the nightly setting says.
     expect(byId(login).report).toMatchObject({
-      state: 'off',
-      meta: 'Turned off',
+      state: 'pending',
+      meta: 'Tonight at midnight',
     })
     const local = firstRun({
       ...base,
@@ -362,16 +362,6 @@ describe('firstRun', () => {
     })
     expect(model.failure).toBe('pg_stat_statements is not readable')
     expect(model.steps[0].state).toBe('blocked')
-  })
-})
-
-describe('nextLocalHour', () => {
-  it('lands on the next occurrence of the hour', () => {
-    const at = nextLocalHour(NOW, 3)
-    expect(at).toBeGreaterThan(NOW)
-    expect(at - NOW).toBeLessThanOrEqual(86_400)
-    expect(new Date(at * 1000).getHours()).toBe(3)
-    expect(new Date(at * 1000).getMinutes()).toBe(0)
   })
 })
 

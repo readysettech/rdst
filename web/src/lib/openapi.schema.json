@@ -296,6 +296,16 @@
             ],
             "title": "Detail"
           },
+          "effort": {
+            "default": "copy_sql",
+            "enum": [
+              "copy_sql",
+              "setting",
+              "code"
+            ],
+            "title": "Effort",
+            "type": "string"
+          },
           "evidence": {
             "default": [],
             "items": {
@@ -375,6 +385,17 @@
             ],
             "title": "Result"
           },
+          "risk": {
+            "default": "none",
+            "enum": [
+              "none",
+              "restart",
+              "locks",
+              "writes"
+            ],
+            "title": "Risk",
+            "type": "string"
+          },
           "rows": {
             "default": [],
             "items": {
@@ -383,6 +404,11 @@
             },
             "title": "Rows",
             "type": "array"
+          },
+          "saves_ms_per_min": {
+            "default": 0.0,
+            "title": "Saves Ms Per Min",
+            "type": "number"
           },
           "score": {
             "title": "Score",
@@ -427,7 +453,8 @@
               "applied",
               "confirmed",
               "no_effect",
-              "retired"
+              "retired",
+              "undone"
             ],
             "title": "State",
             "type": "string"
@@ -446,6 +473,22 @@
           "summary": {
             "title": "Summary",
             "type": "string"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "enum": [
+                  "first",
+                  "then",
+                  "later"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier"
           },
           "title": {
             "title": "Title",
@@ -540,10 +583,12 @@
         "type": "object"
       },
       "ActionVerb": {
+        "description": "An action verb's optional body: `until` (epoch seconds) sets aside until a date, and\n`reason` is the user's words for a set aside, a dismissal or an undo.",
         "properties": {
           "reason": {
             "anyOf": [
               {
+                "maxLength": 500,
                 "type": "string"
               },
               {
@@ -583,6 +628,109 @@
           "counter_age_s"
         ],
         "title": "ActionWindow",
+        "type": "object"
+      },
+      "ActionsCounts": {
+        "description": "What each filter choice would show with the others kept: by database across every\ndatabase, by kind and tier inside the chosen database.",
+        "properties": {
+          "by_database": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Database",
+            "type": "object"
+          },
+          "by_kind": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Kind",
+            "type": "object"
+          },
+          "first": {
+            "title": "First",
+            "type": "integer"
+          },
+          "later": {
+            "title": "Later",
+            "type": "integer"
+          },
+          "then": {
+            "title": "Then",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "by_database",
+          "by_kind",
+          "first",
+          "then",
+          "later",
+          "total"
+        ],
+        "title": "ActionsCounts",
+        "type": "object"
+      },
+      "ActionsDatabase": {
+        "description": "A database in the Actions filter: its open changes and how many are Do first.",
+        "properties": {
+          "checkup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CheckupState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "database": {
+            "title": "Database",
+            "type": "string"
+          },
+          "do_first": {
+            "title": "Do First",
+            "type": "integer"
+          },
+          "monitored": {
+            "title": "Monitored",
+            "type": "boolean"
+          },
+          "to_do": {
+            "title": "To Do",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "database",
+          "monitored",
+          "to_do",
+          "do_first"
+        ],
+        "title": "ActionsDatabase",
+        "type": "object"
+      },
+      "ActionsOpened": {
+        "description": "POST actions/opened: whether an open Changes ready event closed.",
+        "properties": {
+          "closed": {
+            "title": "Closed",
+            "type": "boolean"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "closed"
+        ],
+        "title": "ActionsOpened",
         "type": "object"
       },
       "ActionsPage": {
@@ -1016,6 +1164,7 @@
               "classification",
               "attention_check",
               "daily_snapshot",
+              "explain_actions",
               "benchmark"
             ],
             "title": "Action",
@@ -1168,6 +1317,7 @@
               "classification",
               "attention_check",
               "daily_snapshot",
+              "explain_actions",
               "benchmark"
             ],
             "title": "Action",
@@ -1479,6 +1629,11 @@
               }
             ],
             "title": "Next Cursor"
+          },
+          "retention_days": {
+            "default": 90,
+            "title": "Retention Days",
+            "type": "integer"
           },
           "targets": {
             "items": {
@@ -2000,6 +2155,41 @@
         "title": "AllowlistContextResponse",
         "type": "object"
       },
+      "AlsoWorthDoing": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "AlsoWorthDoing",
+        "type": "object"
+      },
       "AnalysisFix": {
         "properties": {
           "expected_gain": {
@@ -2050,6 +2240,74 @@
           "expected_gain"
         ],
         "title": "AnalysisFix",
+        "type": "object"
+      },
+      "AnalysisFixDetail": {
+        "properties": {
+          "cost_after": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost After"
+          },
+          "cost_before": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Before"
+          },
+          "serves": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serves"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "sql": {
+            "title": "Sql",
+            "type": "string"
+          },
+          "write_cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Write Cost"
+          }
+        },
+        "required": [
+          "sql"
+        ],
+        "title": "AnalysisFixDetail",
         "type": "object"
       },
       "AnalysisHistoryEntry": {
@@ -2190,6 +2448,74 @@
         "title": "AnalysisMetadata",
         "type": "object"
       },
+      "AnalysisParam": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "AnalysisParam",
+        "type": "object"
+      },
+      "AnalysisRunFacts": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokens"
+          }
+        },
+        "title": "AnalysisRunFacts",
+        "type": "object"
+      },
       "AnalysisSummary": {
         "additionalProperties": true,
         "properties": {
@@ -2301,6 +2627,11 @@
             ],
             "title": "Analysis Ref"
           },
+          "cancelled": {
+            "default": false,
+            "title": "Cancelled",
+            "type": "boolean"
+          },
           "enqueued_at": {
             "title": "Enqueued At",
             "type": "integer"
@@ -2338,6 +2669,25 @@
             ],
             "title": "Finished At"
           },
+          "held_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "sign_in",
+                  "monitoring_off",
+                  "outside_top",
+                  "ai_paused",
+                  "automatic_off",
+                  "over_allowance"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Reason"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -2363,7 +2713,8 @@
                 "enum": [
                   "sampled",
                   "table_sampled",
-                  "none"
+                  "none",
+                  "estimated"
                 ],
                 "type": "string"
               },
@@ -2525,6 +2876,11 @@
             ],
             "title": "Analysis Ref"
           },
+          "cancelled": {
+            "default": false,
+            "title": "Cancelled",
+            "type": "boolean"
+          },
           "display_name": {
             "title": "Display Name",
             "type": "string"
@@ -2566,6 +2922,25 @@
             ],
             "title": "Finished At"
           },
+          "held_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "sign_in",
+                  "monitoring_off",
+                  "outside_top",
+                  "ai_paused",
+                  "automatic_off",
+                  "over_allowance"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Reason"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -2591,7 +2966,8 @@
                 "enum": [
                   "sampled",
                   "table_sampled",
-                  "none"
+                  "none",
+                  "estimated"
                 ],
                 "type": "string"
               },
@@ -3193,6 +3569,380 @@
           "reason"
         ],
         "title": "AnthropicValidateResponse",
+        "type": "object"
+      },
+      "AppliedDay": {
+        "description": "Applied rows of one local day, newest first; `day` is its ISO date.",
+        "properties": {
+          "day": {
+            "title": "Day",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/AppliedRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "start": {
+            "title": "Start",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start",
+          "day",
+          "rows"
+        ],
+        "title": "AppliedDay",
+        "type": "object"
+      },
+      "AppliedPage": {
+        "description": "GET /actions/applied?db=: the last 30 days of applied changes by day, the undone and\ndismissed ones with their reasons, and the week's totals.",
+        "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/AppliedDay"
+            },
+            "title": "Days",
+            "type": "array"
+          },
+          "db": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db"
+          },
+          "dismissed": {
+            "items": {
+              "$ref": "#/components/schemas/DismissedRow"
+            },
+            "title": "Dismissed",
+            "type": "array"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/AppliedTotals"
+          },
+          "undone": {
+            "items": {
+              "$ref": "#/components/schemas/AppliedRow"
+            },
+            "title": "Undone",
+            "type": "array"
+          }
+        },
+        "required": [
+          "db",
+          "since",
+          "days",
+          "undone",
+          "dismissed",
+          "totals"
+        ],
+        "title": "AppliedPage",
+        "type": "object"
+      },
+      "AppliedQuery": {
+        "description": "A query an applied change was meant to speed up: average latency over the 7 days\nbefore and since the change settled, and calls since.",
+        "properties": {
+          "after_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Ms"
+          },
+          "before_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Ms"
+          },
+          "calls_after": {
+            "title": "Calls After",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "before_ms",
+          "after_ms",
+          "calls_after"
+        ],
+        "title": "AppliedQuery",
+        "type": "object"
+      },
+      "AppliedRow": {
+        "description": "One applied change. `by` is user when you said you did it, detected when RDST saw it\nland; `source` is how it closed (index_added, index_dropped, setting_changed,\nquery_replaced, cleared, user). Measuring rows say when RDST checks next.",
+        "properties": {
+          "after_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Ms"
+          },
+          "applied_at": {
+            "title": "Applied At",
+            "type": "integer"
+          },
+          "before_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Ms"
+          },
+          "by": {
+            "enum": [
+              "user",
+              "detected"
+            ],
+            "title": "By",
+            "type": "string"
+          },
+          "calls_after": {
+            "title": "Calls After",
+            "type": "integer"
+          },
+          "database": {
+            "title": "Database",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "index",
+              "setting",
+              "maintenance",
+              "rewrite",
+              "caching"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "next_check_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Check At"
+          },
+          "queries": {
+            "items": {
+              "$ref": "#/components/schemas/AppliedQuery"
+            },
+            "title": "Queries",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "rollback_sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rollback Sql"
+          },
+          "saved_ms_per_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved Ms Per Min"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "status": {
+            "enum": [
+              "measuring",
+              "verified",
+              "no_change",
+              "undone"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "undone_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Undone At"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "database",
+          "type",
+          "kind",
+          "title",
+          "applied_at",
+          "by",
+          "source",
+          "status",
+          "queries",
+          "before_ms",
+          "after_ms",
+          "calls_after",
+          "verified_at",
+          "next_check_at",
+          "rollback_sql",
+          "saved_ms_per_min",
+          "undone_at",
+          "reason"
+        ],
+        "title": "AppliedRow",
+        "type": "object"
+      },
+      "AppliedTotals": {
+        "description": "The last 7 days: changes applied by status, and the database time the verified ones\nsave a minute, also as a share of all database time.",
+        "properties": {
+          "changes_this_week": {
+            "title": "Changes This Week",
+            "type": "integer"
+          },
+          "measuring": {
+            "title": "Measuring",
+            "type": "integer"
+          },
+          "no_change": {
+            "title": "No Change",
+            "type": "integer"
+          },
+          "saved_ms_per_min": {
+            "title": "Saved Ms Per Min",
+            "type": "number"
+          },
+          "saved_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved Share"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "changes_this_week",
+          "verified",
+          "measuring",
+          "no_change",
+          "saved_ms_per_min",
+          "saved_share"
+        ],
+        "title": "AppliedTotals",
         "type": "object"
       },
       "AskClarificationNeededEvent": {
@@ -4614,6 +5364,198 @@
         "title": "BackgroundRunResponse",
         "type": "object"
       },
+      "BenchmarkFacts": {
+        "properties": {
+          "after_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Ms"
+          },
+          "before_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Ms"
+          },
+          "change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          }
+        },
+        "title": "BenchmarkFacts",
+        "type": "object"
+      },
+      "BenchmarkFixRow": {
+        "properties": {
+          "after_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Ms"
+          },
+          "before_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Ms"
+          },
+          "change_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Pct"
+          },
+          "estimated": {
+            "default": true,
+            "title": "Estimated",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "before_ms",
+          "after_ms",
+          "change_pct"
+        ],
+        "title": "BenchmarkFixRow",
+        "type": "object"
+      },
+      "BenchmarkFixesRequest": {
+        "properties": {
+          "query_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Query Keys",
+            "type": "array"
+          },
+          "runs": {
+            "default": 20,
+            "title": "Runs",
+            "type": "integer"
+          },
+          "scratch_schema": {
+            "default": true,
+            "title": "Scratch Schema",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query_keys"
+        ],
+        "title": "BenchmarkFixesRequest",
+        "type": "object"
+      },
+      "BenchmarkFixesResult": {
+        "properties": {
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "ran_at": {
+            "title": "Ran At",
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/BenchmarkFixRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          },
+          "scratch_schema": {
+            "title": "Scratch Schema",
+            "type": "boolean"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "ran_at",
+          "runs",
+          "scratch_schema",
+          "rows",
+          "share",
+          "method"
+        ],
+        "title": "BenchmarkFixesResult",
+        "type": "object"
+      },
       "BenchmarkLaneNumbers": {
         "description": "One lane's measurement of one query in a benchmark.",
         "properties": {
@@ -5437,6 +6379,21 @@
       },
       "CheckupState": {
         "properties": {
+          "ai_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "limit",
+                  "quota"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Reason"
+          },
           "analyzed": {
             "title": "Analyzed",
             "type": "integer"
@@ -5462,6 +6419,32 @@
               }
             ],
             "title": "Finished At"
+          },
+          "held": {
+            "anyOf": [
+              {
+                "enum": [
+                  "sign_in",
+                  "ai_paused"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held"
+          },
+          "held_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Text"
           },
           "report_id": {
             "anyOf": [
@@ -6201,6 +7184,76 @@
         "title": "CompositionSlice",
         "type": "object"
       },
+      "ConfirmedFixRow": {
+        "description": "A fix measured as working in the report's day.",
+        "properties": {
+          "after_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Ms"
+          },
+          "applied_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied At"
+          },
+          "before_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Ms"
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
+          "query_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Query Keys",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "applied_at",
+          "confirmed_at",
+          "before_ms",
+          "after_ms",
+          "query_keys"
+        ],
+        "title": "ConfirmedFixRow",
+        "type": "object"
+      },
       "ConnectionProblem": {
         "description": "Why RDST can't reach the database, and what to check.",
         "properties": {
@@ -6388,8 +7441,108 @@
         "title": "Coverage",
         "type": "object"
       },
+      "DatabaseActivity": {
+        "description": "What monitoring is doing on one database now: a pass checking it, an analysis or the\nreport running, or readings alone. `done`/`total` count the first hour's analyses.",
+        "properties": {
+          "done": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done"
+          },
+          "every_s": {
+            "default": 60,
+            "title": "Every S",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "reading",
+              "checking",
+              "analyzing",
+              "report",
+              "idle"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_reading_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reading At"
+          },
+          "next_check_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Check At"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "kind",
+          "label"
+        ],
+        "title": "DatabaseActivity",
+        "type": "object"
+      },
       "DatabaseReport": {
         "properties": {
+          "copy_count": {
+            "default": 0,
+            "title": "Copy Count",
+            "type": "integer"
+          },
+          "day": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportDay"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "detailed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportDetailed"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "finished_at": {
             "anyOf": [
               {
@@ -6401,9 +7554,38 @@
             ],
             "title": "Finished At"
           },
+          "fix_first": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ReportFixItem"
+            },
+            "title": "Fix First",
+            "type": "array"
+          },
+          "health": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ReportHealthRow"
+            },
+            "title": "Health",
+            "type": "array"
+          },
+          "health_fine": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Health Fine",
+            "type": "array"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "narrative_missing": {
+            "default": false,
+            "title": "Narrative Missing",
+            "type": "boolean"
           },
           "period_end": {
             "anyOf": [
@@ -6471,6 +7653,16 @@
               }
             ]
           },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sample": {
             "default": false,
             "title": "Sample",
@@ -6501,6 +7693,16 @@
           "ts": {
             "title": "Ts",
             "type": "integer"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportVerdictText"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -6687,6 +7889,14 @@
       "DeepAnalysisDigest": {
         "description": "One stored deep analysis, as the query row and the report card show it.",
         "properties": {
+          "also": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AlsoWorthDoing"
+            },
+            "title": "Also",
+            "type": "array"
+          },
           "analysis_ref": {
             "anyOf": [
               {
@@ -6709,6 +7919,27 @@
             ],
             "title": "Analyzed At"
           },
+          "benchmark": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchmarkFacts"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "calls_today": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calls Today"
+          },
           "efficiency_score": {
             "anyOf": [
               {
@@ -6719,6 +7950,17 @@
               }
             ],
             "title": "Efficiency Score"
+          },
+          "explain_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explain Text"
           },
           "findings": {
             "items": {
@@ -6731,6 +7973,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/AnalysisFix"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fix_detail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnalysisFixDetail"
               },
               {
                 "type": "null"
@@ -6780,6 +8032,33 @@
             "title": "Other Fixes",
             "type": "array"
           },
+          "param_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Param Source"
+          },
+          "params": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AnalysisParam"
+            },
+            "title": "Params",
+            "type": "array"
+          },
+          "plan_findings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PlanFinding"
+            },
+            "title": "Plan Findings",
+            "type": "array"
+          },
           "plan_summary": {
             "anyOf": [
               {
@@ -6789,6 +8068,17 @@
                 "type": "null"
               }
             ]
+          },
+          "planner_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planner Cost"
           },
           "query_key": {
             "title": "Query Key",
@@ -6804,6 +8094,77 @@
               }
             ],
             "title": "Rating"
+          },
+          "readyset": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadysetFacts"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rewrites": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RewriteTested"
+            },
+            "title": "Rewrites",
+            "type": "array"
+          },
+          "rows_read": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rows Read"
+          },
+          "rows_returned": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rows Returned"
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnalysisRunFacts"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportVerdictText"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -6847,6 +8208,352 @@
           "deleted"
         ],
         "title": "DeletedMuteRule",
+        "type": "object"
+      },
+      "DetailedStretch": {
+        "description": "A spike the day crossed (`spike`), or when none did, one of its two busiest stretches\n(`busiest`), with the queries behind it and the rollbacks inside it.",
+        "properties": {
+          "end": {
+            "title": "End",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "spike",
+              "busiest"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "metric": {
+            "anyOf": [
+              {
+                "enum": [
+                  "traffic",
+                  "latency"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric"
+          },
+          "peak": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peak"
+          },
+          "queries": {
+            "items": {
+              "$ref": "#/components/schemas/DetailedStretchQuery"
+            },
+            "title": "Queries",
+            "type": "array"
+          },
+          "ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ratio"
+          },
+          "rollbacks": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rollbacks"
+          },
+          "start": {
+            "title": "Start",
+            "type": "integer"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "usual": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usual"
+          }
+        },
+        "required": [
+          "kind",
+          "metric",
+          "start",
+          "end",
+          "peak",
+          "usual",
+          "ratio",
+          "summary",
+          "queries",
+          "rollbacks"
+        ],
+        "title": "DetailedStretch",
+        "type": "object"
+      },
+      "DetailedStretchQuery": {
+        "description": "A query behind a busy stretch: its share of the stretch's time (busiest stretches), or\nits level before and during (spikes).",
+        "properties": {
+          "before": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "during": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "During"
+          },
+          "query_key": {
+            "title": "Query Key",
+            "type": "string"
+          },
+          "ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ratio"
+          },
+          "share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share"
+          }
+        },
+        "required": [
+          "query_key",
+          "display_name",
+          "share",
+          "before",
+          "during",
+          "ratio"
+        ],
+        "title": "DetailedStretchQuery",
+        "type": "object"
+      },
+      "DetailedTile": {
+        "description": "One of the Detailed view's six numbers with the day before's. Rollbacks and deadlocks\nshare a tile: `value` counts rollbacks, `second` deadlocks.",
+        "properties": {
+          "change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "metric": {
+            "enum": [
+              "qps",
+              "mean_ms",
+              "p95_ms",
+              "connections",
+              "cache_hit",
+              "rollbacks_deadlocks"
+            ],
+            "title": "Metric",
+            "type": "string"
+          },
+          "prior": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prior"
+          },
+          "prior_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prior Note"
+          },
+          "second": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Second"
+          },
+          "second_prior": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Second Prior"
+          },
+          "state": {
+            "enum": [
+              "ok",
+              "warn",
+              "bad",
+              "collecting"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "unit": {
+            "enum": [
+              "qps",
+              "ms",
+              "count",
+              "ratio"
+            ],
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "metric",
+          "label",
+          "value",
+          "prior",
+          "change",
+          "unit",
+          "state"
+        ],
+        "title": "DetailedTile",
+        "type": "object"
+      },
+      "DetailedTotals": {
+        "properties": {
+          "data_bytes": {
+            "title": "Data Bytes",
+            "type": "integer"
+          },
+          "data_kept_days": {
+            "title": "Data Kept Days",
+            "type": "integer"
+          },
+          "queries_seen": {
+            "title": "Queries Seen",
+            "type": "integer"
+          },
+          "ran_at": {
+            "title": "Ran At",
+            "type": "integer"
+          },
+          "readings": {
+            "title": "Readings",
+            "type": "integer"
+          },
+          "report_number": {
+            "title": "Report Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queries_seen",
+          "readings",
+          "data_kept_days",
+          "data_bytes",
+          "report_number",
+          "ran_at"
+        ],
+        "title": "DetailedTotals",
         "type": "object"
       },
       "DigestEntry": {
@@ -6934,6 +8641,63 @@
           "mode"
         ],
         "title": "DiscoveryModeBody",
+        "type": "object"
+      },
+      "DismissedRow": {
+        "properties": {
+          "database": {
+            "title": "Database",
+            "type": "string"
+          },
+          "dismissed_at": {
+            "title": "Dismissed At",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "index",
+              "setting",
+              "maintenance",
+              "rewrite",
+              "caching"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "database",
+          "type",
+          "kind",
+          "title",
+          "dismissed_at",
+          "reason"
+        ],
+        "title": "DismissedRow",
         "type": "object"
       },
       "EmailRequest": {
@@ -8961,6 +10725,124 @@
         "title": "FormattedQueryRewrite",
         "type": "object"
       },
+      "GlobalActionsPage": {
+        "description": "GET /actions?db=: the plan across databases (decision 6). `cards` holds the open\nactions ranked Do first, Then, Later, each tier by time saved a minute; `set_aside` and\n`dismissed` list the held ones for Bring back.",
+        "properties": {
+          "applied_count": {
+            "title": "Applied Count",
+            "type": "integer"
+          },
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/PlanCard"
+            },
+            "title": "Cards",
+            "type": "array"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ActionsCounts"
+          },
+          "databases": {
+            "items": {
+              "$ref": "#/components/schemas/ActionsDatabase"
+            },
+            "title": "Databases",
+            "type": "array"
+          },
+          "db": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db"
+          },
+          "dismissed": {
+            "items": {
+              "$ref": "#/components/schemas/PlanCard"
+            },
+            "title": "Dismissed",
+            "type": "array"
+          },
+          "keep": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Keep",
+            "type": "object"
+          },
+          "left_out": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Left Out",
+            "type": "object"
+          },
+          "observed_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed S"
+          },
+          "report_checks": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ReportChecks"
+            },
+            "default": {},
+            "title": "Report Checks",
+            "type": "object"
+          },
+          "set_aside": {
+            "items": {
+              "$ref": "#/components/schemas/PlanCard"
+            },
+            "title": "Set Aside",
+            "type": "array"
+          },
+          "unmonitored": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unmonitored",
+            "type": "array"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "db",
+          "databases",
+          "unmonitored",
+          "updated_at",
+          "observed_s",
+          "counts",
+          "cards",
+          "set_aside",
+          "dismissed",
+          "applied_count",
+          "keep",
+          "left_out"
+        ],
+        "title": "GlobalActionsPage",
+        "type": "object"
+      },
       "GuardCheckRequest": {
         "properties": {
           "sql": {
@@ -9374,6 +11256,75 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HealthCheckRow": {
+        "description": "Every health check, worst first: its finding, the one number it shows and the Fix first\nrank that addresses it.",
+        "properties": {
+          "check": {
+            "title": "Check",
+            "type": "string"
+          },
+          "finding": {
+            "title": "Finding",
+            "type": "string"
+          },
+          "fix_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fix Rank"
+          },
+          "in_actions": {
+            "default": false,
+            "title": "In Actions",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "needs_you": {
+            "default": false,
+            "title": "Needs You",
+            "type": "boolean"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "state": {
+            "enum": [
+              "bad",
+              "warn",
+              "ok",
+              "unavailable"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "check",
+          "label",
+          "state",
+          "finding",
+          "number",
+          "fix_rank"
+        ],
+        "title": "HealthCheckRow",
+        "type": "object"
+      },
       "HealthNow": {
         "properties": {
           "active_conns": {
@@ -9503,9 +11454,42 @@
             "title": "Mean Ms",
             "type": "number"
           },
+          "p95_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95 Ms"
+          },
           "qps": {
             "title": "Qps",
             "type": "number"
+          },
+          "qps_peak": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qps Peak"
+          },
+          "qps_peak_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qps Peak At"
           },
           "xact_rollback": {
             "title": "Xact Rollback",
@@ -9698,6 +11682,654 @@
         "title": "HistorySpan",
         "type": "object"
       },
+      "HomeAnalyzed": {
+        "properties": {
+          "analysis_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Ref"
+          },
+          "analyzed_at": {
+            "title": "Analyzed At",
+            "type": "integer"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "fix_suggested",
+              "healthy",
+              "failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "query_key": {
+            "title": "Query Key",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "query_key",
+          "display_name",
+          "analyzed_at",
+          "analysis_ref",
+          "outcome"
+        ],
+        "title": "HomeAnalyzed",
+        "type": "object"
+      },
+      "HomeDatabase": {
+        "properties": {
+          "act_now": {
+            "title": "Act Now",
+            "type": "integer"
+          },
+          "connection": {
+            "title": "Connection",
+            "type": "string"
+          },
+          "do_first": {
+            "default": 0,
+            "title": "Do First",
+            "type": "integer"
+          },
+          "fixes_item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixes Item Id"
+          },
+          "fixes_ready": {
+            "title": "Fixes Ready",
+            "type": "integer"
+          },
+          "open_items": {
+            "title": "Open Items",
+            "type": "integer"
+          },
+          "qps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qps"
+          },
+          "state": {
+            "enum": [
+              "watching",
+              "cant_reach",
+              "ai_paused",
+              "not_monitored"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "state_since": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State Since"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "to_do": {
+            "default": 0,
+            "title": "To Do",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target",
+          "connection",
+          "state",
+          "state_since",
+          "qps",
+          "open_items",
+          "act_now",
+          "fixes_ready",
+          "fixes_item_id"
+        ],
+        "title": "HomeDatabase",
+        "type": "object"
+      },
+      "HomeDayCard": {
+        "properties": {
+          "cache_hit_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Hit Ratio"
+          },
+          "cache_hit_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Hit Reason"
+          },
+          "fixes_item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixes Item Id"
+          },
+          "fixes_ready": {
+            "title": "Fixes Ready",
+            "type": "integer"
+          },
+          "fixes_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixes Share"
+          },
+          "mean_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Ms"
+          },
+          "mean_ms_delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Ms Delta"
+          },
+          "qps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qps"
+          },
+          "qps_peak": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qps Peak"
+          },
+          "qps_peak_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qps Peak At"
+          },
+          "report_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Day"
+          },
+          "report_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Id"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/HomeSparkPoint"
+            },
+            "title": "Series",
+            "type": "array"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "qps",
+          "qps_peak",
+          "qps_peak_at",
+          "mean_ms",
+          "mean_ms_delta",
+          "fixes_ready",
+          "fixes_share",
+          "fixes_item_id",
+          "cache_hit_ratio",
+          "cache_hit_reason",
+          "series",
+          "report_id",
+          "report_day"
+        ],
+        "title": "HomeDayCard",
+        "type": "object"
+      },
+      "HomeLogEntry": {
+        "properties": {
+          "band": {
+            "anyOf": [
+              {
+                "enum": [
+                  "act_now",
+                  "watch"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "link": {
+            "$ref": "#/components/schemas/MonitorLink"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "ts": {
+            "title": "Ts",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ts",
+          "text",
+          "detail",
+          "link"
+        ],
+        "title": "HomeLogEntry",
+        "type": "object"
+      },
+      "HomeModel": {
+        "description": "GET /home: the status line, the day card, every database and today's log.",
+        "properties": {
+          "databases": {
+            "items": {
+              "$ref": "#/components/schemas/HomeDatabase"
+            },
+            "title": "Databases",
+            "type": "array"
+          },
+          "databases_strip": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HomeStripRow"
+            },
+            "title": "Databases Strip",
+            "type": "array"
+          },
+          "day": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HomeDayCard"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "integer"
+          },
+          "not_monitored": {
+            "title": "Not Monitored",
+            "type": "integer"
+          },
+          "recently_analyzed": {
+            "items": {
+              "$ref": "#/components/schemas/HomeAnalyzed"
+            },
+            "title": "Recently Analyzed",
+            "type": "array"
+          },
+          "since_yesterday": {
+            "$ref": "#/components/schemas/HomeSinceYesterday"
+          },
+          "status": {
+            "$ref": "#/components/schemas/HomeStatus"
+          },
+          "today": {
+            "items": {
+              "$ref": "#/components/schemas/HomeLogEntry"
+            },
+            "title": "Today",
+            "type": "array"
+          }
+        },
+        "required": [
+          "status",
+          "day",
+          "databases",
+          "not_monitored",
+          "today",
+          "since_yesterday",
+          "recently_analyzed",
+          "generated_at"
+        ],
+        "title": "HomeModel",
+        "type": "object"
+      },
+      "HomeSinceYesterday": {
+        "properties": {
+          "fixes_confirmed": {
+            "title": "Fixes Confirmed",
+            "type": "integer"
+          },
+          "opened_closed": {
+            "title": "Opened Closed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "opened_closed",
+          "fixes_confirmed"
+        ],
+        "title": "HomeSinceYesterday",
+        "type": "object"
+      },
+      "HomeSparkPoint": {
+        "properties": {
+          "qps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qps"
+          },
+          "ts": {
+            "title": "Ts",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ts",
+          "qps"
+        ],
+        "title": "HomeSparkPoint",
+        "type": "object"
+      },
+      "HomeStatus": {
+        "description": "needs_you: an Act now item is open. quiet: attention checks ran in the last 3 cycles\nand nothing is open. paused: charts and stuck-query alerts run, AI checks do not. off:\nno database is monitored.",
+        "properties": {
+          "act_now": {
+            "default": 0,
+            "title": "Act Now",
+            "type": "integer"
+          },
+          "checks_ran_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checks Ran At"
+          },
+          "do_first": {
+            "default": 0,
+            "title": "Do First",
+            "type": "integer"
+          },
+          "headline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
+          },
+          "last_reading_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reading At"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MonitorLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "needs_you": {
+            "title": "Needs You",
+            "type": "integer"
+          },
+          "next_report_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Report At"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "state": {
+            "enum": [
+              "needs_you",
+              "quiet",
+              "paused",
+              "off"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
+          "to_watch": {
+            "title": "To Watch",
+            "type": "integer"
+          },
+          "watching": {
+            "title": "Watching",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state",
+          "target",
+          "needs_you",
+          "to_watch",
+          "headline",
+          "link",
+          "checks_ran_at",
+          "since",
+          "last_reading_at",
+          "next_report_at",
+          "watching"
+        ],
+        "title": "HomeStatus",
+        "type": "object"
+      },
+      "HomeStripRow": {
+        "description": "One database in Home's \"Across your databases\" strip, in attention order.",
+        "properties": {
+          "act_now": {
+            "title": "Act Now",
+            "type": "integer"
+          },
+          "activity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatabaseActivity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "building": {
+            "default": false,
+            "title": "Building",
+            "type": "boolean"
+          },
+          "do_first": {
+            "title": "Do First",
+            "type": "integer"
+          },
+          "fixes_ready": {
+            "title": "Fixes Ready",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "watching",
+              "cant_reach",
+              "ai_paused",
+              "not_monitored"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "to_do": {
+            "title": "To Do",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target",
+          "state",
+          "act_now",
+          "to_do",
+          "do_first",
+          "fixes_ready"
+        ],
+        "title": "HomeStripRow",
+        "type": "object"
+      },
       "ImportQueriesRequest": {
         "properties": {
           "file": {
@@ -9835,6 +12467,159 @@
         "title": "InboxAdvice",
         "type": "object"
       },
+      "InboxChanges": {
+        "description": "A Changes ready event's plan in brief: how many changes, how many to do first, the top\ntitles and their action ids (do-first ones lead).",
+        "properties": {
+          "action_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Action Ids",
+            "type": "array"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "do_first": {
+            "title": "Do First",
+            "type": "integer"
+          },
+          "titles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Titles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "do_first",
+          "titles",
+          "action_ids"
+        ],
+        "title": "InboxChanges",
+        "type": "object"
+      },
+      "InboxFix": {
+        "properties": {
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "query_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Key"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          },
+          "sql": {
+            "title": "Sql",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rank",
+          "query_key",
+          "title",
+          "sql",
+          "share",
+          "latency_ms",
+          "group"
+        ],
+        "title": "InboxFix",
+        "type": "object"
+      },
+      "InboxFixGroup": {
+        "properties": {
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "group",
+          "table",
+          "columns",
+          "count",
+          "share"
+        ],
+        "title": "InboxFixGroup",
+        "type": "object"
+      },
+      "InboxHistoryEntry": {
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "ts": {
+            "title": "Ts",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ts",
+          "text"
+        ],
+        "title": "InboxHistoryEntry",
+        "type": "object"
+      },
       "InboxItem": {
         "properties": {
           "action": {
@@ -9847,6 +12632,17 @@
               }
             ]
           },
+          "action_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Id"
+          },
           "advice": {
             "anyOf": [
               {
@@ -9857,14 +12653,67 @@
               }
             ]
           },
+          "after_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Ms"
+          },
+          "band": {
+            "default": "watch",
+            "enum": [
+              "act_now",
+              "watch",
+              "closed"
+            ],
+            "title": "Band",
+            "type": "string"
+          },
           "band_reason": {
             "default": "",
             "title": "Band Reason",
             "type": "string"
           },
+          "before_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Ms"
+          },
           "body_json": {
             "title": "Body Json",
             "type": "string"
+          },
+          "calls": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calls"
+          },
+          "changes": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxChanges"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "created_at": {
             "title": "Created At",
@@ -9880,9 +12729,46 @@
             "title": "Delivery",
             "type": "string"
           },
+          "fix_group": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxFixGroup"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fixes": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InboxFix"
+            },
+            "title": "Fixes",
+            "type": "array"
+          },
+          "fixes_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixes Share"
+          },
           "group_key": {
             "title": "Group Key",
             "type": "string"
+          },
+          "history": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InboxHistoryEntry"
+            },
+            "title": "History",
+            "type": "array"
           },
           "id": {
             "title": "Id",
@@ -9897,6 +12783,33 @@
                 "type": "null"
               }
             ]
+          },
+          "index_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index Name"
+          },
+          "kind": {
+            "default": "other",
+            "enum": [
+              "stuck_query",
+              "fixes_ready",
+              "report_ready",
+              "fix_confirmed",
+              "traffic_spike",
+              "monitoring_issue",
+              "changes_ready",
+              "no_change_yet",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
           },
           "link": {
             "$ref": "#/components/schemas/InboxLink"
@@ -9960,6 +12873,17 @@
             "title": "Occurrences",
             "type": "array"
           },
+          "pid": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pid"
+          },
           "query_keys": {
             "items": {
               "type": "string"
@@ -9984,6 +12908,14 @@
                 "type": "null"
               }
             ]
+          },
+          "related": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InboxRelated"
+            },
+            "title": "Related",
+            "type": "array"
           },
           "relevance_rule": {
             "anyOf": [
@@ -10037,6 +12969,17 @@
             ],
             "title": "Resolved By"
           },
+          "running_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running S"
+          },
           "seen_count": {
             "title": "Seen Count",
             "type": "integer"
@@ -10059,6 +13002,17 @@
             "default": 0,
             "title": "Smaller Moved",
             "type": "integer"
+          },
+          "source_report_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Report Id"
           },
           "state": {
             "enum": [
@@ -10092,6 +13046,14 @@
               }
             ],
             "title": "Status At"
+          },
+          "steps": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InboxStep"
+            },
+            "title": "Steps",
+            "type": "array"
           },
           "subject": {
             "title": "Subject",
@@ -10212,7 +13174,8 @@
               "settings",
               "configure",
               "sign_in",
-              "setup"
+              "setup",
+              "actions"
             ],
             "title": "Kind",
             "type": "string"
@@ -10300,6 +13263,53 @@
           "items"
         ],
         "title": "InboxPage",
+        "type": "object"
+      },
+      "InboxRelated": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "link": {
+            "$ref": "#/components/schemas/MonitorLink"
+          }
+        },
+        "required": [
+          "label",
+          "detail",
+          "link"
+        ],
+        "title": "InboxRelated",
+        "type": "object"
+      },
+      "InboxStep": {
+        "properties": {
+          "sql": {
+            "title": "Sql",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "sql"
+        ],
+        "title": "InboxStep",
         "type": "object"
       },
       "Incident": {
@@ -10463,6 +13473,91 @@
           "spark"
         ],
         "title": "IncidentQuery",
+        "type": "object"
+      },
+      "IndexChangeSeen": {
+        "description": "An index added or dropped in the day; `from_rdst` when an RDST action named it, with\nthat action's measuring status, and reads since for an added one.",
+        "properties": {
+          "action_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Id"
+          },
+          "definition": {
+            "title": "Definition",
+            "type": "string"
+          },
+          "from_rdst": {
+            "title": "From Rdst",
+            "type": "boolean"
+          },
+          "index_name": {
+            "title": "Index Name",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "added",
+              "dropped"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "scans": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scans"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "measuring",
+                  "verified",
+                  "no_change",
+                  "undone"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          },
+          "ts": {
+            "title": "Ts",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ts",
+          "kind",
+          "index_name",
+          "table",
+          "definition",
+          "from_rdst",
+          "action_id",
+          "status",
+          "scans"
+        ],
+        "title": "IndexChangeSeen",
         "type": "object"
       },
       "IndexPlan": {
@@ -11789,6 +14884,25 @@
             ],
             "title": "Finished At"
           },
+          "held_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "sign_in",
+                  "monitoring_off",
+                  "outside_top",
+                  "ai_paused",
+                  "automatic_off",
+                  "over_allowance"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Reason"
+          },
           "mode": {
             "title": "Mode",
             "type": "string"
@@ -12251,6 +15365,27 @@
               }
             ],
             "title": "Rating"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportVerdictText"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -12725,6 +15860,17 @@
       },
       "MonitorHealth": {
         "properties": {
+          "checks_ran_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checks Ran At"
+          },
           "delay_reason": {
             "anyOf": [
               {
@@ -12922,6 +16068,94 @@
         "title": "MonitorHealth",
         "type": "object"
       },
+      "MonitorLink": {
+        "description": "Where a Home or Inbox row leads; `label` is the destination word the row shows.",
+        "properties": {
+          "analysis_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Ref"
+          },
+          "item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Id"
+          },
+          "kind": {
+            "enum": [
+              "inbox",
+              "chart",
+              "query",
+              "queries",
+              "live",
+              "report",
+              "analysis",
+              "database",
+              "settings",
+              "sign_in",
+              "actions"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "query_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Key"
+          },
+          "report_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Id"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "required": [
+          "kind",
+          "target",
+          "label"
+        ],
+        "title": "MonitorLink",
+        "type": "object"
+      },
       "MonitorOutage": {
         "description": "A lost-connection episode: from the last reading to when monitoring resumed.",
         "properties": {
@@ -12961,6 +16195,27 @@
       },
       "MonitorPulse": {
         "properties": {
+          "activity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatabaseActivity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checks_ran_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checks Ran At"
+          },
           "delay_reason": {
             "anyOf": [
               {
@@ -13056,6 +16311,27 @@
       },
       "MonitorPulsePage": {
         "properties": {
+          "activity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatabaseActivity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checks_ran_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checks Ran At"
+          },
           "connection_problem": {
             "anyOf": [
               {
@@ -13266,6 +16542,17 @@
               }
             ]
           },
+          "latency_delta_24h": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Delta 24H"
+          },
           "mean_ms": {
             "title": "Mean Ms",
             "type": "number"
@@ -13280,6 +16567,17 @@
               }
             ],
             "title": "Not Analyzable Reason"
+          },
+          "plan_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Score"
           },
           "qps": {
             "title": "Qps",
@@ -13322,6 +16620,28 @@
             "title": "State",
             "type": "array"
           },
+          "status": {
+            "default": "not_analyzed",
+            "enum": [
+              "fix_suggested",
+              "analyzing",
+              "healthy",
+              "stuck",
+              "not_analyzed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "suggested_fix": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SuggestedFix"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "tables": {
             "items": {
               "type": "string"
@@ -13352,6 +16672,14 @@
             ],
             "title": "Text Status",
             "type": "string"
+          },
+          "trend_24h": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TrendMean"
+            },
+            "title": "Trend 24H",
+            "type": "array"
           },
           "write_cost": {
             "anyOf": [
@@ -13461,6 +16789,11 @@
               }
             ],
             "title": "Range"
+          },
+          "seen_total": {
+            "default": 0,
+            "title": "Seen Total",
+            "type": "integer"
           },
           "target": {
             "anyOf": [
@@ -13640,6 +16973,13 @@
           "push_daily_cap": {
             "title": "Push Daily Cap",
             "type": "integer"
+          },
+          "quiet_hours": {
+            "$ref": "#/components/schemas/QuietHours",
+            "default": {
+              "from_hour": 23,
+              "to_hour": 7
+            }
           },
           "size_bytes": {
             "title": "Size Bytes",
@@ -13831,6 +17171,20 @@
               }
             ],
             "title": "Push Daily Cap"
+          },
+          "quiet_hours": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quiet Hours"
           }
         },
         "title": "MonitorSettingsUpdate",
@@ -14510,6 +17864,11 @@
       },
       "NotifyEvents": {
         "properties": {
+          "daily_report": {
+            "default": true,
+            "title": "Daily Report",
+            "type": "boolean"
+          },
           "database_events": {
             "default": true,
             "title": "Database Events",
@@ -14874,6 +18233,494 @@
         "title": "PerformanceMetrics",
         "type": "object"
       },
+      "PlanCard": {
+        "description": "One action on the global Actions page. `sql` applies it and `rollback_sql` reverses it\n(migration templates are built client-side from both). `before_ms`/`after_ms` are the\nmeasured averages once the actions check has verified it.",
+        "properties": {
+          "after_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Ms"
+          },
+          "apply": {
+            "enum": [
+              "run_sql",
+              "setting",
+              "config_restart",
+              "app_change",
+              "readyset"
+            ],
+            "title": "Apply",
+            "type": "string"
+          },
+          "before_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Ms"
+          },
+          "checkup_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkup Rank"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "database": {
+            "title": "Database",
+            "type": "string"
+          },
+          "effort": {
+            "enum": [
+              "copy_sql",
+              "setting",
+              "code"
+            ],
+            "title": "Effort",
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "index_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index Name"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "index",
+              "setting",
+              "maintenance",
+              "rewrite",
+              "caching"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "opened_at": {
+            "title": "Opened At",
+            "type": "integer"
+          },
+          "original": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "enum": [
+                  "first",
+                  "then",
+                  "later"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "queries": {
+            "items": {
+              "$ref": "#/components/schemas/PlanQuery"
+            },
+            "title": "Queries",
+            "type": "array"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "restart": {
+            "title": "Restart",
+            "type": "boolean"
+          },
+          "risk": {
+            "enum": [
+              "none",
+              "restart",
+              "locks",
+              "writes"
+            ],
+            "title": "Risk",
+            "type": "string"
+          },
+          "rollback_sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rollback Sql"
+          },
+          "rows": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "saves_ms_per_min": {
+            "title": "Saves Ms Per Min",
+            "type": "number"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "set_aside_until": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set Aside Until"
+          },
+          "setting": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setting"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "snoozed",
+              "dismissed",
+              "applied",
+              "confirmed",
+              "no_effect",
+              "retired",
+              "undone"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steps"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "add_index",
+              "drop_index",
+              "rewrite_query",
+              "change_setting",
+              "run_maintenance",
+              "try_caching"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "integer"
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Why"
+          },
+          "write_cost": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Write Cost"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "database",
+          "type",
+          "kind",
+          "state",
+          "priority",
+          "rank",
+          "risk",
+          "effort",
+          "saves_ms_per_min",
+          "score",
+          "title",
+          "summary",
+          "note",
+          "why",
+          "apply",
+          "sql",
+          "rollback_sql",
+          "restart",
+          "confidence",
+          "table",
+          "columns",
+          "index_name",
+          "setting",
+          "queries",
+          "share",
+          "before_ms",
+          "after_ms",
+          "write_cost",
+          "steps",
+          "evidence",
+          "rows",
+          "opened_at",
+          "updated_at",
+          "set_aside_until",
+          "closed_at",
+          "reason",
+          "checkup_rank"
+        ],
+        "title": "PlanCard",
+        "type": "object"
+      },
+      "PlanFinding": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "PlanFinding",
+        "type": "object"
+      },
+      "PlanQuery": {
+        "description": "A query a change speeds up: its share of the database's time over the plan's window,\nits average latency there, and the latency expected after the change when the plan knows\nthe gain.",
+        "properties": {
+          "expected_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Ms"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "mean_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Ms"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "share",
+          "mean_ms",
+          "expected_ms"
+        ],
+        "title": "PlanQuery",
+        "type": "object"
+      },
       "PlanSummary": {
         "properties": {
           "execution_ms": {
@@ -14933,6 +18780,119 @@
           "rows_returned"
         ],
         "title": "PlanSummary",
+        "type": "object"
+      },
+      "Preferences": {
+        "description": "App preferences kept in the RDST config file's [preferences] section.",
+        "properties": {
+          "font_size": {
+            "default": "default",
+            "enum": [
+              "default",
+              "large"
+            ],
+            "title": "Font Size",
+            "type": "string"
+          },
+          "keep_readings_days": {
+            "default": 7,
+            "enum": [
+              7,
+              30,
+              90
+            ],
+            "title": "Keep Readings Days",
+            "type": "integer"
+          },
+          "report_view": {
+            "default": "quick",
+            "enum": [
+              "quick",
+              "detailed"
+            ],
+            "title": "Report View",
+            "type": "string"
+          },
+          "theme": {
+            "default": "dark",
+            "enum": [
+              "dark",
+              "light",
+              "system"
+            ],
+            "title": "Theme",
+            "type": "string"
+          }
+        },
+        "title": "Preferences",
+        "type": "object"
+      },
+      "PreferencesUpdate": {
+        "properties": {
+          "font_size": {
+            "anyOf": [
+              {
+                "enum": [
+                  "default",
+                  "large"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Font Size"
+          },
+          "keep_readings_days": {
+            "anyOf": [
+              {
+                "enum": [
+                  7,
+                  30,
+                  90
+                ],
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keep Readings Days"
+          },
+          "report_view": {
+            "anyOf": [
+              {
+                "enum": [
+                  "quick",
+                  "detailed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report View"
+          },
+          "theme": {
+            "anyOf": [
+              {
+                "enum": [
+                  "dark",
+                  "light",
+                  "system"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theme"
+          }
+        },
+        "title": "PreferencesUpdate",
         "type": "object"
       },
       "ProgressEvent": {
@@ -16470,6 +20430,25 @@
         "title": "QuerySkip",
         "type": "object"
       },
+      "QuietHours": {
+        "description": "Pushes are held between these local hours; equal hours mean no quiet hours.",
+        "properties": {
+          "from_hour": {
+            "title": "From Hour",
+            "type": "integer"
+          },
+          "to_hour": {
+            "title": "To Hour",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from_hour",
+          "to_hour"
+        ],
+        "title": "QuietHours",
+        "type": "object"
+      },
       "RangeAvailability": {
         "properties": {
           "enabled": {
@@ -16519,6 +20498,73 @@
           "reason"
         ],
         "title": "RangeAvailability",
+        "type": "object"
+      },
+      "RdstDidRow": {
+        "description": "One timed line of RDST's own day; `until` ends a stretch (an analysis batch, the\nchecks that ran all day).",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Id"
+          },
+          "report_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Id"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "ts": {
+            "title": "Ts",
+            "type": "integer"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          }
+        },
+        "required": [
+          "ts",
+          "until",
+          "text",
+          "detail",
+          "item_id",
+          "report_id"
+        ],
+        "title": "RdstDidRow",
         "type": "object"
       },
       "ReadysetCacheability": {
@@ -16744,6 +20790,25 @@
           "checked"
         ],
         "title": "ReadysetCheckedEvent",
+        "type": "object"
+      },
+      "ReadysetFacts": {
+        "properties": {
+          "blockers": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "verified": {
+            "default": false,
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "title": "ReadysetFacts",
         "type": "object"
       },
       "Recommendations": {
@@ -16973,6 +21038,287 @@
         "title": "ReportBody",
         "type": "object"
       },
+      "ReportCheckOnly": {
+        "description": "A check the report flags that has no change on Actions (a setting merely off a rule\nof thumb, an index with no reads in the report's window).",
+        "properties": {
+          "check": {
+            "title": "Check",
+            "type": "string"
+          },
+          "finding": {
+            "title": "Finding",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "check",
+          "label",
+          "finding"
+        ],
+        "title": "ReportCheckOnly",
+        "type": "object"
+      },
+      "ReportChecks": {
+        "description": "The latest report's health checks: `needs_you` of `checks` (\"2 of 8 checks need\nyou\"), and the ones needing you that only the report lists.",
+        "properties": {
+          "checks": {
+            "title": "Checks",
+            "type": "integer"
+          },
+          "needs_you": {
+            "title": "Needs You",
+            "type": "integer"
+          },
+          "not_in_actions": {
+            "items": {
+              "$ref": "#/components/schemas/ReportCheckOnly"
+            },
+            "title": "Not In Actions",
+            "type": "array"
+          },
+          "report_id": {
+            "title": "Report Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "report_id",
+          "checks",
+          "needs_you",
+          "not_in_actions"
+        ],
+        "title": "ReportChecks",
+        "type": "object"
+      },
+      "ReportDay": {
+        "properties": {
+          "chart": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SnapshotChart"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "compared": {
+            "default": true,
+            "title": "Compared",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "query_count": {
+            "title": "Query Count",
+            "type": "integer"
+          },
+          "spikes": {
+            "items": {
+              "$ref": "#/components/schemas/SnapshotSpike"
+            },
+            "title": "Spikes",
+            "type": "array"
+          },
+          "tiles": {
+            "items": {
+              "$ref": "#/components/schemas/ReportDayTile"
+            },
+            "title": "Tiles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "label",
+          "tiles",
+          "chart",
+          "spikes",
+          "query_count"
+        ],
+        "title": "ReportDay",
+        "type": "object"
+      },
+      "ReportDayTile": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "metric": {
+            "enum": [
+              "qps",
+              "mean_ms",
+              "connections",
+              "cache_hit"
+            ],
+            "title": "Metric",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "state": {
+            "enum": [
+              "ok",
+              "warn",
+              "bad",
+              "collecting"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "unit": {
+            "enum": [
+              "qps",
+              "ms",
+              "count",
+              "ratio"
+            ],
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "metric",
+          "label",
+          "value",
+          "unit",
+          "detail",
+          "state",
+          "reason"
+        ],
+        "title": "ReportDayTile",
+        "type": "object"
+      },
+      "ReportDetailed": {
+        "description": "GET report?view=detailed: the sections Detailed adds, in report-detailed.html order.\nVerdict, the day and Fix first stay in the top-level fields both views share.",
+        "properties": {
+          "compared": {
+            "default": true,
+            "title": "Compared",
+            "type": "boolean"
+          },
+          "fixes_confirmed": {
+            "items": {
+              "$ref": "#/components/schemas/ConfirmedFixRow"
+            },
+            "title": "Fixes Confirmed",
+            "type": "array"
+          },
+          "health_checks": {
+            "items": {
+              "$ref": "#/components/schemas/HealthCheckRow"
+            },
+            "title": "Health Checks",
+            "type": "array"
+          },
+          "index_changes_seen": {
+            "items": {
+              "$ref": "#/components/schemas/IndexChangeSeen"
+            },
+            "title": "Index Changes Seen",
+            "type": "array"
+          },
+          "settings_audit": {
+            "items": {
+              "$ref": "#/components/schemas/SettingsAuditRow"
+            },
+            "title": "Settings Audit",
+            "type": "array"
+          },
+          "spikes": {
+            "items": {
+              "$ref": "#/components/schemas/DetailedStretch"
+            },
+            "title": "Spikes",
+            "type": "array"
+          },
+          "tiles": {
+            "items": {
+              "$ref": "#/components/schemas/DetailedTile"
+            },
+            "title": "Tiles",
+            "type": "array"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/DetailedTotals"
+          },
+          "what_changed": {
+            "items": {
+              "$ref": "#/components/schemas/WhatChangedRow"
+            },
+            "title": "What Changed",
+            "type": "array"
+          },
+          "what_rdst_did": {
+            "items": {
+              "$ref": "#/components/schemas/RdstDidRow"
+            },
+            "title": "What Rdst Did",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tiles",
+          "spikes",
+          "what_changed",
+          "fixes_confirmed",
+          "health_checks",
+          "settings_audit",
+          "index_changes_seen",
+          "what_rdst_did",
+          "totals"
+        ],
+        "title": "ReportDetailed",
+        "type": "object"
+      },
       "ReportFixFirst": {
         "properties": {
           "action": {
@@ -17085,6 +21431,148 @@
         "title": "ReportFixFirst",
         "type": "object"
       },
+      "ReportFixItem": {
+        "properties": {
+          "after_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Ms"
+          },
+          "before_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Ms"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "fixed_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixed At"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "kind": {
+            "enum": [
+              "index",
+              "config",
+              "rewrite",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "query_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Query Keys",
+            "type": "array"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "restart": {
+            "default": false,
+            "title": "Restart",
+            "type": "boolean"
+          },
+          "share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          },
+          "state": {
+            "enum": [
+              "ready",
+              "needs_attention",
+              "worth_doing",
+              "fixed",
+              "smaller"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rank",
+          "title",
+          "detail",
+          "sql",
+          "share",
+          "state",
+          "kind",
+          "group",
+          "query_keys"
+        ],
+        "title": "ReportFixItem",
+        "type": "object"
+      },
       "ReportHealthCheck": {
         "properties": {
           "action": {
@@ -17138,6 +21626,74 @@
           "note"
         ],
         "title": "ReportHealthCheck",
+        "type": "object"
+      },
+      "ReportHealthRow": {
+        "properties": {
+          "check": {
+            "title": "Check",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "finding": {
+            "title": "Finding",
+            "type": "string"
+          },
+          "fix_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fix Rank"
+          },
+          "in_actions": {
+            "default": false,
+            "title": "In Actions",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "needs_you": {
+            "default": false,
+            "title": "Needs You",
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "bad",
+              "warn",
+              "ok",
+              "unavailable"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "check",
+          "label",
+          "state",
+          "finding",
+          "detail",
+          "fix_rank"
+        ],
+        "title": "ReportHealthRow",
         "type": "object"
       },
       "ReportHistory": {
@@ -17307,6 +21863,55 @@
           "success"
         ],
         "title": "ReportResponse",
+        "type": "object"
+      },
+      "ReportRun": {
+        "properties": {
+          "analyses": {
+            "title": "Analyses",
+            "type": "integer"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "ran_at": {
+            "title": "Ran At",
+            "type": "integer"
+          },
+          "rewrites": {
+            "title": "Rewrites",
+            "type": "integer"
+          },
+          "trigger": {
+            "enum": [
+              "nightly",
+              "on_request"
+            ],
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "trigger",
+          "ran_at",
+          "model",
+          "analyses",
+          "rewrites"
+        ],
+        "title": "ReportRun",
         "type": "object"
       },
       "ReportSummary": {
@@ -17528,6 +22133,25 @@
         "title": "ReportVerdict",
         "type": "object"
       },
+      "ReportVerdictText": {
+        "description": "A two-clause verdict: the lead (\"demo needs two things today:\") and the rest.",
+        "properties": {
+          "lead": {
+            "title": "Lead",
+            "type": "string"
+          },
+          "rest": {
+            "title": "Rest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lead",
+          "rest"
+        ],
+        "title": "ReportVerdictText",
+        "type": "object"
+      },
       "ResetLocalDataResponse": {
         "properties": {
           "removed_path": {
@@ -17694,6 +22318,74 @@
           "explanation"
         ],
         "title": "RewriteSuggestionMetadata",
+        "type": "object"
+      },
+      "RewriteTested": {
+        "properties": {
+          "after_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Ms"
+          },
+          "before_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Ms"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "outcome": {
+            "default": "untested",
+            "enum": [
+              "faster",
+              "slower",
+              "no_change",
+              "untested"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "runs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runs"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "RewriteTested",
         "type": "object"
       },
       "RewriteTesting": {
@@ -19464,6 +24156,56 @@
         "title": "SetQueryStarredResponse",
         "type": "object"
       },
+      "SettingsAuditRow": {
+        "description": "A setting off the recommendation and when a change takes effect; `in_actions` when\nthe database shows the problem it fixes, so Actions lists the change.",
+        "properties": {
+          "current": {
+            "title": "Current",
+            "type": "string"
+          },
+          "in_actions": {
+            "default": false,
+            "title": "In Actions",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "parameter": {
+            "title": "Parameter",
+            "type": "string"
+          },
+          "recommended": {
+            "title": "Recommended",
+            "type": "string"
+          },
+          "takes_effect": {
+            "enum": [
+              "after a restart",
+              "on reload"
+            ],
+            "title": "Takes Effect",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parameter",
+          "current",
+          "recommended",
+          "takes_effect",
+          "note"
+        ],
+        "title": "SettingsAuditRow",
+        "type": "object"
+      },
       "SettingsBody": {
         "properties": {
           "cache_budget": {
@@ -20414,6 +25156,7 @@
             "enum": [
               "qps",
               "mean_ms",
+              "p95_ms",
               "active_conns_peak",
               "cache_hit_ratio_min",
               "xact_rollback",
@@ -21481,6 +26224,24 @@
           "value"
         ],
         "title": "StoryFact",
+        "type": "object"
+      },
+      "SuggestedFix": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "sql": {
+            "title": "Sql",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sql",
+          "label"
+        ],
+        "title": "SuggestedFix",
         "type": "object"
       },
       "TargetData": {
@@ -22757,6 +27518,31 @@
         "title": "TopStatusEvent",
         "type": "object"
       },
+      "TrendMean": {
+        "properties": {
+          "mean_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Ms"
+          },
+          "ts": {
+            "title": "Ts",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ts",
+          "mean_ms"
+        ],
+        "title": "TrendMean",
+        "type": "object"
+      },
       "TrendPoint": {
         "properties": {
           "ts": {
@@ -23270,6 +28056,18 @@
       "UpdateTargetRequest": {
         "description": "Request body for updating a target.",
         "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A new name; omitted keeps it.",
+            "title": "Name"
+          },
           "target": {
             "$ref": "#/components/schemas/TargetData"
           }
@@ -23392,6 +28190,115 @@
           "verified"
         ],
         "title": "VerifyPollResponse",
+        "type": "object"
+      },
+      "WhatChangedRow": {
+        "description": "A query against the day before, by average time per call. `plan_changed` rows carry\nthe filing's time and detail instead of numbers.",
+        "properties": {
+          "after_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Ms"
+          },
+          "before_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Ms"
+          },
+          "change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "slower",
+              "faster",
+              "new_heavy",
+              "plan_changed"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "query_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Key"
+          },
+          "share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share"
+          },
+          "ts": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ts"
+          }
+        },
+        "required": [
+          "kind",
+          "query_key",
+          "display_name",
+          "share",
+          "before_ms",
+          "after_ms",
+          "change",
+          "detail",
+          "ts"
+        ],
+        "title": "WhatChangedRow",
         "type": "object"
       },
       "WorkersBody": {
@@ -24266,6 +29173,7 @@
                     "classification",
                     "attention_check",
                     "daily_snapshot",
+                    "explain_actions",
                     "benchmark"
                   ],
                   "type": "string"
@@ -24460,6 +29368,7 @@
                     "classification",
                     "attention_check",
                     "daily_snapshot",
+                    "explain_actions",
                     "benchmark"
                   ],
                   "type": "string"
@@ -26199,6 +31108,27 @@
           }
         },
         "summary": "Discovery Mode",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/facts": {
+      "get": {
+        "description": "What the demo builds: the orders rows, the PostgreSQL version, the workload's\nquery count and the first-run download, from the seed and workload metadata.",
+        "operationId": "facts_api_demo_facts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Facts",
         "tags": [
           "demo",
           "demo"
@@ -27957,6 +32887,166 @@
         ]
       }
     },
+    "/api/monitor/actions": {
+      "get": {
+        "description": "Every database's open actions in one ranked plan, or one database's with `db`.",
+        "operationId": "global_actions_api_monitor_actions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "db",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Db"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GlobalActionsPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Global Actions",
+        "tags": [
+          "monitor"
+        ]
+      }
+    },
+    "/api/monitor/actions/applied": {
+      "get": {
+        "description": "Changes applied in the last 30 days with their measured effect, then the undone and\ndismissed ones.",
+        "operationId": "applied_actions_api_monitor_actions_applied_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "db",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Db"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppliedPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Applied Actions",
+        "tags": [
+          "monitor"
+        ]
+      }
+    },
+    "/api/monitor/home": {
+      "get": {
+        "description": "Home: the status line, the day card, every database and today's log.",
+        "operationId": "home_api_monitor_home_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 6,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Home",
+        "tags": [
+          "monitor"
+        ]
+      }
+    },
     "/api/monitor/inbox": {
       "get": {
         "description": "Tabs (open, muted, done) newest first; a raw item state keeps the classic filter.\n\nDigest items only reach the daily report, so every view leaves them out unless\n`include_digest` is set. Open also lists recoveries from the last 24 h until seen.\nIncident windows are measured only when `incidents` is set (the Inbox page).",
@@ -28048,54 +33138,6 @@
           }
         },
         "summary": "Inbox",
-        "tags": [
-          "monitor"
-        ]
-      }
-    },
-    "/api/monitor/inbox/mark-all-seen": {
-      "post": {
-        "description": "Marks new items seen and acknowledges recent recoveries.",
-        "operationId": "mark_all_seen_api_monitor_inbox_mark_all_seen_post",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "target",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Target"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Mark All Seen",
         "tags": [
           "monitor"
         ]
@@ -28502,9 +33544,52 @@
         ]
       }
     },
+    "/api/monitor/targets/{target}/actions/opened": {
+      "post": {
+        "description": "Actions was opened for this database: its Changes ready event closes.",
+        "operationId": "actions_opened_api_monitor_targets__target__actions_opened_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "title": "Target",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionsOpened"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Actions Opened",
+        "tags": [
+          "monitor"
+        ]
+      }
+    },
     "/api/monitor/targets/{target}/actions/{action_id}/{verb}": {
       "post": {
-        "description": "Snooze, dismiss or reopen an action; `check` reads the database now to see if it's done.",
+        "description": "A user's verb on one action, answered with the database's Actions page.\n\nset_aside (snooze is its older name) takes `until` and `reason`; dismiss takes `reason`;\ndid_it reads the database now and, unless it already shows the change, marks it applied\nby you so measuring starts; undid_it marks an applied change undone with `reason`;\nbring_back (or reopen) opens it again; check reads the database to see if it's done.",
         "operationId": "action_verb_api_monitor_targets__target__actions__action_id___verb__post",
         "parameters": [
           {
@@ -28531,8 +33616,12 @@
             "required": true,
             "schema": {
               "enum": [
+                "set_aside",
                 "snooze",
                 "dismiss",
+                "did_it",
+                "undid_it",
+                "bring_back",
                 "reopen",
                 "check"
               ],
@@ -28682,6 +33771,111 @@
           }
         },
         "summary": "Analyze Jobs",
+        "tags": [
+          "monitor"
+        ]
+      }
+    },
+    "/api/monitor/targets/{target}/analyze-jobs/{job_id}/cancel": {
+      "post": {
+        "description": "Stop a queued or running analysis; the query's latest analysis stays as it was.",
+        "operationId": "cancel_analyze_job_api_monitor_targets__target__analyze_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "title": "Target",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzeJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Analyze Job",
+        "tags": [
+          "monitor"
+        ]
+      }
+    },
+    "/api/monitor/targets/{target}/benchmark-fixes": {
+      "post": {
+        "description": "Before and after for each query with a fix. The after is the planner's estimate;\na timed run on a scratch schema is not done, and `scratch_schema` reads false.",
+        "operationId": "benchmark_fixes_api_monitor_targets__target__benchmark_fixes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "title": "Target",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BenchmarkFixesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchmarkFixesResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Benchmark Fixes",
         "tags": [
           "monitor"
         ]
@@ -28991,7 +34185,7 @@
     },
     "/api/monitor/targets/{target}/load": {
       "get": {
-        "description": "Recorded execution time and calls per bucket, split by the top queries in the range.\n\n`from` and `to` (epoch seconds) scope it to a brushed window instead of `range`.",
+        "description": "Recorded execution time and calls per bucket, split by the top queries in the range.\n\n`rank` picks the top queries by execution time or by calls. `from` and `to` (epoch\nseconds) scope it to a brushed window instead of `range`.",
         "operationId": "load_api_monitor_targets__target__load_get",
         "parameters": [
           {
@@ -29063,6 +34257,20 @@
                 }
               ],
               "title": "To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rank",
+            "required": false,
+            "schema": {
+              "default": "time",
+              "enum": [
+                "time",
+                "calls"
+              ],
+              "title": "Rank",
+              "type": "string"
             }
           }
         ],
@@ -29774,6 +34982,58 @@
         ]
       }
     },
+    "/api/monitor/targets/{target}/queries/{key}/analyze/cancel": {
+      "post": {
+        "description": "Stop the query's queued or running analysis, whichever job holds it.",
+        "operationId": "cancel_query_analysis_api_monitor_targets__target__queries__key__analyze_cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "title": "Target",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzeJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Query Analysis",
+        "tags": [
+          "monitor"
+        ]
+      }
+    },
     "/api/monitor/targets/{target}/queries/{key}/library": {
       "post": {
         "description": "Give a monitored query its Query Library row, so Compare can select it.\n\nLibrary admission is capped per collector pass, so a quiet monitored query may have\nno row yet. Monitor keys are Library hashes; the row is created from monitor text.",
@@ -30036,7 +35296,7 @@
     },
     "/api/monitor/targets/{target}/report/latest": {
       "get": {
-        "description": "The newest run of any kind, or with `daily` the newest one the Reports tab shows.",
+        "description": "The newest run of any kind, or with `daily` the newest one the Reports tab shows.\n`view=detailed` adds the detailed sections.",
         "operationId": "latest_report_api_monitor_targets__target__report_latest_get",
         "parameters": [
           {
@@ -30056,6 +35316,20 @@
               "default": false,
               "title": "Daily",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "default": "quick",
+              "enum": [
+                "quick",
+                "detailed"
+              ],
+              "title": "View",
+              "type": "string"
             }
           }
         ],
@@ -30089,6 +35363,7 @@
     },
     "/api/monitor/targets/{target}/report/{report_id}": {
       "get": {
+        "description": "One run; `view=detailed` adds the detailed sections.",
         "operationId": "get_report_api_monitor_targets__target__report__report_id__get",
         "parameters": [
           {
@@ -30107,6 +35382,20 @@
             "schema": {
               "title": "Report Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "default": "quick",
+              "enum": [
+                "quick",
+                "detailed"
+              ],
+              "title": "View",
+              "type": "string"
             }
           }
         ],
@@ -33536,6 +38825,67 @@
           }
         },
         "summary": "Verify Poll",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/preferences": {
+      "get": {
+        "operationId": "get_preferences_api_settings_preferences_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preferences"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Preferences",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "description": "Change the preferences sent; the rest keep their values.",
+        "operationId": "put_preferences_api_settings_preferences_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreferencesUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preferences"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Preferences",
         "tags": [
           "settings"
         ]

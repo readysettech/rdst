@@ -1,9 +1,11 @@
 import { cn, tv, type VariantProps } from '@rs/tailwind-base'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { forwardRef, memo } from 'react'
 import type { WithChildren, WithClassName } from '../../helpers/types'
 import { Icon } from '../svg/icon'
-import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { IconWithSpinner } from '../svg/icon-with-spinner'
+import { type QuietStatus, quietLineRecipe } from './quiet-line'
+import { Spinner } from './spinner'
 
 const alertRecipe = tv({
   base: [
@@ -289,8 +291,23 @@ type AlertProps = VariantProps<typeof alertRecipe> & {
   icon?: IconStrokeName
   label: string
   onClick?: () => void
+  /**
+   * `quiet`: the inline-alert line. A sunk row with no border, a 14px glyph, the
+   * variant's status tone on the glyph and label only; `modifier`, `size` and
+   * `iconPosition` do not apply, and the row is not a pressable surface.
+   */
+  tone?: 'default' | 'quiet'
 } & WithClassName &
   WithChildren
+
+const QUIET_STATUS: Record<NonNullable<AlertProps['variant']>, QuietStatus> = {
+  primary: 'neutral',
+  rising: 'neutral',
+  informative: 'neutral',
+  negative: 'negative',
+  warning: 'warning',
+  positive: 'positive',
+}
 
 const Alert = forwardRef<HTMLDivElement | HTMLAnchorElement, AlertProps>(
   (props, ref) => {
@@ -307,8 +324,45 @@ const Alert = forwardRef<HTMLDivElement | HTMLAnchorElement, AlertProps>(
       children,
       onClick,
       className,
+      tone,
       ...restProps
     } = props
+
+    if (tone === 'quiet') {
+      const styles = quietLineRecipe({
+        status: QUIET_STATUS[variant ?? 'primary'],
+      })
+      return (
+        <div
+          {...restProps}
+          className={styles.root({
+            class: cn(
+              fullWidth && 'w-full',
+              disabled && 'opacity-50',
+              className
+            ),
+          })}
+          ref={ref as React.Ref<HTMLDivElement>}
+        >
+          {loading ? (
+            <span className="mt-1 shrink-0">
+              <Spinner color="layout" />
+            </span>
+          ) : (
+            icon && (
+              <Icon
+                name={icon}
+                label=""
+                aria-hidden="true"
+                className={styles.glyph()}
+              />
+            )
+          )}
+          <span className={cn('min-w-0 flex-1', styles.lead())}>{label}</span>
+          {children}
+        </div>
+      )
+    }
 
     const hasLeftIcon = icon && iconPosition?.includes('left')
     const hasRightIcon = icon && iconPosition?.includes('right')

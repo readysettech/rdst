@@ -7,6 +7,7 @@ import math
 import re
 import time
 from collections.abc import Callable
+from datetime import datetime
 from functools import lru_cache
 from typing import Any
 
@@ -117,6 +118,8 @@ def analysis_reason(state: str, error: str | None, *, cap_reached: bool = False)
     if state not in ("failed", "skipped") or not error:
         return None
     message = error.strip()
+    if message == "cancelled":
+        return "Cancelled."
     lower = message.lower()
     kind = analysis_error_kind(state, error)
     if kind == "sign_in":
@@ -153,7 +156,7 @@ def analysis_reason(state: str, error: str | None, *, cap_reached: bool = False)
 # Inbox presentation (brief 5.7, NOTIFICATION_MODEL.md)
 
 POSITIVE_TYPES = {"query_improved"}
-FYI_TYPES = {"daily_summary", "query_improved"}
+FYI_TYPES = {"daily_summary", "query_improved", "no_change_yet"}
 ACT_NOW_TYPES = {"lock_contention", "stuck_query", "monitoring_issue"}
 GROUP_BUCKET_SECONDS = 6 * 3600
 # A second of extra database time each minute.
@@ -214,8 +217,6 @@ def _per_minute(value: float) -> str:
 
 
 def _recovery_summary(type: str, body: dict[str, Any]) -> str:
-    if type == "health_finding":
-        return "The latest report no longer flags this."
     if type == "lock_contention":
         after = (body.get("resolution") or {}).get("after") or {}
         return f"Lock waits back to normal: {after.get('lock_waits', 0)} sessions waiting."
@@ -256,12 +257,47 @@ def lead_with_finding(text: str) -> str:
     return stripped[:1].upper() + stripped[1:] if stripped else stripped
 
 
+# Verbs whose last consonant doubles before "-ing".
+_DOUBLED = {"drop", "set", "let", "stop", "cut", "run", "put", "get", "plan", "trim"}
+
+
+def first_change(title: str) -> str:
+    """An action title as the object of "starting with": "an index on orders(total)",
+    "raising work_mem so sorts stay in memory"."""
+    text = title.strip()
+    if text.startswith("Add an index on "):
+        return "an index on " + text[len("Add an index on "):]
+    verb, _, rest = text.partition(" ")
+    word = verb.lower()
+    if not rest or not word.isalpha():
+        return text[:1].lower() + text[1:]
+    if word in _DOUBLED:
+        word += word[-1]
+    elif word.endswith("e") and not word.endswith("ee"):
+        word = word[:-1]
+    return f"{word}ing {rest}"
+
+
 def inbox_summary(item: dict[str, Any], body: dict[str, Any], names: dict[str, str]) -> str:
     type = item["type"]
+    if type == "fix_confirmed" and isinstance(body.get("before_ms"), (int, float)) and \
+            isinstance(body.get("after_ms"), (int, float)):
+        return f"{latency_text(body['before_ms'])} to {latency_text(body['after_ms'])}."
     if recovered(item, body):
         return _recovery_summary(type, body)
-    if type == "health_finding":
-        return str(body.get("finding") or item["title"])
+    if type == "changes_ready":
+        titles = [str(title) for title in body.get("titles") or []]
+        first = int(body.get("do_first") or 0)
+        start = f"starting with {first_change(titles[0])}" if titles else ""
+        if first:
+            return f"{first} to do first{', ' + start if start else ''}."
+        return f"{start[:1].upper()}{start[1:]}." if start else item["title"] + "."
+    if type == "no_change_yet":
+        before, after = body.get("before_ms"), body.get("after_ms")
+        if isinstance(before, (int, float)) and isinstance(after, (int, float)):
+            return (f"{latency_text(before)} before, {latency_text(after)} after over "
+                    f"{int(body.get('calls') or 0):,} calls.")
+        return "Applied, and the numbers didn't move."
     now, before = _numbers(body), _baseline(body)
     share = now.get("db_time_share")
     load = (f", {format_pct(share)} of database time"
@@ -325,7 +361,8 @@ def inbox_summary(item: dict[str, Any], body: dict[str, Any], names: dict[str, s
             "Running for over a minute and still going."
     if type == "daily_summary":
         if body.get("headline_summary"):
-            return str(body["headline_summary"])
+            lead = str(body.get("headline_title") or "").rstrip(".")
+            return f"{lead}. {body['headline_summary']}" if lead else str(body["headline_summary"])
         text = QUERY_TOKEN.sub(lambda m: names.get(m.group(1)) or "a query",
                                str(body.get("summary") or ""))
         return snippet(lead_with_finding(text) or "The nightly report is ready.", 140)
@@ -363,9 +400,14 @@ QUERY_TAB = {"plan_change": "analysis", "new_heavy_query": "analysis"}
 def inbox_link(item: dict[str, Any], body: dict[str, Any], keys: list[str]) -> dict[str, Any]:
     """Where the item's Open button goes: a query row and tab, the report, or a setting."""
     type, target = item["type"], item["target"]
-    if type in ("daily_summary", "health_finding") and body.get("report_id"):
+    if type in ("daily_summary", "report_ready") and body.get("report_id"):
         return {"kind": "report", "target": target, "report_id": body["report_id"],
                 "label": "Open report"}
+    if type in ("changes_ready", "no_change_yet") or (type == "fix_confirmed" and
+                                                      body.get("action_id")):
+        # The plan, or the change's row in Applied, narrowed to this database.
+        return {"kind": "actions", "target": target,
+                "label": "Open Actions" if type == "changes_ready" else "Open Applied"}
     if type == "monitoring_issue":
         subject = item["subject"]
         if subject in ("jev_login", "llm_login"):
@@ -421,19 +463,9 @@ def inbox_advice(item: dict[str, Any], body: dict[str, Any], engine: str,
     analyze = (f"ANALYZE TABLE {', '.join(tables)};" if mysql else
                f"ANALYZE {', '.join(tables)};") if tables else None
     if type == "stuck_query":
-        if mysql:
-            return {"summary": "RDST doesn't stop running statements. From a SQL session:",
-                    "steps": ["Find it: SELECT id, time, state, info FROM "
-                              "information_schema.processlist WHERE command <> 'Sleep' "
-                              "ORDER BY time DESC;",
-                              "Stop the statement and keep the connection: KILL QUERY <id>;"]}
         return {"summary": "RDST doesn't stop running statements. From a SQL session:",
-                "steps": ["Find it and what it waits on: SELECT pid, now() - query_start AS "
-                          "running_for, wait_event_type, wait_event, left(query, 80) FROM "
-                          "pg_stat_activity WHERE state <> 'idle' ORDER BY query_start;",
-                          "Cancel it: SELECT pg_cancel_backend(<pid>);",
-                          "If it won't cancel and others wait on its locks: "
-                          "SELECT pg_terminate_backend(<pid>);"]}
+                "steps": [f"{step['title']}: {step['sql']}"
+                          for step in stuck_steps(body, engine)]}
     if type == "connections_near_max":
         return {"summary": "New connections will fail at the limit.",
                 "steps": (["Find idle sessions: SELECT user, host, command, time FROM "
@@ -547,11 +579,6 @@ SOURCE_MISSING = ("pg_stat_statements_missing", "performance_schema_missing")
 
 
 def current_title(item: dict[str, Any]) -> str:
-    if item["type"] == "daily_summary":
-        body = item.get("body_json") or {}
-        if isinstance(body, str):
-            body = json.loads(body)
-        return str(body.get("headline_title") or "Checkup ready")
     if item["type"] == "monitoring_issue":
         return MONITORING_TITLES.get(item["subject"], item["title"])
     return item["title"]
@@ -919,7 +946,7 @@ def band_reason(item: dict[str, Any], body: dict[str, Any], status: str) -> str:
     label = ("Back to normal" if status == "back_to_normal" else "Closed"
              if status == "closed" else BAND_LABELS.get("watch" if band == "fyi" else band, "Watch"))
     if item["type"] == "daily_summary":
-        return f"{label}: the checkup is ready"
+        return f"{label}: the report is ready"
     routine = routine_repeat(body)
     what = "a routine burst" if routine else _what_changed(item)
     rule = RULE_PHRASES.get(item.get("relevance_rule") or "")
@@ -1350,3 +1377,283 @@ def mentioned_keys(value: Any, known: set[str]) -> set[str]:
         for item in value:
             found |= mentioned_keys(item, known)
     return found
+
+
+# The redesign's item view: kind, band, steps with the real pid, ranked fixes, the item's
+# own log and its related rows (ca-redesign-plan.md section 4.2).
+
+KIND_OF = {"stuck_query": "stuck_query", "fixes_ready": "fixes_ready",
+           "daily_summary": "report_ready", "report_ready": "report_ready",
+           "fix_confirmed": "fix_confirmed", "traffic_spike": "traffic_spike",
+           "monitoring_issue": "monitoring_issue", "changes_ready": "changes_ready",
+           "no_change_yet": "no_change_yet"}
+REPORT_TYPES = {"daily_summary", "report_ready"}
+PUSHED_ONCE_TYPES = {"fixes_ready", "changes_ready", "daily_summary", "report_ready"}
+# Outcomes of the actions check: one per applied change, filed closed.
+VERIFIED_TYPES = {"fix_confirmed", "no_change_yet"}
+# Database-wide Inbox items and the open actions that likely fix them (ca-actions-plan.md
+# decision 7): the named settings first, then the database checks by id, in this order.
+LIKELY_FIX = {
+    "connections_near_max": {"settings": ("max_connections", "idle_in_transaction_session_timeout",
+                                          "wait_timeout"),
+                             "checks": ("connections", "idle_in_transaction")},
+    "lock_contention": {"settings": ("lock_timeout", "idle_in_transaction_session_timeout"),
+                        "checks": ("idle_in_transaction",)},
+    "cache_hit_ratio_drop": {"settings": ("shared_buffers", "innodb_buffer_pool_size"),
+                             "checks": ("cache_hit",)},
+}
+
+
+def database_fix(type: str, body: dict[str, Any],
+                 actions: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The open action that likely fixes a database-wide item, by the LIKELY_FIX mapping;
+    lock contention also matches an index on a table its blocking statement reads."""
+    rule = LIKELY_FIX.get(type)
+    if rule is None:
+        return None
+    titled = [action for action in actions if action["payload"].get("title")]
+
+    def pick(action: dict[str, Any]) -> dict[str, Any]:
+        return {"id": action["id"], "title": action["payload"]["title"], "type": action["type"]}
+
+    for name in rule["settings"]:
+        for action in titled:
+            if action["type"] == "change_setting" and \
+                    (action["payload"].get("setting") or {}).get("name") == name:
+                return pick(action)
+    for check in rule["checks"]:
+        for action in titled:
+            if action.get("key") == f"db:{check}":
+                return pick(action)
+    if type == "lock_contention":
+        tables = {table.lower() for table in _tables(str((body.get("blocker") or {}).get("query")
+                                                         or ""))}
+        for action in titled:
+            if action["type"] == "add_index" and action["payload"].get("table") in tables:
+                return pick(action)
+    return None
+CLOSED_STATES = ("resolved", "dismissed")
+
+
+def item_kind(type: str) -> str:
+    return KIND_OF.get(type, "other")
+
+
+def item_band(item: dict[str, Any], band: str) -> str:
+    if item["state"] in CLOSED_STATES:
+        return "closed"
+    return "act_now" if band == "act_now" else "watch"
+
+
+def clock_text(ts: int) -> str:
+    moment = datetime.fromtimestamp(ts)
+    return f"{moment.hour % 12 or 12}:{moment.minute:02d} {'AM' if moment.hour < 12 else 'PM'}"
+
+
+def stuck_steps(body: dict[str, Any], engine: str) -> list[dict[str, str]]:
+    """What to do about a stuck statement, with its real pid when RDST sampled one."""
+    pid = body.get("pid")
+    if engine == "mysql":
+        ident = str(pid) if pid is not None else "<id>"
+        return [{"title": "Find it",
+                 "sql": "SELECT id, time, state, info FROM information_schema.processlist "
+                        "WHERE command <> 'Sleep' ORDER BY time DESC;"},
+                {"title": "Stop the statement and keep the connection",
+                 "sql": f"KILL QUERY {ident};"}]
+    ident = str(pid) if pid is not None else "<pid>"
+    where = (f"WHERE pid = {ident}" if pid is not None else
+             "WHERE state <> 'idle' ORDER BY query_start")
+    return [{"title": "Find it and what it waits on",
+             "sql": "SELECT pid, now() - query_start AS running, wait_event, query\n"
+                    f"FROM pg_stat_activity {where};"},
+            {"title": "Cancel it", "sql": f"SELECT pg_cancel_backend({ident});"},
+            {"title": "If it won't cancel", "sql": f"SELECT pg_terminate_backend({ident});"}]
+
+
+def latency_text(value: float | None) -> str:
+    """A latency with one decimal under 100 ms ("27.6 ms", "69.7 ms"), as the redesign's
+    numbers read."""
+    if value is None:
+        return "no data"
+    if value >= 1000:
+        return f"{value / 1000:.1f} s"
+    if value >= 100:
+        return f"{value:.0f} ms"
+    if value >= 1:
+        return f"{value:.1f} ms"
+    return f"{value:.2f} ms"
+
+
+def _fix_count(count: int) -> str:
+    return f"{count} {'fix' if count == 1 else 'fixes'}"
+
+
+def _minutes(seconds: Any) -> int:
+    return max(1, int(round(float(seconds) / 60))) if isinstance(seconds, (int, float)) else 0
+
+
+def _filed_text(item: dict[str, Any], body: dict[str, Any]) -> str:
+    type = item["type"]
+    if type == "fixes_ready":
+        return (f"Filed after the report: {_fix_count(int(body.get('count') or 0))}, "
+                f"{format_pct(float(body.get('share') or 0))} of database time")
+    if type == "changes_ready":
+        count, first = int(body.get("count") or 0), int(body.get("do_first") or 0)
+        return (f"Filed: {count} {'change' if count == 1 else 'changes'} in the plan"
+                + (f", {first} to do first" if first else ""))
+    if type in VERIFIED_TYPES and body.get("action_id"):
+        return "Measured against the 7 days before the change"
+    if type == "fix_confirmed":
+        return f"Index on {body.get('index_label') or body.get('index_name') or 'the table'} appeared"
+    if type in REPORT_TYPES:
+        analyses = body.get("analyses")
+        return (f"Report ran, {analyses} {'analysis' if analyses == 1 else 'analyses'}"
+                if isinstance(analyses, int) else "Report ran")
+    if type == "traffic_spike":
+        text = (item.get("measurement") or {}).get("text")
+        return f"Filed: {text[:1].lower()}{text[1:]}" if text else "Filed"
+    return "Filed"
+
+
+def item_history(item: dict[str, Any], body: dict[str, Any],
+                 events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The item's own log, newest first, from its stored events."""
+    type = item["type"]
+    entries: list[dict[str, Any]] = []
+    for event in events:
+        kind = event["kind"]
+        try:
+            detail = json.loads(event.get("detail_json") or "{}")
+        except ValueError:
+            detail = {}
+        detail = detail if isinstance(detail, dict) else {}
+        if kind == "created":
+            if type == "stuck_query":
+                entries.append({"ts": event["ts"], "text": "Statement passed the 60 s limit"})
+            text = _filed_text(item, body)
+        elif kind == "notified":
+            text = "Pushed once to this computer" if type in PUSHED_ONCE_TYPES \
+                else "Pushed to this computer"
+        elif kind == "worse":
+            text = "Got worse"
+        elif kind == "reopened":
+            text = "Reopened"
+        elif kind == "resolved":
+            # A reopen clears the item's resolved_by, so the event keeps who closed it.
+            by_code = detail.get("by", item.get("resolved_by")) in ("code", "jev")
+            if type == "fix_confirmed" and isinstance(body.get("after_ms"), (int, float)):
+                entries.append({"ts": event["ts"], "text": f"Verified: {latency_text(body['after_ms'])}"
+                                f" a call over {int(body.get('calls') or 0)} calls"})
+            text = ("Statement ended, item closed by RDST" if type == "stuck_query" and by_code
+                    else "Item closed by RDST" if by_code else "Resolved by you")
+        elif kind == "dismissed":
+            text = "Dismissed by you"
+        elif kind == "updated" and detail.get("push_skipped") == "daily_limit":
+            text = "Push held at the daily limit"
+        elif kind == "updated" and detail.get("push_skipped") == "event_off":
+            text = "Push off for this event"
+        elif kind == "updated" and detail.get("action") == "seen":
+            text = "Read by you"
+        else:
+            continue
+        entries.append({"ts": event["ts"], "text": text})
+    if item["state"] not in CLOSED_STATES:
+        refreshed = body.get("refreshed_at")
+        if (type == "fixes_ready" and isinstance(refreshed, int) and
+                refreshed > item["created_at"]):
+            entries.append({"ts": refreshed, "text": f"Still {_fix_count(int(body.get('count') or 0))}, "
+                            "no new index seen"})
+        if type == "stuck_query" and body.get("duration_s") and item["updated_at"] > item["created_at"]:
+            entries.append({"ts": item["updated_at"],
+                            "text": f"Still running, {_minutes(body['duration_s'])} min"})
+    return [entry for entry in reversed(sorted(entries, key=lambda entry: entry["ts"]))]
+
+
+def item_related(item: dict[str, Any], body: dict[str, Any], names: dict[str, str],
+                 keys: list[str]) -> list[dict[str, Any]]:
+    type, target = item["type"], item["target"]
+    rows: list[dict[str, Any]] = []
+    report_id = body.get("report_id")
+
+    def query_row(key: str, detail: str | None) -> None:
+        rows.append({"label": names.get(key, f"Query {key}"), "detail": detail,
+                     "link": {"kind": "queries", "target": target, "label": "Queries",
+                              "query_key": key}})
+
+    def report_row(detail: str | None) -> None:
+        if isinstance(report_id, int):
+            rows.append({"label": "The report it came from", "detail": detail,
+                         "link": {"kind": "report", "target": target, "label": "Report",
+                                  "report_id": report_id}})
+
+    if type == "stuck_query" and keys:
+        duration = body.get("duration_s")
+        query_row(keys[0], f"running {_minutes(duration)} min" if duration else None)
+        rows.append({"label": "Connections", "detail": "one held by this statement",
+                     "link": {"kind": "live", "target": target, "label": "Live"}})
+    elif type == "fixes_ready":
+        report_row("Fix first")
+        rows.append({"label": f"Queries on {target}",
+                     "detail": f"{int(body.get('count') or 0)} with a fix suggested",
+                     "link": {"kind": "queries", "target": target, "label": "Queries"}})
+    elif type == "changes_ready":
+        count = int(body.get("count") or 0)
+        rows.append({"label": f"Actions on {target}",
+                     "detail": f"{count} {'change' if count == 1 else 'changes'} to make",
+                     "link": {"kind": "actions", "target": target, "label": "Actions"}})
+    elif type in VERIFIED_TYPES and keys:
+        after = body.get("after_ms")
+        healthy = ", healthy" if type == "fix_confirmed" else ""
+        query_row(keys[0], f"{latency_text(after)} a call{healthy}"
+                  if isinstance(after, (int, float)) else None)
+        if body.get("action_id"):
+            rows.append({"label": "The change in Applied", "detail": body.get("action_title"),
+                         "link": {"kind": "actions", "target": target, "label": "Applied"}})
+        else:
+            report_row("marked done in Fix first")
+    elif type == "traffic_spike" and keys:
+        query_row(keys[0], None)
+    return rows
+
+
+def item_view(item: dict[str, Any], body: dict[str, Any], names: dict[str, str],
+              keys: list[str], events: list[dict[str, Any]], engine: str) -> dict[str, Any]:
+    """The redesign fields for one presented item."""
+    type = item["type"]
+    fixes_item = type == "fixes_ready"
+    confirmed = type in VERIFIED_TYPES
+    duration = body.get("duration_s") if type == "stuck_query" else None
+    group = body.get("group") if fixes_item else None
+    fixes = []
+    for index, fix in enumerate(body.get("fixes") or [] if fixes_item else []):
+        if not isinstance(fix, dict):
+            continue
+        fixes.append({"rank": int(fix.get("rank") or index + 1), "query_key": fix.get("query_key"),
+                      "title": fix.get("title") or names.get(fix.get("query_key") or "", ""),
+                      "sql": str(fix.get("sql") or ""), "share": float(fix.get("share") or 0),
+                      "latency_ms": fix.get("latency_ms"), "group": fix.get("group")})
+    calls = body.get("calls") if confirmed else None
+    return {"kind": item_kind(type), "band": item_band(item, item["severity_band"]),
+            "pid": body.get("pid") if type == "stuck_query" else None,
+            "running_s": float(duration) if isinstance(duration, (int, float)) else None,
+            "steps": (stuck_steps(body, engine)
+                      if type == "stuck_query" and item["state"] not in CLOSED_STATES else []),
+            "fixes": fixes[:3],
+            "fix_group": group if isinstance(group, dict) and group.get("group") else None,
+            "fixes_share": float(body["share"]) if fixes_item and body.get("share") is not None
+            else None,
+            "source_report_id": body.get("report_id")
+            if isinstance(body.get("report_id"), int) and
+            (fixes_item or confirmed or type in REPORT_TYPES) else None,
+            "before_ms": body.get("before_ms") if confirmed else None,
+            "after_ms": body.get("after_ms") if confirmed else None,
+            "calls": int(calls) if isinstance(calls, (int, float)) else None,
+            "index_name": (body.get("index_label") or body.get("index_name")) if confirmed else None,
+            "changes": {"count": int(body.get("count") or 0),
+                        "do_first": int(body.get("do_first") or 0),
+                        "titles": [str(title) for title in body.get("titles") or []],
+                        "action_ids": [int(value) for value in body.get("action_ids") or []]}
+            if type == "changes_ready" else None,
+            "action_id": int(body["action_id"]) if confirmed and body.get("action_id") else None,
+            "history": item_history(item, body, events),
+            "related": item_related(item, body, names, keys)}

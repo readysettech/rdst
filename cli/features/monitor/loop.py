@@ -268,6 +268,17 @@ class MonitorLoop:
         """Start the next pass now (a database was just turned on); call from the event loop."""
         self._wake.set()
 
+    def connection_changed(self, target: str) -> None:
+        """Read the database with its saved settings on the next pass; call from the event
+        loop."""
+        self._setup_failure.pop(target, None)
+        self.backoff.forget(target)
+        self.watch.settings_changed(target)
+        reconnect = getattr(self.sampler, "reconnect", None)
+        if callable(reconnect):
+            reconnect(target)
+        self.wake()
+
     async def start(self) -> None:
         if self._task is None:
             self._guard = RunGuard()
@@ -447,6 +458,8 @@ class MonitorLoop:
             try:
                 indexes = self.index_reader(target)
                 self._check()
+                # An index that appeared closes its action as applied when the statistics
+                # read below refreshes the actions; their check measures it from there.
                 changes = self.store.sync_indexes(target, indexes, now)
                 connection_failed = False
                 self._read_stats(target)
@@ -800,3 +813,23 @@ async def start_monitor_loop(scheduler: Any = None) -> MonitorLoop:
         loop = _active_loop
     await loop.start()
     return loop
+
+
+def connection_changed(target: str, scheduler: Any = None) -> None:
+    """A database's connection settings changed, or its monitoring was turned off or on: every
+    reader drops its open connection and the next reading uses the saved settings, so a
+    failing connection shows as unreachable at once. Call from the event loop."""
+    query_discovery.reconnect(target)
+    target_backoff.forget(target)
+    loop = _active_loop
+    if loop is not None:
+        loop.connection_changed(target)
+    collect_soon = getattr(scheduler, "collect_soon", None)
+    if callable(collect_soon):
+        collect_soon(target)
+
+
+def cycling(target: str) -> bool:
+    """A monitor pass is checking this database right now."""
+    loop = _active_loop
+    return loop is not None and target in loop._cycling

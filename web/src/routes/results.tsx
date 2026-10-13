@@ -22,21 +22,25 @@ export const Route = createFileRoute('/results')({
     target: typeof search.target === 'string' ? search.target : undefined,
     fast: search.fast === true || search.fast === 'true',
     params: typeof search.params === 'string' ? search.params : undefined,
-    returnSearch:
-      typeof search.returnSearch === 'string' ? search.returnSearch : undefined,
     origin: isResultsOrigin(search.origin) ? search.origin : undefined,
     hash: typeof search.hash === 'string' ? search.hash : undefined,
     analysisId:
       typeof search.analysisId === 'string' ? search.analysisId : undefined,
+    monitorFixture:
+      typeof search.monitorFixture === 'string' && search.monitorFixture
+        ? search.monitorFixture
+        : undefined,
   }),
   // `throw redirect` IS honored in `beforeLoad`, so the missing-query guard
-  // lives here — a bare `/results` cleanly redirects to Queries with the app
-  // shell intact, instead of crashing.
+  // lives here — a bare `/results` cleanly redirects to Database with the app
+  // shell intact, instead of crashing. A monitored query's key is enough: the
+  // page reads its SQL and its analysis from monitoring.
   beforeLoad: ({ search }) => {
-    if (!search.query) {
-      throw redirect({ to: '/queries' })
+    if (!search.query && !search.hash) {
+      throw redirect({ to: '/database' })
     }
   },
+  staticData: { layout: 'page' },
   component: ResultsRouteComponent,
 })
 

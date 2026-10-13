@@ -1,6 +1,7 @@
 // Typed contract for /api/monitor (UI brief section 5). Timestamps are Unix seconds.
 // The backend mirrors these shapes in Pydantic; CONTRACT_STATUS in ./contract says
 // which endpoints are served live and which still resolve to fixtures.
+import type { components } from '../api.generated'
 
 export type MonitorRange = '1h' | '24h' | '7d' | '30d' | '90d' | 'all'
 export const MONITOR_RANGES: readonly MonitorRange[] = [
@@ -49,6 +50,11 @@ export interface HealthNow {
 export interface HealthPeriod {
   qps: number
   mean_ms: number
+  /** The 95th percentile of the per-reading mean latency; null without readings. */
+  p95_ms?: number | null
+  /** The busiest reading and when; the same peak Home and the report show. */
+  qps_peak?: number | null
+  qps_peak_at?: number | null
   db_time_ms: number
   active_conns_peak: number | null
   cache_hit_ratio_min: number | null
@@ -111,6 +117,8 @@ export interface MonitorHealth {
   setup_blocked?: boolean
   /** Spans RDST couldn't reach the database; other gaps have no known cause. */
   outages?: MonitorOutage[]
+  /** The last attention check that ran; null when none did. */
+  checks_ran_at?: number | null
 }
 
 /** A lost-connection episode, from the last reading to when monitoring resumed. */
@@ -150,6 +158,8 @@ export interface MonitorPulse {
   delay_reason?: string | null
   /** A setup problem (password or statement statistics) blocks readings. */
   setup_blocked?: boolean
+  checks_ran_at?: number | null
+  activity?: DatabaseActivity | null
 }
 
 /** Why RDST can't reach a database, and what to check. */
@@ -167,6 +177,9 @@ export interface MonitorPulsePage {
   delay_reason?: string | null
   /** A setup problem (password or statement statistics) blocks readings. */
   setup_blocked?: boolean
+  /** The last attention check that ran; null when none did. */
+  checks_ran_at?: number | null
+  activity?: DatabaseActivity | null
 }
 
 // 5.3 Queries list, 5.4 series, 5.5 fix verdicts, 5.12 compare
@@ -225,6 +238,8 @@ export interface LastAnalysis {
   /** While queued: today (it starts today, at `queue_position`) or held (it won't start on
    * its own; `reason` says why). While running: 'running'. */
   queue_state?: AnalyzeQueueState | null
+  /** While held: why, in a word. */
+  held_reason?: HeldReason | null
   /** 1 = next among the jobs that start today. */
   queue_position?: number | null
   /** While running: the step it's on. */
@@ -243,7 +258,7 @@ export type AnalysisErrorKind =
   | 'retrying'
 
 /** A header line for the latest finished analysis; analysis_ref opens the full record. */
-export interface AnalysisSummary {
+export interface AnalysisSummary extends Partial<AnalysisView> {
   analysis_ref: string
   analysis_id: string
   analyzed_at: number | null
@@ -360,7 +375,7 @@ export interface WriteCost {
   hot_ratio: number | null
 }
 
-export interface MonitorQuery {
+export interface MonitorQuery extends Partial<MonitorQueryView> {
   write_cost?: WriteCost | null
   key: string
   text: string
@@ -411,6 +426,8 @@ export interface CompositionSlice {
 export interface MonitorQueryPage {
   queries: MonitorQuery[]
   total: number
+  /** Every application query RDST has seen on the database, listed in the range or not. */
+  seen_total?: number
   counts: QueryCounts
   composition: CompositionSlice[]
   history: HistorySpan
@@ -449,6 +466,9 @@ export interface RangeAvailability {
   res: Resolution
   reason: string | null
 }
+
+/** What picks the chart's top queries: execution time, or calls for the calls chart. */
+export type LoadRank = 'time' | 'calls'
 
 export interface LoadBreakdown {
   detail_note?: string | null
@@ -496,7 +516,7 @@ export interface AnalysisFix {
   expected_gain: ExpectedGain | null
 }
 
-export interface DeepAnalysisDigest {
+export interface DeepAnalysisDigest extends Partial<AnalysisView> {
   query_key: string
   analysis_ref: string | null
   analyzed_at: number | null
@@ -559,7 +579,7 @@ export interface AnalyzeJob {
   reason: 'new' | 'top15_stale' | 'user' | 'report'
   state: AnalysisJobState
   priority: number
-  param_source: 'sampled' | 'table_sampled' | 'none' | null
+  param_source: 'sampled' | 'table_sampled' | 'none' | 'estimated' | null
   mode: 'analyze' | 'explain' | null
   enqueued_at: number
   started_at: number | null
@@ -574,11 +594,16 @@ export interface AnalyzeJob {
   estimated_start_at?: number | null
   /** Only on a click's response: it was already waiting (or running) and kept its place. */
   already_queued?: boolean | null
+  /** Stopped by a cancel: it ended skipped and never became the query's latest analysis. */
+  cancelled?: boolean
 }
 
 /** today: starts today; held: won't start on its own (automatic analysis is off, signed
  * out, or today's automatic analyses are done). Nothing waits for a later day. */
 export type AnalyzeQueueState = 'running' | 'today' | 'held'
+export type HeldReason = NonNullable<
+  components['schemas']['LastAnalysis']['held_reason']
+>
 
 export interface AnalyzeQueueEntry extends AnalyzeJob {
   display_name: string
@@ -712,6 +737,7 @@ export interface InboxLink {
     | 'configure'
     | 'sign_in'
     | 'setup'
+    | 'actions'
   target: string
   label: string
   query_key?: string | null
@@ -729,7 +755,7 @@ export interface InboxAdvice {
 }
 export type InboxTone = 'negative' | 'warning' | 'positive' | 'neutral'
 
-export interface InboxItem {
+export interface InboxItem extends Partial<InboxItemView> {
   id: number
   target: string
   type: string
@@ -1311,7 +1337,7 @@ export interface ReportAnalyzedQuery {
   error_kind?: AnalysisErrorKind | null
 }
 
-export interface DatabaseReport {
+export interface DatabaseReport extends Partial<DatabaseReportView> {
   id: number
   target: string
   ts: number
@@ -1358,6 +1384,8 @@ export interface MonitorSettings {
   push_daily_cap: number
   /** What pushes a notification. Switched-off events still reach the Inbox. */
   notify_events?: NotifyEvents
+  /** Pushes are held between these local hours; equal hours mean no quiet hours. */
+  quiet_hours?: QuietHours
   /** When monitoring was last turned on from the app. */
   enabled_at?: number | null
   /** The first-hour start, or null when the enable has earlier recorded history. */
@@ -1469,6 +1497,37 @@ export interface NotifyEvents {
   stuck_query: boolean
   database_events: boolean
   query_changes: boolean
+  /** The daily report's one push. */
+  daily_report?: boolean
+}
+
+export interface QuietHours {
+  from_hour: number
+  to_hour: number
+}
+
+// POST /targets/{target}/benchmark-fixes
+
+export interface BenchmarkFixRow {
+  key: string
+  name: string
+  before_ms: number | null
+  after_ms: number | null
+  change_pct: number | null
+  /** True when the after value comes from the planner, not a timed run. */
+  estimated: boolean
+}
+
+export interface BenchmarkFixesResult {
+  target: string
+  ran_at: number
+  runs: number
+  /** Whether the fixes were built and timed on a scratch schema. */
+  scratch_schema: boolean
+  rows: BenchmarkFixRow[]
+  /** The covered queries' share of database time over the last 24 h, 0..1. */
+  share: number
+  method: string
 }
 
 export type MonitorSettingsUpdate = Partial<
@@ -1495,4 +1554,478 @@ export interface UsageDay {
 export interface MonitorUsage {
   days: UsageDay[]
   caps: { jev_daily: number; analysis_daily: number; push_daily?: number }
+}
+
+// Continuous Analysis redesign (docs/plans/ca-redesign-plan.md section 4.2, W0). Every
+// field below is additive: the screens built on fixtures read these, older screens keep
+// the shapes above.
+
+/** Where a Home or Inbox row leads. */
+export type MonitorLinkKind =
+  | 'inbox'
+  | 'chart'
+  | 'query'
+  | 'queries'
+  | 'live'
+  | 'report'
+  | 'analysis'
+  | 'database'
+  | 'settings'
+  | 'sign_in'
+  | 'actions'
+
+export interface MonitorLink {
+  kind: MonitorLinkKind
+  target: string | null
+  /** The destination word the row shows ("Inbox", "Chart", "Query", "Report"). */
+  label: string
+  item_id?: number | null
+  query_key?: string | null
+  report_id?: number | null
+  analysis_ref?: string | null
+}
+
+// GET /api/monitor/home
+
+/** needs_you: an Act now item is open. quiet: attention checks ran in the last 3 cycles
+ * and nothing is open. paused: charts and stuck-query alerts run, AI checks do not. off:
+ * no database is monitored. */
+export type HomeState = 'needs_you' | 'quiet' | 'paused' | 'off'
+
+export interface HomeStatus {
+  state: HomeState
+  /** The database the sentence is about (the selected one, or the one that needs you). */
+  target: string | null
+  needs_you: number
+  to_watch: number
+  /** The first Act now item's headline ("a stuck query since 9:55 AM"), for needs_you. */
+  headline: string | null
+  link: MonitorLink | null
+  /** The last attention check that ran; null when none did. */
+  checks_ran_at: number | null
+  /** For quiet: since when; for paused: since when AI checks stopped. */
+  since: number | null
+  last_reading_at: number | null
+  next_report_at: number | null
+  /** Monitored databases. */
+  watching: number
+  /** Act now items open across databases (Inbox). */
+  act_now?: number
+  /** Do first changes across monitored databases (Actions). */
+  do_first?: number
+}
+
+export interface HomeLogEntry {
+  ts: number
+  /** Verb first: "Stuck query filed", "Report ran: 9 index fixes ready". */
+  text: string
+  /** One detail in the third tone ("54% of database time"), or null. */
+  detail: string | null
+  link: MonitorLink
+  band?: 'act_now' | 'watch' | null
+}
+
+export type HomeDatabaseState =
+  | 'watching'
+  | 'cant_reach'
+  | 'ai_paused'
+  | 'not_monitored'
+
+export interface HomeDatabase {
+  target: string
+  /** "PostgreSQL 17 at 127.0.0.1:15432". */
+  connection: string
+  state: HomeDatabaseState
+  /** Since when for cant_reach and ai_paused. */
+  state_since: number | null
+  qps: number | null
+  open_items: number
+  act_now: number
+  fixes_ready: number
+  /** The Inbox item the fixes count opens. */
+  fixes_item_id: number | null
+  /** Open changes in Actions, and how many of them are Do first. */
+  to_do?: number
+  do_first?: number
+}
+
+/** One database in Home's "Across your databases" strip, in attention order. */
+export interface HomeStripRow {
+  target: string
+  state: HomeDatabaseState
+  act_now: number
+  to_do: number
+  do_first: number
+  fixes_ready: number
+  /** What monitoring is doing on the database now. */
+  activity?: DatabaseActivity | null
+  /** The first pass of analyses is still building its first plan. */
+  building?: boolean
+}
+
+export interface HomeSparkPoint {
+  ts: number
+  qps: number | null
+}
+
+/** The selected database's day card: today against yesterday. */
+export interface HomeDayCard {
+  target: string
+  qps: number | null
+  qps_peak: number | null
+  qps_peak_at: number | null
+  mean_ms: number | null
+  /** Today's average latency over yesterday's, minus one; null without a yesterday. */
+  mean_ms_delta: number | null
+  fixes_ready: number
+  /** Share of database time the ready fixes cover, 0..1. */
+  fixes_share: number | null
+  fixes_item_id: number | null
+  cache_hit_ratio: number | null
+  /** Why the cache hit is out of range ("shared_buffers is the default"), else null. */
+  cache_hit_reason: string | null
+  /** Since midnight, one point per 5 minutes. */
+  series: HomeSparkPoint[]
+  /** The latest report for the "Daily report, <date>" link. */
+  report_id: number | null
+  report_day: string | null
+}
+
+export type AnalysisOutcome = 'fix_suggested' | 'healthy' | 'failed'
+
+export interface HomeAnalyzed {
+  target: string
+  query_key: string
+  display_name: string
+  analyzed_at: number
+  analysis_ref: string | null
+  outcome: AnalysisOutcome
+}
+
+export interface HomeModel {
+  status: HomeStatus
+  day: HomeDayCard | null
+  /** Every configured database sorted by attention: needs you, can't reach, watching,
+   * not monitored. Shown only with 2+ entries. */
+  databases: HomeDatabase[]
+  /** Every configured database's counts, in attention order. */
+  databases_strip?: HomeStripRow[]
+  not_monitored: number
+  /** The agent's own log, newest first. */
+  today: HomeLogEntry[]
+  /** "since yesterday: N items opened and closed, N fixes confirmed". */
+  since_yesterday: { opened_closed: number; fixes_confirmed: number }
+  recently_analyzed: HomeAnalyzed[]
+  generated_at: number
+}
+
+// Inbox items, redesign fields
+
+/** The redesign's item kinds; `other` covers every type the redesign does not single out. */
+export type InboxKind =
+  | 'stuck_query'
+  | 'fixes_ready'
+  | 'report_ready'
+  | 'fix_confirmed'
+  | 'traffic_spike'
+  | 'monitoring_issue'
+  | 'changes_ready'
+  | 'no_change_yet'
+  | 'other'
+
+export type InboxBand = 'act_now' | 'watch' | 'closed'
+
+export interface InboxStep {
+  title: string
+  sql: string
+}
+
+export interface InboxFix {
+  rank: number
+  query_key: string | null
+  /** The query's display name. */
+  title: string
+  sql: string
+  /** Share of database time, 0..1. */
+  share: number
+  latency_ms: number | null
+  /** Fixes sharing one index carry the same group id. */
+  group: string | null
+}
+
+/** "One index <columns> helps N queries, X%". */
+export interface InboxFixGroup {
+  group: string
+  table: string
+  columns: string[]
+  count: number
+  share: number
+}
+
+/** A Changes ready event's plan in brief; the do-first titles and their action ids lead. */
+export interface InboxChanges {
+  count: number
+  do_first: number
+  titles: string[]
+  action_ids: number[]
+}
+
+export interface InboxHistoryEntry {
+  ts: number
+  text: string
+}
+
+export interface InboxRelated {
+  label: string
+  detail: string | null
+  link: MonitorLink
+}
+
+export interface InboxItemView {
+  kind: InboxKind
+  band: InboxBand
+  /** Stuck query: the statement's backend pid and how long it has run. */
+  pid: number | null
+  running_s: number | null
+  steps: InboxStep[]
+  fixes: InboxFix[]
+  fix_group: InboxFixGroup | null
+  /** Fixes item: share of database time all its fixes cover. */
+  fixes_share: number | null
+  /** The report that filed or refreshed the item. */
+  source_report_id: number | null
+  /** Fix confirmed: mean latency before and after, and the calls measured after. */
+  before_ms: number | null
+  after_ms: number | null
+  calls: number | null
+  index_name: string | null
+  /** Changes ready: the plan in brief. */
+  changes: InboxChanges | null
+  /** Fix confirmed: the applied action it measured. */
+  action_id: number | null
+  history: InboxHistoryEntry[]
+  related: InboxRelated[]
+}
+
+// Database report, redesign fields
+
+export interface ReportVerdictText {
+  /** "demo needs two things today:" */
+  lead: string
+  rest: string
+}
+
+export type TileState = 'ok' | 'warn' | 'bad' | 'collecting'
+
+export interface ReportDayTile {
+  metric: 'qps' | 'mean_ms' | 'connections' | 'cache_hit'
+  label: string
+  value: number | null
+  unit: 'qps' | 'ms' | 'count' | 'ratio'
+  /** "peak 15.9 at 9:50", "p95 69.7 ms", "0 deadlocks". */
+  detail: string | null
+  state: TileState
+  /** The out-of-range reason, shown in place of the detail. */
+  reason: string | null
+  /** Connections: the server's limit ("8 of 100"). */
+  limit?: number | null
+}
+
+export interface ReportDay {
+  /** "October 7, vs the day before". */
+  label: string
+  tiles: ReportDayTile[]
+  chart: SnapshotChart | null
+  spikes: SnapshotSpike[]
+  query_count: number
+  /** False when the day before has no readings: nothing is compared against it. */
+  compared?: boolean
+}
+
+export type FixFirstState =
+  | 'ready'
+  | 'needs_attention'
+  | 'worth_doing'
+  | 'fixed'
+  | 'smaller'
+
+export interface ReportFixItem {
+  /** 1-based order; null for a fixed row. */
+  rank: number | null
+  title: string
+  /** "Restart needed. Lifts cache hit for every query.", "3 queries, 37% of time". */
+  detail: string | null
+  sql: string | null
+  share: number | null
+  state: FixFirstState
+  kind: 'index' | 'config' | 'rewrite' | 'other'
+  /** Fixes that are one index for several queries share a group id. */
+  group: string | null
+  query_keys: string[]
+  restart: boolean
+  /** Fixed rows: when and what was measured. */
+  fixed_at: number | null
+  before_ms: number | null
+  after_ms: number | null
+}
+
+export type HealthRowState = 'bad' | 'warn' | 'ok' | 'unavailable'
+
+export interface ReportHealthRow {
+  check: string
+  label: string
+  state: HealthRowState
+  /** One line: "Cache hit fell to 11.5%". */
+  finding: string
+  detail: string | null
+  /** The Fix first rank that addresses it. */
+  fix_rank: number | null
+  /** A warning whose finding is on Actions or filed an Inbox item; the rest only inform. */
+  needs_you?: boolean
+}
+
+export interface ReportRun {
+  /** The report's ordinal for its database ("Report #31"). */
+  number: number
+  trigger: 'nightly' | 'on_request'
+  ran_at: number
+  model: string | null
+  analyses: number
+  rewrites: number
+}
+
+export interface DatabaseReportView {
+  verdict: ReportVerdictText | null
+  day: ReportDay | null
+  fix_first: ReportFixItem[]
+  health: ReportHealthRow[]
+  /** The checks that were fine, by name. */
+  health_fine: string[]
+  run: ReportRun | null
+  /** Signed out or the narrative failed: numbers only. */
+  narrative_missing: boolean
+  /** "Copy all N as SQL": the fix rows that carry SQL, the same on both views. */
+  copy_count: number
+  /** The sections the Detailed view adds; only with `?view=detailed`. */
+  detailed: ReportDetailed | null
+}
+
+/** The report view a user reads: the `report_view` preference. */
+export type ReportViewMode = 'quick' | 'detailed'
+
+type Schemas = components['schemas']
+/** What monitoring is doing on one database now, for the radar and its tooltip. */
+export type DatabaseActivity = Schemas['DatabaseActivity']
+export type ReportDetailed = Schemas['ReportDetailed']
+export type DetailedTile = Schemas['DetailedTile']
+export type DetailedStretch = Schemas['DetailedStretch']
+export type WhatChangedRow = Schemas['WhatChangedRow']
+export type ConfirmedFixRow = Schemas['ConfirmedFixRow']
+export type HealthCheckRow = Schemas['HealthCheckRow']
+export type SettingsAuditRow = Schemas['SettingsAuditRow']
+export type IndexChangeSeen = Schemas['IndexChangeSeen']
+export type RdstDidRow = Schemas['RdstDidRow']
+
+// Query rows, redesign fields
+
+export type QueryStatus =
+  | 'fix_suggested'
+  | 'analyzing'
+  | 'healthy'
+  | 'stuck'
+  | 'not_analyzed'
+
+export interface SuggestedFix {
+  sql: string
+  /** "Add index posts (creationdate, owneruserid, score)". */
+  label: string
+}
+
+export interface TrendPoint {
+  ts: number
+  mean_ms: number | null
+}
+
+export interface MonitorQueryView {
+  plan_score: number | null
+  /** Mean latency in the last 24 h over the 24 h before, minus one; null before 24 h. */
+  latency_delta_24h: number | null
+  trend_24h: TrendPoint[]
+  suggested_fix: SuggestedFix | null
+  status: QueryStatus
+}
+
+// Full analysis, redesign fields
+
+export interface AnalysisFixDetail {
+  sql: string
+  /** "Serves the filter and the sort from one index." */
+  serves: string | null
+  cost_before: number | null
+  cost_after: number | null
+  /** "About 9 MB". */
+  size: string | null
+  write_cost: string | null
+}
+
+export interface PlanFinding {
+  title: string
+  detail: string | null
+  value: string | null
+}
+
+export interface RewriteTested {
+  name: string
+  before_ms: number | null
+  after_ms: number | null
+  runs: number | null
+  outcome: 'faster' | 'slower' | 'no_change' | 'untested'
+  /** The rewritten statement, to read and copy. */
+  sql?: string | null
+}
+
+export interface AlsoWorthDoing {
+  title: string
+  detail: string | null
+  /** A further index recommendation's statement. */
+  sql?: string | null
+}
+
+export interface ReadysetFacts {
+  blockers: string[]
+  verified: boolean
+}
+
+export interface BenchmarkFacts {
+  before_ms: number | null
+  after_ms: number | null
+  change: number | null
+  /** "20 runs each on demo". */
+  method: string | null
+}
+
+export interface AnalysisRunFacts {
+  model: string | null
+  tokens: number | null
+  seconds: number | null
+  id: string | null
+}
+
+export interface AnalysisView {
+  score: number | null
+  verdict: ReportVerdictText | null
+  fix_detail: AnalysisFixDetail | null
+  plan_findings: PlanFinding[]
+  rewrites: RewriteTested[]
+  also: AlsoWorthDoing[]
+  readyset: ReadysetFacts | null
+  benchmark: BenchmarkFacts | null
+  run: AnalysisRunFacts | null
+  rows_read: number | null
+  rows_returned: number | null
+  planner_cost: number | null
+  calls_today: number | null
+  params: { name: string; value: string }[]
+  param_source: string | null
+  explain_text: string | null
 }

@@ -2,33 +2,24 @@ import { createFileRoute } from '@tanstack/react-router'
 import { InboxPage } from '@/features/inbox'
 
 /**
- * Search params of /inbox: the tab (`open` is the default), whether muted alerts show,
- * a target filter and an item. Older links used `state=done` or `state=resolved` (now
- * Open, which lists recoveries for 24 hours) and `state=muted` (now the muted filter).
+ * Search params of /inbox: the queue switch (`open` is the default), the database filter
+ * (`db`; older links carry `target`) and the selected item. Older links carried
+ * `state=act_now` or `state=watch`, which land on Open.
  */
 export type InboxSearch = {
-  state?: 'open' | 'act_now' | 'watch'
-  muted?: boolean
+  state?: 'open' | 'closed'
+  db?: string
   target?: string
   item?: number
   monitorFixture?: string
 }
 
-const STATES = ['open', 'act_now', 'watch'] as const
-
 export const Route = createFileRoute('/inbox')({
+  staticData: { layout: 'split' },
   validateSearch: (search: Record<string, unknown>): InboxSearch => {
     const out: InboxSearch = {}
-    const state = STATES.find((value) => value === search.state)
-    if (state) out.state = state
-    if (
-      search.state === 'muted' ||
-      search.muted === true ||
-      search.muted === 'true' ||
-      search.muted === 1 ||
-      search.muted === '1'
-    )
-      out.muted = true
+    if (search.state === 'closed') out.state = 'closed'
+    if (typeof search.db === 'string' && search.db) out.db = search.db
     if (typeof search.target === 'string' && search.target)
       out.target = search.target
     const item = Number(search.item)

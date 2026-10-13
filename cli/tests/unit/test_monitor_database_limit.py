@@ -456,6 +456,8 @@ def test_signing_in_claims_at_once_instead_of_saying_signed_out(tmp_path, keyser
 @pytest.mark.asyncio
 async def test_global_hosted_cap_backs_off_and_recovers(tmp_path, monkeypatch, targets):
     monkeypatch.setenv("RDST_MONITOR_ANALYZE_DAILY_CAP", "100")
+    # One analysis at a time, so the second job can't start before the first files the cap.
+    monkeypatch.setenv("RDST_MONITOR_ANALYSIS_LIMIT", "1")
     monkeypatch.setattr(database_limit, "own_key", lambda: False)
     monkeypatch.setattr(database_limit, "limit_reached", lambda *a, **kw: None)
     store = MonitorStore(tmp_path / "monitor.db", clock=lambda: NOW)

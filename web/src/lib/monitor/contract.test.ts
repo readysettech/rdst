@@ -4,6 +4,7 @@ import {
   deleteMuteRule,
   getHealth,
   getInbox,
+  getLoad,
   getMuteRules,
   getQueries,
   getReport,
@@ -90,9 +91,9 @@ it('keeps health honest about history and gaps', () => {
   expect(series.markers.some((m) => m.kind.startsWith('fix_'))).toBe(false)
 })
 
-it('files 47 inbox items across four colour-coded bands', () => {
+it('files 49 inbox items across four colour-coded bands', () => {
   const items = inboxItems(FIXTURE_NOW)
-  expect(items).toHaveLength(47)
+  expect(items).toHaveLength(49)
   const open = items.filter(
     (i) =>
       i.muted_by === null && i.state !== 'resolved' && i.state !== 'dismissed'
@@ -110,6 +111,22 @@ it('files 47 inbox items across four colour-coded bands', () => {
   // Episode chips carry friendly names for every member query.
   const episode = items.find((i) => i.type === 'many_queries_changed')
   expect(Object.keys(episode?.query_labels ?? {})).toHaveLength(17)
+  // The bridges to Actions: one open Changes ready, one closed No change yet.
+  const ready = items.find((i) => i.type === 'changes_ready')
+  expect(ready).toMatchObject({
+    kind: 'changes_ready',
+    band: 'watch',
+    state: 'seen',
+    link: { kind: 'actions' },
+  })
+  expect(ready?.changes?.titles).toHaveLength(3)
+  const none = items.find((i) => i.type === 'no_change_yet')
+  expect(none).toMatchObject({
+    kind: 'no_change_yet',
+    band: 'closed',
+    state: 'resolved',
+    tone: 'neutral',
+  })
 })
 
 it('reads every endpoint live from the backend', async () => {
@@ -221,6 +238,25 @@ it('moves open items a new stub rule covers to Muted', async () => {
   expect(muted.some((item) => item.id === first.id)).toBe(true)
   setFixtureOverride('empty')
   expect((await getInbox({ state: 'open' })).items).toEqual([])
+})
+
+it('asks the load API for bands by calls when the calls chart is shown', async () => {
+  setFixtureOverride(null)
+  const fetchMock = vi.fn(
+    async (_url: RequestInfo | URL) =>
+      new Response(JSON.stringify({ bands: [], points: [] }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+  )
+  vi.stubGlobal('fetch', fetchMock)
+  await getLoad('localdev', '1h', undefined, 8, 'calls')
+  const requested = new URL(
+    String(fetchMock.mock.calls[0][0]),
+    'http://localhost'
+  )
+  expect(requested.pathname).toBe('/api/monitor/targets/localdev/load')
+  expect(requested.searchParams.get('rank')).toBe('calls')
+  expect(requested.searchParams.get('top')).toBe('8')
 })
 
 it('sends paging, search and sort to the list API for large libraries', async () => {

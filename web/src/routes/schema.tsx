@@ -32,8 +32,8 @@ import {
   SchemaTableTree,
   SchemaTerminologyList,
 } from '../components/schema'
-import { TargetDropdown } from '../components/TargetDropdown'
 import { TargetLockNotice } from '../components/TargetLockNotice'
+import { DatabaseFilter } from '../features/shared/filters/DatabaseFilter'
 import { useTargetResolution } from '../hooks/useTarget'
 import { useBackgroundRun } from '../lib/backgroundRuns'
 import {
@@ -566,9 +566,11 @@ function SchemaPage() {
               body="Choose the database whose semantic layer you want to view or edit."
             />
             <div className="flex justify-center px-6 pb-16">
-              <TargetDropdown
-                selectedTarget={target}
-                onSelectTarget={setTarget}
+              <DatabaseFilter
+                value={target}
+                onChange={(db) => {
+                  if (db) setTarget(db)
+                }}
               />
             </div>
           </Card.Content>

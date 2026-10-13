@@ -6,7 +6,6 @@
 import type { Page } from '@playwright/test'
 import {
   acceptBrowserError,
-  clearQueryRegistry,
   configureTestTarget,
   expect,
   mainContent,
@@ -23,12 +22,11 @@ import {
   stallProductApi,
 } from './_helpers'
 
-/** The nine destinations a user reaches from the shell. */
+/** The eight destinations a user reaches from the shell. */
 const MAIN_IDS = [
   'index',
-  'queries',
+  'database',
   'ask',
-  'audit',
   'cache',
   'schema',
   'scan',
@@ -55,6 +53,9 @@ const FALSE_EMPTY = [
   'Select one or more targets to check',
   'Select a target database from the sidebar',
 ]
+
+/** The AI gate's lead line. */
+const AI_GATE = 'Set up AI to get fixes and the daily report.'
 
 /** Shapes of a raw response leaking into user-facing copy. */
 const RAW_PAYLOAD = /HTTP error|\{"detail"|"detail":|status: \d{3}/
@@ -222,13 +223,7 @@ test('states: a settled empty route is a heading, not a skeleton', async ({
   page,
 }) => {
   await setup(page)
-  // Reach the genuine empty library whatever the specs before this one wrote.
-  await clearQueryRegistry(page.request)
-  const empties = [
-    ['/queries', 'No queries observed yet'],
-    ['/ask', 'No questions yet'],
-    ['/guards', 'No guards yet'],
-  ] as const
+  const empties = [['/guards', 'No guards yet']] as const
 
   for (const [path, title] of empties) {
     await page.goto(path)
@@ -261,34 +256,15 @@ test('states: a failed target list degrades loudly', async ({
   // The 500s below are this test's own injected failure.
   acceptBrowserError(browserErrors, SERVER_ERROR)
   await failProductApi(page)
-  for (const path of ['/audit', '/scan']) {
-    await page.goto(path)
-    await settle(page, 2500)
-    const copy = await mainContent(page).innerText()
-    expect(copy, `${path} instructs a selection it cannot offer`).not.toContain(
-      'Select one or more targets to check'
-    )
-    expect(copy, `${path} instructs a selection it cannot offer`).not.toContain(
-      'Select a target database from the sidebar'
-    )
-
-    if (path === '/audit') {
-      // The health check picks from the list that failed, so the page names
-      // the failure and offers the shared retry in place of an empty picker.
-      await expect(
-        mainContent(page).getByText('Could not load your database targets')
-      ).toBeVisible()
-      await expect(
-        mainContent(page).getByRole('button', { name: 'Try again' }).first()
-      ).toBeVisible()
-    } else {
-      // Code scan already settled its target, so it keeps naming the database
-      // it will act on rather than falling back to a selection prompt.
-      await expect(
-        mainContent(page).getByText('e2e-guard').first()
-      ).toBeVisible()
-    }
-  }
+  await page.goto('/scan')
+  await settle(page, 2500)
+  const copy = await mainContent(page).innerText()
+  expect(copy, '/scan instructs a selection it cannot offer').not.toContain(
+    'Select a target database from the sidebar'
+  )
+  // Code scan already settled its target, so it keeps naming the database it
+  // will act on rather than falling back to a selection prompt.
+  await expect(mainContent(page).getByText('e2e-guard').first()).toBeVisible()
 
   await page.goto('/ask')
   await settle(page, 2500)
@@ -298,7 +274,7 @@ test('states: a failed target list degrades loudly', async ({
   )
 })
 
-/** MG-01 - feature routes open after the full-screen AI provider choice. */
+/** MG-01 - feature routes open after the AI provider choice. */
 test('states: feature routes show the sign-in chooser until a provider is configured', async ({
   page,
 }) => {
@@ -322,36 +298,21 @@ test('states: feature routes show the sign-in chooser until a provider is config
 
   for (const route of MAIN) {
     await page.goto(route.path)
-    // Target setup stays open for local monitoring.
-    if (route.id === 'configure') {
-      await expect(mainContent(page)).toBeVisible()
-      await expect(
-        page.getByRole('heading', {
-          name: 'Choose how RDST uses AI',
-          exact: true,
-        })
-      ).toHaveCount(0)
+    const main = mainContent(page)
+    await expect(main).toBeVisible()
+    // Local monitoring and target setup stay open; the gate stands in for
+    // every other page inside the app shell.
+    if (route.id === 'database' || route.id === 'configure') {
+      await expect(page.getByText(AI_GATE, { exact: true })).toHaveCount(0)
       continue
     }
+    await expect(main.getByText(AI_GATE, { exact: true })).toBeVisible()
     await expect(
-      page.getByRole('heading', {
-        name: 'Choose how RDST uses AI',
-        exact: true,
-      })
+      main.getByRole('button', { name: 'Sign in', exact: true })
     ).toBeVisible()
     await expect(
-      page.getByTestId('ai-access-sign-in').getByRole('button', {
-        name: 'Sign up or sign in',
-        exact: true,
-      })
+      main.getByRole('button', { name: 'Add key', exact: true })
     ).toBeVisible()
-    await expect(
-      page.getByTestId('ai-access-own-key').getByRole('button', {
-        name: 'Add Anthropic key',
-        exact: true,
-      })
-    ).toBeVisible()
-    await expect(mainContent(page)).toHaveCount(0)
   }
 
   await mockAiKeyReady(page)
@@ -361,12 +322,7 @@ test('states: feature routes show the sign-in chooser until a provider is config
     await expect(
       mainContent(page).getByRole('heading', { level: 1 })
     ).toBeVisible()
-    await expect(
-      page.getByRole('heading', {
-        name: 'Choose how RDST uses AI',
-        exact: true,
-      })
-    ).toHaveCount(0)
+    await expect(page.getByText(AI_GATE, { exact: true })).toHaveCount(0)
     await expect(page).toHaveURL(new RegExp(`${route.path}$`))
   }
 })

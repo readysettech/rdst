@@ -315,32 +315,38 @@ export async function mockPrerequisites(
 }
 
 /**
- * Finish onboarding once a database connects: the next step is the "Turn on
- * monitoring" dialog on the new database's page, which checks the monitoring
- * prerequisites itself (the e2e Postgres preloads and creates
- * pg_stat_statements, and connects as a superuser).
- *
- * `monitor` leaves the dialog open to turn monitoring on; otherwise "Not now"
- * closes it and the test goes Home.
+ * Add a database through the add-database dialog over Home: the fields, then "Add
+ * and monitor", which tests and saves before the new database's page opens on the
+ * turn-on dialog. That dialog's prerequisites check passes and its EXPLAIN ANALYZE
+ * warning shows before monitoring turns on. The database is named after its
+ * database name.
  */
-export async function continueWhenMonitoringReady(
+export async function addDatabaseThroughDialog(
   page: Page,
-  target: string,
-  { monitor = false }: { monitor?: boolean } = {}
+  fields: {
+    host: string
+    port?: string
+    database: string
+    user: string
+    password: string
+  }
 ) {
-  await expect(page).toHaveURL(/\/database\?panel=enable/, {
-    timeout: 60_000,
+  await page.goto('/?add=1')
+  const dialog = page.getByRole('dialog', { name: 'Add a database' })
+  await expect(dialog).toBeVisible()
+  await dialog.locator('[name="host"]').fill(fields.host)
+  if (fields.port) await dialog.locator('[name="port"]').fill(fields.port)
+  await dialog.locator('[name="database"]').fill(fields.database)
+  await dialog.locator('[name="user"]').fill(fields.user)
+  await dialog.locator('[name="password"]').fill(fields.password)
+  await dialog.getByRole('button', { name: 'Add and monitor' }).click()
+  await expect(page).toHaveURL(/\/database/, { timeout: 60_000 })
+  const enable = page.getByRole('dialog', {
+    name: `Monitor ${fields.database}`,
   })
-  const dialog = page.getByRole('dialog', {
-    name: `Turn on monitoring for ${target}`,
-  })
-  await expect(dialog).toBeVisible({ timeout: 30_000 })
-  await expect(dialog.getByTestId('prereq-checker')).toHaveAttribute(
-    'data-phase',
-    'ready',
-    { timeout: 60_000 }
-  )
-  if (monitor) return
-  await dialog.getByRole('button', { name: 'Not now' }).click()
-  await page.goto('/')
+  await expect(enable.getByTestId('explain-analyze-warning')).toBeVisible()
+  const turnOn = enable.getByRole('button', { name: 'Turn on monitoring' })
+  await expect(turnOn).toBeEnabled({ timeout: 60_000 })
+  await turnOn.click()
+  await expect(enable).toHaveCount(0)
 }

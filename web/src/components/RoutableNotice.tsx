@@ -65,7 +65,6 @@ export function RoutableNotice({
   const kindDefaults = {
     'password-needed': {
       errorClass: 'database' as const,
-      icon: 'key' as const,
       title: 'Connection needs a password',
       message: `${name} needs a password to run this.`,
       actionLabel: 'Fix connection',
@@ -73,7 +72,6 @@ export function RoutableNotice({
     },
     'trial-exhausted': {
       errorClass: 'rdst-service' as const,
-      icon: 'sparkles' as const,
       title: 'Included AI unavailable',
       message: TRIAL_EXHAUSTED_MESSAGE,
       actionLabel: 'Set key',
@@ -81,7 +79,6 @@ export function RoutableNotice({
     },
     'key-needed': {
       errorClass: 'provider' as const,
-      icon: 'key' as const,
       title: 'This needs AI access',
       message:
         'Sign in to Readyset for the included AI, or add your own Anthropic key.',
@@ -92,14 +89,13 @@ export function RoutableNotice({
 
   return (
     <InlineNotice
+      tone="quiet"
       errorClass={kindDefaults.errorClass}
       accent="warning"
-      icon={kindDefaults.icon}
       title={title ?? kindDefaults.title}
       message={message ?? kindDefaults.message}
       action={{
         label: primaryActionLabel ?? kindDefaults.actionLabel,
-        icon: onPrimaryAction ? 'key' : 'arrow-right',
         onClick: () => {
           if (onPrimaryAction) {
             onPrimaryAction()

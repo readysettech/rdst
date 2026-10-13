@@ -1,10 +1,12 @@
 import {
+  keepPreviousData,
   type Query,
   type QueryClient,
+  useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
 import { useEffect } from 'react'
-import { subscribeInbox } from '@/lib/monitor/api'
+import { getInbox, subscribeInbox } from '@/lib/monitor/api'
 import { useInbox, useMuteRules } from '@/lib/monitor/hooks'
 import { monitorKeys } from '@/lib/monitor/keys'
 import type { InboxItem, InboxQuery } from '@/lib/monitor/types'
@@ -27,6 +29,25 @@ export const incidentInboxKey = (query: InboxQuery) =>
   [...monitorKeys.inbox(query), 'incidents'] as const
 
 const isIncidentList = (query: Query) => query.queryKey.at(-1) === 'incidents'
+
+/**
+ * The open list with incident windows, so its items link to the Database page on their
+ * time frame: the one costly request, made once per target.
+ */
+export function useIncidentInbox(target: string | undefined) {
+  const query: InboxQuery = {
+    state: 'open',
+    target,
+    include_muted: true,
+    incidents: true,
+  }
+  return useQuery({
+    queryKey: incidentInboxKey(query),
+    queryFn: ({ signal }) => getInbox(query, signal),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  })
+}
 
 /** One stream event's item and state; the connect event carries neither. */
 type ItemChange = { id: number; state: string }

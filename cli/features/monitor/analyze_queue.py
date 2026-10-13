@@ -14,6 +14,7 @@ from typing import Any
 
 from sqlglot import exp, parse
 
+from features.analyze.parameter_suggestions import parameter_literal as _literal, plan_only_sql
 from features.analyze.models import AnalyzeInput, AnalyzeOptions
 from features.analyze.service import AnalyzeService
 from features.monitor import database_limit
@@ -35,16 +36,18 @@ logger = logging.getLogger(__name__)
 TICK_SECONDS = 300
 JOB_TIMEOUT_SECONDS = 600
 AUTOMATIC_REASONS = ("new", "top15_stale")
-NO_VALUES_SKIP = ("No real values were available for this query's parameters, and MySQL "
-                  "can't plan it without them.")
+# A PostgreSQL `$N` placeholder left in a statement after the real-value pass.
+_PG_PLACEHOLDER = re.compile(r"\$\d+\b")
 # Queue estimates use this until a few analyses have finished.
 DEFAULT_RUN_SECONDS = 120
-# The first hour: the top N reads (N is the analysis_daily_cap setting) get their first deep
-# analysis as soon as queries appear. The queue runs one analysis at a time per database,
-# which keeps the extra load on it small. The top list is read on every pass while the
-# first readings settle (FIRST_HOUR_SETTLE_S), then every FIRST_HOUR_RECHECK_S (once a
+# The first hour: the top N reads get their first deep analysis as soon as queries appear.
+# N is FIRST_HOUR_TOP, or the analysis_daily_cap setting when that is smaller; the cap
+# itself only budgets the day. The queue runs one analysis at a time per database, which
+# keeps the extra load on it small. The top list is read on every pass while the first
+# readings settle (FIRST_HOUR_SETTLE_S), then every FIRST_HOUR_RECHECK_S (once a
 # reading), so a query that reshuffles onto the first page is queued right away. The hour
 # analyzes at most FIRST_HOUR_SPREAD times N queries.
+FIRST_HOUR_TOP = 10
 FIRST_HOUR_SETTLE_S = 300
 FIRST_HOUR_RECHECK_S = 60
 FIRST_HOUR_SPREAD = 3
@@ -60,6 +63,8 @@ _VERIFY_STAGES = {"testing_rewrites", "testing_indexes", "checking_readyset"}
 # that pass trims it says so.
 OVER_ALLOWANCE = ("Today's automatic analyses are done. RDST picks this query up tomorrow "
                   "if it's still among the busiest, or you can analyze it now.")
+# Automatic analyses need a Readyset account, even with an AI key of your own.
+SIGN_IN_FOR_MONITORING = "Sign in to turn on AI monitoring"
 # A failure that's the AI service's rather than the query's (the Key Service or hosted AI
 # erroring, busy or not answering) retries by itself after each of these waits. Past the
 # last one, the query waits for the normal policy and the row explains why.
@@ -124,7 +129,7 @@ def analysis_retry(job: dict[str, Any], retry: dict[str, Any] | None) -> dict[st
     facts: dict[str, Any] = {"attempts": retry["attempts"], "retry_at": retry["retry_at"]}
     if not database_limit._signed_in() and (job["reason"] != "user" or not database_limit.own_key()):
         return {**facts, "retry_at": None, "error_kind": "login_required",
-                "reason": "Sign in to turn on AI monitoring" if job["reason"] != "user"
+                "reason": SIGN_IN_FOR_MONITORING if job["reason"] != "user"
                 else "Sign in to run deep analysis"}
     if retry["retry_at"] is not None:
         return {**facts, "error_kind": "retrying",
@@ -233,6 +238,11 @@ def daily_cap(target: str | None = None, store: MonitorStore | None = None) -> i
     return default_analysis_daily_cap()
 
 
+def top_n(target: str, store: MonitorStore) -> int:
+    """How many of the busiest reads the first hour and the top list cover."""
+    return min(FIRST_HOUR_TOP, daily_cap(target, store))
+
+
 def newcomer_cap(target: str, store: MonitorStore) -> int:
     """The target's newcomer_daily_cap lever: queries new to the top analyzed per day."""
     return store.levers(target)["newcomer_daily_cap"]
@@ -304,19 +314,20 @@ def queue_plan(store: MonitorStore, target: str, now: int) -> dict[str, Any]:
         limit = facts["cap"] - facts["reserved"] if automatic else facts["cap"]
         newcomer = job["reason"] in NEWCOMER_REASONS and not first_hour
         if not signed_in and (job["reason"] != "user" or not own_key):
-            jobs[job["id"]] = {"queue_state": "held", "reason_text":
-                               "Sign in to turn on AI monitoring" if job["reason"] != "user"
+            jobs[job["id"]] = {"queue_state": "held", "held_reason": "sign_in", "reason_text":
+                               SIGN_IN_FOR_MONITORING if job["reason"] != "user"
                                else "Sign in to run deep analysis"}
         elif job["reason"] != "user" and not enabled:
-            jobs[job["id"]] = {"queue_state": "held", "reason_text": "Monitoring is off"}
+            jobs[job["id"]] = {"queue_state": "held", "held_reason": "monitoring_off",
+                               "reason_text": "Monitoring is off"}
         elif job["reason"] != "user" and job["query_key"] not in eligible:
-            jobs[job["id"]] = {"queue_state": "held", "reason_text":
+            jobs[job["id"]] = {"queue_state": "held", "held_reason": "outside_top", "reason_text":
                                "This query is outside the busiest 1,000. Click Analyze now to run it."}
         elif job["reason"] != "user" and ai_held:
-            jobs[job["id"]] = {"queue_state": "held", "reason_text":
+            jobs[job["id"]] = {"queue_state": "held", "held_reason": "ai_paused", "reason_text":
                                "AI monitoring is paused. Check this database's AI monitoring status."}
         elif automatic and not automatic_on:
-            jobs[job["id"]] = {"queue_state": "held"}
+            jobs[job["id"]] = {"queue_state": "held", "held_reason": "automatic_off"}
         elif (job["reason"] == "user" or first_hour or newcomer and newcomers_left > 0
               or not newcomer and started < limit):
             position += 1
@@ -327,7 +338,8 @@ def queue_plan(store: MonitorStore, target: str, now: int) -> dict[str, Any]:
             jobs[job["id"]] = {"queue_state": "today", "queue_position": position,
                                "estimated_start_at": first_start + (position - 1) * average}
         else:
-            jobs[job["id"]] = {"queue_state": "held", "reason_text": OVER_ALLOWANCE}
+            jobs[job["id"]] = {"queue_state": "held", "held_reason": "over_allowance",
+                               "reason_text": OVER_ALLOWANCE}
     return {**facts, "average_run_s": average, "automatic_enabled": automatic_on,
             "first_hour": first_hour_facts(store, target, now),
             "running": running[0] if running else None, "queued": queued, "jobs": jobs}
@@ -611,7 +623,7 @@ def first_hour_facts(store: MonitorStore, target: str, now: int) -> dict[str, An
     start, end = store.first_hour(target)
     if not start or not start <= now < end:
         return None
-    top = daily_cap(target, store)
+    top = top_n(target, store)
     next_check = _next_first_hour_check(start, now)
     readings = store.read("SELECT MIN(ts) AS ts,COUNT(*) AS n FROM monitor_pulse WHERE target=? "
                           "AND kind='collect' AND ok=1 AND ts>=?", (target, start))[0]
@@ -664,7 +676,7 @@ def enqueue_first_hour(target: str, *, store: MonitorStore | None = None,
     if not any(_load(weights, key) > 0 for key in weights):
         return []
     store.write_setting(target, "first_hour_checked_at", str(now))
-    top = daily_cap(target, store)
+    top = top_n(target, store)
     ranked = top_reads(store, target, weights, top + top // 2)
     if len(ranked) == top + top // 2:
         # While readings settle, a waiting query that fell well out of the top makes room
@@ -731,7 +743,7 @@ def enqueue_new_queries(target: str, *, store: MonitorStore | None = None,
         return []
     now = int(time.time()) if now is None else now
     weights = _weights(store, target, now)
-    top = top_reads(store, target, weights, daily_cap(target, store))
+    top = top_reads(store, target, weights, top_n(target, store))
     if not top:
         return []
     rows = store.read(
@@ -786,22 +798,10 @@ def enqueue_stale_top(target: str, *, store: MonitorStore | None = None,
     return jobs
 
 
-def _literal(value: str | None, column_type: str | None = None) -> str:
-    if value is None:
-        return "NULL"
-    type_name = (column_type or "").lower()
-    quoted_type = (type_name in {"character varying", "character", "varchar", "char",
-                                 "uuid", "date", "datetime"}
-                   or type_name.endswith("text") or type_name.startswith("timestamp"))
-    if re.fullmatch(r"-?\d+(?:\.\d+)?", value) and not quoted_type:
-        return value
-    return "'" + value.replace("'", "''") + "'"
-
-
 # Where a real value came from, by its suggestion's provenance. Live traffic: a running
 # session, a digest or statement-history sample, or the monitor's stored activity sample.
 # The table's own data: pg_stats or a bounded read of the column. Anything else (a query
-# shape hint such as LIMIT 10) is not a real value and is never used here.
+# shape hint such as LIMIT 10) is reserved for plain EXPLAIN.
 _LIVE_PROVENANCE = ("activity", "digest sample", "statement history")
 _TABLE_PROVENANCE = ("pg_stats", "Sampled from")
 # PostgreSQL typed literals (interval '7 days') normalize to `interval $1`, which doesn't
@@ -871,6 +871,32 @@ def apply_suggestions(sql: str, data: dict[str, Any]) -> tuple[str, str | None]:
     return sql, source
 
 
+def sample_params(data: dict[str, Any]) -> list[dict[str, str]]:
+    """The values apply_suggestions fills in, each placeholder with its SQL literal, in the
+    query's order. Placeholders without a real value are left out."""
+    found = []
+    for placeholder in data.get("placeholders", []):
+        option, _ = _real_suggestion(placeholder.get("suggestions") or [])
+        if option is not None:
+            literal = option.get("literal_sql")
+            found.append({"name": placeholder["placeholder"],
+                          "value": literal if literal is not None else
+                          _literal(str(option["value"]), option.get("column_type"))})
+    return found
+
+
+def _attach_parameters(query_hash: str, analysis_id: str, params: list[dict[str, str]],
+                       source: str | None) -> None:
+    """Best effort: the analysis has succeeded, and a view without its values beats a failure."""
+    from shared.query_registry import AnalysisResultsRegistry
+
+    try:
+        AnalysisResultsRegistry().attach_parameters(query_hash, analysis_id, params, source)
+    except Exception:
+        logger.warning("Could not store the parameters of analysis %s of %s", analysis_id,
+                       query_hash, exc_info=True)
+
+
 def parameter_note(suggestions: dict[str, Any], source: str | None) -> str | None:
     """What sampling found, without the values: "3 parameters sampled from live sessions"."""
     count = len(suggestions.get("placeholders") or [])
@@ -878,7 +904,8 @@ def parameter_note(suggestions: dict[str, Any], source: str | None) -> str | Non
         return None
     noun = "parameter" if count == 1 else "parameters"
     return {"sampled": f"{count} {noun} sampled from live sessions",
-            "table_sampled": f"{count} {noun} sampled from the table"}.get(
+            "table_sampled": f"{count} {noun} sampled from the table",
+            "estimated": f"{count} {noun} used for a plan estimate; EXPLAIN ANALYZE was not run"}.get(
                 source, f"{count} {noun} without a sampled value, so the plan is generic")
 
 
@@ -965,6 +992,26 @@ class AnalyzeQueue:
                 self._refresh is None or self._refresh.done()):
             self._refresh = asyncio.create_task(
                 asyncio.to_thread(self._prepare, int(self.clock())), name="monitor-analyze-refresh")
+
+    def cancel(self, job_id: int) -> dict[str, Any] | None:
+        """Stop a queued or running job. The store marks it cancelled first, so its worker's
+        result never lands; a running worker is then told to stop. Returns the job row, or
+        None when it had already ended."""
+        row = self.store.cancel_analysis(job_id, int(self.clock()))
+        if row is None:
+            return None
+        run = self._active_runs.get(job_id)
+        if run is not None:
+            run.stopped.set()
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                analysis_lane.stop(run)
+            else:
+                stop = loop.create_task(asyncio.to_thread(analysis_lane.stop, run))
+                stop.add_done_callback(
+                    lambda task: task.exception() if not task.cancelled() else None)
+        return row
 
     async def _run(self) -> None:
         while not self._stop.is_set():
@@ -1217,21 +1264,21 @@ class AnalyzeQueue:
                 return
             _phases[(target, key)] = "plan"
             timings.enter("plan")
+            original_sql = sql
             sql, source = apply_suggestions(sql, suggestions)
+            if source == "none" and str(target_config.get("engine", "")).lower() in ("mysql", "mariadb"):
+                sql = plan_only_sql(original_sql, "mysql", suggestions)
+                source = "estimated"
             agent_activity.describe(parameters=parameter_note(suggestions, source))
-            if (source == "none" and suggestions.get("placeholders")
-                    and str(target_config.get("engine", "")).lower() in ("mysql", "mariadb")):
-                # MySQL can't plan a statement with placeholders, and RDST never makes up values.
-                await asyncio.to_thread(
-                    self.store.finish_analysis, job["id"], "skipped", int(self.clock()),
-                    owner=job["owner"], attempt=job["attempt"], error=NO_VALUES_SKIP, param_source=source)
-                return
             weights = (await asyncio.to_thread(_weights, self.store, target, now)).get(key, {})
             calls = weights.get("calls", 0)
             mean_ms = weights.get("total_ms", 0) / calls if calls else 0
             execute = job.get("mode") != "explain"
             mode = analysis_mode(sql, mean_ms, execute)
-            if source == "none" and suggestions.get("placeholders"):
+            # Without real values only a plan estimate runs, even with consent to measure:
+            # EXPLAIN ANALYZE never takes placeholders or made-up values.
+            if (source in ("none", "estimated") and suggestions.get("placeholders")) or (
+                    source in (None, "none") and _PG_PLACEHOLDER.search(sql)):
                 mode = "explain"
             if lookup is not None:
                 # A write's row search is only planned: its WHERE may call a function that writes.
@@ -1320,12 +1367,19 @@ class AnalyzeQueue:
                                     if not getattr(final, name))
                 raise RuntimeError(f"Deep Analyze did not store a result: {detail or f'missing {missing}'}")
             plan_format = (final.explain_results or {}).get("plan_format")
+            if (final.explain_results or {}).get("param_source") == "estimated":
+                source = "estimated"
             if plan_format:
                 mode = "analyze" if plan_format == "analyze" else "explain"
             if run.stopped.is_set():
                 return
             ref = (f"/api/query-registry/{final.query_hash}/analysis/"
                    f"{final.stored_analysis_id}")
+            # A write's values belong to its row search, not to the statement itself.
+            params = sample_params(suggestions) if lookup is None else []
+            if params or source == "estimated":
+                await asyncio.to_thread(_attach_parameters, final.query_hash,
+                                        final.stored_analysis_id, params, source)
             finished = await asyncio.to_thread(
                 self.store.finish_analysis, job["id"], "done", int(self.clock()),
                 owner=job["owner"], attempt=job["attempt"], analysis_ref=ref, mode=mode, param_source=source,

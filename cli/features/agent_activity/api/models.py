@@ -6,6 +6,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from shared.agent_activity.store import RETENTION_DAYS
+
 AgentAction = Literal["deep_analysis", "ask", "classification", "attention_check",
                       "daily_snapshot", "explain_actions", "benchmark"]
 AgentOutcome = Literal["done", "failed", "skipped", "cancelled"]
@@ -63,6 +65,8 @@ class AgentActivityPage(BaseModel):
     items: list[AgentActivityItem]
     next_cursor: Optional[str] = None
     targets: list[str]
+    # How long the log keeps an entry; the page and the export both say this one number.
+    retention_days: int = RETENTION_DAYS
 
 
 class AgentStatement(BaseModel):

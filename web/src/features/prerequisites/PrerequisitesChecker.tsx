@@ -1,7 +1,7 @@
 // Live monitoring prerequisites for one target. Each check is a row; failing
 // rows open their provider-specific fix. The checker re-checks every few seconds
 // while something fails, so fixes made in another window land on their own, and
-// it finishes with a large green check once RDST can see the target's queries.
+// it finishes on a green tick once RDST can see the target's queries.
 //
 // Usage:
 //   <PrerequisitesChecker target="orders" layout="page"
@@ -28,14 +28,13 @@ import {
   progress,
   statusWord,
 } from './model'
-import { ReadyMark } from './ReadyMark'
 import { type PrerequisitesState, usePrerequisites } from './usePrerequisites'
 
 export interface PrerequisitesCheckerProps {
   target: string
   /** `page` is a raised card (onboarding); `panel` sits inside a drawer or dialog. */
   layout?: 'page' | 'panel'
-  /** Finish with the large centered check mark. Defaults to true. */
+  /** Finish on the ticked ready line. Defaults to true. */
   celebrate?: boolean
   /** Shown as the primary action once monitoring can start. */
   onContinue?: () => void
@@ -573,47 +572,45 @@ export function PrerequisitesChecker({
           <m.div
             key="ready"
             ref={markRef}
-            className="flex flex-col items-center gap-4 pb-6 pt-4 text-center"
+            className="space-y-1.5 pb-4"
             initial={reduced ? { opacity: 0 } : { opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
           >
-            <ReadyMark />
-            <div className="space-y-1.5">
+            <div
+              data-testid="prereq-ready-mark"
+              className="flex items-center gap-2"
+            >
+              <Icon
+                name="tick"
+                label=""
+                size="small"
+                className="text-content-positive-soft"
+              />
               <Text
                 as="h3"
-                level={page ? 'headline-2' : 'headline-3'}
+                level={page ? 'headline-3' : 'headline-5'}
                 className="text-content-layout-1"
               >
                 {copy.title}
               </Text>
-              <Text
-                as="p"
-                level="body-medium"
-                className="mx-auto max-w-sm text-content-layout-2"
-              >
-                {copy.body}
-              </Text>
             </div>
+            <Text as="p" level="body-small" className="text-content-layout-3">
+              {copy.body}
+            </Text>
             {result?.provider_name && (
-              <Tag
-                size="small"
-                variant="neutral"
-                modifier="outline"
-                icon="database"
-                iconPosition="left"
-                label={result.provider_name}
-              />
+              <Text as="p" level="caption" className="text-content-layout-3">
+                {result.provider_name}
+              </Text>
             )}
             {onContinue && (
               <Button
+                variant="primary"
+                modifier="solid"
                 label={continueLabel}
-                size="large"
-                icon="arrow-right"
-                iconPosition="right"
                 onClick={onContinue}
-                className="mt-2"
+                className="mt-3"
               />
             )}
           </m.div>
@@ -630,9 +627,12 @@ export function PrerequisitesChecker({
               <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   {phase === 'attention' && (
-                    <span className="grid h-7 w-7 place-items-center rounded-pill bg-surface-positive-soft text-content-positive-plain">
-                      <Icon name="tick" label="" size="small" />
-                    </span>
+                    <Icon
+                      name="tick"
+                      label=""
+                      size="small"
+                      className="text-content-positive-soft"
+                    />
                   )}
                   <Text
                     as="h3"
@@ -642,12 +642,13 @@ export function PrerequisitesChecker({
                     {copy.title}
                   </Text>
                   {result?.provider_name && (
-                    <Tag
-                      size="small"
-                      variant="neutral"
-                      modifier="outline"
-                      label={result.provider_name}
-                    />
+                    <Text
+                      as="span"
+                      level="caption"
+                      className="text-content-layout-3"
+                    >
+                      {result.provider_name}
+                    </Text>
                   )}
                 </div>
                 <LiveIndicator state={state} onRecheck={state.recheck} />
@@ -701,9 +702,9 @@ export function PrerequisitesChecker({
           )}
           {onContinue && finished && (
             <Button
+              variant="primary"
+              modifier="solid"
               label={continueLabel}
-              icon="arrow-right"
-              iconPosition="right"
               onClick={onContinue}
             />
           )}

@@ -17,7 +17,7 @@ const keyserviceDir = resolve(rdstDir, "keyservice");
 const keyserviceUrl = "http://127.0.0.1:8788";
 const backendUrl = "http://127.0.0.1:8787";
 const rendererPort = Number(process.env.RDST_RENDERER_PORT || "3001");
-const READY_TIMEOUT_MS = 30_000;
+const READY_TIMEOUT_MS = 120_000;
 const SHUTDOWN_TIMEOUT_MS = 3_000;
 
 // On POSIX, long-running children run detached in their own process groups

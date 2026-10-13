@@ -3,6 +3,7 @@
 // may move the page. Scrolling goes one way only, and only as far as the wheel says.
 import type { Page } from '@playwright/test'
 import {
+  acceptBrowserError,
   configureTestTarget,
   expect,
   mockPrerequisites,
@@ -15,10 +16,21 @@ test.use({ viewport: { width: 1280, height: 640 } })
 // Seeding history and sampling both scroll directions share the test deadline.
 test.describe.configure({ timeout: 90_000 })
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, browserErrors }) => {
+  // The open query has no Query Library record, so that lookup returns 404.
+  acceptBrowserError(
+    browserErrors,
+    'Failed to load resource: the server responded with a status of 404 (Not Found)'
+  )
   await configureTestTarget(page, { hasPassword: true })
   const seeded = await page.request.post('/api/testing/monitor/seed')
   expect(seeded.ok()).toBe(true)
+  // The live numbers and chart show only for a monitored database.
+  const enabled = await page.request.put(
+    '/api/monitor/targets/e2e-guard/settings',
+    { data: { enabled: true } }
+  )
+  expect(enabled.ok()).toBe(true)
   await mockPrerequisites(page, 'e2e-guard')
 })
 
@@ -28,8 +40,14 @@ const scrollTop = (page: Page) =>
     VIEWPORT
   )
 
+// The hovered row; the open row keeps the same highlight, so it is left out.
 const raisedRow = (page: Page) =>
-  page.evaluate(() => document.querySelector('[data-raised]')?.id ?? null)
+  page.evaluate(
+    () =>
+      document.querySelector(
+        '[data-testid=query-row].bg-row-hover:not([aria-current])'
+      )?.id ?? null
+  )
 
 /** Samples the page's scroll position every frame until stopped. */
 async function startSampling(page: Page) {
@@ -69,13 +87,16 @@ function reversals(samples: number[]) {
 }
 
 async function openTallPage(page: Page) {
-  await page.goto('/database?target=e2e-guard&range=1h')
+  await page.goto('/database?target=e2e-guard&view=live&range=1h')
   const row = page.locator('[id="query-orders-e2e"]')
   await expect(row).toBeVisible()
   await expect(page.getByTestId('load-chart')).toBeVisible()
-  // An open row makes the page tall enough to scroll the hero away.
-  await row.getByRole('button', { name: 'Details' }).click()
-  await expect(page.getByTestId('query-detail')).toBeVisible()
+  // An open row narrows the page, making it tall enough to scroll the hero away.
+  await row.click()
+  await expect(page.locator('[data-two-pane]')).toHaveAttribute(
+    'data-open',
+    'true'
+  )
   // Opening the row brings it into view; let that settle before starting at the top.
   await page.waitForTimeout(1200)
   await page.evaluate((selector) => {

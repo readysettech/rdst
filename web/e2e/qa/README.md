@@ -37,7 +37,7 @@ RDST_E2E_BASE_URL=http://127.0.0.1:8872 pnpm run test:qa
 Run one area with a path filter:
 
 ```
-pnpm run test:qa -- e2e/qa/analyze.spec.ts
+pnpm run test:qa -- e2e/qa/results.spec.ts
 ```
 
 ### Screenshots
@@ -55,23 +55,19 @@ No assertion reads a screenshot. Turning them off never changes a verdict.
 ## Layout
 
 One file per product area. `_helpers.ts` carries everything the six audit packs
-had in common: the SSE frame builder and background-run mocks, the comparison
-event builders and sandbox states, the analyze fixtures, the scrolling
-screenshot, the clip / overflow / occlusion probes, the per-route structural
-probe, the focus walk, and the contrast sampler.
+had in common: the comparison event builders and sandbox states, the analyze
+fixtures, the scrolling screenshot, the clip / overflow / occlusion probes, the
+per-route structural probe, the focus walk, and the contrast sampler.
 
 | File | Covers |
 |---|---|
 | `onboarding.spec.ts` | first run, connect, the AI gate, the demo, the setup guide |
-| `shell.spec.ts` | sidebar and nav, the mobile drawer, the target switcher, legacy redirects, Home |
+| `shell.spec.ts` | sidebar and nav, the canvas, the database list, legacy redirects, Home |
 | `configure.spec.ts` | targets, the add and delete flows, the AI panel, account sign-in |
-| `queries.spec.ts` | the Queries library: card anatomy, action hierarchy, running and analyzed states |
-| `analyze.spec.ts` | the analyze drawer: focus order, parameters, consent, jobs, cancellation |
 | `results.spec.ts` | `/results` and analysis recall |
 | `ask.spec.ts` | Ask and the follow-up conversation |
 | `schema.spec.ts` | the schema explorer and its tablist |
 | `benchmarks.spec.ts` | Compare against Readyset and Load test |
-| `health-check.spec.ts` | `/audit`: runs, reports, the email dialog, fleet, run history |
 | `scan.spec.ts` | Code scan |
 | `guards.spec.ts` | Guards, and the retired Agents workspace |
 | `states.spec.ts` | the cross-cutting empty / error / loading sweep, and the console smoke gate |

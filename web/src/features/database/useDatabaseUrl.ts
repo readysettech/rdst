@@ -1,46 +1,56 @@
-// Page-level state of /database in the URL (DESIGN_V4 "UI plan"): which view (Live or
-// Report), the report shown, the live range, the hero metric, a health chart standing
-// in for the hero, and the side panels. Every write replaces the history entry.
+// Page-level state of /database in the URL (DESIGN_V4 "UI plan"): which view (Actions,
+// Live or Report), the Actions section, the report shown, the live range, the hero metric,
+// a health chart standing in for the hero, the side panels and the query list's filters.
+// Every write replaces the history entry, so a filter change never adds a step to go back
+// over.
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { useCallback, useRef } from 'react'
 import { parseFrom } from '@/features/inbox/incidentModel'
 import {
+  LIVE_RANGES,
   type LiveRange,
   type LoadMetric,
   parseLiveRange,
+  RANGE_SECONDS,
 } from '@/features/monitor-kit/charts'
 import { formatClock, formatDayDate } from '@/features/monitor-kit/format'
 
 /** `live` is the Queries tab; its value predates the tab's name and stays for old links. */
-export type DatabaseView = 'actions' | 'live' | 'report'
-
-/** The Actions tab's sections; 'all' is the ranked list. */
-export type ActionsSection =
-  | 'all'
-  | 'indexes'
-  | 'settings'
-  | 'maintenance'
-  | 'rewrites'
-  | 'caching'
-const SECTIONS: readonly ActionsSection[] = [
-  'all',
-  'indexes',
-  'settings',
-  'maintenance',
-  'rewrites',
-  'caching',
-]
+export type DatabaseView = 'live' | 'report'
 
 const VIEWS: Record<string, DatabaseView> = {
-  actions: 'actions',
-  // The index plan lives in Actions; old links to its own tab open it there.
-  indexes: 'actions',
   live: 'live',
   queries: 'live',
   report: 'report',
 }
+/** The Status menu: every query, or one status. */
+export type ListStatus = 'all' | 'fix' | 'analyzing' | 'healthy' | 'stuck'
+export const LIST_STATUSES: readonly ListStatus[] = [
+  'all',
+  'fix',
+  'analyzing',
+  'healthy',
+  'stuck',
+]
+
+export interface ListFilters {
+  status: ListStatus
+  table: string | null
+  q: string
+}
+
+export function parseListStatus(value: unknown): ListStatus {
+  return LIST_STATUSES.includes(value as ListStatus)
+    ? (value as ListStatus)
+    : 'all'
+}
 export type HealthPanel = 'connections' | 'hit' | 'rollback'
-export type SidePanel = 'settings' | 'setup' | 'analyze' | 'enable'
+export type SidePanel =
+  | 'settings'
+  | 'setup'
+  | 'analyze'
+  | 'enable'
+  | 'benchmark'
 
 export const DEFAULT_RANGE: LiveRange = '1h'
 
@@ -73,6 +83,18 @@ export function fitZoom(
     Math.floor(start / step) * step,
     snappedEnd > now ? Math.ceil(end) : snappedEnd,
   ]
+}
+
+/** The range, widened to the smallest one that reaches back to `start` when it falls short. */
+export function rangeHolding(
+  range: LiveRange,
+  start: number,
+  now = Date.now() / 1000
+): LiveRange {
+  const holds = (value: LiveRange) =>
+    value === 'all' || now - RANGE_SECONDS[value] <= start
+  // The ranges run shortest first, so the first that holds is the smallest.
+  return holds(range) ? range : (LIVE_RANGES.find(holds) ?? 'all')
 }
 
 /** "2:10 to 2:25 PM" today, "Mon, Sep 28, 2:10 PM to 3:25 PM" on another day. */
@@ -113,7 +135,6 @@ const HEALTH: readonly HealthPanel[] = ['connections', 'hit', 'rollback']
 
 interface Patch {
   view?: DatabaseView
-  section?: ActionsSection | null
   report?: number | 'latest' | null
   range?: LiveRange
   metric?: LoadMetric
@@ -123,6 +144,9 @@ interface Patch {
   from?: null
   /** Clears the query list's Status filter (a new time frame shows every query). */
   filter?: null
+  status?: ListStatus
+  table?: string | null
+  q?: string
 }
 
 function searchZoom(search: Record<string, unknown>): [number, number] | null {
@@ -141,25 +165,21 @@ export function useDatabaseUrl() {
   const searchRef = useRef(search)
   searchRef.current = search
 
-  // A link to a query, a time frame or an Inbox item is about the Queries tab.
-  const pointsAtQueries = ['query', 'queries', 'focus', 'zoom', 'from'].some(
-    (name) => typeof search[name] === 'string' && search[name] !== ''
-  )
+  // A link to a query, a time frame, an Inbox item or a list filter is about the Queries tab.
+  const pointsAtQueries = [
+    'query',
+    'queries',
+    'focus',
+    'zoom',
+    'from',
+    'status',
+    'table',
+    'q',
+  ].some((name) => typeof search[name] === 'string' && search[name] !== '')
   const requestedView: DatabaseView | null =
     (typeof search.view === 'string' ? VIEWS[search.view] : undefined) ??
     (pointsAtQueries ? 'live' : null)
   const view: DatabaseView = requestedView ?? 'live'
-  const section: ActionsSection =
-    search.view === 'indexes'
-      ? 'indexes'
-      : SECTIONS.includes(search.section as ActionsSection)
-        ? (search.section as ActionsSection)
-        : 'all'
-  const actionRaw = search.action
-  const action =
-    typeof actionRaw === 'string' && /^\d+$/.test(actionRaw)
-      ? Number(actionRaw)
-      : null
   const reportRaw = search.report
   const report: number | 'latest' =
     typeof reportRaw === 'string' && /^\d+$/.test(reportRaw)
@@ -167,7 +187,10 @@ export function useDatabaseUrl() {
       : typeof reportRaw === 'number'
         ? reportRaw
         : 'latest'
-  const range = parseLiveRange(search.range) ?? DEFAULT_RANGE
+  const zoom = searchZoom(search)
+  // A time frame (an Inbox link, a shared zoom) opens on a range that holds it.
+  const urlRange = parseLiveRange(search.range) ?? DEFAULT_RANGE
+  const range = zoom ? rangeHolding(urlRange, zoom[0]) : urlRange
   // 'load' is the old name of the time-spent view.
   const metric: LoadMetric =
     search.metric === 'load'
@@ -182,10 +205,14 @@ export function useDatabaseUrl() {
     search.panel === 'settings' ||
     search.panel === 'setup' ||
     search.panel === 'analyze' ||
-    search.panel === 'enable'
+    search.panel === 'enable' ||
+    search.panel === 'benchmark'
       ? search.panel
       : null
-  const zoom = searchZoom(search)
+  const status = parseListStatus(search.status)
+  const table =
+    typeof search.table === 'string' && search.table ? search.table : null
+  const q = typeof search.q === 'string' ? search.q : ''
   // The Inbox item a link came from (DESIGN_V5 section 3).
   const fromItem = parseFrom(search.from)
 
@@ -198,12 +225,14 @@ export function useDatabaseUrl() {
         else next[name] = String(value)
       }
       set('view', patch.view)
-      set('section', patch.section, 'all')
       set('report', patch.report, 'latest')
       set('range', patch.range, DEFAULT_RANGE)
       set('metric', patch.metric, 'calls')
       set('health', patch.health)
       set('panel', patch.panel)
+      set('status', patch.status, 'all')
+      set('table', patch.table, '')
+      set('q', patch.q, '')
       if (patch.zoom !== undefined)
         set('zoom', patch.zoom ? `${patch.zoom[0]}-${patch.zoom[1]}` : null)
       set('from', patch.from)
@@ -229,17 +258,23 @@ export function useDatabaseUrl() {
 
   return {
     view,
-    /** The tab the URL asks for; null lets the page pick (Actions once there's a plan). */
+    /** The tab the URL asks for; null opens Live. */
     requestedView,
-    section,
-    action,
     report,
     range,
     metric,
     health,
     panel,
     zoom,
+    status,
+    table,
+    q,
     fromItem,
+    /** The list's filters; a field left out keeps its value. */
+    setFilters: useCallback(
+      (patch: Partial<ListFilters>) => write(patch),
+      [write]
+    ),
     clearFrom: useCallback(() => write({ from: null }), [write]),
     /** Back from an incident window to the last day. */
     showDay: useCallback(() => write({ range: '24h', zoom: null }), [write]),
@@ -249,10 +284,6 @@ export function useDatabaseUrl() {
     ),
     setView: useCallback(
       (value: DatabaseView) => write({ view: value }),
-      [write]
-    ),
-    setSection: useCallback(
-      (value: ActionsSection) => write({ view: 'actions', section: value }),
       [write]
     ),
     openReport: useCallback(

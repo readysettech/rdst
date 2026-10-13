@@ -10,7 +10,7 @@ from functools import lru_cache
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from features.monitor.api import models, views
@@ -176,7 +176,8 @@ def _readings(store: MonitorStore, target: str, scheduler: Any = None) -> dict[s
         # A setup problem explains the missing readings better than the scheduler can.
         status = {**status, "delay_reason": blocker, "setup_blocked": True}
     return {"last_reading_at": last["ts"] if last else None,
-            "next_reading_at": next_at if enabled else None, **status}
+            "next_reading_at": next_at if enabled else None,
+            "checks_ran_at": views.checks_ran_at(store, target), **status}
 
 
 def _query_totals(store: MonitorStore, target: str, start: int, end: int):
@@ -435,6 +436,37 @@ async def enqueue_analysis(target: str, key: str, request: Request):
     return {**presented[0], "already_queued": already}
 
 
+def _cancel_job(request: Request, store: MonitorStore, target: str, job_id: int) -> dict:
+    from features.monitor.analyze_queue import _active_queue
+
+    rows = store.read("SELECT * FROM analyze_job WHERE id=? AND target=?", (job_id, target))
+    if not rows:
+        raise HTTPException(404, "Analysis job not found")
+    queue = getattr(request.app.state, "analyze_queue", None) or _active_queue
+    row = queue.cancel(job_id) if queue is not None else store.cancel_analysis(job_id, _now())
+    if row is None:
+        raise HTTPException(409, "This analysis has already ended")
+    presented = _jobs_with_reasons(store, target, [row])[0]
+    return {**presented, "cancelled": True}
+
+
+@router.post("/targets/{target}/analyze-jobs/{job_id}/cancel", **documented(models.AnalyzeJob))
+def cancel_analyze_job(target: str, job_id: int, request: Request):
+    """Stop a queued or running analysis; the query's latest analysis stays as it was."""
+    return _cancel_job(request, _store(), target, job_id)
+
+
+@router.post("/targets/{target}/queries/{key}/analyze/cancel", **documented(models.AnalyzeJob))
+def cancel_query_analysis(target: str, key: str, request: Request):
+    """Stop the query's queued or running analysis, whichever job holds it."""
+    store = _store()
+    rows = store.read("SELECT id FROM analyze_job WHERE target=? AND query_key=? "
+                      "AND state IN ('queued','running') ORDER BY id DESC LIMIT 1", (target, key))
+    if not rows:
+        raise HTTPException(409, "This query has no analysis in progress")
+    return _cancel_job(request, store, target, int(rows[0]["id"]))
+
+
 class AddQueryRequest(BaseModel):
     # The SQL as pasted, placeholders and all: it names the query in the list.
     sql: str
@@ -500,22 +532,84 @@ def query_analysis(target: str, key: str):
     """The latest finished deep analysis of a query, in the report card's shape."""
     from features.monitor.analysis_digest import latest_digest
 
-    digest = latest_digest(_store(), target, key)
+    store = _store()
+    digest = latest_digest(store, target, key)
     if digest is None:
         raise HTTPException(404, "No finished analysis for this query")
-    return digest
+    return views.analysis_view(store, target, key, digest, _now())
+
+
+@router.post("/targets/{target}/benchmark-fixes", **documented(models.BenchmarkFixesResult))
+def benchmark_fixes(target: str, body: models.BenchmarkFixesRequest):
+    """Before and after for each query with a fix. The after is the planner's estimate;
+    a timed run on a scratch schema is not done, and `scratch_schema` reads false."""
+    if not 1 <= body.runs <= 100:
+        raise HTTPException(422, "runs must be between 1 and 100")
+    if not body.query_keys or len(body.query_keys) > 100:
+        raise HTTPException(422, "Pass between 1 and 100 query keys")
+    result = views.benchmark_fixes(_store(), target, list(dict.fromkeys(body.query_keys)),
+                                   body.runs, _now())
+    _record_fix_benchmark(result)
+    return result
+
+
+def _record_fix_benchmark(result: dict[str, Any]) -> None:
+    """The fixes benchmark in the agent activity log, as the planner estimate it is."""
+    from shared.agent_activity.recorder import record_entry
+
+    rows = result["rows"]
+    names = [row["name"] for row in rows]
+    faster = sum(1 for row in rows if (row["change_pct"] or 0) < 0)
+    measured = sum(1 for row in rows if row["after_ms"] is not None)
+    subject = ", ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
+    record_entry({
+        "target": result["target"], "action": "benchmark", "subject": subject,
+        "outcome": "done",
+        "summary": (f"{faster} of {measured} faster with their fixes, estimated" if measured
+                    else "No estimate for the fixes"),
+        "decision": "Read the planner's estimates from the analyses; nothing ran on the "
+                    "database",
+        "details": {"mode": "planner_estimate", "runs": result["runs"],
+                    "queries": [{"query_key": row["key"], "name": row["name"],
+                                 "before_ms": row["before_ms"], "after_ms": row["after_ms"]}
+                                for row in rows]}})
+
+
+def _configured_targets() -> list[dict[str, Any]]:
+    """Every configured database, for Home; empty when the config can't be read."""
+    from shared.config.targets import TargetsConfig
+
+    try:
+        config = TargetsConfig()
+        config.load()
+        return [{"name": name, **(config.get(name) or {})} for name in config.list_targets()]
+    except Exception:
+        logger.debug("Targets config unavailable for Home", exc_info=True)
+        return []
+
+
+@router.get("/home", **documented(models.HomeModel))
+def home(target: str | None = None, limit: int = views.HOME_LOG_LIMIT):
+    """Home: the status line, the day card, every database and today's log."""
+    if not 1 <= limit <= 50:
+        raise HTTPException(422, "limit must be between 1 and 50")
+    return views.home(_store(), _now(), configured=_configured_targets(), selected=target,
+                      limit=limit)
 
 
 @router.get("/targets/{target}/load", **documented(models.LoadBreakdown))
 def load(target: str, range: RangeParam = "1h", top: int = views.LOAD_TOP,
-         from_: FromParam = None, to: int | None = None):
+         from_: FromParam = None, to: int | None = None,
+         rank: Literal["time", "calls"] = "time"):
     """Recorded execution time and calls per bucket, split by the top queries in the range.
 
-    `from` and `to` (epoch seconds) scope it to a brushed window instead of `range`.
+    `rank` picks the top queries by execution time or by calls. `from` and `to` (epoch
+    seconds) scope it to a brushed window instead of `range`.
     """
     if not 1 <= top <= 12:
         raise HTTPException(422, "top must be between 1 and 12")
-    return views.load(_store(), target, range, _now(), top, window=_window(from_, to))
+    return views.load(_store(), target, range, _now(), top, window=_window(from_, to),
+                      rank=rank)
 
 
 @router.get("/targets/{target}/load/latency", **documented(models.LatencyBreakdown))
@@ -549,6 +643,8 @@ class MonitorSettingsUpdate(BaseModel):
     push_daily_cap: int | None = None
     # Partial: only the switches sent change.
     notify_events: dict[str, bool] | None = None
+    # Both hours; equal hours switch quiet hours off.
+    quiet_hours: dict[str, int] | None = None
     # Dev/demo only: shorten this database's first-connection learning period (seconds).
     dev_learning_period_s: int | None = None
 
@@ -696,7 +792,10 @@ async def put_settings(target: str, body: MonitorSettingsUpdate, request: Reques
         await asyncio.to_thread(product_telemetry.monitoring_disabled, target,
                                 monitored_count=len(_store().monitored_targets()))
     if was_enabled and not values["enabled"]:
+        from features.monitor.loop import connection_changed
+
         scheduler = getattr(request.app.state, "monitor_scheduler", None)
+        connection_changed(target, scheduler)
         if scheduler is not None:
             scheduler._refresh_targets(scheduler._clock())
         loop = getattr(request.app.state, "monitor_loop", None)
@@ -731,6 +830,9 @@ async def put_settings(target: str, body: MonitorSettingsUpdate, request: Reques
 
             request.app.state.analyze_queue = await start_analyze_queue()
         if turned_on:
+            from features.monitor.loop import connection_changed
+
+            connection_changed(target, getattr(request.app.state, "monitor_scheduler", None))
             values["enabled_at"] = _now()
             await asyncio.to_thread(_store().start_first_hour, target, values["enabled_at"])
             values["first_hour_started_at"] = await asyncio.to_thread(
@@ -838,6 +940,8 @@ def delete_mute_rule(rule_id: int):
 
 
 INBOX_TABS = {"open", "muted", "done"}
+# Closed items stay 7 days.
+DONE_WINDOW_S = 7 * 86400
 
 
 @router.get("/inbox", **documented(models.InboxPage))
@@ -877,28 +981,16 @@ def inbox(state: str | None = None, target: str | None = None, include_muted: bo
             return item["muted_by"] is None or include_muted
 
         items = [item for item in items if keep(item)]
+        if state == "done":
+            # Closed items stay 7 days.
+            items = [item for item in items
+                     if (item["resolved_at"] or item["updated_at"]) >= now - DONE_WINDOW_S]
         items.sort(key=lambda item: (-item["created_at"], -item["id"]))
     return {"items": items}
 
 
 class InboxAction(BaseModel):
     until: int | None = None
-
-
-@router.post("/inbox/mark-all-seen")
-def mark_all_seen(target: str | None = None):
-    """Marks new items seen and acknowledges recent recoveries."""
-    store = _store()
-    now = _now()
-    items = [store.action_item(item["id"], "seen", now)
-             for item in store.inbox("new", target) if item["delivery"] != "digest"]
-    for item in views.inbox_items(store, [row for row in store.inbox("resolved", target)
-                                          if row["delivery"] != "digest" and
-                                          (row["resolved_at"] or 0) >= now - RECOVERED_WINDOW_S]):
-        if (item["severity_band"] == "recovered" and
-                not json.loads(item["body_json"]).get("recovery_seen_at")):
-            items.append(store.action_item(item["id"], "seen", now))
-    return {"updated": len(items)}
 
 
 @router.post("/inbox/{item_id}/{action}", **documented(models.InboxItem))
@@ -915,8 +1007,10 @@ def inbox_action(item_id: int, action: Literal["seen", "snooze", "dismiss", "res
 
 
 class ActionVerb(BaseModel):
+    """An action verb's optional body: `until` (epoch seconds) sets aside until a date, and
+    `reason` is the user's words for a set aside, a dismissal or an undo."""
     until: int | None = None
-    reason: str | None = None
+    reason: str | None = Field(default=None, max_length=500)
 
 
 @router.get("/targets/{target}/actions", **documented(models.ActionsPage))
@@ -926,30 +1020,92 @@ def target_actions(target: str):
     return actions.present(_store(), target, _now())
 
 
-@router.post("/targets/{target}/actions/{action_id}/{verb}", **documented(models.ActionsPage))
-def action_verb(target: str, action_id: int, verb: Literal["snooze", "dismiss", "reopen", "check"],
-                body: ActionVerb | None = None):
-    """Snooze, dismiss or reopen an action; `check` reads the database now to see if it's done."""
+ActionVerbName = Literal["set_aside", "snooze", "dismiss", "did_it", "undid_it", "bring_back",
+                         "reopen", "check"]
+
+
+def _action_targets(store: MonitorStore) -> tuple[list[str], list[str]]:
+    """The databases Actions covers (monitored, or with actions on record) in config order,
+    and the configured ones that aren't monitored."""
+    configured = [str(entry["name"]) for entry in _configured_targets() if entry.get("name")]
+    monitored = store.monitored_targets()
+    known = monitored | {row["target"] for row in store.read("SELECT DISTINCT target FROM action")}
+    ordered = [name for name in configured if name in known] + sorted(known - set(configured))
+    return ordered, [name for name in configured if name not in monitored]
+
+
+@router.get("/actions", **documented(models.GlobalActionsPage))
+def global_actions(db: str | None = None):
+    """Every database's open actions in one ranked plan, or one database's with `db`."""
     from features.monitor import actions
-    from features.monitor.loop import _scan_stats
+
+    store = _store()
+    targets, unmonitored = _action_targets(store)
+    return actions.global_page(store, targets, _now(), db=db, unmonitored=unmonitored)
+
+
+@router.get("/actions/applied", **documented(models.AppliedPage))
+def applied_actions(db: str | None = None):
+    """Changes applied in the last 30 days with their measured effect, then the undone and
+    dismissed ones."""
+    from features.monitor import actions
+
+    store = _store()
+    return actions.applied_page(store, _action_targets(store)[0], _now(), db=db)
+
+
+@router.post("/targets/{target}/actions/opened", **documented(models.ActionsOpened))
+def actions_opened(target: str):
+    """Actions was opened for this database: its Changes ready event closes."""
+    from features.monitor import actions
+
+    return {"target": target, "closed": actions.mark_opened(_store(), target, _now())}
+
+
+def _read_database(store: MonitorStore, target: str, now: int) -> None:
+    """Read the database's indexes and statistics now and refresh its actions."""
+    from features.monitor import actions
+    from features.monitor.loop import _scan_indexes, _scan_stats
+
+    store.sync_indexes(target, _scan_indexes(target), now)
+    store.record_stats(target, _scan_stats(target))
+    actions.refresh(store, target, now)
+
+
+@router.post("/targets/{target}/actions/{action_id}/{verb}", **documented(models.ActionsPage))
+def action_verb(target: str, action_id: int, verb: ActionVerbName,
+                body: ActionVerb | None = None):
+    """A user's verb on one action, answered with the database's Actions page.
+
+    set_aside (snooze is its older name) takes `until` and `reason`; dismiss takes `reason`;
+    did_it reads the database now and, unless it already shows the change, marks it applied
+    by you so measuring starts; undid_it marks an applied change undone with `reason`;
+    bring_back (or reopen) opens it again; check reads the database to see if it's done."""
+    from features.monitor import actions
 
     store, now = _store(), _now()
     if not any(row["id"] == action_id for row in store.actions(target)):
         raise HTTPException(404, "Action not found")
     if verb == "check":
-        from features.monitor.loop import _scan_indexes
-
         try:
-            store.sync_indexes(target, _scan_indexes(target), now)
-            store.record_stats(target, _scan_stats(target))
+            _read_database(store, target, now)
         except Exception as exc:
             raise HTTPException(503, f"Couldn't read the database: {exc}") from exc
-        actions.refresh(store, target, now)
-    else:
-        if verb == "snooze" and body is not None and body.until is not None and body.until <= now:
-            raise HTTPException(422, "A future snooze time is required")
+        return actions.present(store, target, now)
+    if verb in ("snooze", "set_aside") and body is not None and body.until is not None and \
+            body.until <= now:
+        raise HTTPException(422, "A future date is required")
+    if verb == "did_it":
+        try:
+            _read_database(store, target, now)
+        except Exception:
+            logger.debug("Couldn't read %s for did_it; recording it as yours", target,
+                         exc_info=True)
+    try:
         actions.set_state(store, target, action_id, verb, now,
                           until=body.until if body else None, reason=body.reason if body else None)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     return actions.present(store, target, now)
 
 
@@ -1073,6 +1229,17 @@ def _collect_timing(store: MonitorStore, target: str) -> tuple[dict | None, int]
     return last, interval
 
 
+def _activity(store: MonitorStore, target: str, readings: dict[str, Any],
+              every_s: int) -> dict[str, Any]:
+    levers = store.levers(target)
+    jobs, reports = views.running_work(store, [target])
+    return views.activity(store, target, _now(), enabled=bool(levers["enabled"]),
+                          last_reading_at=readings.get("last_reading_at"), every_s=every_s,
+                          checks_ran_at=readings.get("checks_ran_at"),
+                          check_every_s=levers["attention_every_min"] * 60,
+                          running=jobs.get(target), report=reports.get(target))
+
+
 def _present_pulses(store: MonitorStore, target: str, rows: list[dict],
                     scheduler: Any = None) -> list[dict]:
     now = _now()
@@ -1082,9 +1249,10 @@ def _present_pulses(store: MonitorStore, target: str, rows: list[dict],
     readings = _readings(store, target, scheduler)
     if readings.get("first_reading") and state != "paused":
         state = "live"
+    doing = _activity(store, target, readings, interval) if rows else None
     return [{"ts": row["ts"], "kind": row["kind"], "ok": bool(row["ok"]), "detail": row["detail"],
              "next_collect_at": next_collect, "state": state,
-             **readings} for row in rows]
+             **readings, "activity": doing} for row in rows]
 
 
 def _connection_problem(store: MonitorStore, target: str) -> dict[str, str] | None:
@@ -1113,8 +1281,10 @@ def pulse(target: str, request: Request, limit: int = 5):
         raise HTTPException(422, "limit must be between 1 and 50")
     store = _store()
     scheduler = getattr(request.app.state, "monitor_scheduler", None)
+    readings = _readings(store, target, scheduler)
     return {"pulses": _present_pulses(store, target, store.pulses(target, limit), scheduler),
-            **_readings(store, target, scheduler),
+            **readings, "activity": _activity(store, target, readings,
+                                              _collect_timing(store, target)[1]),
             "connection_problem": _connection_problem(store, target)}
 
 
@@ -1215,9 +1385,13 @@ async def start_report(target: str, request: Request):
     return await asyncio.to_thread(present_report, run, store)
 
 
+ReportView = Literal["quick", "detailed"]
+
+
 @router.get("/targets/{target}/report/latest", **documented(models.DatabaseReport))
-def latest_report(target: str, daily: bool = False):
-    """The newest run of any kind, or with `daily` the newest one the Reports tab shows."""
+def latest_report(target: str, daily: bool = False, view: ReportView = "quick"):
+    """The newest run of any kind, or with `daily` the newest one the Reports tab shows.
+    `view=detailed` adds the detailed sections."""
     from features.monitor.report import present_report
 
     store = _store()
@@ -1227,7 +1401,7 @@ def latest_report(target: str, daily: bool = False):
                       "ORDER BY sample,COALESCE(period_end,ts) DESC,ts DESC,id DESC LIMIT 1",
                       (target,))
     # Null until the first checkup; a fresh database's landing page reads this.
-    return present_report(rows[0], store) if rows else None
+    return present_report(rows[0], store, view=view) if rows else None
 
 
 # The Reports tab shows the finished nightly reports; a checkup someone runs, like the first
@@ -1264,11 +1438,12 @@ def _target_report(store: MonitorStore, target: str, report_id: int) -> dict:
 
 
 @router.get("/targets/{target}/report/{report_id}", **documented(models.DatabaseReport))
-def get_report(target: str, report_id: int):
+def get_report(target: str, report_id: int, view: ReportView = "quick"):
+    """One run; `view=detailed` adds the detailed sections."""
     from features.monitor.report import present_report
 
     store = _store()
-    return present_report(_target_report(store, target, report_id), store)
+    return present_report(_target_report(store, target, report_id), store, view=view)
 
 
 REPORT_EVENT_POLL_SECONDS = 0.5

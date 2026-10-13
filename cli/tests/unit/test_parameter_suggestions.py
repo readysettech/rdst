@@ -536,3 +536,46 @@ def test_a_date_trunc_unit_placeholder_is_a_time_unit():
     bound = bind_placeholders_to_columns(sql, "postgresql", enumerate_placeholders(sql))
     assert bound["$1"] == {"kind": "time_unit"}
     assert bound["$2"]["column"] == "readings.recorded_at" and bound["$2"]["after"]
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("SELECT * FROM t LIMIT ? OFFSET ?", "SELECT * FROM t LIMIT 10 OFFSET 0"),
+    ("SELECT date_trunc($1, created_at) FROM t", "SELECT date_trunc('minute', created_at) FROM t"),
+    ("SELECT now() - $1::interval", "SELECT now() - '1 day'::interval"),
+    ("SELECT * FROM t WHERE created_at > TIMESTAMP $1",
+     "SELECT * FROM t WHERE created_at > TIMESTAMP '2000-01-01 00:00:00'"),
+    ("SELECT '?' FROM t WHERE id = ? LIMIT ?", "SELECT '?' FROM t WHERE id = 1 LIMIT 10"),
+    ("SELECT '?' FROM t LIMIT ? OFFSET ?", "SELECT '?' FROM t LIMIT 10 OFFSET 0"),
+])
+def test_plan_only_shape_literals(sql, expected):
+    assert mod.plan_only_sql(sql, "mysql" if "?" in sql else "postgresql") == expected
+
+
+@pytest.mark.parametrize("column_type,literal", [
+    ("integer", "1"), ("text", "''"), ("date", "CURRENT_DATE"),
+    ("timestamp without time zone", "NOW()"), ("interval", "'1 day'"),
+])
+def test_empty_column_uses_type_hint_only_for_planning(monkeypatch, column_type, literal):
+    from features.monitor.analyze_queue import apply_suggestions
+
+    cur = MagicMock()
+    cur.fetchone.side_effect = [(column_type,), None]
+    cur.fetchall.return_value = []
+    conn = MagicMock()
+    conn.cursor.return_value = cur
+    options = mod._sample_column_values(conn, "postgresql", {"table": "t", "column_name": "v"})
+    data = {"placeholders": [{"placeholder": "$1", "suggestions": options}]}
+    sql = "SELECT * FROM t WHERE v = $1"
+    assert apply_suggestions(sql, data) == (sql, "none")
+    assert mod.plan_only_sql(sql, "postgresql", data) == sql.replace("$1", literal)
+
+
+def test_mysql_column_sampling_reads_one_value_with_timeout():
+    conn = MagicMock()
+    conn.cursor.return_value.fetchone.return_value = ("varchar",)
+    conn.cursor.return_value.fetchall.return_value = [("paid",)]
+    options = mod._sample_column_values(conn, "mysql", {"table": "orders", "column_name": "status"},
+                                      timeout_ms=1000)
+    sql = conn.cursor.return_value.execute.call_args.args[0]
+    assert "MAX_EXECUTION_TIME(1000)" in sql and sql.endswith("LIMIT 1")
+    assert options[0]["value"] == "paid"

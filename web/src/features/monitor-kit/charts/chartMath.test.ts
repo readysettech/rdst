@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   clipToDomain,
   downsample,
+  pointsInView,
   segmentPoints,
   yDomain,
 } from './chartMath'
@@ -34,7 +35,8 @@ describe('segmentPoints', () => {
 describe('yDomain', () => {
   it('uses a zero-based nice max by default', () => {
     expect(yDomain([3, 180]).max).toBe(200)
-    expect(yDomain([0.13, 0.31]).max).toBe(0.5)
+    expect(yDomain([3, 65]).max).toBe(80)
+    expect(yDomain([0.13, 0.31]).max).toBe(0.4)
   })
 
   it('fits a tight window for ratios and respects the cap', () => {
@@ -66,7 +68,11 @@ describe('clipToDomain', () => {
 
   it('keeps full resolution inside the time frame', () => {
     const shown = downsample(clipToDomain(week, domain, 300), 150)
-    expect(shown.every((point, index) => !index || point.x - shown[index - 1].x === 300)).toBe(true)
+    expect(
+      shown.every(
+        (point, index) => !index || point.x - shown[index - 1].x === 300
+      )
+    ).toBe(true)
   })
 
   it('downsampling the whole week first loses most of an hour at the left edge', () => {
@@ -87,6 +93,34 @@ describe('downsample', () => {
       { x: 1, y: 2 },
       { x: 3, y: null },
       { x: 5, y: 6 },
+    ])
+  })
+})
+
+describe('pointsInView', () => {
+  // A first window from 2:56:40 for ten minutes, minute buckets on the clock.
+  const from = 1_790_000_000 + 40
+  const domain: [number, number] = [from, from + 600]
+
+  it('draws a lone reading on the left edge, as one point', () => {
+    expect(pointsInView([from - 40], domain, 60)).toEqual([
+      { x: from, index: 0 },
+    ])
+  })
+
+  it('draws two readings as the line between them, nothing beyond the edge', () => {
+    expect(pointsInView([from - 40, from + 20], domain, 60)).toEqual([
+      { x: from, index: 0 },
+      { x: from + 20, index: 1 },
+    ])
+  })
+
+  it('drops readings over a step outside and keeps one past the right edge', () => {
+    const xs = [from - 100, from - 40, from + 560, from + 620, from + 680]
+    expect(pointsInView(xs, domain, 60)).toEqual([
+      { x: from, index: 1 },
+      { x: from + 560, index: 2 },
+      { x: from + 620, index: 3 },
     ])
   })
 })

@@ -25,7 +25,7 @@ export interface BandMeta {
 
 export const BAND_META: Record<SeverityBand, BandMeta> = {
   act_now: {
-    label: 'Urgent',
+    label: 'Act now',
     hint: 'Hurting the database now',
     tone: 'negative',
   },
@@ -156,7 +156,7 @@ const ALERT_TYPES: Record<string, AlertTypeMeta> = {
   cache_candidate: { label: 'Cache candidate', icon: 'database-settings' },
   query_improved: { label: 'Query got faster', icon: 'arrow-down' },
   query_stopped_running: { label: 'Query stopped running', icon: 'minus' },
-  daily_summary: { label: 'Nightly checkup', icon: 'document-validation' },
+  daily_summary: { label: 'Daily report', icon: 'document-validation' },
   cache_hit_ratio_drop: {
     label: 'Cache hit ratio dropped',
     icon: 'arrow-down',
@@ -209,7 +209,7 @@ export function describeRule(
   rule: Pick<MuteRule, 'target' | 'type' | 'query_key'>,
   queryLabel?: string
 ): string {
-  const where = rule.target ? `on ${rule.target}` : 'on all targets'
+  const where = rule.target ? `on ${rule.target}` : 'on all databases'
   const query = queryLabel ?? 'one query'
   if (rule.query_key && rule.type)
     return `${alertTypeLabel(rule.type)} for ${query} ${where}`

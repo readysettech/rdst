@@ -81,5 +81,9 @@ export interface ConfigureConnectionStatus {
     title: string
     detail?: string
     instructions: string[]
+    /** Server configuration lines to copy. */
+    config?: string[]
+    /** SQL statements to copy. */
+    sql?: string[]
   }
 }

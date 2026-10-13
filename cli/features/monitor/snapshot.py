@@ -151,8 +151,7 @@ def _window_numbers(store: MonitorStore, target: str, start: int, end: int) -> d
     points = sorted((views._health_point(bucket, parts, step, end)
                      for bucket, parts in buckets.items()), key=lambda point: point["ts"])
     period = views._period(rows, seconds, points)
-    busiest = max((point for point in points if point["qps"] is not None),
-                  key=lambda point: point["qps"], default=None)
+    busiest = views.peak_rate(store, target, start, end, period["qps"])
     ratios = [point["cache_hit_ratio"] for point in points
               if point["cache_hit_ratio"] is not None]
     limits = [point["max_conns"] for point in points if point["max_conns"] is not None]
@@ -180,6 +179,7 @@ def _round(value: Any) -> Any:
 
 NUMBERS = (("qps", "Queries per second", "qps", None),
            ("mean_ms", "Average latency", "ms", "down"),
+           ("p95_ms", "p95 latency", "ms", "down"),
            ("active_conns_peak", "Peak connections", "count", "down"),
            ("cache_hit_ratio_min", "Lowest cache hit", "ratio", "up"),
            ("xact_rollback", "Rollbacks", "count", "down"),

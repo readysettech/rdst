@@ -1,7 +1,7 @@
 import { BaseInputCheckbox } from '@rs/ui-new/base-input-checkbox'
 import { Button } from '@rs/ui-new/button'
 import { ConfirmDialog } from '@rs/ui-new/confirm-dialog'
-import { IconTile } from '@rs/ui-new/icon-tile'
+import { InlineNotice } from '@rs/ui-new/error-state'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 
@@ -25,9 +25,8 @@ interface AnalyzeConsentProps {
 
 /**
  * The consent for a measurement that executes the user's query against their
- * database. Executing it is the consequence, so both presentations carry the
- * warning accent, the alert glyph and the same sentence: the drawer is the
- * path most people take, and it used to ask in a neutral card (Mike #3).
+ * database. Both presentations ask in the same two sentences: a quiet dialog on
+ * `/results`, a quiet inline-alert line in the drawer.
  */
 export function AnalyzeConsent({
   presentation,
@@ -38,7 +37,7 @@ export function AnalyzeConsent({
   onConfirm,
 }: AnalyzeConsentProps) {
   const skipToggle = (
-    <HStack className="items-center gap-3">
+    <HStack className="items-center gap-2">
       <BaseInputCheckbox
         checked={skipFuturePrompts}
         onCheckedChange={(checked) => onSkipFuturePrompts(checked === true)}
@@ -53,18 +52,14 @@ export function AnalyzeConsent({
   if (presentation === 'modal') {
     return (
       <ConfirmDialog
+        tone="quiet"
         isOpen={isOpen}
         onClose={onCancel}
         onConfirm={onConfirm}
         title={ANALYZE_CONSENT_TITLE}
-        notice={{
-          accent: 'warning',
-          icon: 'alert',
-          message: ANALYZE_CONSENT_MESSAGE,
-        }}
-        confirmLabel="Run analyze"
+        subtitle={ANALYZE_CONSENT_MESSAGE}
+        confirmLabel="Analyze"
         confirmVariant="primary"
-        confirmIcon="play"
         cancelLabel="Cancel"
       >
         {skipToggle}
@@ -75,50 +70,35 @@ export function AnalyzeConsent({
   if (!isOpen) return null
 
   return (
-    <div
+    <VStack
       data-testid="analyze-consent-inline"
-      // The same announcement the dialog's notice makes, since this is the
-      // same prompt in a surface that cannot open a dialog.
-      role="alert"
-      className="rounded-xl border bg-surface-warning-soft/50 border-border-warning-soft shadow-glow-warning p-4"
+      className="items-stretch gap-3"
     >
-      <HStack className="items-start gap-3">
-        <IconTile icon="alert" size="base" accent="warning" />
-        <VStack className="min-w-0 flex-1 items-stretch gap-3">
-          <VStack className="items-start gap-1">
-            <Text level="label-medium" className="text-content-warning-soft">
-              {ANALYZE_CONSENT_TITLE}
-            </Text>
-            <Text
-              level="body-small"
-              className="max-w-prose text-content-layout-2 leading-relaxed"
-            >
-              {ANALYZE_CONSENT_MESSAGE}
-            </Text>
-          </VStack>
-          <HStack className="flex-wrap items-center justify-between gap-3">
-            {skipToggle}
-            <HStack className="items-center gap-2">
-              <Button
-                variant="primary"
-                modifier="ghost"
-                size="small"
-                label="Cancel"
-                onClick={onCancel}
-              />
-              <Button
-                variant="primary"
-                modifier="solid"
-                size="small"
-                label="Run analyze"
-                icon="play"
-                iconPosition="left"
-                onClick={onConfirm}
-              />
-            </HStack>
-          </HStack>
-        </VStack>
+      <InlineNotice
+        tone="quiet"
+        accent="warning"
+        title={ANALYZE_CONSENT_TITLE}
+        message={ANALYZE_CONSENT_MESSAGE}
+      />
+      <HStack className="flex-wrap items-center justify-between gap-3">
+        {skipToggle}
+        <HStack className="items-center gap-2">
+          <Button
+            variant="primary"
+            modifier="ghost"
+            size="small"
+            label="Cancel"
+            onClick={onCancel}
+          />
+          <Button
+            variant="primary"
+            modifier="solid"
+            size="small"
+            label="Analyze"
+            onClick={onConfirm}
+          />
+        </HStack>
       </HStack>
-    </div>
+    </VStack>
   )
 }

@@ -102,7 +102,11 @@ describe('NeonConnectionPanel', () => {
 
     renderWithClient(<NeonConnectionPanel />)
 
-    expect(await screen.findByText('Connect Neon')).toBeTruthy()
+    const link = await screen.findByRole('link', { name: 'Neon console' })
+    expect(link.getAttribute('href')).toBe('https://console.neon.tech')
+    expect(link.parentElement?.textContent).toBe(
+      'Paste a Neon API key. Create one in the Neon console under Account settings > API keys.'
+    )
     // Nothing to save yet, so the button stays inert.
     expect(
       (screen.getByRole('button', { name: 'Connect' }) as HTMLButtonElement)
@@ -135,7 +139,7 @@ describe('NeonConnectionPanel', () => {
     renderWithClient(<NeonConnectionPanel />)
 
     fireEvent.change(
-      (await screen.findByText('Connect Neon')) &&
+      (await screen.findByRole('link', { name: 'Neon console' })) &&
         (document.querySelector(
           'input[name="neon-api-key"]'
         ) as HTMLInputElement),
@@ -144,9 +148,9 @@ describe('NeonConnectionPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
 
     expect(
-      await screen.findByText(
+      await screen.findAllByText(
         'That API key was rejected by Neon. Check it and try again.'
       )
-    ).toBeTruthy()
+    ).not.toHaveLength(0)
   })
 })

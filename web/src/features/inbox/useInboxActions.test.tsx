@@ -33,9 +33,7 @@ it('reveals each completed batch item while other mutations are pending', async 
     .mockReturnValueOnce(first.promise)
     .mockReturnValueOnce(second.promise)
   const { result } = renderHook(() => useInboxActions())
-  act(() =>
-    result.current.close([item(1), item(2)], { kind: 'snooze', for: 'hour' })
-  )
+  act(() => result.current.close([item(1), item(2)], { kind: 'resolve' }))
   expect([...result.current.hidden]).toEqual([1, 2])
   await act(async () => first.resolve())
   expect([...result.current.hidden]).toEqual([2])

@@ -411,7 +411,7 @@ TABLE = "Common value in t.status (pg_stats)"
      [[{"value": "1", "provenance": LIVE}], [{"value": "paid", "provenance": TABLE,
                                              "column_type": "text"}]],
      "SELECT * FROM t WHERE a=1 AND status='paid'", "table_sampled"),
-    # A query-shape hint is not a real value: never substituted, the run is plan only.
+    # Generic planning keeps shape hints as placeholders; literal fallback is plan only.
     ("SELECT * FROM t WHERE status=$1 LIMIT $2",
      [[{"value": "paid", "provenance": TABLE, "column_type": "text"}],
       [{"value": "10", "provenance": "Query shape (LIMIT)"}]],
@@ -421,7 +421,7 @@ TABLE = "Common value in t.status (pg_stats)"
      [[{"value": "7 days", "provenance": "Query shape (INTERVAL)"}]],
      "SELECT * FROM t WHERE created > now() - $1::interval", "none"),
     ("SELECT * FROM t WHERE d = DATE $1", [[]], "SELECT * FROM t WHERE d = $1::DATE", "none"),
-    # MySQL digests: unfilled `?` stay `?`; no NULL or 'a' stands in for a value.
+    # The real-value pass preserves missing MySQL parameters for plan-only filling.
     ("SELECT * FROM t WHERE a = ? AND b LIKE ?",
      [[{"value": "3", "provenance": "performance_schema digest sample", "literal_sql": "3"}],
       [{"value": "%", "provenance": "Query shape (LIKE)"}]],
@@ -462,25 +462,98 @@ async def test_worker_plans_only_without_real_values(store, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mysql_without_real_values_is_skipped(store, monkeypatch):
-    from features.monitor.analyze_queue import NO_VALUES_SKIP
+async def test_the_analysis_view_names_the_values_the_analysis_ran_with(
+        store, monkeypatch, tmp_path):
+    from features.monitor.analysis_digest import latest_digest
+    from features.monitor.api import views
+    from shared.query_registry import AnalysisResultsRegistry, create_analysis_result
 
+    monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
     store.record("db", NOW, [{"query_key": "one", "calls": 10, "total_ms": 100}],
-                 {"one": "SELECT * FROM one WHERE id = ?"}, [], None)
+                 {"one": "SELECT * FROM order_items WHERE product_id = $1"}, [], None)
+    monkeypatch.setattr("shared.config.targets.TargetsConfig.load", lambda self: None)
+    monkeypatch.setattr("shared.config.targets.TargetsConfig.get",
+                        lambda self, target: {"engine": "postgresql"})
+    record = create_analysis_result(query_hash="hash-1", target="db", performance_metrics={},
+                                    llm_analysis={}, explain_plan={}, query_metrics={})
+    record.analysis_id = "analysis-1"
+    AnalysisResultsRegistry().store_analysis_result("hash-1", record)
+
+    class Sampled(FakeService):
+        async def suggest_parameter_values(self, sql, target, config, key):
+            return {"placeholders": [{"placeholder": "$1", "suggestions": [
+                {"value": "661", "provenance": LIVE}]}]}
+
+    service = Sampled()
+    await AnalyzeQueue(store, service=service, clock=lambda: NOW).tick()
+    assert service.calls[0][0].sql == "SELECT * FROM order_items WHERE product_id = 661"
+    view = views.analysis_view(store, "db", "one", latest_digest(store, "db", "one"), NOW)
+    # Send to Ask fills $1 with the value the analysis used.
+    assert view["params"] == [{"name": "$1", "value": "661"}]
+    assert view["param_source"] == "sampled"
+    assert not service.calls[0][1].fast
+    assert store.analyze_jobs("db")[0]["mode"] == "analyze"
+
+
+@pytest.mark.parametrize("used", [True, False])
+def test_the_analysis_view_shows_planner_costs_only_when_the_planner_used_the_index(
+        store, monkeypatch, used):
+    from features.monitor.api import views
+
+    index = "CREATE INDEX i ON t (id)"
+    analysis = SimpleNamespace(display_payload={"index_testing": {"tested": True, "results": [
+        {"index_sql": index, "planner_used_index": used, "original_cost": 900.0,
+         "new_cost": 12.5}]}})
+    monkeypatch.setattr("features.monitor.analysis_digest.load_analysis", lambda job: analysis)
+    monkeypatch.setattr(views, "_engine", lambda target: "postgresql")
+    digest = {"analysis_ref": "ref-1", "fix_ready": True, "fix": {"sql": index, "why": "id"}}
+    detail = views.analysis_view(store, "db", "one", digest, NOW)["fix_detail"]
+    assert (detail["cost_before"], detail["cost_after"]) == \
+        ((900.0, 12.5) if used else (None, None))
+
+
+def test_the_analysis_view_lists_each_further_index_and_rewrite_with_its_sql(
+        store, monkeypatch):
+    from features.monitor.api import views
+
+    lead = "CREATE INDEX a ON t (a)"
+    analysis = SimpleNamespace(display_payload={}, llm_analysis={
+        "index_recommendations": [
+            {"table": "public.t", "columns": ["a"], "sql": lead, "rationale": "Serves a."},
+            {"table": "public.t", "columns": ["b", "c"], "sql": "CREATE INDEX b ON t (b, c)",
+             "rationale": "Serves the sort."}],
+        "rewrite_suggestions": [{"explanation": "Filter first", "rewritten_sql": " SELECT 2 "}]})
+    monkeypatch.setattr("features.monitor.analysis_digest.load_analysis", lambda job: analysis)
+    monkeypatch.setattr(views, "_engine", lambda target: "postgresql")
+    digest = {"analysis_ref": "ref-1", "fix_ready": True, "fix": {"sql": lead, "why": "a"}}
+    view = views.analysis_view(store, "db", "one", digest, NOW)
+    assert view["also"][0] == {"title": "Add an index on t(b, c)", "detail": "Serves the sort.",
+                               "sql": "CREATE INDEX b ON t (b, c)"}
+    assert len(view["also"]) == 1
+    assert view["rewrites"][0]["sql"] == "SELECT 2"
+
+
+@pytest.mark.asyncio
+async def test_mysql_without_real_values_uses_plan_estimates(store, monkeypatch):
+    store.record("db", NOW, [{"query_key": "one", "calls": 10, "total_ms": 100}],
+                 {"one": "SELECT * FROM one WHERE id = ? LIMIT ?"}, [], None)
     monkeypatch.setattr("shared.config.targets.TargetsConfig.load", lambda self: None)
     monkeypatch.setattr("shared.config.targets.TargetsConfig.get",
                         lambda self, target: {"engine": "mysql"})
 
     class NoValues(FakeService):
         async def suggest_parameter_values(self, sql, target, config, key):
-            return {"placeholders": [{"placeholder": "?", "suggestions": []}]}
+            return {"placeholders": [{"placeholder": "?", "suggestions": []},
+                                     {"placeholder": "?", "suggestions": []}]}
 
     service = NoValues()
     await AnalyzeQueue(store, service=service, clock=lambda: NOW).tick()
     job = store.analyze_jobs("db")[0]
-    assert service.calls == []
-    assert job["state"] == "skipped" and job["error"] == NO_VALUES_SKIP
-    assert job["param_source"] == "none"
+    sent, options = service.calls[0]
+    assert sent.sql == "SELECT * FROM one WHERE id = 1 LIMIT 10"
+    assert options.fast
+    assert job["state"] == "done" and job["mode"] == "explain"
+    assert job["param_source"] == "estimated"
 
 
 def test_postgres_16_plain_explain_uses_generic_plan(monkeypatch):
@@ -522,8 +595,71 @@ def test_postgres_16_plain_explain_uses_generic_plan(monkeypatch):
     assert any("EXPLAIN (GENERIC_PLAN true," in sql for sql in statements)
 
 
-@pytest.mark.parametrize("version,planned", [(160014, True), (150004, False)])
+@pytest.mark.parametrize("version,planned", [(160014, "generic_plan"), (140008, "prepared"),
+                                             (110000, "literals")])
 def test_plan_only_keeps_placeholders_for_a_generic_plan(monkeypatch, version, planned):
+    from features.analyze.functions import explain_analysis
+
+    statements = []
+    monkeypatch.setattr("features.analyze.parameter_suggestions._sample_column_values",
+                        lambda *args, **kwargs: [])
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def execute(self, sql, *args):
+            statements.append(sql)
+
+        def fetchone(self):
+            if "pg_prepared_statements" in statements[-1]:
+                return (2,)
+            return ([{"Plan": {}}],)
+
+    class Connection:
+        server_version = version
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def cursor(self):
+            return Cursor()
+
+    monkeypatch.setattr(explain_analysis, "resolve_connection_params", lambda **kw: {"password": ""})
+    monkeypatch.setattr(explain_analysis, "postgres_connection_kwargs", lambda *args, **kw: {})
+    monkeypatch.setattr(explain_analysis, "_postgres_connection", lambda *args: Connection())
+    sql = "SELECT * FROM t WHERE id = $1 LIMIT $2"
+    result = explain_analysis._execute_postgres_explain_analyze(sql, {}, fast_mode=True)
+    assert result["success"]
+    if planned == "generic_plan":
+        assert any("GENERIC_PLAN true" in sql and "id = $1" in sql for sql in statements)
+    elif planned == "prepared":
+        # Before 16: the statement is prepared, held to its generic plan, explained with a
+        # NULL per parameter and deallocated.
+        assert any(f"PREPARE rdst_generic_plan AS {sql}" in statement for statement in statements)
+        assert "SET LOCAL plan_cache_mode = force_generic_plan" in statements
+        assert any("EXPLAIN (VERBOSE true, COSTS true, FORMAT JSON) "
+                   "EXECUTE rdst_generic_plan(NULL, NULL)" in statement
+                   for statement in statements)
+        assert statements[-1] == "DEALLOCATE rdst_generic_plan"
+        assert not any("GENERIC_PLAN" in statement for statement in statements)
+    else:
+        assert result["param_source"] == "estimated"
+        assert any("WHERE id = 1 LIMIT 10" in statement for statement in statements)
+        assert not any("ANALYZE" in statement for statement in statements)
+    # Measured runs never take placeholders.
+    assert not explain_analysis._execute_postgres_explain_analyze(
+        sql, {}, fast_mode=False)["success"]
+
+
+@pytest.mark.parametrize("version", [140008, 160014])
+def test_plan_only_generic_failure_uses_estimates(monkeypatch, version):
     from features.analyze.functions import explain_analysis
 
     statements = []
@@ -537,6 +673,8 @@ def test_plan_only_keeps_placeholders_for_a_generic_plan(monkeypatch, version, p
 
         def execute(self, sql, *args):
             statements.append(sql)
+            if "PREPARE" in sql or "GENERIC_PLAN" in sql:
+                raise RuntimeError("could not determine data type of parameter $1")
 
         def fetchone(self):
             return ([{"Plan": {}}],)
@@ -557,15 +695,11 @@ def test_plan_only_keeps_placeholders_for_a_generic_plan(monkeypatch, version, p
     monkeypatch.setattr(explain_analysis, "postgres_connection_kwargs", lambda *args, **kw: {})
     monkeypatch.setattr(explain_analysis, "_postgres_connection", lambda *args: Connection())
     result = explain_analysis._execute_postgres_explain_analyze(
-        "SELECT * FROM t WHERE id = $1", {}, fast_mode=True)
-    assert result["success"] is planned
-    if planned:
-        assert any("GENERIC_PLAN true" in sql and "id = $1" in sql for sql in statements)
-    else:
-        assert "No real values" in result["error"] and statements == []
-    # Measured runs never take placeholders.
-    assert not explain_analysis._execute_postgres_explain_analyze(
-        "SELECT * FROM t WHERE id = $1", {}, fast_mode=False)["success"]
+        "SELECT 1 FROM t WHERE $1 IS NULL", {}, fast_mode=True)
+    assert result["success"] and result["param_source"] == "estimated"
+    assert "ROLLBACK TO SAVEPOINT rdst_plan" in statements
+    assert any("WHERE 1 IS NULL" in statement for statement in statements)
+    assert not any("ANALYZE" in statement for statement in statements)
 
 
 @pytest.mark.asyncio

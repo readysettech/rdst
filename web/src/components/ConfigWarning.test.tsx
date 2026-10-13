@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createTestQueryClient, renderWithClient } from '@/test-utils'
 import {
+  fetchAccountStatus,
   fetchEnvRequirements,
-  fetchInitStatus,
   fetchStatus,
   fetchTrialStatus,
 } from '../lib/api'
@@ -16,9 +16,9 @@ vi.mock('../lib/api', async () => {
   return {
     ...actual,
     fetchStatus: vi.fn(),
-    fetchInitStatus: vi.fn(),
     fetchEnvRequirements: vi.fn(),
     fetchTrialStatus: vi.fn(),
+    fetchAccountStatus: vi.fn(),
   }
 })
 
@@ -82,6 +82,10 @@ vi.mock('./EnvSecretsDialog', () => ({
     ) : null,
 }))
 
+vi.mock('./configure/AddDatabaseDialog', () => ({
+  AddDatabaseHost: () => null,
+}))
+
 vi.mock('./TrialRegistrationDialog', () => ({
   TrialRegistrationDialog: ({
     isOpen,
@@ -107,25 +111,13 @@ describe('ConfigWarning env secret flow', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockPathname = '/ask'
+    vi.mocked(fetchAccountStatus).mockResolvedValue({ signed_in: false })
     vi.mocked(fetchStatus).mockResolvedValue({
       configured: true,
       default_target: 'prod',
       targets: [{ name: 'prod', has_password: true, is_default: true }],
       version: '1.0.0',
       error: null,
-    })
-    vi.mocked(fetchInitStatus).mockResolvedValue({
-      initialized: true,
-      targets: [
-        {
-          name: 'prod',
-          engine: 'postgresql',
-          has_password: true,
-          is_default: true,
-        },
-      ],
-      default_target: 'prod',
-      llm_configured: false,
     })
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
@@ -159,6 +151,25 @@ describe('ConfigWarning env secret flow', () => {
     expect(screen.queryByText(/ANTHROPIC_API_KEY/)).toBeNull()
   })
 
+  it('never asks for AI access while the account is signed in', async () => {
+    mockPathname = '/actions'
+    vi.mocked(fetchAccountStatus).mockResolvedValue({
+      signed_in: true,
+      email: 'mike@example.com',
+    })
+
+    renderWarning()
+
+    await waitFor(() =>
+      expect(vi.mocked(fetchEnvRequirements)).toHaveBeenCalled()
+    )
+    await waitFor(() =>
+      expect(vi.mocked(fetchAccountStatus)).toHaveBeenCalled()
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(screen.queryByTestId('config-notice')).toBeNull()
+  })
+
   it('stays off the demo page even when the key is missing', async () => {
     mockPathname = '/demo'
     const queryClient = createTestQueryClient()
@@ -189,173 +200,41 @@ describe('ConfigWarning env secret flow', () => {
     expect(screen.queryByText(/Missing Anthropic API key/i)).toBeNull()
   })
 
-  it('keeps a fresh zero-target install on the home page', async () => {
-    mockPathname = '/'
+  it.each([
+    '/',
+    '/inbox',
+    '/database',
+    '/platform',
+    '/configure',
+  ])('leaves a zero-database install on %s, which shows its own empty state', async (path) => {
+    mockPathname = path
     vi.mocked(fetchStatus).mockResolvedValue({
       configured: false,
       default_target: null,
       targets: [],
       version: '1.0.0',
       error: null,
-    })
-    vi.mocked(fetchInitStatus).mockResolvedValue({
-      initialized: false,
-      targets: [],
-      default_target: null,
-      llm_configured: false,
     })
 
     renderWarning()
 
     await waitFor(() => expect(vi.mocked(fetchStatus)).toHaveBeenCalled())
-    expect(mockNavigate).not.toHaveBeenCalled()
-  })
-
-  it('allows a fresh zero-target install to open the demo', async () => {
-    mockPathname = '/demo'
-    vi.mocked(fetchStatus).mockResolvedValue({
-      configured: false,
-      default_target: null,
-      targets: [],
-      version: '1.0.0',
-      error: null,
-    })
-    vi.mocked(fetchInitStatus).mockResolvedValue({
-      initialized: false,
-      targets: [],
-      default_target: null,
-      llm_configured: false,
-    })
-
-    renderWarning()
-
-    await waitFor(() => expect(vi.mocked(fetchStatus)).toHaveBeenCalled())
-    expect(mockNavigate).not.toHaveBeenCalled()
-  })
-
-  it('routes a zero-target database feature to onboarding', async () => {
-    mockPathname = '/queries'
-    vi.mocked(fetchStatus).mockResolvedValue({
-      configured: false,
-      default_target: null,
-      targets: [],
-      version: '1.0.0',
-      error: null,
-    })
-    vi.mocked(fetchInitStatus).mockResolvedValue({
-      initialized: false,
-      targets: [],
-      default_target: null,
-      llm_configured: false,
-    })
-
-    renderWarning()
-
-    await waitFor(() => {
-      // Routes to Connect preserving the intended destination so the user
-      // returns to /queries after connecting (route-with-intent).
-      expect(mockNavigate).toHaveBeenCalledWith({
-        to: '/onboarding',
-        search: { redirect: '/queries' },
-      })
-    })
-  })
-
-  it('waits for a status refetch before sending a just-added target to onboarding', async () => {
-    mockPathname = '/database'
-    vi.mocked(fetchInitStatus).mockResolvedValue({
-      initialized: true,
-      targets: [],
-      default_target: null,
-      llm_configured: false,
-    })
-    const queryClient = createTestQueryClient()
-    // The cached status predates the add; the refetch in flight knows the target.
-    queryClient.setQueryData(['status'], {
-      configured: false,
-      default_target: null,
-      targets: [],
-      version: '1.0.0',
-      error: null,
-    })
-    let answer: (value: Awaited<ReturnType<typeof fetchStatus>>) => void =
-      () => {}
-    vi.mocked(fetchStatus).mockReturnValue(
-      new Promise((resolve) => {
-        answer = resolve
-      })
-    )
-    void queryClient.fetchQuery({
-      queryKey: ['status'],
-      queryFn: fetchStatus,
-      staleTime: 0,
-    })
-    renderWarning(queryClient)
-    await waitFor(() =>
-      expect(queryClient.getQueryData(['init-status'])).toBeDefined()
-    )
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(mockNavigate).not.toHaveBeenCalled()
-    answer({
-      configured: true,
-      default_target: 'fresh',
-      targets: [{ name: 'fresh', has_password: true, is_default: true }],
-      version: '1.0.0',
-      error: null,
-    })
-    await waitFor(() =>
-      expect(queryClient.getQueryState(['status'])?.fetchStatus).toBe('idle')
+  })
+
+  it('shows the notice as one line with ghost actions and no icons', async () => {
+    renderWarning()
+
+    const line = await screen.findByText(
+      'Sign in to Readyset for the included AI, or add your own Anthropic API key.'
     )
-    expect(mockNavigate).not.toHaveBeenCalled()
-  })
-
-  it('never gates a feature page once a target exists, even if init never completed', async () => {
-    mockPathname = '/queries'
-    // A target added outside the guided flow (configure page, bulk import, or
-    // a partially-failed onboarding submit) leaves init.completed unset; that
-    // must not lock the user out of the app.
-    vi.mocked(fetchInitStatus).mockResolvedValue({
-      initialized: false,
-      targets: [
-        {
-          name: 'prod',
-          engine: 'postgresql',
-          has_password: true,
-          is_default: true,
-        },
-      ],
-      default_target: 'prod',
-      llm_configured: false,
-    })
-
-    renderWarning()
-
-    await waitFor(() => expect(vi.mocked(fetchInitStatus)).toHaveBeenCalled())
-    expect(mockNavigate).not.toHaveBeenCalled()
-  })
-
-  it('keeps a zero-target install on settings instead of onboarding', async () => {
-    mockPathname = '/configure'
-    vi.mocked(fetchStatus).mockResolvedValue({
-      configured: false,
-      default_target: null,
-      targets: [],
-      version: '1.0.0',
-      error: null,
-    })
-    vi.mocked(fetchInitStatus).mockResolvedValue({
-      initialized: false,
-      targets: [],
-      default_target: null,
-      llm_configured: false,
-    })
-
-    renderWarning()
-
-    await waitFor(() => expect(vi.mocked(fetchStatus)).toHaveBeenCalled())
-    // Settings stays reachable so keys, the reset control, and the discovery
-    // drawer (CSV import + AWS) stay usable on a fresh or wiped install.
-    expect(mockNavigate).not.toHaveBeenCalled()
+    const notice = screen.getByTestId('config-notice')
+    expect(notice.contains(line)).toBe(true)
+    expect(notice.querySelector('svg')).toBeNull()
+    expect(notice.querySelectorAll('button')).toHaveLength(3)
+    fireEvent.click(screen.getByRole('button', { name: 'Hide' }))
+    expect(screen.queryByTestId('config-notice')).toBeNull()
   })
 
   it('does not show top banner for target-password-only requirements', async () => {

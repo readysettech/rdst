@@ -4,12 +4,13 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { drawerResultsSearch } from '../features/queries/analyze-drawer/analyzeDrawerState'
 import type { ResultsSearch } from '../features/queries/results/types'
-import { trackEvent } from '../lib/analytics'
-import type { CompleteEvent, QueryRegistryEntry } from '../lib/api'
+import type { CompleteEvent } from '../lib/api'
+import { setFixtureOverride } from '../lib/monitor/contract'
+import { CA_KEYS, CA_TARGET, caFixtures } from '../lib/monitor/fixturesCa'
 import { useAnalyze } from '../lib/sse'
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
 import { ResultsPage } from './-results-page'
@@ -24,37 +25,49 @@ const connectivity = vi.hoisted(() => ({
   reset: vi.fn(),
 }))
 
-vi.mock('../lib/analytics', () => ({
-  trackEvent: vi.fn(),
-}))
+vi.mock('../lib/analytics', () => ({ trackEvent: vi.fn() }))
 
 vi.mock('@tanstack/react-router', async () => {
   const actual = await vi.importActual('@tanstack/react-router')
   return {
     ...actual,
     useNavigate: () => navigateSpy,
+    Link: ({ children, to }: { children: React.ReactNode; to: string }) => (
+      <a href={to}>{children}</a>
+    ),
   }
 })
 
-// Reads the stored-analysis viewer makes, keyed the way the hooks key them.
-const storedReads = vi.hoisted(() => ({
+// Reads the page makes, keyed the way the hooks key them: the stored record, the
+// monitor row and its digest.
+const reads = vi.hoisted(() => ({
   storedAnalysis: undefined as unknown,
   analysisHistory: undefined as unknown,
+  query: undefined as unknown,
+  digest: undefined as unknown,
 }))
 
 vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: vi.fn() }),
-  useQuery: ({ queryKey }: { queryKey?: readonly unknown[] } = {}) => ({
-    data:
+  useQuery: ({ queryKey }: { queryKey?: readonly unknown[] } = {}) => {
+    const data =
       queryKey?.[0] === 'storedAnalysis'
-        ? storedReads.storedAnalysis
+        ? reads.storedAnalysis
         : queryKey?.[0] === 'analysisHistory'
-          ? storedReads.analysisHistory
-          : undefined,
-    isLoading: false,
-    isFetching: false,
-    error: null,
-  }),
+          ? reads.analysisHistory
+          : queryKey?.[2] === 'query-analysis'
+            ? reads.digest
+            : queryKey?.[2] === 'query'
+              ? reads.query
+              : undefined
+    return {
+      data,
+      isLoading: false,
+      isPending: false,
+      isFetching: false,
+      error: null,
+    }
+  },
   useMutation: () => ({
     mutate: vi.fn(),
     mutateAsync: vi.fn(),
@@ -67,170 +80,334 @@ vi.mock('@tanstack/react-query', () => ({
   }),
 }))
 
-vi.mock('../lib/sse', () => ({
-  useAnalyze: vi.fn(),
-}))
-
+vi.mock('../lib/sse', () => ({ useAnalyze: vi.fn() }))
 vi.mock('../lib/useTargetPasswordLock', () => ({
   useTargetPasswordLock: vi.fn(),
 }))
-
 vi.mock('../lib/useTargetConnectivityGate', () => ({
   useTargetConnectivityGate: () => connectivity,
 }))
-
-vi.mock('../components', () => ({
-  AnalysisResults: () => <div>analysis-results</div>,
-  SQLDisplay: () => <div>sql-display</div>,
-  InteractivePanel: () => null,
+vi.mock('../components/TargetLockNotice', () => ({
   TargetLockNotice: ({ message }: { message: string }) => <div>{message}</div>,
 }))
-
+vi.mock('../components/TargetConnectivityNotice', () => ({
+  TargetConnectivityNotice: () => null,
+}))
 vi.mock('../components/top', () => ({
-  ParameterDialog: ({
-    isOpen,
-    onClose,
-    onSubmit,
-  }: {
-    isOpen: boolean
-    onClose: () => void
-    onSubmit: (query: string) => void
-  }) =>
-    isOpen ? (
-      <>
-        <button type="button" onClick={onClose}>
-          Cancel parameters
-        </button>
-        <button
-          type="button"
-          onClick={() => onSubmit('select * from posts where id = 7')}
-        >
-          Submit parameters
-        </button>
-      </>
-    ) : null,
+  ParameterDialog: ({ isOpen }: { isOpen: boolean }) =>
+    isOpen ? <div>parameter-dialog</div> : null,
   hasParameters: hasParametersSpy,
 }))
+
+type LiveRun = ReturnType<typeof useAnalyze>
+
+function liveRun(overrides: Partial<LiveRun> = {}): LiveRun {
+  return {
+    analyze: vi.fn(),
+    state: 'idle',
+    progress: undefined,
+    results: undefined,
+    rewriteTesting: undefined,
+    readysetCacheability: undefined,
+    error: undefined,
+    errorEnvelope: undefined,
+    reset: vi.fn(),
+    ...overrides,
+  }
+}
+
+function unlocked() {
+  vi.mocked(useTargetPasswordLock).mockReturnValue({
+    isResolved: true,
+    isLocked: false,
+    targetName: 'prod',
+    message: '',
+    missingTargetRequirements: [],
+    keyringAvailable: true,
+  })
+}
+
+const set = caFixtures('ca-database')
+const KEY = CA_KEYS.postsByOwneruserid
+const monitoredSearch: ResultsSearch = {
+  query:
+    'select id, title from posts where owneruserid = $1 order by creationdate desc limit $2',
+  target: CA_TARGET,
+  hash: KEY,
+  analysisId: `ca_${KEY}`,
+}
+
+function monitored() {
+  setFixtureOverride('ca-database')
+  reads.query = set.query(CA_TARGET, KEY)
+  reads.digest = set.queryAnalysis(CA_TARGET, KEY)
+  window.localStorage.setItem('rdst.explain-analyze-consent', 'accepted')
+}
 
 beforeEach(() => {
   window.localStorage.clear()
   navigateSpy.mockClear()
-  vi.mocked(trackEvent).mockClear()
-  storedReads.storedAnalysis = undefined
-  storedReads.analysisHistory = undefined
+  reads.storedAnalysis = undefined
+  reads.analysisHistory = undefined
+  reads.query = undefined
+  reads.digest = undefined
   hasParametersSpy.mockReturnValue(false)
   connectivity.failure = null
   connectivity.isChecking = false
   connectivity.ensureReachable.mockReset()
   connectivity.ensureReachable.mockResolvedValue(true)
+  Object.assign(navigator, { clipboard: { writeText: vi.fn(async () => {}) } })
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  setFixtureOverride(undefined)
+})
+
+describe('the full analysis of a monitored query', () => {
+  it('reads the digest into the crumb bar, the hero and the cards', async () => {
+    monitored()
+    vi.mocked(useAnalyze).mockReturnValue(liveRun())
+    unlocked()
+    render(<ResultsPage search={monitoredSearch} />)
+
+    const bar = screen.getByRole('banner')
+    expect(within(bar).getByText('Full analysis')).toBeTruthy()
+    expect(within(bar).getByRole('link', { name: 'demo' })).toBeTruthy()
+    expect(within(bar).getByRole('link', { name: 'Queries' })).toBeTruthy()
+    expect(within(bar).getByRole('button', { name: 'Copy fix' })).toBeTruthy()
+    expect(
+      within(bar).getByRole('button', { name: 'Analyze again' })
+    ).toBeTruthy()
+    expect(within(bar).getByRole('button', { name: 'Benchmark' })).toBeTruthy()
+    expect(
+      within(bar).getByRole('button', { name: 'Send to Ask' })
+    ).toBeTruthy()
+
+    const hero = screen.getByTestId('analysis-hero')
+    expect(
+      within(hero).getByRole('img', { name: 'Plan score 72 out of 100' })
+    ).toBeTruthy()
+    expect(within(hero).getByText('Plan score')).toBeTruthy()
+    expect(
+      within(hero).getByRole('heading', {
+        name: 'SELECT on posts by owneruserid',
+      })
+    ).toBeTruthy()
+    expect(within(hero).getByText('Estimated')).toBeTruthy()
+    expect(within(hero).getByText('sampled from table data')).toBeTruthy()
+    expect(within(hero).getByText('analyzed 9 min ago')).toBeTruthy()
+    expect(within(hero).getByText('17% of database time')).toBeTruthy()
+    expect(
+      within(hero).getByText('One index removes the scan and the sort.')
+    ).toBeTruthy()
+    expect(within(hero).getByText('245,290')).toBeTruthy()
+    expect(within(hero).getByText('to return 583')).toBeTruthy()
+    expect(within(hero).getByText('107,916')).toBeTruthy()
+    expect(within(hero).getByText('one seq scan')).toBeTruthy()
+    expect(within(hero).getByText('174 calls today')).toBeTruthy()
+
+    const fix = screen.getByTestId('analysis-fix')
+    expect(within(fix).getByText('one index, both bottlenecks')).toBeTruthy()
+    expect(
+      within(fix).getByText(/idx_posts_owneruserid_creationdate/)
+    ).toBeTruthy()
+    expect(
+      within(fix).getByText('Planner uses it: cost 107,916 to 41')
+    ).toBeTruthy()
+    expect(
+      within(fix).getByText('About 9 MB, one more index on writes')
+    ).toBeTruthy()
+    expect(screen.queryByTestId('analysis-benchmark')).toBeNull()
+
+    const plan = screen.getByTestId('analysis-plan')
+    expect(within(plan).getByText('3 findings')).toBeTruthy()
+    expect(within(plan).getByText('Sequential scan on posts')).toBeTruthy()
+    expect(within(plan).getByText('245,290 rows')).toBeTruthy()
+
+    const rewrites = screen.getByTestId('analysis-rewrites')
+    expect(within(rewrites).getByText('20 runs each on demo')).toBeTruthy()
+    expect(within(rewrites).getByText('65.4 to 64.9 ms')).toBeTruthy()
+    expect(within(rewrites).getAllByText('No change')).toHaveLength(2)
+
+    expect(
+      within(screen.getByTestId('analysis-also')).getByText(
+        'Select only id and title'
+      )
+    ).toBeTruthy()
+    expect(
+      within(screen.getByTestId('analysis-readyset')).getByText(
+        'No blockers. Not verified yet.'
+      )
+    ).toBeTruthy()
+
+    const query = screen.getByTestId('analysis-query')
+    expect(within(query).getByText('$1 = 1876')).toBeTruthy()
+    expect(within(query).getByText('sampled from table data')).toBeTruthy()
+    fireEvent.click(within(query).getByRole('button', { name: 'EXPLAIN plan' }))
+    expect(within(query).getByText(/Seq Scan on posts/)).toBeTruthy()
+
+    expect(screen.getByText('Claude Sonnet 4.6')).toBeTruthy()
+    expect(screen.getByText('8,028 tokens')).toBeTruthy()
+    expect(screen.getByText('Analysis #412')).toBeTruthy()
+
+    fireEvent.click(within(bar).getByRole('button', { name: 'Copy fix' }))
+    await waitFor(() =>
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        expect.stringContaining('CREATE INDEX CONCURRENTLY')
+      )
+    )
+    fireEvent.click(within(bar).getByRole('button', { name: 'Send to Ask' }))
+    expect(navigateSpy).toHaveBeenCalledWith({
+      to: '/ask',
+      search: { sql: monitoredSearch.query },
+    })
+  })
+
+  it('opens from the key alone, reading the SQL from the monitored row', () => {
+    monitored()
+    vi.mocked(useAnalyze).mockReturnValue(liveRun())
+    unlocked()
+    render(
+      <ResultsPage
+        search={{
+          query: '',
+          target: CA_TARGET,
+          hash: KEY,
+          monitorFixture: 'ca-database',
+        }}
+      />
+    )
+    expect(
+      screen.getByRole('heading', { name: 'SELECT on posts by owneruserid' })
+    ).toBeTruthy()
+    expect(screen.getByText('Analysis #412')).toBeTruthy()
+    expect(
+      within(screen.getByTestId('analysis-query')).getByText(
+        /owneruserid = \$1/
+      )
+    ).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze again' }))
+    expect(navigateSpy).toHaveBeenCalledWith({
+      to: '/results',
+      search: expect.objectContaining({ hash: KEY, analysisId: undefined }),
+    })
+    expect(
+      (navigateSpy.mock.calls[0][0] as { search: ResultsSearch }).search.query
+    ).toMatch(/^select id, title from posts/)
+  })
+
+  it('shows the benchmark card after a benchmark ran', () => {
+    monitored()
+    const digest = set.queryAnalysis(CA_TARGET, KEY)
+    reads.digest = {
+      ...digest,
+      benchmark: {
+        before_ms: 65.4,
+        after_ms: 1.9,
+        change: 34,
+        method: '20 runs each on demo, 2 min ago',
+      },
+    }
+    vi.mocked(useAnalyze).mockReturnValue(liveRun())
+    unlocked()
+    render(<ResultsPage search={monitoredSearch} />)
+    const benchmark = screen.getByTestId('analysis-benchmark')
+    expect(
+      within(benchmark).getByText('20 runs each on demo, 2 min ago')
+    ).toBeTruthy()
+    expect(within(benchmark).getByText('65.4')).toBeTruthy()
+    expect(within(benchmark).getByText('1.9')).toBeTruthy()
+    expect(within(benchmark).getByText('34x')).toBeTruthy()
+    expect(
+      within(benchmark).getByRole('button', { name: 'Rerun' })
+    ).toBeTruthy()
+  })
+
+  it('while analyzing again, dims the cards under the ring and the steps', () => {
+    monitored()
+    vi.mocked(useAnalyze).mockReturnValue(
+      liveRun({
+        state: 'analyzing',
+        progress: {
+          type: 'progress',
+          stage: 'testing_rewrites',
+          percent: 60,
+          message: '',
+        },
+      })
+    )
+    unlocked()
+    render(
+      <ResultsPage search={{ ...monitoredSearch, analysisId: undefined }} />
+    )
+    const bar = screen.getByRole('banner')
+    expect(within(bar).getByRole('button', { name: 'Cancel' })).toBeTruthy()
+    expect(within(bar).queryByRole('button', { name: 'Copy fix' })).toBeNull()
+    expect(screen.getByRole('img', { name: 'Analyzing' })).toBeTruthy()
+    const steps = screen.getByRole('list', { name: 'Analysis steps' })
+    expect(
+      within(steps)
+        .getAllByRole('listitem')
+        .map((item) => item.getAttribute('data-state'))
+    ).toEqual(['done', 'done', 'now', 'todo'])
+    expect(screen.getByTestId('analysis-cards').getAttribute('aria-busy')).toBe(
+      'true'
+    )
+    expect(screen.getByText(/started \d/)).toBeTruthy()
+  })
+})
 
 describe('ResultsPage analyze consent', () => {
   it('does not restart an analysis that has already completed', async () => {
-    const analyzeSpy = vi.fn()
     const results: CompleteEvent = {
       type: 'complete',
       success: true,
       query_hash: 'complete-query',
     }
-    vi.mocked(useAnalyze).mockReturnValue({
-      analyze: analyzeSpy,
-      state: 'complete',
-      progress: undefined,
-      results,
-      rewriteTesting: undefined,
-      readysetCacheability: undefined,
-      error: undefined,
-      errorEnvelope: undefined,
-      reset: vi.fn(),
-    })
-    vi.mocked(useTargetPasswordLock).mockReturnValue({
-      isResolved: true,
-      isLocked: false,
-      targetName: 'prod',
-      message: '',
-      missingTargetRequirements: [],
-      keyringAvailable: true,
-    })
-
+    const run = liveRun({ state: 'complete', results })
+    vi.mocked(useAnalyze).mockReturnValue(run)
+    unlocked()
     render(
       <ResultsPage
         search={{ query: 'select 1', target: 'prod', fast: false }}
       />
     )
-
     await waitFor(() => {
       expect(screen.queryByText('Run EXPLAIN ANALYZE?')).toBeNull()
     })
-    expect(analyzeSpy).not.toHaveBeenCalled()
+    expect(run.analyze).not.toHaveBeenCalled()
   })
 
   it('requires consent before the first run and remembers the opt-out', async () => {
-    const analyzeSpy = vi.fn()
-    vi.mocked(useAnalyze).mockReturnValue({
-      analyze: analyzeSpy,
-      state: 'idle',
-      progress: undefined,
-      results: undefined,
-      rewriteTesting: undefined,
-      readysetCacheability: undefined,
-      error: undefined,
-      errorEnvelope: undefined,
-      reset: vi.fn(),
-    })
-    vi.mocked(useTargetPasswordLock).mockReturnValue({
-      isResolved: true,
-      isLocked: false,
-      targetName: 'prod',
-      message: '',
-      missingTargetRequirements: [],
-      keyringAvailable: true,
-    })
-
+    const run = liveRun()
+    vi.mocked(useAnalyze).mockReturnValue(run)
+    unlocked()
     render(
       <ResultsPage
         search={{ query: 'select 1', target: 'prod', fast: false }}
       />
     )
-
     expect(await screen.findByText('Run EXPLAIN ANALYZE?')).toBeTruthy()
-    expect(
-      screen.getByText(
-        'Analyze runs EXPLAIN ANALYZE, which executes your query once against the database to measure it. Cancel if this query should not be executed.'
-      )
-    ).toBeTruthy()
-    expect(
-      screen
-        .getByRole('checkbox', { name: "Don't ask again" })
-        .getAttribute('aria-checked')
-    ).toBe('false')
-    expect(analyzeSpy).not.toHaveBeenCalled()
-
+    expect(run.analyze).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(analyzeSpy).not.toHaveBeenCalled()
-    expect(navigateSpy).toHaveBeenCalledWith({ to: '/queries' })
+    expect(run.analyze).not.toHaveBeenCalled()
+    expect(navigateSpy).toHaveBeenCalledWith({
+      to: '/database',
+      search: { target: 'prod' },
+    })
 
-    // Re-rendering the route starts another attempt and presents consent again.
     render(
       <ResultsPage
         search={{ query: 'select 1', target: 'prod', fast: false }}
       />
     )
     expect(await screen.findByText('Run EXPLAIN ANALYZE?')).toBeTruthy()
-
     fireEvent.click(screen.getByRole('checkbox', { name: "Don't ask again" }))
-    fireEvent.click(screen.getByRole('button', { name: 'Run analyze' }))
-
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze' }))
     await waitFor(() =>
-      expect(analyzeSpy).toHaveBeenCalledWith(
-        {
-          query: 'select 1',
-          target: 'prod',
-          fast: false,
-        },
-        // The job carries the query's derived name, not its raw SQL (B-27).
+      expect(run.analyze).toHaveBeenCalledWith(
+        { query: 'select 1', target: 'prod', fast: false },
         { queryHash: undefined, queryLabel: 'Select' }
       )
     )
@@ -239,611 +416,154 @@ describe('ResultsPage analyze consent', () => {
     )
   })
 
-  it('asks for consent before values, then runs on the values submit', async () => {
-    const analyzeSpy = vi.fn()
-    hasParametersSpy.mockReturnValue(true)
-    vi.mocked(useAnalyze).mockReturnValue({
-      analyze: analyzeSpy,
-      state: 'idle',
-      progress: undefined,
-      results: undefined,
-      rewriteTesting: undefined,
-      readysetCacheability: undefined,
-      error: undefined,
-      errorEnvelope: undefined,
-      reset: vi.fn(),
-    })
-    vi.mocked(useTargetPasswordLock).mockReturnValue({
-      isResolved: true,
-      isLocked: false,
-      targetName: 'prod',
-      message: '',
-      missingTargetRequirements: [],
-      keyringAvailable: true,
-    })
-
-    const view = render(
-      <ResultsPage
-        search={{
-          query: 'select * from posts where id = $1',
-          target: 'prod',
-          fast: false,
-        }}
-      />
-    )
-
-    // Consent owns the screen first, and the values form is not behind it.
-    expect(await screen.findByText('Run EXPLAIN ANALYZE?')).toBeTruthy()
-    expect(
-      screen.queryByRole('button', { name: 'Cancel parameters' })
-    ).toBeNull()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Run analyze' }))
-
-    // Consent is answered once: the values form replaces it, and submitting
-    // the values measures rather than asking again.
-    expect(
-      await screen.findByRole('button', { name: 'Submit parameters' })
-    ).toBeTruthy()
-    expect(screen.queryByText('Run EXPLAIN ANALYZE?')).toBeNull()
-    expect(analyzeSpy).not.toHaveBeenCalled()
-
-    hasParametersSpy.mockReturnValue(false)
-    fireEvent.click(screen.getByRole('button', { name: 'Submit parameters' }))
-
-    // Router navigation applies the filled query on the next render. The
-    // controller must hold the submission across that handoff instead of
-    // reopening the parameter step against the old URL.
-    view.rerender(
-      <ResultsPage
-        search={{
-          query: 'select * from posts where id = 7',
-          target: 'prod',
-          fast: false,
-        }}
-      />
-    )
-
-    await waitFor(() => expect(analyzeSpy).toHaveBeenCalledTimes(1))
-    expect(screen.queryByText('Run EXPLAIN ANALYZE?')).toBeNull()
-  })
-
-  it('returns to Queries when parameter entry is cancelled', async () => {
-    window.localStorage.setItem('rdst.explain-analyze-consent', 'accepted')
-    hasParametersSpy.mockReturnValue(true)
-    vi.mocked(useAnalyze).mockReturnValue({
-      analyze: vi.fn(),
-      state: 'idle',
-      progress: undefined,
-      results: undefined,
-      rewriteTesting: undefined,
-      readysetCacheability: undefined,
-      error: undefined,
-      errorEnvelope: undefined,
-      reset: vi.fn(),
-    })
-    vi.mocked(useTargetPasswordLock).mockReturnValue({
-      isResolved: true,
-      isLocked: false,
-      targetName: 'prod',
-      message: '',
-      missingTargetRequirements: [],
-      keyringAvailable: true,
-    })
-
-    render(
-      <ResultsPage
-        search={{
-          query: 'select * from posts where id = $1',
-          target: 'prod',
-          returnSearch: JSON.stringify({
-            view: 'new',
-            q: 'posts',
-            source: 'observed',
-          }),
-        }}
-      />
-    )
-
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Cancel parameters' })
-    )
-    expect(navigateSpy).toHaveBeenCalledWith({
-      to: '/queries',
-      search: expect.objectContaining({
-        view: 'new',
-        q: 'posts',
-        source: 'observed',
-      }),
-    })
-  })
-})
-
-describe('ResultsPage password lock', () => {
-  it('waits for target access to resolve before requesting consent', async () => {
-    const analyzeSpy = vi.fn()
-    vi.mocked(useAnalyze).mockReturnValue({
-      analyze: analyzeSpy,
-      state: 'idle',
-      progress: undefined,
-      results: undefined,
-      rewriteTesting: undefined,
-      readysetCacheability: undefined,
-      error: undefined,
-      errorEnvelope: undefined,
-      reset: vi.fn(),
-    })
-    vi.mocked(useTargetPasswordLock).mockReturnValue({
-      isResolved: false,
-      isLocked: false,
-      targetName: null,
-      message: '',
-      missingTargetRequirements: [],
-      keyringAvailable: true,
-    })
-
-    render(
-      <ResultsPage
-        search={{ query: 'select 1', target: 'prod', fast: false }}
-      />
-    )
-
-    await waitFor(() => {
-      expect(screen.queryByText('Run EXPLAIN ANALYZE?')).toBeNull()
-    })
-    expect(analyzeSpy).not.toHaveBeenCalled()
-  })
-
-  it('stops before Analyze when the database preflight fails', async () => {
-    const analyzeSpy = vi.fn()
-    window.localStorage.setItem('rdst.explain-analyze-consent', 'accepted')
-    connectivity.failure = {
-      target: 'prod',
-      message: 'connection refused',
-    }
-    connectivity.ensureReachable.mockResolvedValue(false)
-    vi.mocked(useAnalyze).mockReturnValue({
-      analyze: analyzeSpy,
-      state: 'idle',
-      progress: undefined,
-      results: undefined,
-      rewriteTesting: undefined,
-      readysetCacheability: undefined,
-      error: undefined,
-      errorEnvelope: undefined,
-      reset: vi.fn(),
-    })
-    vi.mocked(useTargetPasswordLock).mockReturnValue({
-      isResolved: true,
-      isLocked: false,
-      targetName: 'prod',
-      message: '',
-      missingTargetRequirements: [],
-      keyringAvailable: true,
-    })
-
-    render(
-      <ResultsPage
-        search={{ query: 'select 1', target: 'prod', fast: false }}
-      />
-    )
-
-    expect(await screen.findByText("Can't reach prod")).toBeTruthy()
-    await waitFor(() =>
-      expect(connectivity.ensureReachable).toHaveBeenCalledTimes(1)
-    )
-    expect(analyzeSpy).not.toHaveBeenCalled()
-  })
-
   it('does not auto-run analyze when target is password-locked', async () => {
-    const analyzeSpy = vi.fn()
-    vi.mocked(useAnalyze).mockReturnValue({
-      analyze: analyzeSpy,
-      state: 'idle',
-      progress: undefined,
-      results: undefined,
-      rewriteTesting: undefined,
-      readysetCacheability: undefined,
-      error: undefined,
-      errorEnvelope: undefined,
-      reset: vi.fn(),
-    })
+    const run = liveRun()
+    vi.mocked(useAnalyze).mockReturnValue(run)
     vi.mocked(useTargetPasswordLock).mockReturnValue({
       isResolved: true,
       isLocked: true,
       targetName: 'prod',
-      message: "Target 'prod' is locked.",
+      message: 'Unlock prod to analyze.',
       missingTargetRequirements: [],
-      keyringAvailable: true,
+      keyringAvailable: false,
     })
-
     render(
       <ResultsPage
         search={{ query: 'select 1', target: 'prod', fast: false }}
       />
     )
+    expect(screen.getByText('Unlock prod to analyze.')).toBeTruthy()
+    await waitFor(() => expect(run.analyze).not.toHaveBeenCalled())
+  })
+})
 
-    await waitFor(() => {
-      expect(screen.getByText("Target 'prod' is locked.")).toBeTruthy()
-    })
-
-    expect(analyzeSpy).not.toHaveBeenCalled()
+describe('a stored analysis', () => {
+  it('renders the record through the same cards and starts no run', async () => {
+    const run = liveRun()
+    vi.mocked(useAnalyze).mockReturnValue(run)
+    unlocked()
+    reads.storedAnalysis = {
+      hash: 'stored-hash',
+      analysis_id: 'an-7',
+      created_at: new Date(Date.now() - 7_200_000).toISOString(),
+      target: 'prod',
+      overall_rating: 'fair',
+      efficiency_score: 65,
+      analysis: {
+        display_payload: {
+          explain_results: {
+            success: true,
+            database_engine: 'postgresql',
+            plan_format: 'explain',
+            execution_time_ms: 0,
+            rows_examined: 81_169,
+            rows_returned: 6,
+            cost_estimate: 33_384,
+            explain_plan: { Plan: { 'Node Type': 'Seq Scan' } },
+          },
+          llm_analysis: {
+            success: true,
+            performance_assessment: {
+              overall_rating: 'fair',
+              efficiency_score: 65,
+              primary_concerns: ['Scans more rows than it returns.'],
+            },
+            index_recommendations: [
+              {
+                table: 'orders',
+                columns: ['customer_id'],
+                index_type: 'btree',
+                sql: 'CREATE INDEX ON orders (customer_id)',
+                rationale: 'Serves the filter from one index.',
+                estimated_impact: 'high',
+              },
+            ],
+          },
+        },
+      },
+    }
+    render(
+      <ResultsPage
+        search={{
+          query: 'select 1',
+          target: 'prod',
+          origin: 'ask',
+          hash: 'stored-hash',
+          analysisId: 'an-7',
+        }}
+      />
+    )
+    expect(
+      await screen.findByRole('img', { name: 'Plan score 65 out of 100' })
+    ).toBeTruthy()
+    expect(
+      within(screen.getByTestId('analysis-fix')).getByText(
+        'Serves the filter from one index.'
+      )
+    ).toBeTruthy()
+    expect(screen.getByText('81,169')).toBeTruthy()
+    expect(screen.getByText('to return 6')).toBeTruthy()
+    expect(
+      within(screen.getByTestId('analysis-plan')).getByText(
+        'Scans more rows than it returns.'
+      )
+    ).toBeTruthy()
+    expect(run.analyze).not.toHaveBeenCalled()
+    expect(screen.queryByText('Run EXPLAIN ANALYZE?')).toBeNull()
   })
 })
 
 describe('/results no-query guard (B1)', () => {
-  it('validateSearch never throws — it parses a missing query to empty', () => {
-    // Throwing `redirect` from validateSearch is what crashed the whole app to
-    // the chrome-less screen; parsing must stay pure.
+  it('validateSearch never throws; it parses a missing query to empty', () => {
     const validateSearch = Route.options.validateSearch as (
-      s: Record<string, unknown>
-    ) => { query: string; returnSearch?: string }
-    expect(() => validateSearch({})).not.toThrow()
-    expect(validateSearch({}).query).toBe('')
-    expect(validateSearch({ query: 'select 1' }).query).toBe('select 1')
-    expect(
-      validateSearch({ query: 'select 1', returnSearch: '{"view":"new"}' })
-        .returnSearch
-    ).toBe('{"view":"new"}')
-  })
-
-  it('parses the full-view link the drawer builds into the same analysis', () => {
-    const validateSearch = Route.options.validateSearch as (
-      s: Record<string, unknown>
+      search: Record<string, unknown>
     ) => ResultsSearch
-
-    const fullView = drawerResultsSearch({
-      entry: {
-        hash: 'h1',
-        sql: 'select 1',
-        tag: '',
-        source: 'observed',
-        target: 'prod',
-        frequency: 1,
-        last_analyzed: '',
-        is_new: false,
-      } as QueryRegistryEntry,
-      hash: 'h1',
-      analysisId: 'a2',
-      returnSearch: { view: 'new' },
-      target: 'prod',
+    expect(validateSearch({})).toEqual({
+      query: '',
+      target: undefined,
+      fast: false,
+      params: undefined,
+      origin: undefined,
+      hash: undefined,
+      analysisId: undefined,
+      monitorFixture: undefined,
     })
-
-    expect(validateSearch({ ...fullView })).toEqual(fullView)
+    expect(
+      validateSearch({ hash: 'k', monitorFixture: 'ca-database' })
+        .monitorFixture
+    ).toBe('ca-database')
   })
 
   it('validateSearch accepts a known origin and drops an unknown one', () => {
     const validateSearch = Route.options.validateSearch as (
-      s: Record<string, unknown>
-    ) => { query: string; origin?: string }
+      search: Record<string, unknown>
+    ) => ResultsSearch
     expect(validateSearch({ query: 'select 1', origin: 'ask' }).origin).toBe(
       'ask'
     )
     expect(
-      validateSearch({ query: 'select 1', origin: 'not-a-real-origin' }).origin
+      validateSearch({ query: 'select 1', origin: 'elsewhere' }).origin
     ).toBeUndefined()
-    expect(validateSearch({ query: 'select 1' }).origin).toBeUndefined()
   })
 
-  it('beforeLoad redirects to the Queries workspace when the query is missing', () => {
+  it('beforeLoad redirects to Database when the query is missing', () => {
     const beforeLoad = Route.options.beforeLoad as (ctx: {
-      search: { query: string }
+      search: ResultsSearch
     }) => void
-
-    let thrown: unknown
-    try {
-      beforeLoad({ search: { query: '' } })
-    } catch (e) {
-      thrown = e
-    }
-    expect(thrown).toBeDefined()
-    expect(JSON.stringify(thrown)).toContain('/queries')
+    expect(() =>
+      beforeLoad({ search: { query: '' } as ResultsSearch })
+    ).toThrow()
   })
 
-  it('beforeLoad allows a present query through (no redirect)', () => {
+  it('beforeLoad allows a present query or a monitored key through (no redirect)', () => {
     const beforeLoad = Route.options.beforeLoad as (ctx: {
-      search: { query: string }
+      search: ResultsSearch
     }) => void
-    expect(() => beforeLoad({ search: { query: 'select 1' } })).not.toThrow()
-  })
-})
-
-describe('ResultsPage back navigation (B1 origin-aware back button)', () => {
-  beforeEach(() => {
-    vi.mocked(useAnalyze).mockReturnValue({
-      analyze: vi.fn(),
-      state: 'complete',
-      progress: undefined,
-      results: {
-        type: 'complete',
-        success: true,
-        query_hash: 'complete-query',
-      } as CompleteEvent,
-      rewriteTesting: undefined,
-      readysetCacheability: undefined,
-      error: undefined,
-      errorEnvelope: undefined,
-      reset: vi.fn(),
-    })
-    vi.mocked(useTargetPasswordLock).mockReturnValue({
-      isResolved: true,
-      isLocked: false,
-      targetName: 'prod',
-      message: '',
-      missingTargetRequirements: [],
-      keyringAvailable: true,
-    })
-  })
-
-  it('defaults to "Back to queries" -> /queries when no origin is given', async () => {
-    render(<ResultsPage search={{ query: 'select 1', target: 'prod' }} />)
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Back to queries' })
-    )
-    expect(navigateSpy).toHaveBeenCalledWith({ to: '/queries' })
-  })
-
-  it.each([
-    ['home', 'Back to Home', '/'],
-    ['ask', 'Back to Ask', '/ask'],
-    ['scan', 'Back to Code scan', '/scan'],
-    ['slow-queries', 'Back to Slow queries', '/queries'],
-    ['query-library', 'Back to queries', '/queries'],
-  ] as const)('origin %s labels the back button %s and navigates to %s', async (origin, label, to) => {
-    render(
-      <ResultsPage search={{ query: 'select 1', target: 'prod', origin }} />
-    )
-    fireEvent.click(await screen.findByRole('button', { name: label }))
-    expect(navigateSpy).toHaveBeenCalledWith({ to })
-  })
-
-  it('emits back_to_origin with the resolved origin when clicked', async () => {
-    render(
-      <ResultsPage
-        search={{ query: 'select 1', target: 'prod', origin: 'ask' }}
-      />
-    )
-    fireEvent.click(await screen.findByRole('button', { name: 'Back to Ask' }))
-    expect(trackEvent).toHaveBeenCalledWith('back_to_origin', {
-      origin: 'ask',
-    })
-  })
-
-  it('falls back to the query-library origin (analytics + label) on an untagged deep link', async () => {
-    render(<ResultsPage search={{ query: 'select 1', target: 'prod' }} />)
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Back to queries' })
-    )
-    expect(trackEvent).toHaveBeenCalledWith('back_to_origin', {
-      origin: 'query-library',
-    })
-  })
-})
-
-describe('ResultsPage analytics (E1 analysis_started)', () => {
-  it('emits analysis_started with the resolved origin when a run kicks off', async () => {
-    window.localStorage.setItem('rdst.explain-analyze-consent', 'accepted')
-    const analyzeSpy = vi.fn()
-    vi.mocked(useAnalyze).mockReturnValue({
-      analyze: analyzeSpy,
-      state: 'idle',
-      progress: undefined,
-      results: undefined,
-      rewriteTesting: undefined,
-      readysetCacheability: undefined,
-      error: undefined,
-      errorEnvelope: undefined,
-      reset: vi.fn(),
-    })
-    vi.mocked(useTargetPasswordLock).mockReturnValue({
-      isResolved: true,
-      isLocked: false,
-      targetName: 'prod',
-      message: '',
-      missingTargetRequirements: [],
-      keyringAvailable: true,
-    })
-
-    render(
-      <ResultsPage
-        search={{ query: 'select 1', target: 'prod', origin: 'scan' }}
-      />
-    )
-
-    await waitFor(() => expect(analyzeSpy).toHaveBeenCalled())
-    expect(trackEvent).toHaveBeenCalledWith('analysis_started', {
-      origin: 'scan',
-    })
-  })
-})
-
-describe('ResultsPage stored analysis viewer (A3/A4)', () => {
-  const HOUR = 3_600_000
-  const ago = (ms: number) => new Date(Date.now() - ms).toISOString()
-
-  function idleLiveRun() {
-    const analyzeSpy = vi.fn()
-    vi.mocked(useAnalyze).mockReturnValue({
-      analyze: analyzeSpy,
-      state: 'idle',
-      progress: undefined,
-      results: undefined,
-      rewriteTesting: undefined,
-      readysetCacheability: undefined,
-      error: undefined,
-      errorEnvelope: undefined,
-      reset: vi.fn(),
-    })
-    vi.mocked(useTargetPasswordLock).mockReturnValue({
-      isResolved: true,
-      isLocked: false,
-      targetName: 'prod',
-      message: '',
-      missingTargetRequirements: [],
-      keyringAvailable: true,
-    })
-    return analyzeSpy
-  }
-
-  function storedRecord(
-    displayPayload: Record<string, unknown>,
-    age = 2 * HOUR
-  ) {
-    return {
-      hash: 'stored-hash',
-      analysis_id: 'an-7',
-      created_at: ago(age),
-      target: 'prod',
-      overall_rating: 'fair',
-      efficiency_score: 65,
-      analysis: { display_payload: displayPayload },
-    }
-  }
-
-  const storedSearch = {
-    query: 'select 1',
-    target: 'prod',
-    origin: 'ask' as const,
-    hash: 'stored-hash',
-    analysisId: 'an-7',
-  }
-
-  it('renders a stored record through the live results presentation and starts no run', async () => {
-    const analyzeSpy = idleLiveRun()
-    storedReads.storedAnalysis = storedRecord({
-      explain_results: {
-        success: true,
-        database_engine: 'postgresql',
-        execution_time_ms: 49.44,
-        rows_examined: 81_169,
-        rows_returned: 6,
-        cost_estimate: 33_384.48,
-      },
-      llm_analysis: {
-        success: true,
-        performance_assessment: {
-          overall_rating: 'fair',
-          efficiency_score: 65,
-          primary_concerns: ['Scans more rows than it returns.'],
-        },
-      },
-    })
-
-    render(<ResultsPage search={storedSearch} />)
-
-    expect(
-      await screen.findByText('Viewing analysis from 2 hours ago')
-    ).toBeTruthy()
-    // The same presentation the live flow renders, fed the stored payload.
-    expect(
-      screen.getByLabelText('Performance score 65 out of 100')
-    ).toBeTruthy()
-    expect(screen.getByText('81,169 → 6')).toBeTruthy()
-    expect(screen.queryByText('Run EXPLAIN ANALYZE?')).toBeNull()
-    await waitFor(() => expect(analyzeSpy).not.toHaveBeenCalled())
-  })
-
-  it('emits analysis_viewed_stored with the record age bucket', async () => {
-    idleLiveRun()
-    storedReads.storedAnalysis = storedRecord({
-      explain_results: { success: true },
-    })
-
-    render(<ResultsPage search={storedSearch} />)
-
-    await waitFor(() =>
-      expect(trackEvent).toHaveBeenCalledWith('analysis_viewed_stored', {
-        age_bucket: '1h-24h',
-      })
-    )
-  })
-
-  it('says so honestly when the stored analysis predates full result storage', async () => {
-    idleLiveRun()
-    storedReads.storedAnalysis = storedRecord({})
-
-    render(<ResultsPage search={storedSearch} />)
-
-    expect(
-      (await screen.findAllByText(/ran before full results were saved/)).length
-    ).toBeGreaterThan(0)
-    // The score and date it does have are still shown, with a way forward.
-    expect(screen.getAllByText('Fair · 65/100').length).toBeGreaterThan(0)
-    expect(screen.getByRole('button', { name: 'Re-run analysis' })).toBeTruthy()
-  })
-
-  it('re-runs by dropping analysisId from the URL and reports the reason', async () => {
-    idleLiveRun()
-    storedReads.storedAnalysis = storedRecord({})
-
-    render(<ResultsPage search={storedSearch} />)
-
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Re-run analysis' })
-    )
-    expect(trackEvent).toHaveBeenCalledWith('analysis_rerun', {
-      reason: 'missing-body',
-    })
-    expect(navigateSpy).toHaveBeenCalledWith({
-      to: '/results',
-      search: expect.objectContaining({
-        query: 'select 1',
-        hash: 'stored-hash',
-        origin: 'ask',
-        analysisId: undefined,
-      }),
-    })
-  })
-
-  it('keeps the origin back affordance while a stored record is open', async () => {
-    idleLiveRun()
-    storedReads.storedAnalysis = storedRecord({
-      explain_results: { success: true },
-    })
-
-    render(<ResultsPage search={storedSearch} />)
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Back to Ask' }))
-    expect(navigateSpy).toHaveBeenCalledWith({ to: '/ask' })
-  })
-
-  it('opens an earlier run from the analysis history', async () => {
-    idleLiveRun()
-    storedReads.storedAnalysis = storedRecord({
-      explain_results: { success: true },
-    })
-    storedReads.analysisHistory = {
-      hash: 'stored-hash',
-      analyses: [
-        {
-          analysis_id: 'an-7',
-          created_at: ago(2 * HOUR),
-          target: 'prod',
-          overall_rating: 'fair',
-          efficiency_score: 65,
-        },
-        {
-          analysis_id: 'an-1',
-          created_at: ago(72 * HOUR),
-          target: 'prod',
-          overall_rating: 'poor',
-          efficiency_score: 41,
-        },
-      ],
-    }
-
-    render(<ResultsPage search={storedSearch} />)
-
-    fireEvent.keyDown(
-      await screen.findByRole('button', { name: 'Analysis history' }),
-      { key: 'Enter' }
-    )
-    fireEvent.click(
-      await screen.findByRole('menuitem', { name: /3 days ago · Poor · 41/ })
-    )
-    expect(navigateSpy).toHaveBeenCalledWith({
-      to: '/results',
-      search: expect.objectContaining({ analysisId: 'an-1' }),
-    })
+    expect(() =>
+      beforeLoad({ search: { query: 'select 1' } as ResultsSearch })
+    ).not.toThrow()
+    expect(() =>
+      beforeLoad({ search: { query: '', hash: 'k' } as ResultsSearch })
+    ).not.toThrow()
   })
 })

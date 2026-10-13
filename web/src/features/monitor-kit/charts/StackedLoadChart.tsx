@@ -17,6 +17,7 @@
 //     onHover={setHovered} onSelect={toggleFocus}
 //   />
 import { cn } from '@rs/tailwind-base'
+import { Pressable } from '@rs/ui-new/pressable'
 import {
   Fragment,
   type KeyboardEvent,
@@ -30,7 +31,7 @@ import {
 } from 'react'
 import { fromScroll } from '../pointerIntent'
 import { useElementWidth, useEntrance } from './chartHooks'
-import { niceMax } from './chartMath'
+import { niceMax, pointsInView } from './chartMath'
 import { GRID_COLOR } from './chartTheme'
 import {
   type ChartHighlight,
@@ -49,6 +50,12 @@ export interface StackSeries {
   values: (number | null)[]
   /** Dashed reference line (lines mode), never stacked or hit-tested. */
   reference?: boolean
+}
+
+/** A dashed vertical line at `x` with a small label beside it (an event on the chart). */
+export interface ChartMarkLine {
+  x: number
+  label?: string
 }
 
 export interface StackedLoadChartProps {
@@ -83,6 +90,10 @@ export interface StackedLoadChartProps {
   overlayLabels?: boolean
   /** Spans with no readings, hatched and labelled with the reason (pauseModel). */
   pauses?: ChartPause[]
+  /** Dashed lines with a label for events in the window. */
+  markers?: ChartMarkLine[]
+  /** Only the bottom gridline and no y labels: the chart reads by its shape. */
+  baselineOnly?: boolean
   /** Shown in the value card under the bands ('Total'). */
   totalLabel?: string
   emptyLabel?: string
@@ -157,6 +168,8 @@ export function StackedLoadChart({
   overlay = null,
   overlayLabels = true,
   pauses,
+  markers,
+  baselineOnly = false,
   totalLabel = 'Total',
   emptyLabel = 'No readings in this range yet',
   testId = 'load-chart',
@@ -209,19 +222,17 @@ export function StackedLoadChart({
   }, [pinned])
   const [x0, x1] = domain
   const spanSeconds = Math.max(1, x1 - x0)
-  const left = width < 420 ? 40 : 52
+  const left = baselineOnly ? 0 : width < 420 ? 40 : 52
   const plotWidth = Math.max(1, width - left - RIGHT)
   const plotHeight = Math.max(1, height - TOP - BOTTOM)
   const bottomY = TOP + plotHeight
 
   const { xs, values } = useMemo(() => {
-    const inDomain = rawXs
-      .map((x, i) => ({ x, i }))
-      .filter(({ x }) => x >= x0 - resolution && x <= x1 + resolution)
+    const inDomain = pointsInView(rawXs, [x0, x1], resolution)
     const cut = {
       xs: inDomain.map(({ x }) => x),
       values: series.map((item) =>
-        inDomain.map(({ i }) => item.values[i] ?? null)
+        inDomain.map(({ index }) => item.values[index] ?? null)
       ),
     }
     return bin(cut.xs, cut.values, Math.max(24, Math.floor((width || 640) / 3)))
@@ -689,29 +700,33 @@ export function StackedLoadChart({
           </defs>
 
           {/* A short strip keeps only the ends, so the axis labels don't collide. */}
-          {(plotHeight < 56 ? [0, 1] : [0, 0.5, 1]).map((fraction) => {
-            const gy = bottomY - fraction * plotHeight
-            return (
-              <Fragment key={fraction}>
-                <line
-                  x1={left}
-                  y1={gy}
-                  x2={left + plotWidth}
-                  y2={gy}
-                  stroke={GRID_COLOR}
-                  strokeWidth="1"
-                />
-                <text
-                  x={left - 8}
-                  y={gy + 4}
-                  textAnchor="end"
-                  className="fill-content-layout-3 text-[11px] tabular-nums"
-                >
-                  {formatAxis((yMax * fraction) / (unit?.divisor ?? 1))}
-                </text>
-              </Fragment>
-            )
-          })}
+          {(baselineOnly ? [0] : plotHeight < 56 ? [0, 1] : [0, 0.5, 1]).map(
+            (fraction) => {
+              const gy = bottomY - fraction * plotHeight
+              return (
+                <Fragment key={fraction}>
+                  <line
+                    x1={left}
+                    y1={gy}
+                    x2={left + plotWidth}
+                    y2={gy}
+                    stroke={GRID_COLOR}
+                    strokeWidth="1"
+                  />
+                  {!baselineOnly && (
+                    <text
+                      x={left - 8}
+                      y={gy + 4}
+                      textAnchor="end"
+                      className="fill-content-layout-3 text-[11px] tabular-nums"
+                    >
+                      {formatAxis((yMax * fraction) / (unit?.divisor ?? 1))}
+                    </text>
+                  )}
+                </Fragment>
+              )
+            }
+          )}
           {line && overlayMax != null && overlayLabels && (
             <text
               x={left + plotWidth}
@@ -723,7 +738,7 @@ export function StackedLoadChart({
               {`${width < 480 ? 'Its own scale' : 'Highlighted query on its own scale'}, 0 to ${formatValue(overlayMax)}`}
             </text>
           )}
-          {unit?.unit && (
+          {unit?.unit && !baselineOnly && (
             <text
               x={left - 8}
               y={TOP - 10}
@@ -866,6 +881,41 @@ export function StackedLoadChart({
             top={TOP}
             height={plotHeight}
           />
+          {markers?.map((marker) => {
+            if (marker.x < x0 || marker.x > x1) return null
+            const mx = xFor(marker.x)
+            const flip = mx > left + plotWidth * 0.7
+            return (
+              <g
+                key={marker.x}
+                pointerEvents="none"
+                data-testid="load-chart-marker"
+              >
+                <line
+                  x1={mx}
+                  y1={TOP}
+                  x2={mx}
+                  y2={bottomY}
+                  stroke="var(--color-content-layout-3)"
+                  strokeDasharray="3 3"
+                />
+                {marker.label && (
+                  <text
+                    x={flip ? mx - 6 : mx + 6}
+                    y={TOP + 4}
+                    textAnchor={flip ? 'end' : 'start'}
+                    stroke="var(--color-surface-primary-soft)"
+                    strokeWidth="4"
+                    strokeLinejoin="round"
+                    paintOrder="stroke"
+                    className="fill-content-layout-2 text-[12px]"
+                  >
+                    {marker.label}
+                  </text>
+                )}
+              </g>
+            )
+          })}
           <HighlightBand
             highlight={highlight}
             domain={domain}
@@ -876,6 +926,7 @@ export function StackedLoadChart({
 
           {!stacked &&
             lastIndex >= 0 &&
+            xs[lastIndex] <= x1 &&
             series.map((item, s) => {
               const value = values[s][lastIndex]
               if (value == null || item.reference) return null
@@ -1007,14 +1058,13 @@ export function StackedLoadChart({
               {hoverLabel(xs[hoverIndex], spanSeconds, binRes)}
             </p>
             {pinned ? (
-              <button
-                type="button"
+              <Pressable
                 aria-label="Close"
                 onClick={dismiss}
                 className="rounded-control px-1 text-caption text-content-layout-3 hover:bg-surface-layout-2 hover:text-content-layout-1"
               >
                 Close
-              </button>
+              </Pressable>
             ) : null}
           </div>
           {line && overlayAt ? (
@@ -1079,8 +1129,7 @@ export function StackedLoadChart({
               return (
                 <li key={item.id}>
                   {clickable ? (
-                    <button
-                      type="button"
+                    <Pressable
                       onClick={() => {
                         onSelect?.(item.id)
                         dismiss()
@@ -1093,7 +1142,7 @@ export function StackedLoadChart({
                       title={`Open ${item.label}`}
                     >
                       {body}
-                    </button>
+                    </Pressable>
                   ) : (
                     <span className="flex items-center gap-2 px-1 py-px text-label-small">
                       {body}

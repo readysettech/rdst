@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { expect } from '../fixtures'
+import { expect, mainContent } from '../fixtures'
 import { ciAddress, waitForEmail } from './mailbox'
 
 const keyservice = process.env.RDST_KEYSERVICE_URL?.replace(/\/$/, '') ?? ''
@@ -46,8 +46,15 @@ export async function signInWithEmail(
   const email = ciAddress(emailLabel)
   const requestedAt = new Date()
 
+  // Signed out with no Anthropic key, Home is the AI gate inside the app
+  // shell; its hosted option opens the sign-in dialog with the email field.
   await page.goto('/')
-  await page.getByRole('button', { name: 'Sign up or sign in' }).click()
+  await expect(
+    mainContent(page).getByText('Set up AI to get fixes and the daily report.')
+  ).toBeVisible()
+  await mainContent(page)
+    .getByRole('button', { name: 'Sign in', exact: true })
+    .click()
   const dialog = page.getByRole('dialog')
   await expect(
     dialog.getByRole('heading', { name: 'Sign in to Readyset' })
@@ -62,6 +69,7 @@ export async function signInWithEmail(
   await dialog.getByRole('button', { name: 'Send sign-in link' }).click()
   await expect(dialog.getByText('Check your email')).toBeVisible()
 
+  // The emailed link lands on /account-login, which finishes the sign-in.
   const mail = await waitForEmail(email, { newerThan: requestedAt })
   const signedInPage = await page.context().newPage()
   await signedInPage.goto(supabaseMagicLink(mail.html ?? ''))
@@ -71,11 +79,21 @@ export async function signInWithEmail(
     expect((await response.json()).signed_in).toBe(true)
   }).toPass({ timeout: 60_000 })
 
-  await signedInPage.goto('/configure?panel=ai')
-  await expect(signedInPage.getByText(`Signed in as ${email}`)).toBeVisible()
-  const useIncluded = signedInPage.getByRole('button', {
-    name: 'Use the included AI',
+  // Make the included AI the active provider, as choosing it in Settings does.
+  const provider = await signedInPage.request.post('/api/env/ai-provider', {
+    data: { provider: 'readyset' },
   })
-  if (await useIncluded.isVisible()) await useIncluded.click()
+  expect(provider.ok()).toBe(true)
+
+  await signedInPage.goto('/configure?panel=ai')
+  const account = signedInPage.getByRole('region', { name: 'Account' })
+  await expect(account.getByText(email, { exact: true })).toBeVisible()
+  await expect(account.getByText('Signed in', { exact: true })).toBeVisible()
+  await expect(
+    signedInPage.getByRole('switch', { name: 'Hosted by Readyset' })
+  ).toBeChecked()
+  await expect(signedInPage.getByTestId('sidebar-account-email')).toHaveText(
+    email
+  )
   return signedInPage
 }

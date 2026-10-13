@@ -35,7 +35,7 @@ export const ACTION_META: Record<
   deep_analysis: { label: 'Deep analysis', icon: 'test-tube', tone: 'rising' },
   ask: { label: 'Ask', icon: 'message-multiple', tone: 'info' },
   daily_snapshot: {
-    label: 'Nightly checkup',
+    label: 'Daily report',
     icon: 'document-validation',
     tone: 'positive',
   },
@@ -112,12 +112,12 @@ export function reportDay(item: AgentActivityItem): {
   day: string
   partial: boolean
 } {
+  const nightly = item.subject !== 'On request'
   if (item.period_start != null && item.period_end != null)
     return {
       day: shortDay(item.period_start),
-      partial: item.period_end - item.period_start < 82_800,
+      partial: !nightly || item.period_end - item.period_start < 82_800,
     }
-  const nightly = item.subject !== 'On request'
   return {
     day: shortDay(nightly ? item.ts - 43_200 : item.ts),
     partial: !nightly,
@@ -225,10 +225,10 @@ function classificationSentence(item: AgentActivityItem): SentencePart[] {
 function reportSentence(item: AgentActivityItem): SentencePart[] {
   const { day, partial } = reportDay(item)
   if (item.outcome === 'failed' || item.outcome === 'cancelled')
-    return s`The agent couldn't finish the nightly checkup for ${b(day)}.`
+    return s`The agent couldn't finish the daily report for ${b(day)}.`
   return partial
-    ? s`The agent ran a checkup for ${b(day)} so far, on request.`
-    : s`The agent ran the nightly checkup for ${b(day)}.`
+    ? s`The agent wrote a report for ${b(day)} so far, on request.`
+    : s`The agent wrote the daily report for ${b(day)}.`
 }
 
 function explainSentence(item: AgentActivityItem): SentencePart[] {
@@ -584,7 +584,7 @@ const PURPOSE_LABEL: Record<string, string> = {
   analyze_cache: 'Caching advice',
   monitor_attention: 'Does anything need attention',
   query_registry_analysis: 'Classify the query',
-  monitor_report: 'Run the nightly checkup',
+  monitor_report: 'Write the daily report',
   sql_generation: 'Write SQL for your question',
   sql_generation_alternate: 'Write SQL for your question',
   sql_recovery: 'Fix SQL that failed',
@@ -600,4 +600,277 @@ export function purposeLabel(
   if (label) return label
   const text = (call.operation || call.purpose || 'other').replace(/_/g, ' ')
   return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+// The Activity page: one verb-first line per entry, where it leads, and the day it sits under.
+
+/** The column at the right of a row: the page the row opens. */
+export type ActivityPlace =
+  | 'Analysis'
+  | 'Database'
+  | 'Queries'
+  | 'Report'
+  | 'Actions'
+  | 'Ask'
+  | 'Benchmarks'
+
+export interface ActivityLine {
+  /** Verb first: "Analyzed SELECT on users by id", "Checked for changes". */
+  text: string
+  /** One detail in the third tone, or in the warn tone when something did not complete. */
+  detail: string | null
+  warn: boolean
+  place: ActivityPlace
+  link: { to: string; search?: Record<string, unknown> }
+}
+
+/** "October 7" for a local day. */
+export function longDay(ts: number): string {
+  return new Date(ts * 1000).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+  })
+}
+
+/** The day label over a group: Today, Yesterday, then the date. */
+export function dayHeading(day: string, now: number): string {
+  const label = dayLabel(day, now)
+  if (label === 'Today' || label === 'Yesterday') return label
+  const start = dayStart(day)
+  return start === null ? day : longDay(start)
+}
+
+function target(item: AgentActivityItem) {
+  return item.target ? { target: item.target } : {}
+}
+
+function analysisLine(item: AgentActivityItem): ActivityLine {
+  const subject = item.subject || 'a query'
+  const link =
+    item.query_key && item.outcome === 'done'
+      ? {
+          to: '/database',
+          search: { ...target(item), query: item.query_key, tab: 'analysis' },
+        }
+      : { to: '/database', search: target(item) }
+  if (item.kind === 'rollup')
+    return {
+      text: `Skipped ${plural(item.count, 'query', 'queries')}`,
+      detail: 'writes and schema changes',
+      warn: false,
+      place: 'Queries',
+      link,
+    }
+  switch (item.outcome) {
+    case 'done':
+      return {
+        text: `Analyzed ${subject}`,
+        detail: item.finding ?? null,
+        warn: false,
+        place: 'Analysis',
+        link,
+      }
+    case 'failed':
+      return {
+        text: `Couldn't finish analyzing ${subject}`,
+        detail: plainReason(item.summary) || null,
+        warn: true,
+        place: 'Analysis',
+        link,
+      }
+    case 'cancelled':
+      return {
+        text: `Stopped analyzing ${subject}`,
+        detail: null,
+        warn: false,
+        place: 'Analysis',
+        link,
+      }
+    case 'skipped':
+      return {
+        text: `Skipped ${subject}`,
+        detail: plainReason(item.summary) || null,
+        warn: false,
+        place: 'Queries',
+        link,
+      }
+  }
+}
+
+function checksLine(item: AgentActivityItem): ActivityLine {
+  const link = { to: '/database', search: target(item) }
+  const filed = item.items_filed
+    ? `${plural(item.items_filed, 'change')} filed`
+    : 'nothing new'
+  if (item.kind === 'rollup')
+    return {
+      text: 'Checked for changes',
+      detail: item.failed
+        ? `${item.failed} of ${item.count} didn't complete`
+        : `${plural(item.count, 'check')}, ${filed}`,
+      warn: item.failed > 0,
+      place: 'Database',
+      link,
+    }
+  if (item.outcome === 'failed')
+    return {
+      text: 'Checked for changes',
+      detail: `didn't complete${plainReason(item.summary) ? `, ${plainReason(item.summary).toLowerCase()}` : ''}`,
+      warn: true,
+      place: 'Database',
+      link,
+    }
+  return {
+    text: 'Checked for changes',
+    detail:
+      item.outcome === 'skipped' ? plainReason(item.summary) || null : filed,
+    warn: false,
+    place: 'Database',
+    link,
+  }
+}
+
+function classificationLine(item: AgentActivityItem): ActivityLine {
+  const link = { to: '/database', search: target(item) }
+  if (item.kind === 'rollup') {
+    const aside = item.count - item.done - item.failed
+    const notes = [
+      aside > 0 ? `${aside} set aside` : null,
+      item.failed > 0 ? `${item.failed} didn't complete` : null,
+    ].filter((note) => note !== null)
+    return {
+      text: item.done
+        ? `Classified ${plural(item.done, 'query', 'queries')}`
+        : `Couldn't classify ${plural(item.count, 'query', 'queries')}`,
+      detail: item.done && notes.length ? notes.join(', ') : null,
+      warn: item.failed > 0,
+      place: 'Queries',
+      link,
+    }
+  }
+  return {
+    text:
+      item.outcome === 'done'
+        ? `Classified ${item.subject || 'a query'}`
+        : `Set ${item.subject || 'a query'} aside`,
+    detail: item.decision ? item.decision.toLowerCase() : null,
+    warn: item.outcome === 'failed',
+    place: 'Queries',
+    link,
+  }
+}
+
+function reportLine(item: AgentActivityItem): ActivityLine {
+  const { partial } = reportDay(item)
+  const start =
+    item.period_start ??
+    (item.subject !== 'On request' ? item.ts - 43_200 : item.ts)
+  const link =
+    item.report_id != null
+      ? {
+          to: '/database',
+          search: {
+            ...target(item),
+            view: 'report',
+            report: String(item.report_id),
+          },
+        }
+      : { to: '/database', search: { ...target(item), view: 'report' } }
+  if (item.outcome === 'failed' || item.outcome === 'cancelled')
+    return {
+      text: `Couldn't finish the daily report for ${longDay(start)}`,
+      detail: plainReason(item.summary) || null,
+      warn: true,
+      place: 'Report',
+      link,
+    }
+  return partial
+    ? {
+        text: 'Report ran',
+        detail: 'on request',
+        warn: false,
+        place: 'Report',
+        link,
+      }
+    : {
+        text: `Daily report for ${longDay(start)}`,
+        detail: item.finding ?? null,
+        warn: false,
+        place: 'Report',
+        link,
+      }
+}
+
+function askLine(item: AgentActivityItem): ActivityLine {
+  const link = { to: '/ask', search: target(item) }
+  const question = item.question ? quotedText(item.question) : 'a question'
+  if (item.outcome === 'failed' || item.outcome === 'cancelled')
+    return {
+      text: `Couldn't answer ${question}`,
+      detail: plainReason(item.summary) || null,
+      warn: true,
+      place: 'Ask',
+      link,
+    }
+  return {
+    text: item.decision?.startsWith('Asked you')
+      ? `Asked you to clarify ${question}`
+      : `Answered ${question}`,
+    detail: item.subject || null,
+    warn: false,
+    place: 'Ask',
+    link,
+  }
+}
+
+function quotedText(text: string): string {
+  const trimmed = text.trim().replace(/\s+/g, ' ')
+  return `"${trimmed.length > 90 ? `${trimmed.slice(0, 89)}...` : trimmed}"`
+}
+
+function benchmarkLine(item: AgentActivityItem): ActivityLine {
+  const subject = item.subject || 'saved queries'
+  return {
+    text:
+      item.outcome === 'done'
+        ? `Benchmarked ${subject}`
+        : `Benchmark of ${subject} didn't finish`,
+    detail: item.summary || null,
+    warn: item.outcome !== 'done',
+    place: 'Benchmarks',
+    link: { to: '/cache', search: target(item) },
+  }
+}
+
+function explainLine(item: AgentActivityItem): ActivityLine {
+  const changes = item.subject || 'new changes'
+  const done = item.outcome === 'done'
+  return {
+    text: done
+      ? `Explained why ${changes} matter on Actions`
+      : `Couldn't explain ${changes} on Actions`,
+    detail: done ? null : plainReason(item.summary) || null,
+    warn: !done,
+    place: 'Actions',
+    link: { to: '/actions', search: item.target ? { db: item.target } : {} },
+  }
+}
+
+export function activityLine(item: AgentActivityItem): ActivityLine {
+  switch (item.action) {
+    case 'deep_analysis':
+      return analysisLine(item)
+    case 'attention_check':
+      return checksLine(item)
+    case 'classification':
+      return classificationLine(item)
+    case 'daily_snapshot':
+      return reportLine(item)
+    case 'explain_actions':
+      return explainLine(item)
+    case 'ask':
+      return askLine(item)
+    case 'benchmark':
+      return benchmarkLine(item)
+  }
 }

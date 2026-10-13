@@ -1,17 +1,15 @@
 import { Alert } from '@rs/ui-new/alert'
 import { Button } from '@rs/ui-new/button'
-import { Card } from '@rs/ui-new/card'
-import { Icon } from '@rs/ui-new/icon'
-import { IconTile } from '@rs/ui-new/icon-tile'
-import { ReadysetFullLogo } from '@rs/ui-new/logo'
+import { DividedList, ListRow } from '@rs/ui-new/divided-list'
+import { ErrorState } from '@rs/ui-new/error-state'
+import { PageBar } from '@rs/ui-new/page-bar'
+import { PageContainer } from '@rs/ui-new/page-container'
 import { Spinner } from '@rs/ui-new/spinner'
-import { HStack, VStack } from '@rs/ui-new/stack'
-import { Tag } from '@rs/ui-new/tag'
+import { HStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useMemo, useState } from 'react'
 import type { EnvRequirement } from '../lib/api'
-import { isDesktopFrameless, isDesktopMac } from '../lib/desktop'
 import {
   invalidateTrialRelatedQueries,
   useTrialSource,
@@ -19,58 +17,64 @@ import {
 import type { AiGate } from '../lib/useAiGate'
 import { EnvSecretsDialog } from './EnvSecretsDialog'
 import { AccountLoginDialog } from './TrialRegistrationDialog'
-import { WindowControls } from './WindowControls'
 
 interface AiProviderGateProps {
   notice?: ReactNode
   gate: Extract<AiGate, { status: 'checking' | 'error' | 'blocked' }>
+  /** The bar title of the page the gate stands in for. */
+  title?: string
 }
 
-function Benefit({ children }: { children: string }) {
-  return (
-    <HStack className="items-start gap-2">
-      <Icon
-        name="tick"
-        label="Included"
-        className="mt-0.5 h-4 w-4 shrink-0 text-content-positive-soft"
-      />
-      <Text level="body-small" className="text-content-layout-2">
-        {children}
-      </Text>
-    </HStack>
-  )
-}
-
+/** The page's own bar, then the gate on the content axis. */
 function GateFrame({
-  children,
+  title,
   notice,
+  children,
 }: {
-  children: ReactNode
+  title: string
   notice?: ReactNode
+  children: ReactNode
 }) {
-  const frameless = isDesktopFrameless()
-  const mac = isDesktopMac()
-
   return (
-    <div className="h-dvh overflow-auto bg-surface-layout-2 text-content-layout-1">
-      <header className="draggable-region sticky top-0 z-20 h-14 border-b border-border-layout-1 bg-surface-layout-1/90 backdrop-blur-md">
-        <HStack
-          className={`h-full items-center justify-between px-6 ${mac ? 'pl-24' : ''}`}
-        >
-          <ReadysetFullLogo />
-          <span className="sr-only">Readyset</span>
-          {frameless && <WindowControls />}
-        </HStack>
-      </header>
-      <main className="min-h-[calc(100dvh-56px)] bg-gradient-to-b from-surface-primary-soft/20 via-surface-layout-2 to-surface-layout-2 px-6 py-10">
+    <>
+      <PageBar title={title} />
+      <PageContainer className="pt-9 pb-24">
         {notice}
         {children}
-      </main>
-    </div>
+      </PageContainer>
+    </>
   )
 }
 
-export function AiProviderGate({ gate, notice }: AiProviderGateProps) {
+function OptionRow({
+  name,
+  caption,
+  action,
+}: {
+  name: string
+  caption: string
+  action: ReactNode
+}) {
+  return (
+    <ListRow columns="1fr auto">
+      <div className="min-w-0">
+        <Text level="body-medium" className="text-content-layout-1">
+          {name}
+        </Text>
+        <Text level="caption" className="text-content-layout-3">
+          {caption}
+        </Text>
+      </div>
+      {action}
+    </ListRow>
+  )
+}
+
+export function AiProviderGate({
+  gate,
+  notice,
+  title = 'Home',
+}: AiProviderGateProps) {
   const queryClient = useQueryClient()
   const { envRequirements, envRequirementsQuery, anthropicRequirement } =
     useTrialSource()
@@ -102,37 +106,27 @@ export function AiProviderGate({ gate, notice }: AiProviderGateProps) {
 
   if (gate.status === 'checking') {
     return (
-      <GateFrame notice={notice}>
-        <VStack className="mx-auto min-h-[60vh] max-w-md items-center justify-center gap-3 text-center">
-          <Spinner size="base" color="primary-soft" />
-          <Text level="label-medium" className="text-content-layout-1">
+      <GateFrame title={title} notice={notice}>
+        <HStack className="items-center gap-2.5">
+          <Spinner size="base" color="layout" />
+          <Text level="body-small" className="text-content-layout-3">
             Checking your AI setup
           </Text>
-        </VStack>
+        </HStack>
       </GateFrame>
     )
   }
 
   if (gate.status === 'error') {
     return (
-      <GateFrame notice={notice}>
-        <VStack className="mx-auto min-h-[60vh] max-w-md items-center justify-center gap-4 text-center">
-          <IconTile icon="alert" accent="negative" size="lg" />
-          <VStack className="items-center gap-2">
-            <Text as="h1" level="headline-2" className="text-content-layout-1">
-              Could not check your AI setup
-            </Text>
-            <Text level="body-small" className="text-content-layout-2">
-              {gate.message}
-            </Text>
-          </VStack>
-          <Button
-            variant="primary"
-            modifier="solid"
-            label="Try again"
-            onClick={() => void envRequirementsQuery.refetch()}
-          />
-        </VStack>
+      <GateFrame title={title} notice={notice}>
+        <ErrorState
+          tone="quiet"
+          errorClass="rdst-service"
+          title="Could not check your AI setup"
+          message={gate.message}
+          onRetry={() => void envRequirementsQuery.refetch()}
+        />
       </GateFrame>
     )
   }
@@ -147,99 +141,47 @@ export function AiProviderGate({ gate, notice }: AiProviderGateProps) {
   const refresh = () => void invalidateTrialRelatedQueries(queryClient)
 
   return (
-    <GateFrame notice={notice}>
-      <div className="mx-auto w-full max-w-5xl">
-        <VStack className="mx-auto mb-8 max-w-2xl items-center gap-3 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-surface-primary-soft shadow-elevation-1">
-            <Icon
-              name="sparkles"
-              label="AI"
-              className="h-7 w-7 text-content-primary-soft"
-            />
-          </div>
-          <Text as="h1" level="headline-1" className="text-content-layout-1">
-            Choose how RDST uses AI
-          </Text>
-          <Text level="body-medium" className="max-w-xl text-content-layout-2">
-            Sign in to Readyset to turn on AI monitoring for your databases. You
-            can change this later in Settings.
-          </Text>
-        </VStack>
-
-        {gateError && (
-          <div className="mx-auto mb-5 max-w-xl">
-            <Alert variant="negative" modifier="outline" label={gateError} />
-          </div>
-        )}
-
-        <Card
-          className="mx-auto flex max-w-xl flex-col overflow-hidden border-border-primary-soft bg-surface-primary-soft/20 shadow-elevation-1"
-          data-testid="ai-access-sign-in"
-        >
-          <Card.Header className="border-border-primary-soft/60">
-            <HStack className="w-full items-start justify-between gap-3">
-              <IconTile icon="sparkles" accent="primary" size="lg" />
-              <Tag
-                size="small"
-                variant="primary"
-                modifier="ghost"
-                label="Recommended"
-              />
-            </HStack>
-            <Card.Title className="mt-3">Sign in to Readyset</Card.Title>
-            <Card.Description>
-              AI monitoring needs a Readyset account. It checks your databases
-              every few minutes and tells you when a query starts costing more
-              time.
-            </Card.Description>
-          </Card.Header>
-          <Card.Content className="space-y-3">
-            <Benefit>AI monitoring for your databases</Benefit>
-            <Benefit>Deep analysis, nightly checkups and Ask</Benefit>
-            <Benefit>No API key to manage</Benefit>
-          </Card.Content>
-          <Card.Footer className="border-border-primary-soft/60">
+    <GateFrame title={title} notice={notice}>
+      <Text as="p" level="headline-3" className="text-content-layout-1">
+        Set up AI to get fixes and the daily report.
+      </Text>
+      {gateError && (
+        <Alert
+          tone="quiet"
+          variant="negative"
+          icon="alert"
+          label={gateError}
+          className="mt-4"
+        />
+      )}
+      <DividedList className="mt-6 max-w-2xl">
+        <OptionRow
+          name="Hosted by Readyset"
+          caption="No API key to manage."
+          action={
             <Button
-              variant="rising"
+              variant="primary"
               modifier="solid"
-              fullWidth
-              label="Sign up or sign in"
-              icon="arrow-right"
-              iconPosition="right"
+              size="small"
+              label="Sign in"
               onClick={() => setAccountOpen(true)}
             />
-          </Card.Footer>
-        </Card>
-
-        <VStack
-          className="mx-auto mt-5 max-w-xl items-center gap-1 text-center"
-          data-testid="ai-access-own-key"
-        >
-          <Text level="body-small" className="text-content-layout-2">
-            Have an Anthropic key? It covers deep analysis and reports, and it
-            doesn&rsquo;t replace signing in.
-          </Text>
-          <Button
-            variant="primary"
-            modifier="link"
-            size="small"
-            label="Add Anthropic key"
-            icon="key"
-            iconPosition="left"
-            onClick={() => setKeyOpen(true)}
-          />
-        </VStack>
-
-        <Text
-          as="p"
-          level="caption"
-          className="mx-auto mt-6 max-w-xl text-center text-content-layout-3"
-        >
-          RDST sends schema context and your question to the selected AI
-          provider. Database passwords and connection strings stay on this
-          machine.
-        </Text>
-      </div>
+          }
+        />
+        <OptionRow
+          name="Use my own key"
+          caption="Your provider bills you directly."
+          action={
+            <Button
+              variant="primary"
+              modifier="ghost"
+              size="small"
+              label="Add key"
+              onClick={() => setKeyOpen(true)}
+            />
+          }
+        />
+      </DividedList>
 
       <AccountLoginDialog
         isOpen={accountOpen}

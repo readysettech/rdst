@@ -20,37 +20,33 @@ afterEach(() => {
 })
 
 describe('AiSetupNotice', () => {
-  it('asks for a provider only once the probe says one is missing', () => {
-    const { rerender } = render(<AiSetupNotice feature="Ask" />)
+  it('says AI checks are paused only once the probe says a provider is missing', () => {
+    const { rerender } = render(<AiSetupNotice />)
     expect(screen.queryByRole('alert')).toBeNull()
 
     mocks.gate.current = { status: 'checking' }
-    rerender(<AiSetupNotice feature="Ask" />)
+    rerender(<AiSetupNotice />)
     expect(screen.queryByRole('alert')).toBeNull()
 
     mocks.gate.current = { status: 'blocked', reason: 'missing' }
-    rerender(<AiSetupNotice feature="Ask" />)
-    expect(screen.getByText('Connect an AI provider to use this')).toBeTruthy()
-    expect(screen.getByText(/^Ask sends your question/)).toBeTruthy()
-    expect(
-      screen.getByText('Everything else in RDST works without it.')
-    ).toBeTruthy()
+    rerender(<AiSetupNotice />)
+    expect(screen.getByRole('alert').textContent).toContain(
+      'AI checks paused. Sign in or add a key in Settings.'
+    )
+    expect(screen.getAllByRole('button')).toHaveLength(1)
   })
 
-  it('names the reason a configured provider stopped working', () => {
+  it('reads the same line whatever stopped the provider', () => {
     mocks.gate.current = { status: 'blocked', reason: 'invalid' }
-    render(<AiSetupNotice feature="Query analysis" />)
-    expect(screen.getByText(/Anthropic rejected the saved key/)).toBeTruthy()
-
-    cleanup()
-    mocks.gate.current = { status: 'blocked', reason: 'exhausted' }
-    render(<AiSetupNotice feature="Query analysis" />)
-    expect(screen.getByText(/Your included AI is used up/)).toBeTruthy()
+    render(<AiSetupNotice />)
+    expect(
+      screen.getByText('AI checks paused. Sign in or add a key in Settings.')
+    ).toBeTruthy()
   })
 
   it('routes the fix to the AI settings panel', () => {
     mocks.gate.current = { status: 'blocked', reason: 'missing' }
-    render(<AiSetupNotice feature="Ask" />)
+    render(<AiSetupNotice />)
     screen.getByRole('button', { name: 'Set up AI' }).click()
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: '/configure',
