@@ -12,6 +12,7 @@ import {
   setFixtureTiming,
 } from '@/lib/monitor/api'
 import { setFixtureOverride } from '@/lib/monitor/contract'
+import { CA_NOW } from '@/lib/monitor/fixturesCa'
 import { renderWithClient } from '@/test-utils'
 import {
   NotificationSettings,
@@ -45,6 +46,7 @@ function pushTo(on: boolean) {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   setFixtureOverride(undefined)
   vi.unstubAllGlobals()
   localStorage.clear()
@@ -163,6 +165,9 @@ describe('NotificationSettings', () => {
   })
 
   it('opens the mute rules, each with Unmute, with or without a database', async () => {
+    // The seeded expiring rule is timed against the fixture clock.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(CA_NOW * 1000)
     renderWithClient(<NotificationSettings />)
     fireEvent.click(screen.getByRole('button', { name: 'Notifications' }))
     fireEvent.click(

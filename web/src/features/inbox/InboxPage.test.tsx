@@ -65,6 +65,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   setFixtureOverride(undefined)
   localStorage.clear()
 })
@@ -476,6 +477,9 @@ describe('InboxPage muted items', () => {
   })
 
   it('counts muted and snoozed items on the Muted chip and lists them with the rules', async () => {
+    // The seeded expiring rule is timed against the fixture clock.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(CA_NOW * 1000)
     await muteDemo('stuck_query')
     await inboxAction(2, 'snooze', CA_NOW + 3600)
     renderWithClient(<InboxPage />)
