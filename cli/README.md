@@ -10,7 +10,7 @@
   <a href="https://readyset.io/downloads"><img src="https://img.shields.io/badge/desktop-download-6e56cf" alt="Download RDST Desktop"/></a>
 </p>
 
-**Find slow queries, analyze them, and fix them — from your terminal.**
+**Find slow queries, analyze them, and fix them from your terminal.**
 
 </div>
 
