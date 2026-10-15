@@ -59,6 +59,10 @@ CONTRACTS = {
     'monitoring_daily_summary': {**DB, 'monitored_count': int, 'own_key': bool,
         **{k: int for k in ('queries_seen queries_known new_queries analyses_done analyses_failed analyses_skipped analyses_queued ai_checks ai_check_errors inbox_items inbox_items_new notifications inbox_open reports ai_calls collection_errors collected_minutes').split()},
         'period_hours': float, 'ai_cost_usd': float, 'uptime_pct': float, 'days_monitored': float},
+    'monitoring_first_look': {**DB, 'monitored_count': int, 'own_key': bool, 'ai_monitoring': str,
+        'ai_reason': str, 'minutes_since_enable': int,
+        **{k: int for k in ('queries_seen queries_known new_queries analyses_done analyses_failed analyses_skipped analyses_queued ai_checks ai_check_errors inbox_items inbox_items_new notifications inbox_open reports ai_calls collection_errors collected_minutes').split()},
+        'period_hours': float, 'ai_cost_usd': float, 'uptime_pct': float, 'days_monitored': float},
     'web_started': dict(port=int, serve_static=bool, ui_mode=str, launched_by=str),
     'app_error': dict(source=str, component=str, error_class=str, message=str, handled=bool,
         suppressed_repeats=int, level=str),
@@ -163,6 +167,12 @@ async def fire(event, store, monkeypatch):
         assert monitor_telemetry.send_due(store, now=T0) == 0
         assert monitor_telemetry.send_due(store, now=T0 + 86400) == int(product.enabled())
         assert monitor_telemetry.send_due(store, now=T0 + 86460) == 0
+    elif event == 'monitoring_first_look':
+        store.set_settings(TARGET, {'enabled': True})
+        store.start_first_hour(TARGET, T0)
+        monkeypatch.setattr(monitor_telemetry, '_ai_usage', lambda *args: (0, 0.0))
+        monitor_telemetry.send_due(store, now=T0 + monitor_telemetry.FIRST_LOOK_S)
+        monitor_telemetry.send_due(store, now=T0 + 2 * monitor_telemetry.FIRST_LOOK_S)
     elif event == 'web_started':
         import rdst
         import uvicorn

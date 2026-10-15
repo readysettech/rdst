@@ -277,6 +277,28 @@ def test_daily_summary_counts_a_day_once_per_database(fake, tmp_path, with_histo
     assert_private(fake)
 
 
+
+def test_first_look_counts_queries_once_soon_after_monitoring_turns_on(fake, tmp_path,
+                                                                       monkeypatch):
+    store = MonitorStore(tmp_path / "monitor.db")
+    store.set_settings(TARGET, {"enabled": True})
+    store.start_first_hour(TARGET, T0)
+    monkeypatch.setattr("features.monitor.database_limit._signed_in", lambda: False)
+    store.write_setting(TARGET, "ai_reason", "signed_out")
+    store.record(TARGET, T0 + 300, [
+        {"query_key": key, "text": SQL, "calls": 3, "total_ms": 30.0, "rows": 3,
+         "blks_hit": 0, "blks_read": 0} for key in ("k1", "k2")],
+        {"k1": SQL, "k2": SQL}, [], {"calls": 6, "total_ms": 60.0})
+    monitor_telemetry.send_due(store, now=T0 + monitor_telemetry.FIRST_LOOK_S - 60)
+    assert fake.named("monitoring_first_look") == []
+    monitor_telemetry.send_due(store, now=T0 + monitor_telemetry.FIRST_LOOK_S)
+    monitor_telemetry.send_due(store, now=T0 + 2 * monitor_telemetry.FIRST_LOOK_S)
+    [look] = fake.named("monitoring_first_look")
+    assert look["queries_seen"] == 2 and look["minutes_since_enable"] == 15
+    assert look["ai_monitoring"] == "pending" and look["ai_reason"] == "signed_out"
+    assert fake.named("monitoring_daily_summary") == []
+    assert_private(fake)
+
 def test_background_analysis_counts_as_an_analyze_run_and_completes(fake):
     job = {"target": TARGET, "query_key": "abc123", "reason": "new"}
     monitor_telemetry.analysis_finished(

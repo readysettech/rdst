@@ -62,6 +62,9 @@ DEFAULT_INSTALL_BUDGET_BYTES = 1024 * 1024 * 1024
 EVENT_RETENTION_SECONDS = 30 * 86400
 DEFAULT_BUDGET_BYTES = 250 * 1024 * 1024
 PULSE_RETENTION_SECONDS = 48 * 3600
+# A stuck query stays one open item until it has gone this long without running long again,
+# so a job that runs past a minute on a schedule doesn't resolve and reopen with every run.
+STUCK_CLEAR_SECONDS = 3600
 # In the rollback journal a commit waits for every reader, and new readers wait for that
 # commit. A writer that cannot start or commit within WRITE_BUSY_MS rolls back, so readers
 # go ahead, and runs its transaction again until its retry window closes.
@@ -2483,6 +2486,10 @@ class MonitorStore:
         for item in self.inbox(target=target):
             if (item["type"] == "stuck_query" and item["state"] != "resolved"
                     and item["subject"] not in active):
+                last = self.read("SELECT MAX(ts) ts FROM stuck_sample WHERE target=? AND query_key=?",
+                                 (target, item["subject"]))[0]["ts"]
+                if last is not None and ts - last < STUCK_CLEAR_SECONDS:
+                    continue
                 self.action_item(item["id"], "resolve", ts, resolved_by="code")
 
     @staticmethod

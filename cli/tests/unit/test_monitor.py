@@ -16,7 +16,7 @@ from features.query_registry.statement_stats import MysqlDigestSource, MYSQL_ACT
 from features.query_registry.scheduler import ACTIVE_INTERVAL_SECONDS, ObservationScheduler
 from shared.constants import rdst_data_dir
 from shared.monitor.monitor_store import (
-    FINE_RETENTION_SECONDS, RETENTION, MonitorStore, SCHEMA_VERSION)
+    FINE_RETENTION_SECONDS, RETENTION, STUCK_CLEAR_SECONDS, MonitorStore, SCHEMA_VERSION)
 from shared.query_registry import hash_sql
 from shared.query_registry.delta_processor import COMPLETE, COUNTER_REGRESSION, CounterRow, DeltaResult
 
@@ -500,7 +500,31 @@ def test_stuck_query_is_filed_and_closed_on_collector_cadence(monkeypatch, tmp_p
     collector._record_monitor_cycle(240, [], registry, [], activity_sampled=False)
     assert store.inbox("new", "db")[0]["subject"] == key
     collector._record_monitor_cycle(300, [], registry, [], activity_sampled=True)
+    assert store.inbox("new", "db")[0]["subject"] == key
+    collector._record_monitor_cycle(180 + STUCK_CLEAR_SECONDS, [], registry, [],
+                                    activity_sampled=True)
     assert store.inbox("resolved", "db")[0]["resolved_by"] == "code"
+
+
+def test_stuck_query_on_a_schedule_stays_one_open_item(monkeypatch, tmp_path):
+    monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
+    store = MonitorStore()
+    collector = QueryDiscoveryCollector("db", two_phase=True)
+    collector._monitor = store
+    collector._engine = "postgresql"
+    collector._alias_map = {}
+    collector._monitor_db_sample = None
+    sql = "SELECT refresh_rollups() FROM jobs WHERE id = 1"
+    registry = SimpleNamespace(get_query=lambda _key: None)
+    # A job that runs about 90 seconds every five minutes, sampled every minute for hours.
+    for minute in range(1, 6 * 60):
+        running = minute % 5 in (1, 2)
+        collector._record_monitor_cycle(minute * 60, [], registry, [
+            {"query": sql, "pid": 7, "state": "active", "duration_s": 75}
+        ] if running else [], activity_sampled=True)
+    assert [row["state"] for row in store.inbox(target="db")] == ["new"]
+    assert store.read("SELECT kind,COUNT(*) n FROM inbox_event WHERE kind IN "
+                      "('created','reopened') GROUP BY kind") == [{"kind": "created", "n": 1}]
 
 
 def test_monitored_cadence_without_subscriber():

@@ -4,7 +4,7 @@ import threading
 import selectors
 
 from features.monitor import loop as monitor_loop
-from shared.monitor.monitor_store import MonitorStore
+from shared.monitor.monitor_store import STUCK_CLEAR_SECONDS, MonitorStore
 
 
 def test_loop_files_code_rules_closes_when_clear_and_records_dry_run(monkeypatch, tmp_path):
@@ -30,7 +30,7 @@ def test_loop_files_code_rules_closes_when_clear_and_records_dry_run(monkeypatch
     assert {item["type"] for item in store.inbox("new")} == {
         "stuck_query", "connections_near_max"}
     assert store.read("SELECT dry_run,outcome FROM judge_run") == [{"dry_run": 1, "outcome": "noop"}]
-    store.sync_stuck_items("db", now + 60, [])
+    store.sync_stuck_items("db", now - 60 + STUCK_CLEAR_SECONDS, [])
     active.clock = lambda: now + 360
     active.cycle("db")
     assert {item["type"] for item in store.inbox("resolved")} == {

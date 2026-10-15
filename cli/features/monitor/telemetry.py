@@ -1,4 +1,5 @@
-"""The daily `monitoring_daily_summary` event: one per monitored database per day.
+"""The daily `monitoring_daily_summary` event: one per monitored database per day, plus one
+early `monitoring_first_look` with the same counts soon after monitoring turns on.
 
 Counts only, read from monitor.db and agent_activity.db. The database is named by its
 salted `database_id`; no query text, names or hosts leave the machine.
@@ -17,8 +18,11 @@ from shared.monitor.monitor_store import MonitorStore, default_monitor_db_path
 logger = logging.getLogger(__name__)
 
 PERIOD_S = 86400
-CHECK_EVERY_S = 3600
+CHECK_EVERY_S = 300
 FIRST_CHECK_S = 300
+# How long after monitoring turns on the first look is sent: long enough for the first
+# collections to have found the database's queries.
+FIRST_LOOK_S = 900
 
 
 def _one(store: Any, sql: str, params: tuple[Any, ...]) -> Any:
@@ -99,7 +103,8 @@ def send_due(store: MonitorStore | None = None, *, now: float | None = None,
     """Send the summary for each monitored database whose last one is a day old.
 
     A database's clock starts the first time it's seen here, so its first summary covers a
-    full day. Returns how many were sent.
+    full day; its first look goes out once, FIRST_LOOK_S after monitoring turned on. Returns
+    how many daily summaries were sent.
     """
     if not product_telemetry.enabled():
         return 0
@@ -114,6 +119,7 @@ def send_due(store: MonitorStore | None = None, *, now: float | None = None,
         database_id = product_telemetry.database_id(target)
         if not database_id:
             continue
+        _send_first_look(store, target, database_id, now, send)
         key = f"daily_summary:{database_id}"
         last = product_telemetry.state_value(key)
         if last is None:
@@ -135,8 +141,35 @@ def send_due(store: MonitorStore | None = None, *, now: float | None = None,
     return sent
 
 
+def _send_first_look(store: MonitorStore, target: str, database_id: str, now: int,
+                     send: Callable[[str, dict[str, Any]], None]) -> None:
+    key = f"first_look:{database_id}"
+    enabled_at = store.enabled_at(target)
+    if (not enabled_at or now - enabled_at < FIRST_LOOK_S
+            or product_telemetry.state_value(key) is not None):
+        return
+    product_telemetry.set_state_value(key, now)
+    from features.monitor import database_limit
+
+    try:
+        counts = summary(store, target, enabled_at, now)
+        reason = store.read("SELECT value FROM monitor_setting WHERE target=? AND key=?",
+                            (target, database_limit.AI_REASON_KEY))
+        ai_monitoring = database_limit.display_state(store, target)
+    except Exception:
+        logger.warning("First monitoring look failed", exc_info=True)
+        return
+    send("monitoring_first_look", {
+        "database_id": database_id, "engine": product_telemetry.engine_of(target),
+        "monitored_count": len(store.monitored_targets()),
+        "own_key": product_telemetry.own_key(), "ai_monitoring": ai_monitoring,
+        "ai_reason": (reason[0]["value"] if reason else "") or "none",
+        "minutes_since_enable": (now - enabled_at) // 60, **counts})
+
+
 class DailySummaries:
-    """Checks hourly, in the background, whether a database's daily summary is due."""
+    """Checks every few minutes, in the background, whether a first look or daily summary is
+    due."""
 
     def __init__(self, store: MonitorStore | None = None) -> None:
         self.store = store
