@@ -55,7 +55,8 @@ const FALSE_EMPTY = [
 ]
 
 /** The AI gate's lead line. */
-const AI_GATE = 'Set up AI to get fixes and the daily report.'
+/** Only the AI gate offers an own key; the get-started steps are on Home too. */
+const AI_GATE = 'Use my own Anthropic key instead'
 
 /** Shapes of a raw response leaking into user-facing copy. */
 const RAW_PAYLOAD = /HTTP error|\{"detail"|"detail":|status: \d{3}/
@@ -310,9 +311,7 @@ test('states: feature routes show the sign-in chooser until a provider is config
     await expect(
       main.getByRole('button', { name: 'Sign in', exact: true })
     ).toBeVisible()
-    await expect(
-      main.getByRole('button', { name: 'Add key', exact: true })
-    ).toBeVisible()
+    await expect(main.getByRole('button', { name: AI_GATE })).toBeVisible()
   }
 
   await mockAiKeyReady(page)

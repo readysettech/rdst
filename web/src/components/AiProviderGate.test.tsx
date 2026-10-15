@@ -28,6 +28,7 @@ vi.mock('./EnvSecretsDialog', () => ({
 
 describe('AI provider startup gate', () => {
   beforeEach(() => {
+    sessionStorage.clear()
     vi.clearAllMocks()
     vi.mocked(useTrialSource).mockReturnValue({
       envRequirements: {
@@ -61,10 +62,18 @@ describe('AI provider startup gate', () => {
 
     expect(screen.getByRole('heading', { name: 'Ask', level: 1 })).toBeTruthy()
     expect(
-      screen.getByText('Set up AI to get fixes and the daily report.')
+      screen.getByText("Find out what's slowing your database.")
     ).toBeTruthy()
-    expect(screen.getByText('Hosted by Readyset')).toBeTruthy()
-    expect(screen.getByText('Use my own key')).toBeTruthy()
+    // Signing in is the current step; the database and monitoring steps follow.
+    const steps = screen.getAllByRole('listitem')
+    expect(steps.map((step) => step.getAttribute('aria-current'))).toEqual([
+      'step',
+      null,
+      null,
+    ])
+    expect(screen.getByText('Sign in to Readyset')).toBeTruthy()
+    expect(screen.getByText('Connect your database')).toBeTruthy()
+    expect(screen.getByText('Turn on monitoring')).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/\bfree\b|trial|credit/i)
     expect(document.body.textContent).not.toMatch(/change this later/i)
     expect(screen.queryByRole('button', { name: /skip/i })).toBeNull()
@@ -75,8 +84,30 @@ describe('AI provider startup gate', () => {
     fireEvent.click(signIn)
     expect(screen.getByText('Readyset account login')).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add key' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use my own Anthropic key instead' })
+    )
     expect(screen.getByText('Anthropic key setup')).toBeTruthy()
+  })
+
+  it('opens sign-in on its own on first run, once per app session', () => {
+    const gate = { status: 'blocked', reason: 'missing' } as const
+    renderWithClient(<AiProviderGate gate={gate} />, createTestQueryClient())
+    expect(screen.getByRole('dialog').textContent).toBe(
+      'Readyset account login'
+    )
+
+    cleanup()
+    renderWithClient(<AiProviderGate gate={gate} />, createTestQueryClient())
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('does not pop sign-in up when a saved key stopped working', () => {
+    renderWithClient(
+      <AiProviderGate gate={{ status: 'blocked', reason: 'invalid' }} />,
+      createTestQueryClient()
+    )
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('says why the saved key stopped working', () => {

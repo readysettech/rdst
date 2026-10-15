@@ -1,9 +1,14 @@
-import { Button } from '@rs/ui-new/button'
-import { DividedList, ListRow } from '@rs/ui-new/divided-list'
 import { StatusLine, statusLinkClass } from '@rs/ui-new/status-line'
-import { Text } from '@rs/ui-new/text'
+import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
+import { useEffect } from 'react'
 import { useOpenAddDatabase } from '../../components/configure/addDatabase'
+import {
+  claimFirstRunPopup,
+  GetStarted,
+  GetStartedButton,
+} from '../../components/GetStarted'
+import { fetchAccountStatus } from '../../lib/api'
 import type { HomeStatus } from '../../lib/monitor/types'
 import { formatClock, plural } from '../monitor-kit/format'
 import { monitorLinkTo } from './homeModel'
@@ -145,46 +150,32 @@ export function homeCaption(
   return parts.length ? parts.join(' ') : null
 }
 
-const AFTER = [
-  { step: 'Monitoring starts', when: 'as soon as it connects' },
-  { step: 'Fixes show up in Actions', when: 'after about 10 minutes' },
-  { step: 'A report every night', when: 'at 12 AM' },
-]
-
-/** Home with no database yet: one line, one action, and what follows. */
+/** Home with no database yet: the Get started steps, at connecting a database. */
 export function HomeEmpty() {
   const openAddDatabase = useOpenAddDatabase()
+  // The next step pops up on its own once per app session, right after sign-in.
+  useEffect(() => {
+    if (claimFirstRunPopup('add-database')) openAddDatabase()
+  }, [openAddDatabase])
+  const { data: account } = useQuery({
+    queryKey: ['account-status'],
+    queryFn: fetchAccountStatus,
+    staleTime: 60_000,
+  })
   return (
-    <>
-      <StatusLine tone="off">No database yet.</StatusLine>
-      <div className="mt-5">
-        <Button
-          variant="primary"
-          modifier="solid"
+    <GetStarted
+      step="add-database"
+      doneCaption={
+        account?.signed_in
+          ? `Signed in${account.email ? ` as ${account.email}` : ''}.`
+          : 'AI is set up with your own key.'
+      }
+      action={
+        <GetStartedButton
           label="Add a database"
           onClick={() => openAddDatabase()}
         />
-      </div>
-      <div className="mt-12 max-w-160">
-        <Text as="p" level="caption" className="mb-2.5 text-content-layout-3">
-          After you add one
-        </Text>
-        <DividedList columns="24px 1fr auto">
-          {AFTER.map((item, index) => (
-            <ListRow key={item.step}>
-              <span className="text-caption tabular-nums text-content-layout-3">
-                {index + 1}
-              </span>
-              <span className="text-body-medium text-content-layout-2">
-                {item.step}
-              </span>
-              <span className="text-right text-caption text-content-layout-3">
-                {item.when}
-              </span>
-            </ListRow>
-          ))}
-        </DividedList>
-      </div>
-    </>
+      }
+    />
   )
 }

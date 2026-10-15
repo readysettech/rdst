@@ -126,8 +126,8 @@ test('the first-run primary tests the connection before it saves a target', asyn
   expect(after.default_target).toBe('qa-connect')
 })
 
-/** The AI gate's lead line, standing in for the page inside the app shell. */
-const AI_GATE = 'Set up AI to get fixes and the daily report.'
+/** Only the AI gate offers an own key; the get-started steps are on Home too. */
+const AI_GATE = 'Use my own Anthropic key instead'
 
 /** Routes that stay open during AI setup: local monitoring and target setup. */
 const OPEN_DURING_AI_SETUP = ['database', 'configure', 'configure-connections']
@@ -156,9 +156,7 @@ test('every route shows the sign-in chooser until an AI provider is configured',
     await expect(
       main.getByRole('button', { name: 'Sign in', exact: true })
     ).toBeVisible()
-    await expect(
-      main.getByRole('button', { name: 'Add key', exact: true })
-    ).toBeVisible()
+    await expect(main.getByRole('button', { name: AI_GATE })).toBeVisible()
   }
 
   await mockAiKeyReady(page)

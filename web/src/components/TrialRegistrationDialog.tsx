@@ -28,12 +28,18 @@ import {
 import { isDesktopRuntime } from '../lib/desktop'
 import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
 import { isValidEmail, normalizeEmail } from './emailValidation'
+import { GetStartedStrip } from './GetStarted'
 
 interface AccountLoginDialogProps {
   isOpen: boolean
   onClose: () => void
   onSuccess?: () => void
   callbackLoginId?: string | null
+  /**
+   * First run: title it as sign in or sign up, show the three get-started steps,
+   * and finish on the next step instead of Done.
+   */
+  getStarted?: { onNext: () => void }
 }
 
 // The marks on the sign-in page, so the dialog offers the same two buttons.
@@ -107,6 +113,7 @@ export function AccountLoginDialog({
   onClose,
   onSuccess,
   callbackLoginId = null,
+  getStarted,
 }: AccountLoginDialogProps) {
   const queryClient = useQueryClient()
   const emailFieldId = useId()
@@ -316,11 +323,23 @@ export function AccountLoginDialog({
         >
           <div className="shrink-0 pt-4.5 pr-14 pl-6">
             <ModalTitle>
-              {complete ? 'Signed in to Readyset' : 'Sign in to Readyset'}
+              {complete
+                ? 'Signed in to Readyset'
+                : getStarted
+                  ? 'Sign in or sign up to get started'
+                  : 'Sign in to Readyset'}
             </ModalTitle>
           </div>
           <Scrollable rootClassName="min-h-0 flex-1" className="px-6 pt-2 pb-5">
             <VStack className="items-stretch gap-4">
+              {getStarted && (
+                <GetStartedStrip step={complete ? 'add-database' : 'sign-in'} />
+              )}
+              {getStarted && showProviders && (
+                <ModalDescription>
+                  New here? This creates your Readyset account.
+                </ModalDescription>
+              )}
               {(error || callbackPollingError) && (
                 <Alert
                   tone="quiet"
@@ -409,7 +428,11 @@ export function AccountLoginDialog({
                           setEmail(event.target.value)
                           if (emailError) setEmailError(null)
                         }}
-                        onBlur={validateEmailField}
+                        // An empty field isn't checked on blur: leaving it for
+                        // GitHub or Google isn't a mistake.
+                        onBlur={() => {
+                          if (email.trim()) validateEmailField()
+                        }}
                         disabled={pending}
                         placeholder="you@example.com"
                         error={!!emailError}
@@ -462,8 +485,15 @@ export function AccountLoginDialog({
               <Button
                 variant="primary"
                 modifier="solid"
-                label="Done"
-                onClick={handleClose}
+                label={getStarted ? 'Next: connect your database' : 'Done'}
+                onClick={
+                  getStarted
+                    ? () => {
+                        reset()
+                        getStarted.onNext()
+                      }
+                    : handleClose
+                }
               />
             )}
           </HStack>

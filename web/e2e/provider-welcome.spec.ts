@@ -34,17 +34,14 @@ for (const source of ['missing', 'trial'] as const) {
     await page.goto('/')
     // The gate stands in for Home inside the app shell.
     const main = mainContent(page)
-    const welcome = main.getByText(
-      'Set up AI to get fixes and the daily report.'
-    )
+    const welcome = main.getByText("Find out what's slowing your database.")
     await expect(welcome).toBeVisible()
-    await expect(main.getByText('Hosted by Readyset')).toBeVisible()
+    await expect(main.getByText('Sign in to Readyset')).toBeVisible()
     await expect(
       main.getByRole('button', { name: 'Sign in', exact: true })
     ).toBeVisible()
-    await expect(main.getByText('Use my own key')).toBeVisible()
     await expect(
-      main.getByRole('button', { name: 'Add key', exact: true })
+      main.getByRole('button', { name: 'Use my own Anthropic key instead' })
     ).toBeVisible()
     await expect(main.getByRole('region', { name: 'Today' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: /skip/i })).toHaveCount(0)

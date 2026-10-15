@@ -189,6 +189,19 @@ describe('AccountLoginDialog', () => {
     ).toBe(true)
   })
 
+  it('leaves an empty field alone when focus moves to GitHub or Google', () => {
+    renderWithClient(
+      <AccountLoginDialog isOpen onClose={vi.fn()} />,
+      createTestQueryClient()
+    )
+
+    const input = screen.getByLabelText('Email address')
+    fireEvent.blur(input)
+
+    expect(screen.queryByText('Enter a valid email address.')).toBeNull()
+    expect(input.getAttribute('aria-invalid')).toBeNull()
+  })
+
   it('offers GitHub OAuth from the same Readyset dialog', async () => {
     renderWithClient(
       <AccountLoginDialog isOpen onClose={vi.fn()} />,

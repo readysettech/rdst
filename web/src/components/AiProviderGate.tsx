@@ -1,6 +1,5 @@
 import { Alert } from '@rs/ui-new/alert'
 import { Button } from '@rs/ui-new/button'
-import { DividedList, ListRow } from '@rs/ui-new/divided-list'
 import { ErrorState } from '@rs/ui-new/error-state'
 import { PageBar } from '@rs/ui-new/page-bar'
 import { PageContainer } from '@rs/ui-new/page-container'
@@ -8,14 +7,16 @@ import { Spinner } from '@rs/ui-new/spinner'
 import { HStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useQueryClient } from '@tanstack/react-query'
-import { type ReactNode, useMemo, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import type { EnvRequirement } from '../lib/api'
 import {
   invalidateTrialRelatedQueries,
   useTrialSource,
 } from '../lib/trialQueries'
 import type { AiGate } from '../lib/useAiGate'
+import { useOpenAddDatabase } from './configure/addDatabase'
 import { EnvSecretsDialog } from './EnvSecretsDialog'
+import { claimFirstRunPopup, GetStarted, GetStartedButton } from './GetStarted'
 import { AccountLoginDialog } from './TrialRegistrationDialog'
 
 interface AiProviderGateProps {
@@ -46,30 +47,6 @@ function GateFrame({
   )
 }
 
-function OptionRow({
-  name,
-  caption,
-  action,
-}: {
-  name: string
-  caption: string
-  action: ReactNode
-}) {
-  return (
-    <ListRow columns="1fr auto">
-      <div className="min-w-0">
-        <Text level="body-medium" className="text-content-layout-1">
-          {name}
-        </Text>
-        <Text level="caption" className="text-content-layout-3">
-          {caption}
-        </Text>
-      </div>
-      {action}
-    </ListRow>
-  )
-}
-
 export function AiProviderGate({
   gate,
   notice,
@@ -80,6 +57,13 @@ export function AiProviderGate({
     useTrialSource()
   const [accountOpen, setAccountOpen] = useState(false)
   const [keyOpen, setKeyOpen] = useState(false)
+  const openAddDatabase = useOpenAddDatabase()
+  // A new install opens straight into sign-in: once per app session, and only
+  // when AI has never been set up (not when a saved key stopped working).
+  const firstRun = gate.status === 'blocked' && gate.reason === 'missing'
+  useEffect(() => {
+    if (firstRun && claimFirstRunPopup('sign-in')) setAccountOpen(true)
+  }, [firstRun])
 
   const keyRequirements = useMemo<EnvRequirement[]>(() => {
     if (anthropicRequirement) {
@@ -142,46 +126,33 @@ export function AiProviderGate({
 
   return (
     <GateFrame title={title} notice={notice}>
-      <Text as="p" level="headline-3" className="text-content-layout-1">
-        Set up AI to get fixes and the daily report.
-      </Text>
       {gateError && (
         <Alert
           tone="quiet"
           variant="negative"
           icon="alert"
           label={gateError}
-          className="mt-4"
+          className="mb-6 max-w-2xl"
         />
       )}
-      <DividedList className="mt-6 max-w-2xl">
-        <OptionRow
-          name="Hosted by Readyset"
-          caption="No API key to manage."
-          action={
-            <Button
-              variant="primary"
-              modifier="solid"
-              size="small"
-              label="Sign in"
-              onClick={() => setAccountOpen(true)}
-            />
-          }
-        />
-        <OptionRow
-          name="Use my own key"
-          caption="Your provider bills you directly."
-          action={
-            <Button
-              variant="primary"
-              modifier="ghost"
-              size="small"
-              label="Add key"
-              onClick={() => setKeyOpen(true)}
-            />
-          }
-        />
-      </DividedList>
+      <GetStarted
+        step="sign-in"
+        action={
+          <GetStartedButton
+            label="Sign in"
+            onClick={() => setAccountOpen(true)}
+          />
+        }
+        footer={
+          <Button
+            variant="primary"
+            modifier="ghost"
+            size="small"
+            label="Use my own Anthropic key instead"
+            onClick={() => setKeyOpen(true)}
+          />
+        }
+      />
 
       <AccountLoginDialog
         isOpen={accountOpen}
@@ -189,7 +160,18 @@ export function AiProviderGate({
         onSuccess={() => {
           setAccountOpen(false)
           refresh()
+          if (firstRun) openAddDatabase()
         }}
+        getStarted={
+          firstRun
+            ? {
+                onNext: () => {
+                  setAccountOpen(false)
+                  openAddDatabase()
+                },
+              }
+            : undefined
+        }
       />
       <EnvSecretsDialog
         isOpen={keyOpen}

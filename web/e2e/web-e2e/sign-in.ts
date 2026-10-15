@@ -46,18 +46,18 @@ export async function signInWithEmail(
   const email = ciAddress(emailLabel)
   const requestedAt = new Date()
 
-  // Signed out with no Anthropic key, Home is the AI gate inside the app
-  // shell; its hosted option opens the sign-in dialog with the email field.
+  // Signed out with no Anthropic key, Home is the get-started steps inside the
+  // app shell; the sign-in step opens the sign-in dialog with the email field.
   await page.goto('/')
   await expect(
-    mainContent(page).getByText('Set up AI to get fixes and the daily report.')
+    mainContent(page).getByText("Find out what's slowing your database.")
   ).toBeVisible()
   await mainContent(page)
     .getByRole('button', { name: 'Sign in', exact: true })
     .click()
   const dialog = page.getByRole('dialog')
   await expect(
-    dialog.getByRole('heading', { name: 'Sign in to Readyset' })
+    dialog.getByRole('heading', { name: 'Sign in or sign up to get started' })
   ).toBeVisible()
   await expect(
     dialog.getByRole('button', { name: 'Continue with Google' })

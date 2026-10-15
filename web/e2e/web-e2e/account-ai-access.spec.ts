@@ -23,18 +23,18 @@ async function resetLocalState(page: Page): Promise<void> {
   await clearTargets(page.request)
 }
 
-/** Signed out with no key, Home is the AI choice inside the app shell. */
+/** Signed out with no key, Home is the get-started steps inside the app shell. */
 async function expectSignedOutAiAccess(page: Page): Promise<void> {
   await page.goto('/')
   const main = mainContent(page)
   await expect(
-    main.getByText('Set up AI to get fixes and the daily report.')
+    main.getByText("Find out what's slowing your database.")
   ).toBeVisible()
   await expect(
     main.getByRole('button', { name: 'Sign in', exact: true })
   ).toBeVisible()
   await expect(
-    main.getByRole('button', { name: 'Add key', exact: true })
+    main.getByRole('button', { name: 'Use my own Anthropic key instead' })
   ).toBeVisible()
   await expect(page.getByTestId('sidebar-sign-in')).toBeVisible()
   await expect(page.getByTestId('sidebar-account-email')).toHaveCount(0)
@@ -56,7 +56,7 @@ test('account login unlocks hosted Ask and sign-out restores the AI access choic
 
   // The alternate BYOK path must remain usable without creating an account.
   await mainContent(page)
-    .getByRole('button', { name: 'Add key', exact: true })
+    .getByRole('button', { name: 'Use my own Anthropic key instead' })
     .click()
   const keyDialog = page.getByRole('dialog')
   await expect(

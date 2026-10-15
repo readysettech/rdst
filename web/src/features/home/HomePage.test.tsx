@@ -235,19 +235,18 @@ describe('HomePage', () => {
     expect(within(recent).getByText('2 days ago, fix suggested')).toBeTruthy()
   })
 
-  it('shows one line, one action and what follows when there is no database', async () => {
+  it('shows the get started steps, at connecting a database, when there is no database', async () => {
     setFixtureOverride('ca-home-empty')
     renderWithClient(<HomePage />)
 
-    expect(await screen.findByText('No database yet.')).toBeTruthy()
+    expect(await screen.findByText('Connect your database')).toBeTruthy()
     const solids = screen
       .getAllByRole('button')
       .filter((button) => button.className.includes('bg-surface-primary-solid'))
     expect(solids.map((button) => button.textContent)).toEqual([
       'Add a database',
     ])
-    expect(screen.getByText('After you add one')).toBeTruthy()
-    expect(screen.getByText('Fixes show up in Actions')).toBeTruthy()
+    expect(screen.getByText('Turn on monitoring')).toBeTruthy()
     expect(screen.queryByText(/Inbox/)).toBeNull()
     expect(screen.queryByTestId('home-day-card')).toBeNull()
     expect(screen.queryByRole('region', { name: 'Today' })).toBeNull()
