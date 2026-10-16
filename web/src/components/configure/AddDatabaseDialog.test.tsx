@@ -485,6 +485,17 @@ describe('AddDatabaseDialog', () => {
     expect(screen.getByText('Import source: aws')).toBeTruthy()
   })
 
+  it('shows the getting-started progress only for the first database', () => {
+    renderDialog('form')
+    expect(screen.getByTestId('get-started-strip').textContent).toContain(
+      'Step 2 of 3 · Connect database'
+    )
+    cleanup()
+
+    renderDialog('form', ['prod'])
+    expect(screen.queryByTestId('get-started-strip')).toBeNull()
+  })
+
   it('stays closed without a request', () => {
     renderDialog(null)
 

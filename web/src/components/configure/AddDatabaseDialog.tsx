@@ -31,6 +31,7 @@ import type {
   ConfigureFormData,
   ConfigureTargetDetail,
 } from '../../types/configure'
+import { GetStartedStrip } from '../GetStarted'
 import {
   type AddRequest,
   notifyDatabasesChanged,
@@ -605,14 +606,21 @@ export function AddDatabaseDialog({
   )
   const [step, setStep] = useState<ImportStep>('source')
   const [lastEdit, setLastEdit] = useState(edit)
+  // Adding the first database is step 2 of getting started. Held while open, so the strip
+  // stays through the add that ends the step.
+  const status = useSystemStatus()
+  const [firstDatabase, setFirstDatabase] = useState(false)
   if (request !== seen) {
     setSeen(request)
     if (request) {
       setOpening((count) => count + 1)
       setImporting(importingFor(request))
       setStep('source')
+      setFirstDatabase(false)
     }
   }
+  if (request && !edit && status.data?.targets.length === 0 && !firstDatabase)
+    setFirstDatabase(true)
   if (edit && edit !== lastEdit) setLastEdit(edit)
   const editing = edit ?? (open ? null : lastEdit)
   const title = editing
@@ -654,6 +662,11 @@ export function AddDatabaseDialog({
             )}
             <ModalTitle>{title}</ModalTitle>
           </div>
+          {firstDatabase && !editing && (
+            <div className="shrink-0 px-6 pt-2">
+              <GetStartedStrip step="add-database" />
+            </div>
+          )}
           {editing ? (
             <ConnectionForm
               key={editing.name}

@@ -1,5 +1,6 @@
 import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
+import { Progress } from '@rs/ui-new/progress'
 import { Text } from '@rs/ui-new/text'
 import type { ReactNode } from 'react'
 
@@ -134,49 +135,41 @@ export function GetStartedButton({
   )
 }
 
-/** The three steps as one compact row, for the sign-in dialog. */
-export function GetStartedStrip({ step }: { step: GetStartedStep }) {
+/**
+ * Where a first-run dialog sits among the three steps: a progress bar over the step's
+ * name and the one after it.
+ */
+export function GetStartedStrip({
+  step,
+}: {
+  step: (typeof STEPS)[number]['key']
+}) {
   const current = STEPS.findIndex((item) => item.key === step)
+  const next = STEPS[current + 1]
   return (
-    <ol className="grid grid-cols-3 gap-2" data-testid="get-started-strip">
-      {STEPS.map((item, index) => {
-        const done = index < current
-        const active = index === current
-        return (
-          <li
-            key={item.key}
-            aria-current={active ? 'step' : undefined}
-            className={`flex items-center gap-2 rounded-control px-2.5 py-2 ${
-              active ? 'bg-surface-layout-1' : ''
-            }`}
-          >
-            <span
-              className={`grid size-5 shrink-0 place-items-center rounded-full text-caption tabular-nums ${
-                done
-                  ? 'bg-surface-positive-soft text-content-positive-soft'
-                  : active
-                    ? 'bg-surface-primary-solid text-content-primary-solid'
-                    : 'bg-surface-layout-1 text-content-layout-3'
-              }`}
-            >
-              {done ? (
-                <Icon name="tick" label="Done" size="small" />
-              ) : (
-                index + 1
-              )}
-            </span>
-            <Text
-              level="caption"
-              className={
-                active ? 'text-content-layout-1' : 'text-content-layout-3'
-              }
-            >
-              {item.short}
-            </Text>
-          </li>
-        )
-      })}
-    </ol>
+    <div className="flex flex-col gap-2" data-testid="get-started-strip">
+      <Progress
+        tone="quiet"
+        // The default track is the dialog surface's own color; the field inset keeps
+        // the steps still to come visible.
+        className="bg-surface-layout-1"
+        value={current + 1}
+        max={STEPS.length}
+        label="Getting started"
+      />
+      <div className="flex items-baseline justify-between gap-3">
+        <Text level="caption" className="text-content-layout-3">
+          Step {current + 1} of {STEPS.length}
+          {' · '}
+          <span className="text-content-layout-1">{STEPS[current]?.short}</span>
+        </Text>
+        {next && (
+          <Text level="caption" className="text-content-layout-3">
+            Next: {next.short}
+          </Text>
+        )}
+      </div>
+    </div>
   )
 }
 

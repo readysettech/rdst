@@ -24,6 +24,8 @@ import {
 import { monitorKeys } from '@/lib/monitor/keys'
 import { invalidateTrialRelatedQueries } from '@/lib/trialQueries'
 import { DialogShell } from '../../../components/DialogShell'
+import { GetStartedStrip } from '../../../components/GetStarted'
+import { useSystemStatus } from '../../../lib/useSystemStatus'
 import { SettingRow } from './SettingRow'
 
 export function EnableMonitoringDialog({
@@ -41,6 +43,8 @@ export function EnableMonitoringDialog({
   // Absent outside a router, as in isolated renders; then the dialog only closes.
   const router = useRouter({ warn: false })
   const settings = useMonitorSettings(target)
+  // Turning on the only database is the last step of getting started.
+  const onlyDatabase = useSystemStatus().data?.targets.length === 1
   // AI checks need a Readyset account: signed out, deep analysis waits for a sign-in. A full
   // account or used-up AI usage holds it too.
   const limit = useMonitoringLimit(target, open).data
@@ -145,6 +149,11 @@ export function EnableMonitoringDialog({
         )
       }
     >
+      {onlyDatabase && (
+        <div className="mb-4">
+          <GetStartedStrip step="monitor" />
+        </div>
+      )}
       <PrerequisitesChecker
         target={target}
         state={prerequisites}
