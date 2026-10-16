@@ -33,6 +33,15 @@ export function updateFeedUrl(
     : undefined
 }
 
+/** The tray's restart item, shown once an update has downloaded and can be installed. */
+export function restartToUpdateLabel(
+  state: UpdateStatePayload | null
+): string | null {
+  return state?.status === 'ready'
+    ? `Restart to update (${state.version})`
+    : null
+}
+
 export interface UpdateEnvironment {
   isPackaged: boolean
   /**

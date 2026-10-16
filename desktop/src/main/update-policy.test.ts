@@ -5,6 +5,7 @@ import {
   manualDownloadLinks,
   parseUpdateMetadata,
   resolveUpdateMode,
+  restartToUpdateLabel,
   updateFeedUrl,
 } from './update-policy.js'
 
@@ -227,5 +228,36 @@ describe('updateFeedUrl', () => {
       'https://downloads.readyset.io/packages/rdst-desktop-staging/linux/update/rdst-desktop-staging-1.0.42-amd64.deb',
       'https://downloads.readyset.io/packages/rdst-desktop-staging/linux/update/rdst-desktop-staging-1.0.42-x86_64.rpm',
     ])
+  })
+})
+
+describe('restartToUpdateLabel', () => {
+  it('offers a restart once the update is ready', () => {
+    expect(
+      restartToUpdateLabel({
+        status: 'ready',
+        version: '0.1.2706',
+        downloadLinks: [],
+      })
+    ).toBe('Restart to update (0.1.2706)')
+  })
+
+  it('offers nothing before the update is ready', () => {
+    expect(restartToUpdateLabel(null)).toBeNull()
+    expect(
+      restartToUpdateLabel({
+        status: 'available',
+        version: '0.1.2706',
+        downloadLinks: [],
+      })
+    ).toBeNull()
+    expect(
+      restartToUpdateLabel({
+        status: 'downloading',
+        version: '0.1.2706',
+        downloadLinks: [],
+        progress: 40,
+      })
+    ).toBeNull()
   })
 })

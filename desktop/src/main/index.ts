@@ -83,7 +83,8 @@ import {
   type TrayStatusWatcher,
   watchTrayStatus,
 } from './tray-state.js'
-import { setupAutoUpdates } from './updater.js'
+import { restartToUpdateLabel } from './update-policy.js'
+import { onUpdateStateChange, setupAutoUpdates } from './updater.js'
 import {
   cleanUpThen,
   hideWindowOnClose,
@@ -151,6 +152,9 @@ let settings: DesktopSettings
 let rendererUrl = ''
 let starting = true
 let trayMenu: Menu | null = null
+let installUpdate: (() => void) | null = null
+// Set once a downloaded update can be installed; the tray offers the restart.
+let restartLabel: string | null = null
 // The databases the monitoring submenu lists; null until the backend answers.
 let trayDatabases: TrayDatabase[] | null = null
 let trayDatabasesLoading: Promise<void> | null = null
@@ -822,6 +826,12 @@ function buildTrayMenu(): void {
           }
   )
   trayMenu = Menu.buildFromTemplate([
+    ...(restartLabel
+      ? [
+          { label: restartLabel, click: () => installUpdate?.() },
+          { type: 'separator' as const },
+        ]
+      : []),
     { label: 'Open RDST', click: focusMainWindow },
     {
       label: 'Inbox',
@@ -1165,7 +1175,22 @@ async function startApplication(): Promise<void> {
   if (SMOKE_MODE) {
     ipcMain.handle('updates:get-state', () => null)
   } else {
-    setupAutoUpdates(
+    onUpdateStateChange((state) => {
+      const label = restartToUpdateLabel(state)
+      if (label === restartLabel) return
+      restartLabel = label
+      buildTrayMenu()
+      if (label && settings.notificationsEnabled) {
+        showNotification(
+          `RDST ${state.version} is ready`,
+          'Click to restart RDST and finish updating.',
+          () => installUpdate?.(),
+          false,
+          'update_ready'
+        )
+      }
+    })
+    installUpdate = setupAutoUpdates(
       {
         isPackaged: app.isPackaged,
         platform: process.platform,

@@ -25,6 +25,7 @@ const INSTALL_TIMEOUT_MS = 10_000
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 let currentState: UpdateStatePayload | null = null
+const stateListeners = new Set<(state: UpdateStatePayload) => void>()
 
 /**
  * Reads the rdstUpdates flag the package scripts bake into the packaged
@@ -45,9 +46,18 @@ function packagedUpdatesEnabled(): boolean {
 
 function broadcastState(state: UpdateStatePayload): void {
   currentState = state
+  for (const listener of stateListeners) listener(state)
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('updates:state-changed', state)
   }
+}
+
+/** Calls `listener` with each update state change in the main process. */
+export function onUpdateStateChange(
+  listener: (state: UpdateStatePayload) => void
+): () => void {
+  stateListeners.add(listener)
+  return () => stateListeners.delete(listener)
 }
 
 function scheduleChecks(check: () => void): void {
@@ -157,20 +167,20 @@ function setupUpdateNotifications(env: UpdateEnvironment): void {
  * Wires update delivery for packaged builds and exposes update state to
  * the renderer over updates:* IPC channels. The handlers are registered
  * even when updates are disabled so the preload bridge always works.
+ * Returns the restart-to-update action, which does nothing until an update is ready.
  */
 export function setupAutoUpdates(
   options: Omit<UpdateEnvironment, 'updatesEnabled'>,
   /** Ends the app's background work, then calls install; windows must close for it to run. */
   beforeInstall: (install: () => void) => void
-): void {
+): () => void {
   const env: UpdateEnvironment = {
     ...options,
     updatesEnabled: options.isPackaged && packagedUpdatesEnabled(),
   }
   const mode = resolveUpdateMode(env)
 
-  ipcMain.handle('updates:get-state', () => currentState)
-  ipcMain.on('updates:install', () => {
+  const installUpdate = () => {
     if (mode === 'auto' && currentState?.status === 'ready') {
       beforeInstall(() =>
         installOrQuit({
@@ -182,11 +192,14 @@ export function setupAutoUpdates(
         })
       )
     }
-  })
+  }
+  ipcMain.handle('updates:get-state', () => currentState)
+  ipcMain.on('updates:install', installUpdate)
 
   if (mode === 'auto') {
     setupInPlaceUpdates()
   } else if (mode === 'notify') {
     setupUpdateNotifications(env)
   }
+  return installUpdate
 }
