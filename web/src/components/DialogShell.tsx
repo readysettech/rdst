@@ -4,6 +4,7 @@ import {
   Modal,
   ModalContent,
   ModalContentContainer,
+  type ModalContentProps,
   ModalTitle,
 } from '@rs/ui-new/modal'
 import { Scrollable } from '@rs/ui-new/scrollable'
@@ -24,6 +25,8 @@ export interface DialogShellProps {
   busy?: boolean
   children: ReactNode
   testId?: string
+  /** Where focus lands as the dialog opens, when not on its first control. */
+  onOpenAutoFocus?: ModalContentProps['onOpenAutoFocus']
 }
 
 export function DialogShell({
@@ -36,6 +39,7 @@ export function DialogShell({
   busy,
   children,
   testId,
+  onOpenAutoFocus,
 }: DialogShellProps) {
   return (
     <Modal open={open} onOpenChange={(next) => !next && !busy && onClose()}>
@@ -45,6 +49,7 @@ export function DialogShell({
           hideClose={busy}
           description={description}
           data-testid={testId}
+          onOpenAutoFocus={onOpenAutoFocus}
         >
           <div className="shrink-0 pt-4.5 pr-14 pl-6">
             <ModalTitle>{title}</ModalTitle>

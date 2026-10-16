@@ -38,7 +38,7 @@ export async function sendAccountMagicLink(
 
 export async function startAccountOAuth(
   context: AccountLoginResponse,
-  provider: 'google' | 'github'
+  provider: 'google'
 ): Promise<void> {
   const { data, error } = await authClient(context).auth.signInWithOAuth({
     provider,
@@ -59,9 +59,6 @@ export async function startAccountOAuth(
 
 export const startAccountGoogleOAuth = (context: AccountLoginResponse) =>
   startAccountOAuth(context, 'google')
-
-export const startAccountGithubOAuth = (context: AccountLoginResponse) =>
-  startAccountOAuth(context, 'github')
 
 function clearTemporarySession(loginId: string): void {
   const prefix = storageKey(loginId)

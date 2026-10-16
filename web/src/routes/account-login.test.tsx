@@ -4,7 +4,6 @@ import { renderWithClient } from '@/test-utils'
 import {
   completeAccountRedirect,
   sendAccountMagicLink,
-  startAccountGithubOAuth,
   startAccountGoogleOAuth,
 } from '../lib/accountAuth'
 import { fetchAccountStatus, startAccountLogin } from '../lib/api'
@@ -29,7 +28,6 @@ vi.mock('../lib/api', () => ({
 }))
 
 vi.mock('../lib/accountAuth', () => ({
-  startAccountGithubOAuth: vi.fn(async () => undefined),
   startAccountGoogleOAuth: vi.fn(async () => undefined),
   sendAccountMagicLink: vi.fn(async () => undefined),
   completeAccountRedirect: vi.fn(),
@@ -46,16 +44,16 @@ afterEach(() => {
 })
 
 describe('SignInPage', () => {
-  it('is the one page with the rising purple, and says what signing in is for', () => {
+  it('offers Google and an emailed link, and says what signing in is for', () => {
     renderWithClient(<SignInPage />)
 
     expect(screen.getByRole('heading', { level: 1, name: 'RDST' })).toBeTruthy()
     expect(screen.getByText('Find slow queries. Prove the fix.')).toBeTruthy()
-    const github = screen.getByRole('button', { name: 'Continue with GitHub' })
     const google = screen.getByRole('button', { name: 'Continue with Google' })
-    expect(github.className).toContain('bg-surface-rising-solid')
-    expect(google.className).not.toContain('bg-surface-rising-solid')
     expect(google.className).not.toContain('bg-surface-primary-solid')
+    expect(
+      screen.queryByRole('button', { name: 'Continue with GitHub' })
+    ).toBeNull()
     expect(
       screen.getByText(
         'Signing in turns on AI monitoring and the free AI included with a Readyset account for analyses, checks and Ask.'
@@ -81,25 +79,18 @@ describe('SignInPage', () => {
     expect(router.back).toHaveBeenCalledOnce()
   })
 
-  it('starts the provider sign-in from each button', async () => {
+  it('starts the Google sign-in from its button', async () => {
     renderWithClient(<SignInPage />)
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with GitHub' })
-    )
-    await waitFor(() =>
-      expect(vi.mocked(startAccountGithubOAuth)).toHaveBeenCalledWith({
-        login_id: 'login-1',
-      })
-    )
-    expect(vi.mocked(startAccountLogin)).toHaveBeenCalledTimes(1)
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Continue with Google' })
     )
     await waitFor(() =>
-      expect(vi.mocked(startAccountGoogleOAuth)).toHaveBeenCalled()
+      expect(vi.mocked(startAccountGoogleOAuth)).toHaveBeenCalledWith({
+        login_id: 'login-1',
+      })
     )
+    expect(vi.mocked(startAccountLogin)).toHaveBeenCalledTimes(1)
   })
 
   it('sends an emailed sign-in link and finishes when it is opened', async () => {
@@ -158,7 +149,7 @@ describe('SignInPage', () => {
       )
     ).toBeTruthy()
     expect(
-      screen.getByRole('button', { name: 'Continue with GitHub' })
+      screen.getByRole('button', { name: 'Continue with Google' })
     ).toBeTruthy()
   })
 

@@ -12,7 +12,6 @@ import { createTestQueryClient, renderWithClient } from '@/test-utils'
 import {
   completeAccountRedirect,
   sendAccountMagicLink,
-  startAccountGithubOAuth,
   startAccountGoogleOAuth,
 } from '../lib/accountAuth'
 import { fetchAccountBrowserCallback, startAccountLogin } from '../lib/api'
@@ -22,7 +21,6 @@ import { AccountLoginDialog } from './TrialRegistrationDialog'
 vi.mock('../lib/accountAuth', () => ({
   completeAccountRedirect: vi.fn(),
   sendAccountMagicLink: vi.fn(),
-  startAccountGithubOAuth: vi.fn(),
   startAccountGoogleOAuth: vi.fn(),
 }))
 
@@ -61,7 +59,6 @@ describe('AccountLoginDialog', () => {
     })
     vi.mocked(sendAccountMagicLink).mockResolvedValue(undefined)
     vi.mocked(startAccountGoogleOAuth).mockResolvedValue(undefined)
-    vi.mocked(startAccountGithubOAuth).mockResolvedValue(undefined)
     vi.mocked(completeAccountRedirect).mockResolvedValue({
       state: 'success',
       detail: 'Signed in to Readyset',
@@ -189,7 +186,7 @@ describe('AccountLoginDialog', () => {
     ).toBe(true)
   })
 
-  it('leaves an empty field alone when focus moves to GitHub or Google', () => {
+  it('leaves an empty field alone when focus moves to Google', () => {
     renderWithClient(
       <AccountLoginDialog isOpen onClose={vi.fn()} />,
       createTestQueryClient()
@@ -202,22 +199,7 @@ describe('AccountLoginDialog', () => {
     expect(input.getAttribute('aria-invalid')).toBeNull()
   })
 
-  it('offers GitHub OAuth from the same Readyset dialog', async () => {
-    renderWithClient(
-      <AccountLoginDialog isOpen onClose={vi.fn()} />,
-      createTestQueryClient()
-    )
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with GitHub' })
-    )
-
-    await waitFor(() =>
-      expect(startAccountGithubOAuth).toHaveBeenCalledWith(context)
-    )
-  })
-
-  it('leads with GitHub, then Google, and says what signing in is for', () => {
+  it('offers Google and an emailed link, and says what signing in is for', () => {
     renderWithClient(
       <AccountLoginDialog isOpen onClose={vi.fn()} />,
       createTestQueryClient()
@@ -226,12 +208,16 @@ describe('AccountLoginDialog', () => {
     expect(
       screen.getByRole('heading', { name: 'Sign in to Readyset' })
     ).toBeTruthy()
-    const buttons = screen
-      .getAllByRole('button')
-      .map((button) => button.textContent?.trim())
-    expect(buttons.indexOf('Continue with GitHub')).toBeLessThan(
-      buttons.indexOf('Continue with Google')
-    )
+    expect(
+      screen.getByRole('button', { name: 'Continue with Google' })
+    ).toBeTruthy()
+    expect(
+      screen.queryByRole('button', { name: 'Continue with GitHub' })
+    ).toBeNull()
+    // The dialog's one solid action is the emailed link.
+    expect(
+      screen.getByRole('button', { name: 'Send sign-in link' }).className
+    ).toContain('bg-surface-primary-solid')
     expect(
       screen.getByText(
         'Signing in turns on AI monitoring and the free AI included with a Readyset account for analyses, checks and Ask.'

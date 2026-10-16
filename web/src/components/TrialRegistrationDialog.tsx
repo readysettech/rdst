@@ -2,22 +2,14 @@ import { Alert } from '@rs/ui-new/alert'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
 import { Field } from '@rs/ui-new/field'
-import {
-  Modal,
-  ModalContent,
-  ModalContentContainer,
-  ModalDescription,
-  ModalTitle,
-} from '@rs/ui-new/modal'
-import { Scrollable } from '@rs/ui-new/scrollable'
-import { HStack, VStack } from '@rs/ui-new/stack'
+import { ModalDescription } from '@rs/ui-new/modal'
+import { VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useId, useRef, useState } from 'react'
 import {
   completeAccountRedirect,
   sendAccountMagicLink,
-  startAccountGithubOAuth,
   startAccountGoogleOAuth,
 } from '../lib/accountAuth'
 import {
@@ -27,6 +19,7 @@ import {
 } from '../lib/api'
 import { isDesktopRuntime } from '../lib/desktop'
 import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
+import { DialogShell } from './DialogShell'
 import { isValidEmail, normalizeEmail } from './emailValidation'
 import { GetStartedStrip } from './GetStarted'
 
@@ -42,20 +35,7 @@ interface AccountLoginDialogProps {
   getStarted?: { onNext: () => void }
 }
 
-// The marks on the sign-in page, so the dialog offers the same two buttons.
-function GithubMark() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-4 w-4"
-      viewBox="0 0 16 16"
-      fill="currentColor"
-    >
-      <path d="M8 .2a8 8 0 0 0-2.5 15.6c.4.1.5-.2.5-.4v-1.4c-2.2.5-2.7-1-2.7-1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.2 1.9.9 2.3.7.1-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.1-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8a7.5 7.5 0 0 1 4 0c1.5-1 2.2-.8 2.2-.8.4 1.1.2 1.9.1 2.1.5.6.8 1.3.8 2.1 0 3.1-1.9 3.8-3.6 4 .3.3.6.8.6 1.5v2.2c0 .2.1.5.6.4A8 8 0 0 0 8 .2z" />
-    </svg>
-  )
-}
-
+// The mark on the sign-in page, so the dialog offers the same button.
 function GoogleMark() {
   return (
     <svg
@@ -160,15 +140,6 @@ export function AccountLoginDialog({
     },
   })
 
-  const githubMutation = useMutation({
-    mutationFn: async () => {
-      rememberReturn()
-      const context = await startAccountLogin(accountCallbackUrl())
-      await startAccountGithubOAuth(context)
-      if (isDesktopRuntime()) setDesktopLoginId(context.login_id)
-    },
-  })
-
   const callbackMutation = useMutation({
     mutationFn: ({
       loginId,
@@ -263,7 +234,6 @@ export function AccountLoginDialog({
     callbackStarted.current = false
     magicLinkMutation.reset()
     googleMutation.reset()
-    githubMutation.reset()
     callbackMutation.reset()
   }
 
@@ -282,15 +252,11 @@ export function AccountLoginDialog({
   }
 
   const mutationError =
-    magicLinkMutation.error ??
-    googleMutation.error ??
-    githubMutation.error ??
-    callbackMutation.error
+    magicLinkMutation.error ?? googleMutation.error ?? callbackMutation.error
   const error = mutationError instanceof Error ? mutationError.message : null
   const pending =
     magicLinkMutation.isPending ||
     googleMutation.isPending ||
-    githubMutation.isPending ||
     callbackMutation.isPending
   const callbackFailed =
     !!callbackLoginId &&
@@ -309,197 +275,175 @@ export function AccountLoginDialog({
     !complete && !completingCallback && !callbackFailed && !linkSent
 
   return (
-    <Modal open={isOpen} onOpenChange={(open) => !open && handleClose()}>
-      <ModalContentContainer open={isOpen}>
-        <ModalContent
-          tone="quiet"
-          // Radix would open with focus on the first control, which here is a
-          // one-Enter trip into a third-party OAuth redirect. The email field
-          // is the safe landing spot. [F-45]
-          onOpenAutoFocus={(event) => {
-            event.preventDefault()
-            emailInputRef.current?.focus()
-          }}
-        >
-          <div className="shrink-0 pt-4.5 pr-14 pl-6">
-            <ModalTitle>
-              {complete
-                ? 'Signed in to Readyset'
-                : getStarted
-                  ? 'Sign in or sign up to get started'
-                  : 'Sign in to Readyset'}
-            </ModalTitle>
-          </div>
-          <Scrollable rootClassName="min-h-0 flex-1" className="px-6 pt-2 pb-5">
-            <VStack className="items-stretch gap-4">
-              {getStarted && (
-                <GetStartedStrip step={complete ? 'add-database' : 'sign-in'} />
-              )}
-              {getStarted && showProviders && (
-                <ModalDescription>
-                  New here? This creates your Readyset account.
-                </ModalDescription>
-              )}
-              {(error || callbackPollingError) && (
-                <Alert
-                  tone="quiet"
-                  variant="negative"
-                  icon="alert"
-                  label={
-                    callbackFailed
-                      ? 'This sign-in link has expired or was already used.'
-                      : (error ??
-                        callbackPollingError ??
-                        'Readyset sign-in failed')
-                  }
-                />
-              )}
+    <DialogShell
+      open={isOpen}
+      onClose={handleClose}
+      title={
+        complete
+          ? 'Signed in to Readyset'
+          : getStarted
+            ? 'Sign in or sign up to get started'
+            : 'Sign in to Readyset'
+      }
+      // Radix would open with focus on the first control, which here is a
+      // one-Enter trip into a third-party OAuth redirect. The email field
+      // is the safe landing spot. [F-45]
+      onOpenAutoFocus={(event) => {
+        event.preventDefault()
+        emailInputRef.current?.focus()
+      }}
+      action={
+        <>
+          {!complete && (
+            <Button
+              variant="primary"
+              modifier="ghost"
+              label="Cancel"
+              onClick={handleClose}
+              disabled={pending}
+            />
+          )}
+          {callbackFailed && (
+            <Button
+              variant="primary"
+              modifier="solid"
+              label="Start over"
+              onClick={startOver}
+            />
+          )}
+          {showProviders && (
+            <Button
+              variant="primary"
+              modifier="solid"
+              label="Send sign-in link"
+              onClick={() => {
+                if (validateEmailField()) magicLinkMutation.mutate()
+              }}
+              loading={magicLinkMutation.isPending}
+              disabled={!email.trim() || !!emailError || pending}
+            />
+          )}
+          {complete && (
+            <Button
+              variant="primary"
+              modifier="solid"
+              label={getStarted ? 'Next: connect your database' : 'Done'}
+              onClick={
+                getStarted
+                  ? () => {
+                      reset()
+                      getStarted.onNext()
+                    }
+                  : handleClose
+              }
+            />
+          )}
+        </>
+      }
+    >
+      <VStack className="items-stretch gap-4">
+        {getStarted && (
+          <GetStartedStrip step={complete ? 'add-database' : 'sign-in'} />
+        )}
+        {getStarted && showProviders && (
+          <ModalDescription>
+            New here? This creates your Readyset account.
+          </ModalDescription>
+        )}
+        {(error || callbackPollingError) && (
+          <Alert
+            tone="quiet"
+            variant="negative"
+            icon="alert"
+            label={
+              callbackFailed
+                ? 'This sign-in link has expired or was already used.'
+                : (error ?? callbackPollingError ?? 'Readyset sign-in failed')
+            }
+          />
+        )}
 
-              {complete ? (
-                <ModalDescription>
-                  Readyset account connected. Your included AI is ready to use.
-                </ModalDescription>
-              ) : completingCallback ? (
-                <ModalDescription>
-                  Completing your Readyset sign-in...
-                </ModalDescription>
-              ) : callbackFailed ? (
-                <VStack className="items-stretch gap-1">
-                  <Text level="body-small" className="text-content-layout-1">
-                    Sign-in could not be completed
-                  </Text>
-                  <ModalDescription>
-                    Start over to request a fresh sign-in link or use a
-                    provider.
-                  </ModalDescription>
-                </VStack>
-              ) : linkSent ? (
-                <VStack className="items-stretch gap-1">
-                  <Text level="body-small" className="text-content-layout-1">
-                    Check your email
-                  </Text>
-                  <ModalDescription>
-                    Open the sign-in link sent to {email.trim()}. It returns to
-                    this RDST application to finish securely.
-                  </ModalDescription>
-                </VStack>
-              ) : (
-                <VStack className="items-stretch gap-2.5">
-                  <Button
-                    variant="rising"
-                    modifier="solid"
-                    fullWidth
-                    label="Continue with GitHub"
-                    onClick={() => githubMutation.mutate()}
-                    loading={githubMutation.isPending}
-                    disabled={pending}
-                  >
-                    {!githubMutation.isPending && <GithubMark />}
-                    {!githubMutation.isPending && <span className="w-2" />}
-                  </Button>
-                  <Button
-                    variant="primary"
-                    modifier="outline"
-                    fullWidth
-                    label="Continue with Google"
-                    onClick={() => googleMutation.mutate()}
-                    loading={googleMutation.isPending}
-                    disabled={pending}
-                  >
-                    {!googleMutation.isPending && <GoogleMark />}
-                    {!googleMutation.isPending && <span className="w-2" />}
-                  </Button>
-                  <ModalDescription className="text-caption text-content-layout-3">
-                    Signing in turns on AI monitoring and the free AI included
-                    with a Readyset account for analyses, checks and Ask.
-                  </ModalDescription>
-                  <Field.Root className="mt-2 px-0 py-0">
-                    <Field.Label htmlFor={emailFieldId}>
-                      Email address
-                    </Field.Label>
-                    <Field.Content>
-                      <BaseInputText
-                        ref={emailInputRef}
-                        id={emailFieldId}
-                        type="email"
-                        autoComplete="email"
-                        value={email}
-                        onChange={(event) => {
-                          setEmail(event.target.value)
-                          if (emailError) setEmailError(null)
-                        }}
-                        // An empty field isn't checked on blur: leaving it for
-                        // GitHub or Google isn't a mistake.
-                        onBlur={() => {
-                          if (email.trim()) validateEmailField()
-                        }}
-                        disabled={pending}
-                        placeholder="you@example.com"
-                        error={!!emailError}
-                        aria-invalid={emailError ? true : undefined}
-                        aria-describedby={`${emailFieldId}-info`}
-                      />
-                      <div id={`${emailFieldId}-info`}>
-                        <Field.Info
-                          errorMessage={emailError ?? undefined}
-                          infoMessage="We'll email you a secure sign-in link."
-                        />
-                      </div>
-                    </Field.Content>
-                  </Field.Root>
-                </VStack>
-              )}
-            </VStack>
-          </Scrollable>
-          <HStack className="shrink-0 items-center justify-end gap-3 border-t border-border-layout-2 px-6 py-3.5">
-            {!complete && (
-              <Button
-                variant="primary"
-                modifier="ghost"
-                label="Cancel"
-                onClick={handleClose}
-                disabled={pending}
-              />
-            )}
-            {callbackFailed && (
-              <Button
-                variant="primary"
-                modifier="outline"
-                label="Start over"
-                onClick={startOver}
-              />
-            )}
-            {showProviders && (
-              <Button
-                variant="primary"
-                modifier="outline"
-                label="Send sign-in link"
-                onClick={() => {
-                  if (validateEmailField()) magicLinkMutation.mutate()
-                }}
-                loading={magicLinkMutation.isPending}
-                disabled={!email.trim() || !!emailError || pending}
-              />
-            )}
-            {complete && (
-              <Button
-                variant="primary"
-                modifier="solid"
-                label={getStarted ? 'Next: connect your database' : 'Done'}
-                onClick={
-                  getStarted
-                    ? () => {
-                        reset()
-                        getStarted.onNext()
-                      }
-                    : handleClose
-                }
-              />
-            )}
-          </HStack>
-        </ModalContent>
-      </ModalContentContainer>
-    </Modal>
+        {complete ? (
+          <ModalDescription>
+            Readyset account connected. Your included AI is ready to use.
+          </ModalDescription>
+        ) : completingCallback ? (
+          <ModalDescription>
+            Completing your Readyset sign-in...
+          </ModalDescription>
+        ) : callbackFailed ? (
+          <VStack className="items-stretch gap-1">
+            <Text level="body-small" className="text-content-layout-1">
+              Sign-in could not be completed
+            </Text>
+            <ModalDescription>
+              Start over to request a fresh sign-in link or use a provider.
+            </ModalDescription>
+          </VStack>
+        ) : linkSent ? (
+          <VStack className="items-stretch gap-1">
+            <Text level="body-small" className="text-content-layout-1">
+              Check your email
+            </Text>
+            <ModalDescription>
+              Open the sign-in link sent to {email.trim()}. It returns to this
+              RDST application to finish securely.
+            </ModalDescription>
+          </VStack>
+        ) : (
+          <VStack className="items-stretch gap-2.5">
+            <Button
+              variant="primary"
+              modifier="outline"
+              fullWidth
+              label="Continue with Google"
+              onClick={() => googleMutation.mutate()}
+              loading={googleMutation.isPending}
+              disabled={pending}
+            >
+              {!googleMutation.isPending && <GoogleMark />}
+              {!googleMutation.isPending && <span className="w-2" />}
+            </Button>
+            <Text as="p" level="caption" className="text-content-layout-3">
+              Signing in turns on AI monitoring and the free AI included with a
+              Readyset account for analyses, checks and Ask.
+            </Text>
+            <Field.Root className="mt-2 px-0 py-0">
+              <Field.Label htmlFor={emailFieldId}>Email address</Field.Label>
+              <Field.Content>
+                <BaseInputText
+                  ref={emailInputRef}
+                  id={emailFieldId}
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(event) => {
+                    setEmail(event.target.value)
+                    if (emailError) setEmailError(null)
+                  }}
+                  // An empty field isn't checked on blur: leaving it for
+                  // Google isn't a mistake.
+                  onBlur={() => {
+                    if (email.trim()) validateEmailField()
+                  }}
+                  disabled={pending}
+                  placeholder="you@example.com"
+                  error={!!emailError}
+                  aria-invalid={emailError ? true : undefined}
+                  aria-describedby={`${emailFieldId}-info`}
+                />
+                <div id={`${emailFieldId}-info`}>
+                  <Field.Info
+                    errorMessage={emailError ?? undefined}
+                    infoMessage="We'll email you a secure sign-in link."
+                  />
+                </div>
+              </Field.Content>
+            </Field.Root>
+          </VStack>
+        )}
+      </VStack>
+    </DialogShell>
   )
 }
 

@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   completeAccountRedirect,
   sendAccountMagicLink,
-  startAccountGithubOAuth,
   startAccountGoogleOAuth,
 } from './accountAuth'
 import {
@@ -94,28 +93,6 @@ describe('RDST account authentication', () => {
     })
     expect(window.open).toHaveBeenCalledWith(
       'https://accounts.google.com/o/oauth2/auth',
-      '_blank',
-      'noopener,noreferrer'
-    )
-  })
-
-  it('starts GitHub OAuth through the same desktop browser handoff', async () => {
-    signInWithOAuth.mockResolvedValue({
-      data: { url: 'https://github.com/login/oauth/authorize' },
-      error: null,
-    })
-
-    await startAccountGithubOAuth(context)
-
-    expect(signInWithOAuth).toHaveBeenCalledWith({
-      provider: 'github',
-      options: {
-        redirectTo: context.callback_url,
-        skipBrowserRedirect: true,
-      },
-    })
-    expect(window.open).toHaveBeenCalledWith(
-      'https://github.com/login/oauth/authorize',
       '_blank',
       'noopener,noreferrer'
     )

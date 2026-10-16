@@ -129,11 +129,8 @@ test('a11y: the sign-in page opens safely with nothing focused', async ({
     page.getByRole('heading', { level: 1, name: 'RDST' })
   ).toBeVisible()
   await expect(page.locator('#app-sidebar')).toHaveCount(0)
-  const github = page.getByRole('button', { name: 'Continue with GitHub' })
   const google = page.getByRole('button', { name: 'Continue with Google' })
-  await expect(github).toBeVisible()
   await expect(google).toBeVisible()
-  await expect(github).not.toBeFocused()
   await expect(google).not.toBeFocused()
   expect(
     await page.evaluate(() => document.activeElement === document.body)

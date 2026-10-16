@@ -12,7 +12,6 @@ import { takeLoginReturn } from '../components/TrialRegistrationDialog'
 import {
   completeAccountRedirect,
   sendAccountMagicLink,
-  startAccountGithubOAuth,
   startAccountGoogleOAuth,
 } from '../lib/accountAuth'
 import {
@@ -40,19 +39,6 @@ const LINK_EXPIRED = 'This sign-in link has expired or was already used.'
 // Supabase, Keyservice and the local backend each word a spent or stale link differently.
 const SPENT_LINK =
   /invalid_login|otp_expired|link is invalid|has expired|expired, or already|already (?:been )?used|already completed/i
-
-function GithubMark() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-4 w-4"
-      viewBox="0 0 16 16"
-      fill="currentColor"
-    >
-      <path d="M8 .2a8 8 0 0 0-2.5 15.6c.4.1.5-.2.5-.4v-1.4c-2.2.5-2.7-1-2.7-1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.2 1.9.9 2.3.7.1-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.1-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8a7.5 7.5 0 0 1 4 0c1.5-1 2.2-.8 2.2-.8.4 1.1.2 1.9.1 2.1.5.6.8 1.3.8 2.1 0 3.1-1.9 3.8-3.6 4 .3.3.6.8.6 1.5v2.2c0 .2.1.5.6.4A8 8 0 0 0 8 .2z" />
-    </svg>
-  )
-}
 
 function GoogleMark() {
   return (
@@ -145,8 +131,8 @@ function useEmailSignIn(waiting: boolean, onSignedIn: () => void) {
 }
 
 /**
- * The one page where the rising purple appears: sign in with a provider. A provider
- * redirect lands here with `callbackLoginId`, and the column finishes that sign-in.
+ * Sign in with Google or an emailed link. A provider redirect lands here with
+ * `callbackLoginId`, and the column finishes that sign-in.
  */
 export function SignInPage({
   callbackLoginId = null,
@@ -177,9 +163,6 @@ export function SignInPage({
     await open(context)
     if (isDesktopRuntime()) setDesktopLoginId(context.login_id)
   }
-  const github = useMutation({
-    mutationFn: () => start(startAccountGithubOAuth),
-  })
   const google = useMutation({
     mutationFn: () => start(startAccountGoogleOAuth),
   })
@@ -228,12 +211,7 @@ export function SignInPage({
   }, [])
 
   const failure =
-    github.error ??
-    google.error ??
-    magicLink.error ??
-    callback.error ??
-    pollError ??
-    null
+    google.error ?? magicLink.error ?? callback.error ?? pollError ?? null
   const failureText = failure instanceof Error ? failure.message : failure
   const linkExpired =
     (!!callbackLoginId && callback.isError) ||
@@ -256,11 +234,7 @@ export function SignInPage({
     }
     setFocusEmail(true)
   }
-  const pending =
-    github.isPending ||
-    google.isPending ||
-    magicLink.isPending ||
-    callback.isPending
+  const pending = google.isPending || magicLink.isPending || callback.isPending
 
   return (
     <main className="relative flex min-h-dvh items-center justify-center bg-surface-layout-2 px-6 py-12">
@@ -311,18 +285,6 @@ export function SignInPage({
         ) : (
           <div className="mt-8 flex w-full flex-col gap-2.5">
             <Button
-              variant="rising"
-              modifier="solid"
-              fullWidth
-              label="Continue with GitHub"
-              onClick={() => github.mutate()}
-              loading={github.isPending}
-              disabled={pending}
-            >
-              {!github.isPending && <GithubMark />}
-              {!github.isPending && <span className="w-2" />}
-            </Button>
-            <Button
               variant="primary"
               modifier="outline"
               fullWidth
@@ -371,7 +333,7 @@ export function SignInPage({
               <Button
                 type="submit"
                 variant="primary"
-                modifier="outline"
+                modifier="solid"
                 fullWidth
                 label="Send sign-in link"
                 loading={magicLink.isPending}

@@ -62,9 +62,6 @@ export async function signInWithEmail(
   await expect(
     dialog.getByRole('button', { name: 'Continue with Google' })
   ).toBeVisible()
-  await expect(
-    dialog.getByRole('button', { name: 'Continue with GitHub' })
-  ).toBeVisible()
   await dialog.getByLabel('Email address').fill(email)
   await dialog.getByRole('button', { name: 'Send sign-in link' }).click()
   await expect(dialog.getByText('Check your email')).toBeVisible()

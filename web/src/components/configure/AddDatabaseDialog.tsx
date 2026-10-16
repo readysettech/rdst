@@ -627,15 +627,13 @@ export function AddDatabaseDialog({
     <Modal open={open} onOpenChange={(next) => !next && onClose()}>
       <ModalContentContainer open={open}>
         <ModalContent
-          size="base"
+          tone="quiet"
           onEscapeKeyDown={(event) => {
             // Escape in a provider view goes back to the form, as Back does.
             if (editing || !importing || step !== 'source') return
             event.preventDefault()
             setImporting(null)
           }}
-          className="max-w-120 border-border-layout-2 bg-surface-primary-soft p-0"
-          closeClassName="top-4.5 right-4"
           description={
             editing
               ? `How RDST connects to ${editing.name}.`
@@ -654,7 +652,7 @@ export function AddDatabaseDialog({
                 onClick={() => setImporting(null)}
               />
             )}
-            <ModalTitle className="h-auto text-headline-5">{title}</ModalTitle>
+            <ModalTitle>{title}</ModalTitle>
           </div>
           {editing ? (
             <ConnectionForm
