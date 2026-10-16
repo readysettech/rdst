@@ -5,14 +5,16 @@ test_error_handling() {
 
   # Test early AI-access validation. Isolate the command from both environment
   # and keyring credentials so persistent CI agents cannot accidentally satisfy
-  # the preflight with credentials left by another run.
+  # the preflight with credentials left by another run, and from the Key
+  # Service, which would otherwise start an anonymous session with hosted AI.
   local saved_api_key="${ANTHROPIC_API_KEY:-}"
   unset ANTHROPIC_API_KEY
-  run_expect_fail "Analyze without API key" \
+  run_expect_fail "Analyze without AI access" \
     env -u RDST_ACCOUNT_ACCESS_TOKEN \
       -u RDST_ACCOUNT_REFRESH_TOKEN \
       -u RDST_ACCOUNT_EXPIRES_AT \
       PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring \
+      RDST_KEYSERVICE_URL=http://127.0.0.1:9 \
       "${RDST_CMD[@]}" analyze --target "$TARGET_NAME" --query "SELECT 1" --skip-warning
   assert_contains "AI access is required" "missing AI access should fail early"
   # Restore API key
