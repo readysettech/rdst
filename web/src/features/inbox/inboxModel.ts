@@ -198,6 +198,7 @@ export function queueTime(ts: number, now: number): string {
 /** "running 4 min" for a stuck statement still going. */
 export function runningText(item: InboxItem, now: number): string | null {
   if (kindOf(item) !== 'stuck_query' || bandOf(item) === 'closed') return null
+  if (item.status === 'back_to_normal') return null
   const seconds = item.running_s ?? now - item.created_at
   const minutes = Math.max(1, Math.round(seconds / 60))
   return `running ${plural(minutes, 'min', 'min')}`

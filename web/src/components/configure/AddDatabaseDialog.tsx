@@ -96,6 +96,14 @@ const TITLES: Record<Exclude<ImportStep, 'source'>, string> = {
 const EXPECTED_URL = 'Expected postgresql://user@host:5432/database'
 const MISSING_FIELDS =
   'Fill in the host, database and user, or paste a connection string.'
+const INVALID_PORT = 'Enter a port from 1 to 65535.'
+
+/** A typed port that isn't one; an empty port is fine, it reads as the default. */
+function invalidPort(port: string): boolean {
+  if (!port.trim()) return false
+  const value = Number(port)
+  return !Number.isInteger(value) || value < 1 || value > 65535
+}
 
 /** A name for the new database: its database name, made unique among the saved ones. */
 export function newDatabaseName(
@@ -113,6 +121,9 @@ export function newDatabaseName(
   }
   return `${root}-${taken.length + 2}`
 }
+
+const missingFields = (fields: Fields) =>
+  !fields.host.trim() || !fields.database.trim() || !fields.user.trim()
 
 /**
  * The form's connection: the string when one is typed (it fills the fields), the
@@ -143,8 +154,7 @@ export function connectionFrom(
   const port = fields.port.trim()
     ? Number(fields.port)
     : defaultPortFor(engine ?? 'postgresql')
-  if (!fields.host.trim() || !Number.isInteger(port) || port <= 0) return null
-  if (!fields.database.trim() || !fields.user.trim()) return null
+  if (missingFields(fields) || invalidPort(fields.port)) return null
   return {
     engine:
       engine ?? (port === defaultPortFor('mysql') ? 'mysql' : 'postgresql'),
@@ -286,6 +296,8 @@ function ConnectionForm({
     pathsChosen.current.add(path)
     trackEvent('database_add_path_selected', { via: path })
   }
+  // Set synchronously, so a second click before the busy state renders doesn't submit again.
+  const inFlight = useRef(false)
 
   const taken = (status.data?.targets ?? [])
     .map((target) => target.name)
@@ -306,9 +318,11 @@ function ConnectionForm({
       (urlUnreadable
         ? EXPECTED_URL
         : !connection
-          ? editing
-            ? 'Fill in the host, database and user.'
-            : MISSING_FIELDS
+          ? missingFields(fields)
+            ? editing
+              ? 'Fill in the host, database and user.'
+              : MISSING_FIELDS
+            : INVALID_PORT
           : nameError(name, taken))) ||
     (check && !check.connected ? check.message : null)
   const capture = check?.connected ? check.capture : null
@@ -431,6 +445,17 @@ function ConnectionForm({
         })
       )
     return next
+  }
+
+  /** Runs one action at a time; a call while another runs is dropped. */
+  const exclusive = async (run: () => Promise<void>) => {
+    if (inFlight.current) return
+    inFlight.current = true
+    try {
+      await run()
+    } finally {
+      inFlight.current = false
+    }
   }
 
   const fail = (caught: unknown, fallback: string) => {
@@ -699,7 +724,7 @@ function ConnectionForm({
               aria-label="Test"
               loading={phase === 'testing'}
               disabled={busy}
-              onClick={() => void test()}
+              onClick={() => void exclusive(test)}
             />
             <Button
               variant="primary"
@@ -713,7 +738,7 @@ function ConnectionForm({
               }
               loading={phase === 'saving'}
               disabled={busy}
-              onClick={() => void (editing ? save() : add())}
+              onClick={() => void exclusive(editing ? save : add)}
             />
           </>
         )}

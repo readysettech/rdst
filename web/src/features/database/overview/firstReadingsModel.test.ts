@@ -383,6 +383,25 @@ describe('firstRun', () => {
     expect(model.failure).toBe('pg_stat_statements is not readable')
     expect(model.steps[0].state).toBe('blocked')
   })
+
+  it('gathers queries only while the latest reading succeeds', () => {
+    const measuring = (pulses: MonitorPulse[]) =>
+      firstRun({
+        now: NOW,
+        settings,
+        history: history(ON, NOW - 60),
+        pulses,
+        queries: [row('a', null)],
+        queue: null,
+      }).measuring
+    expect(measuring([collect(NOW - 5, 'Read 1 query')])).toBe(true)
+    expect(
+      measuring([
+        collect(NOW - 5, "Can't reach the database", false),
+        collect(NOW - 65, 'Read 1 query'),
+      ])
+    ).toBe(false)
+  })
 })
 
 it.each([

@@ -293,6 +293,7 @@ async function proxyApi(
     await response.body?.cancel()
     return redirectResponse(response, target, apiBaseUrl)
   }
+  if (body !== undefined && response.ok) options.onWrite?.(url.pathname)
   const responseHeaders = new Headers(response.headers)
   for (const name of DROPPED_RESPONSE_HEADERS) responseHeaders.delete(name)
   const passBody = !NULL_BODY_STATUSES.has(response.status) && method !== 'HEAD'
@@ -311,6 +312,8 @@ export interface AppRequestHandlerOptions {
   apiBaseUrl: () => string | null
   /** Package CI supplies UI sign-in discovery without production account credentials. */
   smokeAuth?: boolean
+  /** Told the path of each request that changed something in the backend and succeeded. */
+  onWrite?: (pathname: string) => void
   fetch?: typeof fetch
 }
 

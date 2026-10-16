@@ -504,13 +504,18 @@ async def set_fleet_neon_key(http_request: Request, request: ProviderTokenReques
     """Store a Neon API key after validating it."""
     require_local_request(http_request)
 
-    from ..neon import store_api_key, validate_key
+    from ..neon import MALFORMED_DETAIL, store_api_key, validate_key, well_formed
 
     token = request.token.strip()
     if not token:
         return JSONResponse(
             status_code=400,
             content={"code": "invalid_token", "detail": "Provide a Neon API key"},
+        )
+    # Not a key Neon rejected: the app shows this detail instead of its "rejected" line.
+    if not well_formed(token):
+        return JSONResponse(
+            status_code=400, content={"code": "malformed_token", "detail": MALFORMED_DETAIL}
         )
     valid, detail = await asyncio.to_thread(validate_key, token)
     if valid is None:

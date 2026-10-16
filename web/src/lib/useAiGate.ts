@@ -28,8 +28,11 @@ export function useAiGate(): AiGate {
     (isTrialSource &&
       (trialStatus?.status === 'exhausted' || trialStatus?.active === false))
   const isReadysetAccount = anthropicRequirement?.source === 'readyset_account'
+  // A key Anthropic rejected stays configured but unsatisfied; the probe names the rejection.
   const hasKey =
-    Boolean(anthropicRequirement?.satisfied) &&
+    (Boolean(anthropicRequirement?.satisfied) ||
+      (anthropicRequirement?.selected_provider === 'claude' &&
+        Boolean(anthropicRequirement.anthropic_key_configured))) &&
     !isTrialSource &&
     !isTrialExhausted
   const validityQuery = useAnthropicValidity(hasKey && !isReadysetAccount)

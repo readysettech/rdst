@@ -240,3 +240,10 @@ def test_connection_failure_is_a_network_error_not_an_auth_error(
 
     assert raised.value.code == code
     assert str(raised.value) == f"Couldn't reach {name}. Check your connection and try again."
+
+
+def test_non_ascii_key_is_an_auth_error_not_a_connection_error():
+    with pytest.raises(LLMError) as exc_info:
+        ClaudeProvider().complete(_request(), api_key="sk-ant-\u00e9\u6f22")
+
+    assert exc_info.value.code == "ANTHROPIC_AUTH_INVALID"

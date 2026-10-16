@@ -87,7 +87,18 @@ def store_analysis_results(**kwargs) -> Dict[str, Any]:
                 "analysis_id": None,
             }
 
-        engine = _ensure_dict(kwargs.get("explain_results")).get("database_engine")
+        explain_results = _ensure_dict(kwargs.get("explain_results"))
+        # A run whose EXPLAIN failed has no plan to judge, so it is not an analysis; storing
+        # it would list the query as analyzed and already efficient.
+        if explain_results.get("success") is False:
+            return {
+                "success": False,
+                "error": explain_results.get("error") or "EXPLAIN failed",
+                "query_hash": "",
+                "analysis_id": None,
+            }
+
+        engine = explain_results.get("database_engine")
         if engine in ("postgresql", "postgres"):
             # Separate VALUES rows so SQLGlot recognizes positional parameters after commas.
             query = "".join(

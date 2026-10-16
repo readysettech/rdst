@@ -11,11 +11,17 @@ export type AiProvider = 'readyset' | 'claude' | null
 /** One line per kind of AI work, saying which key covers it. */
 export function keyRoutingLines(
   provider: AiProvider,
-  signedIn: boolean
+  signedIn: boolean,
+  keyConfigured: boolean
 ): string[] {
   const jev = signedIn
     ? 'Quick checks and monitoring alerts always run through Readyset and use your Readyset allowance.'
     : 'Quick checks and monitoring alerts always run through Readyset, so they need you signed in.'
+  if (provider === 'claude' && !keyConfigured)
+    return [
+      'Anthropic is selected, but no Anthropic key is set. Add your key or switch to Hosted by Readyset.',
+      jev,
+    ]
   if (provider === 'claude')
     return [
       'Your Anthropic key covers Analyze, Ask, deep analysis and nightly reports.',
@@ -35,9 +41,11 @@ export function keyRoutingLines(
 export function AiKeyRouting({
   provider,
   signedIn,
+  keyConfigured,
 }: {
   provider: AiProvider
   signedIn: boolean
+  keyConfigured: boolean
 }) {
   const limit = useMonitoringLimit()
   return (
@@ -50,7 +58,7 @@ export function AiKeyRouting({
           What each key covers
         </Text>
         <ul className="list-disc space-y-1 pl-5">
-          {keyRoutingLines(provider, signedIn).map((line) => (
+          {keyRoutingLines(provider, signedIn, keyConfigured).map((line) => (
             <li key={line}>
               <Text
                 as="span"

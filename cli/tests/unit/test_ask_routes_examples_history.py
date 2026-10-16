@@ -6,6 +6,8 @@ manager and the query registry are stubbed / temp-backed.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -84,6 +86,28 @@ async def test_history_returns_only_ask_entries_with_questions(
     assert item["target"] == "demo"
     # The original submitted SQL is returned (positional GROUP BY preserved).
     assert "GROUP BY 1" in item["sql"]
+
+
+@pytest.mark.asyncio
+async def test_history_keeps_the_sql_that_answered_its_question(app, monkeypatch, tmp_path):
+    registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+    # The same pattern, differing only in its literals.
+    registry.add_query("SELECT primarytitle FROM title_basics WHERE titletype = 'tvSeries' "
+                       "LIMIT 100", source="ask", target="demo", question="List TV series")
+    registry.add_query("SELECT primarytitle FROM title_basics WHERE titletype = 'short' "
+                       "LIMIT 3", source="ask", target="demo", question="Top 3 shorts")
+
+    import shared.query_registry as sqr
+
+    monkeypatch.setattr(sqr, "QueryRegistry", lambda *a, **k: registry)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/api/ask/history", params={"target": "demo"})
+    [item] = resp.json()["items"]
+    assert item["question"] == "Top 3 shorts"
+    assert "'short'" in item["sql"] and "LIMIT 3" in item["sql"]
 
 
 @pytest.mark.asyncio
@@ -212,3 +236,50 @@ async def test_resume_carries_the_request_target(monkeypatch):
     ]
 
     assert captured["target"] == "tpcds"
+
+
+@pytest.mark.asyncio
+async def test_an_answer_reports_and_accepts_its_clarifications(app, monkeypatch):
+    from features.ask.events import AskResultEvent
+    from features.ask.models import AskClarification
+    from shared.api.target_guard import TargetGuard, require_target_body
+
+    clarification = AskClarification(
+        id="ranking", term="best", question="Rank by what?", answer="most votes"
+    )
+    asked = []
+
+    class FakeService:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def ask(self, input_data, _options):
+            asked.append(input_data)
+            yield AskResultEvent(
+                type="result", success=True, sql="SELECT 1", rows=[[1]],
+                columns=["one"], row_count=1, execution_time_ms=1.0, llm_calls=1,
+                total_tokens=1, clarifications=input_data.clarifications,
+            )
+
+    async def target_guard() -> TargetGuard:
+        return TargetGuard("imdb", {"engine": "postgresql"}, "postgresql")
+
+    monkeypatch.setattr(ask_routes, "AskService", FakeService)
+    app.dependency_overrides[require_target_body] = target_guard
+    reported = {
+        "id": "ranking", "term": "best", "question": "Rank by what?", "answer": "most votes",
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post("/api/ask", json={
+            "question": "Show me the best titles", "target": "imdb",
+            "clarifications": [reported],
+        })
+
+    assert asked[0].clarifications == [clarification]
+    data = next(
+        line for line in response.text.splitlines() if line.startswith("data:")
+    )
+    assert json.loads(data.removeprefix("data:"))["clarifications"] == [reported]

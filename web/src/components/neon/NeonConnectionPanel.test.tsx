@@ -224,4 +224,32 @@ describe('NeonConnectionPanel', () => {
       )
     ).not.toHaveLength(0)
   })
+
+  it('says a malformed key is not a key, not that Neon rejected it', async () => {
+    vi.mocked(fetchFleetNeonStatus).mockResolvedValue({
+      connected: false,
+      method: null,
+      detail: null,
+    })
+    const { FleetProviderError } = await import('../../lib/useFleet')
+    const malformed =
+      "That isn't a valid Neon API key; copy it from the Neon console again"
+    vi.mocked(setFleetNeonKey).mockRejectedValue(
+      new FleetProviderError(malformed, 'malformed_token')
+    )
+
+    renderWithClient(<NeonConnectionPanel />)
+
+    fireEvent.change(
+      (await screen.findByRole('link', { name: 'Neon console' })) &&
+        (document.querySelector(
+          'input[name="neon-api-key"]'
+        ) as HTMLInputElement),
+      { target: { value: 'napi_\u00e9' } }
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+    expect(await screen.findAllByText(malformed)).not.toHaveLength(0)
+    expect(screen.queryByText(/rejected by Neon/)).toBeNull()
+  })
 })

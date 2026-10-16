@@ -48,6 +48,15 @@ contextBridge.exposeInMainWorld('rdstDesktop', {
     },
     openSettings: () => ipcRenderer.send('desktop:open-notification-settings'),
   },
+  monitoring: {
+    onChange: (callback: () => void) => {
+      const listener = () => callback()
+      ipcRenderer.on('desktop:monitoring-changed', listener)
+      return () =>
+        ipcRenderer.removeListener('desktop:monitoring-changed', listener)
+    },
+    changed: () => ipcRenderer.send('desktop:refresh-tray'),
+  },
   startup: {
     openLogs: () => ipcRenderer.send('desktop:open-logs'),
     retry: () => ipcRenderer.send('desktop:retry-backend'),

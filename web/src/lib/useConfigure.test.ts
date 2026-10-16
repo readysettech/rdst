@@ -27,6 +27,7 @@ vi.mock('./api', () => ({
   setEnvSecret: vi.fn(),
 }))
 
+import type { ConfigureConnectionStatus } from '../types/configure'
 import { setEnvSecret } from './api'
 import { api } from './client'
 // Import after the mock so the hook picks up the mocked client.
@@ -88,7 +89,10 @@ describe('useConfigure unknown events', () => {
       vi
         .fn()
         .mockResolvedValue(
-          sseResponse('event: unknown\ndata: {"message":"x"}\n\n')
+          sseResponse(
+            'event: unknown\ndata: {"message":"x"}\n\n' +
+              'event: connection_test\ndata: {"target_name":"prod","status":"success"}\n\n'
+          )
         )
     )
 
@@ -102,6 +106,88 @@ describe('useConfigure unknown events', () => {
 
     expect(result.current.error).toBeNull()
     expect(result.current.state).not.toBe('error')
+  })
+
+  it('ends a test whose stream closes after "Connecting..." with a retryable failure', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          sseResponse(
+            'event: connection_test\ndata: {"target_name":"prod","status":"in_progress","message":"Connecting..."}\n\n'
+          )
+        )
+    )
+    const { result } = renderHook(() => useConfigure(), {
+      wrapper: queryClientWrapper(),
+    })
+
+    let outcome = null as ConfigureConnectionStatus | null
+    await act(async () => {
+      outcome = await result.current.testConnection('prod')
+    })
+
+    expect(outcome).toEqual({
+      target: 'prod',
+      connected: false,
+      error: 'The connection test stopped before it finished. Try again.',
+    })
+    expect(result.current.state).toBe('error')
+    expect(result.current.loading).toBe(false)
+  })
+
+  it('ends a test whose stream breaks mid-read with a retryable failure', async () => {
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            'event: connection_test\ndata: {"target_name":"prod","status":"in_progress","message":"Connecting..."}\n\n'
+          )
+        )
+        controller.error(new TypeError('network error'))
+      },
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(stream, { status: 200 }))
+    )
+    const { result } = renderHook(() => useConfigure(), {
+      wrapper: queryClientWrapper(),
+    })
+
+    let outcome = null as ConfigureConnectionStatus | null
+    await act(async () => {
+      outcome = await result.current.testConnection('prod')
+    })
+
+    expect(outcome?.connected).toBe(false)
+    expect(outcome?.error).toBe(
+      'The connection test stopped before it finished. Try again.'
+    )
+  })
+
+  it("returns the backend's error event as the failed test's reason", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          sseResponse(
+            'event: error\ndata: {"message":"Connection test failed: boom"}\n\n'
+          )
+        )
+    )
+    const { result } = renderHook(() => useConfigure(), {
+      wrapper: queryClientWrapper(),
+    })
+
+    let outcome = null as ConfigureConnectionStatus | null
+    await act(async () => {
+      outcome = await result.current.testConnection('prod')
+    })
+
+    expect(outcome?.error).toBe('Connection test failed: boom')
   })
 
   it('keeps an in-flight connection test alive across a target list refresh', async () => {

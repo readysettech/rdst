@@ -173,6 +173,53 @@ def test_tunnel_wording_remains_for_genuine_network_failure():
     assert payload["message"].startswith("The SSH tunnel opened")
 
 
+@pytest.mark.parametrize(
+    ("driver_error", "reason"),
+    [
+        (
+            'connection to server at "db.example.com", port 5432 failed: timeout expired',
+            "db.example.com:5432 didn't answer in time.",
+        ),
+        ("connection refused", "db.example.com:5432 refused the connection."),
+        ("could not connect to server: No route to host",
+         "db.example.com:5432 couldn't be reached."),
+    ],
+)
+def test_unreachable_database_names_the_reason_and_next_step(driver_error, reason):
+    payload = connectivity_error_payload(
+        RuntimeError(driver_error),
+        "orders",
+        {"engine": "postgresql", "host": "db.example.com", "port": 5432},
+    )
+
+    assert payload is not None
+    assert payload["category"] == "database_connection_failed"
+    assert payload["message"] == (
+        f"The database connection for 'orders' failed: {reason} Check that the "
+        "database is running and reachable from this computer, and that its host "
+        "and port are right."
+    )
+    assert driver_error not in payload["message"]
+
+
+@pytest.mark.parametrize(
+    "driver_error",
+    [
+        "Host '10.0.0.5' is not allowed to connect to this MySQL server",
+        "canceling statement due to statement timeout",
+    ],
+)
+def test_a_server_that_answered_is_not_called_unreachable(driver_error):
+    payload = connectivity_error_payload(
+        RuntimeError(driver_error),
+        "orders",
+        {"engine": "postgresql", "host": "db.example.com", "port": 5432},
+    )
+
+    assert payload is not None
+    assert payload["message"] == "The database connection for 'orders' failed."
+
+
 class FakeFleetConfig(FakeConfig):
     def list_fleet_targets(self, group=None, tag=None) -> list[str]:
         return list(self.targets)

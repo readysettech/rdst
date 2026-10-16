@@ -16,7 +16,7 @@ import { AskFailure } from '../features/ask/AskFailure'
 import { AskSteps } from '../features/ask/AskSteps'
 import { hasPlaceholders } from '../features/ask/askModel'
 import { fetchAskExamples, fetchAskHistory } from '../lib/api'
-import { useAsk } from '../lib/ask'
+import { type AskClarification, useAsk } from '../lib/ask'
 
 const SUGGESTIONS = 3
 
@@ -27,6 +27,8 @@ interface AskPanelProps {
   targetResolving?: boolean
   disabled?: boolean
   beforeRun?: () => Promise<boolean>
+  /** Chooses the page's database, so an answer can be asked again where it was answered. */
+  onTargetChange?: (target: string) => void
 }
 
 function Suggestions({
@@ -76,11 +78,13 @@ export function AskPanel({
   targetResolving = false,
   disabled = false,
   beforeRun,
+  onTargetChange,
 }: AskPanelProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [question, setQuestion] = useState(initialQuestion ?? '')
   const [askedTarget, setAskedTarget] = useState<string | null>(null)
+  const askedQuestion = useRef('')
   const inputRef = useRef<HTMLTextAreaElement>(null)
   // A question sent by link leaves the URL once it is asked.
   const fromLink = useRef(Boolean(initialQuestion))
@@ -129,8 +133,8 @@ export function AskPanel({
       void queryClient.invalidateQueries({ queryKey: ['ask', 'history'] })
   }, [state, queryClient])
 
-  const submit = useCallback(
-    async (text: string) => {
+  const send = useCallback(
+    async (text: string, clarifications?: AskClarification[]) => {
       const trimmed = text.trim()
       if (disabled || !trimmed || !runsAgainst) return
       if (beforeRun && !(await beforeRun())) return
@@ -147,17 +151,63 @@ export function AskPanel({
         })
       }
       setAskedTarget(runsAgainst)
-      await ask({ question: trimmed, target: runsAgainst })
+      askedQuestion.current = trimmed
+      await ask({
+        question: trimmed,
+        target: runsAgainst,
+        ...(clarifications?.length ? { clarifications } : {}),
+      })
     },
     [ask, beforeRun, disabled, runsAgainst, navigate]
   )
+  // A question asked again while one is still being checked or answered, as by Enter pressed
+  // in quick succession, is ignored.
+  const submitting = useRef(false)
+  const submit = useCallback(
+    async (text: string, clarifications?: AskClarification[]) => {
+      if (submitting.current) return
+      submitting.current = true
+      try {
+        await send(text, clarifications)
+      } finally {
+        submitting.current = false
+      }
+    },
+    [send]
+  )
   const askAgain = useCallback(
-    (text: string) => {
+    (text: string, clarifications?: AskClarification[]) => {
       setQuestion(text)
-      void submit(text)
+      void submit(text, clarifications)
     },
     [submit]
   )
+  // An answer is asked again as it was clarified, on the database it came from: the page
+  // switches there first, and the question goes once the page runs against it.
+  const [queued, setQueued] = useState<{
+    text: string
+    clarifications?: AskClarification[]
+    target: string
+    from: string | null
+  } | null>(null)
+  const askAgainOn = useCallback(
+    (text: string, on: string, clarifications?: AskClarification[]) => {
+      if (!on || on === runsAgainst || !onTargetChange) {
+        askAgain(text, clarifications)
+        return
+      }
+      setQueued({ text, clarifications, target: on, from: runsAgainst })
+      onTargetChange(on)
+    },
+    [askAgain, onTargetChange, runsAgainst]
+  )
+  useEffect(() => {
+    if (!queued) return
+    if (runsAgainst === queued.target) {
+      setQueued(null)
+      askAgain(queued.text, queued.clarifications)
+    } else if (runsAgainst !== queued.from) setQueued(null)
+  }, [queued, runsAgainst, askAgain])
   const edit = useCallback(() => {
     reset()
     inputRef.current?.focus()
@@ -282,7 +332,13 @@ export function AskPanel({
                 },
               })
             }
-            onAskAgain={() => askAgain(question)}
+            onAskAgain={() =>
+              askAgainOn(
+                askedQuestion.current || question,
+                answeredFrom,
+                result.clarifications
+              )
+            }
             onEdit={edit}
           />
         )}

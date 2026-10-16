@@ -224,6 +224,23 @@ def test_a_significant_tested_rewrite_becomes_an_action(tmp_path, monkeypatch):
     assert found["score"] == 0.2 * 0.8
 
 
+def test_a_plan_only_rewrite_test_counts_its_planner_estimate(tmp_path, monkeypatch):
+    store = MonitorStore(tmp_path / "monitor.db")
+    _snapshot(store)
+    best = {"rewritten_sql": "SELECT id FROM customers WHERE email = $1", "was_skipped": True,
+            "improvement": {"execution_time": {"improvement_pct": 94.0, "is_better": True},
+                            "cost_estimate": {"improvement_pct": 60.0, "is_better": True},
+                            "overall": {"improvement_pct": 85.0, "is_better": True,
+                                        "significant": True}}}
+    analysis = type("A", (), {"display_payload": {"rewrite_testing": {"tested": True,
+                                                                       "best_rewrite": best}}})()
+    monkeypatch.setattr(actions, "latest_done_job", lambda store, target, key: {"analysis_ref": "r"})
+    monkeypatch.setattr(actions, "load_analysis", lambda job: analysis)
+    actions._tested_rewrite.cache_clear()
+    rewrite = actions._tested_rewrite("db", "login", "r")
+    assert (rewrite["measured"], rewrite["improvement_pct"]) == (False, 60.0)
+
+
 def test_a_rewrite_that_ran_slower_never_shows_whatever_the_planner_thought(tmp_path, monkeypatch):
     store = MonitorStore(tmp_path / "monitor.db")
     _snapshot(store)

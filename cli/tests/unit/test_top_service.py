@@ -958,7 +958,9 @@ class TestTopServiceErrorHandling:
         assert events[-1].type == "error"
         assert events[-1].code == "database_connection_failed"
         assert events[-1].message == (
-            "The database connection for 'test-target' failed."
+            "The database connection for 'test-target' failed: localhost refused the "
+            "connection. Check that the database is running and reachable from this "
+            "computer, and that its host and port are right."
         )
         assert events[-1].detail == "ConnectionError"
         assert "Connection refused" not in events[-1].message

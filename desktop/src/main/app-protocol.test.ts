@@ -189,6 +189,25 @@ describe('api proxy', () => {
     })
   })
 
+  it('reports each successful write, not reads or failures', async () => {
+    const base = await backend((req, res) => {
+      res.writeHead(req.url === '/api/broken' ? 500 : 200)
+      res.end()
+    })
+    const writes: string[] = []
+    const handle = createAppRequestHandler({
+      rootDir: bundle(),
+      apiBaseUrl: () => base,
+      onWrite: (pathname) => writes.push(pathname),
+    })
+    await handle(app('/api/monitor/targets/db/settings'))
+    await handle(app('/api/broken', { method: 'POST', body: '{}' }))
+    await handle(
+      app('/api/monitor/targets/db/settings?x=1', { method: 'PUT', body: '{}' })
+    )
+    expect(writes).toEqual(['/api/monitor/targets/db/settings'])
+  })
+
   it('streams server-sent events and closes the upstream when the reader stops', async () => {
     let closed!: () => void
     const upstreamClosed = new Promise<void>((resolve) => {

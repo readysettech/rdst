@@ -10,7 +10,7 @@ from shared.account_session import (
     AccountSessionError,
     access_token,
 )
-from shared.anthropic_env import get_anthropic_source
+from shared.anthropic_env import anthropic_key_rejected, get_anthropic_source
 from shared.config.targets import TargetsConfig
 from shared.password_resolver import resolve_password
 from shared.secret_store_service import SecretStoreService
@@ -126,6 +126,17 @@ class EnvRequirementsService:
         cfg.set_llm_provider(provider)
         cfg.save()
 
+    def prefer_readyset_without_anthropic_key(self) -> None:
+        """Select Readyset-hosted AI when Anthropic is selected and the key store says no key
+        remains; a store that is locked or slow to answer changes nothing."""
+        cfg = self._load_config()
+        if self._selected_ai_provider(cfg) != "claude":
+            return
+        if self._resolve_anthropic_source(cfg) == "missing" and \
+                self.secret_store.lacks_secret("ANTHROPIC_API_KEY"):
+            cfg.set_llm_provider("readyset")
+            cfg.save()
+
     def get_requirements(self) -> List[Dict[str, Any]]:
         cfg = self._load_config()
         requirements: List[Dict[str, Any]] = []
@@ -148,17 +159,20 @@ class EnvRequirementsService:
         anthropic_source = self._resolve_anthropic_source(cfg)
         account_signed_in = self._account_signed_in()
         anthropic_available = anthropic_source not in ("missing", "trial_exhausted")
+        # A configured key Anthropic rejected can't run AI, so it doesn't meet the requirement.
+        anthropic_usable = anthropic_available and not anthropic_key_rejected(self.secret_store)
         selected_provider = self._selected_ai_provider(cfg)
         if selected_provider == "readyset":
             source = "readyset_account" if account_signed_in else "missing"
             satisfied = account_signed_in
         elif selected_provider == "claude":
             source = anthropic_source
-            satisfied = anthropic_available
+            satisfied = anthropic_usable
+        # AI runs on a saved key ahead of the account, so a rejected one still decides it.
         elif anthropic_available:
             selected_provider = "claude"
             source = anthropic_source
-            satisfied = True
+            satisfied = anthropic_usable
         elif account_signed_in:
             selected_provider = "readyset"
             source = "readyset_account"

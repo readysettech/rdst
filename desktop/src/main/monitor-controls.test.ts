@@ -7,6 +7,7 @@ import { DesktopSettings } from './desktop-settings.js'
 import {
   allPaused,
   applyPauseAction,
+  changesTrayDatabases,
   listTrayDatabases,
   pauseMenuModel,
 } from './monitor-controls.js'
@@ -162,4 +163,16 @@ it('uses backend off state without a desktop-only paused list', async () => {
   )
   expect(backend.requests.at(-1)?.body).toBe('{"enabled":false}')
   expect(settings.pausedTargets).toEqual([])
+})
+
+it('refreshes the tray databases after writes to targets or monitoring settings', () => {
+  expect(changesTrayDatabases('/api/monitor/targets/test%20db/settings')).toBe(
+    true
+  )
+  expect(changesTrayDatabases('/api/configure/targets')).toBe(true)
+  expect(changesTrayDatabases('/api/configure/targets/testdb')).toBe(true)
+  expect(changesTrayDatabases('/api/monitor/targets/testdb/analyze-jobs')).toBe(
+    false
+  )
+  expect(changesTrayDatabases('/api/configure/targetsx')).toBe(false)
 })

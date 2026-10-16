@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from features.providers import digitalocean_oauth
 from features.providers.digitalocean import (
@@ -307,6 +308,16 @@ class TestDigitalOceanStatus:
 
 
 class TestDigitalOceanRoutes:
+    def test_offline_login_explains_the_connection_problem(self, fleet_router_client):
+        offline = requests.ConnectionError("[Errno 111] Connection refused")
+        with patch("features.providers.provider_oauth.requests.post", side_effect=offline):
+            response = fleet_router_client.post("/api/providers/digitalocean-login")
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == (
+            "Couldn't reach DigitalOcean sign-in. Check your connection and try again."
+        )
+
     # discover-preview is a single provider-agnostic endpoint; this is the one
     # place its already_exists behavior is exercised across all providers.
     def test_discover_preview_flags_existing_targets(

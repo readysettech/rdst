@@ -621,6 +621,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
             <AiKeyRouting
               provider={activeAiProvider}
               signedIn={Boolean(readysetAccountAvailable)}
+              keyConfigured={Boolean(anthropicKeyConfigured)}
             />
           </div>
         </SettingsGroup>

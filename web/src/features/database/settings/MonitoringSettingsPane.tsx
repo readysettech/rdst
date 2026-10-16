@@ -18,6 +18,10 @@ import { type ReactNode, useState } from 'react'
 import { AiMonitoringPanel } from '@/features/monitor-kit/AiMonitoringStatus'
 import { formatBytes, plural } from '@/features/monitor-kit/format'
 import {
+  keepReadingsLabel,
+  usePreferences,
+} from '@/features/settings/preferences'
+import {
   StateDot,
   type SwitcherTone,
 } from '@/features/shared/filters/DatabaseFilter'
@@ -126,6 +130,7 @@ export function MonitoringSettingsPane({
   const settings = useMonitorSettings(target)
   const usage = useMonitorUsage(target, 7)
   const update = useUpdateMonitorSettings(target)
+  const keepReadings = usePreferences().data?.keep_readings_days
   const { toast } = useToast()
   const [stopOpen, setStopOpen] = useState(false)
   const [enableOpen, setEnableOpen] = useState(false)
@@ -282,7 +287,7 @@ export function MonitoringSettingsPane({
                   level="caption"
                   className="text-content-layout-2"
                 >
-                  7 days
+                  {keepReadings ? keepReadingsLabel(keepReadings) : null}
                 </Text>
               }
             />

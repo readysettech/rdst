@@ -34,6 +34,10 @@ vi.mock('@/lib/monitor/hooks', async (original) => ({
   useMonitorUsage: () => ({ data: usage, isError: false }),
   useUpdateMonitorSettings: () => ({ mutate, isPending: false }),
 }))
+vi.mock('@/features/settings/preferences', async (original) => ({
+  ...(await original<typeof import('@/features/settings/preferences')>()),
+  usePreferences: () => ({ data: { keep_readings_days: 30 } }),
+}))
 
 const { MonitoringSettingsPane, statusCaption } = await import(
   './MonitoringSettingsPane'
@@ -96,6 +100,13 @@ it('lists the preference rows with Advanced folded and one ghost footer action',
       .getAllByRole('button')
       .filter((button) => button.className.includes('bg-surface-primary-solid'))
   ).toHaveLength(0)
+})
+
+it('shows the Keep readings choice saved in Settings', () => {
+  renderWithClient(<MonitoringSettingsPane target="demo" onClose={vi.fn()} />)
+  const row = screen.getByText('Keep readings').closest('div')?.parentElement
+  expect(row?.textContent).toContain('30 days')
+  expect(row?.textContent).not.toContain('7 days')
 })
 
 it('saves each control on its own', () => {

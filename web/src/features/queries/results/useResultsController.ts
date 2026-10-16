@@ -102,7 +102,20 @@ export function useResultsController(
   const hashRunKey = useAnalysisRunKeyForHash(hash)
   const requestRunKey = query ? analysisRunKey({ query, target, fast }) : null
   const live = useAnalyze(hashRunKey ?? requestRunKey)
-  const stored = useStoredAnalysis({ hash, analysisId })
+  const liveRecord =
+    live.state === 'complete' &&
+    live.results?.query_hash &&
+    live.results.stored_analysis_id
+      ? { hash: live.results.query_hash, id: live.results.stored_analysis_id }
+      : null
+  // The URL names the record of the run this view just finished; the run is still on
+  // screen, and the record is what a reload opens.
+  const showingLiveRecord = Boolean(analysisId && liveRecord?.id === analysisId)
+  const stored = useStoredAnalysis({
+    hash,
+    analysisId,
+    justRan: showingLiveRecord,
+  })
   const storedView: ResultsAnalysisView = {
     state: stored.hasBody ? 'complete' : 'idle',
     progress: undefined,
@@ -112,7 +125,8 @@ export function useResultsController(
     error: undefined,
     errorEnvelope: undefined,
   }
-  const analysis: ResultsAnalysisView = stored.isActive ? storedView : live
+  const analysis: ResultsAnalysisView =
+    stored.isActive && !showingLiveRecord ? storedView : live
   const { setTarget } = useTarget()
   const passwordLock = useTargetPasswordLock(target)
   const connectivity = useTargetConnectivityGate(
@@ -293,6 +307,9 @@ export function useResultsController(
   const reRunStored = useCallback(
     (reason: AnalysisRerunReason) => {
       trackEvent('analysis_rerun', { reason })
+      // A finished run this view still holds would otherwise stand in for the new one; a
+      // run still in flight is kept, and the live view picks it back up.
+      if (live.state !== 'analyzing') live.reset()
       openSearch({
         query,
         target,
@@ -304,7 +321,18 @@ export function useResultsController(
         analysisId: undefined,
       })
     },
-    [fast, hash, key, openSearch, origin, params, query, target]
+    [
+      fast,
+      hash,
+      key,
+      live.reset,
+      live.state,
+      openSearch,
+      origin,
+      params,
+      query,
+      target,
+    ]
   )
 
   /**
@@ -386,6 +414,36 @@ export function useResultsController(
     stored.isActive,
   ])
 
+  // Naming a finished run's saved record in the URL makes a reload reopen the result
+  // rather than measure the query, and pay for its AI analysis, again.
+  useEffect(() => {
+    if (stored.isActive || !liveRecord) return
+    openSearch(
+      {
+        query,
+        target,
+        fast,
+        params,
+        origin,
+        hash: liveRecord.hash,
+        key,
+        analysisId: liveRecord.id,
+      },
+      { replace: true }
+    )
+  }, [
+    fast,
+    key,
+    liveRecord?.hash,
+    liveRecord?.id,
+    openSearch,
+    origin,
+    params,
+    query,
+    stored.isActive,
+    target,
+  ])
+
   useEffect(() => {
     if (parameterSubmissionPending.current !== query) return
     parameterSubmissionPending.current = null
@@ -445,7 +503,7 @@ export function useResultsController(
     analysis,
     stored: {
       isActive: stored.isActive,
-      isLoading: stored.isLoading,
+      isLoading: stored.isLoading && !showingLiveRecord,
       hasBody: stored.hasBody,
       error: stored.error,
       record: stored.record,

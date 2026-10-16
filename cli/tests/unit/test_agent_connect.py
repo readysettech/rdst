@@ -503,15 +503,20 @@ def test_after_the_user_turned_it_on_the_agent_may_toggle_monitoring(app, prereq
     monkeypatch.setattr(analyze_queue, "start_analyze_queue", start_analyze_queue)
     _add_shop(app)
     _turn_on_in_app(app)
-    failed, disabled = _tool(app, "rdst_disable_monitoring", name="shop")
+    # The app refetches what an agent's change makes stale.
+    (failed, disabled), events = _events_from(
+        lambda: _tool(app, "rdst_disable_monitoring", name="shop"))
     assert not failed and disabled["enabled"] is False
+    assert [(event["step"], event["target"]) for event in events] == [
+        ("settings_changed", "shop")]
     (failed, enabled), events = _events_from(
         lambda: _tool(app, "rdst_enable_monitoring", name="shop"))
     assert not failed and enabled["enabled"] is True and "waiting_for_user" not in enabled
     assert [event["step"] for event in events] == ["monitoring_enabled"]
-    failed, updated = _tool(app, "rdst_update_monitor_settings", name="shop",
-                            settings={"enabled": False})
+    (failed, updated), events = _events_from(lambda: _tool(
+        app, "rdst_update_monitor_settings", name="shop", settings={"enabled": False}))
     assert not failed and updated["enabled"] is False
+    assert [event["step"] for event in events] == ["settings_changed"]
     failed, updated = _tool(app, "rdst_update_monitor_settings", name="shop",
                             settings={"enabled": True})
     assert not failed and updated["enabled"] is True

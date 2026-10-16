@@ -320,8 +320,10 @@ export function firstRun(input: FirstRunInput): FirstRunModel {
     firstAt != null &&
     listed === 0 &&
     (latestCount != null ? Number(latestCount) === 0 : readings >= 2)
+  // A failed latest reading gathers nothing until the database answers again.
   const measuring =
     !waitingForQueries &&
+    !failure &&
     listed != null &&
     listed > 0 &&
     (input.queries ?? []).every(

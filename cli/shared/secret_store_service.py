@@ -191,6 +191,11 @@ class SecretStoreService:
             "message": "Failed to persist securely. Secret applied for this session only.",
         }
 
+    def lacks_secret(self, name: str) -> bool:
+        """Whether the store answered that ``name`` is absent, rather than being unavailable or
+        too slow to say."""
+        return self.is_available() and self._get(name) is None
+
     def get_secret(self, name: str) -> Optional[str]:
         if not self.is_available():
             return None

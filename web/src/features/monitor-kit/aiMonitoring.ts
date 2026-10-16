@@ -433,13 +433,16 @@ export function aiCanRun(input: AiCanRunInput): AiCanRun {
         : status.kind === 'local_only'
           ? status.reason
           : null
-  // The nightly report doesn't run signed out; with AI off it runs without its summary.
+  // The nightly report runs only while it's on and signed in; with AI off it runs without
+  // its summary. Switched off, a sign-in alone wouldn't run it.
   const report: AiBlocker | null =
-    checks === 'monitoring_off' || checks === 'signed_out'
+    checks === 'monitoring_off'
       ? checks
       : settings.nightly_report === false
         ? 'report_off'
-        : null
+        : checks === 'signed_out'
+          ? checks
+          : null
   return {
     checks,
     deep:

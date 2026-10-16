@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
+import { useEffect } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   __resetAnalysisRunsForTests,
@@ -77,6 +78,35 @@ describe('analyze runs outside the view that started them', () => {
     await waitFor(() => expect(reopened.result.current.state).toBe('complete'))
     expect(reopened.result.current.results?.analysis_id).toBe('a1')
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves a finished run behind as soon as the view attaches to another key', async () => {
+    const stream = stubOpenStream()
+    const starter = renderHook(() => useAnalyze())
+    await act(async () => {
+      await starter.result.current.analyze(REQUEST)
+    })
+    await stream.complete()
+    starter.unmount()
+
+    // What an effect of the view sees on each commit, as the view's own effects do.
+    const seen: Array<[string, string | null | undefined]> = []
+    const view = renderHook(
+      ({ key }) => {
+        const run = useAnalyze(key)
+        useEffect(() => {
+          seen.push([key, run.results?.analysis_id])
+        })
+        return run
+      },
+      { initialProps: { key: analysisRunKey(REQUEST) } }
+    )
+    await waitFor(() => expect(view.result.current.state).toBe('complete'))
+    const other = analysisRunKey({ ...REQUEST, query: 'SELECT 2' })
+    view.rerender({ key: other })
+
+    expect(view.result.current.state).toBe('idle')
+    expect(seen.filter(([key]) => key === other)).toEqual([[other, undefined]])
   })
 
   it('starts idle without a key, so no view adopts a run by accident', async () => {

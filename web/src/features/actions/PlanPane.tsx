@@ -263,7 +263,8 @@ function PlanDetail({ card }: { card: PlanCard }) {
               label={copied ? 'Copied' : 'Copy SQL'}
               onClick={() => copy(card.sql ?? '')}
             />
-            <CopyAsMigration card={card} />
+            {/* A rewrite changes the application's query, not the schema. */}
+            {rewrite ? null : <CopyAsMigration card={card} />}
           </div>
           {sqlNote ? (
             <Text

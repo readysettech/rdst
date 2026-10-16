@@ -25,7 +25,7 @@ import { RADAR_STATE, Radar } from '../monitor-kit/Radar'
 import { SignInNote, useSignInHeld } from '../monitor-kit/signInHold'
 import { DATABASE_WORD, DatabaseFilter } from '../shared/filters/DatabaseFilter'
 import { DayChart, dayChartModel } from './DayChart'
-import { HomeEmpty, HomeSentence, homeCaption } from './HomeStates'
+import { HomeEmpty, HomeSentence, HomeTurnOn, homeCaption } from './HomeStates'
 import {
   appliedLine,
   doFirstTarget,
@@ -547,6 +547,11 @@ export function HomeView({
   onDbChange?: (db: string | null) => void
 }) {
   const strip = stripRows(model)
+  // The only database isn't monitored yet, so turning it on is the next Get started step.
+  const unmonitored =
+    strip.length === 1 && strip[0].state === 'not_monitored'
+      ? strip[0].target
+      : null
   const scope = db && strip.some((row) => row.target === db) ? db : null
   const day =
     model.day && (scope === null || model.day.target === scope)
@@ -577,6 +582,8 @@ export function HomeView({
       <PageContainer className="pt-9 pb-24">
         {isEmptyHome(model) ? (
           <HomeEmpty />
+        ) : unmonitored ? (
+          <HomeTurnOn target={unmonitored} />
         ) : (
           <>
             <StatusLine

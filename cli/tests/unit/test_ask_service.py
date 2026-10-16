@@ -26,6 +26,7 @@ from features.ask.events import (
     AskStatusEvent,
 )
 from features.ask.models import (
+    AskClarification,
     AskClarificationQuestion,
     AskInput,
     AskInterpretation,
@@ -410,6 +411,87 @@ class TestAskServiceSessionManagement:
         assert isinstance(resumed[-1], AskResultEvent)
         assert resumed[-1].sql == "SELECT * FROM users WHERE enabled = 1"
         assert sessions == {}
+
+    @pytest.mark.asyncio
+    async def test_an_answer_asked_again_keeps_its_clarifications(self):
+        from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
+
+        service = AskService(session_store={}, persist_queries=False)
+        options = AskOptions(dry_run=True, no_interactive=False, persist_query=False)
+        ambiguity = Ambiguity(
+            id="ranking",
+            category="ranking",
+            clarifying_question="Rank the best titles by what?",
+            possible_interpretations=[
+                AmbiguityOption("votes", "most user votes", 0.5),
+                AmbiguityOption("rating", "highest average rating", 0.5),
+            ],
+            term="best",
+            reason="best is undefined",
+        )
+        detections = []
+        refined = []
+
+        async def mock_load_config(target):
+            return (target, {"engine": "postgresql"})
+
+        def fake_load(ctx, _presenter, _manager):
+            ctx.schema_info = SchemaInfo(
+                target="test", db_type="postgresql", source=SchemaSource.DATABASE
+            )
+            ctx.schema_info.tables = {"titles": Mock()}
+            ctx.schema_formatted = "titles table"
+            return ctx
+
+        def fake_detect(ctx):
+            detections.append(ctx.question)
+            return ctx, [], [ambiguity]
+
+        def fake_generate(ctx, _presenter, _manager):
+            refined.append(ctx.refined_question)
+            ctx.sql = "SELECT title FROM titles ORDER BY numvotes DESC"
+            ctx.generated_sql = ctx.sql
+            return ctx
+
+        with (
+            patch.object(service, "_load_config", side_effect=mock_load_config),
+            patch("features.ask.service.load_schema", side_effect=fake_load),
+            patch.object(service, "_detect_ambiguities", side_effect=fake_detect),
+            patch("features.ask.service.generate_sql", side_effect=fake_generate),
+            patch(
+                "features.ask.service.validate_sql",
+                side_effect=lambda ctx, _presenter: ctx,
+            ),
+        ):
+            question = AskInput(question="Show me the best titles", target="test")
+            initial = [event async for event in service.ask(question, options)]
+            session_id = initial[-1].session_id
+            answered = [
+                event
+                async for event in service.resume(
+                    session_id, {"ranking": "most user votes"}
+                )
+            ][-1]
+            again = AskInput(
+                question="Show me the best titles",
+                target="test",
+                clarifications=answered.clarifications,
+            )
+            asked_again = [event async for event in service.ask(again, options)][-1]
+
+        assert answered.clarifications == [
+            AskClarification(
+                id="ranking",
+                term="best",
+                question="Rank the best titles by what?",
+                answer="most user votes",
+            )
+        ]
+        assert isinstance(asked_again, AskResultEvent)
+        assert asked_again.clarifications == answered.clarifications
+        assert detections == ["Show me the best titles"]
+        assert len(refined) == 2 and refined[0] == refined[1]
+        assert "Answer: most user votes" in refined[1]
 
     @pytest.mark.asyncio
     async def test_validation_failure_gets_exactly_one_bounded_repair(self):

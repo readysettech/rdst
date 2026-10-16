@@ -2313,6 +2313,17 @@
             ],
             "title": "Cost Before"
           },
+          "kind": {
+            "default": "index",
+            "enum": [
+              "index",
+              "rewrite",
+              "config",
+              "none"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
           "serves": {
             "anyOf": [
               {
@@ -3992,6 +4003,66 @@
         "title": "AppliedTotals",
         "type": "object"
       },
+      "AskClarification": {
+        "description": "A clarification question the user answered for a question.",
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "term": {
+            "title": "Term",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "term",
+          "question",
+          "answer"
+        ],
+        "title": "AskClarification",
+        "type": "object"
+      },
+      "AskClarificationAnswer": {
+        "description": "A clarification the user answered, as an answer reports it.",
+        "properties": {
+          "answer": {
+            "minLength": 1,
+            "title": "Answer",
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "term": {
+            "title": "Term",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "term",
+          "question",
+          "answer"
+        ],
+        "title": "AskClarificationAnswer",
+        "type": "object"
+      },
       "AskClarificationNeededEvent": {
         "description": "Clarification needed from the user.",
         "properties": {
@@ -4284,6 +4355,20 @@
             ],
             "title": "Clarification Answers"
           },
+          "clarifications": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AskClarificationAnswer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarifications"
+          },
           "dry_run": {
             "default": false,
             "title": "Dry Run",
@@ -4341,6 +4426,13 @@
       "AskResultEvent": {
         "description": "Ask completed with results.",
         "properties": {
+          "clarifications": {
+            "items": {
+              "$ref": "#/components/schemas/AskClarification"
+            },
+            "title": "Clarifications",
+            "type": "array"
+          },
           "columns": {
             "items": {
               "type": "string"
@@ -22731,6 +22823,17 @@
             "title": "Name",
             "type": "string"
           },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
           "outcome": {
             "default": "untested",
             "enum": [
@@ -30327,7 +30430,7 @@
     },
     "/api/ask/history": {
       "get": {
-        "description": "Past natural-language questions, newest first.\n\nDraws on the query registry, which auto-saves every answered ask with its\noriginal question text. One item per database a SQL pattern was asked on,\ncarrying that database's question; entries saved before question\npersistence landed have none. The SQL is the original submitted form when\nstored, so a re-ask is faithful.",
+        "description": "Past natural-language questions, newest first.\n\nDraws on the query registry, which auto-saves every answered ask with its\noriginal question text. One item per database a SQL pattern was asked on,\ncarrying that database's question; entries saved before question\npersistence landed have none. The SQL is the one that answered that question,\nin its original submitted form when stored, so a re-ask is faithful.",
         "operationId": "ask_history_api_ask_history_get",
         "parameters": [
           {
@@ -31866,6 +31969,27 @@
           }
         },
         "summary": "Provision",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/provision/stream": {
+      "get": {
+        "description": "Re-attach to the provision in flight, replaying it from the start.",
+        "operationId": "provision_stream_api_demo_provision_stream_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Provision Stream",
         "tags": [
           "demo",
           "demo"

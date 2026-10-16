@@ -180,6 +180,7 @@ describe('viewFromResults', () => {
         runs: null,
         outcome: 'untested',
         sql: 'select 2',
+        note: null,
       },
     ])
     expect(view.also[0].title).toBe('Select fewer columns')
@@ -225,6 +226,34 @@ describe('viewFromResults', () => {
     expect(view.rewrites.map((rewrite) => rewrite.sql)).toEqual([
       'select 2',
       'select 3',
+    ])
+  })
+
+  it('keeps a rewrite whose SQL could not be mapped back, with a note and no SQL', () => {
+    const view = viewFromResults(results, {
+      tested: true,
+      original_performance: { execution_time_ms: 100 },
+      rewrite_results: [
+        {
+          sql: null as unknown as string,
+          unmapped_rewrite: 1,
+          success: true,
+          performance: { execution_time_ms: 40 },
+          improvement: { overall: { improvement_pct: 60 } },
+          suggestion_metadata: { explanation: 'Filter before sort' },
+        },
+      ],
+    })
+    expect(view.rewrites).toEqual([
+      {
+        name: 'Filter before sort',
+        before_ms: 100,
+        after_ms: 40,
+        runs: null,
+        outcome: 'faster',
+        sql: null,
+        note: "RDST could not map this rewrite back to the query's parameters, so it offers no SQL to copy.",
+      },
     ])
   })
 

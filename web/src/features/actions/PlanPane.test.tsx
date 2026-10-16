@@ -62,6 +62,8 @@ it('shows a rewrite next to the query it replaces', () => {
   expect(screen.getByTestId('plan-original-sql').textContent).toContain(
     'SELECT * FROM posts'
   )
+  expect(screen.getByRole('button', { name: 'Copy SQL' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Copy as migration' })).toBeNull()
 })
 
 it('keeps one SQL block and no steps when the change has none', () => {

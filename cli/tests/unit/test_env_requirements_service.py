@@ -2,19 +2,25 @@
 
 from unittest.mock import Mock, patch
 
+import pytest
+
 from shared.account_session import SESSION_SECRET_NAMES
 from shared.env_requirements_service import EnvRequirementsService
 
 
 class FakeSecretStore:
-    def __init__(self, values=None):
+    def __init__(self, values=None, available=True):
         self.values = values or {}
+        self.available = available
 
     def get_secret(self, name: str):
         return self.values.get(name)
 
     def is_available(self) -> bool:
         return True
+
+    def lacks_secret(self, name: str) -> bool:
+        return self.available and name not in self.values
 
 
 def _mock_config():
@@ -200,6 +206,48 @@ def test_saved_claude_provider_is_active_when_both_credentials_exist(monkeypatch
     assert requirement["readyset_account_connected"] is True
 
 
+# AI runs on a saved key ahead of a Readyset sign-in, so a rejected key decides either way.
+@pytest.mark.parametrize("provider,signed_in", [("claude", False), (None, False), (None, True)])
+def test_key_anthropic_rejected_does_not_satisfy_the_requirement(monkeypatch, provider,
+                                                                 signed_in):
+    import shared.anthropic_env as ae
+    import shared.llm_manager as llm
+    from shared.llm_manager import LLMError
+
+    class Rejecting:
+        def query(self, **kwargs):
+            raise LLMError("no", code="ANTHROPIC_AUTH_INVALID", status=401)
+
+    ae.clear_anthropic_validity_cache()
+    monkeypatch.setattr(llm, "LLMManager", lambda *args, **kwargs: Rejecting())
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-not-a-real-key")
+    cfg = _mock_config()
+    cfg.get_llm_provider.return_value = provider
+    service = EnvRequirementsService(secret_store=FakeSecretStore())
+
+    def requirement():
+        with (
+            patch.object(service, "_load_config", return_value=cfg),
+            patch.object(service, "_account_signed_in", return_value=signed_in),
+        ):
+            return next(
+                item
+                for item in service.get_requirements()
+                if item["kind"] == "anthropic_api_key"
+            )
+
+    try:
+        assert requirement()["satisfied"] is True
+        assert ae.validate_anthropic_key()["reason"] == "rejected"
+        rejected = requirement()
+    finally:
+        ae.clear_anthropic_validity_cache()
+
+    assert rejected["satisfied"] is False
+    assert rejected["selected_provider"] == "claude"
+    assert rejected["anthropic_key_configured"] is True
+
+
 def test_expired_unrefreshable_account_does_not_open_gate(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     service = EnvRequirementsService(secret_store=FakeSecretStore())
@@ -354,3 +402,40 @@ def test_target_without_password_source_is_missing(monkeypatch):
         "satisfied": False,
         "source": "missing",
     }
+
+
+def test_signing_in_selects_readyset_when_the_anthropic_key_is_gone(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    cfg = _mock_config()
+    cfg.get_llm_provider.return_value = "claude"
+    service = EnvRequirementsService(secret_store=FakeSecretStore())
+
+    with patch.object(service, "_load_config", return_value=cfg):
+        service.prefer_readyset_without_anthropic_key()
+
+    cfg.set_llm_provider.assert_called_once_with("readyset")
+    cfg.save.assert_called_once()
+
+
+def test_signing_in_keeps_anthropic_while_the_key_store_cannot_answer(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    cfg = _mock_config()
+    cfg.get_llm_provider.return_value = "claude"
+    service = EnvRequirementsService(secret_store=FakeSecretStore(available=False))
+
+    with patch.object(service, "_load_config", return_value=cfg):
+        service.prefer_readyset_without_anthropic_key()
+
+    cfg.set_llm_provider.assert_not_called()
+
+
+def test_signing_in_keeps_anthropic_while_its_key_remains(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "in-process")
+    cfg = _mock_config()
+    cfg.get_llm_provider.return_value = "claude"
+    service = EnvRequirementsService(secret_store=FakeSecretStore())
+
+    with patch.object(service, "_load_config", return_value=cfg):
+        service.prefer_readyset_without_anthropic_key()
+
+    cfg.set_llm_provider.assert_not_called()

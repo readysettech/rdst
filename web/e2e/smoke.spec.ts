@@ -24,8 +24,8 @@ test('loads the production application and backend', async ({
   await expect(health.json()).resolves.toEqual({ status: 'ok' })
 
   await page.goto('/')
-  // One configured database: the sidebar lists it and Home's sentence is about it
-  // (the strip across databases needs two or more).
+  // One configured, unmonitored database: the sidebar lists it and Home's Get started
+  // steps offer to monitor it (the strip across databases needs two or more).
   await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
   await expect(
     page
@@ -33,7 +33,7 @@ test('loads the production application and backend', async ({
       .getByRole('link', { name: /^e2e-guard/ })
   ).toBeVisible()
   await expect(
-    mainContent(page).getByText('e2e-guard: not monitored.')
+    mainContent(page).getByRole('button', { name: 'Monitor e2e-guard' })
   ).toBeVisible()
   await expect(
     mainContent(page).getByRole('region', { name: 'Across your databases' })

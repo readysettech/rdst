@@ -14,7 +14,8 @@ from typing import Any
 
 from sqlglot import exp, parse
 
-from features.analyze.parameter_suggestions import parameter_literal as _literal, plan_only_sql
+from features.analyze.parameter_suggestions import (parameter_literal as _literal,
+                                                     plan_only_parameters, plan_only_sql)
 from features.analyze.models import AnalyzeInput, AnalyzeOptions
 from features.analyze.service import AnalyzeService
 from features.monitor import database_limit
@@ -903,13 +904,159 @@ def sample_params(data: dict[str, Any]) -> list[dict[str, str]]:
     return found
 
 
+_SQL_TOKEN = re.compile(
+    r"\s+|--[^\n]*|/\*.*?\*/|'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|`(?:``|[^`])*`|"
+    r"\$\d+|(?<!:):[A-Za-z_]\w*|\?|(?<![\w$.])-?\d+(?:\.\d+)?(?![\w$.])|[A-Za-z_][\w$]*|.",
+    re.DOTALL)
+_PLACEHOLDER_TOKEN = re.compile(r"\?|\$\d+|:[A-Za-z_]\w*")
+# Words that read the string literal after them as a typed value (DATE '2024-01-01').
+_TYPED_LITERAL_WORDS = frozenset(("date", "time", "timetz", "timestamp", "timestamptz",
+                                  "interval"))
+
+
+def _sql_tokens(sql: str) -> list[re.Match[str]]:
+    return [match for match in _SQL_TOKEN.finditer(sql)
+            if not match.group().isspace() and not match.group().startswith(("--", "/*"))]
+
+
+def _token_key(token: str) -> str:
+    return token if token[0] in "'\"`" else token.lower()
+
+
+def _find_literals(tokens: list[re.Match[str]],
+                   literals: list[tuple[str, ...]]) -> list[tuple[int, int, tuple[str, ...]]]:
+    """Each occurrence of a literal's token run, as (first token, end, literal), left to
+    right."""
+    found, index = [], 0
+    longest = sorted(literals, key=len, reverse=True)
+    while index < len(tokens):
+        keys = [_token_key(match.group()) for match in tokens[index:index + len(longest[0])]]
+        literal = next((lit for lit in longest if tuple(keys[:len(lit)]) == lit), None)
+        if literal is None:
+            index += 1
+            continue
+        found.append((index, tokens[index + len(literal) - 1].end(), literal))
+        index += len(literal)
+    return found
+
+
+def _typed_literal(tokens: list[re.Match[str]], index: int) -> bool:
+    """Whether the string literal at `index` belongs to a type keyword or a charset
+    introducer before it (DATE '2024-01-01', N'abc', _utf8mb4'x'); no placeholder parses in
+    its place."""
+    if index == 0 or tokens[index].group()[0] not in "'\"":
+        return False
+    before = tokens[index - 1]
+    word = before.group().lower()
+    if not re.fullmatch(r"[a-z_][\w$]*", word):
+        return False
+    with_zone = word == "zone" and index >= 3 and tokens[index - 2].group().lower() == "time" \
+        and tokens[index - 3].group().lower() in ("with", "without")
+    return before.end() == tokens[index].start() or word.startswith("_") or with_zone \
+        or word in _TYPED_LITERAL_WORDS
+
+
+# Words that end an ORDER BY or GROUP BY item, and words that open a clause besides them.
+_ITEM_END_WORDS = frozenset((",", ")", ";", "asc", "desc", "nulls", "limit", "offset", "fetch",
+                             "having", "window", "order", "union", "intersect", "except", "for"))
+_CLAUSE_WORDS = frozenset(("select", "from", "where", "having", "on", "set", "values", "limit",
+                           "offset", "fetch", "returning", "union", "intersect", "except"))
+
+
+def _ordinal_literal(tokens: list[re.Match[str]], index: int) -> bool:
+    """Whether the integer at `index` is a whole ORDER BY or GROUP BY item, which names an
+    output column by position; a placeholder in its place is a constant."""
+    if not tokens[index].group().isdigit() or index == 0 \
+            or tokens[index - 1].group().lower() not in ("by", ","):
+        return False
+    if index + 1 < len(tokens) and tokens[index + 1].group().lower() not in _ITEM_END_WORDS:
+        return False
+    depth = 0
+    for match in reversed(tokens[:index]):
+        word = match.group().lower()
+        if word == ")":
+            depth += 1
+        elif word == "(":
+            if depth == 0:
+                return False
+            depth -= 1
+        elif depth == 0 and word == "by":
+            return True
+        elif depth == 0 and word in _CLAUSE_WORDS:
+            return False
+    return False
+
+
+def parameterized_rewrite(rewrite: str, template: str,
+                          params: list[dict[str, str]]) -> str | None:
+    """A rewrite of the analyzed statement with each sampled value back in its placeholder,
+    so it reads the query's parameters the way `template` does.
+
+    The analysis runs the query with sampled values, and a rewrite comes back with them
+    written in. None when a value can't be told apart from a constant, a parameter is
+    dropped, a value is written as a typed literal, or positional parameters lose their
+    order or a recorded value. The parameters' names say whether the query's placeholders
+    are positional `?` or named; a `?` in a query with named ones is an operator.
+    """
+    values = {param["name"]: tuple(_token_key(match.group())
+                                   for match in _sql_tokens(param["value"]))
+              for param in params}
+    occurrences = [match.group() for match in _sql_tokens(template)
+                   if _PLACEHOLDER_TOKEN.fullmatch(match.group())]
+    if not values or any(not literal for literal in values.values()):
+        return None
+    positional = any(param["name"] == "?" for param in params)
+    if positional:
+        ordered = [param["value"] for param in params if param["name"] == "?"]
+        if len(ordered) != len(params) or len(ordered) != occurrences.count("?"):
+            return None
+        expected = [tuple(_token_key(match.group()) for match in _sql_tokens(value))
+                    for value in ordered]
+        names = dict.fromkeys(expected, "?")
+    else:
+        expected = [values[token] for token in occurrences if token in values]
+        names = {}
+        for name, literal in values.items():
+            if names.setdefault(literal, name) != name:
+                return None
+    literals = list(names)
+    tokens = _sql_tokens(rewrite)
+    # A value the template also writes as a constant can't be told apart in the rewrite.
+    if _find_literals([match for match in _sql_tokens(template)
+                       if not _PLACEHOLDER_TOKEN.fullmatch(match.group())], literals):
+        return None
+    if positional and any(match.group() == "?" for match in tokens):
+        return None
+    found = _find_literals(tokens, literals)
+    seen = [literal for _, _, literal in found]
+    if (seen != expected) if positional else (sorted(seen) != sorted(expected)):
+        return None
+    if any(_typed_literal(tokens, index) or _ordinal_literal(tokens, index)
+           for index, _, _ in found):
+        return None
+    parts, last = [], 0
+    for index, end, literal in found:
+        parts += [rewrite[last:tokens[index].start()], names[literal]]
+        last = end
+    return "".join(parts) + rewrite[last:]
+
+
 def _attach_parameters(query_hash: str, analysis_id: str, params: list[dict[str, str]],
-                       source: str | None) -> None:
-    """Best effort: the analysis has succeeded, and a view without its values beats a failure."""
+                       source: str | None, template: str, written: list[dict[str, str]]) -> None:
+    """Best effort: the analysis has succeeded, and a view without its values beats a failure.
+
+    `written` are the values the analyzed statement had in place of `template`'s
+    placeholders, so its rewrites get the placeholders back. A rewrite that can't keeps no
+    SQL: it would run with those values.
+    """
     from shared.query_registry import AnalysisResultsRegistry
 
+    def rewrite_sql(sql: str) -> str | None:
+        return parameterized_rewrite(sql, template, written)
+
     try:
-        AnalysisResultsRegistry().attach_parameters(query_hash, analysis_id, params, source)
+        AnalysisResultsRegistry().attach_parameters(query_hash, analysis_id, params, source,
+                                                    rewrite_sql=rewrite_sql if written else None)
     except Exception:
         logger.warning("Could not store the parameters of analysis %s of %s", analysis_id,
                        query_hash, exc_info=True)
@@ -929,8 +1076,12 @@ def parameter_note(suggestions: dict[str, Any], source: str | None) -> str | Non
 
 def analysis_outcome(job: dict[str, Any], statements: list[dict[str, Any]]) -> dict[str, Any]:
     """The audit entry's outcome and decision for one finished job."""
-    # A job still marked running was stopped before it finished.
+    # A job still marked running was stopped before it finished. One the user cancelled is
+    # stored as skipped with the error `cancelled`.
+    user_cancelled = job["state"] == "skipped" and job.get("error") == "cancelled"
     state = job["state"] if job["state"] in ("done", "failed", "skipped") else "cancelled"
+    if user_cancelled:
+        state = "cancelled"
     timeouts = [row["timeout_ms"] for row in statements
                 if row["kind"] == "explain_analyze" and row.get("timeout_ms")]
     if job.get("mode") == "analyze":
@@ -942,10 +1093,26 @@ def analysis_outcome(job: dict[str, Any], statements: list[dict[str, Any]]) -> d
         decision = None
     if state == "skipped":
         decision = "Not run: " + (job.get("error") or "not eligible")
+    elif state == "cancelled" and not statements:
+        decision = "Stopped before any statement ran"
     return {"outcome": state, "decision": decision,
-            "summary": (job.get("error") or "")[:300] if state == "failed" else "",
+            "summary": "Cancelled by you" if user_cancelled else
+            (job.get("error") or "")[:300] if state == "failed" else "",
             "analysis_ref": job.get("analysis_ref"), "mode": job.get("mode"),
             "param_source": job.get("param_source")}
+
+
+def record_recovery_failures(jobs: list[dict[str, Any]], now: int) -> None:
+    """An Activity entry for each analysis restart recovery gave up on; its run was cut off
+    before it could write one."""
+    for job in jobs:
+        agent_activity.record_entry({
+            "ts": job["started_at"] or job["enqueued_at"], "finished_at": now,
+            "target": job["target"], "action": "deep_analysis", "subject": job["query_key"],
+            "outcome": "failed", "summary": "Analysis timed out after restart recovery",
+            "details": {"query_key": job["query_key"], "reason": job["reason"],
+                        "mode": job.get("mode")},
+            "run_ref": f"analyze_job:{job['id']}"})
 
 
 class AnalyzeQueue:
@@ -973,7 +1140,8 @@ class AnalyzeQueue:
 
     async def start(self) -> "AnalyzeQueue":
         if self._task is None:
-            self.store.recover_analysis(int(self.clock()), self.job_timeout_s)
+            now = int(self.clock())
+            record_recovery_failures(self.store.recover_analysis(now, self.job_timeout_s), now)
             self._stop.clear()
             self._wake.clear()
             self._task = asyncio.create_task(self._run(), name="monitor-analyze-queue")
@@ -1105,7 +1273,7 @@ class AnalyzeQueue:
             self._busy = False
 
     def _prepare(self, now: int) -> list[str]:
-        self.store.recover_analysis(now, self.job_timeout_s)
+        record_recovery_failures(self.store.recover_analysis(now, self.job_timeout_s), now)
         targets = sorted(self.store.monitored_targets() | {
             row["target"] for row in self.store.read(
                 "SELECT DISTINCT target FROM analyze_job WHERE reason='user' "
@@ -1284,8 +1452,10 @@ class AnalyzeQueue:
             timings.enter("plan")
             original_sql = sql
             sql, source = apply_suggestions(sql, suggestions)
+            written = sample_params(suggestions)
             if source == "none" and str(target_config.get("engine", "")).lower() in ("mysql", "mariadb"):
                 sql = plan_only_sql(original_sql, "mysql", suggestions)
+                written = plan_only_parameters(original_sql, "mysql", suggestions)
                 source = "estimated"
             agent_activity.describe(parameters=parameter_note(suggestions, source))
             weights = (await asyncio.to_thread(_weights, self.store, target, now)).get(key, {})
@@ -1397,7 +1567,8 @@ class AnalyzeQueue:
             params = sample_params(suggestions) if lookup is None else []
             if params or source == "estimated":
                 await asyncio.to_thread(_attach_parameters, final.query_hash,
-                                        final.stored_analysis_id, params, source)
+                                        final.stored_analysis_id, params, source, original_sql,
+                                        written)
             finished = await asyncio.to_thread(
                 self.store.finish_analysis, job["id"], "done", int(self.clock()),
                 owner=job["owner"], attempt=job["attempt"], analysis_ref=ref, mode=mode, param_source=source,

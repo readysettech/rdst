@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWithClient } from '@/test-utils'
 import { selectGlobalTarget } from '../../features/database/targetSelection'
@@ -173,6 +179,21 @@ describe('AddDatabaseDialog', () => {
         'Fill in the host, database and user, or paste a connection string.'
       )
     ).toBeTruthy()
+    expect(configure.testConnection).not.toHaveBeenCalled()
+  })
+
+  it('names an invalid port, not the filled fields, and keeps them', () => {
+    renderDialog()
+
+    type('Host', 'postgres')
+    type('Port', 'invalid')
+    type('Database', 'rdst_test')
+    type('User', 'rdst_test')
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+
+    expect(screen.getByText('Enter a port from 1 to 65535.')).toBeTruthy()
+    expect(screen.queryByText(/Fill in the host/)).toBeNull()
+    expect(field('Host').value).toBe('postgres')
     expect(configure.testConnection).not.toHaveBeenCalled()
   })
 
@@ -434,7 +455,10 @@ describe('AddDatabaseDialog', () => {
 
     type('Host', 'db.internal')
     type('Port', 'abc')
-    fireEvent.click(screen.getByRole('button', { name: 'Add and monitor' }))
+    // Settles before the next click, as separate clicks do.
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Add and monitor' }))
+    )
     const fieldErrors = vi
       .mocked(trackEvent)
       .mock.calls.filter(([event]) => event === 'database_add_field_error')
@@ -487,6 +511,32 @@ describe('AddDatabaseDialog', () => {
       'database_add_abandoned',
       expect.anything()
     )
+  })
+
+  it('adds once when Add and monitor is clicked twice before it re-renders', async () => {
+    configure.testConnection.mockResolvedValue({
+      target: 'shop',
+      connected: true,
+      queryCapture: CAPTURE_MISSING,
+    })
+    renderDialog()
+
+    type('Host', 'db.internal')
+    type('Database', 'shop')
+    type('User', 'reader')
+    const add = screen.getByRole('button', { name: 'Add and monitor' })
+    act(() => {
+      add.click()
+      add.click()
+    })
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith({
+        to: '/database',
+        search: { target: 'shop', panel: 'enable' },
+      })
+    )
+    expect(configure.testConnection).toHaveBeenCalledTimes(1)
+    expect(configure.addTarget).toHaveBeenCalledTimes(1)
   })
 
   it('adds without asking when the query statistics are readable', async () => {
@@ -646,6 +696,17 @@ describe('AddDatabaseDialog editing', () => {
     expect(solidLabels()).toEqual(['Save changes'])
   })
 
+  it('names an invalid port on Save changes', () => {
+    renderEdit()
+
+    type('Port', 'abc')
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    expect(screen.getByText('Enter a port from 1 to 65535.')).toBeTruthy()
+    expect(screen.queryByText(/Fill in the host/)).toBeNull()
+    expect(configure.updateTarget).not.toHaveBeenCalled()
+  })
+
   it('offers Save anyway after a failed Test', async () => {
     configure.testConnection.mockResolvedValue({
       target: 'orders',
@@ -785,6 +846,16 @@ describe('connectionFrom', () => {
       connectionFrom('', { ...empty, host: 'h', database: 'd', user: 'u' })
         ?.port
     ).toBe(5432)
+    for (const port of ['abc', '0', '65536', '54.3'])
+      expect(
+        connectionFrom('', {
+          ...empty,
+          host: 'h',
+          port,
+          database: 'd',
+          user: 'u',
+        })
+      ).toBeNull()
   })
 
   it('reads MySQL from its port and the engine from a string', () => {

@@ -888,12 +888,16 @@ def _rewrite_tested(sql, execution, cost, better=True):
     (_rewrite_tested("select 2", None, 30.0),
      {"measured": False, "text": "Planner estimate: cost down 30%", "before_ms": None,
       "after_ms": None, "cost_reduction_pct": 30.0}),
-    (_rewrite_tested("SELECT 2", -10.0, 30.0, better=False),
+    (_rewrite_tested("SELECT 2", 3.0, 30.0, better=False),
      {"measured": False, "text": "Tested: no faster than the original", "before_ms": None,
       "after_ms": None, "cost_reduction_pct": 0.0}),
     (_rewrite_tested("SELECT 3", 75.0, 30.0),
      {"measured": False, "text": "Estimated: 2x faster", "before_ms": None, "after_ms": None,
       "cost_reduction_pct": None}),
+    # A plan-only test times only its EXPLAIN.
+    ({**_rewrite_tested("SELECT 2", 94.0, 30.0), "was_skipped": True},
+     {"measured": False, "text": "Planner estimate: cost down 30%", "before_ms": None,
+      "after_ms": None, "cost_reduction_pct": 30.0}),
 ])
 def test_rewrite_fix_gain_comes_from_its_tested_rewrite(tested, gain):
     from types import SimpleNamespace
@@ -908,6 +912,26 @@ def test_rewrite_fix_gain_comes_from_its_tested_rewrite(tested, gain):
     digest = digest_from_analysis("q", {"mode": "analyze"}, analysis)
     assert digest["fix"]["kind"] == "rewrite"
     assert digest["fix"]["expected_gain"] == gain
+
+
+@pytest.mark.parametrize("tested", [
+    _rewrite_tested("SELECT 2", -10.0, 30.0, better=False),
+    # Cancelled for running longer than the query, which leaves only its plan.
+    {**_rewrite_tested("SELECT 2", -100.0, 0.0, better=False), "was_skipped": True,
+     "rewrite_timeout_exceeded": True},
+])
+def test_a_rewrite_its_test_found_slower_is_no_fix(tested):
+    from types import SimpleNamespace
+    from features.monitor.analysis_digest import digest_from_analysis
+
+    analysis = SimpleNamespace(
+        timestamp="2026-10-01T00:00:00Z", index_suggestions=[], rewrite_suggestions=[],
+        explain_plan={}, performance_metrics={},
+        llm_analysis={"rewrite_suggestions": [{"rewritten_sql": "SELECT 2"}]},
+        display_payload={"rewrite_testing": {"tested": True, "rewrite_results": [tested]}})
+    digest = digest_from_analysis("q", {"mode": "analyze"}, analysis)
+    assert (digest["fix"], digest["fix_ready"]) == (None, False)
+    assert digest["headline"] != "A rewrite could make it faster"
 
 
 def test_rewrite_gain_never_borrows_a_test_whose_literals_differ():

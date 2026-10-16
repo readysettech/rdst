@@ -300,7 +300,9 @@ describe('InboxPage detail', () => {
       3
     )
     expect(
-      within(steps).getByText('Closes by itself when the statement ends.')
+      within(steps).getByText(
+        'Goes back to normal when the statement ends and closes an hour later.'
+      )
     ).toBeTruthy()
     expect(
       within(within(detail).getByRole('region', { name: 'History' })).getByText(

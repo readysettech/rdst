@@ -199,6 +199,27 @@ def test_store_analysis_results_reports_summary_store_failure(
     assert result["analysis_id"] is None
 
 
+def test_store_analysis_results_skips_a_failed_explain(
+    monkeypatch, registry, analysis_registry
+):
+    from unittest.mock import Mock
+
+    store = Mock(wraps=analysis_registry.store_analysis_result)
+    monkeypatch.setattr(analysis_registry, "store_analysis_result", store)
+    error = "MySQL EXPLAIN failed: (1054, \"Unknown column 'missing' in 'field list'\")"
+    result = workflow_integration.store_analysis_results(
+        query="SELECT missing FROM title_basics",
+        target="demo",
+        llm_analysis={"success": False, "error": error},
+        explain_results={"success": False, "error": error, "database_engine": "mysql"},
+    )
+
+    assert result["success"] is False
+    assert result["error"] == error
+    assert registry.list_queries() == []
+    store.assert_not_called()
+
+
 @pytest.mark.parametrize("literal", ["'a,b),($4'", "$$a,b),($4$$"])
 def test_store_postgres_values_with_adjacent_parameterized_rows(
     registry, analysis_registry, literal, monkeypatch

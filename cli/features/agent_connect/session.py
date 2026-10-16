@@ -15,7 +15,7 @@ from typing import Any
 
 EVENT_HISTORY = 50
 STEPS = ("connected", "database_added", "tested", "needs_setup", "awaiting_user",
-         "monitoring_enabled", "error")
+         "monitoring_enabled", "settings_changed", "error")
 
 # Tool calls this long after a prompt was issued still count toward that prompt's attempt.
 ATTEMPT_WINDOW_SECONDS = 2 * 60 * 60

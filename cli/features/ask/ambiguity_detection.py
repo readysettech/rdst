@@ -67,6 +67,13 @@ _IMPLEMENTATION_FACING_QUESTION_PATTERN = re.compile(
     r"(?:tables?|columns?|fields?|joins?|schemas?|sql)\b",
     re.IGNORECASE,
 )
+# Ask answers each question on its own, so a choice that leans on an earlier exchange
+# promises context the generator never receives.
+_EARLIER_EXCHANGE_PATTERN = re.compile(
+    r"\b(?:previous|prior|earlier)\s+(?:result|question|conversation|discussion)\b"
+    r"|\bwe\s+were\s+discussing\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -435,6 +442,14 @@ def _unusable_ambiguity_reason(ambiguity: Ambiguity) -> str | None:
         return "schema_insufficiency_is_not_user_intent"
     if _IMPLEMENTATION_FACING_QUESTION_PATTERN.search(ambiguity.clarifying_question):
         return "implementation_facing_question"
+    if any(
+        _EARLIER_EXCHANGE_PATTERN.search(text)
+        for text in (
+            ambiguity.clarifying_question,
+            *(option.text for option in ambiguity.possible_interpretations),
+        )
+    ):
+        return "refers_to_an_earlier_exchange"
 
     option_texts = {
         _normalized_choice_text(option.text)

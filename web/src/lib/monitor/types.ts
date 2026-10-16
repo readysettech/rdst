@@ -1969,6 +1969,8 @@ export interface MonitorQueryView {
 
 export interface AnalysisFixDetail {
   sql: string
+  /** What the SQL changes: an index to build or the query to run instead. */
+  kind: AnalysisFix['kind']
   /** "Serves the filter and the sort from one index." */
   serves: string | null
   cost_before: number | null
@@ -1992,6 +1994,8 @@ export interface RewriteTested {
   outcome: 'faster' | 'slower' | 'no_change' | 'untested'
   /** The rewritten statement, to read and copy. */
   sql?: string | null
+  /** Why the rewrite has no statement to copy. */
+  note?: string | null
 }
 
 export interface AlsoWorthDoing {

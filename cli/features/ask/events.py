@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
 
-from .models import AskClarificationQuestion, AskInterpretation, AskPhase, AskResult
+from .models import (
+    AskClarification,
+    AskClarificationQuestion,
+    AskInterpretation,
+    AskPhase,
+    AskResult,
+)
 
 
 @dataclass
@@ -74,6 +80,9 @@ class AskResultEvent:
     # Database-page query key, set only when monitoring has recorded this statement on the
     # target, so the page has something to show.
     monitor_key: Optional[str] = None
+    # The clarifications the user answered for this question, so it can be asked again as
+    # clarified.
+    clarifications: list[AskClarification] = field(default_factory=list)
 
     @classmethod
     def from_result(cls, result: AskResult) -> "AskResultEvent":

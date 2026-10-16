@@ -39,12 +39,12 @@ test('records existing installs for the upgrade and invites them to monitor', as
       targets: [{ name: 'e2e-guard', engine: 'postgresql' }],
     })
 
-    // Home names the unmonitored database; its page offers to turn monitoring
-    // on through the enable dialog.
+    // Home offers to monitor the unmonitored database; its page offers to turn
+    // monitoring on through the enable dialog.
     await mockPrerequisites(page, 'e2e-guard')
     await page.goto('/')
     await expect(
-      mainContent(page).getByText('e2e-guard: not monitored.')
+      mainContent(page).getByRole('button', { name: 'Monitor e2e-guard' })
     ).toBeVisible()
     await page.goto('/database?target=e2e-guard')
     await page.getByRole('button', { name: 'Turn on monitoring' }).click()

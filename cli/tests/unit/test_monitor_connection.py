@@ -189,6 +189,64 @@ def test_recovery_closes_with_the_gap_and_a_new_loss_pushes_after_an_hour(tmp_pa
     assert pushes(store, reopened["id"]) == 2
 
 
+
+def test_reopening_an_ended_outage_keeps_when_it_ended(tmp_path):
+    store = monitored(tmp_path)
+    watch = ConnectionWatch(store, clock=lambda: T0)
+    for ts in (T0, T0 + 60, T0 + 120):
+        watch.collection("db", False, ts)
+    watch.collection("db", True, T0 + 360)
+    ended = json.loads(item(store)["body_json"])
+
+    store.action_item(item(store)["id"], "reopen", T0 + 400)
+    watch.collection("db", True, T0 + 420)
+
+    closed = item(store)
+    assert (closed["state"], closed["resolved_by"]) == ("resolved", "code")
+    assert json.loads(closed["body_json"]) == ended
+
+    store.action_item(closed["id"], "reopen", T0 + 500)
+    for ts in (T0 + 600, T0 + 660, T0 + 720):
+        watch.collection("db", False, ts)
+    body = json.loads(item(store)["body_json"])
+    assert (body["failed_since"], body.get("resumed_at")) == (T0 + 600, None)
+
+def test_a_new_outage_reopens_an_item_the_user_resolved(tmp_path):
+    store = monitored(tmp_path)
+    watch = ConnectionWatch(store, clock=lambda: T0)
+    for ts in (T0, T0 + 60, T0 + 120):
+        watch.collection("db", False, ts)
+    # Resolved by the user while the outage goes on: it stays closed for this outage.
+    store.action_item(item(store)["id"], "resolve", T0 + 150)
+    watch.collection("db", False, T0 + 180)
+    assert item(store)["state"] == "resolved"
+    watch.collection("db", True, T0 + 240)
+    for ts in (T0 + 600, T0 + 660, T0 + 720):
+        watch.collection("db", False, ts)
+    reopened = item(store)
+    assert reopened["state"] == "new" and json.loads(reopened["body_json"])["failed_since"] == T0 + 600
+    assert len(store.read("SELECT id FROM inbox_item WHERE type='monitoring_issue'")) == 1
+
+
+def test_an_item_resolved_during_an_outage_stays_closed_across_a_restart(tmp_path):
+    store = monitored(tmp_path)
+    watch = ConnectionWatch(store, clock=lambda: T0)
+    for ts in (T0, T0 + 60, T0 + 120):
+        watch.collection("db", False, ts)
+    store.action_item(item(store)["id"], "resolve", T0 + 150)
+    # RDST restarts while the database still doesn't answer: a fresh run starts after the
+    # resolve, yet it is the same outage.
+    now = [T0 + 300]
+    restarted = ConnectionWatch(store, clock=lambda: now[0])
+    for ts in (T0 + 300, T0 + 360, T0 + 420):
+        restarted.collection("db", False, ts)
+    now[0] = T0 + 420 + PUSH_AFTER_SECONDS
+    restarted.tick()
+    closed = item(store)
+    assert closed["state"] == "resolved" and closed["delivery"] == "inbox"
+    assert pushes(store, closed["id"]) == 0
+
+
 def test_unmonitored_targets_never_alert(tmp_path):
     store = MonitorStore(tmp_path / "monitor.db")
     watch = ConnectionWatch(store)

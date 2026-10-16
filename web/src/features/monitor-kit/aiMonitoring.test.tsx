@@ -117,14 +117,19 @@ describe('limit words', () => {
   })
 
   it('says which key covers what', () => {
-    expect(keyRoutingLines('claude', true)).toEqual([
+    expect(keyRoutingLines('claude', true, true)).toEqual([
       'Your Anthropic key covers Analyze, Ask, deep analysis and nightly reports.',
       'Quick checks and monitoring alerts always run through Readyset and use your Readyset allowance.',
     ])
-    expect(keyRoutingLines('readyset', true)[0]).toMatch(
+    expect(keyRoutingLines('readyset', true, false)[0]).toMatch(
       /Readyset account covers Analyze/
     )
-    expect(keyRoutingLines(null, false)[0]).toMatch(/Sign in to Readyset/)
+    expect(keyRoutingLines(null, false, false)[0]).toMatch(
+      /Sign in to Readyset/
+    )
+    expect(keyRoutingLines('claude', true, false)[0]).toBe(
+      'Anthropic is selected, but no Anthropic key is set. Add your key or switch to Hosted by Readyset.'
+    )
   })
 })
 
@@ -280,6 +285,20 @@ describe('what AI work can run now', () => {
     expect(
       aiCanRun({ settings: { ...on, nightly_report: false } }).report
     ).toBe('report_off')
+    // Switched off, the report waits on its setting, not on a sign-in.
+    const off = {
+      ...on,
+      nightly_report: false,
+      ai_monitoring: 'pending' as const,
+      ai_reason: 'signed_out' as const,
+    }
+    expect(aiCanRun({ settings: off })).toMatchObject({
+      checks: 'signed_out',
+      report: 'report_off',
+    })
+    expect(aiCanRun({ settings: on, signInHeld: true }).report).toBe(
+      'signed_out'
+    )
     expect(aiCanRun({ settings: { ...on, enabled: false } }).checks).toBe(
       'monitoring_off'
     )

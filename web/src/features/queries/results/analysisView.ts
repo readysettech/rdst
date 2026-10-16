@@ -17,6 +17,14 @@ import type {
 
 const NUMBER_WORDS = ['no', 'one', 'two', 'three', 'four', 'five']
 
+/** A stored monitor analysis marks a rewrite it couldn't map back to the query's parameters. */
+const UNMAPPED_NOTE =
+  "RDST could not map this rewrite back to the query's parameters, so it offers no SQL to copy."
+
+function unmappedNote(rewrite: Record<string, unknown>): string | null {
+  return rewrite.unmapped_rewrite ? UNMAPPED_NOTE : null
+}
+
 function finite(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
@@ -72,6 +80,7 @@ export function viewFromDigest(digest: DeepAnalysisDigest): AnalysisView {
       (digest.fix?.sql
         ? {
             sql: digest.fix.sql,
+            kind: digest.fix.kind,
             serves: digest.fix.why || null,
             cost_before: null,
             cost_after: null,
@@ -177,6 +186,7 @@ export function viewFromResults(
             ? rewriteOutcome(baseline, after)
             : 'untested',
           sql: result.sql?.trim() || null,
+          note: result.sql?.trim() ? null : unmappedNote(result),
         }
       })
     : (llm?.rewrite_suggestions ?? []).map((suggestion) => ({
@@ -186,6 +196,9 @@ export function viewFromResults(
         runs: null,
         outcome: 'untested' as const,
         sql: suggestion.rewritten_sql?.trim() || null,
+        note: suggestion.rewritten_sql?.trim()
+          ? null
+          : unmappedNote(suggestion),
       }))
   const concerns = assessment?.primary_concerns ?? []
   const readyset = cacheability ?? results.readyset_cacheability ?? null
@@ -221,6 +234,7 @@ export function viewFromResults(
     fix_detail: first
       ? {
           sql: first.sql,
+          kind: 'index',
           serves: first.rationale,
           cost_before: finite(planner?.cost_before),
           cost_after: finite(planner?.cost_after),

@@ -288,3 +288,18 @@ def test_clearing_deletes_secrets_even_when_the_keyring_reads_slowly(monkeypatch
     assert "RDST_TEST_TOKEN#1" in deleted and "RDST_TEST_TOKEN#8" in deleted
     assert result["cleared"] == ["RDST_TEST_TOKEN"]
     assert "RDST_TEST_TOKEN" not in os.environ
+
+
+def test_lacks_secret_only_when_the_store_answers_it_is_absent():
+    service = SecretStoreService()
+    service._keyring = Mock()
+
+    with patch.object(service, "is_available", return_value=True):
+        service._keyring.get_password.return_value = None
+        assert service.lacks_secret("ANTHROPIC_API_KEY") is True
+        service._keyring.get_password.return_value = "sk-ant-key"
+        assert service.lacks_secret("ANTHROPIC_API_KEY") is False
+        service._keyring.get_password.side_effect = RuntimeError("locked")
+        assert service.lacks_secret("ANTHROPIC_API_KEY") is False
+    with patch.object(service, "is_available", return_value=False):
+        assert service.lacks_secret("ANTHROPIC_API_KEY") is False

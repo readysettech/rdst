@@ -32,6 +32,7 @@ import { Sidebar } from '../layout/Sidebar'
 import { maskInReplays, setAnalyticsAccountId } from '../lib/analytics'
 import { fetchAccountStatus } from '../lib/api'
 import { reportAppError } from '../lib/appErrors'
+import { useDesktopMonitoringChanges } from '../lib/useDesktopMonitoringChanges'
 import { useQueryDiscoveryTransport } from '../lib/useQueryDiscovery'
 import { useSystemStatus } from '../lib/useSystemStatus'
 
@@ -63,6 +64,7 @@ function AppShell({
   const routeLayout = useRouteLayout()
   const layout = layoutOverride ?? routeLayout
   useGoShortcuts()
+  useDesktopMonitoringChanges()
 
   // The strip the desktop window controls sit in drags the window. Without a sidebar it
   // spans the window; beside one, only where the controls sit at the right.

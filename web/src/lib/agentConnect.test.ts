@@ -67,6 +67,16 @@ describe('parseAgentEvent', () => {
 })
 
 describe('advanceAgentProgress', () => {
+  it('leaves the progress alone when the agent only changes settings', () => {
+    const failed = advanceAgentProgress(NO_PROGRESS, {
+      step: 'error',
+      message: 'pg_stat_statements is off',
+    })
+    expect(
+      advanceAgentProgress(failed, { step: 'settings_changed', target: 'shop' })
+    ).toBe(failed)
+  })
+
   it('ticks the step and every one before it', () => {
     const next = advanceAgentProgress(NO_PROGRESS, {
       step: 'tested',

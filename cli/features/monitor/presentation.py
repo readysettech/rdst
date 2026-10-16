@@ -170,6 +170,11 @@ def recovered(item: dict[str, Any], body: dict[str, Any]) -> bool:
             isinstance(body.get("resolution"), dict) and not body.get("settled"))
 
 
+def stuck_ended(item: dict[str, Any], body: dict[str, Any]) -> bool:
+    """A stuck query item whose statement has ended while the item stays open."""
+    return item["type"] == "stuck_query" and body.get("ended_at") is not None
+
+
 def severity_band(type: str, severity: float, *, is_recovered: bool = False) -> str:
     if is_recovered:
         return "recovered"
@@ -357,7 +362,8 @@ def inbox_summary(item: dict[str, Any], body: dict[str, Any], names: dict[str, s
         keys = body.get("episode_query_keys") or body.get("query_keys") or []
         return f"{len(keys)} {'query' if len(keys) == 1 else 'queries'} changed at the same time."
     if type == "stuck_query":
-        return "Ran for over a minute." if item["state"] in ("resolved", "dismissed") else \
+        return "Ran for over a minute." if item["state"] in ("resolved", "dismissed") or \
+            stuck_ended(item, body) else \
             "Running for over a minute and still going."
     if type == "daily_summary":
         if body.get("headline_summary"):
@@ -455,7 +461,7 @@ def inbox_advice(item: dict[str, Any], body: dict[str, Any], engine: str,
 
     None when the fix lives inside RDST (the link covers it) or the item is closed.
     """
-    if item["state"] in ("resolved", "dismissed"):
+    if item["state"] in ("resolved", "dismissed") or stuck_ended(item, body):
         return None
     type, subject = item["type"], item["subject"]
     mysql = engine == "mysql"
@@ -782,11 +788,12 @@ def alert_measurement(item: dict[str, Any], body: dict[str, Any]) -> dict[str, A
                     "text": f"{active} of {limit} connections in use"}
     if type == "stuck_query":
         duration = body.get("duration_s") or (body.get("numbers") or {}).get("duration_s")
+        verb = "Ran" if stuck_ended(item, body) else "Running"
         if isinstance(duration, (int, float)):
             return {"metric": "running_time", "direction": "up", "before": None,
                     "after": float(duration), "change": None, "unit": "seconds",
-                    "text": f"Running for {duration / 60:.0f} min" if duration >= 120 else
-                            f"Running for {duration:.0f} s"}
+                    "text": f"{verb} for {duration / 60:.0f} min" if duration >= 120 else
+                            f"{verb} for {duration:.0f} s"}
     return None
 
 
@@ -811,7 +818,7 @@ def present_inbox_item(item: dict[str, Any], names: dict[str, str],
     if band == "act_now" and routine_repeat(body):
         band = "watch"
     # Something that already ended, like a stuck query that finished, never asks to act now.
-    if band == "act_now" and item["state"] == "resolved":
+    if band == "act_now" and (item["state"] == "resolved" or stuck_ended(item, body)):
         band = "recovered"
     muted_by = item.get("muted_by")
     title, summary = current_title(item), inbox_summary(item, body, names)
@@ -875,7 +882,8 @@ def item_status(item: dict[str, Any], body: dict[str, Any],
     misread as a jump) doesn't keep the occurrence going.
     """
     if item["severity_band"] == "recovered":
-        return "back_to_normal", body.get("resumed_at") or item.get("resolved_at")
+        return "back_to_normal", (body.get("resumed_at") or body.get("ended_at") or
+                                  item.get("resolved_at"))
     if item["state"] in ("resolved", "dismissed"):
         return "closed", item.get("resolved_at") or item.get("dismissed_at")
     entries = body.get("occurrences")
@@ -1563,7 +1571,9 @@ def item_history(item: dict[str, Any], body: dict[str, Any],
                 refreshed > item["created_at"]):
             entries.append({"ts": refreshed, "text": f"Still {_fix_count(int(body.get('count') or 0))}, "
                             "no new index seen"})
-        if type == "stuck_query" and body.get("duration_s") and item["updated_at"] > item["created_at"]:
+        if type == "stuck_query" and stuck_ended(item, body):
+            entries.append({"ts": int(body["ended_at"]), "text": "Statement ended"})
+        elif type == "stuck_query" and body.get("duration_s") and item["updated_at"] > item["created_at"]:
             entries.append({"ts": item["updated_at"],
                             "text": f"Still running, {_minutes(body['duration_s'])} min"})
     return [entry for entry in reversed(sorted(entries, key=lambda entry: entry["ts"]))]
@@ -1588,7 +1598,8 @@ def item_related(item: dict[str, Any], body: dict[str, Any], names: dict[str, st
 
     if type == "stuck_query" and keys:
         duration = body.get("duration_s")
-        query_row(keys[0], f"running {_minutes(duration)} min" if duration else None)
+        verb = "ran" if item["state"] in CLOSED_STATES or stuck_ended(item, body) else "running"
+        query_row(keys[0], f"{verb} {_minutes(duration)} min" if duration else None)
         rows.append({"label": "Connections", "detail": "one held by this statement",
                      "link": {"kind": "live", "target": target, "label": "Live"}})
     elif type == "fixes_ready":
@@ -1636,8 +1647,8 @@ def item_view(item: dict[str, Any], body: dict[str, Any], names: dict[str, str],
     return {"kind": item_kind(type), "band": item_band(item, item["severity_band"]),
             "pid": body.get("pid") if type == "stuck_query" else None,
             "running_s": float(duration) if isinstance(duration, (int, float)) else None,
-            "steps": (stuck_steps(body, engine)
-                      if type == "stuck_query" and item["state"] not in CLOSED_STATES else []),
+            "steps": (stuck_steps(body, engine) if type == "stuck_query" and
+                      item["state"] not in CLOSED_STATES and not stuck_ended(item, body) else []),
             "fixes": fixes[:3],
             "fix_group": group if isinstance(group, dict) and group.get("group") else None,
             "fixes_share": float(body["share"]) if fixes_item and body.get("share") is not None

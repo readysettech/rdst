@@ -7,7 +7,12 @@ import { useAiGate } from '../lib/useAiGate'
 
 // The gate reads three server facts; this fixture is the server, so a test can
 // flip "key was just saved" between renders the way a real save does.
-type ServerState = { source: string; satisfied: boolean; valid: boolean }
+type ServerState = {
+  source: string
+  satisfied: boolean
+  valid: boolean
+  rejected?: boolean
+}
 
 function serveEnv(state: ServerState) {
   vi.stubGlobal(
@@ -30,6 +35,8 @@ function serveEnv(state: ServerState) {
               target: null,
               satisfied: state.satisfied,
               source: state.source,
+              selected_provider: state.rejected ? 'claude' : undefined,
+              anthropic_key_configured: state.rejected || undefined,
             },
           ],
         })
@@ -37,7 +44,7 @@ function serveEnv(state: ServerState) {
       if (url.includes('/api/env/anthropic/validate')) {
         return json({
           valid: state.valid,
-          reason: state.valid ? 'ok' : 'no_key',
+          reason: state.valid ? 'ok' : state.rejected ? 'rejected' : 'no_key',
           model: null,
           source: state.source,
         })
@@ -108,6 +115,21 @@ describe('useAiGate', () => {
 
     await waitFor(() =>
       expect(result.current).toEqual({ status: 'blocked', reason: 'missing' })
+    )
+  })
+
+  it('says a saved key Anthropic rejected is invalid, not missing', async () => {
+    serveEnv({
+      source: 'secure_store',
+      satisfied: false,
+      valid: false,
+      rejected: true,
+    })
+
+    const { result } = renderGate(createTestQueryClient())
+
+    await waitFor(() =>
+      expect(result.current).toEqual({ status: 'blocked', reason: 'invalid' })
     )
   })
 })

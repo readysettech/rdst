@@ -30,6 +30,12 @@ interface MissingEntry {
 
 const maskedSecretStyle = { WebkitTextSecurity: 'disc' } as CSSProperties
 
+// Anthropic keys are dash-separated URL-safe base64; anything else is a
+// mistyped or mangled paste that Anthropic could never accept.
+const ANTHROPIC_KEY_ALPHABET = /^[A-Za-z0-9_-]+$/
+const MALFORMED_ANTHROPIC_KEY_MESSAGE =
+  "That isn't a valid Anthropic API key. Keys contain only letters, digits, hyphens, and underscores; copy the key from the Anthropic Console and paste it again."
+
 function toMissingEntries(requirements: EnvRequirement[]): MissingEntry[] {
   return requirements.map((item) => {
     const envName = item.accepted_names[0] || ''
@@ -159,6 +165,16 @@ export function EnvSecretsDialog({
       setValidationError('Enter at least one secret value before saving.')
       return
     }
+    if (
+      payloads.some(
+        (item) =>
+          item.name === 'ANTHROPIC_API_KEY' &&
+          !ANTHROPIC_KEY_ALPHABET.test(item.value)
+      )
+    ) {
+      setValidationError(MALFORMED_ANTHROPIC_KEY_MESSAGE)
+      return
+    }
 
     setValidationError(null)
     setEnvSecretMutation.reset()
@@ -280,6 +296,7 @@ export function EnvSecretsDialog({
             </div>
             <BaseInputSwitch
               name="persist"
+              aria-label="Save securely"
               checked={persist}
               onCheckedChange={setPersist}
               disabled={setEnvSecretMutation.isPending}

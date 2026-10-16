@@ -174,7 +174,7 @@ export function AnalysisHero({
         )}
       >
         <Num
-          label="Rows read"
+          label={tag === 'Estimated' ? 'Rows estimated' : 'Rows read'}
           value={formatInt(view.rows_read)}
           detail={
             view.rows_returned == null

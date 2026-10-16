@@ -65,6 +65,22 @@ def test_keyservice_error_preserves_rate_limit_status(monkeypatch):
     assert "Too many sign-in attempts" in str(raised.value)
 
 
+def test_an_unreachable_keyservice_reads_as_a_connection_problem(monkeypatch):
+    import requests
+
+    def refuse(*_args, **_kwargs):
+        raise requests.ConnectionError(
+            "HTTPSConnectionPool(host='keyservice'): Max retries exceeded (Errno 111)")
+
+    monkeypatch.setattr("features.account.service.requests.post", refuse)
+
+    with pytest.raises(AccountServiceError) as raised:
+        AccountService._post("/account-auth/start", {})
+
+    assert str(raised.value) == (
+        "Couldn't reach Readyset sign-in. Check your connection and try again.")
+
+
 @pytest.mark.parametrize("enabled", [True, False])
 def test_complete_login_parks_then_picks_up_and_saves_session(monkeypatch, enabled):
     monkeypatch.setattr("shared.telemetry.telemetry.is_enabled", lambda: enabled)

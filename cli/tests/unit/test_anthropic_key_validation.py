@@ -115,3 +115,16 @@ def test_result_is_cached_per_key(monkeypatch):
     ae.validate_anthropic_key()
     ae.validate_anthropic_key()
     assert calls["n"] == 1  # second call served from the cache
+
+
+def test_key_outside_alphabet_is_rejected_without_a_request(monkeypatch):
+    ae.clear_anthropic_validity_cache()
+    _stub_key(monkeypatch, "sk-ant-\u00e9\u6f22")
+
+    def _unexpected():
+        raise AssertionError("malformed key must not be sent")
+
+    _stub_query(monkeypatch, _unexpected)
+    out = ae.validate_anthropic_key()
+    assert out["valid"] is False
+    assert out["reason"] == "rejected"

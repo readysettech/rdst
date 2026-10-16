@@ -10,6 +10,7 @@ import { stripRows as stripOf } from './homeModel'
 
 const filter = vi.hoisted(() => ({ db: null as string | null }))
 const signIn = vi.hoisted(() => ({ held: new Set<string>() }))
+const navigate = vi.hoisted(() => vi.fn())
 
 vi.mock('../monitor-kit/signInHold', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../monitor-kit/signInHold')>()),
@@ -41,7 +42,7 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
   }
   return {
     ...(await importOriginal<typeof import('@tanstack/react-router')>()),
-    ...fileRouteModuleMock({ useNavigate: () => vi.fn(), Link }),
+    ...fileRouteModuleMock({ useNavigate: () => navigate, Link }),
   }
 })
 
@@ -358,6 +359,28 @@ describe('HomeView sentence', () => {
     )
     expect(screen.queryByText(/All quiet/)).toBeNull()
     expect(screen.queryByText(/alerts running/)).toBeNull()
+  })
+
+  it('keeps the get started steps, at turning on monitoring, for one unmonitored database', () => {
+    const model = base()
+    const unmonitored: HomeModel = {
+      ...model,
+      status: { ...model.status, state: 'off', target: null, watching: 0 },
+      day: null,
+      databases_strip: [
+        { ...stripOf(model)[0], target: 'pg-home', state: 'not_monitored' },
+      ],
+    }
+    renderWithClient(<HomeView model={unmonitored} />)
+
+    expect(screen.getByTestId('get-started')).toBeTruthy()
+    const steps = screen.getAllByRole('listitem')
+    expect(steps.map((step) => step.getAttribute('aria-current'))).toEqual([null, 'step'])
+    fireEvent.click(screen.getByRole('button', { name: 'Monitor pg-home' }))
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/database',
+      search: { target: 'pg-home', panel: 'enable' },
+    })
   })
 
   it('reads all quiet with nothing to act on and nothing to do first', () => {

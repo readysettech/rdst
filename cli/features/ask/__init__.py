@@ -10,6 +10,7 @@ from .events import (
     AskStatusEvent,
 )
 from .models import (
+    AskClarification,
     AskClarificationQuestion,
     AskInput,
     AskInterpretation,
@@ -20,6 +21,7 @@ from .models import (
 from .service import AskService, _sessions
 
 __all__ = [
+    "AskClarification",
     "AskClarificationNeededEvent",
     "AskClarificationQuestion",
     "AskErrorEvent",

@@ -6,6 +6,7 @@ afterEach(cleanup)
 
 const fix = {
   sql: 'CREATE INDEX idx_orders_channel ON orders (channel)',
+  kind: 'index' as const,
   serves: 'Speculative index on channel.',
   cost_before: null,
   cost_after: null,
@@ -41,6 +42,23 @@ describe('FixCard', () => {
     expect(screen.getByText('Planner uses it: cost 49,586 to 36')).toBeTruthy()
     expect(screen.queryByTestId('planner-setup')).toBeNull()
   })
+
+  it('labels a rewrite as a query rewrite, without index build steps', () => {
+    render(
+      <FixCard
+        fix={{
+          ...fix,
+          kind: 'rewrite',
+          sql: 'SELECT b.id FROM b LEFT JOIN r ON r.id = b.id',
+        }}
+        onCopy={vi.fn()}
+      />
+    )
+    const card = screen.getByTestId('analysis-fix')
+    expect(card.textContent).toContain('query rewrite')
+    expect(card.textContent).not.toMatch(/one index|Builds without blocking/)
+    expect(card.textContent).toContain('in place of the query')
+  })
 })
 
 describe('RewritesCard', () => {
@@ -63,6 +81,31 @@ describe('RewritesCard', () => {
     const block = screen.getByTestId('statement-copy')
     expect(block.textContent).toContain('owneruserid = 7')
     expect(within(block).getByRole('button', { name: /Copy SQL/ })).toBeTruthy()
+  })
+
+  it('shows a rewrite without SQL with its note and nothing to copy', () => {
+    render(
+      <RewritesCard
+        method={null}
+        rewrites={[
+          {
+            name: 'Filter before sort',
+            before_ms: 100,
+            after_ms: 40,
+            runs: null,
+            outcome: 'faster',
+            sql: null,
+            note: 'RDST could not map this rewrite back to the query.',
+          },
+        ]}
+      />
+    )
+    const card = screen.getByTestId('analysis-rewrites')
+    expect(card.textContent).toContain('Filter before sort')
+    expect(card.textContent).toContain('100.0 to 40.0 ms')
+    expect(card.textContent).toContain('could not map this rewrite back')
+    expect(screen.queryByTestId('statement-copy')).toBeNull()
+    expect(within(card).queryByRole('button', { name: /Copy/ })).toBeNull()
   })
 })
 

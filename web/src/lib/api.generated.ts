@@ -438,8 +438,8 @@ export interface paths {
          *     Draws on the query registry, which auto-saves every answered ask with its
          *     original question text. One item per database a SQL pattern was asked on,
          *     carrying that database's question; entries saved before question
-         *     persistence landed have none. The SQL is the original submitted form when
-         *     stored, so a re-ask is faithful.
+         *     persistence landed have none. The SQL is the one that answered that question,
+         *     in its original submitted form when stored, so a re-ask is faithful.
          */
         get: operations["ask_history_api_ask_history_get"];
         put?: never;
@@ -1078,6 +1078,26 @@ export interface paths {
         put?: never;
         /** Provision */
         post: operations["provision_api_demo_provision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/demo/provision/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Provision Stream
+         * @description Re-attach to the provision in flight, replaying it from the start.
+         */
+        get: operations["provision_stream_api_demo_provision_stream_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5249,6 +5269,12 @@ export interface components {
             cost_after?: number | null;
             /** Cost Before */
             cost_before?: number | null;
+            /**
+             * Kind
+             * @default index
+             * @enum {string}
+             */
+            kind?: "index" | "rewrite" | "config" | "none";
             /** Serves */
             serves?: string | null;
             /** Size */
@@ -5811,6 +5837,34 @@ export interface components {
             verified: number;
         };
         /**
+         * AskClarification
+         * @description A clarification question the user answered for a question.
+         */
+        AskClarification: {
+            /** Answer */
+            answer: string;
+            /** Id */
+            id: string;
+            /** Question */
+            question: string;
+            /** Term */
+            term: string;
+        };
+        /**
+         * AskClarificationAnswer
+         * @description A clarification the user answered, as an answer reports it.
+         */
+        AskClarificationAnswer: {
+            /** Answer */
+            answer: string;
+            /** Id */
+            id: string;
+            /** Question */
+            question: string;
+            /** Term */
+            term: string;
+        };
+        /**
          * AskClarificationNeededEvent
          * @description Clarification needed from the user.
          */
@@ -5928,6 +5982,8 @@ export interface components {
             clarification_answers?: {
                 [key: string]: string;
             } | null;
+            /** Clarifications */
+            clarifications?: components["schemas"]["AskClarificationAnswer"][] | null;
             /**
              * Dry Run
              * @default false
@@ -5952,6 +6008,8 @@ export interface components {
          * @description Ask completed with results.
          */
         AskResultEvent: {
+            /** Clarifications */
+            clarifications?: components["schemas"]["AskClarification"][];
             /** Columns */
             columns: string[];
             /** Execution Time Ms */
@@ -12476,6 +12534,8 @@ export interface components {
             before_ms?: number | null;
             /** Name */
             name: string;
+            /** Note */
+            note?: string | null;
             /**
              * Outcome
              * @default untested
@@ -16518,6 +16578,26 @@ export interface operations {
         };
     };
     provision_api_demo_provision_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    provision_stream_api_demo_provision_stream_get: {
         parameters: {
             query?: never;
             header?: never;

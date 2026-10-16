@@ -151,6 +151,10 @@ describe('row and header words', () => {
       'running 2 min'
     )
     expect(runningText(closed[0], CA_NOW)).toBeNull()
+    // An ended statement whose item has not closed yet.
+    expect(
+      runningText({ ...stuck, status: 'back_to_normal' }, CA_NOW)
+    ).toBeNull()
     expect(rowMeta(stuck)).toBe('COUNT on posts with pg_sleep')
     expect(rowMeta(closed[0])).toBe(closed[0].summary)
   })

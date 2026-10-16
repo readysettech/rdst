@@ -1622,6 +1622,7 @@ QUIET_CYCLES = 3
 OPEN_STATES = ("new", "seen", "snoozed")
 ENGINE_WORDS = {"postgresql": "PostgreSQL", "mysql": "MySQL"}
 _FIX_TITLE = re.compile(r"^Add an index on (\w+)\((.*)\)$")
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
 
 
 def fix_label(fix: dict[str, Any]) -> str:
@@ -1681,12 +1682,29 @@ def _num(value: Any) -> float | None:
         else None
 
 
+def _rewrite_outcome(before: float | None, after: float | None) -> str:
+    """How a tested rewrite's run time compared with the original's; 5% either way is no
+    change."""
+    if before is None or after is None:
+        return "untested"
+    change = (before - after) / max(before, 0.001)
+    return "faster" if change > 0.05 else "slower" if change < -0.05 else "no_change"
+
+
+def _also_note(description: Any) -> dict[str, Any]:
+    """A suggestion's first sentence as its title, and the rest, whole, as its detail."""
+    title, *rest = _SENTENCE_END.split(" ".join(str(description).split()), maxsplit=1)
+    return {"title": title, "detail": rest[0] if rest else None}
+
+
 def analysis_view(store: MonitorStore, target: str, key: str, digest: dict[str, Any],
                   now: int) -> dict[str, Any]:
     """The digest plus what the Full analysis page shows, read from the stored analysis.
     Facts the stored record lacks stay null."""
-    from features.monitor.analysis_digest import as_tested, index_why, load_analysis, tested_index
+    from features.monitor.analysis_digest import (as_tested, index_why, load_analysis,
+                                                  plan_only_test, rewrite_result, tested_index)
     from shared.monitor.monitor_store import local_day_bounds
+    from shared.query_registry.analysis_results import listed_rewrite
 
     analysis = load_analysis({"state": "done", "analysis_ref": digest.get("analysis_ref"),
                               "target": target, "query_key": key, "mode": digest.get("mode")}) \
@@ -1711,11 +1729,29 @@ def analysis_view(store: MonitorStore, target: str, key: str, digest: dict[str, 
     root = explain.get("Plan") if isinstance(explain.get("Plan"), dict) else {}
     findings = [{"title": text, "detail": None, "value": None}
                 for text in digest.get("findings") or []]
-    rewrites = [{"name": " ".join(str(item.get("explanation") or "Rewrite").split())[:80],
-                 "before_ms": None, "after_ms": None, "runs": None, "outcome": "untested",
-                 "sql": str(item["rewritten_sql"]).strip()}
-                for item in llm.get("rewrite_suggestions") or []
-                if isinstance(item, dict) and item.get("rewritten_sql")]
+    # Run times are measured only when the analysis ran the query; a plan's are not.
+    rewrite_testing = display.get("rewrite_testing") \
+        if isinstance(display.get("rewrite_testing"), dict) and digest.get("mode") == "analyze" \
+        else {}
+    baseline = _num((rewrite_testing.get("original_performance") or {}).get("execution_time_ms"))
+    rewrites = []
+    for item in llm.get("rewrite_suggestions") or []:
+        if not listed_rewrite(item):
+            continue
+        result = rewrite_result(item, rewrite_testing) or {}
+        # A plan-only test records how long its EXPLAIN took, and one cancelled for running
+        # longer than the query has no run time.
+        after = None if plan_only_test(result) else \
+            _num((result.get("performance") or {}).get("execution_time_ms"))
+        sql = str(item.get("rewritten_sql") or "").strip() or None
+        rewrites.append({
+            "name": " ".join(str(item.get("explanation") or "Rewrite").split())[:80],
+            "before_ms": baseline if after is not None else None, "after_ms": after,
+            "runs": None, "sql": sql,
+            "outcome": "slower" if result.get("rewrite_timeout_exceeded")
+            else _rewrite_outcome(baseline, after),
+            "note": None if sql else "RDST could not map this rewrite back to the query's "
+                                     "parameters, so it offers no SQL to copy."})
     # Every index recommendation besides the one the fix leads with, with its statement.
     lead_sql = str((digest.get("fix") or {}).get("sql") or "").strip().lower()
     indexes = []
@@ -1730,8 +1766,7 @@ def analysis_view(store: MonitorStore, target: str, key: str, digest: dict[str, 
                         else "Add an index",
                         "detail": index_why(item.get("rationale")) or None, "sql": sql})
     also = indexes + [
-        {"title": " ".join(str(item["description"]).split())[:120], "detail": None}
-        for item in llm.get("optimization_opportunities") or []
+        _also_note(item["description"]) for item in llm.get("optimization_opportunities") or []
         if isinstance(item, dict) and item.get("description") and not (
             str(item.get("type") or "").lower() == "configuration" and
             str(item.get("priority") or "").lower() == "high")]
@@ -1755,6 +1790,7 @@ def analysis_view(store: MonitorStore, target: str, key: str, digest: dict[str, 
     return {**digest, "score": digest.get("efficiency_score"),
             "verdict": {"lead": f"{headline}.", "rest": rest} if headline else None,
             "fix_detail": {"sql": concurrent_index_sql(fix["sql"], engine) or fix["sql"],
+                           "kind": fix["kind"],
                            "serves": str(fix.get("why") or "") or None,
                            "cost_before": cost_before, "cost_after": cost_after,
                            "size": None, "write_cost": None}

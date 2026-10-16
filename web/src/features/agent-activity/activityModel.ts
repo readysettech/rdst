@@ -681,7 +681,7 @@ function analysisLine(item: AgentActivityItem): ActivityLine {
     case 'cancelled':
       return {
         text: `Stopped analyzing ${subject}`,
-        detail: null,
+        detail: plainReason(item.summary) || null,
         warn: false,
         place: 'Analysis',
         link,

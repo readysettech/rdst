@@ -17,6 +17,8 @@ import type {
 
 type ActionControllers = Record<string, AbortController | null>;
 
+const TEST_INTERRUPTED = 'The connection test stopped before it finished. Try again.';
+
 /** Start an action, superseding only a previous run of that same action. */
 function beginRequest(
   controllers: ActionControllers,
@@ -449,7 +451,13 @@ export function useConfigure(): UseConfigureReturn {
           const { done, value } = await reader.read();
 
           if (done) {
-            setState((prev) => (prev === 'loading' ? 'success' : prev));
+            if (finalResult) {
+              setState((prev) => (prev === 'loading' ? 'success' : prev));
+            } else {
+              finalResult = { target: name, connected: false, error: TEST_INTERRUPTED };
+              setError(TEST_INTERRUPTED);
+              setState('error');
+            }
             setLoading(false);
             break;
           }
@@ -481,6 +489,8 @@ export function useConfigure(): UseConfigureReturn {
                     break;
 
                   case 'connection_test': {
+                    // "Connecting..." announces the test; only success or failure ends it.
+                    if (data.status === 'in_progress') break;
                     const isSuccess = data.status === 'success';
                     finalResult = {
                       target: data.target_name,
@@ -507,11 +517,14 @@ export function useConfigure(): UseConfigureReturn {
                     setLoading(false);
                     break;
 
-                  case 'error':
-                    setError(data.message || 'Connection test failed');
+                  case 'error': {
+                    const message = data.message || 'Connection test failed';
+                    finalResult = { target: name, connected: false, error: message };
+                    setError(message);
                     setState('error');
                     setLoading(false);
                     break;
+                  }
 
                   case 'unknown':
                     console.warn('[Configure SSE] Unknown event payload (ignored):', data);
@@ -531,7 +544,14 @@ export function useConfigure(): UseConfigureReturn {
         if (err instanceof Error && err.name === 'AbortError') {
           return null;
         }
-        const errorMessage = err instanceof Error ? err.message : 'Connection test failed';
+        // A dropped connection (the backend stopped mid-stream) surfaces as a TypeError.
+        const dropped = err instanceof TypeError;
+        const errorMessage = dropped
+          ? TEST_INTERRUPTED
+          : err instanceof Error
+            ? err.message
+            : 'Connection test failed';
+        if (dropped) finalResult ??= { target: name, connected: false, error: errorMessage };
         setError(errorMessage);
         setState('error');
         setLoading(false);

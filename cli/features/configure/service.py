@@ -834,21 +834,34 @@ class ConfigureService:
                         "config": ["shared_preload_libraries = 'pg_stat_statements'"],
                         "sql": ["CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"],
                     }
+            enabled = False
             try:
                 cursor.execute("SHOW VARIABLES LIKE 'performance_schema'")
                 row = cursor.fetchone()
-                if row and str(row[1]).lower() in {"on", "1", "true"}:
+                enabled = bool(row) and str(row[1]).lower() in {"on", "1", "true"}
+                if enabled:
                     cursor.execute("SELECT 1 FROM performance_schema.events_statements_summary_by_digest LIMIT 1")
                     cursor.fetchone()
                     return {"available": True, "source": "performance_schema", "title": "Historical query discovery is ready", "instructions": []}
             except Exception:
                 pass
+            grant = "Grant this database user SELECT access to performance_schema statement digest tables."
+            if enabled:
+                # performance_schema is already on, so only this user's read access is missing.
+                return {
+                    "available": False, "source": "performance_schema",
+                    "title": "Enable historical query discovery",
+                    "detail": "permission",
+                    "instructions": [grant],
+                    "config": [],
+                    "sql": [],
+                }
             return {
                 "available": False, "source": "performance_schema",
                 "title": "Enable historical query discovery",
                 "instructions": [
                     "Set performance_schema=ON in the MySQL server configuration and restart MySQL.",
-                    "Grant this database user SELECT access to performance_schema statement digest tables.",
+                    grant,
                     "Verify with SHOW VARIABLES LIKE 'performance_schema';.",
                 ],
                 "config": ["performance_schema=ON"],

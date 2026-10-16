@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import secrets
 import threading
 import time
@@ -14,6 +15,8 @@ import requests
 from shared import account_session
 from shared.keyservice import keyservice_url
 from shared.llm_manager.key_resolution import HOSTED_MODEL
+
+logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT_SECONDS = 15
 LOGIN_TTL_SECONDS = 600
@@ -43,7 +46,10 @@ class AccountService:
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
         except requests.RequestException as exc:
-            raise AccountServiceError(f"Could not reach Readyset sign-in: {exc}") from exc
+            logger.debug("Readyset sign-in request failed", exc_info=True)
+            raise AccountServiceError(
+                "Couldn't reach Readyset sign-in. Check your connection and try again."
+            ) from exc
         try:
             payload = response.json()
         except ValueError as exc:

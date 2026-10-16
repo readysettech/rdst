@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
 import re
 import subprocess
 import sys
@@ -164,12 +165,78 @@ def _shape(sql: str) -> str:
     return text
 
 
+def _process_alive(pid: object) -> bool:
+    """Whether ``pid`` names a running process, such as another RDST still provisioning."""
+    if not isinstance(pid, int) or pid <= 0 or pid == os.getpid():
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def _now_s() -> float:
     return time.time()
 
 
 def _round_float(value: float | None, digits: int = 1) -> float | None:
     return round(value, digits) if value is not None else None
+
+
+class _ProvisionRun:
+    """The events of one provision, fanned out to every client following it.
+
+    Each follower gets every event published after it joins, preceded by a replay of the
+    run so far; the replay keeps only the latest of consecutive same-stage progress
+    events, which bounds it to a few entries per container.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._replay: list[dict] = []
+        self._followers: list[queue.SimpleQueue] = []
+        self._done = False
+
+    def publish(self, event: dict) -> None:
+        with self._lock:
+            last = self._replay[-1] if self._replay else None
+            if (last is not None and event.get("type") == "progress"
+                    and last.get("type") == "progress"
+                    and last.get("stage") == event.get("stage")):
+                self._replay[-1] = event
+            else:
+                self._replay.append(event)
+            for q in self._followers:
+                q.put(event)
+
+    def finish(self) -> None:
+        with self._lock:
+            self._done = True
+            for q in self._followers:
+                q.put(None)
+
+    def follow(self) -> Iterator[dict]:
+        q: queue.SimpleQueue = queue.SimpleQueue()
+        with self._lock:
+            backlog = list(self._replay)
+            if self._done:
+                q.put(None)
+            else:
+                self._followers.append(q)
+        return self._drain(backlog, q)
+
+    def _drain(self, backlog: list[dict], q: queue.SimpleQueue) -> Iterator[dict]:
+        try:
+            yield from backlog
+            while (event := q.get()) is not None:
+                yield event
+        finally:
+            with self._lock:
+                if q in self._followers:
+                    self._followers.remove(q)
 
 
 class DemoService:
@@ -206,6 +273,8 @@ class DemoService:
         self._supervisor_stop = threading.Event()
         self._supervisor: threading.Thread | None = None
         self._provisioning = False
+        self._provision_run: _ProvisionRun | None = None
+        self._provision_cancel = threading.Event()
         # Sticky success flag for the Apple Silicon emulation probe: once an
         # amd64 container has provably run, no need to re-probe this session.
         self._amd64_emulation_ok = False
@@ -220,6 +289,7 @@ class DemoService:
         self._catalog = {_norm(q.sql): q for q in WORKLOAD}
         self._catalog_by_key = {q.id: q for q in WORKLOAD}
         self._catalog_by_shape = {_shape(q.sql): q for q in WORKLOAD}
+        self._discard_interrupted_provision()
         if self._ports:
             self._ensure_supervisor()
 
@@ -315,6 +385,9 @@ class DemoService:
         self._qp_cron_verified = bool(data.get("qp_cron_verified", False))
         at = data.get("auto_teardown_at")
         self._auto_teardown_at = float(at) if at is not None else None
+        # State saved before this flag existed was a finished provision or one still running.
+        self._provision_complete = bool(data.get("complete", True))
+        self._provision_pid = data.get("provision_pid")
         ports = data.get("ports") or {}
         if not ports:
             return None
@@ -337,6 +410,8 @@ class DemoService:
             "cache_budget": self._cache_budget,
             "qp_cron_fast": self._qp_cron_fast,
             "qp_cron_verified": self._qp_cron_verified,
+            "complete": self._provision_complete,
+            "provision_pid": None if self._provision_complete else os.getpid(),
         }
         if self._auto_teardown_at is not None:
             state["auto_teardown_at"] = self._auto_teardown_at
@@ -844,28 +919,61 @@ class DemoService:
 
     # ---- provision -----------------------------------------------------------
     def provision(self) -> Iterator[dict]:
+        """Start a provision and follow its events.
+
+        The provision runs on its own thread, so it completes even when the client that
+        started it disconnects; follow_provision() lets a client attach to it again.
+        """
         if not self._lifecycle_lock.acquire(blocking=False):
-            yield {"type": "error",
-                   "message": "Another provision or teardown is already in progress."}
-            return
+            return iter([{"type": "error",
+                          "message": "Another provision or teardown is already in progress."}])
         self._provisioning = True
+        self._provision_cancel.clear()
+        run = _ProvisionRun()
+        self._provision_run = run
+        events = run.follow()
+        threading.Thread(target=self._run_provision, args=(run,),
+                         name="qpdemo-provision", daemon=True).start()
+        return events
+
+    def follow_provision(self) -> Iterator[dict]:
+        """Follow the provision in flight from its first event; empty when none is."""
+        run = self._provision_run
+        return run.follow() if run else iter(())
+
+    def _run_provision(self, run: _ProvisionRun) -> None:
+        events = self._provision_locked()
         try:
             # Container-start milestones are authored on a 5..100 scale for the
             # cached-images case. When a real download happens it owns the bar
             # up to IMAGE_STAGE_MAX_PCT, so the container milestones rescale
             # into the remainder instead of snapping the bar backwards.
             base = 5
-            for ev in self._provision_locked():
+            for ev in events:
                 pct = ev.get("percent")
                 if ev.get("stage") == "images":
                     if str(ev.get("message", "")).startswith("Pulling"):
                         base = IMAGE_STAGE_MAX_PCT
                 elif isinstance(pct, int) and pct >= 5:
                     ev["percent"] = base + round((pct - 5) * (100 - base) / 95)
-                yield ev
+                run.publish(ev)
+                # A teardown cancels the start between steps and removes what it built.
+                if self._provision_cancel.is_set():
+                    close = getattr(events, "close", None)
+                    if close is not None:
+                        close()
+                    run.publish({"type": "error", "message": "The demo start was cancelled."})
+                    break
+        except Exception as e:
+            logger.exception("Demo provision failed")
+            self._last_error = str(e)
+            run.publish({"type": "error", "message": str(e)})
         finally:
             self._provisioning = False
+            if self._provision_run is run:
+                self._provision_run = None
             self._lifecycle_lock.release()
+            run.finish()
 
     def _provision_locked(self) -> Iterator[dict]:
         if not self.docker_ok():
@@ -886,6 +994,7 @@ class DemoService:
             self._qp_paused = True
             self._demo_completed_fired = False
             self._auto_teardown_at = self._clock() + AUTO_TEARDOWN_S
+            self._provision_complete = False
             self._health = {n: "recovering" for n in NAMES}
             self._supervisor_failures = {n: 0 for n in NAMES}
 
@@ -979,6 +1088,7 @@ class DemoService:
             yield {"type": "container", "name": "qp-cron", "label": "QueryPilot accelerator",
                    "state": "ready", "percent": 97}
 
+            self._provision_complete = True
             self._save_state()
             self._health = {n: "running" for n in NAMES}
             self._ensure_supervisor()
@@ -990,6 +1100,16 @@ class DemoService:
             self._abandon_provision()
             self._last_error = str(e)
             yield {"type": "error", "message": str(e)}
+
+    def _discard_interrupted_provision(self) -> None:
+        """Remove the half-built stack of a provision RDST stopped in the middle of; it is not a
+        demo to resume."""
+        if self._ports and not self._provision_complete and \
+                not _process_alive(self._provision_pid):
+            self._abandon_provision()
+            self._qp_enabled = False
+            self._qp_paused = True
+            self._last_error = "Setup stopped when RDST restarted. Start the demo again."
 
     def _abandon_provision(self) -> None:
         """Remove a half-built stack after a failed provision.
@@ -1105,8 +1225,9 @@ class DemoService:
         return {"queries": len(warm_queries), "executions": executions}
 
     def teardown(self, reason: str = "user") -> dict:
-        # Waits for any in-flight provision to finish (or be abandoned) so the
-        # two can't interleave docker operations on the same containers.
+        # Cancels any in-flight provision at its next step and waits for it to stop, so
+        # the two can't interleave docker operations on the same containers.
+        self._provision_cancel.set()
         with self._lifecycle_lock:
             return self._teardown_locked(reason)
 
@@ -1183,7 +1304,10 @@ class DemoService:
         return {
             "notice": notice,
             "auto_teardown_at": self._auto_teardown_at,
-            "provisioned": self._ports is not None,
+            # Ports are allocated early in a provision; the demo is provisioned only
+            # once the provision has completed.
+            "provisioned": self._ports is not None and not self._provisioning,
+            "provisioning": self._provisioning,
             "containers": {n: self._container_state(cn) for n, cn in NAMES.items()},
             "load_running": self._running,
             "workers": self._workers,

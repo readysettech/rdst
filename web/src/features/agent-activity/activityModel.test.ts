@@ -393,6 +393,13 @@ describe('activity lines', () => {
       detail: 'Plan took too long',
       warn: true,
     })
+    expect(
+      activityLine(item({ outcome: 'cancelled', summary: 'Cancelled by you' }))
+    ).toMatchObject({
+      text: 'Stopped analyzing SELECT on events by props',
+      detail: 'Cancelled by you',
+      warn: false,
+    })
     expect(activityLine(rollup({ count: 12, items_filed: 0 }))).toMatchObject({
       text: 'Checked for changes',
       detail: '12 checks, nothing new',

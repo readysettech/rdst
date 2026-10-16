@@ -393,7 +393,7 @@ function StuckQuery({
         <Steps
           steps={steps}
           meta="in order, stop when it ends"
-          note="Closes by itself when the statement ends."
+          note="Goes back to normal when the statement ends and closes an hour later."
         />
       )}
       <History item={item} />

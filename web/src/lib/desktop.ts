@@ -67,6 +67,12 @@ declare global {
       updates?: DesktopUpdates
       notifications?: DesktopNotifications
       backend?: DesktopBackend
+      monitoring?: {
+        /** Fires after the tray turns monitoring on or off, or pauses it. */
+        onChange: (callback: () => void) => () => void
+        /** Rebuilds the tray menu after monitoring changed outside the app. */
+        changed?: () => void
+      }
       startup?: {
         openLogs: () => void
       }

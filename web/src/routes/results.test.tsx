@@ -204,6 +204,8 @@ describe('the full analysis of a monitored query', () => {
     expect(
       within(hero).getByText('One index removes the scan and the sort.')
     ).toBeTruthy()
+    // A plan's row counts are the planner's estimate.
+    expect(within(hero).getByText('Rows estimated')).toBeTruthy()
     expect(within(hero).getByText('245,290')).toBeTruthy()
     expect(within(hero).getByText('to return 583')).toBeTruthy()
     expect(within(hero).getByText('107,916')).toBeTruthy()
@@ -402,6 +404,91 @@ describe('ResultsPage analyze consent', () => {
       expect(screen.queryByText('Run EXPLAIN ANALYZE?')).toBeNull()
     })
     expect(run.analyze).not.toHaveBeenCalled()
+  })
+
+  it('names the saved record of a finished run so a reload reopens it', async () => {
+    const results: CompleteEvent = {
+      type: 'complete',
+      success: true,
+      query_hash: 'saved-hash',
+      stored_analysis_id: 'an-9',
+    }
+    const run = liveRun({ state: 'complete', results })
+    vi.mocked(useAnalyze).mockReturnValue(run)
+    unlocked()
+    const search: ResultsSearch = {
+      query: 'select 1',
+      target: 'prod',
+      fast: false,
+      origin: 'ask',
+    }
+    const { rerender } = render(<ResultsPage search={search} />)
+    await waitFor(() =>
+      expect(navigateSpy).toHaveBeenCalledWith({
+        to: '/results',
+        search: { ...search, hash: 'saved-hash', analysisId: 'an-9' },
+        replace: true,
+      })
+    )
+
+    // The run stays on screen under the new URL; the next view of it reads the record.
+    navigateSpy.mockClear()
+    rerender(
+      <ResultsPage
+        search={{ ...search, hash: 'saved-hash', analysisId: 'an-9' }}
+      />
+    )
+    expect(navigateSpy).not.toHaveBeenCalled()
+    expect(run.analyze).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze again' }))
+    expect(run.reset).toHaveBeenCalled()
+    expect(navigateSpy).toHaveBeenCalledWith({
+      to: '/results',
+      search: expect.objectContaining({ analysisId: undefined }),
+      replace: undefined,
+    })
+  })
+
+  it('goes back to a run still in flight when a stored record asks to analyze again', () => {
+    // Back from a run started on this record shows the record while the run measures.
+    const run = liveRun({ state: 'analyzing' })
+    vi.mocked(useAnalyze).mockReturnValue(run)
+    unlocked()
+    window.localStorage.setItem('rdst.explain-analyze-consent', 'accepted')
+    reads.storedAnalysis = {
+      hash: 'stored-hash',
+      analysis_id: 'an-7',
+      created_at: new Date(Date.now() - 7_200_000).toISOString(),
+      target: 'prod',
+      analysis: {
+        display_payload: {
+          explain_results: { success: true, explain_plan: {} },
+          llm_analysis: { success: true },
+        },
+      },
+    }
+    const search: ResultsSearch = {
+      query: 'select 1',
+      target: 'prod',
+      fast: false,
+      origin: 'ask',
+      hash: 'stored-hash',
+    }
+    const { rerender } = render(
+      <ResultsPage search={{ ...search, analysisId: 'an-7' }} />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze again' }))
+    expect(run.reset).not.toHaveBeenCalled()
+    expect(navigateSpy).toHaveBeenCalledWith({
+      to: '/results',
+      search: { ...search, analysisId: undefined },
+      replace: undefined,
+    })
+
+    rerender(<ResultsPage search={search} />)
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy()
+    expect(run.analyze).not.toHaveBeenCalled()
+    expect(run.reset).not.toHaveBeenCalled()
   })
 
   it('requires consent before the first run and remembers the opt-out', async () => {

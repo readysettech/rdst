@@ -507,6 +507,7 @@ export function PlatformPage() {
             modifier="ghost"
             label="Turn off QueryPilot"
             disabled={modeResetting}
+            loading={d.querypilotPending}
             onClick={() => void d.toggleQueryPilot(false)}
           />
         ) : (
@@ -515,6 +516,7 @@ export function PlatformPage() {
             modifier="solid"
             label="Turn on QueryPilot"
             disabled={modeResetting}
+            loading={d.querypilotPending}
             onClick={() => onTry('querypilot')}
           />
         )}
@@ -664,7 +666,7 @@ export function PlatformPage() {
                   ? suggestions.map((row) => row.key)
                   : []
               }
-              busy={modeResetting}
+              busy={modeResetting || d.querypilotPending}
               onCache={d.cache}
               onUncache={d.uncache}
               onPolicy={onPolicy}

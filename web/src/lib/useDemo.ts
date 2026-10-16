@@ -143,6 +143,8 @@ export interface DemoStatus {
   workers?: number
   cache_budget: number
   provisioned: boolean
+  // A start is in flight on the backend; it runs on even when no page follows it.
+  provisioning: boolean
   last_error: string | null
   // One-shot server-initiated toast (e.g. the one-hour auto-teardown notice).
   notice: string | null
@@ -151,7 +153,7 @@ export interface DemoStatus {
 }
 
 // ---- contract helpers ------------------------------------------------------
-function describeCacheError(e: unknown): string {
+function describeActionError(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e)
   try {
     const detail = JSON.parse(raw)?.detail
@@ -336,6 +338,7 @@ function normalizeStatus(raw: any): DemoStatus {
       typeof raw?.provisioned === 'boolean'
         ? raw.provisioned
         : Boolean(raw?.ports),
+    provisioning: Boolean(raw?.provisioning),
     last_error: raw?.last_error ?? null,
     notice: raw?.notice ?? null,
     auto_teardown_at:
@@ -607,6 +610,12 @@ function abortProvision(): void {
   demoProvisionController = null
 }
 
+// Ends a provisioning phase from a status that reports the start finished.
+function settleProvisionPhase(s: DemoStatus): void {
+  if (!s.provisioned && s.last_error) demoPendingError = s.last_error
+  setProvisionPhase(s.provisioned ? 'ready' : s.last_error ? 'failed' : 'idle')
+}
+
 // The stream ended without a clean complete/error frame (a mid-deploy network
 // drop, e.g. the dev server reconnecting). Ask the backend what actually
 // happened so a still-provisioning phase can never get stuck forever.
@@ -618,10 +627,9 @@ async function reconcileAfterProvisionStreamEnd(
   try {
     const s = await getStatus()
     if (demoProvisionController !== ctrl) return
-    if (!s.provisioned && s.last_error) demoPendingError = s.last_error
-    setProvisionPhase(
-      s.provisioned ? 'ready' : s.last_error ? 'failed' : 'idle'
-    )
+    // Still starting: the status poll attaches to it again.
+    if (s.provisioning) return
+    settleProvisionPhase(s)
   } catch {
     if (demoProvisionController === ctrl) setProvisionPhase('idle')
   }
@@ -631,8 +639,9 @@ async function reconcileAfterProvisionStreamEnd(
 // a deploy is already in flight is a no-op, so double-provisioning is impossible
 // from the UI even before the phase change hides the Start control — and the
 // backend's "already in progress" lock error can never be reached from a
-// legitimate click.
-async function runProvision(): Promise<void> {
+// legitimate click. With `attach`, it follows a start the backend already runs
+// (one begun before a reload), replayed from its first step.
+async function runProvision(attach = false): Promise<void> {
   if (demoProvisionController) return // a deploy is already in flight
   demoPendingNotice = null
   demoPendingError = null
@@ -646,8 +655,8 @@ async function runProvision(): Promise<void> {
   let terminal = false
   try {
     await readSSE(
-      '/api/demo/provision',
-      { method: 'POST' },
+      attach ? '/api/demo/provision/stream' : '/api/demo/provision',
+      { method: attach ? 'GET' : 'POST' },
       (ev, data: any) => {
         const type = data?.type ?? ev
         if (type === 'progress') {
@@ -763,6 +772,10 @@ export function useDemo() {
   const [patterns, setPatterns] = useState<PatternRow[]>([])
   const [querypilotOn, setQuerypilotOn] = useState(false)
   const [mode, setMode] = useState<DiscoveryMode>('count_star')
+  // A QueryPilot or policy change awaits the backend; the ref guards repeat calls
+  // synchronously, before the state re-renders the controls disabled.
+  const [querypilotPending, setQuerypilotPending] = useState(false)
+  const querypilotPendingRef = useRef(false)
   const [nextPassEta, setNextPassEta] = useState<number | null>(null)
   const [cacheBudget, setCacheBudgetState] = useState(10)
   const [loadRunning, setLoadRunning] = useState(false)
@@ -792,11 +805,28 @@ export function useDemo() {
       // tearing down; the 5s health poll must not overwrite them (that flapped
       // green containers back to orange "recovering" mid-provision).
       if (
+        !s.provisioning &&
         phaseRef.current !== 'provisioning' &&
         phaseRef.current !== 'tearing-down'
       ) {
         setProvisionContainers(containersFromHealth(s.health))
       }
+      // A start this page doesn't follow (one begun before a reload): follow it
+      // rather than reading its half-built stack as a running demo.
+      if (
+        s.provisioning &&
+        !demoProvisionController &&
+        demoProvisionSnapshot.phase !== 'tearing-down'
+      )
+        void runProvision(true)
+      // A start whose stream dropped gets no complete/error frame, so a status
+      // reporting it finished settles the phase.
+      if (
+        !s.provisioning &&
+        !demoProvisionController &&
+        demoProvisionSnapshot.phase === 'provisioning'
+      )
+        settleProvisionPhase(s)
       if (s.last_error) setError(s.last_error)
       // Server-initiated toast, delivered exactly once (the backend clears it
       // after the first status read), e.g. the one-hour auto-teardown notice.
@@ -880,7 +910,7 @@ export function useDemo() {
       } catch (e) {
         toast({
           title: "Couldn't cache that query",
-          description: describeCacheError(e),
+          description: describeActionError(e),
           variant: 'negative',
         })
         return
@@ -901,7 +931,7 @@ export function useDemo() {
       } catch (e) {
         toast({
           title: "Couldn't uncache that query",
-          description: describeCacheError(e),
+          description: describeActionError(e),
           variant: 'negative',
         })
         return
@@ -915,8 +945,39 @@ export function useDemo() {
     [addEvent, refreshHistory, refreshPatterns]
   )
 
-  const toggleQueryPilot = useCallback(
+  // Runs one QueryPilot or policy change at a time; a call made while one is
+  // pending is ignored, so a repeat click can't send or annotate it twice.
+  const runQueryPilotChange = useCallback(
+    async (change: () => Promise<void>) => {
+      if (querypilotPendingRef.current) return
+      querypilotPendingRef.current = true
+      setQuerypilotPending(true)
+      try {
+        await change()
+      } finally {
+        querypilotPendingRef.current = false
+        setQuerypilotPending(false)
+      }
+    },
+    []
+  )
+
+  // QueryPilot and policy changes apply to the page, its chart annotation included,
+  // only once the backend confirms them, so a failed one leaves the page as it was.
+  const applyQueryPilot = useCallback(
     async (on: boolean) => {
+      try {
+        await setQueryPilot(on)
+      } catch (e) {
+        toast({
+          title: on
+            ? "Couldn't turn on QueryPilot"
+            : "Couldn't turn off QueryPilot",
+          description: describeActionError(e),
+          variant: 'negative',
+        })
+        return
+      }
       setQuerypilotOn(on)
       // Do NOT optimistically set the mode — the backend decides the policy, and
       // guessing here made the selector flip on the next status poll. [QW18]
@@ -927,8 +988,6 @@ export function useDemo() {
           'QueryPilot is off. Its caches were dropped; the ones you made stay.'
         )
       }
-      await setQueryPilot(on)
-      setPatterns((ps) => resetPatternStats(ps, true))
       const [status] = await Promise.all([
         refreshStatus(),
         refreshPatterns(),
@@ -949,18 +1008,30 @@ export function useDemo() {
     },
     [addEvent, cacheBudget, refreshHistory, refreshPatterns, refreshStatus]
   )
+  const toggleQueryPilot = useCallback(
+    (on: boolean) => runQueryPilotChange(() => applyQueryPilot(on)),
+    [applyQueryPilot, runQueryPilotChange]
+  )
 
-  const setDiscoveryMode = useCallback(
+  const applyDiscoveryMode = useCallback(
     async (nextMode: DiscoveryMode) => {
       if (nextMode === mode) return
+      try {
+        await setDiscoveryModeApi(nextMode)
+      } catch (e) {
+        toast({
+          title: "Couldn't switch the caching policy",
+          description: describeActionError(e),
+          variant: 'negative',
+        })
+        return
+      }
       setMode(nextMode)
       setPatterns((ps) => resetPatternStats(ps, true))
       addEvent(
         'mode_change',
         `policy -> ${nextMode === 'sum_time' ? 'most expensive' : 'most frequent'}`
       )
-      await setDiscoveryModeApi(nextMode)
-      setPatterns((ps) => resetPatternStats(ps, true))
       const [status] = await Promise.all([
         refreshStatus(),
         refreshPatterns(),
@@ -984,6 +1055,11 @@ export function useDemo() {
       refreshPatterns,
       refreshStatus,
     ]
+  )
+  const setDiscoveryMode = useCallback(
+    (nextMode: DiscoveryMode) =>
+      runQueryPilotChange(() => applyDiscoveryMode(nextMode)),
+    [applyDiscoveryMode, runQueryPilotChange]
   )
 
   const setCacheBudget = useCallback(
@@ -1132,6 +1208,7 @@ export function useDemo() {
     events,
     patterns,
     querypilotOn,
+    querypilotPending,
     mode,
     nextPassEta,
     cacheBudget,

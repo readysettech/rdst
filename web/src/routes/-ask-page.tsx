@@ -115,6 +115,7 @@ export function AskPage({
               aiBlocked || passwordLock.isLocked || connectivity.isChecking
             }
             beforeRun={connectivity.ensureReachable}
+            onTargetChange={filter.setDb}
           />
         )}
       </PageContainer>

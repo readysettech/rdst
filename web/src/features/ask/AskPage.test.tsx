@@ -164,6 +164,25 @@ describe('the box', () => {
     expect(ask.ask).not.toHaveBeenCalled()
   })
 
+  it('asks once when Enter is pressed again while the question starts', async () => {
+    const ask = askState()
+    vi.mocked(useAsk).mockReturnValue(ask)
+    let reachable: (value: boolean) => void = () => {}
+    const beforeRun = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          reachable = resolve
+        })
+    )
+    renderAsk({ beforeRun })
+    const box = screen.getByRole('textbox', { name: 'Question' })
+    for (let i = 0; i < 5; i++) fireEvent.keyDown(box, { key: 'Enter' })
+    reachable(true)
+    await waitFor(() => expect(ask.ask).toHaveBeenCalled())
+    expect(beforeRun).toHaveBeenCalledTimes(1)
+    expect(ask.ask).toHaveBeenCalledTimes(1)
+  })
+
   it('refetches Earlier questions when a run completes', async () => {
     vi.mocked(fetchAskHistory).mockClear()
     vi.mocked(useAsk).mockReturnValue(askState())
@@ -382,6 +401,75 @@ describe('the answer', () => {
     expect(disclosure.textContent).toContain('LIMIT 1000 added')
     fireEvent.click(disclosure)
     expect(screen.queryByTestId('ask-sql')).toBeNull()
+  })
+
+  it('asks again with the clarifications the answer was given', async () => {
+    const clarifications = [
+      {
+        id: 'ranking',
+        term: 'best',
+        question: 'Rank the best titles by what?',
+        answer: 'most user votes',
+      },
+    ]
+    const ask = askState()
+    vi.mocked(useAsk).mockReturnValue(ask)
+    const question = 'Show me the best titles'
+    const view = renderAsk({ initialQuestion: question })
+    const box = screen.getByRole('textbox', { name: 'Question' })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(ask.ask).toHaveBeenCalledTimes(1))
+    const answered = askState({
+      ask: ask.ask,
+      state: 'complete',
+      result: answer({ clarifications }),
+    })
+    vi.mocked(useAsk).mockReturnValue(answered)
+    view.rerender(<AskPanel target="demo" initialQuestion={question} />)
+    fireEvent.change(box, { target: { value: 'Something else' } })
+    fireEvent.click(
+      screen.getByRole('button', { name: "Ask again with today's data" })
+    )
+    await waitFor(() => expect(ask.ask).toHaveBeenCalledTimes(2))
+    expect(ask.ask).toHaveBeenLastCalledWith({
+      question,
+      target: 'demo',
+      clarifications,
+    })
+  })
+
+  it('asks again on the database the answer came from', async () => {
+    const ask = askState({
+      state: 'complete',
+      result: answer(),
+      schemaLoaded: {
+        type: 'schema_loaded',
+        source: 'cache',
+        table_count: 1,
+        tables: ['votes'],
+        target: 'demo',
+      },
+    })
+    vi.mocked(useAsk).mockReturnValue(ask)
+    const onTargetChange = vi.fn()
+    const question = 'Which posts got the most votes this week?'
+    const view = renderAsk({ target: 'other', onTargetChange })
+    fireEvent.click(
+      screen.getByRole('button', { name: "Ask again with today's data" })
+    )
+    expect(onTargetChange).toHaveBeenCalledWith('demo')
+    expect(ask.ask).not.toHaveBeenCalled()
+    view.rerender(
+      <AskPanel
+        target="demo"
+        initialQuestion={question}
+        onTargetChange={onTargetChange}
+      />
+    )
+    await waitFor(() =>
+      expect(ask.ask).toHaveBeenCalledWith({ question, target: 'demo' })
+    )
+    expect(ask.ask).toHaveBeenCalledTimes(1)
   })
 
   it('offers Open in Database only for a query the database lists', () => {

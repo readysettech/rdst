@@ -107,6 +107,14 @@ class ClaudeProvider(Provider):
         extra_headers: dict | None,
         timeout: int,
     ):
+        # The key travels in a request header, which can only carry printable ASCII; the HTTP
+        # client would otherwise fail before sending, which reads as a network problem.
+        if not base_url and not (api_key.isascii() and api_key.isprintable()):
+            raise LLMError(
+                "The configured Anthropic API key contains characters an API key cannot have. "
+                "Update it with a valid key.",
+                code="ANTHROPIC_AUTH_INVALID",
+            )
         headers = {"anthropic-version": self._API_VERSION}
         if extra_headers:
             headers.update(extra_headers)

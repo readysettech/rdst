@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
 
@@ -17,6 +17,16 @@ class AskPhase(str, Enum):
 
 
 @dataclass
+class AskClarification:
+    """A clarification question the user answered for a question."""
+
+    id: str
+    term: str
+    question: str
+    answer: str
+
+
+@dataclass
 class AskInput:
     """Input for ask service."""
 
@@ -25,6 +35,9 @@ class AskInput:
     source: str = "cli"
     provided_context: str = ""
     matched_database_values: str = ""
+    # Answers already given for this question, as an answer reports them; asking with them
+    # applies them instead of asking for clarification again.
+    clarifications: list[AskClarification] = field(default_factory=list)
 
 
 @dataclass

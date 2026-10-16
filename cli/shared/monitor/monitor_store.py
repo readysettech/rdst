@@ -1869,8 +1869,10 @@ class MonitorStore:
                                              (cursor.lastrowid,)).fetchone())}
         return self._write(write)
 
-    def recover_analysis(self, now: int, timeout_s: int) -> None:
-        def write(conn: sqlite3.Connection) -> None:
+    def recover_analysis(self, now: int, timeout_s: int) -> list[dict[str, Any]]:
+        """Requeue analyses a dead or stalled worker left running; return the ones failed."""
+        def write(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+            failed = []
             rows = conn.execute("SELECT * FROM analyze_job WHERE state='running'").fetchall()
             for row in rows:
                 if not _dead_analysis_owner(row) and row["started_at"] > now - timeout_s:
@@ -1879,10 +1881,12 @@ class MonitorStore:
                     conn.execute("UPDATE analyze_job SET state='failed',finished_at=?,"
                                  "error='Analysis timed out after restart recovery',owner=NULL,attempt=attempt+1 WHERE id=?",
                                  (now, row["id"]))
+                    failed.append(dict(row))
                 else:
                     conn.execute("UPDATE analyze_job SET state='queued',started_at=NULL,"
                                  "error='recovered_once',owner=NULL,attempt=attempt+1 WHERE id=?", (row["id"],))
-        self._write(write)
+            return failed
+        return self._write(write)
 
     def sync_indexes(self, target: str, indexes: list[dict[str, str]], ts: int) -> list[dict[str, Any]]:
         """Atomically replace a target's snapshot; an initial empty snapshot is valid."""
@@ -2489,6 +2493,10 @@ class MonitorStore:
                 last = self.read("SELECT MAX(ts) ts FROM stuck_sample WHERE target=? AND query_key=?",
                                  (target, item["subject"]))[0]["ts"]
                 if last is not None and ts - last < STUCK_CLEAR_SECONDS:
+                    # The statement ended; the item reads back to normal until it closes.
+                    body = json.loads(item["body_json"])
+                    if body.get("ended_at") is None:
+                        self.update_item_body(item["id"], {**body, "ended_at": ts})
                     continue
                 self.action_item(item["id"], "resolve", ts, resolved_by="code")
 

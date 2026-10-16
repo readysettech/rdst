@@ -16,7 +16,7 @@ import logging
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 import shared.constants as shared_constants
 
@@ -173,11 +173,14 @@ class AnalysisResultsRegistry:
         analysis_id: str,
         parameters: List[Dict[str, str]],
         source: Optional[str],
+        rewrite_sql: Optional[Callable[[str], Optional[str]]] = None,
     ) -> bool:
         """Record the values a stored analysis ran its query with, beside its results view.
 
         Each parameter is ``{"name": placeholder, "value": SQL literal}``, in the order the
-        query uses them; ``source`` says where the values came from.
+        query uses them; ``source`` says where the values came from. ``rewrite_sql`` maps
+        each suggested rewrite's SQL to the text the analysis keeps everywhere it appears,
+        or to None to keep no SQL for that rewrite.
 
         Returns:
             True when the stored analysis was updated.
@@ -185,6 +188,8 @@ class AnalysisResultsRegistry:
         stored = self._store.analysis_payload(query_hash, analysis_id)
         if stored is None:
             return False
+        if rewrite_sql is not None:
+            stored = _replace_rewrites(stored, rewrite_sql)
         display = stored.get("display_payload")
         stored["display_payload"] = {
             **(display if isinstance(display, dict) else {}),
@@ -381,6 +386,57 @@ def _decode(payload: Dict[str, Any]) -> Optional[AnalysisResult]:
             exc,
         )
         return None
+
+
+# Marks a rewrite whose SQL can't be mapped back to its query's parameters: it keeps no SQL,
+# and copies of one rewrite share the same number.
+UNMAPPED_REWRITE = "unmapped_rewrite"
+_REWRITE_LISTS = ("rewrite_suggestions", "rewrite_results", "query_rewrites", "rewrites")
+
+
+def listed_rewrite(item: Any) -> bool:
+    """Whether a stored rewrite suggestion is one to list: it has SQL, or its SQL couldn't
+    be mapped back to the query's parameters."""
+    return isinstance(item, dict) and bool(
+        str(item.get("rewritten_sql") or "").strip() or item.get(UNMAPPED_REWRITE))
+
+
+def _rewrite_fields(value: Any, in_rewrite: bool = False) -> Iterator[tuple[Dict[str, Any], str]]:
+    """Each (holder, key) of a rewrite's SQL in ``value``: any ``rewritten_sql``, and the
+    ``sql`` of a listed rewrite, a rewrite's test result or the best rewrite."""
+    if isinstance(value, list):
+        for item in value:
+            yield from _rewrite_fields(item, in_rewrite)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            if isinstance(item, str):
+                if item.strip() and (key == "rewritten_sql" or in_rewrite and key == "sql"):
+                    yield value, key
+            elif isinstance(item, dict):
+                yield from _rewrite_fields(item, key == "best_rewrite")
+            elif isinstance(item, list):
+                yield from _rewrite_fields(item, key in _REWRITE_LISTS)
+
+
+def _replace_rewrites(
+    payload: Dict[str, Any], rewrite_sql: Callable[[str], Optional[str]]
+) -> Dict[str, Any]:
+    """``payload`` with each rewrite's SQL, in every copy of it, mapped through
+    ``rewrite_sql``; copies match ignoring surrounding whitespace. A rewrite mapped to None
+    keeps no SQL and is marked ``UNMAPPED_REWRITE``."""
+    fields = list(_rewrite_fields(payload))
+    texts: Dict[str, Optional[str]] = {}
+    for holder, key in fields:
+        texts.setdefault(holder[key].strip(), None)
+    numbers = {sql: number for number, sql in enumerate(texts, 1)}
+    for sql in texts:
+        texts[sql] = rewrite_sql(sql)
+    for holder, key in fields:
+        sql = holder[key].strip()
+        holder[key] = texts[sql]
+        if texts[sql] is None:
+            holder[UNMAPPED_REWRITE] = numbers[sql]
+    return payload
 
 
 def extract_performance_assessment(llm_analysis: Dict[str, Any]) -> Dict[str, Any]:

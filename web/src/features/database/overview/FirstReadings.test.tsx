@@ -88,6 +88,11 @@ it('says the first report runs at the saved hour, and signed out, what it waits 
     'Your first daily report runs tomorrow at 6 AM once you sign in.'
   )
   expect(line).not.toMatch(/midnight/)
+  // Switched off, signed out or not, no report is promised.
+  const off = { ...signedOut, nightly_report: false }
+  expect(firstReportLine(off, aiCanRun({ settings: off, now }), now)).toBe(
+    'The daily report is off. Turn it on in Monitoring settings.'
+  )
 })
 
 it('signed out, the waiting card says the analyses wait for a sign-in', () => {

@@ -209,6 +209,32 @@ def _cancelled_result() -> Dict[str, Any]:
     }
 
 
+# How often PostgreSQL checks that RDST is still connected while Ask's statement runs.
+_CLIENT_CHECK_INTERVAL_MS = 1000
+
+
+def _stop_with_client(conn, cursor, config: Dict[str, Any] | None) -> None:
+    """Have the server end Ask's statement once RDST's connection to it is gone.
+
+    A backend that dies mid-query never gets to cancel its statement, and PostgreSQL keeps
+    running it until it finishes or times out unless it checks the connection while executing.
+    PostgreSQL 14 added that check; servers that refuse it run the statement as before.
+    Readyset accepts the setting by proxying the whole session upstream, which would keep
+    Ask's queries off its caches, and its upstream connection outlives RDST's anyway.
+    """
+    if (config or {}).get("target_type") == "readyset":
+        return
+    if getattr(conn, "server_version", 0) < 140000:
+        return
+    import psycopg2
+
+    try:
+        cursor.execute(f"SET client_connection_check_interval = {_CLIENT_CHECK_INTERVAL_MS}")
+    except psycopg2.Error as exc:
+        logger.debug("Could not set client_connection_check_interval: %s", exc)
+        conn.rollback()
+
+
 def _execute_postgres(
     sql: str,
     config: Dict[str, Any],
@@ -250,6 +276,7 @@ def _execute_postgres(
 
         try:
             with conn.cursor() as cursor:
+                _stop_with_client(conn, cursor, config)
                 # Set query timeout
                 if timeout_seconds > 0:
                     timeout_ms = timeout_seconds * 1000

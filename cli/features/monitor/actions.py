@@ -14,7 +14,7 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Any
 
-from features.monitor.analysis_digest import latest_done_job, load_analysis
+from features.monitor.analysis_digest import latest_done_job, load_analysis, plan_only_test
 from features.monitor.index_plan import MIN_ADD_BENEFIT, _columns, _norm, _prefix
 from features.monitor.presentation import format_size
 from shared.monitor.monitor_store import MonitorStore
@@ -151,7 +151,7 @@ def _tested_rewrite(target: str, key: str, ref: str) -> dict[str, Any] | None:
     # Measured run time when the rewrite ran; the planner's estimate when it was only planned.
     timed = (improvement.get("execution_time") or {}).get("improvement_pct")
     planned = (improvement.get("cost_estimate") or {}).get("improvement_pct")
-    measured = isinstance(timed, (int, float))
+    measured = isinstance(timed, (int, float)) and not plan_only_test(best)
     # A rewrite that ran no faster never shows, whatever the planner thought of it.
     pct = timed if measured else planned
     sql = best.get("rewritten_sql") or best.get("sql")

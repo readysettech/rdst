@@ -115,10 +115,10 @@ def test_restart_recovery_only_once(store):
     job = enqueue_user("db", "one", store=store, now=NOW)
     store.claim_analysis("db", NOW)
     reopened = MonitorStore(store.path, clock=lambda: NOW + 601)
-    reopened.recover_analysis(NOW + 601, 600)
+    assert reopened.recover_analysis(NOW + 601, 600) == []
     assert reopened.analyze_jobs("db")[0]["state"] == "queued"
     reopened.claim_analysis("db", NOW + 601)
-    reopened.recover_analysis(NOW + 1202, 600)
+    assert [row["id"] for row in reopened.recover_analysis(NOW + 1202, 600)] == [job["id"]]
     row = reopened.analyze_jobs("db")[0]
     assert row["state"] == "failed"
     assert "timed out" in row["error"]
@@ -499,6 +499,208 @@ async def test_the_analysis_view_names_the_values_the_analysis_ran_with(
     assert store.analyze_jobs("db")[0]["mode"] == "analyze"
 
 
+TITLES = ("SELECT b.primarytitle FROM title_basics b WHERE LOWER(b.primarytitle) LIKE ? "
+          "ORDER BY b.primarytitle")
+
+
+@pytest.mark.parametrize("rewrite,template,params,expected", [
+    # The sampled value goes back to the query's own placeholder.
+    ("SELECT b.primarytitle FROM title_basics AS b WHERE LOWER(b.primarytitle) LIKE "
+     "'Carmencita' ORDER BY 1", TITLES, [{"name": "?", "value": "'Carmencita'"}],
+     "SELECT b.primarytitle FROM title_basics AS b WHERE LOWER(b.primarytitle) LIKE ? "
+     "ORDER BY 1"),
+    # Named placeholders may move; positional ones bind in order, so they may not.
+    ("SELECT * FROM t WHERE b = 5 AND a = 1", "SELECT * FROM t WHERE a = $1 AND b = $2",
+     [{"name": "$1", "value": "1"}, {"name": "$2", "value": "5"}],
+     "SELECT * FROM t WHERE b = $2 AND a = $1"),
+    ("SELECT * FROM t WHERE b = 5 AND a = 1", "SELECT * FROM t WHERE a = ? AND b = ?",
+     [{"name": "?", "value": "1"}, {"name": "?", "value": "5"}], None),
+    # A multi-token literal, and a placeholder the template uses twice.
+    ("SELECT * FROM t WHERE d > '2024-01-01'::date OR e > '2024-01-01'::date",
+     "SELECT * FROM t WHERE d > $1 OR e > $1", [{"name": "$1", "value": "'2024-01-01'::date"}],
+     "SELECT * FROM t WHERE d > $1 OR e > $1"),
+    # A constant equal to the value can't be told apart from it.
+    ("SELECT * FROM t WHERE a = 1 LIMIT 1", "SELECT * FROM t WHERE a = $1",
+     [{"name": "$1", "value": "1"}], None),
+    ("SELECT * FROM t WHERE a = 1 AND b = 1", "SELECT * FROM t WHERE a = $1 AND b = 1",
+     [{"name": "$1", "value": "1"}], None),
+    # An ORDER BY or GROUP BY position equal to the value would turn into a constant.
+    ("SELECT a FROM t WHERE b = 1 ORDER BY 1", "SELECT a FROM t WHERE b IN ($1, $1) ORDER BY a",
+     [{"name": "$1", "value": "1"}], None),
+    ("SELECT a, COUNT(*) FROM t WHERE b = 2 GROUP BY a, 2",
+     "SELECT a, COUNT(*) FROM t WHERE b IN ($1, $1) GROUP BY a",
+     [{"name": "$1", "value": "2"}], None),
+    # A value inside an ORDER BY expression or a subquery keeps its placeholder.
+    ("SELECT a FROM t WHERE b = 3 ORDER BY a + 3", "SELECT a FROM t WHERE b = $1 ORDER BY a + $1",
+     [{"name": "$1", "value": "3"}], "SELECT a FROM t WHERE b = $1 ORDER BY a + $1"),
+    ("SELECT a FROM t ORDER BY (SELECT 1 FROM u WHERE u.id = 4)",
+     "SELECT a FROM t ORDER BY (SELECT 1 FROM u WHERE u.id = $1)",
+     [{"name": "$1", "value": "4"}], "SELECT a FROM t ORDER BY (SELECT 1 FROM u WHERE u.id = $1)"),
+    # A dropped parameter, or a value written differently, can't be restored.
+    ("SELECT * FROM t", "SELECT * FROM t WHERE a = $1", [{"name": "$1", "value": "7"}], None),
+    ("SELECT * FROM t WHERE s = \"x\"", "SELECT * FROM t WHERE s = ?",
+     [{"name": "?", "value": "'x'"}], None),
+    # Two placeholders with one value are ambiguous by name.
+    ("SELECT * FROM t WHERE a = 3 AND b = 3", "SELECT * FROM t WHERE a = $1 AND b = $2",
+     [{"name": "$1", "value": "3"}, {"name": "$2", "value": "3"}], None),
+    # A positional placeholder without a recorded value leaves the order unknown.
+    ("SELECT * FROM t WHERE a = 3 AND b LIKE '%'", "SELECT * FROM t WHERE a = ? AND b LIKE ?",
+     [{"name": "?", "value": "3"}], None),
+    # A value a type keyword or introducer reads takes no placeholder in its place.
+    ("SELECT * FROM t WHERE d > DATE '2024-01-01'", "SELECT * FROM t WHERE d > ?",
+     [{"name": "?", "value": "'2024-01-01'"}], None),
+    ("SELECT * FROM t WHERE d > timestamp  '2024-01-01 00:00'", "SELECT * FROM t WHERE d > $1",
+     [{"name": "$1", "value": "'2024-01-01 00:00'"}], None),
+    ("SELECT * FROM t WHERE d > timestamp with time zone '2024-01-01'",
+     "SELECT * FROM t WHERE d > $1", [{"name": "$1", "value": "'2024-01-01'"}], None),
+    ("SELECT * FROM t WHERE d > TIME '10:00'", "SELECT * FROM t WHERE d > ?",
+     [{"name": "?", "value": "'10:00'"}], None),
+    ("SELECT * FROM t WHERE d > now() - INTERVAL '7 days'", "SELECT * FROM t WHERE d > $1",
+     [{"name": "$1", "value": "'7 days'"}], None),
+    ("SELECT * FROM t WHERE s = N'abc'", "SELECT * FROM t WHERE s = ?",
+     [{"name": "?", "value": "'abc'"}], None),
+    ("SELECT * FROM t WHERE s = _utf8mb4'x'", "SELECT * FROM t WHERE s = ?",
+     [{"name": "?", "value": "'x'"}], None),
+    ("SELECT * FROM t WHERE s = _latin1 'x'", "SELECT * FROM t WHERE s = ?",
+     [{"name": "?", "value": "'x'"}], None),
+    # A cast after the value keeps its place; AT TIME ZONE takes a placeholder.
+    ("SELECT * FROM t WHERE d > '2024-01-01'::date", "SELECT * FROM t WHERE d > ?",
+     [{"name": "?", "value": "'2024-01-01'"}], "SELECT * FROM t WHERE d > ?::date"),
+    ("SELECT d AT TIME ZONE 'UTC' FROM t", "SELECT d AT TIME ZONE $1 FROM t",
+     [{"name": "$1", "value": "'UTC'"}], "SELECT d AT TIME ZONE $1 FROM t"),
+    # PostgreSQL's jsonb operators are not placeholders.
+    ("SELECT * FROM t WHERE id = 5 AND data ? 'k'", "SELECT * FROM t WHERE data ? $1 AND id = $2",
+     [{"name": "$1", "value": "'k'"}, {"name": "$2", "value": "5"}],
+     "SELECT * FROM t WHERE id = $2 AND data ? $1"),
+    ("SELECT * FROM t WHERE data ?| ARRAY['a'] AND id = 5",
+     "SELECT * FROM t WHERE data ?| ARRAY['a'] AND id = $1", [{"name": "$1", "value": "5"}],
+     "SELECT * FROM t WHERE data ?| ARRAY['a'] AND id = $1"),
+])
+def test_rewrites_get_their_placeholders_back(rewrite, template, params, expected):
+    from features.monitor.analyze_queue import parameterized_rewrite
+
+    assert parameterized_rewrite(rewrite, template, params) == expected
+
+
+UNMAPPED_NOTE = ("RDST could not map this rewrite back to the query's parameters, so it "
+                 "offers no SQL to copy.")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value,rewrite,expected", [
+    ("Carmencita", "SELECT b.primarytitle FROM title_basics b WHERE LOWER(b.primarytitle) LIKE "
+     "'Carmencita' ORDER BY 1", "SELECT b.primarytitle FROM title_basics b WHERE "
+                                "LOWER(b.primarytitle) LIKE ? ORDER BY 1"),
+    # The value written twice no longer binds to the query's one placeholder.
+    ("Carmencita", "SELECT b.primarytitle FROM title_basics b WHERE b.primarytitle = "
+     "'Carmencita' OR LOWER(b.primarytitle) LIKE 'Carmencita'", None),
+    # Without a sampled value MySQL plans with a made-up one, which goes back the same way.
+    (None, "SELECT b.primarytitle FROM title_basics b WHERE LOWER(b.primarytitle) LIKE '%' "
+     "ORDER BY 1", "SELECT b.primarytitle FROM title_basics b WHERE LOWER(b.primarytitle) "
+                   "LIKE ? ORDER BY 1"),
+    (None, "SELECT b.primarytitle FROM title_basics b WHERE b.primarytitle LIKE '%' OR "
+     "LOWER(b.primarytitle) LIKE '%'", None),
+])
+async def test_stored_rewrites_keep_the_query_parameters(store, monkeypatch, tmp_path, value,
+                                                         rewrite, expected):
+    from features.monitor import actions
+    from features.monitor.analysis_digest import latest_digest
+    from features.monitor.api import views
+    from shared.agent_activity.findings import analysis_finding
+    from shared.query_registry import AnalysisResultsRegistry, create_analysis_result
+
+    monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
+    store.record("db", NOW, [{"query_key": "one", "calls": 10, "total_ms": 100}],
+                 {"one": TITLES}, [], None)
+    monkeypatch.setattr("shared.config.targets.TargetsConfig.load", lambda self: None)
+    monkeypatch.setattr("shared.config.targets.TargetsConfig.get",
+                        lambda self, target: {"engine": "mysql"})
+    suggestion = {"rewritten_sql": rewrite + "\n", "explanation": "Join instead"}
+    result = {"success": True, "sql": rewrite, "performance": {"execution_time_ms": 10.0},
+              "improvement": {"overall": {"is_better": True, "significant": True},
+                              "execution_time": {"improvement_pct": 80.0}}}
+    tested = {"tested": True, "original_performance": {"execution_time_ms": 50.0},
+              "rewrite_results": [result], "best_rewrite": dict(result)}
+    record = create_analysis_result(
+        query_hash="hash-1", target="db", performance_metrics={},
+        llm_analysis={"rewrite_suggestions": [suggestion]}, explain_plan={}, query_metrics={},
+        rewrite_suggestions=[suggestion], rewrite_test_results=tested)
+    record.analysis_id = "analysis-1"
+    record.display_payload = {"rewrite_testing": tested,
+                              "formatted": {"rewrites": [{"sql": rewrite}]}}
+    AnalysisResultsRegistry().store_analysis_result("hash-1", record)
+
+    class Sampled(FakeService):
+        async def suggest_parameter_values(self, sql, target, config, key):
+            return {"placeholders": [{"placeholder": "?", "suggestions": [] if value is None else [
+                {"value": value, "provenance": "Sampled from title_basics.primarytitle",
+                 "column_type": "varchar"}]}]}
+
+    await AnalyzeQueue(store, service=Sampled(), clock=lambda: NOW).tick()
+    assert store.analyze_jobs("db")[0]["param_source"] == ("estimated" if value is None
+                                                            else "table_sampled")
+    stored = AnalysisResultsRegistry().get_stored_payload("hash-1", "analysis-1")
+    display = stored["display_payload"]
+    copies = [stored["rewrite_suggestions"][0], stored["llm_analysis"]["rewrite_suggestions"][0],
+              display["rewrite_testing"]["rewrite_results"][0],
+              display["rewrite_testing"]["best_rewrite"], display["formatted"]["rewrites"][0]]
+    assert [copy.get("rewritten_sql", copy.get("sql")) for copy in copies] == [expected] * 5
+    assert [copy.get("unmapped_rewrite") for copy in copies] == [None if expected else 1] * 5
+    assert display["parameters"] == ([] if value is None else [{"name": "?",
+                                                               "value": "'Carmencita'"}])
+    digest = latest_digest(store, "db", "one")
+    assert (digest["fix"]["kind"], digest["fix"]["sql"]) == ("rewrite", expected)
+    assert digest["fix_ready"] == bool(expected)
+    assert digest["fix"]["expected_gain"]["text"] == "Tested: 80% faster"
+    view = views.analysis_view(store, "db", "one", digest, NOW)
+    measured = value is not None
+    assert view["rewrites"] == [{
+        "name": "Join instead", "before_ms": 50.0 if measured else None,
+        "after_ms": 10.0 if measured else None, "runs": None,
+        "outcome": "faster" if measured else "untested", "sql": expected,
+        "note": None if expected else UNMAPPED_NOTE}]
+    assert (view["fix_detail"] is None) == (expected is None)
+    tested_rewrite = actions._tested_rewrite.__wrapped__(
+        "db", "one", "/api/query-registry/hash-1/analysis/analysis-1")
+    assert (tested_rewrite or {}).get("sql") == expected
+    assert analysis_finding(stored["llm_analysis"]) == "suggested a rewrite"
+
+
+def test_a_rewrite_without_sql_lists_without_a_fix_ahead_of_one_with_sql():
+    from features.monitor.analysis_digest import digest_from_analysis
+    from shared.query_registry import create_analysis_result
+
+    analysis = create_analysis_result(
+        query_hash="hash-1", target="db", performance_metrics={}, explain_plan={},
+        query_metrics={}, llm_analysis={"rewrite_suggestions": [
+            {"rewritten_sql": None, "unmapped_rewrite": 1, "explanation": "Unmapped."},
+            {"rewritten_sql": "SELECT 1", "explanation": "Mapped."},
+            {"rewritten_sql": None, "explanation": "No SQL at all."}]})
+    digest = digest_from_analysis("one", {"analysis_ref": None, "finished_at": NOW}, analysis)
+    assert [(fix["sql"], fix["why"]) for fix in [digest["fix"], *digest["other_fixes"]]] == [
+        ("SELECT 1", "Mapped."), (None, "Unmapped.")]
+    assert digest["fix_ready"]
+
+
+def test_only_rewrite_fields_take_a_mapped_rewrite():
+    from shared.query_registry.analysis_results import _replace_rewrites
+
+    payload = {"rewrite_suggestions": [{"rewritten_sql": "SELECT 1 "},
+                                       {"rewritten_sql": "SELECT 2"}],
+               "rewrite_testing": {"original_performance": {"sql": "SELECT 1"},
+                                   "best_rewrite": {"sql": "SELECT 2"},
+                                   "rewrite_results": [{"sql": "SELECT 1"}]},
+               "query": "SELECT 1", "notes": ["SELECT 2"]}
+    mapped = _replace_rewrites(payload, {"SELECT 1": "SELECT ?"}.get)
+    assert mapped == {
+        "rewrite_suggestions": [{"rewritten_sql": "SELECT ?"},
+                                {"rewritten_sql": None, "unmapped_rewrite": 2}],
+        "rewrite_testing": {"original_performance": {"sql": "SELECT 1"},
+                            "best_rewrite": {"sql": None, "unmapped_rewrite": 2},
+                            "rewrite_results": [{"sql": "SELECT ?"}]},
+        "query": "SELECT 1", "notes": ["SELECT 2"]}
+
+
 @pytest.mark.parametrize("used", [True, False])
 def test_the_analysis_view_shows_planner_costs_only_when_the_planner_used_the_index(
         store, monkeypatch, used):
@@ -510,10 +712,24 @@ def test_the_analysis_view_shows_planner_costs_only_when_the_planner_used_the_in
          "new_cost": 12.5}]}})
     monkeypatch.setattr("features.monitor.analysis_digest.load_analysis", lambda job: analysis)
     monkeypatch.setattr(views, "_engine", lambda target: "postgresql")
-    digest = {"analysis_ref": "ref-1", "fix_ready": True, "fix": {"sql": index, "why": "id"}}
+    digest = {"analysis_ref": "ref-1", "fix_ready": True,
+              "fix": {"kind": "index", "sql": index, "why": "id"}}
     detail = views.analysis_view(store, "db", "one", digest, NOW)["fix_detail"]
     assert (detail["cost_before"], detail["cost_after"]) == \
         ((900.0, 12.5) if used else (None, None))
+
+
+def test_the_analysis_view_names_a_rewrite_fix_as_a_rewrite(store, monkeypatch):
+    from features.monitor.api import views
+
+    monkeypatch.setattr("features.monitor.analysis_digest.load_analysis",
+                        lambda job: SimpleNamespace(display_payload={}))
+    monkeypatch.setattr(views, "_engine", lambda target: "postgresql")
+    rewrite = "SELECT b.id FROM b LEFT JOIN r ON r.id = b.id"
+    digest = {"analysis_ref": "ref-1", "fix_ready": True,
+              "fix": {"kind": "rewrite", "sql": rewrite, "why": "Join instead"}}
+    detail = views.analysis_view(store, "db", "one", digest, NOW)["fix_detail"]
+    assert (detail["kind"], detail["sql"]) == ("rewrite", rewrite)
 
 
 def test_the_analysis_view_lists_each_further_index_and_rewrite_with_its_sql(
@@ -529,12 +745,59 @@ def test_the_analysis_view_lists_each_further_index_and_rewrite_with_its_sql(
         "rewrite_suggestions": [{"explanation": "Filter first", "rewritten_sql": " SELECT 2 "}]})
     monkeypatch.setattr("features.monitor.analysis_digest.load_analysis", lambda job: analysis)
     monkeypatch.setattr(views, "_engine", lambda target: "postgresql")
-    digest = {"analysis_ref": "ref-1", "fix_ready": True, "fix": {"sql": lead, "why": "a"}}
+    digest = {"analysis_ref": "ref-1", "fix_ready": True,
+              "fix": {"kind": "index", "sql": lead, "why": "a"}}
     view = views.analysis_view(store, "db", "one", digest, NOW)
     assert view["also"][0] == {"title": "Add an index on t(b, c)", "detail": "Serves the sort.",
                                "sql": "CREATE INDEX b ON t (b, c)"}
     assert len(view["also"]) == 1
     assert view["rewrites"][0]["sql"] == "SELECT 2"
+
+
+@pytest.mark.parametrize("performance,flags,expected", [
+    ({"execution_time_ms": 10.0}, {}, (50.0, 10.0, "faster")),
+    # A plan-only test timed only its EXPLAIN.
+    ({"execution_time_ms": 2.0, "was_skipped": True}, {"was_skipped": True},
+     (None, None, "untested")),
+    # Cancelled for running longer than the query; its time is the EXPLAIN's.
+    ({"execution_time_ms": 2.0, "was_skipped": False, "rewrite_timeout_exceeded": True},
+     {"was_skipped": True, "rewrite_timeout_exceeded": True}, (None, None, "slower")),
+])
+def test_the_analysis_view_times_only_a_rewrite_that_ran(store, monkeypatch, performance,
+                                                          flags, expected):
+    from features.monitor.api import views
+
+    result = {"success": True, "sql": "SELECT 2", "performance": performance,
+              "improvement": {"overall": {}}, **flags}
+    analysis = SimpleNamespace(
+        llm_analysis={"rewrite_suggestions": [{"explanation": "Filter first",
+                                               "rewritten_sql": "SELECT 2"}]},
+        display_payload={"rewrite_testing": {
+            "tested": True, "original_performance": {"execution_time_ms": 50.0},
+            "rewrite_results": [result]}})
+    monkeypatch.setattr("features.monitor.analysis_digest.load_analysis", lambda job: analysis)
+    monkeypatch.setattr(views, "_engine", lambda target: "postgresql")
+    view = views.analysis_view(store, "db", "one", {"analysis_ref": "ref-1", "mode": "analyze"},
+                               NOW)
+    rewrite = view["rewrites"][0]
+    assert (rewrite["before_ms"], rewrite["after_ms"], rewrite["outcome"]) == expected
+
+
+def test_the_analysis_view_keeps_each_suggestion_whole(store, monkeypatch):
+    from features.monitor.api import views
+
+    stale = ("Run ANALYZE on title_ratings: the planner expects 10 rows where 1.5 million "
+             "match, suggesting stale table statistics. Estimates read pg_class.reltuples.")
+    cache = ("Cache the result at the application layer or in Readyset, since the count "
+             "changes only when ratings are loaded")
+    analysis = SimpleNamespace(display_payload={}, llm_analysis={"optimization_opportunities": [
+        {"description": stale, "type": "maintenance"}, {"description": cache, "type": "caching"}]})
+    monkeypatch.setattr("features.monitor.analysis_digest.load_analysis", lambda job: analysis)
+    monkeypatch.setattr(views, "_engine", lambda target: "postgresql")
+    view = views.analysis_view(store, "db", "one", {"analysis_ref": "ref-1"}, NOW)
+    assert view["also"] == [
+        {"title": stale.split(" Estimates")[0], "detail": "Estimates read pg_class.reltuples."},
+        {"title": cache, "detail": None}]
 
 
 @pytest.mark.asyncio

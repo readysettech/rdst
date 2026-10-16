@@ -67,6 +67,13 @@ def provision(request: Request):
     return EventSourceResponse(_sse(_svc().provision()))
 
 
+@router.get("/provision/stream")
+def provision_stream(request: Request):
+    """Re-attach to the provision in flight, replaying it from the start."""
+    require_local_request(request)
+    return EventSourceResponse(_sse(_svc().follow_provision()))
+
+
 @router.post("/teardown")
 def teardown(request: Request):
     require_local_request(request)

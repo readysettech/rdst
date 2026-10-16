@@ -12,7 +12,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from features.agent_activity.api import routes
-from features.monitor.analyze_queue import analysis_outcome, parameter_note
+from features.monitor.analyze_queue import (analysis_outcome, parameter_note,
+                                            record_recovery_failures)
 from shared import agent_activity
 from shared.agent_activity import recorder
 from shared.agent_activity.store import RETENTION_SECONDS, AgentActivityStore
@@ -325,7 +326,26 @@ def test_judge_and_analysis_outcomes():
     assert (skipped["outcome"], skipped["decision"]) == (
         "skipped", "Not run: Only SELECT statements")
     assert analysis_outcome({"state": "running"}, [])["outcome"] == "cancelled"
+    # A user's cancel is stored as skipped, but it is not a query RDST declined to run.
+    cancelled = analysis_outcome(
+        {"state": "skipped", "error": "cancelled", "mode": "analyze"}, [])
+    assert (cancelled["outcome"], cancelled["decision"], cancelled["summary"]) == (
+        "cancelled", "Stopped before any statement ran", "Cancelled by you")
+    stopped = analysis_outcome(
+        {"state": "skipped", "error": "cancelled", "mode": "analyze"},
+        [{"kind": "explain_analyze", "timeout_ms": 1500}])
+    assert stopped["decision"] == "Ran EXPLAIN ANALYZE with a 1.5 s timeout"
 
+
+
+def test_an_analysis_restart_recovery_gave_up_on_is_recorded_as_failed(data_dir):
+    record_recovery_failures([{"id": 4, "target": "db", "query_key": "k1", "reason": "user",
+                               "mode": "analyze", "started_at": HOUR, "enqueued_at": HOUR}],
+                             HOUR + 60)
+
+    [item] = AgentActivityStore().page(group="none")["items"]
+    assert (item["action"], item["outcome"], item["summary"]) == (
+        "deep_analysis", "failed", "Analysis timed out after restart recovery")
 
 def test_backfill_runs_once_from_monitor_history(data_dir):
     monitor = MonitorStore()
@@ -341,6 +361,10 @@ def test_backfill_runs_once_from_monitor_history(data_dir):
                      (now - 60, now - 60, now - 30))
         conn.execute("INSERT INTO analyze_job (target,query_key,reason,state,priority,"
                      "enqueued_at) VALUES ('db','k1','new','queued',1,?)", (now,))
+        conn.execute("INSERT INTO analyze_job (target,query_key,reason,state,priority,error,"
+                     "enqueued_at,started_at,finished_at) VALUES "
+                     "('db','k1','user','skipped',1,'cancelled',?,?,?)",
+                     (now - 50, now - 50, now - 40))
         conn.execute("INSERT INTO judge_run (target,ts,shortlist_json,request_json,response_json,"
                      "dry_run,outcome) VALUES ('db',?,'[]',?,?,0,'filed')",
                      (now - 300, json.dumps({"request_id": "r9"}), json.dumps(
@@ -358,11 +382,14 @@ def test_backfill_runs_once_from_monitor_history(data_dir):
         act.started = now
     store = AgentActivityStore()
     items = [item for item in store.page(group="none")["items"] if item["source"] == "backfill"]
-    assert len(store.page(group="none")["items"]) == 4
+    assert len(store.page(group="none")["items"]) == 5
     assert sorted(item["action"] for item in items) == [
-        "attention_check", "daily_snapshot", "deep_analysis"]
+        "attention_check", "daily_snapshot", "deep_analysis", "deep_analysis"]
     assert {item["source"] for item in items} == {"backfill"}
-    analysis = next(item for item in items if item["action"] == "deep_analysis")
+    cancelled = next(item for item in items if item["outcome"] == "cancelled")
+    assert (cancelled["action"], cancelled["summary"]) == ("deep_analysis", "Cancelled by you")
+    analysis = next(item for item in items
+                    if item["action"] == "deep_analysis" and item["outcome"] == "done")
     assert analysis["subject"] == "SELECT on orders by id"
     detail = store.entry(analysis["id"])
     assert detail["decision"] == "Ran EXPLAIN ANALYZE with parameters sampled from live sessions"
@@ -373,7 +400,7 @@ def test_backfill_runs_once_from_monitor_history(data_dir):
 
     store_module._OPENED.clear()
     AgentActivityStore().ensure_open()
-    assert len(AgentActivityStore().page(group="none")["items"]) == 4
+    assert len(AgentActivityStore().page(group="none")["items"]) == 5
 
 
 def test_api_pages_details_and_csv(data_dir):
@@ -423,8 +450,10 @@ def test_deep_analysis_findings_read_the_stored_result(data_dir, monkeypatch):
         {"table": "public.events", "columns": ["event_type", "created_at"]},
         {"table": "orders", "columns": ["id"]}]}) == (
         "suggested an index on events(event_type, created_at) and 1 more")
-    assert findings.analysis_finding({"rewrite_suggestions": [{}, {}]}) == (
-        "suggested 2 rewrites")
+    # The rewrites Full analysis lists: with SQL, or with SQL it couldn't map back.
+    assert findings.analysis_finding({"rewrite_suggestions": [
+        {"rewritten_sql": "SELECT 1"}, {"rewritten_sql": None, "unmapped_rewrite": 1},
+        {"rewritten_sql": None}]}) == "suggested 2 rewrites"
     assert findings.analysis_finding({"performance_assessment": {
         "overall_rating": "good"}}) == "rated it good, no index or rewrite needed"
     assert findings.analysis_finding({"performance_assessment": {

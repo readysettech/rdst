@@ -82,6 +82,14 @@ async function jsonResponse<T>(response: Response): Promise<T> {
 const settingsUrl = (apiBaseUrl: string, name: string) =>
   `${apiBaseUrl}/api/monitor/targets/${encodeURIComponent(name)}/settings`
 
+/** True for an API path whose writes change which databases there are or which are monitored. */
+export function changesTrayDatabases(pathname: string): boolean {
+  return (
+    /^\/api\/configure\/targets(\/|$)/.test(pathname) ||
+    /^\/api\/monitor\/targets\/[^/]+\/settings$/.test(pathname)
+  )
+}
+
 /** Read monitoring settings for every configured database. */
 export async function listTrayDatabases(
   apiBaseUrl: string,

@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from features.monitor.api import routes
+from features.monitor.api.views import inbox_items
 from features.query_registry.discovery import (
     PG_MONITOR_DB_SQL, QueryDiscoveryCollector, mysql_monitor_sample,
 )
@@ -501,6 +502,10 @@ def test_stuck_query_is_filed_and_closed_on_collector_cadence(monkeypatch, tmp_p
     assert store.inbox("new", "db")[0]["subject"] == key
     collector._record_monitor_cycle(300, [], registry, [], activity_sampled=True)
     assert store.inbox("new", "db")[0]["subject"] == key
+    # The statement ended: the open item reads back to normal and stops asking to stop it.
+    ended = inbox_items(store, store.inbox("new", "db"))[0]
+    assert (ended["status"], ended["status_at"], ended["band"]) == ("back_to_normal", 300, "watch")
+    assert (ended["steps"], ended["advice"], ended["summary"]) == ([], None, "Ran for over a minute.")
     collector._record_monitor_cycle(180 + STUCK_CLEAR_SECONDS, [], registry, [],
                                     activity_sampled=True)
     assert store.inbox("resolved", "db")[0]["resolved_by"] == "code"
@@ -525,6 +530,10 @@ def test_stuck_query_on_a_schedule_stays_one_open_item(monkeypatch, tmp_path):
     assert [row["state"] for row in store.inbox(target="db")] == ["new"]
     assert store.read("SELECT kind,COUNT(*) n FROM inbox_event WHERE kind IN "
                       "('created','reopened') GROUP BY kind") == [{"kind": "created", "n": 1}]
+    collector._record_monitor_cycle(6 * 3600, [], registry, [
+        {"query": sql, "pid": 7, "state": "active", "duration_s": 75}], activity_sampled=True)
+    running = inbox_items(store, store.inbox(target="db"))[0]
+    assert (running["status"], running["band"]) == ("ongoing", "act_now")
 
 
 def test_monitored_cadence_without_subscriber():

@@ -665,6 +665,27 @@ def test_query_capture_probe_gives_mysql_config_line_when_performance_schema_is_
     assert result["sql"] == []
 
 
+def test_query_capture_probe_asks_only_for_access_when_performance_schema_is_on():
+    from features.configure.service import ConfigureService
+
+    cursor = Mock()
+    cursor.fetchone.return_value = ("performance_schema", "ON")
+    cursor.execute.side_effect = [
+        None,
+        RuntimeError("(1142, \"SELECT command denied to user 'testuser'@'%'\")"),
+    ]
+    connection = Mock()
+    connection.cursor.return_value = cursor
+    result = ConfigureService._query_capture_capability(connection, "mysql")
+    assert result["available"] is False
+    assert result["detail"] == "permission"
+    assert result["instructions"] == [
+        "Grant this database user SELECT access to performance_schema statement digest tables."
+    ]
+    assert result["config"] == []
+    assert not any("restart" in step.lower() for step in result["instructions"])
+
+
 def test_query_capture_probe_accepts_mysql_performance_schema():
     cursor = Mock()
     cursor.fetchone.side_effect = [("performance_schema", "ON"), None]

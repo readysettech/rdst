@@ -199,6 +199,30 @@ def _shape_hint(sql: str, placeholder: Dict[str, Any], kind: str | None) -> Dict
 def plan_only_sql(sql: str, engine: str, data: Dict[str, Any] | None = None, conn=None,
                   timeout_ms: int = SAMPLE_TIMEOUT_MS) -> str:
     """Fill parameters for plain EXPLAIN. These values must never enable execution."""
+    values = _plan_only_values(sql, engine, data, conn, timeout_ms)
+    ordinal = 0
+
+    def replace(match):
+        nonlocal ordinal
+        token = match.group()
+        if token == "?":
+            ordinal += 1
+            return values.get(f"?{ordinal}", token)
+        return values.get(token, token)
+
+    return _SQL_TOKEN_RE.sub(replace, sql)
+
+
+def plan_only_parameters(sql: str, engine: str,
+                         data: Dict[str, Any] | None = None) -> List[Dict[str, str]]:
+    """The SQL literal plan_only_sql writes for each placeholder, in the query's order."""
+    values = _plan_only_values(sql, engine, data, None, SAMPLE_TIMEOUT_MS)
+    return [{"name": placeholder["placeholder"], "value": values[placeholder["key"]]}
+            for placeholder in enumerate_placeholders(sql)]
+
+
+def _plan_only_values(sql: str, engine: str, data: Dict[str, Any] | None, conn,
+                      timeout_ms: int) -> Dict[str, str]:
     placeholders = enumerate_placeholders(sql)
     bindings = bind_placeholders_to_columns(sql, engine, placeholders)
     supplied = (data or {}).get("placeholders") or []
@@ -219,17 +243,7 @@ def plan_only_sql(sql: str, engine: str, data: Dict[str, Any] | None = None, con
             cast = re.search(re.escape(placeholder["placeholder"]) + r"\s*::\s*([\w]+)", sql)
             literal = _type_hint(cast.group(1).strip() if cast else None)["literal_sql"]
         values[placeholder["key"]] = literal
-    ordinal = 0
-
-    def replace(match):
-        nonlocal ordinal
-        token = match.group()
-        if token == "?":
-            ordinal += 1
-            return values.get(f"?{ordinal}", token)
-        return values.get(token, token)
-
-    return _SQL_TOKEN_RE.sub(replace, sql)
+    return values
 
 
 def parameter_literal(value: str | None, column_type: str | None = None) -> str:

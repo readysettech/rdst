@@ -13,6 +13,9 @@ class FakeService:
     def start_load(self, workers: int | None = None) -> None:
         self.start_calls.append(workers)
 
+    def follow_provision(self):
+        return iter([{"type": "container", "name": "pg", "state": "ready", "percent": 30}])
+
 
 def _client(monkeypatch) -> tuple[TestClient, FakeService]:
     fake = FakeService()
@@ -37,3 +40,11 @@ def test_load_start_accepts_worker_count(monkeypatch):
     r = client.post("/api/demo/load/start", json={"workers": 8})
     assert r.status_code == 200, r.text
     assert fake.start_calls == [8]
+
+
+def test_provision_stream_replays_the_inflight_provision(monkeypatch):
+    client, _ = _client(monkeypatch)
+    r = client.get("/api/demo/provision/stream")
+    assert r.status_code == 200, r.text
+    assert "event: container" in r.text
+    assert '"name": "pg"' in r.text

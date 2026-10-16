@@ -94,6 +94,11 @@ describe('EnvSecretsDialog', () => {
     expect((input as HTMLInputElement).autocomplete).toBe('off')
     expect(input.getAttribute('data-1p-ignore')).toBe('true')
     expect(input.getAttribute('data-lpignore')).toBe('true')
+    expect(
+      screen
+        .getByRole('switch', { name: 'Save securely' })
+        .getAttribute('aria-checked')
+    ).toBe('true')
     fireEvent.change(input, { target: { value: 'my-secret' } })
     fireEvent.click(screen.getByRole('button', { name: /Save secrets/i }))
 
@@ -134,6 +139,20 @@ describe('EnvSecretsDialog', () => {
     expect(screen.getByLabelText('Password (prod)')).toBeTruthy()
     expect(screen.queryByText(/config\.toml/i)).toBeNull()
     expect(screen.queryByText(/Save between restarts/i)).toBeNull()
+  })
+
+  it('rejects an Anthropic key with characters outside the key alphabet before saving', () => {
+    const onClose = vi.fn()
+    renderWithClient(exhaustedDialog(onClose))
+
+    fireEvent.change(screen.getByPlaceholderText('Enter Anthropic API key'), {
+      target: { value: 'sk-ant-\u00e9\u6f22' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Save secrets/i }))
+
+    expect(screen.getByText(/isn't a valid Anthropic API key/i)).toBeTruthy()
+    expect(setEnvSecret).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('preserves typed values and validation state when parent rerenders while open', async () => {

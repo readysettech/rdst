@@ -1,6 +1,9 @@
+import { toast } from '@rs/ui-new/use-toast'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { __resetDemoProvisionForTests, useDemo } from './useDemo'
+
+vi.mock('@rs/ui-new/use-toast', () => ({ toast: vi.fn() }))
 
 function jsonResponse(body: unknown) {
   return {
@@ -46,10 +49,10 @@ const idleStatus = {
   last_error: null,
 }
 
-// The backend allocates ports and reports provisioned:true partway through the
-// deploy (well before the final "complete" frame), so /status keeps a ready page
-// ready and re-attaches a mid-deploy return. Mirror that instead of pretending
-// the demo is unprovisioned the whole time.
+// While a start runs the backend reports provisioning, and provisioned only once
+// the start has completed.
+const provisioningStatus = { ...idleStatus, provisioning: true }
+
 const provisionedStatus = {
   ...idleStatus,
   provisioned: true,
@@ -92,15 +95,15 @@ function sseResponse() {
   }
 }
 
-// Routes /provision to a controllable SSE stream and everything else to plain
-// JSON, so the provision lifecycle can be exercised end to end. `statusHolder`
-// lets a test flip the backend's provisioned answer mid-deploy, as the real
-// backend does once it has allocated ports.
+// Routes /provision (and its re-attach stream) to a controllable SSE stream and
+// everything else to plain JSON, so the provision lifecycle can be exercised end
+// to end. `statusHolder` lets a test change the backend's answer as the start
+// progresses.
 function mockProvisionFetch(
   sse: ReturnType<typeof sseResponse>,
   statusHolder: { status: Record<string, unknown> }
 ) {
-  return vi.fn((url: RequestInfo | URL) => {
+  return vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
     const u = String(url)
     if (u.includes('/provision')) return Promise.resolve(sse.response)
     if (u.includes('/status'))
@@ -186,13 +189,13 @@ describe('useDemo provision persists across navigation', () => {
     const first = renderHook(() => useDemo())
     await waitFor(() => expect(first.result.current.phase).toBe('idle'))
 
-    // Start the deploy and stream a progress frame; the backend now reports
-    // provisioned (ports allocated) as it does mid-deploy.
+    // Start the deploy and stream a progress frame; the backend now reports the
+    // start in flight.
     await act(async () => {
       void first.result.current.provision()
     })
     await waitFor(() => expect(first.result.current.phase).toBe('provisioning'))
-    holder.status = provisionedStatus
+    holder.status = provisioningStatus
     await act(async () => {
       sse.push('container', {
         name: 'pg',
@@ -219,6 +222,7 @@ describe('useDemo provision persists across navigation', () => {
       sse.push('complete', { percent: 100, message: 'Environment ready.' })
       sse.close()
     })
+    holder.status = provisionedStatus
     await waitFor(() => expect(second.result.current.phase).toBe('ready'), {
       timeout: 2000,
     })
@@ -236,7 +240,7 @@ describe('useDemo provision persists across navigation', () => {
       void first.result.current.provision()
     })
     await waitFor(() => expect(first.result.current.phase).toBe('provisioning'))
-    holder.status = provisionedStatus
+    holder.status = provisioningStatus
 
     // Leave, THEN the deploy finishes on the module-scoped stream.
     first.unmount()
@@ -244,6 +248,7 @@ describe('useDemo provision persists across navigation', () => {
       sse.push('complete', { percent: 100, message: 'Environment ready.' })
       sse.close()
     })
+    holder.status = provisionedStatus
 
     // Returning derives ready from the settled engine state.
     const second = renderHook(() => useDemo())
@@ -265,7 +270,7 @@ describe('useDemo provision persists across navigation', () => {
       void result.current.provision()
     })
     await waitFor(() => expect(result.current.phase).toBe('provisioning'))
-    // Mid-deploy the backend reports provisioned, as it does once ports are allocated.
+    // A stale status read reports the demo provisioned.
     holder.status = provisionedStatus
 
     await act(async () => {
@@ -356,5 +361,312 @@ describe('useDemo provision persists across navigation', () => {
     await waitFor(() => expect(result.current.phase).toBe('ready'), {
       timeout: 2000,
     })
+  })
+
+  it('settles a dropped start that finishes before the next status poll', async () => {
+    const sse = sseResponse()
+    const holder = { status: idleStatus as Record<string, unknown> }
+    vi.stubGlobal('fetch', mockProvisionFetch(sse, holder))
+
+    const { result } = renderHook(() => useDemo())
+    await waitFor(() => expect(result.current.phase).toBe('idle'))
+    await act(async () => {
+      void result.current.provision()
+    })
+    await waitFor(() => expect(result.current.phase).toBe('provisioning'))
+    // The stream drops while the backend still reports the start running.
+    holder.status = provisioningStatus
+    await act(async () => {
+      sse.close()
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50))
+    })
+    expect(result.current.phase).toBe('provisioning')
+
+    // The start completes before the next poll reattaches to it.
+    holder.status = provisionedStatus
+    await act(async () => {
+      await result.current.refreshStatus()
+    })
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+  })
+
+  it('settles a dropped start that fails before the next status poll', async () => {
+    const sse = sseResponse()
+    const holder = { status: idleStatus as Record<string, unknown> }
+    vi.stubGlobal('fetch', mockProvisionFetch(sse, holder))
+
+    const { result } = renderHook(() => useDemo())
+    await waitFor(() => expect(result.current.phase).toBe('idle'))
+    await act(async () => {
+      void result.current.provision()
+    })
+    await waitFor(() => expect(result.current.phase).toBe('provisioning'))
+    holder.status = provisioningStatus
+    await act(async () => {
+      sse.close()
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50))
+    })
+
+    holder.status = { ...idleStatus, last_error: 'SQP proxy did not start.' }
+    await act(async () => {
+      await result.current.refreshStatus()
+    })
+    await waitFor(() => expect(result.current.phase).toBe('failed'))
+    expect(result.current.error).toBe('SQP proxy did not start.')
+  })
+
+  it('reattaches to a start still running after its stream dropped', async () => {
+    const first = sseResponse()
+    const replay = sseResponse()
+    const holder = { status: idleStatus as Record<string, unknown> }
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      const u = String(url)
+      if (u.endsWith('/provision/stream'))
+        return Promise.resolve(replay.response)
+      if (u.includes('/provision')) return Promise.resolve(first.response)
+      if (u.includes('/status'))
+        return Promise.resolve(jsonResponse(holder.status))
+      if (u.includes('/history'))
+        return Promise.resolve(jsonResponse({ samples: [], events: [] }))
+      if (u.includes('/patterns'))
+        return Promise.resolve(jsonResponse({ patterns: [] }))
+      return Promise.resolve(jsonResponse({}))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useDemo())
+    await waitFor(() => expect(result.current.phase).toBe('idle'))
+    await act(async () => {
+      void result.current.provision()
+    })
+    await waitFor(() => expect(result.current.phase).toBe('provisioning'))
+    holder.status = provisioningStatus
+    await act(async () => {
+      first.close()
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50))
+    })
+
+    await act(async () => {
+      await result.current.refreshStatus()
+    })
+    const replays = fetchMock.mock.calls.filter(([u]) =>
+      String(u).endsWith('/provision/stream')
+    )
+    expect(replays).toHaveLength(1)
+    expect(result.current.phase).toBe('provisioning')
+
+    await act(async () => {
+      replay.push('complete', { percent: 100, message: 'Environment ready.' })
+      replay.close()
+    })
+    holder.status = provisionedStatus
+    await waitFor(() => expect(result.current.phase).toBe('ready'), {
+      timeout: 2000,
+    })
+  })
+
+  it('follows a start already in flight after a reload instead of showing it running', async () => {
+    const sse = sseResponse()
+    const holder = { status: provisioningStatus as Record<string, unknown> }
+    const fetchMock = mockProvisionFetch(sse, holder)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useDemo())
+    await waitFor(() => expect(result.current.phase).toBe('provisioning'))
+    const provisionCalls = fetchMock.mock.calls.filter(([u]) =>
+      String(u).includes('/provision')
+    )
+    expect(provisionCalls).toHaveLength(1)
+    expect(String(provisionCalls[0][0])).toBe('/api/demo/provision/stream')
+    expect(provisionCalls[0][1]).toMatchObject({ method: 'GET' })
+
+    // The backend replays the start so far.
+    await act(async () => {
+      sse.push('container', {
+        name: 'pg',
+        label: 'Postgres (Orders dataset)',
+        state: 'ready',
+        percent: 30,
+      })
+    })
+    await waitFor(() => expect(result.current.provisionPct).toBe(30))
+    expect(result.current.containers.find((c) => c.name === 'pg')?.state).toBe(
+      'ready'
+    )
+    await act(async () => {
+      await result.current.refreshStatus()
+    })
+    expect(result.current.phase).toBe('provisioning')
+
+    await act(async () => {
+      sse.push('complete', { percent: 100, message: 'Environment ready.' })
+      sse.close()
+    })
+    holder.status = provisionedStatus
+    await waitFor(() => expect(result.current.phase).toBe('ready'), {
+      timeout: 2000,
+    })
+  })
+
+  it('ends a start followed after a reload in the failed state when it fails', async () => {
+    const sse = sseResponse()
+    const holder = { status: provisioningStatus as Record<string, unknown> }
+    vi.stubGlobal('fetch', mockProvisionFetch(sse, holder))
+
+    const { result } = renderHook(() => useDemo())
+    await waitFor(() => expect(result.current.phase).toBe('provisioning'))
+    holder.status = {
+      ...idleStatus,
+      last_error: 'ReadySet did not snapshot in time.',
+    }
+    await act(async () => {
+      sse.push('error', { message: 'ReadySet did not snapshot in time.' })
+      sse.close()
+    })
+    await waitFor(() => expect(result.current.phase).toBe('failed'))
+    expect(result.current.error).toBe('ReadySet did not snapshot in time.')
+  })
+})
+
+describe('useDemo QueryPilot and policy changes', () => {
+  afterEach(() => {
+    cleanup()
+    __resetDemoProvisionForTests()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  function failingFetch(failing: string) {
+    const ok = mockFetch(provisionedStatus)
+    return vi.fn((url: RequestInfo | URL) =>
+      String(url).includes(failing)
+        ? Promise.resolve({
+            ok: false,
+            status: 500,
+            statusText: 'Internal Server Error',
+            text: () => Promise.resolve('Internal Server Error'),
+          } as unknown as Response)
+        : ok(url)
+    )
+  }
+
+  it('a failed QueryPilot toggle keeps it off, adds no annotation and says why', async () => {
+    vi.stubGlobal('fetch', failingFetch('/api/demo/querypilot'))
+    const { result } = renderHook(() => useDemo())
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+
+    await act(async () => {
+      await result.current.toggleQueryPilot(true)
+    })
+
+    expect(result.current.querypilotOn).toBe(false)
+    expect(result.current.events).toEqual([])
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Couldn't turn on QueryPilot",
+        description: 'Internal Server Error',
+        variant: 'negative',
+      })
+    )
+  })
+
+  it('a failed policy switch keeps the current policy and adds no annotation', async () => {
+    vi.stubGlobal('fetch', failingFetch('/api/demo/discovery-mode'))
+    const { result } = renderHook(() => useDemo())
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+
+    await act(async () => {
+      await result.current.setDiscoveryMode('sum_time')
+    })
+
+    expect(result.current.mode).toBe('count_star')
+    expect(result.current.events).toEqual([])
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Couldn't switch the caching policy",
+        variant: 'negative',
+      })
+    )
+  })
+
+  // A fetch whose QueryPilot and policy calls wait until `release` is called.
+  function gatedFetch() {
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    const ok = mockFetch(provisionedStatus)
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const u = String(url)
+      if (u.includes('/querypilot') || u.includes('/discovery-mode')) await gate
+      return ok(url)
+    })
+    const changes = () =>
+      fetchMock.mock.calls.filter(([u]) =>
+        /\/(querypilot|discovery-mode)/.test(String(u))
+      ).length
+    return { fetchMock, release, changes }
+  }
+
+  it('ignores QueryPilot and policy changes while one is pending', async () => {
+    const { fetchMock, release, changes } = gatedFetch()
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useDemo())
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+    expect(result.current.querypilotPending).toBe(false)
+
+    let first!: Promise<void>
+    await act(async () => {
+      first = result.current.toggleQueryPilot(true)
+    })
+    expect(result.current.querypilotPending).toBe(true)
+    expect(result.current.querypilotOn).toBe(false)
+    await act(async () => {
+      await result.current.toggleQueryPilot(true)
+      await result.current.setDiscoveryMode('sum_time')
+    })
+    expect(changes()).toBe(1)
+
+    await act(async () => {
+      release()
+      await first
+    })
+    expect(result.current.querypilotPending).toBe(false)
+    expect(result.current.events.map((e) => e.type)).toEqual(['qp_on'])
+  })
+
+  it('takes a new change once a failed one has settled', async () => {
+    vi.stubGlobal('fetch', failingFetch('/api/demo/querypilot'))
+    const { result } = renderHook(() => useDemo())
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+
+    await act(async () => {
+      await result.current.toggleQueryPilot(true)
+    })
+    expect(result.current.querypilotPending).toBe(false)
+    expect(result.current.querypilotOn).toBe(false)
+
+    await act(async () => {
+      await result.current.setDiscoveryMode('sum_time')
+    })
+    expect(result.current.events.map((e) => e.type)).toEqual(['mode_change'])
+  })
+
+  it('a confirmed QueryPilot toggle turns it on and annotates the chart', async () => {
+    vi.stubGlobal('fetch', mockFetch(provisionedStatus))
+    const { result } = renderHook(() => useDemo())
+    await waitFor(() => expect(result.current.phase).toBe('ready'))
+
+    await act(async () => {
+      await result.current.toggleQueryPilot(true)
+    })
+
+    expect(result.current.events.map((e) => e.type)).toEqual(['qp_on'])
   })
 })

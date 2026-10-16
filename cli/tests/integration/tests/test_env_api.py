@@ -216,6 +216,22 @@ async def test_set_anthropic_secret_notifies_parked_work(
     assert cfg.get_llm_provider() == "claude"
 
 
+async def test_set_anthropic_secret_rejects_characters_outside_key_alphabet(
+    client, tmp_rdst_home, inmemory_keyring, monkeypatch
+):
+    response = await client.post(
+        "/api/env/set",
+        json={"name": "ANTHROPIC_API_KEY", "value": "sk-ant-\u00e9\u6f22", "persist": True},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["success"] is False
+    assert "isn't a valid Anthropic API key" in body["message"]
+    assert SecretStoreService().get_secret("ANTHROPIC_API_KEY") is None
+    assert "ANTHROPIC_API_KEY" not in os.environ
+
+
 async def test_switch_ai_provider_persists_and_updates_requirements(
     client, tmp_rdst_home, inmemory_keyring, monkeypatch
 ):

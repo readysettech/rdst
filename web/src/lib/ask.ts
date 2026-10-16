@@ -12,12 +12,15 @@ export interface AskRequest {
   session_id?: string
   selected_interpretation_id?: number
   clarification_answers?: Record<string, string>
+  /** Clarifications an earlier answer to the question reported, applied instead of asking. */
+  clarifications?: AskClarification[]
 }
 
 type AskEvent = components['schemas']['AskEvent']
 export type AskEventType = AskEvent['type']
 
 export type AskInterpretation = components['schemas']['AskInterpretation']
+export type AskClarification = components['schemas']['AskClarification']
 export type AskClarificationQuestion =
   components['schemas']['AskClarificationQuestion']
 export type AskStatusEvent = Extract<AskEvent, { type: 'status' }>

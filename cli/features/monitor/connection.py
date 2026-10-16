@@ -232,11 +232,23 @@ class ConnectionWatch:
         return bool(rows) and not rows[0]["ok"]
 
     def _open_item(self, target: str) -> dict[str, Any] | None:
-        rows = self.store.read("SELECT * FROM inbox_item WHERE target=? AND type=? AND subject=?",
-                               (target, *ITEM))
+        rows = self._items(target)
         if rows and rows[0]["state"] not in ("resolved", "dismissed"):
             return rows[0]
         return None
+
+    def _items(self, target: str) -> list[dict[str, Any]]:
+        return self.store.read("SELECT * FROM inbox_item WHERE target=? AND type=? AND subject=?",
+                               (target, *ITEM))
+
+    def _answered_since_resolved(self, target: str) -> bool:
+        """The database answered after the user resolved the item, so this outage is a new one.
+        Read from stored checks: the outage's first failure is lost when RDST restarts."""
+        rows = self._items(target)
+        if not rows or rows[0]["state"] != "resolved" or rows[0]["resolved_at"] is None:
+            return False
+        return bool(self.store.read("SELECT 1 FROM monitor_pulse WHERE target=? AND kind='collect' "
+                                    "AND ok=1 AND ts>=? LIMIT 1", (target, rows[0]["resolved_at"])))
 
     def _last_reading(self, target: str, before: int) -> int | None:
         rows = self.store.read("SELECT MAX(ts) ts FROM monitor_pulse WHERE target=? "
@@ -259,8 +271,9 @@ class ConnectionWatch:
         open_item = self._open_item(target)
         if open_item is not None:
             # Keep the outage's own start across updates and restarts; an update never pushes.
+            # An item the user reopened after its outage ended takes this new outage's body.
             body = json.loads(open_item["body_json"])
-            if body.get("failed_since"):
+            if body.get("failed_since") and body.get("resumed_at") is None:
                 if error and body.get("error") != error[:300]:
                     body["error"] = error[:300]
                     message = lost_message(target, int(body.get('gap_from') or body['failed_since']))
@@ -277,7 +290,10 @@ class ConnectionWatch:
             body["error"] = error[:300]
             if reason := reason_text(error):
                 body["message"] += f" {reason}"
-        self.store.upsert_item(target, *ITEM, 1.0, TITLE, body, now, delivery="inbox")
+        # A new outage reopens the item even when the user resolved the last one; one resolved
+        # during this outage stays closed until the database answers again.
+        self.store.upsert_item(target, *ITEM, 1.0, TITLE, body, now, delivery="inbox",
+                               reopen_resolved=self._answered_since_resolved(target))
         if open_item is None:
             product_telemetry.connection_lost(target)
         self._push_if_due(target, now)
@@ -287,6 +303,10 @@ class ConnectionWatch:
         if item is None:
             return
         body = json.loads(item["body_json"])
+        if body.get("resumed_at") is not None:
+            # The user reopened an outage that had already ended; its recorded end stands.
+            self.store.action_item(item["id"], "resolve", now, resolved_by="code")
+            return
         gap_from = int(body.get("gap_from") or body.get("failed_since") or item["created_at"])
         # A measured recovery: the Inbox lists it green in Open for a day.
         body.update({"resumed_at": now, "gap_to": now, "gap_from": gap_from,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any
 
@@ -12,11 +13,20 @@ from pydantic import BaseModel
 
 from features.account.service import AccountServiceError, account_service
 from shared.api.guards import require_local_request
+from shared.env_requirements_service import EnvRequirementsService
 from shared.monitor.monitor_store import MonitorStore, default_monitor_db_path
 from shared.run_registry import run_registry
 
 
+logger = logging.getLogger(__name__)
+
+
 def _signed_in() -> None:
+    # Signing in is the remedy the app offers when no Anthropic key remains.
+    try:
+        EnvRequirementsService().prefer_readyset_without_anthropic_key()
+    except Exception:
+        logger.warning("Could not select Readyset-hosted AI after sign-in", exc_info=True)
     run_registry.wake_needs_key()
     # Sign-in alerts otherwise wait for the next monitor cycle to clear.
     if default_monitor_db_path().exists():

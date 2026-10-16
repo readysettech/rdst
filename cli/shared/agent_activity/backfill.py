@@ -76,13 +76,16 @@ def _analyze_jobs(conn: sqlite3.Connection, since: int, before: int, texts: dict
                          "table_sampled": " with parameters sampled from the table"}.get(
                              job.get("param_source") or "", "")
         calls = int(job.get("billable_calls") or 0) if billable else 0
+        # A cancelled job is stored as skipped; the audit log records the cancellation.
+        cancelled = job["state"] == "skipped" and job.get("error") == "cancelled"
         out.append(({
             "ts": job.get("started_at") or job.get("finished_at") or job["enqueued_at"],
             "finished_at": job.get("finished_at"),
             "target": job["target"], "action": "deep_analysis",
             "subject": display_name(text) if text else job["query_key"],
-            "outcome": job["state"],
-            "summary": (job.get("error") or "")[:500] if job["state"] != "done" else "",
+            "outcome": "cancelled" if cancelled else job["state"],
+            "summary": "Cancelled by you" if cancelled else
+            (job.get("error") or "")[:500] if job["state"] != "done" else "",
             "decision": decision,
             "details": {"query_key": job["query_key"], "reason": job["reason"],
                         "mode": mode, "param_source": job.get("param_source"),

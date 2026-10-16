@@ -134,11 +134,18 @@ export function FixCard({
   /** Set when hypopg is missing: the statement that turns planner verification on. */
   plannerSetup?: { installSql: string } | null
 }) {
+  const rewrite = fix.kind === 'rewrite'
   const bothBottlenecks = /\bsort\b/i.test(fix.serves ?? '')
   return (
     <Card
       title="Fix"
-      meta={bothBottlenecks ? 'one index, both bottlenecks' : 'one index'}
+      meta={
+        rewrite
+          ? 'query rewrite'
+          : bothBottlenecks
+            ? 'one index, both bottlenecks'
+            : 'one index'
+      }
       wide
       testId="analysis-fix"
     >
@@ -154,7 +161,9 @@ export function FixCard({
               onClick={() => onCopy(fix.sql)}
             />
             <Text as="span" level="caption" className="text-content-layout-3">
-              Builds without blocking writes. Confirmed by RDST once it appears.
+              {rewrite
+                ? 'Run it in place of the query where your application sends it.'
+                : 'Builds without blocking writes. Confirmed by RDST once it appears.'}
             </Text>
           </div>
           {plannerSetup && (
@@ -325,6 +334,15 @@ export function RewritesCard({
               />
             </ListRow>
             {rewrite.sql && <StatementCopy sql={rewrite.sql} />}
+            {!rewrite.sql && rewrite.note && (
+              <Text
+                as="p"
+                level="caption"
+                className="pt-1 pb-3 text-content-layout-3"
+              >
+                {rewrite.note}
+              </Text>
+            )}
           </Fragment>
         ))}
       </DividedList>

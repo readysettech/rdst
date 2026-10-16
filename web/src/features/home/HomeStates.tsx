@@ -1,5 +1,5 @@
 import { StatusLine, statusLinkClass } from '@rs/ui-new/status-line'
-import { Link } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { useOpenAddDatabase } from '../../components/configure/addDatabase'
 import {
@@ -162,6 +162,27 @@ export function HomeEmpty() {
         <GetStartedButton
           label="Add a database"
           onClick={() => openAddDatabase()}
+        />
+      }
+    />
+  )
+}
+
+/** Home with one database that isn't monitored yet: the Get started steps, at turning it on. */
+export function HomeTurnOn({ target }: { target: string }) {
+  const navigate = useNavigate()
+  return (
+    <GetStarted
+      step="monitor"
+      action={
+        <GetStartedButton
+          label={`Monitor ${target}`}
+          onClick={() =>
+            void navigate({
+              to: '/database',
+              search: { target, panel: 'enable' } as never,
+            })
+          }
         />
       }
     />

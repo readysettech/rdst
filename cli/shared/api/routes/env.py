@@ -8,7 +8,11 @@ from typing import List, Literal, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, SecretStr
 
-from shared.anthropic_env import ANTHROPIC_API_KEY_NAMES
+from shared.anthropic_env import (
+    ANTHROPIC_API_KEY_NAMES,
+    MALFORMED_ANTHROPIC_KEY_MESSAGE,
+    is_well_formed_anthropic_key,
+)
 from shared.api.guards import require_local_request
 from shared.env_requirements_service import EnvRequirementsService
 from shared.run_registry import run_registry
@@ -104,11 +108,20 @@ async def set_env_secret(request: Request, body: EnvSetRequest) -> EnvSetRespons
             session_only=True,
             message="This secret cannot be set here.",
         )
+    value = body.value.get_secret_value()
+    if body.name in ANTHROPIC_API_KEY_NAMES and not is_well_formed_anthropic_key(value):
+        return EnvSetResponse(
+            success=False,
+            name=body.name,
+            persisted=False,
+            session_only=True,
+            message=MALFORMED_ANTHROPIC_KEY_MESSAGE,
+        )
 
     service.bind_missing_target_password(body.name)
     result = service.secret_store.set_secret(
         name=body.name,
-        value=body.value.get_secret_value(),
+        value=value,
         persist=body.persist,
     )
     if body.name in ANTHROPIC_API_KEY_NAMES:

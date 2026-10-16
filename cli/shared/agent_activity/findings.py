@@ -12,6 +12,8 @@ import threading
 from collections import OrderedDict
 from typing import Any
 
+from shared.query_registry.analysis_results import listed_rewrite
+
 logger = logging.getLogger(__name__)
 
 _REF = re.compile(r"^/api/query-registry/([^/]+)/analysis/([^/]+)$")
@@ -34,8 +36,8 @@ def analysis_finding(llm_analysis: dict[str, Any] | None) -> str | None:
                  else f" on {table}" if table else "")
         more = len(indexes) - 1
         return f"suggested an index{where}" + (f" and {more} more" if more else "")
-    rewrites = [item for item in llm.get("rewrite_suggestions") or []
-                if isinstance(item, dict)]
+    # The rewrites Full analysis lists, including one without SQL to copy.
+    rewrites = [item for item in llm.get("rewrite_suggestions") or [] if listed_rewrite(item)]
     if rewrites:
         return "suggested a rewrite" if len(rewrites) == 1 else \
             f"suggested {len(rewrites)} rewrites"

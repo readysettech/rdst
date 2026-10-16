@@ -63,11 +63,14 @@ interface UseAnalyzeReturn {
  */
 export function useAnalyze(attachKey?: string | null): UseAnalyzeReturn {
   const [activeKey, setActiveKey] = useState<string | null>(attachKey ?? null)
-  const run = useAnalysisRun(activeKey)
-
-  useEffect(() => {
+  // A new attach key takes over in the same render, so no effect of the caller sees the
+  // previous key's run next to the new key's request.
+  const [attachedKey, setAttachedKey] = useState(attachKey ?? null)
+  if ((attachKey ?? null) !== attachedKey) {
+    setAttachedKey(attachKey ?? null)
     setActiveKey(attachKey ?? null)
-  }, [attachKey])
+  }
+  const run = useAnalysisRun(activeKey)
 
   useTargetSwitchLock('analyze', run?.state === 'analyzing')
 

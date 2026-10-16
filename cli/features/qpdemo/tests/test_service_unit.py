@@ -1,5 +1,7 @@
+import os
 import subprocess
 import threading
+import time
 from unittest import mock
 
 import pytest
@@ -33,6 +35,9 @@ def _bare_service(tmp_path, monkeypatch):
     svc._clock = service_mod._now_s
     svc._auto_teardown_at = None
     svc._lifecycle_lock = threading.Lock()
+    svc._provisioning = False
+    svc._provision_run = None
+    svc._provision_cancel = threading.Event()
     svc._pending_notice = None
     svc._demo_completed_fired = False
     return svc
@@ -90,10 +95,12 @@ def test_status_on_empty_state_reports_unprovisioned(tmp_path, monkeypatch):
     svc._health = {n: "failed" for n in NAMES}
     svc._supervisor_failures = {n: 0 for n in NAMES}
     svc._container_state = lambda name: "absent"
+    svc._provisioning = False
 
     out = svc.status()
 
     assert out["provisioned"] is False
+    assert out["provisioning"] is False
     assert out["ports"] is None
     assert out["auto_teardown_at"] is None
     # With nothing provisioned, health must not force qp-cron to "running"
@@ -283,6 +290,7 @@ def test_demo_touches_only_the_demo_config_section(tmp_path, monkeypatch):
     svc._qp_cron_fast = True
     svc._qp_cron_verified = False
     svc._auto_teardown_at = 1234.5
+    svc._provision_complete = True
 
     svc._save_state()
 
@@ -618,23 +626,117 @@ def _stub_successful_provision(svc, monkeypatch):
     svc._wait_pg_connect = lambda timeout: True
 
 
+def _hold_readyset_snapshot(svc):
+    """Park the provision at the Readyset snapshot wait until the returned event is set."""
+    release = threading.Event()
+
+    def _held(*_a, **_k):
+        yield {"type": "progress", "stage": "readyset", "percent": 40,
+               "message": "Waiting for Readyset to connect and snapshot the dataset (3s)..."}
+        release.wait(10)
+        return True
+
+    svc._wait_readyset_events = _held
+    return release
+
+
+def _statusable(svc):
+    svc._qp_enabled = False
+    svc._running = False
+    svc._workers = 2
+    svc._discovery_mode = "count_star"
+    svc._cache_budget = 20
+    svc._qp_cron_fast = True
+    svc._qp_cron_verified = False
+    svc._qp_last_tick = None
+    return svc
+
+
+def _read_until(events, predicate):
+    seen = []
+    for ev in events:
+        seen.append(ev)
+        if predicate(ev):
+            return seen
+    raise AssertionError(f"stream ended before the expected event: {seen}")
+
+
 def test_concurrent_provision_is_rejected(tmp_path, monkeypatch):
     svc = _bare_service(tmp_path, monkeypatch)
     _stub_successful_provision(svc, monkeypatch)
     _record_demo_events(svc, monkeypatch)
+    release = _hold_readyset_snapshot(svc)
 
     gen1 = svc.provision()
-    next(gen1)  # in flight: holds the lifecycle lock
+    _read_until(gen1, lambda ev: ev.get("stage") == "readyset")
 
     second = list(svc.provision())
     assert second[-1]["type"] == "error"
     assert "already in progress" in second[-1]["message"]
 
-    # Abandoning the in-flight stream (client disconnect) releases the lock,
-    # so a fresh provision goes through.
-    gen1.close()
+    release.set()
+    assert list(gen1)[-1]["type"] == "complete"
     out = list(svc.provision())
     assert out[-1]["type"] == "complete"
+
+
+def test_provision_outlives_its_client_and_reports_progress(tmp_path, monkeypatch):
+    """A client that disconnects mid-start (a page reload) leaves the start running: status
+    reports it in progress, not provisioned, and a new client can follow it to the end."""
+    svc = _statusable(_bare_service(tmp_path, monkeypatch))
+    svc._ports = None
+    _stub_successful_provision(svc, monkeypatch)
+    _record_demo_events(svc, monkeypatch)
+    release = _hold_readyset_snapshot(svc)
+
+    first = svc.provision()
+    _read_until(first, lambda ev: ev.get("stage") == "readyset")
+    first.close()
+
+    st = svc.status()
+    assert st["provisioning"] is True
+    assert st["provisioned"] is False
+
+    follower = svc.follow_provision()
+    replayed = _read_until(follower, lambda ev: ev.get("stage") == "readyset")
+    assert {"type": "container", "name": "pg", "label": "Postgres (Orders dataset)",
+            "state": "ready", "percent": 30} in replayed
+
+    release.set()
+    rest = list(follower)
+    assert rest[-1]["type"] == "complete"
+    st = svc.status()
+    assert st["provisioning"] is False
+    assert st["provisioned"] is True
+    assert list(svc.follow_provision()) == []
+
+
+def test_teardown_cancels_an_inflight_provision(tmp_path, monkeypatch):
+    svc = _bare_service(tmp_path, monkeypatch)
+    svc._ports = None
+    _stub_successful_provision(svc, monkeypatch)
+    _record_demo_events(svc, monkeypatch)
+    release = _hold_readyset_snapshot(svc)
+    svc.stop_load = lambda: None
+    svc._remove_demo_images = lambda: None
+    svc._delete_state = lambda: None
+
+    events = svc.provision()
+    _read_until(events, lambda ev: ev.get("stage") == "readyset")
+    result: dict = {}
+    teardown = threading.Thread(target=lambda: result.update(svc.teardown()))
+    teardown.start()
+    while not svc._provision_cancel.is_set():
+        time.sleep(0.01)
+    release.set()
+    rest = list(events)
+    teardown.join(5)
+
+    assert rest[-1] == {"type": "error", "message": "The demo start was cancelled."}
+    assert not any(ev.get("type") == "complete" for ev in rest)
+    assert result["success"] is True
+    assert svc._ports is None
+    assert svc._provisioning is False
 
 
 def test_first_demo_fires_once_across_provisions(tmp_path, monkeypatch):
@@ -919,6 +1021,35 @@ def test_status_reconciles_stale_provisioned_state(tmp_path, monkeypatch):
     assert out["provisioned"] is False
     assert svc._ports is None
     assert all(state == "absent" for state in out["health"].values())
+
+
+def test_a_provision_interrupted_by_a_restart_is_not_resumed(tmp_path, monkeypatch):
+    svc = _bare_service(tmp_path, monkeypatch)
+    abandoned = []
+    svc._abandon_provision = lambda: abandoned.append(True)
+    ports = {"pg": 1, "readyset": 2, "sqp": 3, "metrics": 4}
+
+    svc._ports = svc._apply_state({"ports": ports, "complete": False})
+    svc._discard_interrupted_provision()
+
+    assert abandoned == [True]
+    assert svc._last_error == "Setup stopped when RDST restarted. Start the demo again."
+
+
+@pytest.mark.parametrize("state,complete", [
+    ({"complete": True}, True), ({}, True),
+    ({"complete": False, "provision_pid": os.getppid()}, False)])
+def test_a_finished_earlier_or_still_running_provision_is_kept(tmp_path, monkeypatch, state,
+                                                               complete):
+    svc = _bare_service(tmp_path, monkeypatch)
+    svc._abandon_provision = lambda: pytest.fail("a finished demo was discarded")
+    ports = {"pg": 1, "readyset": 2, "sqp": 3, "metrics": 4}
+
+    svc._ports = svc._apply_state({"ports": ports, **state})
+    svc._discard_interrupted_provision()
+
+    assert svc._ports is not None
+    assert svc._state_dict()["complete"] is complete
 
 
 def test_resolve_cache_target_prefers_workload_key_over_hex(tmp_path, monkeypatch):

@@ -6,6 +6,7 @@ import hashlib
 from unittest.mock import patch
 
 import pytest
+import requests
 
 from features.providers import supabase_oauth
 from features.providers.provider_common import status_cache
@@ -324,6 +325,20 @@ class TestSupabaseRoutes:
 
         assert response.status_code == 409
         assert response.json()["code"] == "supabase_oauth_unavailable"
+
+    def test_offline_login_explains_the_connection_problem(self, fleet_router_client):
+        offline = requests.ConnectionError(
+            "HTTPSConnectionPool(host='keyservice.test', port=443): "
+            "[Errno 111] Connection refused"
+        )
+        with patch("features.providers.supabase_oauth.requests.post", side_effect=offline):
+            response = fleet_router_client.post("/api/providers/supabase-login")
+
+        assert response.status_code == 409
+        assert response.json() == {
+            "code": "supabase_oauth_unavailable",
+            "detail": "Couldn't reach Supabase sign-in. Check your connection and try again.",
+        }
 
     def test_login_falls_back_to_direct_exchange_for_dev(
         self, fleet_router_client, monkeypatch

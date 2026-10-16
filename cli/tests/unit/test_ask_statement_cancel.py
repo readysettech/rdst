@@ -133,6 +133,96 @@ def test_a_cancelled_request_never_starts_its_statement(monkeypatch):
     assert conn.closed
 
 
+class _SessionConn(_Conn):
+    """A connection that records its statements and refuses the ones it is told to."""
+
+    def __init__(self, server_version, refuse=()):
+        super().__init__()
+        self.server_version = server_version
+        self.refuse = refuse
+        self.statements = []
+        self.rollbacks = 0
+
+    def cursor(self):
+        conn = self
+
+        class Cursor:
+            description = [("one",)]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+            def execute(self, sql):
+                import psycopg2
+
+                if any(sql.startswith(prefix) for prefix in conn.refuse):
+                    raise psycopg2.Error("refused")
+                conn.statements.append(sql)
+
+            def fetchmany(self, _size):
+                return [(1,)]
+
+        return Cursor()
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+def _run_on(monkeypatch, conn, config=None):
+    import psycopg2
+
+    monkeypatch.setattr(psycopg2, "connect", lambda **_kwargs: conn)
+    monkeypatch.setattr(
+        "shared.db_connection.resolve_connection_params",
+        lambda **_kwargs: {"host": "h", "user": "u", "database": "d"},
+    )
+    monkeypatch.setattr(
+        "shared.db_connection.postgres_connection_kwargs", lambda params, **kw: {}
+    )
+    return execute_phase._execute_postgres("SELECT 1", config or {}, 30, "db", max_rows=10)
+
+
+def test_postgres_ends_the_statement_when_rdst_disconnects(monkeypatch):
+    conn = _SessionConn(160000)
+
+    result = _run_on(monkeypatch, conn)
+
+    assert result["success"]
+    assert conn.statements == [
+        "SET client_connection_check_interval = 1000",
+        "SET statement_timeout = '30000ms'",
+        "SELECT 1",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("server_version", "refuse", "rollbacks"),
+    [(130000, (), 0), (160000, ("SET client_connection_check_interval",), 1)],
+)
+def test_a_server_without_the_connection_check_still_answers(
+    monkeypatch, server_version, refuse, rollbacks
+):
+    conn = _SessionConn(server_version, refuse)
+
+    result = _run_on(monkeypatch, conn)
+
+    assert result["success"]
+    assert conn.statements == ["SET statement_timeout = '30000ms'", "SELECT 1"]
+    assert conn.rollbacks == rollbacks
+
+
+def test_a_readyset_target_keeps_its_session_cacheable(monkeypatch):
+    conn = _SessionConn(160000)
+
+    result = _run_on(monkeypatch, conn, {"target_type": "readyset"})
+
+    assert result["success"]
+    assert conn.statements == ["SET statement_timeout = '30000ms'", "SELECT 1"]
+
+
 def _blocking_execute(started: threading.Event, conn: _Conn):
     def execute(ctx, _presenter, _executor=None):
         ctx.statement_cancel.register(conn, DbType.POSTGRESQL, ctx.target, {})

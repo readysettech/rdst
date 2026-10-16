@@ -1060,6 +1060,7 @@ function analysisView(row: CaRow): AnalysisView {
     fix_detail: row.fix
       ? {
           sql: row.fix.sql,
+          kind: 'index',
           serves: full
             ? 'Serves the filter and the sort from one index.'
             : 'Serves the filter from one index.',

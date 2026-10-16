@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
@@ -59,6 +60,17 @@ def _get(
 
 
 UNREACHABLE_DETAIL = "Couldn't reach Neon. Check your connection and try again."
+MALFORMED_DETAIL = "That isn't a valid Neon API key; copy it from the Neon console again"
+_KEY_ALPHABET = re.compile(r"[!-~]+")
+
+
+def well_formed(key: str) -> bool:
+    """Whether ``key`` can be a Neon API key at all.
+
+    The key travels as a bearer header, which only carries visible ASCII; anything else is a
+    mistyped paste that would otherwise fail while encoding the request.
+    """
+    return bool(_KEY_ALPHABET.fullmatch(key))
 
 
 def validate_key(key: str) -> tuple[Optional[bool], str]:
@@ -66,6 +78,8 @@ def validate_key(key: str) -> tuple[Optional[bool], str]:
 
     Returns None as the verdict when Neon couldn't be asked: only a 401/403 rejects a key.
     """
+    if not well_formed(key):
+        return False, MALFORMED_DETAIL
     try:
         response = _get("/projects", key, params={"limit": 1})
     except requests.RequestException:

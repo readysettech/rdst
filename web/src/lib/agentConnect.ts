@@ -8,6 +8,8 @@ export type AgentStep =
   | 'tested'
   | 'awaiting_user'
   | 'monitoring_enabled'
+  /** The agent changed a database's monitoring settings, such as turning it off. */
+  | 'settings_changed'
   | 'needs_setup'
   | 'error'
 
@@ -57,6 +59,7 @@ const STEP_SET = new Set<string>([
   ...AGENT_STEPS,
   'needs_setup',
   'awaiting_user',
+  'settings_changed',
   'error',
 ])
 
@@ -231,6 +234,7 @@ export function advanceAgentProgress(
   progress: AgentProgress,
   event: AgentEvent
 ): AgentProgress {
+  if (event.step === 'settings_changed') return progress
   const target = event.target || progress.target
   if (event.step === 'error')
     return {

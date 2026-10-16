@@ -16,6 +16,7 @@ from functools import lru_cache
 from typing import Any
 
 from shared.monitor.monitor_store import MonitorStore
+from shared.query_registry.analysis_results import UNMAPPED_REWRITE, listed_rewrite
 
 logger = logging.getLogger(__name__)
 MODE_LABELS = {"explain": "Plan only (EXPLAIN)", "analyze": "Ran the query (EXPLAIN ANALYZE)"}
@@ -186,6 +187,22 @@ def _index_gain(recommendation: dict[str, Any], result: dict[str, Any] | None
     return None
 
 
+def plan_only_test(result: dict[str, Any]) -> bool:
+    """A rewrite test that only planned the rewrite; it still records how long its EXPLAIN took,
+    which is no run time."""
+    return bool(result.get("was_skipped") or (result.get("performance") or {}).get("was_skipped"))
+
+
+def ran_no_faster(result: dict[str, Any]) -> bool:
+    """A rewrite test that ran the rewrite and measured it no faster than the query, or
+    cancelled it for running longer than the query."""
+    if result.get("rewrite_timeout_exceeded"):
+        return True
+    pct = _number(((result.get("improvement") or {}).get("execution_time") or {})
+                  .get("improvement_pct"))
+    return not plan_only_test(result) and pct is not None and pct <= 0
+
+
 def rewrite_test_gain(result: Any) -> dict[str, Any] | None:
     """A tested rewrite's gain: the measured run time when it ran, the planner's cost when it
     was only planned. None unless the test found it significantly faster."""
@@ -196,7 +213,7 @@ def rewrite_test_gain(result: Any) -> dict[str, Any] | None:
     if not overall.get("is_better") or not overall.get("significant"):
         return None
     timed = improvement.get("execution_time") or {}
-    measured = _number(timed.get("improvement_pct")) is not None
+    measured = _number(timed.get("improvement_pct")) is not None and not plan_only_test(result)
     # A rewrite that ran no faster never counts, whatever the planner thought of it.
     pct = _number(timed.get("improvement_pct") if measured
                   else (improvement.get("cost_estimate") or {}).get("improvement_pct"))
@@ -226,16 +243,24 @@ def _same_sql(left: Any, right: Any) -> bool:
     return _sql_shape(left) == _sql_shape(right)
 
 
+def rewrite_result(item: dict[str, Any], testing: dict[str, Any]) -> dict[str, Any] | None:
+    """The successful test result of a listed rewrite, matched by its SQL, or by its mark
+    when its SQL couldn't be mapped back to the query's parameters."""
+    unmapped = item.get(UNMAPPED_REWRITE)
+    return next((result for result in [*(testing.get("rewrite_results") or []),
+                                       testing.get("best_rewrite")]
+                 if isinstance(result, dict) and result.get("success", True)
+                 and isinstance(result.get("improvement"), dict)
+                 and (result.get(UNMAPPED_REWRITE) == unmapped if unmapped else
+                      _same_sql(result.get("rewritten_sql") or result.get("sql"),
+                                item["rewritten_sql"]))), None) \
+        if testing.get("tested") else None
+
+
 def _rewrite_gain(item: dict[str, Any], testing: dict[str, Any]) -> dict[str, Any] | None:
-    sql = item["rewritten_sql"]
-    tested = [result for result in [*(testing.get("rewrite_results") or []),
-                                     testing.get("best_rewrite")]
-              if isinstance(result, dict) and result.get("success", True)
-              and isinstance(result.get("improvement"), dict)
-              and _same_sql(result.get("rewritten_sql") or result.get("sql"), sql)
-              ] if testing.get("tested") else []
+    tested = rewrite_result(item, testing)
     if tested:
-        gain = rewrite_test_gain(tested[0])
+        gain = rewrite_test_gain(tested)
         if gain is None:
             return {"measured": False, "text": "Tested: no faster than the original",
                     "before_ms": None, "after_ms": None, "cost_reduction_pct": 0.0}
@@ -269,11 +294,17 @@ def _fixes(analysis: Any) -> list[dict[str, Any]]:
                       else "Add an index",
                       "sql": sql, "why": index_why(item.get("rationale")),
                       "expected_gain": _index_gain(item, tested)})
-    for item in llm.get("rewrite_suggestions") or analysis.rewrite_suggestions or []:
-        if not isinstance(item, dict) or not item.get("rewritten_sql"):
+    rewrites = [item for item in llm.get("rewrite_suggestions") or analysis.rewrite_suggestions
+                or [] if listed_rewrite(item)]
+    # One without SQL to run follows those with it, so it never stands in for a ready fix.
+    for item in sorted(rewrites, key=lambda item: bool(item.get(UNMAPPED_REWRITE))):
+        tested = rewrite_result(item, rewrite_testing)
+        # A rewrite whose test ran it and found it no faster is no fix; Full analysis lists
+        # its result.
+        if tested and ran_no_faster(tested):
             continue
         fixes.append({"kind": "rewrite", "title": "Rewrite the query",
-                      "sql": str(item["rewritten_sql"]).strip(),
+                      "sql": str(item.get("rewritten_sql") or "").strip() or None,
                       "why": _sentence(item.get("explanation")),
                       "expected_gain": _rewrite_gain(item, rewrite_testing)})
     for item in llm.get("optimization_opportunities") or []:

@@ -551,6 +551,18 @@ def test_plan_only_shape_literals(sql, expected):
     assert mod.plan_only_sql(sql, "mysql" if "?" in sql else "postgresql") == expected
 
 
+def test_plan_only_parameters_name_the_literals_the_plan_estimate_writes():
+    sql = "SELECT * FROM t WHERE name LIKE ? AND id = ? LIMIT ?"
+    data = {"placeholders": [{"placeholder": "?", "suggestions": []},
+                             {"placeholder": "?", "suggestions": [{"value": "7"}]},
+                             {"placeholder": "?", "suggestions": []}]}
+    assert mod.plan_only_parameters(sql, "mysql", data) == [
+        {"name": "?", "value": "'%'"}, {"name": "?", "value": "7"},
+        {"name": "?", "value": "10"}]
+    assert mod.plan_only_sql(sql, "mysql", data) == \
+        "SELECT * FROM t WHERE name LIKE '%' AND id = 7 LIMIT 10"
+
+
 @pytest.mark.parametrize("column_type,literal", [
     ("integer", "1"), ("text", "''"), ("date", "CURRENT_DATE"),
     ("timestamp without time zone", "NOW()"), ("interval", "'1 day'"),

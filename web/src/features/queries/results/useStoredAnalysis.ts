@@ -60,10 +60,13 @@ export function useStoredAnalysis({
   hash,
   analysisId,
   mode,
+  justRan = false,
 }: {
   hash?: string
   analysisId?: string
   mode?: string | null
+  /** The record is the run this view just finished, so opening it is not a revisit. */
+  justRan?: boolean
 }): StoredAnalysisState {
   const isActive = Boolean(hash && analysisId)
 
@@ -92,10 +95,11 @@ export function useStoredAnalysis({
     const key = `${hash}:${analysisId}`
     if (viewed.current === key) return
     viewed.current = key
+    if (justRan) return
     trackEvent('analysis_viewed_stored', {
       age_bucket: analysisAgeBucket(createdAt),
     })
-  }, [analysisId, createdAt, hash, isActive])
+  }, [analysisId, createdAt, hash, isActive, justRan])
 
   const replayed: StoredAnalysisResults = record.data
     ? storedAnalysisResults(record.data, mode)

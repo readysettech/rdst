@@ -1,6 +1,6 @@
 from typing import Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AnalyzeRequest(BaseModel):
@@ -74,6 +74,15 @@ class DeleteResponse(BaseModel):
     success: bool
 
 
+class AskClarificationAnswer(BaseModel):
+    """A clarification the user answered, as an answer reports it."""
+
+    id: str = Field(min_length=1)
+    term: str
+    question: str
+    answer: str = Field(min_length=1)
+
+
 class AskRequest(BaseModel):
     """Request for text-to-SQL conversion."""
 
@@ -84,12 +93,15 @@ class AskRequest(BaseModel):
     session_id: Optional[str] = None
     selected_interpretation_id: Optional[int] = None
     clarification_answers: Optional[dict[str, str]] = None
+    # Answers from an earlier run of the same question, applied in place of asking again.
+    clarifications: Optional[list[AskClarificationAnswer]] = None
 
 
 __all__ = [
     "AnalyzeProgress",
     "AnalyzeRequest",
     "AnalyzeResult",
+    "AskClarificationAnswer",
     "AskRequest",
     "ConversationHistoryResponse",
     "ConversationStatusResponse",

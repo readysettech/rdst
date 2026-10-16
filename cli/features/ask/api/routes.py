@@ -21,7 +21,7 @@ from features.ask.events import (
     AskSqlGeneratedEvent,
     AskStatusEvent,
 )
-from features.ask.models import AskInput, AskOptions
+from features.ask.models import AskClarification, AskInput, AskOptions
 from features.ask.profiles import default_ask_service_options
 from features.ask.service import AskService
 from features.ask.telemetry import ask_terminal_detector
@@ -135,6 +135,15 @@ def _event_to_sse(event: AskEvent) -> dict:
                     "truncated": event.truncated,
                     "row_limit": event.row_limit,
                     "monitor_key": event.monitor_key,
+                    "clarifications": [
+                        {
+                            "id": item.id,
+                            "term": item.term,
+                            "question": item.question,
+                            "answer": item.answer,
+                        }
+                        for item in event.clarifications
+                    ],
                 }
             ),
         }
@@ -302,8 +311,8 @@ async def ask_history(
     Draws on the query registry, which auto-saves every answered ask with its
     original question text. One item per database a SQL pattern was asked on,
     carrying that database's question; entries saved before question
-    persistence landed have none. The SQL is the original submitted form when
-    stored, so a re-ask is faithful.
+    persistence landed have none. The SQL is the one that answered that question,
+    in its original submitted form when stored, so a re-ask is faithful.
     """
     from shared.query_registry import QueryRegistry
 
@@ -311,14 +320,14 @@ async def ask_history(
     items = [
         AskHistoryItem(
             question=question,
-            sql=e.original_sql or e.sql,
+            sql=sql,
             hash=e.hash,
             tag=e.tag,
             target=asked_on,
             last_used=asked_at,
         )
         for e in registry.list_queries()
-        for asked_on, question, asked_at in e.ask_history()
+        for asked_on, question, asked_at, sql in e.ask_history()
         if not target or asked_on == target
     ]
     items.sort(key=lambda item: item.last_used, reverse=True)
@@ -350,6 +359,12 @@ async def ask(
         question=body.question,
         target=guard.target_name,
         source=surface,
+        clarifications=[
+            AskClarification(
+                id=item.id, term=item.term, question=item.question, answer=item.answer
+            )
+            for item in body.clarifications or []
+        ],
     )
     options = AskOptions(
         dry_run=body.dry_run,

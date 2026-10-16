@@ -12,6 +12,7 @@ calls; this module owns the parts every broker-backed provider shares.
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 import threading
 import time
@@ -20,6 +21,8 @@ from typing import Any, Callable, Optional
 import requests
 
 from shared.keyservice import keyservice_url
+
+logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 10.0
 LOGIN_TTL_SECONDS = 600.0
@@ -79,7 +82,11 @@ class ProviderOAuth:
                 timeout=REQUEST_TIMEOUT,
             )
         except requests.RequestException as exc:
-            raise self.broker_error(f"Could not reach the RDST sign-in service: {exc}") from exc
+            logger.debug("%s sign-in broker request failed", self.display_name, exc_info=True)
+            raise self.broker_error(
+                f"Couldn't reach {self.display_name} sign-in. "
+                "Check your connection and try again."
+            ) from exc
 
         if response.status_code != 200:
             detail = (response.text or "").strip()[:300]

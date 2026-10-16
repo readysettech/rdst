@@ -111,6 +111,7 @@ test('unowned code takes the areas of the owners nearest to it in the graphs', (
       .sort()
   assert.deepEqual(names('web-apps/apps/rdst/src/lib/targetQueries.ts'), [
     'connections',
+    'monitoring',
     'settings',
   ])
   assert.deepEqual(names('web-apps/apps/rdst/src/lib/useDemo.ts'), ['platform'])

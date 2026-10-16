@@ -88,6 +88,7 @@ from .events import (
     AskStatusEvent,
 )
 from .models import (
+    AskClarification,
     AskClarificationQuestion,
     AskInput,
     AskInterpretation,
@@ -839,7 +840,22 @@ class AskService:
                     else "Analyzing question..."
                 ),
             )
-            if options.no_interactive:
+            if input.clarifications:
+                # The user already answered this question's clarifications.
+                self._apply_user_clarifications(
+                    ctx,
+                    {item.id: item.answer for item in input.clarifications},
+                    {
+                        item.id: {
+                            "ambiguity_id": item.id,
+                            "term": item.term,
+                            "question": item.question,
+                        }
+                        for item in input.clarifications
+                    },
+                )
+                self._observe(AskPhase.CLARIFY, ctx)
+            elif options.no_interactive:
                 deterministic_ambiguities = self._check_non_interactive_intent(ctx)
                 self._observe(AskPhase.CLARIFY, ctx)
                 if deterministic_ambiguities:
@@ -979,7 +995,25 @@ class AskService:
 
         self._session_store.pop(session_id, None)
         ctx = pending.context
-        for answer_key, context in pending.clarification_context.items():
+        self._apply_user_clarifications(ctx, answers, pending.clarification_context)
+        try:
+            with inference_workflow("ask", pending.surface, pending.workflow_id):
+                async for event in self._run_from_generate(
+                    ctx, persist_query=pending.persist_query
+                ):
+                    yield event
+        except Exception as exc:
+            if pending.raise_unexpected_errors:
+                raise
+            yield AskErrorEvent(type="error", message=str(exc))
+
+    def _apply_user_clarifications(
+        self,
+        ctx: Any,
+        answers: dict[str, str],
+        clarification_context: dict[str, dict[str, str]],
+    ) -> None:
+        for answer_key, context in clarification_context.items():
             answer = answers.get(answer_key)
             ctx.clarification_resolutions.append(
                 {
@@ -998,18 +1032,27 @@ class AskService:
             ctx.refined_question = self._build_refined_question(
                 ctx.question,
                 answers,
-                pending.clarification_context,
+                clarification_context,
             )
-        try:
-            with inference_workflow("ask", pending.surface, pending.workflow_id):
-                async for event in self._run_from_generate(
-                    ctx, persist_query=pending.persist_query
-                ):
-                    yield event
-        except Exception as exc:
-            if pending.raise_unexpected_errors:
-                raise
-            yield AskErrorEvent(type="error", message=str(exc))
+
+    @staticmethod
+    def _answered_clarifications(ctx: Any) -> list[AskClarification]:
+        """The user's clarification answers, in the order they refined the question."""
+        answered = {
+            item["answer_key"]: item
+            for item in ctx.clarification_resolutions
+            if item.get("source") == "user" and item.get("action") == "answer"
+        }
+        return [
+            AskClarification(
+                id=key,
+                term=answered[key]["term"],
+                question=answered[key]["question"],
+                answer=answer,
+            )
+            for key, answer in ctx.clarifications.items()
+            if key in answered
+        ]
 
     def abandon(self, session_id: str) -> bool:
         """Discard a pending clarification session."""
@@ -1140,6 +1183,7 @@ class AskService:
                 total_tokens=ctx.total_tokens,
                 query_hash="",
                 query_tag="",
+                clarifications=self._answered_clarifications(ctx),
             )
             return
 
@@ -1301,6 +1345,7 @@ class AskService:
                 monitor_key=await _recorded_monitor_key(
                     ctx.target, ctx.sql or "", monitor_lookup
                 ),
+                clarifications=self._answered_clarifications(ctx),
             )
             return
 

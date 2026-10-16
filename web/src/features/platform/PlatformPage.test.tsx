@@ -110,6 +110,7 @@ function makeBase(): DemoState {
     events: [],
     patterns: [],
     querypilotOn: false,
+    querypilotPending: false,
     mode: 'count_star',
     nextPassEta: null,
     cacheBudget: 10,
@@ -420,6 +421,25 @@ describe('PlatformPage', () => {
         /QueryPilot picks what to cache by policy: most frequent\./
       )
     ).toBeTruthy()
+  })
+
+  it('holds the QueryPilot and policy controls while a QueryPilot change is pending', () => {
+    stubApi()
+    const demo = running({ querypilotPending: true })
+    renderWithClient(<PlatformPage />)
+    const turnOn = screen.getByRole('button', {
+      name: 'Turn on QueryPilot',
+    }) as HTMLButtonElement
+    expect(turnOn.disabled).toBe(true)
+    fireEvent.click(turnOn)
+    expect(demo.toggleQueryPilot).not.toHaveBeenCalled()
+    expect(
+      (
+        screen.getByRole('button', {
+          name: 'Policy: most frequent',
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(true)
   })
 
   it('shuts down only through the red confirm', async () => {

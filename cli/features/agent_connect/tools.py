@@ -355,7 +355,9 @@ async def enable_monitoring(app: FastAPI, args: dict) -> dict:
 
 async def disable_monitoring(app: FastAPI, args: dict) -> dict:
     name = _require_target(args)
-    return {"target": name, **await _put_settings(app, name, {"enabled": False})}
+    values = await _put_settings(app, name, {"enabled": False})
+    session.events.publish("settings_changed", target=name)
+    return {"target": name, **values}
 
 
 async def get_monitor_settings(app: FastAPI, args: dict) -> dict:
@@ -374,7 +376,9 @@ async def update_monitor_settings(app: FastAPI, args: dict) -> dict:
         await _require_ready(name)
         if waiting := await _await_user(name):
             return waiting
-    return {"target": name, **await _put_settings(app, name, update)}
+    values = await _put_settings(app, name, update)
+    session.events.publish("settings_changed", target=name)
+    return {"target": name, **values}
 
 
 async def status(app: FastAPI, args: dict) -> dict:

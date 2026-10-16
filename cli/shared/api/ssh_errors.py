@@ -137,6 +137,38 @@ def ssh_error_payload(
     }
 
 
+def _unreachable_reason(error: object, target_config: dict[str, Any]) -> str | None:
+    """Why the server didn't take the connection, in words rather than driver text.
+
+    None when the text does not show the server out of reach: a server that
+    answered, such as one refusing this client's host or cancelling a statement
+    at its timeout, needs other advice than its host and port.
+    """
+    host, port = target_config.get("host"), target_config.get("port")
+    server = f"{host}:{port}" if host and port else host or "the database server"
+    text = _exception_text(error).lower()
+    if "statement" in text:
+        return None
+    if "connection refused" in text:
+        return f"{server} refused the connection."
+    if "timeout expired" in text or "timed out" in text:
+        return f"{server} didn't answer in time."
+    if any(
+        signal in text
+        for signal in (
+            "could not translate host name",
+            "name or service not known",
+            "nodename nor servname",
+            "unknown mysql server host",
+            "no route to host",
+            "network is unreachable",
+            "can't connect to mysql server",
+        )
+    ):
+        return f"{server} couldn't be reached."
+    return None
+
+
 def connectivity_error_payload(
     error: object,
     target_name: str,
@@ -194,7 +226,14 @@ def connectivity_error_payload(
                 "port, network rules, and credentials."
             )
         else:
-            message = f"The database connection for '{target_name}' failed."
+            reason = _unreachable_reason(error, target_config)
+            message = (
+                f"The database connection for '{target_name}' failed: {reason} Check "
+                "that the database is running and reachable from this computer, and "
+                "that its host and port are right."
+                if reason
+                else f"The database connection for '{target_name}' failed."
+            )
         return {
             "category": "database_connection_failed",
             "message": message,

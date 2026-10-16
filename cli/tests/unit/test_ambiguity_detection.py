@@ -188,6 +188,19 @@ def test_detector_prompt_distinguishes_missing_intent_from_implementation() -> N
             _ambiguity_response(category="schema_insufficient"),
             "schema_insufficiency_is_not_user_intent",
         ),
+        (
+            _ambiguity_response(
+                first_text="One year earlier than the year from the previous result.",
+            ),
+            "refers_to_an_earlier_exchange",
+        ),
+        (
+            _ambiguity_response(
+                second_text="Show the same results for the year before the year we "
+                "were discussing.",
+            ),
+            "refers_to_an_earlier_exchange",
+        ),
     ],
 )
 def test_detector_drops_questions_users_cannot_use(response, reason) -> None:

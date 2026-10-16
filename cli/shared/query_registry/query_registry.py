@@ -98,8 +98,10 @@ class QueryTargetLifecycle:
     # measured. Absent keys mean the run reported nothing for them, so the
     # mapping stays TOML-serializable.
     last_compare: Dict[str, Any] = field(default_factory=dict)
-    # The latest Ask question that produced this SQL on this target, and when.
+    # The latest Ask question that produced this SQL on this target, the SQL that answered it
+    # (one pattern covers SQL that differs only in its literals), and when.
     ask_question: str = ""
+    ask_sql: str = ""
     last_asked_at: str = ""
 
     @classmethod
@@ -890,14 +892,16 @@ class QueryEntry:
             and not lifecycle.reviewed_at
         )
 
-    def ask_history(self) -> List[Tuple[str, str, str]]:
-        """(target, question, asked_at) for every target this SQL was asked on.
+    def ask_history(self) -> List[Tuple[str, str, str, str]]:
+        """(target, question, asked_at, sql) for every target this SQL was asked on.
 
         One SQL pattern can answer questions on several databases; each keeps its
-        own question. Entries from before per-target questions fall back to the
-        entry's question on its home target only.
+        own question and the SQL that answered it. Entries from before per-target
+        questions fall back to the entry's question on its home target only, and
+        those from before per-question SQL to the entry's submitted SQL.
         """
-        items: Dict[str, Tuple[str, str, str]] = {}
+        sql = self.original_sql or self.sql
+        items: Dict[str, Tuple[str, str, str, str]] = {}
         for key, lifecycle in self.target_lifecycle.items():
             if "ask" not in lifecycle.sources:
                 continue
@@ -907,9 +911,9 @@ class QueryEntry:
             )
             if question:
                 asked_at = lifecycle.last_asked_at or self.last_analyzed
-                items[target] = (target, question, asked_at)
+                items[target] = (target, question, asked_at, lifecycle.ask_sql or sql)
         if self.source == "ask" and self.question and self.home_target not in items:
-            items[self.home_target] = (self.home_target, self.question, self.last_analyzed)
+            items[self.home_target] = (self.home_target, self.question, self.last_analyzed, sql)
         return list(items.values())
 
     def to_dict(self) -> Dict[str, Any]:
@@ -1339,6 +1343,7 @@ class QueryRegistry:
         compared: bool,
         save_intent: bool,
         question: str = "",
+        sql: str = "",
     ) -> None:
         """Update additive Query Library state without changing CLI metadata.
 
@@ -1369,6 +1374,7 @@ class QueryRegistry:
             lifecycle.last_asked_at = occurred_at
             if question:
                 lifecycle.ask_question = question
+                lifecycle.ask_sql = sql
 
     def add_query(
         self,
@@ -1584,6 +1590,7 @@ class QueryRegistry:
             compared=compared,
             save_intent=save_intent,
             question=question,
+            sql=canonical_sql,
         )
 
         if self._defer_depth:

@@ -263,6 +263,20 @@ class TestNeonRoutes:
         assert body["code"] == "invalid_token"
         assert "rejected" in body["detail"]
 
+    def test_key_outside_the_header_alphabet_is_invalid_without_a_request(
+        self, fleet_router_client, tmp_rdst_home
+    ):
+        with patch("features.providers.neon.requests.get") as get:
+            response = fleet_router_client.post(
+                "/api/providers/neon-key", json={"token": "napi_\u00e9\U0001f642"}
+            )
+
+        assert response.status_code == 400
+        body = response.json()
+        assert body["code"] == "malformed_token"
+        assert "isn't a valid Neon API key" in body["detail"]
+        get.assert_not_called()
+
     def test_key_is_stored_after_validation(self, fleet_router_client, tmp_rdst_home):
         stored: list[tuple[str, str]] = []
 

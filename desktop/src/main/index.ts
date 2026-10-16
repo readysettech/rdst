@@ -53,6 +53,7 @@ import { getStartAtLogin, isHiddenLaunch, setStartAtLogin } from './login.js'
 import {
   allPaused,
   applyPauseAction,
+  changesTrayDatabases,
   listTrayDatabases,
   type PauseAction,
   pauseMenuModel,
@@ -90,6 +91,7 @@ import {
   hideWindowOnClose,
   stopBeforeQuit,
 } from './window-lifecycle.js'
+import { DEFAULT_ZOOM_FACTOR, zoomShortcuts } from './zoom.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RENDERER_DIR = path.resolve(__dirname, '../renderer')
@@ -253,6 +255,10 @@ function registerAppProtocol(): void {
       rootDir: RENDERER_DIR,
       apiBaseUrl: () => backend?.apiBaseUrl ?? null,
       smokeAuth: SMOKE_MODE,
+      // A database turned on or off in the app shows in the next tray menu.
+      onWrite: (pathname) => {
+        if (changesTrayDatabases(pathname)) refreshTrayMenu()
+      },
     })
   )
   appProtocolRegistered = true
@@ -383,20 +389,13 @@ function registerWindowControlHandlers(): void {
   })
 }
 
-// The renderer is laid out for the browser at 100%; the desktop shell shows
-// it two zoom steps smaller so more of a page fits without scrolling. A
-// person's own zoom changes (Cmd/Ctrl +/-) persist per origin on top of this.
-const DEFAULT_ZOOM_FACTOR = 0.8
 // The title strip the window controls sit in, in device-independent pixels: the system's
 // caption height on Windows and Linux, and on macOS the sidebar's top up to its first item.
 const TITLE_BAR_HEIGHT = process.platform === 'darwin' ? 46 : 32
 
 // Electron's stock View menu resets zoom to 100 percent. This shell's actual
-// size is the default factor above, so Actual Size returns there while Zoom
+// size is DEFAULT_ZOOM_FACTOR, so Actual Size returns there while Zoom
 // In and Zoom Out keep stepping from wherever the person has taken it.
-/** How often a held zoom key steps. */
-const ZOOM_REPEAT_MS = 150
-
 function installApplicationMenu(): void {
   const isMac = process.platform === 'darwin'
   const view: MenuItemConstructorOptions = {
@@ -475,31 +474,10 @@ async function createWindow(
       zoomFactor: DEFAULT_ZOOM_FACTOR,
     },
   })
-  // Handle unshifted Ctrl+= as well as Ctrl++ before menu accelerators. A held key
-  // repeats fast, so repeats step at most every ZOOM_REPEAT_MS.
-  let lastZoomAt = 0
-  window.webContents.on('before-input-event', (event, input) => {
-    const modifier = isMac ? input.meta : input.control
-    if (input.type !== 'keyDown' || !modifier || input.alt) return
-    const direction =
-      input.key === '=' || input.key === '+'
-        ? 1
-        : input.key === '-' || input.key === '_'
-          ? -1
-          : 0
-    if (!direction && input.key !== '0') return
-    event.preventDefault()
-    const now = Date.now()
-    if (input.isAutoRepeat && now - lastZoomAt < ZOOM_REPEAT_MS) return
-    lastZoomAt = now
-    const level = direction
-      ? Math.max(
-          -3,
-          Math.min(5, window.webContents.getZoomLevel() + direction * 0.5)
-        )
-      : 0
-    window.webContents.setZoomLevel(level)
-  })
+  window.webContents.on(
+    'before-input-event',
+    zoomShortcuts(window.webContents, isMac)
+  )
 
   mainWindow = window
   hideWindowOnClose(window, () => quitState.started || SMOKE_MODE)
@@ -800,7 +778,14 @@ function runPauseAction(action: PauseAction): void {
     .catch((error) =>
       dialog.showErrorBox('RDST monitoring', errorMessage(error))
     )
-    .finally(refreshTrayMenu)
+    .finally(() => {
+      refreshTrayMenu()
+      // Open pages show what the tray changed, including part of a pause that failed.
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed())
+          window.webContents.send('desktop:monitoring-changed')
+      }
+    })
 }
 
 function refreshTrayMenu(): void {
@@ -1149,6 +1134,8 @@ async function startApplication(): Promise<void> {
       notificationHealth ?? (await notificationWatch?.refresh()) ?? null
   )
   ipcMain.on('desktop:open-notification-settings', openNotificationSettings)
+  // A coding agent changed monitoring through RDST's MCP server, out of the proxy's sight.
+  ipcMain.on('desktop:refresh-tray', () => refreshTrayMenu())
   ipcMain.handle('desktop:get-start-at-login', startAtLoginStatus)
   ipcMain.handle('desktop:set-start-at-login', (_event, enabled: boolean) => {
     const result = configureStartAtLogin(enabled)

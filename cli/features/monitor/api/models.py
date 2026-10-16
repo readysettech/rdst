@@ -228,6 +228,7 @@ class ReportVerdictText(BaseModel):
 
 class AnalysisFixDetail(BaseModel):
     sql: str
+    kind: Literal["index", "rewrite", "config", "none"] = "index"
     serves: str | None = None
     cost_before: float | None = None
     cost_after: float | None = None
@@ -248,6 +249,8 @@ class RewriteTested(BaseModel):
     runs: int | None = None
     outcome: Literal["faster", "slower", "no_change", "untested"] = "untested"
     sql: str | None = None
+    # Why a rewrite has no SQL to copy.
+    note: str | None = None
 
 
 class AlsoWorthDoing(BaseModel):
