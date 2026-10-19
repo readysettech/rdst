@@ -347,6 +347,7 @@ class TunnelManager:
         jump_host = resolved["host"]
         key_path = resolved.get("key_path")
         pkey = None
+        locked_key = None
 
         if key_path:
             if not Path(key_path).is_file():
@@ -358,13 +359,20 @@ class TunnelManager:
                     ),
                     key_path=key_path,
                 )
-            pkey = self._load_private_key(
-                paramiko,
-                target_name,
-                jump_host,
-                key_path,
-                passphrase,
-            )
+            try:
+                pkey = self._load_private_key(
+                    paramiko,
+                    target_name,
+                    jump_host,
+                    key_path,
+                    passphrase,
+                )
+            except SshPassphraseRequired as exc:
+                # The key may already be unlocked in ssh-agent (ssh-add), so authenticate with
+                # the agent and ask for the passphrase only when that fails.
+                if passphrase is not None or not self._agent_has_keys(paramiko):
+                    raise
+                locked_key = exc
 
         client = paramiko.SSHClient()
         client.load_system_host_keys()
@@ -406,6 +414,8 @@ class TunnelManager:
             ) from exc
         except paramiko.AuthenticationException as exc:
             client.close()
+            if locked_key is not None:
+                raise locked_key from exc
             raise SshAuthenticationError(
                 self._message(
                     target_name,
@@ -419,6 +429,8 @@ class TunnelManager:
         except paramiko.SSHException as exc:
             client.close()
             if "authentication" in str(exc).lower():
+                if locked_key is not None:
+                    raise locked_key from exc
                 raise SshAuthenticationError(
                     self._message(
                         target_name,
@@ -613,6 +625,17 @@ class TunnelManager:
             ),
             key_path=key_path,
         )
+
+    @staticmethod
+    def _agent_has_keys(paramiko: Any) -> bool:
+        try:
+            agent = paramiko.Agent()
+        except (OSError, paramiko.SSHException):
+            return False
+        try:
+            return bool(agent.get_keys())
+        finally:
+            agent.close()
 
     @staticmethod
     def _remember_jump_host(resolved: dict) -> None:

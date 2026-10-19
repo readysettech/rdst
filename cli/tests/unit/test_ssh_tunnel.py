@@ -741,6 +741,64 @@ def test_passphrase_required_is_typed_and_actionable(tmp_path, monkeypatch):
     assert str(key_path) in message
 
 
+class _KeyAgent:
+    def __init__(self, keys):
+        self.keys = keys
+
+    def get_keys(self):
+        return self.keys
+
+    def close(self):
+        pass
+
+
+def _encrypted_key_in_agent(tmp_path, monkeypatch):
+    key = paramiko.RSAKey.generate(1024)
+    key_path = Path(tmp_path) / "encrypted-key"
+    key.write_private_key_file(str(key_path), password="secret")
+    monkeypatch.setattr(paramiko, "Agent", lambda: _KeyAgent((key,)))
+    monkeypatch.setattr(paramiko.client, "Agent", lambda: _KeyAgent((key,)))
+    return str(key_path)
+
+
+def test_encrypted_key_authenticates_through_ssh_agent(
+    tunnel_environment, tmp_path, monkeypatch
+):
+    tunnel_environment["key_path"] = _encrypted_key_in_agent(tmp_path, monkeypatch)
+    manager = TunnelManager()
+    try:
+        endpoint = _open(manager, tunnel_environment, "agent-db")
+
+        with socket.create_connection(endpoint, timeout=2) as client:
+            client.sendall(b"agent key")
+            assert client.recv(65536) == b"agent key"
+    finally:
+        manager.close_all()
+
+
+def test_encrypted_key_rejected_through_agent_asks_for_passphrase(tmp_path, monkeypatch):
+    key_path = _encrypted_key_in_agent(tmp_path, monkeypatch)
+
+    def reject(self, **kwargs):
+        assert "pkey" not in kwargs
+        assert kwargs["allow_agent"] is True
+        raise paramiko.AuthenticationException("rejected")
+
+    monkeypatch.setattr(paramiko.SSHClient, "connect", reject)
+    manager = TunnelManager()
+
+    with pytest.raises(SshPassphraseRequired) as exc_info:
+        manager.ensure_tunnel(
+            "private-db",
+            {"host": "jump.example.com", "user": "db-user", "key_path": key_path},
+            "database.internal",
+            5432,
+        )
+
+    assert exc_info.value.key_path == key_path
+    assert key_path in str(exc_info.value)
+
+
 def test_garbage_key_file_is_typed_and_names_path(tmp_path):
     key_path = Path(tmp_path) / "garbage-key"
     key_path.write_text("this is not a private key\n", encoding="utf-8")
