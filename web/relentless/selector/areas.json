@@ -4,6 +4,7 @@
     "max_areas": 8
   },
   "smoke": ["onboarding-connect", "shell-navigation", "ai-access"],
+  "infra": ["app-lifecycle", "desktop-shell"],
   "frontend": {
     "tsconfig": "web-apps/apps/rdst/tsconfig.json",
     "sources": [
@@ -39,6 +40,9 @@
       "entries": [
         "web-apps/apps/rdst/src/routes/onboarding.tsx",
         "web-apps/apps/rdst/src/components/configure/AddDatabaseDialog.tsx"
+      ],
+      "shared_entries": [
+        "web-apps/apps/rdst/src/components/configure/AddDatabaseDialog.tsx"
       ]
     },
     "settings-targets": {
@@ -63,6 +67,9 @@
         "web-apps/apps/rdst/src/components/AiAccessBoundary.tsx",
         "web-apps/apps/rdst/src/routes/account-login.tsx",
         "web-apps/apps/rdst/src/routes/-sign-in-page.tsx"
+      ],
+      "shared_entries": [
+        "web-apps/apps/rdst/src/components/AiAccessBoundary.tsx"
       ]
     },
     "ask": {
@@ -101,7 +108,8 @@
         "web-apps/apps/rdst/src/routes/__root.tsx",
         "web-apps/apps/rdst/src/routes/help.tsx",
         "web-apps/apps/rdst/src/routes/-help-page.tsx"
-      ]
+      ],
+      "shared_entries": ["web-apps/apps/rdst/src/routes/__root.tsx"]
     },
     "app-lifecycle": {
       "minutes": 9,
@@ -112,6 +120,9 @@
       "entries": [
         "web-apps/apps/rdst-desktop/src/main/index.ts",
         "web-apps/apps/rdst-desktop/src/preload/index.ts",
+        "web-apps/apps/rdst/src/components/DesktopUpdateControl.tsx"
+      ],
+      "shared_entries": [
         "web-apps/apps/rdst/src/components/DesktopUpdateControl.tsx"
       ]
     },
@@ -132,11 +143,16 @@
     }
   },
   "uncalledRoutes": {
-    "DELETE /api/fleet/snapshots/{snapshot_id}": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
-    "GET /api/bootstrap/runs/{run_id}": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
-    "GET /api/bootstrap/runs/{run_id}/events": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
-    "GET /api/demo/workload": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
-    "GET /api/fleet/diff": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
+    "DELETE /api/interactive/{query_hash}": "not called by the UI; the page that used it was removed",
+    "GET /api/interactive/{query_hash}/history": "not called by the UI; the page that used it was removed",
+    "POST /api/interactive/{query_hash}/message": "not called by the UI; the page that used it was removed",
+    "GET /api/audit/runs/{run_id}": "not called by the UI; the page that used it was removed",
+    "GET /api/fleet/snapshots/{snapshot_id}": "not called by the UI; the page that used it was removed",
+    "DELETE /api/fleet/snapshots/{snapshot_id}": "not called by the UI",
+    "GET /api/bootstrap/runs/{run_id}": "not called by the UI",
+    "GET /api/bootstrap/runs/{run_id}/events": "not called by the UI",
+    "GET /api/demo/workload": "not called by the UI",
+    "GET /api/fleet/diff": "not called by the UI",
     "GET /api/init/monitoring-upgrade": "no page requests it since the redesign; only a query key of that name is invalidated",
     "GET /api/monitor/targets/{target}/index-changes": "a diagnostic read for the monitoring soak checker, not called by the UI",
     "GET /api/monitor/targets/{target}/judge-runs": "a diagnostic read for the monitoring soak checker, not called by the UI",
@@ -144,17 +160,17 @@
     "GET /mcp": "the local MCP endpoint a coding agent calls, not the UI",
     "POST /mcp": "the local MCP endpoint a coding agent calls, not the UI",
     "GET /api/providers/supabase-callback": "the OAuth redirect Supabase opens in the system browser, not app code",
-    "GET /api/top/realtime": "the legacy top view; /top now redirects to Queries",
-    "POST /api/analyze/quick": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
+    "GET /api/top/realtime": "the legacy top view; /top now redirects to the Database page",
+    "POST /api/analyze/quick": "not called by the UI",
     "POST /api/init/monitoring-upgrade/dismiss": "no page requests it since the redesign",
-    "POST /api/init/validate/stream": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
-    "POST /api/providers/discover": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
-    "POST /api/query-registry/benchmark": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
+    "POST /api/init/validate/stream": "not called by the UI",
+    "POST /api/providers/discover": "not called by the UI",
+    "POST /api/query-registry/benchmark": "not called by the UI",
     "POST /api/scan/json": "Scan is not linked in the app",
-    "POST /api/semantic-layer/annotate": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
-    "POST /api/semantic-layer/init/stream": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
+    "POST /api/semantic-layer/annotate": "not called by the UI",
+    "POST /api/semantic-layer/init/stream": "not called by the UI",
     "POST /api/settings/email": "no page sets the report email; the report dialog only reads it",
     "POST /api/settings/email/verify-poll": "no page verifies the report email",
-    "POST /api/tunnel/close": "not called by the UI; listed as unused in UX_MAP.md section 8.2"
+    "POST /api/tunnel/close": "not called by the UI"
   }
 }

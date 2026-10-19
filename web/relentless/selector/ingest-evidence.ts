@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
  *
  * Evidence only adds: an endpoint no run requested is not evidence that an
  * area is independent of it, since a blocked or short run may have stopped
- * before reaching it.
+ * before reaching it. Areas the contract no longer has are dropped.
  */
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -244,6 +244,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (paths.length === 0)
     throw new Error('usage: ingest-evidence.ts RUN_DIR_OR_PARENT...')
   const { evidence, added } = ingest(paths)
+  const contract = JSON.parse(
+    readFileSync(join(here, 'areas.json'), 'utf8')
+  ) as { areas: Record<string, unknown> }
+  for (const name of Object.keys(evidence.areas))
+    if (!(name in contract.areas)) delete evidence.areas[name]
   for (const area of Object.values(evidence.areas)) {
     area.runs.sort()
     area.endpoints = sorted(area.endpoints)

@@ -1,1686 +1,1596 @@
 {
-  "note": "Which pilot flows each past change needs, labeled by agents from the description, files, and diff without seeing the selector's output. Changes from before the web app need none.",
+  "note": "Which flows each past RDST change needs, labeled blind to the selector by two independent agent passes (different models) from the description, files and diff. flows: both named; disputed: only one did, graded neither way.",
   "changes": [
     {
       "commit": "c4fa944d51",
       "flows": [],
-      "confidence": "high",
-      "rationale": "License text and package metadata only."
+      "disputed": []
     },
     {
       "commit": "ab440bbbc9",
-      "flows": ["server/browser-start", "server/desktop-sidecar-start"],
-      "confidence": "medium",
-      "rationale": "Adds a query-assessment worker started and stopped in the API lifespan, so server start-up and shutdown change in both modes."
+      "flows": [],
+      "disputed": [
+        "ai-access/hosted-inference",
+        "monitoring/hosted-ai",
+        "monitoring/local-lifecycle",
+        "server/browser-start"
+      ]
     },
     {
       "commit": "1ca96b093f",
-      "flows": ["ai-access/key-update-recovery", "server/browser-start"],
-      "confidence": "high",
-      "rationale": "Restores the full-screen AI provider gate and AiAccessBoundary in __root, changing first load and gate behavior."
+      "flows": [
+        "ai-access/hosted-inference",
+        "ai-access/key-update-recovery",
+        "home/getting-started"
+      ],
+      "disputed": []
     },
     {
       "commit": "49fa9b2cd2",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Keyservice signup/quota alerts plus an analytics flag on account sign-in; no key, run, or server start-up path."
+      "flows": ["ai-access/hosted-inference"],
+      "disputed": []
     },
     {
       "commit": "01c187c91f",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Hosted GLM response-format contract; not the Anthropic key gate or any flow surface."
+      "flows": ["ai-access/hosted-inference", "monitoring/hosted-ai"],
+      "disputed": []
     },
     {
       "commit": "99b1e9ca1d",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Keyservice staging email config only."
+      "disputed": []
     },
     {
       "commit": "6a795e17f9",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Test guard and CI agent change."
+      "disputed": []
     },
     {
       "commit": "6391fb5282",
-      "flows": ["activity/server-run-reload"],
-      "confidence": "medium",
-      "rationale": "Sandbox readiness cancellation changes how stopping a load test/comparison settles; desktop change is only zoom shortcuts."
+      "flows": [],
+      "disputed": []
     },
     {
       "commit": "5e3a4c8cd9",
-      "flows": ["activity/server-run-reload"],
-      "confidence": "medium",
-      "rationale": "Health-check capture run now awaits a concurrent model verdict before saving, changing run completion and stop behavior."
+      "flows": [],
+      "disputed": []
     },
     {
       "commit": "2672867d97",
-      "flows": [],
-      "confidence": "medium",
-      "rationale": "Hosted inference routing, step timeout, and hosted-timeout error copy; no key validation, run registry, or cancel path."
+      "flows": ["ai-access/hosted-inference", "monitoring/hosted-ai"],
+      "disputed": []
     },
     {
       "commit": "0ecf9ef41b",
       "flows": [
-        "ai-access/key-update-recovery",
         "activity/server-run-reload",
-        "server/browser-start",
-        "server/desktop-sidecar-start"
+        "ai-access/key-update-recovery",
+        "ask/across-databases",
+        "home/getting-started"
       ],
-      "confidence": "high",
-      "rationale": "UX audit stack adds the Jobs popover, reworks analysis runs and the drawer, replaces the AI gate, touches Settings/__root/app.py, and installs a custom desktop View menu."
+      "disputed": ["ai-access/hosted-inference"]
     },
     {
       "commit": "c387d070d1",
-      "flows": [],
-      "confidence": "medium",
-      "rationale": "Prompt/schema caching in AI requests; no key, run, stream-cancel, or start-up change."
+      "flows": [
+        "ai-access/hosted-inference",
+        "ask/answer-correctness",
+        "monitoring/hosted-ai"
+      ],
+      "disputed": []
     },
     {
       "commit": "a28aaf577d",
-      "flows": ["ai-access/key-update-recovery"],
-      "confidence": "high",
-      "rationale": "Persists the active AI provider and changes key resolution, env routes, and Settings switching."
+      "flows": ["ai-access/hosted-inference", "ai-access/key-update-recovery"],
+      "disputed": []
     },
     {
       "commit": "2c03d6d4c4",
-      "flows": ["activity/server-run-reload"],
-      "confidence": "medium",
-      "rationale": "Target-setup bootstrap run drops its default annotate/key-gate phase, changing the setup job; rest is hosted inference and Ask."
+      "flows": ["ai-access/hosted-inference"],
+      "disputed": ["ask/answer-correctness"]
     },
     {
       "commit": "0df865a859",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Ask profile and keyservice quota."
+      "flows": ["ask/answer-correctness"],
+      "disputed": ["ai-access/hosted-inference", "ask/read-only"]
     },
     {
       "commit": "8eb45c8c98",
       "flows": [
+        "ai-access/hosted-inference",
         "ai-access/key-update-recovery",
-        "server/browser-start",
-        "server/desktop-sidecar-start"
+        "ask/answer-correctness"
       ],
-      "confidence": "high",
-      "rationale": "Introduces the AI provider gate in __root, key resolution/env/Settings changes, account router in the app, and desktop main-process startup/deep-link changes."
+      "disputed": ["home/getting-started", "monitoring/hosted-ai"]
     },
     {
       "commit": "8ca26c84ca",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI command AI-access gating only."
+      "disputed": []
     },
     {
       "commit": "7741a336b5",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Ask accuracy and benchmark changes."
+      "disputed": ["ask/across-databases"]
     },
     {
       "commit": "4a3229b54b",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Checks in a placeholder version file for source builds; no runtime start-up change."
+      "disputed": []
     },
     {
       "commit": "3d6824ed3b",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Keeps an empty web_dist dir for source builds; server still keys off index.html."
+      "disputed": []
     },
     {
       "commit": "374c36dfdd",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Test guard only."
+      "disputed": []
     },
     {
       "commit": "25d3b40214",
-      "flows": [
-        "ai-access/key-update-recovery",
-        "server/browser-start",
-        "server/desktop-sidecar-start"
-      ],
-      "confidence": "medium",
-      "rationale": "Lifespan now retires legacy trial credentials from keyring/config at start-up and adds request middleware, touching start-up and key persistence."
+      "flows": ["ai-access/hosted-inference"],
+      "disputed": ["monitoring/hosted-ai"]
     },
     {
       "commit": "ffe1060758",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Font/icon asset plumbing and plan doc."
+      "disputed": []
     },
     {
       "commit": "e3771573d8",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Ask correction pipeline."
+      "flows": ["ask/answer-correctness"],
+      "disputed": []
     },
     {
       "commit": "e0d8bcd331",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Ask SQL corrections."
+      "disputed": []
     },
     {
       "commit": "de0063d0f7",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Keyservice email transport."
+      "disputed": ["ai-access/hosted-inference"]
     },
     {
       "commit": "d689dee998",
-      "flows": ["server/desktop-sidecar-start"],
-      "confidence": "medium",
-      "rationale": "Rewires desktop sidecar build, lock, and dev launch scripts for the mirror layout, which affects sidecar packaging."
+      "flows": [],
+      "disputed": []
     },
     {
       "commit": "d23389bebb",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Benchmark qualification tooling."
+      "disputed": []
     },
     {
       "commit": "bbd67bf6de",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Keyservice trial follow-up email and a copy tweak."
+      "disputed": []
     },
     {
       "commit": "5ec07467ce",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Ask alternate selection."
+      "disputed": []
     },
     {
       "commit": "16f1637e40",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Public mirror asset overlay tooling."
+      "disputed": []
     },
     {
       "commit": "16aadf7484",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Ask SQL repairs."
+      "disputed": ["ask/answer-correctness"]
     },
     {
       "commit": "0e409d25e9",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Ask value grounding."
+      "flows": ["ask/answer-correctness", "ask/read-only"],
+      "disputed": []
     },
     {
       "commit": "d2d8ee5f56",
-      "flows": [
-        "ai-access/key-update-recovery",
-        "server/desktop-sidecar-start"
-      ],
-      "confidence": "medium",
-      "rationale": "Replaces the Claude transport used for key validation and error normalization, and pins anthropic==0.122.0 while the sidecar lock stays on 0.116.0."
+      "flows": ["ai-access/key-update-recovery"],
+      "disputed": ["ask/answer-correctness"]
     },
     {
       "commit": "bcc97dc0a5",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CI and docs for BIRD qualification."
+      "disputed": []
     },
     {
       "commit": "a86898ab45",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Benchmark harness."
+      "disputed": []
     },
     {
       "commit": "a03995ff4e",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Sidebar Discord link."
+      "disputed": []
     },
     {
       "commit": "99bbac77a6",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Ask clarification flow."
+      "flows": ["ask/answer-correctness"],
+      "disputed": []
     },
     {
       "commit": "5c200fb66e",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Schema annotation determinism."
+      "disputed": ["ask/across-databases"]
     },
     {
       "commit": "5826fcd5e7",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Benchmark provider and CI."
+      "disputed": ["ask/answer-correctness"]
     },
     {
       "commit": "4ca34c466a",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Benchmark diagnostics and Ask internals."
+      "flows": ["ask/answer-correctness"],
+      "disputed": []
     },
     {
       "commit": "390689837e",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Benchmark tooling."
+      "disputed": []
     },
     {
       "commit": "37ae4055c6",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Ask schema prompts."
+      "flows": ["ask/answer-correctness"],
+      "disputed": ["ask/read-only"]
     },
     {
       "commit": "31111b4c1f",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Ask SQL generation."
+      "flows": ["ask/answer-correctness", "ask/read-only"],
+      "disputed": []
     },
     {
       "commit": "1daad11a1a",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CI schedule for BIRD."
+      "disputed": []
     },
     {
       "commit": "ae16732898",
-      "flows": ["activity/server-run-reload", "server/browser-start"],
-      "confidence": "medium",
-      "rationale": "Rebuilds analysis runs, the analyze drawer, stored-analysis viewing, and background runs, and mounts a global SetupGuide in __root."
+      "flows": ["activity/server-run-reload", "home/getting-started"],
+      "disputed": []
     },
     {
       "commit": "850296298a",
-      "flows": ["activity/server-run-reload"],
-      "confidence": "medium",
-      "rationale": "Changes backgroundRuns reattach/seenLive and load-test progress handling plus analyze drawer tabs and state."
+      "flows": [],
+      "disputed": ["activity/server-run-reload"]
     },
     {
       "commit": "767496dc8c",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Persists analysis bodies with history and stored-payload endpoints for redisplay, which is what the stored-analysis check covers."
+      "disputed": ["activity/server-run-reload", "monitoring/hosted-ai"]
     },
     {
       "commit": "3ceafcaa45",
-      "flows": [],
-      "confidence": "medium",
-      "rationale": "Query normalizer and self-traffic tagging; no stream, run, key, or startup behavior."
+      "flows": ["monitoring/local-lifecycle"],
+      "disputed": []
     },
     {
       "commit": "2c5cfdce8e",
       "flows": [],
-      "confidence": "low",
-      "rationale": "Adds Readyset lane to load test measurement content; run registry and Jobs mechanics untouched."
+      "disputed": []
     },
     {
       "commit": "21a804a8d8",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Compare/load test parameter pipeline and migration safety; no run lifecycle, key, or startup change."
+      "disputed": [
+        "activity/server-run-reload",
+        "monitoring/hosted-ai",
+        "monitoring/local-lifecycle"
+      ]
     },
     {
       "commit": "20a43e0c10",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Docker sandbox networking fallback only."
+      "disputed": []
     },
     {
       "commit": "ba74b8d6e8",
-      "flows": ["activity/server-run-reload"],
-      "confidence": "medium",
-      "rationale": "Health-check capture runs change timing/window enforcement, run_registry error path, and RunProgress."
+      "flows": [],
+      "disputed": []
     },
     {
       "commit": "45e9bd0fbc",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Sandbox Docker lifecycle recovery and test infra; not run registry or Jobs behavior."
+      "disputed": []
     },
     {
       "commit": "77cb7d4368",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Docker topology for Linux localhost comparisons only."
+      "disputed": ["platform/demo-lifecycle"]
     },
     {
       "commit": "60c21ddba6",
-      "flows": [],
-      "confidence": "medium",
-      "rationale": "Connection write-privilege guidance in Settings DB section, not the AI key section."
+      "flows": ["home/getting-started"],
+      "disputed": []
     },
     {
       "commit": "1d0029854e",
-      "flows": [],
-      "confidence": "medium",
-      "rationale": "Adds a hypopg index-testing step and payload field to the analysis stream and results."
+      "flows": ["monitoring/hosted-ai"],
+      "disputed": ["activity/server-run-reload"]
     },
     {
       "commit": "8cde81b0be",
       "flows": [
-        "ai-access/key-update-recovery",
         "activity/server-run-reload",
-        "server/browser-start",
-        "server/desktop-sidecar-start"
+        "ask/across-databases",
+        "home/getting-started",
+        "platform/demo-lifecycle"
       ],
-      "confidence": "medium",
-      "rationale": "Sweeping rework touching SettingsPage, backgroundRuns/BackgroundRuns, analyze controller/results, __root, and Electron main window."
+      "disputed": []
     },
     {
       "commit": "1a79bb7b1d",
-      "flows": ["server/browser-start", "server/desktop-sidecar-start"],
-      "confidence": "medium",
-      "rationale": "Adds lifespan scheduler hooks and SQLite stores to app start and changes sidecar build Python/sqlite probing."
+      "flows": ["monitoring/local-lifecycle"],
+      "disputed": []
     },
     {
       "commit": "e7c62bcb8f",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Josh filter CI config only."
+      "disputed": []
     },
     {
       "commit": "bb85fa7371",
       "flows": [
+        "ask/read-only",
         "server/browser-start",
-        "server/desktop-sidecar-start",
-        "activity/server-run-reload"
+        "server/desktop-sidecar-start"
       ],
-      "confidence": "medium",
-      "rationale": "Tightens CORS in the app factory and adds local-request guards on status, analyze, and run cancel; sidecar lock changes."
+      "disputed": []
     },
     {
       "commit": "1b0acd7280",
       "flows": [],
-      "confidence": "high",
-      "rationale": "E2E test bed and keyservice preview tooling."
+      "disputed": []
     },
     {
       "commit": "bd92c82187",
-      "flows": ["server/browser-start", "server/desktop-sidecar-start"],
-      "confidence": "low",
-      "rationale": "Boots posthog-js in the renderer entry point for web and desktop, which could affect first load."
+      "flows": [],
+      "disputed": ["server/browser-start", "server/desktop-sidecar-start"]
     },
     {
       "commit": "19759dbe94",
-      "flows": ["ai-access/key-update-recovery", "server/browser-start"],
-      "confidence": "medium",
-      "rationale": "Rewrites the local-request guard for all API calls and surfaces Anthropic provider error details via env/llm_manager."
+      "flows": ["server/browser-start"],
+      "disputed": [
+        "ai-access/key-update-recovery",
+        "server/desktop-sidecar-start"
+      ]
     },
     {
       "commit": "cec15ac24c",
-      "flows": ["server/desktop-sidecar-start"],
-      "confidence": "medium",
-      "rationale": "Changes sidecar build base and packaging via build-sidecar.mjs and lock."
+      "flows": [],
+      "disputed": ["server/desktop-sidecar-start"]
     },
     {
       "commit": "cb356b315c",
-      "flows": ["server/desktop-sidecar-start"],
-      "confidence": "high",
-      "rationale": "Modifies desktop main process, backend.ts sidecar spawning, and packaging."
+      "flows": [],
+      "disputed": []
     },
     {
       "commit": "65b2a4c85e",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Per-target password import for fleet/providers; not key, runs, or startup."
+      "disputed": ["home/getting-started"]
     },
     {
       "commit": "00e84c7cd4",
-      "flows": ["server/desktop-sidecar-start"],
-      "confidence": "medium",
-      "rationale": "Bundles paramiko into the sidecar and changes Electron main process OAuth handling."
+      "flows": [],
+      "disputed": ["server/desktop-sidecar-start"]
     },
     {
       "commit": "a72a171903",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Feedback email requirement and CI node provisioning."
+      "disputed": []
     },
     {
       "commit": "9c7e2d58b2",
-      "flows": [
-        "ai-access/key-update-recovery",
-        "server/browser-start",
-        "server/desktop-sidecar-start"
-      ],
-      "confidence": "low",
-      "rationale": "Portability changes to secret store set_secret, persistent config writes, CLI entry stdio, and desktop dev/lock."
+      "flows": ["platform/demo-lifecycle"],
+      "disputed": ["server/browser-start"]
     },
     {
       "commit": "9aeaf52f7a",
-      "flows": [
-        "ai-access/key-update-recovery",
-        "server/desktop-sidecar-start",
-        "activity/server-run-reload"
-      ],
-      "confidence": "medium",
-      "rationale": "Changes EnvSecretsDialog persistence/keychain UI, sidecar spawn env and main deep links, and backgroundRuns kickoff failures."
+      "flows": ["ai-access/key-update-recovery"],
+      "disputed": [
+        "ask/read-only",
+        "home/getting-started",
+        "server/desktop-sidecar-start"
+      ]
     },
     {
       "commit": "fe3c3cdd12",
       "flows": ["activity/server-run-reload"],
-      "confidence": "medium",
-      "rationale": "Extends run_registry (partial status, start_factory, cancel_target) and makes web Analyze static by default."
+      "disputed": ["monitoring/hosted-ai"]
     },
     {
       "commit": "efb16f794a",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Adds sandbox manager backend only."
+      "disputed": []
     },
     {
       "commit": "8a0e90e268",
-      "flows": [
-        "activity/server-run-reload",
-        "server/browser-start",
-        "server/desktop-sidecar-start"
-      ],
-      "confidence": "medium",
-      "rationale": "Adds sandbox start/stop to app lifespan, reworks backgroundRuns/BackgroundRuns run replay and cancellation, and the analysis SSE client."
+      "flows": ["activity/server-run-reload"],
+      "disputed": ["monitoring/hosted-ai"]
     },
     {
       "commit": "2711aa1d2a",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI installer and update command only."
+      "disputed": []
     },
     {
       "commit": "54fd64d013",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Telemetry classification only."
+      "disputed": []
     },
     {
       "commit": "c4e9a996e3",
-      "flows": ["server/browser-start"],
-      "confidence": "medium",
-      "rationale": "Changes static bundle cache headers in the app factory alongside provider discovery."
+      "flows": [],
+      "disputed": ["server/browser-start"]
     },
     {
       "commit": "facec3f88e",
-      "flows": ["ai-access/key-update-recovery", "activity/server-run-reload"],
-      "confidence": "high",
-      "rationale": "Changes Anthropic validity results and env guards plus moves audits and captures onto detached background runs."
+      "flows": ["activity/server-run-reload", "ai-access/key-update-recovery"],
+      "disputed": []
     },
     {
       "commit": "8596556f10",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Settings target list and Add Targets drawer UI; not the AI section or runs."
+      "disputed": ["home/getting-started"]
     },
     {
       "commit": "482fd8c368",
-      "flows": ["activity/server-run-reload"],
-      "confidence": "medium",
-      "rationale": "Adds run_registry.reset and clearAllBackgroundRuns on local data reset."
+      "flows": ["home/getting-started"],
+      "disputed": ["platform/demo-lifecycle"]
     },
     {
       "commit": "f85bdae9d6",
-      "flows": ["ai-access/key-update-recovery"],
-      "confidence": "high",
-      "rationale": "Removes EmailGate, changes EnvSecretsDialog and ConfigWarning around AI credit/key access."
+      "flows": ["ai-access/key-update-recovery", "home/getting-started"],
+      "disputed": ["ai-access/hosted-inference"]
     },
     {
       "commit": "b4ce9af0cf",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Schema profile completion surfacing only."
+      "disputed": []
     },
     {
       "commit": "8b94716980",
-      "flows": ["activity/server-run-reload", "ai-access/key-update-recovery"],
-      "confidence": "high",
-      "rationale": "Introduces runs API and Jobs popover and wakes key-parked jobs when a key is stored via env/EnvSecretsDialog."
+      "flows": ["activity/server-run-reload"],
+      "disputed": []
     },
     {
       "commit": "57133bce17",
-      "flows": ["activity/server-run-reload"],
-      "confidence": "low",
-      "rationale": "Adds bootstrap orchestrator backend that runs target setup as a registry run."
+      "flows": [],
+      "disputed": []
     },
     {
       "commit": "536bb82794",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Annotation batching inside schema service; no run lifecycle change."
+      "disputed": []
     },
     {
       "commit": "365a4b094b",
-      "flows": ["activity/server-run-reload"],
-      "confidence": "high",
-      "rationale": "Adds client-side bootstrap run state with SSE replay and reload reattach in the sidebar."
+      "flows": ["activity/server-run-reload", "home/getting-started"],
+      "disputed": ["platform/demo-lifecycle"]
     },
     {
       "commit": "16f8a23da9",
-      "flows": ["activity/server-run-reload"],
-      "confidence": "high",
-      "rationale": "Introduces the background run registry with replay and cancellation."
+      "flows": [],
+      "disputed": ["activity/server-run-reload"]
     },
     {
       "commit": "b6f54630dc",
-      "flows": [],
-      "confidence": "medium",
-      "rationale": "Keyservice signup, demo tour, and trial dialog fixes; not the Anthropic key gate."
+      "flows": ["platform/demo-lifecycle"],
+      "disputed": []
     },
     {
       "commit": "ac686e0289",
-      "flows": ["server/desktop-sidecar-start"],
-      "confidence": "medium",
-      "rationale": "Changes sidecar PyInstaller data collection."
+      "flows": [],
+      "disputed": [
+        "activity/server-run-reload",
+        "platform/demo-lifecycle",
+        "server/desktop-sidecar-start"
+      ]
     },
     {
       "commit": "a85ddef6a0",
-      "flows": ["ai-access/key-update-recovery"],
-      "confidence": "medium",
-      "rationale": "Restructures the settings page hosting the Anthropic key section and validity display."
+      "flows": ["ask/across-databases", "platform/demo-lifecycle"],
+      "disputed": ["ai-access/key-update-recovery"]
     },
     {
       "commit": "394695b3fd",
-      "flows": [],
-      "confidence": "medium",
-      "rationale": "Queries workbench and cache page UI rework; no stream, run, key, or startup change."
+      "flows": ["ask/across-databases"],
+      "disputed": []
     },
     {
       "commit": "f09ddfafa9",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Docs only."
+      "disputed": []
     },
     {
       "commit": "e478dae5cd",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Shared confirm dialog, responsive layout, and self-hosted fonts are UI chrome with no key, run, analysis stream, or server start-up change."
+      "disputed": ["platform/demo-lifecycle"]
     },
     {
       "commit": "e423e6407f",
-      "flows": ["server/browser-start"],
-      "confidence": "medium",
-      "rationale": "Sets an env var in the rdst web command so reload workers skip the TTY probe that could hang start-up; the rest is Ask/Schema/Home UX."
+      "flows": ["ask/across-databases", "home/getting-started"],
+      "disputed": ["platform/demo-lifecycle"]
     },
     {
       "commit": "a3a51a565e",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Design-token sheet and lint check only."
+      "disputed": []
     },
     {
       "commit": "8cc2855abd",
-      "flows": [],
-      "confidence": "low",
-      "rationale": "Mostly Ask; also adds an in-place Re-analyze on results and carries query and params into Analyze, which touches how analyses restart."
+      "flows": ["ask/across-databases", "ask/answer-correctness"],
+      "disputed": []
     },
     {
       "commit": "796b38e9b9",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Timing units, schema re-init confirm, and benchmark safety; benchmarks were page streams then, not server-owned runs."
+      "disputed": []
     },
     {
       "commit": "7906c81d87",
-      "flows": ["ai-access/key-update-recovery"],
-      "confidence": "high",
-      "rationale": "Adds the Anthropic key validity probe, key resolution precedence, and EnvSecretsDialog changes: the core of key update and recovery."
+      "flows": ["ai-access/key-update-recovery", "home/getting-started"],
+      "disputed": []
     },
     {
       "commit": "7129765150",
-      "flows": [],
-      "confidence": "medium",
-      "rationale": "Small UX fixes plus bundle chunking config; no server, key, or analysis-stream lifecycle change."
+      "flows": ["platform/demo-lifecycle"],
+      "disputed": []
     },
     {
       "commit": "59fc29c580",
-      "flows": ["server/browser-start"],
-      "confidence": "high",
-      "rationale": "Adds an SSE error envelope to the analyze stream and results route, and registers global error handlers in the app factory plus root error pages."
+      "flows": ["ask/read-only"],
+      "disputed": ["server/browser-start"]
     },
     {
       "commit": "4c4d9dc04c",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Desktop update progress UI and updater events; does not touch sidecar spawning or static serving."
+      "disputed": []
     },
     {
       "commit": "3a1edf3d57",
-      "flows": [],
-      "confidence": "medium",
-      "rationale": "Visual design-system migration; results page moved to a lazy module with the same streaming logic."
+      "flows": ["home/getting-started"],
+      "disputed": ["platform/demo-lifecycle"]
     },
     {
       "commit": "05b70889a6",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "QueryPilot demo copy and chart changes only."
+      "flows": ["platform/demo-lifecycle"],
+      "disputed": []
     },
     {
       "commit": "f2e558b030",
-      "flows": ["server/desktop-sidecar-start"],
-      "confidence": "high",
-      "rationale": "Changes the sidecar environment PATH in the desktop main-process backend spawner."
+      "flows": ["platform/demo-lifecycle", "server/desktop-sidecar-start"],
+      "disputed": []
     },
     {
       "commit": "eac6c4545d",
-      "flows": ["server/desktop-sidecar-start"],
-      "confidence": "medium",
-      "rationale": "Enables hardened runtime and new macOS entitlements, which can change whether the packaged sidecar launches."
+      "flows": [],
+      "disputed": []
     },
     {
       "commit": "f97a5403e3",
       "flows": ["server/desktop-sidecar-start"],
-      "confidence": "medium",
-      "rationale": "Adds auto-update setup to the Electron main-process start-up path before the renderer loads."
+      "disputed": []
     },
     {
       "commit": "f2a545e8a7",
-      "flows": ["server/desktop-sidecar-start"],
-      "confidence": "high",
-      "rationale": "Changes the Electron main boot sequence and exit paths (smoke mode, watchdog, sidecar stop)."
+      "flows": [],
+      "disputed": []
     },
     {
       "commit": "cb5702314d",
-      "flows": ["server/desktop-sidecar-start"],
-      "confidence": "high",
-      "rationale": "Changes how sidecar shared-library symlinks are staged into the package, directly affecting sidecar launch."
+      "flows": [],
+      "disputed": []
     },
     {
       "commit": "c9af5e3699",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Demo load-driver pacing only."
+      "flows": ["platform/demo-lifecycle"],
+      "disputed": []
     },
     {
       "commit": "9c2d9eb8b8",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CI Slack notification only."
+      "disputed": []
     },
     {
       "commit": "9779f812f0",
-      "flows": ["server/browser-start", "ai-access/key-update-recovery"],
-      "confidence": "medium",
-      "rationale": "Removes the docker pre-pull from app start-up and makes rdst web open the browser; also moves the key-warning banner off Home."
+      "flows": ["platform/demo-lifecycle", "server/browser-start"],
+      "disputed": []
     },
     {
       "commit": "7fd7a709a3",
       "flows": [],
-      "confidence": "low",
-      "rationale": "Mainly Playwright test tiers, but changes analyze SSE event serialization used by the live stream."
+      "disputed": []
     },
     {
       "commit": "728fc08be4",
-      "flows": ["server/browser-start", "ai-access/key-update-recovery"],
-      "confidence": "medium",
-      "rationale": "Removes the global email gate from first load and changes the rdst web WSL opener; Claude provider now reports a rejected Anthropic key distinctly."
+      "flows": [],
+      "disputed": [
+        "ai-access/hosted-inference",
+        "ai-access/key-update-recovery",
+        "home/getting-started",
+        "platform/demo-lifecycle"
+      ]
     },
     {
       "commit": "3d0befa07f",
       "flows": [],
-      "confidence": "low",
-      "rationale": "macOS package CI build and artifact naming; no runtime change to the shell or sidecar."
+      "disputed": []
     },
     {
       "commit": "34ab03a01d",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Readyset deploy image reference only."
+      "disputed": []
     },
     {
       "commit": "2b0475f762",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CI pipeline status reporting only."
+      "disputed": []
     },
     {
       "commit": "1c8ecbaebf",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CI update-channel publishing only."
+      "disputed": []
     },
     {
       "commit": "14aaa5dedb",
-      "flows": ["server/desktop-sidecar-start"],
-      "confidence": "medium",
-      "rationale": "Adds Linux deb/rpm packaging targets for the desktop app, a packaging change to how the shell and sidecar ship."
+      "flows": [],
+      "disputed": []
     },
     {
       "commit": "00838de662",
-      "flows": ["server/browser-start"],
-      "confidence": "medium",
-      "rationale": "Adds a signup gate on first rdst web load and a new browser-open helper in the rdst web command."
+      "flows": ["platform/demo-lifecycle"],
+      "disputed": []
     },
     {
       "commit": "93225f7e2e",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "New demo page UI only."
+      "flows": ["platform/demo-lifecycle"],
+      "disputed": []
     },
     {
       "commit": "60e926e625",
-      "flows": ["server/browser-start"],
-      "confidence": "medium",
-      "rationale": "Adds a blocking email gate to the root route on first load and a new settings router to the app factory."
+      "flows": [],
+      "disputed": []
     },
     {
       "commit": "1a40f24df1",
-      "flows": [],
-      "confidence": "medium",
-      "rationale": "New demo backend; the app factory only gains a router include."
+      "flows": ["platform/demo-lifecycle"],
+      "disputed": []
     },
     {
       "commit": "0521639e8b",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Demo stability tuning only."
+      "flows": ["platform/demo-lifecycle"],
+      "disputed": []
     },
     {
       "commit": "8f1c237ffd",
       "flows": ["server/desktop-sidecar-start"],
-      "confidence": "high",
-      "rationale": "Hardens the Electron main lifecycle, backend spawning, static server, and pinned sidecar build."
+      "disputed": []
     },
     {
       "commit": "678f6f2f6b",
       "flows": ["server/desktop-sidecar-start"],
-      "confidence": "high",
-      "rationale": "Introduces the Electron shell, sidecar spawner, and static server."
+      "disputed": []
     },
     {
       "commit": "004ecb84e9",
       "flows": ["server/desktop-sidecar-start"],
-      "confidence": "medium",
-      "rationale": "Changes Electron main window creation and chrome, plus packaging and sidecar build scripts."
+      "disputed": ["monitoring/local-lifecycle"]
     },
     {
       "commit": "f3002ad25b",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "New web pages for audit, fleet, agents, and guards; no run registry or Jobs popover existed yet."
+      "disputed": []
     },
     {
       "commit": "91f008720c",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Test fixture isolation only."
+      "disputed": []
     },
     {
       "commit": "88f1df9050",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "New API routes; the app factory only registers routers and SSE schemas."
+      "disputed": []
     },
     {
       "commit": "59b7bef158",
-      "flows": ["ai-access/key-update-recovery"],
-      "confidence": "medium",
-      "rationale": "New Home adds a missing-key banner that opens the key dialog, a new place to recover the key."
+      "flows": ["home/getting-started"],
+      "disputed": []
     },
     {
       "commit": "36dbecfceb",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI child-process invocation only."
+      "disputed": []
     },
     {
       "commit": "5faea1d289",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CI diff-area mapping and integration tests only."
+      "disputed": []
     },
     {
       "commit": "930b823935",
       "flows": [],
-      "confidence": "high",
-      "rationale": "rdst top CLI launch and registry fixes."
+      "disputed": []
     },
     {
       "commit": "d2c5625104",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CI container cleanup and a unit test."
+      "disputed": []
     },
     {
       "commit": "f57592b6fc",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "The analyze service now deploys or starts an ephemeral Readyset container per run, which changes what stopping an analysis leaves behind."
+      "disputed": []
     },
     {
       "commit": "6d0d1b30ee",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI cache deploy and lifecycle commands."
+      "disputed": []
     },
     {
       "commit": "ddf94b3fcc",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Integration tests only."
+      "disputed": []
     },
     {
       "commit": "d39e98eb56",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Integration test suite, with minor cacheability helper changes."
+      "disputed": ["activity/server-run-reload"]
     },
     {
       "commit": "af23d30fee",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Test or docs only change."
+      "disputed": []
     },
     {
       "commit": "9ecef11160",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Wraps the web analyze SSE generator in a new telemetry context manager, which can change how a stopped or disconnected analysis stream terminates."
+      "disputed": ["ask/read-only"]
     },
     {
       "commit": "92edf28904",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "35622907ec",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Mechanical refactor of ~/.rdst path constants into getter functions with no intended behavioral delta."
+      "disputed": []
     },
     {
       "commit": "c489b2aac5",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CI pipeline change only."
+      "disputed": []
     },
     {
       "commit": "d55ed65096",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "b4118b8614",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Test or docs only change."
+      "disputed": []
     },
     {
       "commit": "a2c02010ac",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CI pipeline change only."
+      "disputed": []
     },
     {
       "commit": "eb21291ea5",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "c569d8cdc9",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CI pipeline change only."
+      "disputed": []
     },
     {
       "commit": "b1e72de3c5",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Email/report verification and keyservice URL cleanup; key_resolution change only reroutes the trial proxy URL, not own-key validation or the gate."
+      "disputed": ["ai-access/hosted-inference"]
     },
     {
       "commit": "38cc413580",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "flows": ["ask/answer-correctness"],
+      "disputed": ["ask/across-databases", "ask/read-only"]
     },
     {
       "commit": "e444199302",
-      "flows": ["ai-access/key-update-recovery", "server/browser-start"],
-      "confidence": "medium",
-      "rationale": "Adds typed response models (Literal env requirement sources) and a new useEnvRequirements hook feeding the AI gate, plus a custom OpenAPI hook in the app factory and a typed fetch client used for every REST call."
+      "flows": [],
+      "disputed": ["ai-access/key-update-recovery"]
     },
     {
       "commit": "9c0fa3db7a",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "9b9ee9e6e5",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "CLI-oriented bugfixes; the analyze service only adds an explain error event, not stream cancellation or stored analysis behavior."
+      "disputed": ["ask/across-databases", "ask/answer-correctness"]
     },
     {
       "commit": "8dd6ff1036",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": ["ask/answer-correctness"]
     },
     {
       "commit": "1d5b99256d",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "c678b66cb3",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "d3bf055f13",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "b65b342b98",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": ["monitoring/local-lifecycle"]
     },
     {
       "commit": "a9b0f7be1f",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "9a48b6ae8e",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "e8ec67d8bf",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Adds a cache management page and router; the anthropic_env edit is whitespace only and app factory only registers a new router."
+      "disputed": []
     },
     {
       "commit": "b003da2181",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "9cc07824af",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": ["ask/across-databases"]
     },
     {
       "commit": "7e0a0692ae",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "flows": ["actions/plan-follow-through"],
+      "disputed": ["monitoring/hosted-ai"]
     },
     {
       "commit": "52eb0cb26c",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": ["monitoring/hosted-ai"]
     },
     {
       "commit": "4ec6a37514",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "2dcd0c037c",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": ["ask/answer-correctness"]
     },
     {
       "commit": "10714914c0",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "02ab2c4796",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "a13acdc246",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "f9fb58c2a0",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "e4378c01bc",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "c8bb4eda4e",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+      "disputed": []
     },
     {
       "commit": "7e50474685",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+      "disputed": []
     },
     {
       "commit": "26aeb8dc8a",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+      "flows": ["activity/server-run-reload"],
+      "disputed": []
     },
     {
       "commit": "254692ecae",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+      "disputed": []
     },
     {
       "commit": "851ebe48bc",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+      "disputed": []
     },
     {
       "commit": "6b4025ef7e",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+      "disputed": []
     },
     {
       "commit": "677ac31e11",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Adds a data storage path to the status payload and a configure edit pre-fill; no start-up or lifecycle change."
+      "disputed": []
     },
     {
       "commit": "5906522b2d",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+      "flows": ["ask/answer-correctness"],
+      "disputed": []
     },
     {
       "commit": "289f326770",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+      "disputed": []
     },
     {
       "commit": "1b7b6d0833",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "EXPLAIN metric parsing and analysis result display, unrelated to stream stop/reload."
+      "flows": ["monitoring/hosted-ai"],
+      "disputed": []
     },
     {
       "commit": "09871a3d6b",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+      "disputed": []
     },
     {
       "commit": "1ded920c7c",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CI pipeline change only."
+      "disputed": []
     },
     {
       "commit": "8100d3e5ca",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Integration test and CI infrastructure only."
+      "disputed": []
     },
     {
       "commit": "4af9fb452d",
       "flows": ["server/browser-start"],
-      "confidence": "high",
-      "rationale": "Adds a lifespan hook to the API app that pre-pulls a Docker image on web server start."
+      "disputed": ["server/desktop-sidecar-start"]
     },
     {
       "commit": "3bd37d1987",
-      "flows": ["ai-access/key-update-recovery"],
-      "confidence": "medium",
-      "rationale": "Reworks anthropic_env and env requirements for trial lifecycle and touches EnvSecretsDialog; scan page and router additions are outside the flows."
+      "flows": [],
+      "disputed": ["ai-access/key-update-recovery"]
     },
     {
       "commit": "fa74db5bc9",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Analyze prompt and workflow output content only."
+      "flows": ["actions/plan-follow-through"],
+      "disputed": ["monitoring/hosted-ai"]
     },
     {
       "commit": "f18b3f9975",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI interactive menu and formatter fixes."
+      "disputed": []
     },
     {
       "commit": "eddd95c707",
       "flows": [],
-      "confidence": "high",
-      "rationale": "LLM prompt text only."
+      "disputed": ["monitoring/hosted-ai"]
     },
     {
       "commit": "ec08e5947b",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI analyze --json output only."
+      "disputed": []
     },
     {
       "commit": "c381761e75",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "LLM prompt text only."
+      "flows": ["monitoring/hosted-ai"],
+      "disputed": []
     },
     {
       "commit": "b57d13d7be",
-      "flows": ["ai-access/key-update-recovery", "server/browser-start"],
-      "confidence": "medium",
-      "rationale": "Changes key setup from exhausted-trial flows, EnvSecretsDialog and env requirements; also enables the React compiler for the whole bundle."
+      "flows": ["ai-access/key-update-recovery"],
+      "disputed": []
     },
     {
       "commit": "a02f9b6ea5",
       "flows": [],
-      "confidence": "high",
-      "rationale": "LLM prompt text only."
+      "disputed": ["actions/plan-follow-through", "monitoring/hosted-ai"]
     },
     {
       "commit": "8f1839ef50",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Ask dry-run execution fix; not analysis streaming or key handling."
+      "disputed": []
     },
     {
       "commit": "56c11ef9d9",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI help text only."
+      "disputed": []
     },
     {
       "commit": "4e9fb5bd05",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI display fixes for ask and analyze output."
+      "disputed": []
     },
     {
       "commit": "4b9fed3c7a",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI output formatter wording."
+      "disputed": []
     },
     {
       "commit": "3301d1bef4",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Ask logging levels and index column ordering in analysis output."
+      "flows": ["actions/plan-follow-through"],
+      "disputed": ["monitoring/hosted-ai"]
     },
     {
       "commit": "1ab1c48f2e",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI output formatter rendering of rewrites."
+      "disputed": []
     },
     {
       "commit": "d069b741ec",
-      "flows": ["ai-access/key-update-recovery"],
-      "confidence": "high",
-      "rationale": "Adds trial and trial_exhausted key sources to env requirements and changes EnvSecretsDialog and gate warnings."
+      "flows": ["ai-access/hosted-inference", "ai-access/key-update-recovery"],
+      "disputed": []
     },
     {
       "commit": "8eefab0f38",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Docker/cache error messages in analyze results; not stream control or persistence."
+      "disputed": []
     },
     {
       "commit": "859b8dc3db",
       "flows": [],
-      "confidence": "medium",
-      "rationale": "Pre-fills parameter dialog values; does not change analysis stream, stop, or stored-result display."
+      "disputed": []
     },
     {
       "commit": "f4bc9baf86",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Cache timing measurement fix."
+      "disputed": []
     },
     {
       "commit": "4ea97b99ed",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI shallow cache command."
+      "disputed": []
     },
     {
       "commit": "fc50a4a0fa",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Schema enrichment for ask; CLI and schema internals."
+      "flows": ["ask/answer-correctness"],
+      "disputed": []
     },
     {
       "commit": "faac657cd8",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Ask pipeline null-schema guard."
+      "disputed": ["ask/read-only"]
     },
     {
       "commit": "f0e56a2db7",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI analyze target fallback."
+      "disputed": []
     },
     {
       "commit": "df631c3d2b",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Ask SQL generation gate, provider JSON format, CLI top crash."
+      "flows": ["ask/answer-correctness", "ask/read-only"],
+      "disputed": []
     },
     {
       "commit": "be7cbd6a7e",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "Schema filter JSON parsing and CLI flag rename."
+      "flows": ["ask/answer-correctness"],
+      "disputed": []
     },
     {
       "commit": "a0fa1086f1",
       "flows": [],
-      "confidence": "high",
-      "rationale": "E2E test infrastructure only."
+      "disputed": []
     },
     {
       "commit": "495a806444",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Dev tmux harness script only."
+      "disputed": []
     },
     {
       "commit": "3be979cc7e",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI LLM-guided schema annotation."
+      "disputed": []
     },
     {
       "commit": "16a4e9c783",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Test and skill file cleanup."
+      "disputed": []
     },
     {
       "commit": "bb3616ecde",
       "flows": ["ai-access/key-update-recovery"],
-      "confidence": "medium",
-      "rationale": "Fixes keyring availability detection on macOS, which decides where a saved Anthropic key persists."
+      "disputed": []
     },
     {
       "commit": "2598a222f8",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI SQL rendering."
+      "disputed": []
     },
     {
       "commit": "279b77ed61",
       "flows": ["server/browser-start"],
-      "confidence": "high",
-      "rationale": "Changes how the rdst web command locates and serves the embedded frontend bundle."
+      "disputed": []
     },
     {
       "commit": "12892af24a",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI cacheability display."
+      "disputed": []
     },
     {
       "commit": "dcae07f515",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CI josh filter config."
+      "disputed": []
     },
     {
       "commit": "d10bd36c02",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI scan subprocess timeout."
+      "disputed": []
     },
     {
       "commit": "b3ef4fa28a",
-      "flows": ["ai-access/key-update-recovery"],
-      "confidence": "medium",
-      "rationale": "Adds key_resolution and makes has_anthropic_api_key accept an active trial, changing what the AI gate treats as a usable key."
+      "flows": ["ai-access/hosted-inference", "ai-access/key-update-recovery"],
+      "disputed": []
     },
     {
       "commit": "813b5e94d3",
       "flows": [],
-      "confidence": "high",
-      "rationale": "MySQL TLS and CLI top error display."
+      "disputed": []
     },
     {
       "commit": "6a6679b4a5",
       "flows": ["ai-access/key-update-recovery"],
-      "confidence": "medium",
-      "rationale": "Renames the accepted Anthropic key env names used by env requirements and key resolution."
+      "disputed": []
     },
     {
       "commit": "57ab2d5d27",
       "flows": [],
-      "confidence": "high",
-      "rationale": "CLI message text."
+      "disputed": []
     },
     {
       "commit": "48658c0cfd",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Default model change; not key handling or gate."
+      "disputed": ["ask/answer-correctness"]
     },
     {
       "commit": "0987e77167",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Dev shadow workspace files only."
+      "disputed": []
     },
     {
       "commit": "83cb1102fd",
       "flows": [],
-      "confidence": "high",
-      "rationale": "Public release prep: CI, docs, telemetry defaults."
+      "disputed": []
     },
     {
       "commit": "38bb3d3202",
-      "flows": ["server/browser-start", "ai-access/key-update-recovery"],
-      "confidence": "high",
-      "rationale": "Introduces the FastAPI app, rdst web serving, env/key routes with EnvSecretsDialog, and the SSE analyze stream."
+      "flows": ["ask/answer-correctness", "server/browser-start"],
+      "disputed": ["ai-access/key-update-recovery"]
     },
     {
       "commit": "ff47993aa7",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "996c7b4ce0",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "e20e6f1fa7",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": ["ask/read-only"]
     },
     {
       "commit": "aae711a604",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "flows": ["ask/answer-correctness"],
+      "disputed": []
     },
     {
       "commit": "9d2167c27e",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "83bccde334",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": ["ask/answer-correctness", "ask/read-only"]
     },
     {
       "commit": "80af071233",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "347dc843a5",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "21a6d89daf",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "8bd3eddf46",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "2c00b1297c",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "c80ea00f7f",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "b553e16def",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "ddf38a010a",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "cbcd185600",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": ["monitoring/hosted-ai"]
     },
     {
       "commit": "345c542a12",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "2138730493",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "80b190fedb",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": ["ask/answer-correctness"]
     },
     {
       "commit": "5d027f9075",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "0b0c39459b",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": ["monitoring/local-lifecycle"]
     },
     {
       "commit": "e18cbd6471",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "9ed378eddb",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "42213bbbb1",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "1e0f82549e",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "6bfb516f34",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "2cd6e12156",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "12f76f411e",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "c5f8089139",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "bc707b5736",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "flows": ["ask/answer-correctness"],
+      "disputed": []
     },
     {
       "commit": "688adf7d26",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "588a37f3e4",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "8a3592f499",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "09912d4273",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "4293b86149",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": ["ask/answer-correctness", "ask/read-only"]
     },
     {
       "commit": "eaa6e6a40d",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "ea5af16664",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "da50781e60",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "b2d701d329",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "6e447cd337",
-      "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "flows": ["monitoring/hosted-ai"],
+      "disputed": []
     },
     {
       "commit": "44ac437c80",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "c4ff80ba80",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "82134b33af",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "a1b6a661e3",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "5678d307a8",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": ["monitoring/hosted-ai"]
     },
     {
       "commit": "46c4c50872",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
     },
     {
       "commit": "9712044811",
       "flows": [],
-      "confidence": "high",
-      "rationale": "before the web app existed"
+      "disputed": []
+    },
+    {
+      "commit": "21c39cc14d",
+      "flows": ["inbox/put-away"],
+      "disputed": []
+    },
+    {
+      "commit": "2dc53e646c",
+      "flows": [
+        "ai-access/hosted-inference",
+        "ai-access/key-update-recovery",
+        "home/getting-started"
+      ],
+      "disputed": []
+    },
+    {
+      "commit": "c44b6317e3",
+      "flows": [],
+      "disputed": []
+    },
+    {
+      "commit": "d885cbef1d",
+      "flows": [],
+      "disputed": []
+    },
+    {
+      "commit": "e3c47a5bae",
+      "flows": [
+        "actions/plan-follow-through",
+        "ask/across-databases",
+        "ask/answer-correctness",
+        "ask/read-only",
+        "monitoring/outage-alert",
+        "server/desktop-sidecar-start"
+      ],
+      "disputed": [
+        "ai-access/hosted-inference",
+        "monitoring/hosted-ai",
+        "monitoring/local-lifecycle",
+        "platform/demo-lifecycle",
+        "server/browser-start"
+      ]
+    },
+    {
+      "commit": "87b3b5120f",
+      "flows": [
+        "actions/plan-follow-through",
+        "activity/server-run-reload",
+        "home/getting-started",
+        "inbox/put-away",
+        "monitoring/hosted-ai",
+        "monitoring/local-lifecycle",
+        "monitoring/outage-alert"
+      ],
+      "disputed": [
+        "ai-access/hosted-inference",
+        "ai-access/key-update-recovery",
+        "ask/across-databases",
+        "ask/answer-correctness",
+        "platform/demo-lifecycle"
+      ]
+    },
+    {
+      "commit": "3425e1a333",
+      "flows": ["ai-access/hosted-inference", "ask/answer-correctness"],
+      "disputed": ["ask/read-only"]
+    },
+    {
+      "commit": "1be6cc5ea5",
+      "flows": [],
+      "disputed": ["ai-access/hosted-inference", "monitoring/hosted-ai"]
+    },
+    {
+      "commit": "c030770111",
+      "flows": [
+        "actions/plan-follow-through",
+        "ask/answer-correctness",
+        "monitoring/hosted-ai"
+      ],
+      "disputed": []
+    },
+    {
+      "commit": "0e1b980dea",
+      "flows": [],
+      "disputed": []
+    },
+    {
+      "commit": "f98bfc3ac1",
+      "flows": [],
+      "disputed": []
+    },
+    {
+      "commit": "0aee078d75",
+      "flows": [],
+      "disputed": []
+    },
+    {
+      "commit": "3b50ce919c",
+      "flows": ["server/desktop-sidecar-start"],
+      "disputed": ["platform/demo-lifecycle"]
+    },
+    {
+      "commit": "97db8a377f",
+      "flows": [],
+      "disputed": []
+    },
+    {
+      "commit": "0e5addcbd5",
+      "flows": ["monitoring/hosted-ai"],
+      "disputed": []
+    },
+    {
+      "commit": "3b7eff3cfd",
+      "flows": [
+        "actions/plan-follow-through",
+        "home/getting-started",
+        "monitoring/local-lifecycle",
+        "monitoring/outage-alert"
+      ],
+      "disputed": [
+        "activity/server-run-reload",
+        "inbox/put-away",
+        "monitoring/hosted-ai"
+      ]
+    },
+    {
+      "commit": "767c31a486",
+      "flows": [
+        "home/getting-started",
+        "inbox/put-away",
+        "monitoring/hosted-ai",
+        "monitoring/local-lifecycle",
+        "monitoring/outage-alert"
+      ],
+      "disputed": ["activity/server-run-reload", "ai-access/hosted-inference"]
+    },
+    {
+      "commit": "f684c0c39f",
+      "flows": [],
+      "disputed": []
+    },
+    {
+      "commit": "cbb323221a",
+      "flows": [],
+      "disputed": ["ai-access/hosted-inference"]
+    },
+    {
+      "commit": "f3c0b0ac0b",
+      "flows": [],
+      "disputed": []
+    },
+    {
+      "commit": "eaeb419090",
+      "flows": [],
+      "disputed": []
+    },
+    {
+      "commit": "dd5b4f3ad5",
+      "flows": ["ask/answer-correctness"],
+      "disputed": ["ai-access/hosted-inference", "ask/read-only"]
+    },
+    {
+      "commit": "82926d55fe",
+      "flows": [],
+      "disputed": []
+    },
+    {
+      "commit": "8db531d833",
+      "flows": ["ai-access/hosted-inference", "monitoring/hosted-ai"],
+      "disputed": []
     }
   ]
 }

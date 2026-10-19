@@ -30,7 +30,15 @@
       "reason": "license, ignore lists, placeholders, and the CLI installer"
     },
     {
-      "match": ["web-apps/apps/rdst/relentless/**"],
+      "match": [
+        "web-apps/apps/rdst/relentless/**",
+        "web-apps/apps/rdst/scripts/run-relentless-ci.sh",
+        "web-apps/apps/rdst/e2e/docker-compose.relentless.yml",
+        "web-apps/apps/rdst/e2e/Dockerfile.relentless",
+        "web-apps/apps/rdst/e2e/Dockerfile.bastion",
+        "web-apps/apps/rdst/e2e/bastion-entrypoint.sh",
+        "rdst/.buildkite/detect_relentless_ui_areas.sh"
+      ],
       "action": "areas",
       "areas": ["ai-access"],
       "reason": "the tester itself changed; its shortest area proves it end to end",

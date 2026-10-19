@@ -265,7 +265,16 @@ keyservice is refused, so runs never create production accounts; staging
 sends no signup alerts. Without them, `rt status` reports mail as
 unavailable and the prompt tells the agent not to sign up.
 
-CI reads both secrets and uses the staging keyservice.
+CI reads both secrets and signs in to the keyservice the build's binaries
+name. A stack that changes `rdst/keyservice/` gets its own CL env
+(`keyservice-cl<change>.readyset.io`), which runs the non-prod secrets
+bundle, so its runs attest with `rdst/keyservice/dev01` and wait for the CL
+env to deploy. Every other change, and the check of findings on main, uses
+staging. A CL env throttles no sign-ins, so runs side by side do not lock
+each other out.
+
+To point a local run at a CL env, use its URL and dev01's
+`ATTESTATION_SECRET`.
 
 ## CI
 
@@ -283,8 +292,9 @@ the build ships, and runs its part inside `e2e/docker-compose.relentless.yml`,
 with the databases, jump host, and mail above. The app's key comes from the
 `ANTHROPIC_API_KEY` secret and the agent's login from
 `buildkite/rdst/claude-oauth-token`. The step removes each run's `home/`
-(it holds the keychain) and fails if the key appears anywhere in the
-artifacts, then annotates the build with `report.ts`. It is soft-fail:
+(it holds the keychain), fails if any of its secrets appears anywhere in the
+runs, and only then uploads them, so a job stopped first uploads none; it
+then annotates the build with `report.ts`. It is soft-fail:
 findings are leads until they become deterministic specs. The comment on the
 change lists only the P1/P2 findings main does not also have, and says so
 when the check on main could not decide.
@@ -295,9 +305,9 @@ the step before it spends anything. `RELENTLESS_UI_AREAS`,
 `RELENTLESS_UI_BUDGET`, and `RELENTLESS_UI_TIMEOUT_MIN` override the
 detector's choice, for a run by hand.
 
-Every main build that builds the desktop package offers the release run
-behind a block step, since it costs agent-hours: every area and every flow
-in desktop mode, one job each
+Every main build that builds the desktop package starts the release run
+once the package is built: every area and every flow in desktop mode, one
+job each
 (`rdst/.buildkite/relentless_ui_step.sh`, which the change's step shares),
 then a report job annotates the build and
 posts each run's verdict and every P1 and P2 finding to `#builds-rdst`. The
@@ -322,6 +332,12 @@ selection and the change mission cover every CL in it. The detector writes the
 change with `selector/change.ts` and the tester step downloads it, since the
 tester's image has no git.
 
+The selector itself is checked on every change that touches RDST, below the
+tip too: `rdst/.buildkite/check_relentless_selector.sh` runs its tests, the
+contract check, and `evaluation/report.ts --verify`, and fails the build. A
+refactor that breaks selection fails there instead of quietly choosing
+nothing.
+
 Areas follow ownership. A `relentless.json` in a folder says which
 capability the folder's code belongs to: `{"capability": "connections"}`. A
 capability spanning several folders, such as a UI slice and its backend
@@ -342,11 +358,14 @@ layer) each declare the areas that test them. Code no capability owns takes
 its users from the change's import and API graphs: the capabilities whose
 owned code it reaches first, ranked by how many of its changed declarations
 reach each and by how specifically each area's recorded runs request the
-API routes it reaches. Code half of all capabilities use is broad, an entry
-point of the app is broad, and code no page or route reaches selects
-nothing. A file the backend loads by a path relative to its own code is part
-of the code that loads it. Manifests are read from the selector's own
-checkout, so a replay judges old trees by today's, with
+API routes it reaches. Code half of all capabilities use is broad, and code
+no page or route reaches selects nothing. An area's entry pages own the code
+they render, except its `shared_entries` in `areas.json` (the root layout, a
+dialog any page opens): those are its own when they change, and the walk
+passes through them to the pages that use them. A file the backend loads by
+a path relative to its own code is part of the code that loads it.
+Manifests are read from the selector's own checkout, so a replay judges old
+trees by today's, with
 `evaluation/history.json` resolving paths only older trees had; `--check`
 fails on unknown areas or flows, patterns that match nothing, a file two
 manifests name, and a history pattern that matches a current file.
@@ -357,7 +376,10 @@ the tester itself, and what the UI tester does not cover (the CLI, dev
 tooling, the keyservice, /scan and /guards). License, ignore, and
 placeholder files select nothing. A dependency manifest is read: a runtime
 dependency, export, build tool, or packaging change is broad; metadata and
-test tooling are not; a lockfile follows its manifests.
+test tooling are not; a lockfile follows its manifests. Changes to what ships
+(runtime dependencies, resolved versions) and to the app's entry point run
+the `infra` areas (the app starting, its shell) before anything they reach,
+not the smoke set: their failures show as the app not starting.
 
 The graphs also suggest flows.
 `selector/frontend_graph.ts` builds a declaration-level graph of the
@@ -388,22 +410,29 @@ a route has no area or a rule matches no file.
 
 ### Validating the selector
 
-- `selector/evaluation/labels.json` holds 274 past RDST changes, each
-  labeled with the areas it needs without seeing the selector's output: 42
-  checked by hand against their trees, the rest by agents reading the
-  description, files, and diff. `node selector/evaluation/replay.ts --out
-  DIR` checks each change out in a scratch jj workspace and runs the
-  selector on its own tree; `node selector/evaluation/report.ts DIR
-  [--baseline OTHER_DIR]` grades it: required areas found at all, required
-  areas recommended, changes where none was, false alarms, unneeded flows,
-  and area and mission minutes, by era and label confidence. A replay
-  directory records the selector's fingerprint and refuses to resume under
-  another. Every change to selection should come with a replay against the
-  previous one. The labels guided the selector's tuning, so a replay is a
-  regression check, not an unbiased estimate.
-- `evaluation/astra-labels.json` labels a seeded sample of 80 web-app-era
-  changes by another model, blind to the selector, the contract, and the
-  first labels; `report.ts DIR --labels FILE` grades against it.
+- `selector/evaluation/labels.json` holds 298 past RDST changes, each
+  labeled with today's areas it needs by two independent agent passes on
+  different models, blind to the selector: `required` are the areas both
+  named, `disputed` those only one did, graded neither way until someone
+  reviews them (`source: reviewed`). A frozen 30% `held-out` split, chosen by
+  commit hash, guided no tuning and gives the headline; tune on `tune`.
+  `node selector/evaluation/replay.ts --out DIR [--split held-out]` checks
+  each change out in a scratch jj workspace and runs the selector on its own
+  tree; `node selector/evaluation/report.ts DIR [--baseline OTHER_DIR]`
+  grades it over the areas that exist today: required areas found at all,
+  required areas recommended, misses, false alarms and their minutes, by
+  split, era, label confidence and selection status, and flow recall
+  against `flow-labels.json`.
+- `evaluation/finding-labels.json` is ground truth from real runs: the areas
+  whose runs found a P1 or P2 that main did not reproduce. Replays include
+  its changes, and the report grades them on their own ("Found bugs").
+  `node selector/metrics.ts --labels-out FILE ARTIFACT_DIRS...` adds a
+  build's to FILE; CI's report step writes each build's as an artifact.
+- `evaluation/replay.json` records a complete replay under today's selector
+  and labels (`report.ts DIR --record`): the fingerprint of everything that
+  decides a selection, and the held-out and overall numbers. CI fails while
+  either changed since (`report.ts --verify`), so a change to selection
+  carries the replay that measured it, and its diff shows the effect.
 - The tester step records what ran in `selection-outcome.json`, and
   `node selector/metrics.ts ARTIFACT_DIRS...` reports whether any P1 or P2
   finding came from an area or mission the selector left out.

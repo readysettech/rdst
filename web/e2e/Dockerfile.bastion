@@ -1,0 +1,14 @@
+FROM public.ecr.aws/docker/library/alpine:3.20
+
+# A disposable SSH jump host for the relentless tester: key-only login as
+# `relentless`, TCP forwarding on so RDST can tunnel to the databases.
+RUN apk add --no-cache openssh \
+    && adduser -D -s /bin/sh relentless \
+    && sed -i 's/^relentless:!/relentless:*/' /etc/shadow \
+    && ssh-keygen -A
+
+COPY bastion-entrypoint.sh /usr/local/bin/bastion-entrypoint.sh
+RUN chmod +x /usr/local/bin/bastion-entrypoint.sh
+
+EXPOSE 2222
+ENTRYPOINT ["/usr/local/bin/bastion-entrypoint.sh"]

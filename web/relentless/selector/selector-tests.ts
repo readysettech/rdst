@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import {
   existsSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -147,15 +148,20 @@ test('code no capability owns follows its users in the graphs', () => {
 })
 
 test('shared infrastructure is broad and runs the smoke set', () => {
-  // The HTTP client every page requests through, and the app's entry point.
-  for (const change of [
+  // The HTTP client every page requests through.
+  const client = select([
     edit('web-apps/apps/rdst/src/lib/client.ts', 'export'),
-    edit('web-apps/apps/rdst/src/main.tsx', 'import'),
-  ]) {
-    const s = select([change])
-    assert.equal(s.status, 'broad')
-    assert.deepEqual(s.recommended_areas, contract.smoke)
-  }
+  ])
+  assert.equal(client.status, 'broad')
+  assert.deepEqual(client.recommended_areas, contract.smoke)
+  // The app's entry point fails as the app not starting: the infra areas.
+  const entry = select([edit('web-apps/apps/rdst/src/main.tsx', 'import')])
+  assert.equal(entry.status, 'broad')
+  assert.deepEqual(entry.recommended_areas, contract.infra)
+  // So do new dependency versions.
+  const lock = select([touch('web-apps/pnpm-lock.yaml')])
+  assert.equal(lock.status, 'broad')
+  assert.deepEqual(lock.recommended_areas, contract.infra)
   // One request helper in a shared module reaches only its callers.
   const s = select([
     edit(
@@ -427,6 +433,163 @@ test('diffs, globs, and route matching', () => {
   )
 })
 
+test('the detector starts the tester at the tip, with no gate', () => {
+  const script = readFileSync(
+    join(repoRoot, 'rdst/.buildkite/detect_relentless_ui_areas.sh'),
+    'utf8'
+  )
+  const upload = script.slice(
+    script.indexOf("buildkite-agent pipeline upload <<'EOF'")
+  )
+  assert.doesNotMatch(upload, /- block:/)
+  assert.match(
+    upload,
+    /key: "relentless-ui-tester"\n\s+depends_on: "package-rdst-desktop-linux-cl"\n\s+command: "[^"]*run-relentless-ci\.sh plan"/
+  )
+  // The plan reads the detected choice; a stack reaching no area starts nothing.
+  for (const key of ['areas', 'flows', 'change', 'modes'])
+    assert.match(script, new RegExp(`meta-data set relentless-ui-${key} `))
+  const none = script.indexOf('if [[ "$status" == "none" ]]')
+  assert.ok(none > 0 && none < script.indexOf('pipeline upload <<'))
+  assert.match(script.slice(none, script.indexOf('fi\n', none)), /exit 0/)
+})
+
+test('the pipeline runs the detector last, and only for changes', () => {
+  const generator = readFileSync(
+    join(repoRoot, 'rdst/.buildkite/detect_pipeline_areas.sh'),
+    'utf8'
+  ).replace(
+    /^(el)?if ! CHANGED_FILES=.*$/m,
+    '$1if ! CHANGED_FILES="web-apps/apps/rdst/relentless/cli.ts"; then'
+  )
+  // Fed on stdin, the generator has no path of its own to find its step files
+  // beside, so they are named from the repository root it runs in. Its fetch
+  // of main fails at once, offline, and it falls back to this commit alone.
+  const render = (branch: string) =>
+    execFileSync('bash', ['-s'], {
+      cwd: repoRoot,
+      input: generator.replaceAll('"$(dirname "$0")', '"rdst/.buildkite'),
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        BUILDKITE_BRANCH: branch,
+        GIT_SSH_COMMAND: 'false',
+        GIT_TERMINAL_PROMPT: '0',
+      },
+      stdio: ['pipe', 'pipe', 'ignore'],
+    })
+  const change = render('refs/changes/1/1')
+  const keys = [
+    ...change.matchAll(
+      /^ {2}- (?:label|block|wait|group)[^\n]*\n(?: {4}key: "?([\w-]+)"?)?/gm
+    ),
+  ].map((m) => m[1])
+  assert.equal(keys.filter(Boolean).at(-1), 'relentless-ui-detect')
+  // A CL build waits on no one, and the detector starts once the package is
+  // built rather than after the whole build.
+  assert.ok(!change.includes('- block:'))
+  assert.match(
+    change,
+    /key: "relentless-ui-detect"\n\s+depends_on: "package-rdst-desktop-linux-cl"/
+  )
+  // The selector's own check runs on every change, fails the build, and
+  // waits for nothing: it precedes the CL's vote.
+  const checkAt = change.indexOf('key: "relentless-selector-check"')
+  assert.ok(checkAt > 0 && checkAt < change.indexOf('key: set-gerrit-status'))
+  const check = change.slice(checkAt)
+  const checkStep = check.slice(0, check.indexOf('\n  - '))
+  assert.ok(checkStep.length > 0)
+  assert.doesNotMatch(checkStep, /soft_fail|depends_on/)
+  assert.match(checkStep, /check_relentless_selector\.sh/)
+  const main = render('main')
+  assert.ok(!main.includes('relentless-ui-detect'))
+  assert.ok(!main.includes('relentless-selector-check'))
+  // Main runs every area and every flow once the package is built, with
+  // nothing to press, reports them once, and gates nothing.
+  assert.ok(!main.includes('relentless-release-trigger'))
+  const firstRun = main.slice(
+    main.indexOf('key: "relentless-release-ai-access"')
+  )
+  assert.match(
+    firstRun.slice(0, firstRun.indexOf('command:')),
+    /depends_on:\n {6}- "package-rdst-desktop-linux-staging"/
+  )
+  assert.match(firstRun, /soft_fail: true/)
+  const areas = readdirSync(
+    join(repoRoot, 'web-apps/apps/rdst/relentless/areas')
+  )
+  for (const file of areas)
+    assert.match(
+      main,
+      new RegExp(`key: "relentless-release-${file.replace('.md', '')}"`)
+    )
+  // Each flow that runs on desktop gets its own job.
+  const flowsDir = join(repoRoot, 'web-apps/apps/rdst/relentless/flows')
+  const desktopFlows = readdirSync(flowsDir).flatMap((capability) =>
+    readdirSync(join(flowsDir, capability))
+      .filter((file) =>
+        /^Modes: .*desktop/m.test(
+          readFileSync(join(flowsDir, capability, file), 'utf8')
+        )
+      )
+      .map((file) => `${capability}-${file.replace('.md', '')}`)
+  )
+  for (const flow of desktopFlows)
+    assert.match(main, new RegExp(`key: "relentless-release-flow-${flow}"`))
+  assert.doesNotMatch(main, /relentless-release-flow-server-browser-start/)
+  const report = main.slice(main.indexOf('key: "relentless-release-report"'))
+  assert.equal(
+    [
+      ...report
+        .slice(0, report.indexOf('command:'))
+        .matchAll(/allow_failure: true/g),
+    ].length,
+    areas.length + desktopFlows.length
+  )
+  const gate = main.slice(main.indexOf('key: "release-approval"'))
+  assert.doesNotMatch(gate.slice(0, gate.indexOf('\n  - ')), /relentless/)
+  assert.ok(!change.includes('relentless-release'))
+})
+
+test('the runner takes names, all, or none, and rejects anything else', () => {
+  // The runner clears its runs directory, so it gets a scratch one.
+  const runsDir = mkdtempSync(join(tmpdir(), 'rt-runs-'))
+  const run = (areas: string, modes = 'desktop') => {
+    try {
+      execFileSync(
+        'bash',
+        [join(repoRoot, 'web-apps/apps/rdst/scripts/run-relentless-ci.sh')],
+        {
+          encoding: 'utf8',
+          env: {
+            PATH: process.env.PATH,
+            HOME: process.env.HOME,
+            RELENTLESS_UI_AREAS: areas,
+            RELENTLESS_UI_MODES: modes,
+            RELENTLESS_UI_RUNS_DIR: runsDir,
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }
+      )
+      return { code: 0, text: '' }
+    } catch (error) {
+      const e = error as { status: number; stderr: string; stdout: string }
+      return { code: e.status, text: `${e.stdout}${e.stderr}` }
+    }
+  }
+  assert.equal(run('').code, 2)
+  assert.equal(run('none').code, 0)
+  assert.match(run('ask no-such-area').text, /unknown area no-such-area/)
+  assert.match(run('ask', 'phone').text, /unknown mode phone/)
+  // A valid choice passes validation and stops at the first missing secret.
+  assert.match(
+    run('ask inbox').text,
+    /RDST_RELENTLESS_ANTHROPIC_API_KEY is required/
+  )
+  assert.match(run('all').text, /RDST_RELENTLESS_ANTHROPIC_API_KEY is required/)
+  rmSync(runsDir, { recursive: true, force: true })
+})
+
 test('overrides come due for review', () => {
   const tracked = existsSync(join(repoRoot, '.git'))
     ? execFileSync('git', ['ls-files'], {
@@ -696,4 +859,157 @@ test('account flows refuse every production keyservice host', () => {
   ])
     assert.ok(isProductionKeyservice(url), url)
   assert.ok(!isProductionKeyservice('https://keyservice-staging.readyset.io'))
+})
+
+test('only a stack tip starts the tester, with a change mission', () => {
+  const script = readFileSync(
+    join(repoRoot, 'rdst/.buildkite/detect_relentless_ui_areas.sh'),
+    'utf8'
+  )
+  const tipCheck = script.indexOf('--stack-position')
+  assert.ok(tipCheck > 0)
+  // A build below the tip leaves before anything is uploaded.
+  assert.ok(tipCheck < script.indexOf('buildkite-agent pipeline upload'))
+  assert.match(
+    script.slice(tipCheck, script.indexOf('fi\n', tipCheck)),
+    /exit 0/
+  )
+  assert.match(script, /change\.ts" --range "\$\{BASE\}\.\.HEAD"/)
+  assert.match(script, /meta-data set relentless-ui-change run/)
+})
+
+test('a plan fans the chosen parts out one job each, checks them on main, then reports them', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rt-plan-'))
+  try {
+    // A stand-in agent: uploads land in a file; nothing else happens.
+    writeFileSync(
+      join(dir, 'buildkite-agent'),
+      `#!/usr/bin/env bash\n[[ "$1 $2" == "pipeline upload" ]] && cat > "${dir}/upload.yml"\nexit 0\n`,
+      { mode: 0o755 }
+    )
+    execFileSync(
+      'bash',
+      [
+        join(repoRoot, 'web-apps/apps/rdst/scripts/run-relentless-ci.sh'),
+        'plan',
+      ],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH}`,
+          RELENTLESS_UI_RUNS_DIR: join(dir, 'runs'),
+          RELENTLESS_UI_PART: '1',
+          RELENTLESS_UI_AREAS: 'ask desktop-shell',
+          RELENTLESS_UI_FLOWS:
+            'server/browser-start activity/server-run-reload',
+          RELENTLESS_UI_CHANGE: 'run',
+          RELENTLESS_UI_MODES: 'desktop browser',
+        },
+      }
+    )
+    const upload = readFileSync(join(dir, 'upload.yml'), 'utf8')
+    const keys = [...upload.matchAll(/key: "([\w-]+)"/g)].map((m) => m[1])
+    // desktop-shell runs only on desktop; the browser-start flow only in a browser.
+    // Each flow gets its own job, like each area.
+    assert.deepEqual(keys, [
+      'relentless-ui-desktop-change',
+      'relentless-ui-desktop-flow-activity-server-run-reload',
+      'relentless-ui-desktop-ask',
+      'relentless-ui-desktop-desktop-shell',
+      'relentless-ui-browser-change',
+      'relentless-ui-browser-flow-server-browser-start',
+      'relentless-ui-browser-flow-activity-server-run-reload',
+      'relentless-ui-browser-ask',
+      'relentless-ui-verify',
+      'relentless-ui-report',
+    ])
+    // The check on main and the report wait for every part, however it ended,
+    // and the report for the check as well.
+    const verify = upload.slice(
+      upload.indexOf('key: "relentless-ui-verify"'),
+      upload.indexOf('key: "relentless-ui-report"')
+    )
+    assert.equal([...verify.matchAll(/allow_failure: true/g)].length, 8)
+    assert.match(verify, /RELENTLESS_UI_VERIFY: "1"/)
+    // Every variable a step sets reaches its container.
+    for (const step of upload.split('\n  - label: ').slice(1, -1)) {
+      const set = [...step.matchAll(/^ {6}((?:RDST_)?RELENTLESS_\w+): /gm)].map(
+        (m) => m[1]
+      )
+      for (const name of set)
+        assert.match(step, new RegExp(`- ${name}\\n`), name)
+    }
+    const report = upload.slice(upload.indexOf('key: "relentless-ui-report"'))
+    assert.equal([...report.matchAll(/allow_failure: true/g)].length, 9)
+    assert.match(report, /step: "relentless-ui-verify"/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("a plan signs its parts in to the build's keyservice, and checks main on staging", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rt-plan-'))
+  try {
+    writeFileSync(
+      join(dir, 'buildkite-agent'),
+      `#!/usr/bin/env bash\n[[ "$1 $2" == "pipeline upload" ]] && cat > "${dir}/upload.yml"\nexit 0\n`,
+      { mode: 0o755 }
+    )
+    const plan = (buildKeyservice?: string) => {
+      const { RDST_BUILD_KEYSERVICE_URL: _, ...env } = process.env
+      execFileSync(
+        'bash',
+        [
+          join(repoRoot, 'web-apps/apps/rdst/scripts/run-relentless-ci.sh'),
+          'plan',
+        ],
+        {
+          encoding: 'utf8',
+          env: {
+            ...env,
+            ...(buildKeyservice
+              ? { RDST_BUILD_KEYSERVICE_URL: buildKeyservice }
+              : {}),
+            PATH: `${dir}:${process.env.PATH}`,
+            RELENTLESS_UI_RUNS_DIR: join(dir, 'runs'),
+            RELENTLESS_UI_PART: '1',
+            RELENTLESS_UI_AREAS: 'ask',
+            RELENTLESS_UI_CHANGE: 'skip',
+          },
+        }
+      )
+      const upload = readFileSync(join(dir, 'upload.yml'), 'utf8')
+      const step = (key: string) => {
+        const start = upload.indexOf(`key: "${key}"`)
+        return upload.slice(start, upload.indexOf('\n  - label: ', start))
+      }
+      return {
+        part: step('relentless-ui-desktop-ask'),
+        verify: step('relentless-ui-verify'),
+      }
+    }
+    const clEnv = 'https://keyservice-cl15396.readyset.io'
+    const stack = plan(clEnv)
+    // The CL env runs the non-prod bundle's attestation, once it has deployed.
+    assert.match(
+      stack.part,
+      new RegExp(`RDST_RELENTLESS_KEYSERVICE_URL: "${clEnv}"`)
+    )
+    assert.match(stack.part, /- "keyservice-cl-env-deploy"/)
+    assert.match(stack.part, /secret-id: "rdst\/keyservice\/dev01"/)
+    for (const { verify } of [stack, plan()]) {
+      assert.doesNotMatch(verify, /RDST_RELENTLESS_KEYSERVICE_URL: /)
+      assert.match(verify, /secret-id: "rdst\/keyservice\/staging"/)
+    }
+    const other = plan().part
+    assert.match(
+      other,
+      /RDST_RELENTLESS_KEYSERVICE_URL: "https:\/\/keyservice-staging\.readyset\.io"/
+    )
+    assert.doesNotMatch(other, /keyservice-cl-env-deploy/)
+    assert.match(other, /secret-id: "rdst\/keyservice\/staging"/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

@@ -1,22 +1,19 @@
 import { execFile, execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
-import { capabilities } from '../ownership.ts'
+import { selectorFingerprint } from './fingerprint.ts'
 
 /**
  * Replays the selector on labeled past changes, each on its own tree in a
@@ -27,6 +24,9 @@ import { capabilities } from '../ownership.ts'
  * result into tables.
  *
  *   node replay.ts --out DIR [--workers 4] [--source reviewed|agent] [--since 2026-02-19]
+ *     [--split tune|held-out]
+ *
+ * Changes with findings evidence (`finding-labels.json`) are replayed too.
  *
  * The selector code and contract come from this checkout, so a replay
  * measures today's selector against yesterday's code.
@@ -41,6 +41,7 @@ const { values } = parseArgs({
     workers: { type: 'string', default: '4' },
     source: { type: 'string' },
     since: { type: 'string' },
+    split: { type: 'string' },
   },
 })
 if (!values.out) throw new Error('--out DIR is required')
@@ -48,23 +49,7 @@ const out = values.out
 mkdirSync(out, { recursive: true })
 const replayPath = join(out, 'replay.jsonl')
 
-// Everything that decides a selection: the selector, its contract, the flows.
-const fingerprint = createHash('sha256')
-const hashDir = (dir: string) => {
-  for (const entry of readdirSync(dir).sort()) {
-    const path = join(dir, entry)
-    if (entry === 'evaluation' || entry === '__pycache__') continue
-    if (statSync(path).isDirectory()) hashDir(path)
-    else fingerprint.update(relative(here, path)).update(readFileSync(path))
-  }
-}
-hashDir(join(here, '..'))
-hashDir(join(here, '..', '..', 'flows'))
-// Ownership manifests live beside the code they describe.
-for (const { manifests } of capabilities().capabilities)
-  for (const manifest of manifests)
-    fingerprint.update(manifest).update(readFileSync(join(repoRoot, manifest)))
-const meta = { selector: fingerprint.digest('hex') }
+const meta = { selector: selectorFingerprint() }
 const metaPath = join(out, 'replay.meta.json')
 if (existsSync(replayPath)) {
   const previous = existsSync(metaPath)
@@ -83,15 +68,46 @@ interface Label {
   date: string
   title: string
   source: string
+  split?: string
 }
-const labels = (
+const labeled = (
   JSON.parse(readFileSync(join(here, 'labels.json'), 'utf8')) as {
     changes: Label[]
   }
-).changes.filter(
+).changes
+const findingPath = join(here, 'finding-labels.json')
+const known = new Set(labeled.map((l) => l.commit))
+const evidenced: Label[] = existsSync(findingPath)
+  ? (
+      JSON.parse(readFileSync(findingPath, 'utf8')) as {
+        changes: { commit: string }[]
+      }
+    ).changes
+      .filter((c) => !known.has(c.commit))
+      .map((c) => ({
+        commit: c.commit,
+        date: execFileSync(
+          'jj',
+          [
+            'log',
+            '--no-graph',
+            '-r',
+            c.commit,
+            '-T',
+            'committer.timestamp().format("%Y-%m-%d")',
+          ],
+          { cwd: repoRoot, encoding: 'utf8' }
+        ).trim(),
+        title: '',
+        source: 'finding',
+        split: 'finding',
+      }))
+  : []
+const labels = [...labeled, ...evidenced].filter(
   (l) =>
     (!values.source || l.source === values.source) &&
-    (!values.since || l.date >= values.since)
+    (!values.since || l.date >= values.since) &&
+    (!values.split || l.split === values.split || l.split === 'finding')
 )
 const contract = JSON.parse(
   readFileSync(join(here, '..', 'areas.json'), 'utf8')

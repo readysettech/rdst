@@ -1,0 +1,70 @@
+services:
+  postgres:
+    extends:
+      file: docker-compose.postgres.yml
+      service: postgres
+
+  mysql:
+    image: ${PUBLIC_REPO_BASE:-public.ecr.aws}/docker/library/mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpassword
+      MYSQL_DATABASE: testdb
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --performance-schema=ON
+    healthcheck:
+      test: [CMD, mysqladmin, ping, -h, localhost, -u, testuser, -ptestpassword]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+    ports:
+      - "127.0.0.1:13307:3306"
+    volumes:
+      - ../../../../rdst/tests/integration/init-scripts/mysql:/docker-entrypoint-initdb.d:ro
+
+  # SSH jump host in front of both databases: reach them as postgres:5432
+  # and mysql:3306 through it. Its throwaway key is generated at start into
+  # test-results/relentless-ssh, from where the driver copies it into each
+  # run's ~/.ssh.
+  bastion:
+    build:
+      context: .
+      dockerfile: Dockerfile.bastion
+    ports:
+      - "127.0.0.1:12222:2222"
+    volumes:
+      - ../test-results/relentless-ssh:/keys
+    # Up once it authorizes the key, so the driver finds the key to copy.
+    healthcheck:
+      test: [CMD, test, -s, /home/relentless/.ssh/authorized_keys]
+      interval: 1s
+      retries: 30
+
+  relentless:
+    build:
+      context: ../../../..
+      dockerfile: web-apps/apps/rdst/e2e/Dockerfile.relentless
+    user: "${RDST_E2E_BROWSER_USER:-0:0}"
+    working_dir: /workdir
+    environment:
+      CI: "${CI:-true}"
+      RDST_E2E_DB_HOST: postgres
+      RDST_E2E_DB_PORT: "5432"
+      RDST_E2E_DB_PASSWORD: rdst_e2e_password
+      RDST_RELENTLESS_MYSQL_HOST: mysql
+      RDST_RELENTLESS_MYSQL_PORT: "3306"
+      RDST_RELENTLESS_SSH_HOST: bastion
+      RDST_RELENTLESS_SSH_PORT: "2222"
+      RDST_DOCKER_PUBLISHED_HOST: rdst-readyset-sandbox
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      bastion:
+        condition: service_healthy
+    volumes:
+      - ../../../..:/workdir
+      - /var/run/docker.sock:/var/run/docker.sock

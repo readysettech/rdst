@@ -1,0 +1,23 @@
+{
+  "note": "Areas and flows whose runs found a P1 or P2 that main did not reproduce, per change: evidence the change needed them. Written by metrics.ts --labels-out.",
+  "changes": [
+    {
+      "commit": "109c1d294e",
+      "change_range": null,
+      "areas": ["activity"],
+      "flows": [],
+      "findings": [
+        "Cancelled analyses claim EXPLAIN ANALYZE ran before any statement executed"
+      ]
+    },
+    {
+      "commit": "60be8b607c",
+      "change_range": null,
+      "areas": ["actions"],
+      "flows": [],
+      "findings": [
+        "Copy as migration exports an unbound parameterized SELECT for application rewrites"
+      ]
+    }
+  ]
+}

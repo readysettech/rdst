@@ -1,0 +1,24 @@
+{
+  "selector": "f1df8cf57fbbff56007afcc2e8808d4f122a48e6e4ee69074b7eea19198aa0b9",
+  "labels": "9b28e46a7c57e50c07b6a05441d6931736927eda1dbdd8ebd776d2ca888bf7b8",
+  "held_out": {
+    "changes": 83,
+    "recall_recommended": 0.811,
+    "recall_affected": 0.863,
+    "false_alarm_minutes": 560,
+    "area_minutes": 3516,
+    "mission_minutes": 784
+  },
+  "all": {
+    "changes": 298,
+    "recall_recommended": 0.799,
+    "recall_affected": 0.901,
+    "false_alarm_minutes": 2196,
+    "area_minutes": 12014,
+    "mission_minutes": 2520
+  },
+  "found_bugs": {
+    "needed": 2,
+    "chosen": 1
+  }
+}

@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 UPLOAD = Path(__file__).parents[2] / ".buildkite" / "upload_rdst_desktop_artifacts.sh"
 
@@ -71,6 +72,7 @@ elif [[ "$1 $2" == "pipeline upload" ]]; then
     exit 1
   fi
   printf '%s\n' "$key" >> "$FAKE_BUILDKITE_STEPS"
+  printf '%s\n' "$pipeline" >> "$FAKE_BUILDKITE_STEPS.yml"
 else
   echo "unexpected buildkite-agent command: $*" >&2
   exit 2
@@ -168,8 +170,6 @@ def test_older_desktop_build_cannot_rewind_update_channel(publication_env):
 
     repeated = _publish(env, 900)
     assert repeated.returncode == 0, repeated.stderr
-    assert "Announcement step already exists" in repeated.stdout
-    assert steps.read_text().splitlines() == ["announce-rdst-desktop-windows"]
 
     latest = store / "packages/rdst-desktop/windows/update/latest.yml"
     marker = store / "packages/rdst-desktop/windows/update/latest-build"
@@ -182,7 +182,7 @@ def test_older_desktop_build_cannot_rewind_update_channel(publication_env):
     assert "newer windows desktop build (900)" in older.stdout
     assert "version: 0.1.900" in latest.read_text(encoding="utf-8")
     assert marker.read_text(encoding="utf-8").strip() == "900"
-    assert steps.read_text().splitlines() == ["announce-rdst-desktop-windows"]
+    assert steps.read_text() == ""
 
 
 def test_interrupted_channel_publication_can_be_retried(publication_env):
@@ -246,25 +246,82 @@ def test_desktop_build_cannot_replace_published_metadata(publication_env):
 
 def test_staging_channel_publishes_apart_from_production(publication_env):
     # Main builds publish the staging channel first and production after the
-    # Release button, in the same build: neither may take the other's prefix or
-    # announcement step.
-    env, store, artifacts, steps = publication_env
+    # Release button, in the same build: neither may take the other's prefix.
+    # Only production is announced; the merge's release-candidate message
+    # already covers staging.
+    env, store, artifacts, _ = publication_env
+    lines = store.parent / "slack-lines"
+    lines.touch()
+    env = env | {"RDST_DESKTOP_SLACK_LINES": str(lines)}
     _stage_windows_artifacts(artifacts, "0.1.900", b"staging")
     staging = _publish(env | {"RDST_DESKTOP_FLAVOR": "staging"}, 900)
     assert staging.returncode == 0, staging.stderr
     staging_feed = store / "packages/rdst-desktop-staging/windows/update"
     assert "version: 0.1.900" in (staging_feed / "latest.yml").read_text(encoding="utf-8")
     assert not (store / "packages/rdst-desktop").exists()
+    assert lines.read_text() == ""
 
     _stage_windows_artifacts(artifacts, "0.1.900", b"release")
     production = _publish(env, 900)
     assert production.returncode == 0, production.stderr
     production_feed = store / "packages/rdst-desktop/windows/update"
     assert "version: 0.1.900" in (production_feed / "latest.yml").read_text(encoding="utf-8")
-    assert steps.read_text().splitlines() == [
-        "announce-rdst-desktop-windows-staging",
-        "announce-rdst-desktop-windows",
-    ]
+    build = "https://example.test/rdst-desktop/windows/main/build-900"
+    assert lines.read_text() == (
+        f":window: *Windows*: <{build}/rdst-desktop-0.1.900-x64.exe|Windows installer>, "
+        f"<{build}/SHA256SUMS|SHA-256 checksums>\n"
+    )
+
+
+def _stage_every_platform(root: Path, version: str) -> None:
+    update = root / "update"
+    update.mkdir(parents=True, exist_ok=True)
+    sums = ""
+    for name in (
+        f"rdst-desktop-{version}-x86_64.AppImage",
+        f"rdst-desktop-{version}-amd64.deb",
+        f"rdst-desktop-{version}-x86_64.rpm",
+        f"rdst-desktop-{version}-arm64.dmg",
+        f"rdst-desktop-{version}-arm64.zip",
+        f"rdst-desktop-{version}-x64.exe",
+    ):
+        (root / name).write_bytes(name.encode())
+        sums += f"{hashlib.sha256(name.encode()).hexdigest()}  {name}\n"
+    _write_text(root / "SHA256SUMS", sums)
+    _write_text(root / "notarized", "submission-id\n")
+    _write_text(update / "latest.yml", f"version: {version}\nfiles: []\n")
+
+
+def test_a_release_is_announced_once_for_every_platform(publication_env):
+    env, _, artifacts, steps = publication_env
+    _stage_every_platform(artifacts, "0.1.900")
+
+    def publish_all(flavor: str):
+        return subprocess.run(
+            [os.environ.get("BASH", "bash"), str(UPLOAD), "all"],
+            env=env | {"BUILDKITE_BUILD_NUMBER": "900", "RDST_DESKTOP_FLAVOR": flavor},
+            capture_output=True, text=True, check=False,
+        )
+
+    staging = publish_all("staging")
+    assert staging.returncode == 0, staging.stderr
+    assert steps.read_text() == ""
+
+    release = publish_all("release")
+    assert release.returncode == 0, release.stderr
+    assert steps.read_text().splitlines() == ["announce-rdst-desktop-release"]
+    message = yaml.safe_load(Path(f"{steps}.yml").read_text())["steps"][0]["notify"][0][
+        "slack"
+    ]["message"]
+    heading, *platforms = message.split("\n")
+    assert heading == ":package: *RDST Desktop release packages* from main - build #900"
+    assert [line.split(":")[1] for line in platforms] == ["penguin", "apple", "window"]
+    assert "AppImage>, <" in platforms[0]
+
+    retried = publish_all("release")
+    assert retried.returncode == 0, retried.stderr
+    assert "Announcement step already exists" in retried.stdout
+    assert steps.read_text().splitlines() == ["announce-rdst-desktop-release"]
 
 
 def test_only_a_staging_promotion_publishes_from_a_change(publication_env):

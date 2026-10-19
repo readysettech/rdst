@@ -64,6 +64,11 @@ export interface Change {
 interface AreaSpec {
   minutes: number
   entries: string[]
+  /**
+   * Entries mounted across the app, such as the root layout or a dialog any
+   * page opens: theirs when they change, not the code they render.
+   */
+  shared_entries?: string[]
 }
 
 function readIfExists(path: string) {
@@ -73,6 +78,8 @@ function readIfExists(path: string) {
 interface Contract {
   budget: { areas: number; max_areas?: number; mission_minutes?: number }
   smoke: string[]
+  /** What a dependency or entry-point change runs: the app starting and its shell. */
+  infra: string[]
   frontend: {
     tsconfig: string
     sources: string[]
@@ -462,6 +469,9 @@ export function select(
   const reasons = new Map<string, string[]>()
   const distance = new Map<string, number>()
   const broad: string[] = []
+  // What ships or starts the app changed: every page depends on it, but a
+  // failure shows as the app not starting, which the infra areas test.
+  const infra: string[] = []
   const unknown: Selection['unknown'] = []
   const ignored: Selection['ignored'] = []
   // Changed files reaching each area, weighted: how much of the change is its.
@@ -559,7 +569,7 @@ export function select(
         manifests.push(verdict.runtime)
         const what = verdict.changed.slice(0, 6).join(', ')
         if (verdict.runtime)
-          broad.push(`${change.path}: changes what ships (${what})`)
+          infra.push(`${change.path}: changes what ships (${what})`)
         else {
           setAside.add(change.path)
           ignored.push({
@@ -631,7 +641,7 @@ export function select(
         reason: 'follows manifests that changed only metadata or test tooling',
       })
     } else {
-      broad.push(`${lockfile.path}: resolved dependency versions changed`)
+      infra.push(`${lockfile.path}: resolved dependency versions changed`)
     }
   }
 
@@ -681,7 +691,7 @@ export function select(
   for (const change of unowned) {
     // Nothing imports an entry point; every page starts from it.
     if (roots.has(canonical(change.path))) {
-      broad.push(`${change.path}: the app's entry point`)
+      infra.push(`${change.path}: the app's entry point`)
       continue
     }
     const nearest = nearestOwners(
@@ -778,7 +788,8 @@ export function select(
   )
   let status: Status = 'none'
   if (unknown.length > 0) status = 'unknown'
-  else if (broad.length > 0 || affected.length > budget) status = 'broad'
+  else if (broad.length > 0 || infra.length > 0 || affected.length > budget)
+    status = 'broad'
   else if (affected.length > 0) status = 'targeted'
 
   // Owners are obligations, not candidates: they run whatever the ranking
@@ -792,12 +803,15 @@ export function select(
     // A broad change (shared infrastructure, build configuration, what ships)
     // tops up with the smoke set; otherwise it stands in only when no area was
     // reached.
+    // Infrastructure changes run the infra areas first.
     const fill =
-      affected.length === 0
-        ? contract.smoke
-        : broad.length > 0
-          ? [...affected, ...contract.smoke]
-          : affected
+      broad.length === 0 && infra.length > 0
+        ? [...contract.infra, ...affected]
+        : affected.length === 0
+          ? contract.smoke
+          : broad.length > 0
+            ? [...affected, ...contract.smoke]
+            : affected
     for (const area of fill) {
       if (recommended.length >= budget) break
       if (!recommended.includes(area)) recommended.push(area)
@@ -820,7 +834,7 @@ export function select(
       (a) => !recommended.includes(a)
     ),
     reasons: Object.fromEntries(reasons),
-    broad_reasons: broad,
+    broad_reasons: [...broad, ...infra],
     unknown,
     ignored,
     estimated_minutes: recommended.reduce(
@@ -837,6 +851,15 @@ export function select(
 
 // An area's entry page stands for its areas wherever no capability owns it.
 const pages = new Map<string, Capability>()
+const sharedEntries = new Set(
+  Object.values(contract.areas).flatMap((spec) => spec.shared_entries ?? [])
+)
+
+/** The area entry page a walk reaching `file` belongs to, if it claims it. */
+function claimingPage(file: string): Capability | undefined {
+  return sharedEntries.has(file) ? undefined : pageOf(file)
+}
+
 function pageOf(file: string): Capability | undefined {
   if (!pages.size) {
     for (const [area, spec] of Object.entries(contract.areas)) {
@@ -922,13 +945,13 @@ export function nearestOwners(
   const seeds = new Map<Capability, { via: string; seeds: Set<string> }>()
   const self = canonical(origin)
   for (const [file, chain] of reached ?? []) {
-    const capability = ownerOf(file) ?? pageOf(file)
+    const capability = ownerOf(file) ?? claimingPage(file)
     if (!capability || file === self) continue
     const between = chain
       .slice(1, -1)
       .map((step) => canonical(step.split('::')[0]))
       .filter((f) => f !== self && f !== file)
-    if (between.some((f) => ownerOf(f) ?? pageOf(f))) continue
+    if (between.some((f) => ownerOf(f) ?? claimingPage(f))) continue
     const use = seeds.get(capability) ?? { via: file, seeds: new Set() }
     use.seeds.add(chain[0])
     seeds.set(capability, use)
@@ -1154,10 +1177,20 @@ export function checkContract(
       if (!existsSync(join(repoRoot, entry)))
         problems.push(`${area}: entry ${entry} does not exist`)
     }
+    for (const entry of spec.shared_entries ?? []) {
+      if (!spec.entries.includes(entry))
+        problems.push(
+          `${area}: shared entry ${entry} is not one of its entries`
+        )
+    }
   }
   for (const area of contract.smoke) {
     if (!(area in contract.areas))
       problems.push(`smoke area ${area} is not an area`)
+  }
+  for (const area of contract.infra) {
+    if (!(area in contract.areas))
+      problems.push(`infra area ${area} is not an area`)
   }
   const owned = new Set(Object.values(contract.areas).flatMap((a) => a.entries))
   const routesDir = join(repoRoot, contract.frontend.routes)
