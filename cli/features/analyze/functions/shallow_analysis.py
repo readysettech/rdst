@@ -47,6 +47,101 @@ def estimate_cost(tokens_in: int, tokens_out: int, model: str = "default") -> fl
     return cost_in + cost_out
 
 
+SHALLOW_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "shallow_query_analysis",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "performance_assessment": {
+                    "type": "object",
+                    "properties": {
+                        "overall_rating": {"type": "string", "enum": ["excellent", "good", "fair", "poor", "critical"]},
+                        "risk_score": {"type": "number"},
+                        "primary_concerns": {"type": "array", "items": {"type": "string"}}
+                    },
+                    "required": ["overall_rating", "risk_score", "primary_concerns"],
+                    "additionalProperties": False
+                },
+                "structural_analysis": {
+                    "type": "object",
+                    "properties": {
+                        "has_select_star": {"type": "boolean"},
+                        "has_limit": {"type": "boolean"},
+                        "has_order_by": {"type": "boolean"},
+                        "uses_explicit_joins": {"type": "boolean"},
+                        "subquery_count": {"type": "number"},
+                        "potential_bottlenecks": {"type": "array", "items": {"type": "string"}}
+                    },
+                    "required": ["has_select_star", "has_limit", "has_order_by", "uses_explicit_joins", "subquery_count", "potential_bottlenecks"],
+                    "additionalProperties": False
+                },
+                "index_coverage": {
+                    "type": "object",
+                    "properties": {
+                        "where_columns_indexed": {"type": "boolean"},
+                        "join_columns_indexed": {"type": "boolean"},
+                        "order_by_columns_indexed": {"type": "boolean"},
+                        "missing_indexes": {"type": "array", "items": {"type": "string"}}
+                    },
+                    "required": ["where_columns_indexed", "join_columns_indexed", "order_by_columns_indexed", "missing_indexes"],
+                    "additionalProperties": False
+                },
+                "optimization_opportunities": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "priority": {"type": "string", "enum": ["high", "medium", "low"]},
+                            "description": {"type": "string"},
+                            "type": {"type": "string"}
+                        },
+                        "required": ["priority", "description", "type"],
+                        "additionalProperties": False
+                    }
+                },
+                "rewrite_suggestions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "rewritten_sql": {"type": "string"},
+                            "explanation": {"type": "string"},
+                            "expected_improvement": {"type": "string"},
+                            "priority": {"type": "string", "enum": ["high", "medium", "low"]},
+                            "optimization_type": {"type": "string"}
+                        },
+                        "required": ["rewritten_sql", "explanation", "expected_improvement", "priority", "optimization_type"],
+                        "additionalProperties": False
+                    }
+                },
+                "index_recommendations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "sql": {"type": "string"},
+                            "table": {"type": "string"},
+                            "columns": {"type": "array", "items": {"type": "string"}},
+                            "index_type": {"type": "string"},
+                            "rationale": {"type": "string"},
+                            "estimated_impact": {"type": "string", "enum": ["high", "medium", "low"]}
+                        },
+                        "required": ["sql", "table", "columns", "index_type", "rationale", "estimated_impact"],
+                        "additionalProperties": False
+                    }
+                }
+            },
+            "required": ["performance_assessment", "structural_analysis", "index_coverage", "optimization_opportunities", "rewrite_suggestions", "index_recommendations"],
+            "additionalProperties": False
+        }
+    }
+}
+SHALLOW_SYSTEM_PROMPT = "You are a database performance expert. Analyze the query for potential performance issues based on structure and schema. Respond with valid JSON only."
+
+
 def analyze_shallow_with_llm(
     parameterized_sql: str,
     original_sql: str = None,
@@ -100,109 +195,18 @@ def analyze_shallow_with_llm(
         llm_manager = LLMManager()
 
         # Define JSON schema for structured output
-        json_schema = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "shallow_query_analysis",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "performance_assessment": {
-                            "type": "object",
-                            "properties": {
-                                "overall_rating": {"type": "string", "enum": ["excellent", "good", "fair", "poor", "critical"]},
-                                "risk_score": {"type": "number"},
-                                "primary_concerns": {"type": "array", "items": {"type": "string"}}
-                            },
-                            "required": ["overall_rating", "risk_score", "primary_concerns"],
-                            "additionalProperties": False
-                        },
-                        "structural_analysis": {
-                            "type": "object",
-                            "properties": {
-                                "has_select_star": {"type": "boolean"},
-                                "has_limit": {"type": "boolean"},
-                                "has_order_by": {"type": "boolean"},
-                                "uses_explicit_joins": {"type": "boolean"},
-                                "subquery_count": {"type": "number"},
-                                "potential_bottlenecks": {"type": "array", "items": {"type": "string"}}
-                            },
-                            "required": ["has_select_star", "has_limit", "has_order_by", "uses_explicit_joins", "subquery_count", "potential_bottlenecks"],
-                            "additionalProperties": False
-                        },
-                        "index_coverage": {
-                            "type": "object",
-                            "properties": {
-                                "where_columns_indexed": {"type": "boolean"},
-                                "join_columns_indexed": {"type": "boolean"},
-                                "order_by_columns_indexed": {"type": "boolean"},
-                                "missing_indexes": {"type": "array", "items": {"type": "string"}}
-                            },
-                            "required": ["where_columns_indexed", "join_columns_indexed", "order_by_columns_indexed", "missing_indexes"],
-                            "additionalProperties": False
-                        },
-                        "optimization_opportunities": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "priority": {"type": "string", "enum": ["high", "medium", "low"]},
-                                    "description": {"type": "string"},
-                                    "type": {"type": "string"}
-                                },
-                                "required": ["priority", "description", "type"],
-                                "additionalProperties": False
-                            }
-                        },
-                        "rewrite_suggestions": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "rewritten_sql": {"type": "string"},
-                                    "explanation": {"type": "string"},
-                                    "expected_improvement": {"type": "string"},
-                                    "priority": {"type": "string", "enum": ["high", "medium", "low"]},
-                                    "optimization_type": {"type": "string"}
-                                },
-                                "required": ["rewritten_sql", "explanation", "expected_improvement", "priority", "optimization_type"],
-                                "additionalProperties": False
-                            }
-                        },
-                        "index_recommendations": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "sql": {"type": "string"},
-                                    "table": {"type": "string"},
-                                    "columns": {"type": "array", "items": {"type": "string"}},
-                                    "index_type": {"type": "string"},
-                                    "rationale": {"type": "string"},
-                                    "estimated_impact": {"type": "string", "enum": ["high", "medium", "low"]}
-                                },
-                                "required": ["sql", "table", "columns", "index_type", "rationale", "estimated_impact"],
-                                "additionalProperties": False
-                            }
-                        }
-                    },
-                    "required": ["performance_assessment", "structural_analysis", "index_coverage", "optimization_opportunities", "rewrite_suggestions", "index_recommendations"],
-                    "additionalProperties": False
-                }
-            }
-        }
+        json_schema = SHALLOW_RESPONSE_FORMAT
 
         # Determine if JSON mode is supported
         provider = kwargs.get('provider', 'claude').lower()
-        use_json_mode = provider in ['claude', 'openai'] and os.getenv("RDST_USE_JSON_MODE", "true").lower() == "true"
+        use_json_mode = provider in ["claude", "openai", "readyset"] and os.getenv("RDST_USE_JSON_MODE", "true").lower() == "true"
 
         extra_params = {}
         if use_json_mode:
             extra_params["response_format"] = json_schema
 
         # Estimate input tokens
-        system_msg = "You are a database performance expert. Analyze the query for potential performance issues based on structure and schema. Respond with valid JSON only."
+        system_msg = SHALLOW_SYSTEM_PROMPT
         if cache_schema:
             system_msg = schema_context_prefix(cache_schema, database_engine) + system_msg
             extra_params["_rdst_schema_cache_key"] = schema_cache_key(

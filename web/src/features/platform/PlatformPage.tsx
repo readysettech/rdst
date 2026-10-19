@@ -114,8 +114,8 @@ function DemoTrialInvite() {
           </Pressable>
         </div>
         <Text level="body-small" className="mt-2 text-content-layout-2">
-          Sign in for the included AI, then connect your database to test how
-          much Readyset caching helps your queries.
+          Connect your database to test how much Readyset caching helps your
+          queries. Sign in to keep your history and get alerts by email.
         </Text>
         <div className="mt-4 flex flex-col gap-2">
           <Button

@@ -706,10 +706,11 @@ class TestInteractiveServiceCallLLMSync:
         assert result == "LLM response"
         mock_llm_manager.query.assert_called_once()
 
-        # Verify system messages were combined
+        # Stored system messages become context; the instructions are the fixed prompt.
         call_kwargs = mock_llm_manager.query.call_args.kwargs
-        assert "System prompt 1" in call_kwargs["system_message"]
-        assert "System prompt 2" in call_kwargs["system_message"]
+        assert call_kwargs["system_message"] == _get_interactive_mode_prompt()
+        assert call_kwargs["context"] == "System prompt 1\n\nSystem prompt 2"
+        assert call_kwargs["purpose"] == "interactive_answer"
 
     def test_call_llm_removes_temp_message(
         self, service, mock_llm_manager, mock_conversation

@@ -57,7 +57,7 @@ describe('AccountLoginDialog', () => {
       error: null,
       error_description: null,
     })
-    vi.mocked(sendAccountMagicLink).mockResolvedValue(undefined)
+    vi.mocked(sendAccountMagicLink).mockResolvedValue('sent')
     vi.mocked(startAccountGoogleOAuth).mockResolvedValue(undefined)
     vi.mocked(completeAccountRedirect).mockResolvedValue({
       state: 'success',
@@ -220,7 +220,7 @@ describe('AccountLoginDialog', () => {
     ).toContain('bg-surface-primary-solid')
     expect(
       screen.getByText(
-        'Signing in turns on AI monitoring and the free AI included with a Readyset account for analyses, checks and Ask.'
+        "Signing in keeps your monitoring history and AI checks running, and sends alerts by email. Everything you've set up carries over."
       )
     ).toBeTruthy()
   })

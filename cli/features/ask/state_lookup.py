@@ -537,6 +537,9 @@ def accepts_state_count(expected, rows):
 
 SYSTEM = "Classify a requested categorical state and explicit non-null requirements from effective_question. Interpret any language and ordinary typos. Use parsed structural facts to identify a possible state lookup, not to infer a missing request. Do not generate SQL or select a database code. The host independently checks an exact stored label and the affected row population."
 
+NUMERIC_TEXT_SYSTEM = SYSTEM.replace(
+    "explicit non-null requirements", "explicit original-predicate requirements"
+)
 
 CATALOG = [
     {
@@ -568,9 +571,7 @@ def route_state_lookup(q, sql, d, a, callback=None, *, structural_facts):
     facts = structural_facts
     catalog, system = CATALOG, SYSTEM
     if "numeric_text_predicate" in facts:
-        system = SYSTEM.replace(
-            "explicit non-null requirements", "explicit original-predicate requirements"
-        )
+        system = NUMERIC_TEXT_SYSTEM
         catalog = [
             {
                 **item,

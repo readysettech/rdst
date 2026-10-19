@@ -77,7 +77,7 @@ def test_reenable_requests_collection_and_wakes_queue(tmp_path, monkeypatch):
     app.include_router(routes.router, prefix="/api/monitor")
     app.state.monitor_scheduler = scheduler
     app.state.analyze_queue = queue
-    with TestClient(app) as http:
+    with TestClient(app, client=("127.0.0.1", 50000)) as http:
         response = http.put("/api/monitor/targets/db/settings", json={"enabled": True, "deep_analysis": True})
     assert response.status_code == 200
     assert scheduler.next_reading_at("db") == 10000

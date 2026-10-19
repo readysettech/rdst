@@ -1,6 +1,7 @@
 import type { components as apiComponents } from './api.generated'
 import { api as typedClient } from './client'
 import { extractDetail, throwIfApiError, throwIfNotOk } from './httpError'
+import { setInstallationScope } from './installationScope'
 
 export type AnalyzeRequest = apiComponents['schemas']['AnalyzeRequest']
 
@@ -59,7 +60,9 @@ export async function fetchStatus(): Promise<StatusResponse> {
   if (!response.ok) {
     throw new Error(`Failed to fetch status: ${response.status}`)
   }
-  return response.json()
+  const status = (await response.json()) as StatusResponse
+  setInstallationScope(status.installation_id)
+  return status
 }
 
 export type TargetSummary = apiComponents['schemas']['TargetSummaryResponse']

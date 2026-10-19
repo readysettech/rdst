@@ -3,7 +3,10 @@ import { defineConfig } from 'tsup'
 
 // The main process uses the sidecar's telemetry config even when it cannot start. Builds
 // outside the monorepo layout (the public mirror) have no sidecar source and ship without it.
-const backendConfigUrl = new URL('../../../rdst/shared/telemetry_manager.py', import.meta.url)
+const backendConfigUrl = new URL(
+  '../../../rdst/shared/telemetry_manager.py',
+  import.meta.url
+)
 const backendConfig = fs.existsSync(backendConfigUrl)
   ? fs.readFileSync(backendConfigUrl, 'utf8')
   : null
@@ -17,11 +20,15 @@ const configValue = (source: string, name: string): string => {
 }
 const telemetryConfig = backendConfig
   ? {
-      key: configValue(backendConfig, 'POSTHOG_API_KEY'),
+      key: configValue(backendConfig, 'PRODUCTION_POSTHOG_KEY'),
+      previewKey: configValue(backendConfig, 'DEFAULT_PREVIEW_POSTHOG_KEY'),
       host: configValue(backendConfig, 'POSTHOG_HOST'),
-      internalProbeUrl: configValue(backendConfig, 'INTERNAL_INSTALL_PROBE_URL'),
+      internalProbeUrl: configValue(
+        backendConfig,
+        'INTERNAL_INSTALL_PROBE_URL'
+      ),
     }
-  : { key: '', host: '', internalProbeUrl: '' }
+  : { key: '', host: '', internalProbeUrl: '', previewKey: '' }
 
 export default defineConfig([
   {

@@ -7,7 +7,8 @@ key, and the `internal_user` tag the PostHog destinations filter on).
 Properties never carry SQL, hostnames, database or target names, file paths or emails. A
 database is named by `database_id`: a prefix of its salted monitoring fingerprint. Free text
 (error messages) passes through `scrub` first. TELEMETRY.md in
-docs/plans/continuous_analysis lists every event.
+docs/plans/continuous_analysis lists every event; docs/ONBOARDING_TELEMETRY.md lists the
+onboarding and agent connect events.
 """
 
 from __future__ import annotations
@@ -151,18 +152,60 @@ def _telemetry() -> Any:
     return telemetry
 
 
-def identity(device_id: str) -> dict[str, Any]:
-    """The local person identity. Email is used only to set the PostHog profile."""
+def _signed_in_metadata() -> dict[str, Any]:
+    """Account metadata for a signed-in (not anonymous) session, else empty."""
     from shared import account_session
 
-    metadata = account_session.account_metadata() if account_session.is_signed_in_locally() else {}
-    user_id = str(metadata.get("user_id") or "")
+    if not account_session.is_signed_in_locally() or account_session.is_anonymous_session():
+        return {}
+    return account_session.account_metadata()
+
+
+def internal_user(email: str | None = None) -> bool:
+    """Readyset's own people and builds, as the Key Service should treat their events.
+
+    The company-network probe counts once it has answered; this never waits for it.
+    """
+    from shared.telemetry_manager import internal_install
+
+    try:
+        probed = bool(getattr(_telemetry(), "_internal_user_result", None))
+    except Exception:
+        probed = False
+    if email is None:
+        try:
+            email = str(_signed_in_metadata().get("email") or "")
+        except Exception:
+            email = ""
+    return probed or internal_install(email)
+
+
+def identity(device_id: str) -> dict[str, Any]:
+    """The local person identity. Email is used only to set the PostHog profile.
+
+    Signed in, the person is the account's analytics id (``rdst_account_<hmac>``), the same
+    id the Key Service reports under. An anonymous session stays a device-only person until
+    it signs in.
+    """
+    metadata = _signed_in_metadata()
+    person_id = str(metadata.get("analytics_account_id") or metadata.get("user_id") or "")
     return {
-        "distinct_id": user_id or device_id,
+        "distinct_id": person_id or device_id,
         "device_id": device_id,
-        "account_kind": "signed_in" if user_id else "device_only",
-        "email": str(metadata.get("email") or "") if user_id else "",
+        "account_kind": "signed_in" if person_id else "device_only",
+        "email": str(metadata.get("email") or "") if person_id else "",
     }
+
+
+def legacy_person_id() -> str:
+    """The raw user id earlier builds used as the signed-in person, when it differs."""
+    try:
+        metadata = _signed_in_metadata()
+    except Exception:
+        return ""
+    user_id = str(metadata.get("user_id") or "")
+    account_id = str(metadata.get("analytics_account_id") or "")
+    return user_id if user_id and account_id and user_id != account_id else ""
 
 
 def enabled() -> bool:
@@ -406,11 +449,14 @@ ADMIN_USER_PATH = "/admin#/users/{user_id}"
 
 
 def account_kind() -> str:
-    """``signed_in`` with a Readyset account, else ``device_only``."""
+    """``signed_in`` with a Readyset account, ``anonymous`` with an anonymous session, else
+    ``device_only``."""
     try:
         from shared import account_session
 
-        return "signed_in" if account_session.is_signed_in_locally() else "device_only"
+        if not account_session.is_signed_in_locally():
+            return "device_only"
+        return "anonymous" if account_session.is_anonymous_session() else "signed_in"
     except Exception:
         return "device_only"
 
@@ -607,6 +653,192 @@ def _report_generated(target: str, trigger: str, ok: bool, duration_s: float,
         props["error_class"] = error_class
     capture("report_generated", props)
 
+
+# Onboarding: adding a database, turning on monitoring, and the account
+
+VIAS = frozenset({"url", "fields", "provider", "agent", "cli", "mcp"})
+ERROR_CLASSES = ("auth_failed", "host_unreachable", "timeout", "tls", "db_not_found",
+                 "permission_denied", "ssh_failed", "unknown")
+MONITORING_ENABLE_FAILURES = frozenset({"unavailable", "local_limit", "invalid", "unknown"})
+SIGNIN_PROMPT_STATES = frozenset({"none", "soft", "budget", "required"})
+_CONNECTION_ERRORS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("ssh_failed", ("ssh", "jump host", "bastion", "tunnel")),
+    ("tls", ("tls", "ssl", "certificate", "x509")),
+    ("auth_failed", ("password", "authentication", "auth_failed", "access denied for user",
+                     "login failed", "28p01", "1045")),
+    ("db_not_found", ("does not exist", "unknown database", "3d000", "1049",
+                      "database_not_found")),
+    ("permission_denied", ("permission denied", "insufficient privilege", "not authorized",
+                           "42501", "1044", "1142")),
+    ("timeout", ("timed out", "timeout")),
+    ("host_unreachable", ("could not connect", "connection refused", "unreachable",
+                          "could not translate host", "name or service not known",
+                          "nodename nor servname", "no route to host", "can't connect",
+                          "getaddrinfo", "connection_failed", "network")),
+)
+
+
+def normalize_via(value: Any) -> str | None:
+    """The add-database path from the X-RDST-Via header, when it's a known one."""
+    via = str(value or "").strip().lower()
+    return via if via in VIAS else None
+
+
+def connection_error_class(*parts: Any) -> str:
+    """One of ERROR_CLASSES for a failed connection, from its code, category and message.
+
+    Only the class leaves the machine, never the text it came from.
+    """
+    text = " ".join(str(part or "") for part in parts).lower()
+    for label, needles in _CONNECTION_ERRORS:
+        if any(needle in text for needle in needles):
+            return label
+    return "unknown"
+
+
+def _engine(value: Any) -> str:
+    engine = str(value or "").strip().lower()
+    if engine in {"postgres", "postgresql", "pg"}:
+        return "postgresql"
+    return engine if engine in {"mysql", "mariadb"} else "unknown"
+
+
+def database_add_test_completed(engine: Any, *, via: Any, ok: bool,
+                                error_class: str | None = None) -> None:
+    if not enabled():
+        return
+    capture("database_add_test_completed", {
+        "engine": _engine(engine), "via": normalize_via(via), "ok": bool(ok),
+        "error_class": None if ok else (error_class if error_class in ERROR_CLASSES
+                                        else "unknown"),
+    })
+
+
+def database_add_saved(engine: Any, *, via: Any, is_first_database: bool) -> None:
+    if not enabled():
+        return
+    capture("database_add_saved", {"engine": _engine(engine), "via": normalize_via(via),
+                                   "is_first_database": bool(is_first_database)})
+
+
+def database_add_failed(engine: Any, *, via: Any, error_class: str) -> None:
+    if not enabled():
+        return
+    capture("database_add_failed", {
+        "engine": _engine(engine), "via": normalize_via(via),
+        "error_class": error_class if error_class in ERROR_CLASSES else "unknown",
+    })
+
+
+def monitoring_enable_failed(reason: str) -> None:
+    if not enabled():
+        return
+    capture("monitoring_enable_failed",
+            {"reason": reason if reason in MONITORING_ENABLE_FAILURES else "unknown"})
+
+
+def account_anonymous_created(*, trial_days: Any = None,
+                              machine_first_seen_at: Any = None) -> None:
+    """A new anonymous session; ``reinstall`` when this machine had used RDST before."""
+    if not enabled():
+        return
+    props: dict[str, Any] = {}
+    if isinstance(trial_days, int) and not isinstance(trial_days, bool):
+        props["trial_days"] = trial_days
+    if isinstance(machine_first_seen_at, (int, float)) and not isinstance(
+            machine_first_seen_at, bool) and machine_first_seen_at > 0:
+        props["machine_age_days"] = max(0, int((time.time() - machine_first_seen_at) // 86400))
+    capture("account_anonymous_created", props)
+
+
+def account_linked(*, from_anonymous: bool, days_since_first_seen: Any = None) -> None:
+    if not enabled():
+        return
+    days = days_since_first_seen if isinstance(days_since_first_seen, int) and not isinstance(
+        days_since_first_seen, bool) else None
+    capture("account_linked", {"from_anonymous": bool(from_anonymous),
+                               "days_since_first_seen": days})
+
+
+def signin_prompt_state(state: str) -> None:
+    """Send signin_prompt_state_changed when the sign-in prompt moves to a new state."""
+    if state not in SIGNIN_PROMPT_STATES:
+        return
+    with _state_lock:
+        if state_value("signin_prompt_state") == state:
+            return
+        previous = state_value("signin_prompt_state")
+        set_state_value("signin_prompt_state", state)
+    if previous is None and state == "none":
+        return
+    if not enabled():
+        return
+    capture("signin_prompt_state_changed", {"state": state})
+
+
+
+# Agent connect: a coding agent connecting to RDST and calling its MCP tools
+
+AGENT_CONNECT_STEPS = frozenset({"prompt_issued", "connected", "tool_called"})
+AGENT_ERROR_CLASSES = frozenset(ERROR_CLASSES) | {
+    "needs_setup", "invalid_arguments", "unknown_target", "tool_error",
+    "unexpected"}
+PREREQ_CHECKS = frozenset({
+    "pg_stat_statements_preload", "pg_stat_statements", "read_all_stats", "visibility_probe",
+    "performance_schema", "statement_consumers", "query_text_size", "statement_history"})
+# Distinct agent_connect_step keys kept for de-duplication before the set starts over.
+_AGENT_SEEN_LIMIT = 5000
+_agent_lock = threading.Lock()
+_agent_seen: set[tuple] = set()
+
+
+def agent_attempt_id(nonce: str) -> str:
+    """A stable, non-reversible id for one copied prompt, derived from its attempt nonce."""
+    return hashlib.sha256(f"rdst-agent-attempt-v1:{nonce}".encode()).hexdigest()[:16]
+
+
+def agent_connect_step(step: str, *, attempt_id: str | None, tool: str | None = None,
+                       ok: bool | None = None, error_class: str | None = None) -> None:
+    """One step of an agent connecting, at most once per (attempt_id, step, tool, ok)."""
+    if step not in AGENT_CONNECT_STEPS or not enabled():
+        return
+    key = (attempt_id, step, tool, ok)
+    with _agent_lock:
+        if key in _agent_seen:
+            return
+        if len(_agent_seen) >= _AGENT_SEEN_LIMIT:
+            _agent_seen.clear()
+        _agent_seen.add(key)
+    props: dict[str, Any] = {"step": step, "attempt_id": attempt_id, "ok": ok}
+    if tool is not None:
+        props["tool"] = tool if tool.startswith("rdst_") and len(tool) <= 40 else "other"
+    if ok is False:
+        props["error_class"] = error_class if error_class in AGENT_ERROR_CLASSES else "unknown"
+    capture("agent_connect_step", props)
+
+
+def database_add_prereq_result(engine: Any, *, check: str, ok: bool, via: Any,
+                               attempt_id: str | None = None, scope: str | None = None) -> None:
+    """One monitoring prerequisite's outcome, once per check and outcome for an attempt.
+
+    ``scope`` (the target's name) de-duplicates repeated checks of one database outside an
+    agent attempt; it never leaves the machine.
+    """
+    if not enabled():
+        return
+    check = check if check in PREREQ_CHECKS else "other"
+    key = ("prereq", attempt_id or scope, check, bool(ok))
+    with _agent_lock:
+        if key in _agent_seen:
+            return
+        if len(_agent_seen) >= _AGENT_SEEN_LIMIT:
+            _agent_seen.clear()
+        _agent_seen.add(key)
+    props: dict[str, Any] = {"engine": _engine(engine), "check": check, "ok": bool(ok),
+                             "via": normalize_via(via)}
+    if attempt_id:
+        props["attempt_id"] = attempt_id
+    capture("database_add_prereq_result", props)
 
 # Errors
 

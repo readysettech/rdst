@@ -7,6 +7,9 @@ const registerMock = vi.hoisted(() => vi.fn())
 const identifyMock = vi.hoisted(() => vi.fn())
 const resetMock = vi.hoisted(() => vi.fn())
 const fetchMock = vi.hoisted(() => vi.fn())
+const setConfigMock = vi.hoisted(() => vi.fn())
+const hasOptedOutMock = vi.hoisted(() => vi.fn(() => false))
+const optInMock = vi.hoisted(() => vi.fn())
 
 vi.mock('posthog-js', () => ({
   default: {
@@ -18,6 +21,10 @@ vi.mock('posthog-js', () => ({
     capture: captureMock,
     opt_out_capturing: vi.fn(),
     stopSessionRecording: vi.fn(),
+    has_opted_out_capturing: hasOptedOutMock,
+    opt_in_capturing: optInMock,
+    startSessionRecording: vi.fn(),
+    set_config: setConfigMock,
   },
 }))
 
@@ -47,6 +54,7 @@ describe('analytics', () => {
     registerMock.mockClear()
     identifyMock.mockClear()
     resetMock.mockClear()
+    setConfigMock.mockClear()
     vi.stubGlobal('fetch', fetchMock)
     fetchMock.mockResolvedValue({
       ok: true,
@@ -72,12 +80,122 @@ describe('analytics', () => {
     expect(captureMock).not.toHaveBeenCalled()
   })
 
+  it('sends events from before setup once analytics is on', async () => {
+    vi.stubEnv('VITE_POSTHOG_KEY', 'test-key')
+    const { initAnalytics, finishAnalyticsSetup, trackEvent, REPLAY_PRIVACY } =
+      await import('./analytics')
+    trackEvent('first_screen_rendered', { gated: false })
+    await initAnalytics()
+    expect(captureMock).not.toHaveBeenCalledWith(
+      'first_screen_rendered',
+      expect.anything()
+    )
+    finishAnalyticsSetup()
+    expect(setConfigMock).toHaveBeenCalledWith({
+      session_recording: REPLAY_PRIVACY,
+    })
+    expect(captureMock).toHaveBeenCalledWith('first_screen_rendered', {
+      gated: false,
+    })
+  })
+
+  it('drops events from before setup when analytics stays off', async () => {
+    const { initAnalytics, finishAnalyticsSetup, trackEvent } = await import(
+      './analytics'
+    )
+    trackEvent('first_screen_rendered', { gated: true })
+    await initAnalytics(false)
+    finishAnalyticsSetup()
+    trackEvent('inbox_first_viewed')
+    expect(captureMock).not.toHaveBeenCalled()
+    expect(setConfigMock).not.toHaveBeenCalled()
+  })
+
+  it('reports a keyed event once per app session', async () => {
+    vi.stubEnv('VITE_POSTHOG_KEY', 'test-key')
+    const { initAnalytics, trackEventOnce } = await import('./analytics')
+    await initAnalytics()
+    trackEventOnce('soft', 'signin_prompt_shown', { state: 'soft' })
+    trackEventOnce('soft', 'signin_prompt_shown', { state: 'soft' })
+    expect(
+      captureMock.mock.calls.filter(([name]) => name === 'signin_prompt_shown')
+    ).toHaveLength(1)
+  })
+
   it('stays a no-op when no PostHog key is configured', async () => {
     const { initAnalytics, trackEvent } = await import('./analytics')
     await initAnalytics()
     trackEvent('load_test_run')
     expect(initMock).not.toHaveBeenCalled()
     expect(captureMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps a production key silent unless the server reports to production', async () => {
+    const { PRODUCTION_POSTHOG_KEY } = await import('./analytics')
+    vi.stubEnv('VITE_POSTHOG_KEY', PRODUCTION_POSTHOG_KEY)
+    for (const project of [undefined, 'preview', 'none']) {
+      vi.resetModules()
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          telemetry_enabled: true,
+          distinct_id: 'device-1',
+          device_id: 'device-1',
+          account_kind: 'device_only',
+          email: '',
+          internal_user: false,
+          posthog_project: project,
+        }),
+      })
+      const { initAnalytics } = await import('./analytics')
+      await initAnalytics()
+    }
+    expect(initMock).not.toHaveBeenCalled()
+
+    vi.resetModules()
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        telemetry_enabled: true,
+        distinct_id: 'device-1',
+        device_id: 'device-1',
+        account_kind: 'device_only',
+        email: '',
+        internal_user: false,
+        posthog_project: 'production',
+      }),
+    })
+    const { initAnalytics } = await import('./analytics')
+    await initAnalytics()
+    expect(initMock).toHaveBeenCalledWith(
+      PRODUCTION_POSTHOG_KEY,
+      expect.anything()
+    )
+  })
+
+  it("sends Readyset's own people to the preview project the server names", async () => {
+    const { PRODUCTION_POSTHOG_KEY } = await import('./analytics')
+    vi.stubEnv('VITE_POSTHOG_KEY', PRODUCTION_POSTHOG_KEY)
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        telemetry_enabled: true,
+        distinct_id: 'account-1',
+        device_id: 'device-1',
+        account_kind: 'signed_in',
+        email: 'employee@readyset.io',
+        internal_user: true,
+        posthog_project: 'preview',
+        posthog_key: 'phc_preview',
+      }),
+    })
+    const { initAnalytics } = await import('./analytics')
+    await initAnalytics()
+    expect(initMock).toHaveBeenCalledWith('phc_preview', expect.anything())
+    expect(initMock).not.toHaveBeenCalledWith(
+      PRODUCTION_POSTHOG_KEY,
+      expect.anything()
+    )
   })
 
   it('honors the server-side telemetry opt-out', async () => {
@@ -88,6 +206,14 @@ describe('analytics', () => {
 
     expect(initMock).not.toHaveBeenCalled()
     expect(captureMock).not.toHaveBeenCalled()
+  })
+
+  it('opts back in when an earlier ineligible session left an opt-out behind', async () => {
+    vi.stubEnv('VITE_POSTHOG_KEY', 'test-key')
+    hasOptedOutMock.mockReturnValueOnce(true)
+    const { initAnalytics } = await import('./analytics')
+    await initAnalytics()
+    expect(optInMock).toHaveBeenCalledTimes(1)
   })
 
   it('captures a named event with its properties once initialized', async () => {
@@ -527,4 +653,41 @@ it.each([
   unmount()
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
+})
+
+describe('session replay privacy', () => {
+  it('masks SQL and code whole, and known names wherever they appear', async () => {
+    const { maskInReplays, maskReplayText } = await import('./analytics')
+    maskInReplays(['orders_prod', 'db.internal.example', null, 'ab'])
+    const code = document.createElement('pre')
+    code.textContent = 'SELECT 1'
+    expect(maskReplayText('SELECT * FROM t', code)).toBe('****** * **** *')
+    const plain = document.createElement('span')
+    expect(
+      maskReplayText('Monitor orders_prod on db.internal.example', plain)
+    ).toBe('Monitor *********** on *******************')
+    // Too short to mask safely.
+    expect(maskReplayText('ab', plain)).toBe('ab')
+  })
+
+  it('keeps only the method, status and timing of network requests', async () => {
+    const { REPLAY_PRIVACY } = await import('./analytics')
+    const masked = REPLAY_PRIVACY.maskCapturedNetworkRequestFn({
+      name: 'http://127.0.0.1/api/configure/targets?name=orders',
+      method: 'POST',
+      status: 200,
+      requestBody: '{"password":"secret"}',
+      responseBody: '{"host":"db"}',
+      requestHeaders: { 'X-RDST-Via': 'url' },
+    } as never)
+    expect(masked).toMatchObject({
+      name: 'http://127.0.0.1/api/configure/targets',
+      method: 'POST',
+      status: 200,
+      requestBody: null,
+      responseBody: null,
+      requestHeaders: {},
+    })
+    expect(REPLAY_PRIVACY.maskAllInputs).toBe(true)
+  })
 })

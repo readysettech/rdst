@@ -1,16 +1,17 @@
-// The add-database dialog opens on any page through `?add=1`, or `?add=<provider>` for
-// the provider import on that source. Pages that list databases hear about additions
-// through `onDatabasesChanged`.
+// The add-database dialog opens on any page through `?add=1`, `?add=agent` for the coding
+// agent path, or `?add=<provider>` for the provider import on that source. Pages that
+// list databases hear about additions through `onDatabasesChanged`.
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { useCallback } from 'react'
 import { type AddTab, parseAddTab } from './addTabs'
 
-/** What the dialog shows: the connection form, or one provider's import. */
-export type AddRequest = 'form' | AddTab
+/** What the dialog shows: the connection form, the agent path, or one provider's import. */
+export type AddRequest = 'form' | 'agent' | AddTab
 
 /** Parse-only: `1` opens the form; the router reads it back as a number. */
 export function parseAddRequest(value: unknown): AddRequest | null {
   if (value === 1 || value === '1') return 'form'
+  if (value === 'agent') return 'agent'
   return parseAddTab(value) ?? null
 }
 

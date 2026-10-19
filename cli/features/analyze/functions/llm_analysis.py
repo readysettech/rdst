@@ -85,6 +85,130 @@ from features.analyze.prompts import (
 )
 
 
+ANALYZE_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "query_performance_analysis",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "performance_assessment": {
+                    "type": "object",
+                    "properties": {
+                        "overall_rating": {
+                            "type": "string",
+                            "enum": ["excellent", "good", "fair", "poor"],
+                        },
+                        "efficiency_score": {"type": "number"},
+                        "primary_concerns": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "required": [
+                        "overall_rating",
+                        "efficiency_score",
+                        "primary_concerns",
+                    ],
+                    "additionalProperties": False,
+                },
+                "execution_analysis": {
+                    "type": "object",
+                    "properties": {
+                        "bottlenecks": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "scan_efficiency": {"type": "string"},
+                    },
+                    "required": ["bottlenecks", "scan_efficiency"],
+                    "additionalProperties": False,
+                },
+                "optimization_opportunities": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "priority": {
+                                "type": "string",
+                                "enum": ["high", "medium", "low"],
+                            },
+                            "description": {"type": "string"},
+                            "type": {"type": "string"},
+                        },
+                        "required": ["priority", "description", "type"],
+                        "additionalProperties": False,
+                    },
+                },
+                "rewrite_suggestions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "rewritten_sql": {"type": "string"},
+                            "explanation": {"type": "string"},
+                            "expected_improvement": {"type": "string"},
+                            "priority": {
+                                "type": "string",
+                                "enum": ["high", "medium", "low"],
+                            },
+                            "optimization_type": {"type": "string"},
+                        },
+                        "required": [
+                            "rewritten_sql",
+                            "explanation",
+                            "expected_improvement",
+                            "priority",
+                            "optimization_type",
+                        ],
+                        "additionalProperties": False,
+                    },
+                },
+                "index_recommendations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "sql": {"type": "string"},
+                            "table": {"type": "string"},
+                            "columns": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "index_type": {"type": "string"},
+                            "rationale": {"type": "string"},
+                            "estimated_impact": {
+                                "type": "string",
+                                "enum": ["high", "medium", "low"],
+                            },
+                        },
+                        "required": [
+                            "sql",
+                            "table",
+                            "columns",
+                            "index_type",
+                            "rationale",
+                            "estimated_impact",
+                        ],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": [
+                "performance_assessment",
+                "execution_analysis",
+                "optimization_opportunities",
+                "rewrite_suggestions",
+                "index_recommendations",
+            ],
+            "additionalProperties": False,
+        },
+    },
+}
+ANALYZE_SYSTEM_PROMPT = "You are a database performance expert. Respond with valid JSON only. Be proactive in suggesting query rewrites when you see opportunities like: old-style comma JOINs, missing LIMIT on ORDER BY, inefficient subqueries, or non-optimal WHERE clause ordering."
+
+
 def analyze_with_llm(
     explain_results: Dict[str, Any],
     query_metrics: Dict[str, Any],
@@ -627,127 +751,7 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
 """
 
         # Define JSON schema for structured output (Anthropic/OpenAI native JSON mode)
-        json_schema = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "query_performance_analysis",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "performance_assessment": {
-                            "type": "object",
-                            "properties": {
-                                "overall_rating": {
-                                    "type": "string",
-                                    "enum": ["excellent", "good", "fair", "poor"],
-                                },
-                                "efficiency_score": {"type": "number"},
-                                "primary_concerns": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                },
-                            },
-                            "required": [
-                                "overall_rating",
-                                "efficiency_score",
-                                "primary_concerns",
-                            ],
-                            "additionalProperties": False,
-                        },
-                        "execution_analysis": {
-                            "type": "object",
-                            "properties": {
-                                "bottlenecks": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                },
-                                "scan_efficiency": {"type": "string"},
-                            },
-                            "required": ["bottlenecks", "scan_efficiency"],
-                            "additionalProperties": False,
-                        },
-                        "optimization_opportunities": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "priority": {
-                                        "type": "string",
-                                        "enum": ["high", "medium", "low"],
-                                    },
-                                    "description": {"type": "string"},
-                                    "type": {"type": "string"},
-                                },
-                                "required": ["priority", "description", "type"],
-                                "additionalProperties": False,
-                            },
-                        },
-                        "rewrite_suggestions": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "rewritten_sql": {"type": "string"},
-                                    "explanation": {"type": "string"},
-                                    "expected_improvement": {"type": "string"},
-                                    "priority": {
-                                        "type": "string",
-                                        "enum": ["high", "medium", "low"],
-                                    },
-                                    "optimization_type": {"type": "string"},
-                                },
-                                "required": [
-                                    "rewritten_sql",
-                                    "explanation",
-                                    "expected_improvement",
-                                    "priority",
-                                    "optimization_type",
-                                ],
-                                "additionalProperties": False,
-                            },
-                        },
-                        "index_recommendations": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "sql": {"type": "string"},
-                                    "table": {"type": "string"},
-                                    "columns": {
-                                        "type": "array",
-                                        "items": {"type": "string"},
-                                    },
-                                    "index_type": {"type": "string"},
-                                    "rationale": {"type": "string"},
-                                    "estimated_impact": {
-                                        "type": "string",
-                                        "enum": ["high", "medium", "low"],
-                                    },
-                                },
-                                "required": [
-                                    "sql",
-                                    "table",
-                                    "columns",
-                                    "index_type",
-                                    "rationale",
-                                    "estimated_impact",
-                                ],
-                                "additionalProperties": False,
-                            },
-                        },
-                    },
-                    "required": [
-                        "performance_assessment",
-                        "execution_analysis",
-                        "optimization_opportunities",
-                        "rewrite_suggestions",
-                        "index_recommendations",
-                    ],
-                    "additionalProperties": False,
-                },
-            },
-        }
+        json_schema = ANALYZE_RESPONSE_FORMAT
 
         # Call LLM with enhanced approach and JSON mode
         # Don't pass a default model for LM Studio - let it use whatever is loaded
@@ -756,7 +760,7 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
         # Determine provider to check if JSON mode is supported
         provider = kwargs.get("provider", "claude").lower()
         use_json_mode = (
-            provider in ["claude", "openai"]
+            provider in ["claude", "openai", "readyset"]
             and os.getenv("RDST_USE_JSON_MODE", "true").lower() == "true"
         )
 
@@ -765,7 +769,7 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
             extra_params["response_format"] = json_schema
 
         # Estimate input tokens before call (for progress display)
-        system_msg = "You are a database performance expert. Respond with valid JSON only. Be proactive in suggesting query rewrites when you see opportunities like: old-style comma JOINs, missing LIMIT on ORDER BY, inefficient subqueries, or non-optimal WHERE clause ordering."
+        system_msg = ANALYZE_SYSTEM_PROMPT
         if cache_schema:
             engine = explain_results.get("database_engine", "unknown")
             system_msg = schema_context_prefix(cache_schema, engine) + system_msg

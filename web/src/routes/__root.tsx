@@ -18,18 +18,22 @@ import { BackendDownBanner } from '../components/BackendDownBanner'
 // which would statically pull CodeMirror into the eager entry chunk.
 import { ConfigWarning } from '../components/ConfigWarning'
 import { DesktopNotificationsBanner } from '../components/DesktopNotificationsBanner'
+import { SigninSoftStrip } from '../components/SigninPrompts'
 import { hydrateSelectedTarget } from '../features/database/selectedTarget'
+import { useAgentTurnOnRequests } from '../features/database/settings/useAgentTurnOnRequests'
 import { hydrateDesktopNotifications } from '../features/inbox/desktopNotifications'
+import { OnboardingTourHost } from '../features/onboarding/OnboardingTour'
 import { usePreferences } from '../features/settings/preferences'
 import { useTarget } from '../hooks/useTarget'
 import { useGoShortcuts } from '../layout/goShortcuts'
 import { legacyTitle, Main } from '../layout/Main'
 import { type RouteLayout, useRouteLayout } from '../layout/routeLayout'
 import { Sidebar } from '../layout/Sidebar'
-import { setAnalyticsAccountId } from '../lib/analytics'
+import { maskInReplays, setAnalyticsAccountId } from '../lib/analytics'
 import { fetchAccountStatus } from '../lib/api'
 import { reportAppError } from '../lib/appErrors'
 import { useQueryDiscoveryTransport } from '../lib/useQueryDiscovery'
+import { useSystemStatus } from '../lib/useSystemStatus'
 
 export const Route = createRootRoute({
   component: RootComponent,
@@ -107,6 +111,7 @@ function RootComponent() {
 function ReadyRoot() {
   const { target } = useTarget()
   useQueryDiscoveryTransport(target)
+  useAgentTurnOnRequests()
   const accountStatus = useQuery({
     queryKey: ['account-status'],
     queryFn: fetchAccountStatus,
@@ -115,6 +120,10 @@ function ReadyRoot() {
   useEffect(() => {
     setAnalyticsAccountId(accountStatus.data?.analytics_account_id)
   }, [accountStatus.data?.analytics_account_id])
+  const targets = useSystemStatus().data?.targets
+  useEffect(() => {
+    maskInReplays(targets?.map((item) => item.name) ?? [])
+  }, [targets])
 
   // The selected database and "Push to this computer" are kept with the backend's
   // preferences; the first read on load replaces this browser's cached copies.
@@ -134,10 +143,12 @@ function ReadyRoot() {
         <PageNotices>
           <DesktopNotificationsBanner />
           <ConfigWarning />
+          <SigninSoftStrip />
         </PageNotices>
         <Outlet />
         {/* Outside the notice slot: pages without a PageBar open it too. */}
         <AddDatabaseHost />
+        <OnboardingTourHost />
       </AppShell>
     </PageNoticesProvider>
   )

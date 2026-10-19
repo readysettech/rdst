@@ -12,6 +12,7 @@ Handles:
 import json
 import os
 import platform
+import re
 import sys
 import threading
 import time
@@ -157,6 +158,113 @@ FEEDBACK_NOT_SENT = "Couldn't send your feedback. Check your connection and try 
 FEEDBACK_TELEMETRY_OFF = "Feedback isn't sent while telemetry is turned off."
 
 
+# The production PostHog project (260434) and the preview project (640148). Only a released
+# build talking to the production keyservice reports to production, and only for people
+# outside Readyset; dev builds, CL builds, test runs and Readyset's own people report to
+# preview. RDST_POSTHOG_PREVIEW_KEY overrides the preview key; test runs use it only when set.
+PRODUCTION_POSTHOG_KEY = "phc_WPINnbS1CUiADz01QFeDZCr4Wn7jXfNPxe1EK0V2ZzP"
+DEFAULT_PREVIEW_POSTHOG_KEY = "phc_AKx8uPnsRXNfe9KaQZZ6Ad3TPGexzZEKVXNJoxRFNcaJ"
+PREVIEW_POSTHOG_KEY_ENV = "RDST_POSTHOG_PREVIEW_KEY"
+INTERNAL_EMAIL_DOMAIN = "@readyset.io"
+_RELEASE_VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+
+
+def build_version() -> str:
+    """The version the build stamped, or the installed package's."""
+    try:
+        from _version_build import __version__
+
+        return str(__version__)
+    except Exception:
+        pass
+    try:
+        from importlib.metadata import version
+
+        return version("rdst")
+    except Exception:
+        return ""
+
+
+def is_release_version(version: str) -> bool:
+    """A Buildkite release number: major.minor.build, never a .dev, 0.0.x or .0 build."""
+    match = _RELEASE_VERSION.fullmatch(version.strip())
+    return bool(match) and match.group(3) != "0" and (match.group(1), match.group(2)) != ("0", "0")
+
+
+def _test_run(env: Dict[str, str]) -> bool:
+    testing = env.get("RDST_TESTING", "").lower() in ("true", "1", "yes")
+    return testing or bool(env.get("PYTEST_CURRENT_TEST")) or "pytest" in sys.modules
+
+
+def preview_posthog_key(env: Optional[Dict[str, str]] = None) -> str:
+    env = os.environ if env is None else env
+    if PREVIEW_POSTHOG_KEY_ENV in env:
+        return env[PREVIEW_POSTHOG_KEY_ENV].strip()
+    return "" if _test_run(env) else DEFAULT_PREVIEW_POSTHOG_KEY
+
+
+def internal_install(
+    email: str = "", env: Optional[Dict[str, str]] = None, version: Optional[str] = None,
+) -> bool:
+    """Readyset's own people and builds, short of the company-network probe.
+
+    RDST_INTERNAL=1, a signed-in @readyset.io account, or any build that isn't a release.
+    """
+    env = os.environ if env is None else env
+    if env.get("RDST_INTERNAL", "").strip().lower() in ("1", "true", "yes"):
+        return True
+    if email.strip().lower().endswith(INTERNAL_EMAIL_DOMAIN):
+        return True
+    return not is_release_version(build_version() if version is None else version)
+
+
+def production_analytics_allowed(
+    env: Optional[Dict[str, str]] = None, version: Optional[str] = None,
+) -> bool:
+    """Whether this process may report to the production PostHog project."""
+    env = os.environ if env is None else env
+    if _test_run(env) or not is_release_version(build_version() if version is None else version):
+        return False
+    try:
+        from shared.keyservice import DEFAULT_KEYSERVICE_URL, keyservice_base_url
+
+        return keyservice_base_url() == DEFAULT_KEYSERVICE_URL
+    except Exception:
+        return False
+
+
+def resolve_posthog_key(
+    env: Optional[Dict[str, str]] = None, version: Optional[str] = None,
+) -> str:
+    """The PostHog key to report with; empty disables telemetry.
+
+    RDST_POSTHOG_KEY overrides the default, and an empty value turns telemetry off. Where
+    production isn't allowed, the production key becomes the preview key, or nothing.
+    """
+    env = os.environ if env is None else env
+    key = env.get("RDST_POSTHOG_KEY", PRODUCTION_POSTHOG_KEY).strip()
+    if key != PRODUCTION_POSTHOG_KEY or production_analytics_allowed(env, version):
+        return key
+    return preview_posthog_key(env)
+
+
+def routed_posthog_key(key: str, internal: bool) -> str:
+    """The key one person's events use: an internal person's production events go to preview.
+
+    Without a preview key they stay in production, tagged internal_user.
+    """
+    if internal and key == PRODUCTION_POSTHOG_KEY:
+        return preview_posthog_key() or key
+    return key
+
+
+def posthog_project(key: str) -> str:
+    """Which project a key reports to, for the UI: production, preview, or none."""
+    if not key:
+        return "none"
+    return "production" if key == PRODUCTION_POSTHOG_KEY else "preview"
+
+
 class TelemetryManager:
     """
     Manages all telemetry for RDST.
@@ -173,11 +281,11 @@ class TelemetryManager:
     # Configuration, overridable via the environment.
     # RDST_POSTHOG_KEY: PostHog project key. Write-only ingest key by design
     # (cannot read data), so it ships in source like any client-side analytics
-    # key. Setting it empty disables telemetry entirely.
+    # key. Setting it empty disables telemetry entirely. See resolve_posthog_key.
     # RDST_SENTRY_DSN: Sentry DSN for crash reporting
     # RDST_INTERNAL_PROBE_URL: host that answers only from inside the company
     # network; unresolvable elsewhere. Empty skips the internal-install probe.
-    POSTHOG_API_KEY = os.environ.get("RDST_POSTHOG_KEY", "phc_WPINnbS1CUiADz01QFeDZCr4Wn7jXfNPxe1EK0V2ZzP")
+    POSTHOG_API_KEY = resolve_posthog_key()
     POSTHOG_HOST = "https://us.i.posthog.com"
     SENTRY_DSN = os.environ.get("RDST_SENTRY_DSN", "")
     INTERNAL_INSTALL_PROBE_URL = os.environ.get("RDST_INTERNAL_PROBE_URL", "http://readyset-canary/")
@@ -422,10 +530,10 @@ class TelemetryManager:
             except Exception:
                 pass
             try:
-                from shared.account_session import is_signed_in_locally
+                from shared.account_session import is_anonymous_session, is_signed_in_locally
 
                 if is_signed_in_locally():
-                    return "readyset_account"
+                    return "readyset_anonymous" if is_anonymous_session() else "readyset_account"
             except Exception:
                 pass
         except Exception:
@@ -448,7 +556,8 @@ class TelemetryManager:
             from shared import account_session
 
             account_id = ""
-            if account_session.is_signed_in_locally():
+            if account_session.is_signed_in_locally() and \
+                    not account_session.is_anonymous_session():
                 account_id = str(
                     account_session.account_metadata().get("analytics_account_id")
                     or ""
@@ -545,7 +654,10 @@ class TelemetryManager:
                 all_props.update(properties)
 
             def send(internal_user: bool):
+                client = posthog
                 try:
+                    internal_user = internal_user or internal_install(person["email"])
+                    client = self._routed_client(posthog, internal_user, delivered is not None)
                     all_props["internal_user"] = internal_user
                     distinct_id = person["distinct_id"]
                     all_props["account_kind"] = person["account_kind"]
@@ -570,14 +682,15 @@ class TelemetryManager:
                                 binding = product_telemetry.state_value(binding_key)
                                 if binding is None or binding == distinct_id:
                                     identify_props["$anon_distinct_id"] = self.device_id
-                                posthog.capture(distinct_id=distinct_id, event="$identify",
+                                client.capture(distinct_id=distinct_id, event="$identify",
                                                 properties=identify_props)
                                 if binding is None:
                                     product_telemetry.set_state_value(binding_key, distinct_id)
+                                self._alias_legacy_person(client, distinct_id)
                             else:
                                 all_props["$set_once"] = person_props
                             self._identified_person = profile
-                    sent = posthog.capture(
+                    sent = client.capture(
                         distinct_id=distinct_id,
                         event=event,
                         properties=all_props
@@ -586,6 +699,9 @@ class TelemetryManager:
                         delivered.append(sent is not None)
                 except Exception:
                     pass
+                finally:
+                    if client is not posthog and delivered is not None:
+                        client.shutdown()
 
             if delivered is None:
                 self._enqueue_posthog_send(send)
@@ -599,6 +715,24 @@ class TelemetryManager:
             finally:
                 posthog.shutdown()
 
+        except Exception:
+            pass
+
+    @staticmethod
+    def _alias_legacy_person(posthog: Any, distinct_id: str) -> None:
+        """Merge the raw user id earlier builds identified as, once per account."""
+        try:
+            from shared import product_telemetry
+
+            legacy = product_telemetry.legacy_person_id()
+            if not legacy or legacy == distinct_id:
+                return
+            key = f"identity_alias:{distinct_id}"
+            if product_telemetry.state_value(key):
+                return
+            posthog.capture(distinct_id=distinct_id, event="$create_alias",
+                            properties={"alias": legacy, "distinct_id": distinct_id})
+            product_telemetry.set_state_value(key, True)
         except Exception:
             pass
 
@@ -941,6 +1075,20 @@ class TelemetryManager:
                     send(internal_user)
                 except Exception:
                     pass
+
+    def _routed_client(self, client, internal_user: bool, sync: bool):
+        """The PostHog client for one event: preview for an internal person, else `client`."""
+        key = routed_posthog_key(self.POSTHOG_API_KEY, internal_user)
+        if key == self.POSTHOG_API_KEY:
+            return client
+        module = _get_posthog()
+        if sync:
+            return module.Client(key, host=self.POSTHOG_HOST, sync_mode=True,
+                                 max_retries=0, timeout=10)
+        with self._identity_lock:
+            if getattr(self, "_preview_client", None) is None:
+                self._preview_client = module.Client(key, host=self.POSTHOG_HOST)
+            return self._preview_client
 
     def _enqueue_posthog_send(self, send: Callable[[bool], None]) -> None:
         with self._internal_user_lock:

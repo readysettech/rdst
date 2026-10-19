@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -74,6 +74,11 @@ class AccountLoginRequest(BaseModel):
     return_url: str
 
 
+class AccountAnonymousSession(BaseModel):
+    access_token: str
+    refresh_token: str
+
+
 class AccountLoginResponse(BaseModel):
     login_id: str
     state: str
@@ -81,6 +86,9 @@ class AccountLoginResponse(BaseModel):
     publishable_key: str
     callback_url: str
     expires_in: int
+    # The anonymous session this sign-in upgrades, so the browser can link the new identity
+    # to the same user. Only returned when the login starts.
+    anonymous_session: AccountAnonymousSession | None = None
 
 
 class AccountLoginCompleteRequest(BaseModel):
@@ -111,6 +119,17 @@ class AccountStatusResponse(BaseModel):
     model: str | None = None
     quota: dict[str, Any] | None = None
     detail: str | None = None
+    # Hosted-AI access. An anonymous session uses hosted AI without signing in; only
+    # signin_prompt == "required" blocks it.
+    has_session: bool = False
+    is_anonymous: bool = False
+    signin_prompt: Literal["none", "soft", "budget", "required"] = "none"
+    signin_reason: str | None = None
+    percent_used: float | None = None
+    days_remaining: int | None = None
+    trial_days: int | None = None
+    limit_microusd: int | None = None
+    used_microusd: int | None = None
 
 
 class AccountLogoutResponse(BaseModel):
@@ -239,7 +258,7 @@ async def account_login_status(
 @router.get("/account/status", response_model=AccountStatusResponse)
 async def account_status(request: Request) -> AccountStatusResponse:
     require_local_request(request)
-    result = await asyncio.to_thread(account_service.status, False)
+    result = await asyncio.to_thread(account_service.status, False, True)
     return AccountStatusResponse(**result)
 
 

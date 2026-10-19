@@ -78,7 +78,13 @@ class JevClient:
     @staticmethod
     def _session_token(*, force_refresh: bool = False) -> str | None:
         try:
-            return account_session.access_token(force_refresh=force_refresh)
+            if force_refresh:
+                return account_session.access_token(force_refresh=True)
+            token = account_session.ensure_access_token()
+            if token and account_session.signin_required() and \
+                    account_session.is_anonymous_session():
+                return None
+            return token
         except account_session.AccountSessionError as exc:
             code = ("JEV_SERVICE_UNAVAILABLE" if isinstance(exc.__cause__, requests.RequestException)
                     else "LOGIN_REQUIRED")
@@ -265,7 +271,10 @@ class JevClient:
             raise JevClientError("JEV_INVALID_RESPONSE", response.status_code) from exc
         if response.status_code != 200:
             code = str(body.get("code") or "JEV_SERVICE_UNAVAILABLE") if isinstance(body, dict) else "JEV_SERVICE_UNAVAILABLE"
-            if response.status_code == 401:
+            reason = account_session.signin_required_reason(body)
+            if reason:
+                account_session.record_signin_required(reason)
+            if response.status_code == 401 or reason:
                 code = "LOGIN_REQUIRED"
             from shared import product_telemetry
 

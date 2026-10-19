@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+from features.schema.inference_context import schema_context_prefix
 from shared.constants import rdst_semantic_layer_dir
 
 from .events import (
@@ -30,6 +31,21 @@ from .extractors.orm_patterns import ORM_PATTERNS_COMPILED, _JS_EXTENSIONS, _SCA
 from .models import ScanInput, ScanOptions
 
 logger = logging.getLogger(__name__)
+
+
+ORM_CONVERSION_SYSTEM_PROMPT = """Convert ORM snippets to SQL, using the ORM and SQL dialect named in the request.
+
+RULES:
+1. Use $1, $2, $3 for parameter placeholders
+2. Uppercase SQL keywords (SELECT, FROM, WHERE)
+3. Lowercase table/column names
+4. Output ONLY valid JSON, no markdown, no notes, no explanations
+5. If a snippet is not a database query, output "-- Not a query" as the SQL
+6. If a snippet uses dynamic kwargs (**data, ...item, spread operators) that prevent determining columns, output "-- Dynamic arguments" as the SQL
+7. If a snippet calls a method on an unknown variable (e.g. "query.first()" without seeing the query definition), output "-- Cross-file query" as the SQL
+8. NEVER use literal "..." or ellipsis in SQL output. Always list actual column names from the schema, or use the appropriate -- marker if columns cannot be determined
+9. For Prisma: translate include/select/where/orderBy/take/skip to SQL equivalents
+10. For Drizzle: translate builder chains (.from().where().limit()) to SQL"""
 
 
 class ScanService:
@@ -730,7 +746,6 @@ class ScanService:
             return
 
         llm = LLMManager()
-        schema_section = f"\n\nDatabase Schema:\n{schema_context}" if schema_context else ""
         orm_desc = self._describe_orm_types(needs_llm)
 
         snippets_list = []
@@ -741,22 +756,14 @@ class ScanService:
         # Remap: subsequent code uses `queries` variable; point it at needs_llm
         queries = needs_llm
 
-        system_message = f"""Convert {orm_desc} ORM snippets to {sql_dialect} SQL.
-{schema_section}
+        system_message = ORM_CONVERSION_SYSTEM_PROMPT
+        if schema_context:
+            system_message = schema_context_prefix(schema_context, sql_dialect) + system_message
 
-RULES:
-1. Use $1, $2, $3 for parameter placeholders
-2. Uppercase SQL keywords (SELECT, FROM, WHERE)
-3. Lowercase table/column names
-4. Output ONLY valid JSON, no markdown, no notes, no explanations
-5. If a snippet is not a database query, output "-- Not a query" as the SQL
-6. If a snippet uses dynamic kwargs (**data, ...item, spread operators) that prevent determining columns, output "-- Dynamic arguments" as the SQL
-7. If a snippet calls a method on an unknown variable (e.g. "query.first()" without seeing the query definition), output "-- Cross-file query" as the SQL
-8. NEVER use literal "..." or ellipsis in SQL output. Always list actual column names from the schema, or use the appropriate -- marker if columns cannot be determined
-9. For Prisma: translate include/select/where/orderBy/take/skip to SQL equivalents
-10. For Drizzle: translate builder chains (.from().where().limit()) to SQL"""
+        user_query = f"""ORM: {orm_desc}
+SQL dialect: {sql_dialect}
 
-        user_query = f"""Convert these {len(queries)} ORM snippets to SQL.
+Convert these {len(queries)} ORM snippets to SQL.
 
 {snippets_text}
 

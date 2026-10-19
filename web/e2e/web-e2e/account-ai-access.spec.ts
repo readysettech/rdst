@@ -23,24 +23,21 @@ async function resetLocalState(page: Page): Promise<void> {
   await clearTargets(page.request)
 }
 
-/** Signed out with no key, Home is the get-started steps inside the app shell. */
-async function expectSignedOutAiAccess(page: Page): Promise<void> {
+/** Signed out: the sidebar offers sign-in and the backend reports no account. */
+async function expectSignedOut(
+  page: Page
+): Promise<{ signin_prompt?: string }> {
   await page.goto('/')
-  const main = mainContent(page)
-  await expect(
-    main.getByText("Find out what's slowing your database.")
-  ).toBeVisible()
-  await expect(
-    main.getByRole('button', { name: 'Sign in', exact: true })
-  ).toBeVisible()
-  await expect(
-    main.getByRole('button', { name: 'Use my own Anthropic key instead' })
-  ).toBeVisible()
   await expect(page.getByTestId('sidebar-sign-in')).toBeVisible()
   await expect(page.getByTestId('sidebar-account-email')).toHaveCount(0)
+  const status = await page.request.get('/api/account/status')
+  expect(status.ok()).toBe(true)
+  const body = await status.json()
+  expect(body.signed_in).toBe(false)
+  return body
 }
 
-test('account login unlocks hosted Ask and sign-out restores the AI access choice', async ({
+test('account login unlocks hosted Ask and sign-out asks this computer to sign in again', async ({
   browserErrors,
   page,
 }) => {
@@ -52,12 +49,22 @@ test('account login unlocks hosted Ask and sign-out restores the AI access choic
     'Failed to load resource: the server responded with a status of 429 ()'
   )
   await resetLocalState(page)
-  await expectSignedOutAiAccess(page)
+  const firstRun = await expectSignedOut(page)
+  if (test.info().retry === 0) {
+    // A computer that has never signed in gets hosted AI without an account, so Home
+    // is the get-started steps with sign-in as an optional last step.
+    expect(firstRun.signin_prompt).toBe('none')
+    const main = mainContent(page)
+    await expect(
+      main.getByText("Find out what's slowing your database.")
+    ).toBeVisible()
+    await expect(main.getByText('AI works without an account.')).toBeVisible()
+    await expect(page.getByTestId('ai-setup')).toHaveCount(0)
+  }
 
   // The alternate BYOK path must remain usable without creating an account.
-  await mainContent(page)
-    .getByRole('button', { name: 'Use my own Anthropic key instead' })
-    .click()
+  await page.goto('/configure?panel=ai')
+  await page.getByRole('button', { name: 'Add key' }).click()
   const keyDialog = page.getByRole('dialog')
   await expect(
     keyDialog.getByRole('heading', { name: 'Update Anthropic API key' })
@@ -222,16 +229,24 @@ test('account login unlocks hosted Ask and sign-out restores the AI access choic
     }).toPass({ timeout: 120_000 })
   })
 
-  await test.step('sign out and require an AI access choice again', async () => {
-    // `section=ai` is the recovery deep link and opens the Anthropic-key
-    // dialog. The settings panel itself is selected with `panel=ai`.
+  await test.step('sign out and require a sign-in on this computer again', async () => {
     await signedInPage.goto('/configure?panel=ai')
     const account = signedInPage.getByRole('region', { name: 'Account' })
     await account.getByRole('button', { name: 'Sign out' }).click()
     await expect(account.getByText('Not signed in')).toBeVisible()
-    await expectSignedOutAiAccess(signedInPage)
-    const status = await signedInPage.request.get('/api/account/status')
-    expect(status.ok()).toBe(true)
-    expect((await status.json()).signed_in).toBe(false)
+    // The free allowance without an account is once per computer. This one has signed
+    // in, so signed out it needs a sign-in or an own key for AI again.
+    const status = await expectSignedOut(signedInPage)
+    expect(status.signin_prompt).toBe('required')
+    const main = mainContent(signedInPage)
+    await expect(
+      main.getByText('Sign in to keep AI monitoring running')
+    ).toBeVisible()
+    await expect(
+      main.getByRole('button', { name: 'Sign in', exact: true })
+    ).toBeVisible()
+    await expect(
+      main.getByRole('button', { name: 'Use my own Anthropic key instead' })
+    ).toBeVisible()
   })
 })

@@ -191,7 +191,7 @@ def test_sixth_turn_on_returns_clear_message_before_ai_claim(monkeypatch, tmp_pa
     monkeypatch.setattr(routes, "_store", lambda: store)
     app = FastAPI()
     app.include_router(routes.router)
-    response = TestClient(app).put('/targets/sixth/settings', json={"enabled": True})
+    response = TestClient(app, client=("127.0.0.1", 50000)).put('/targets/sixth/settings', json={"enabled": True})
     assert response.status_code == 409
     assert "local limit is 5" in response.json()["detail"]
     assert "Turn off monitoring" in response.json()["detail"]
@@ -207,7 +207,7 @@ def test_old_zoom_and_query_series_use_hourly_for_missing_minutes(monkeypatch, t
     monkeypatch.setattr(routes, "_now", lambda: NOW)
     app = FastAPI()
     app.include_router(routes.router)
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
     suffix = f'?range=7d&from={hour}&to={hour + 3540}'
     query = client.get(f'/targets/db/queries/{KEY}/series{suffix}')
     assert query.status_code == 200, query.text

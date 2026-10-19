@@ -45,7 +45,7 @@ def store(monkeypatch, tmp_path):
 def client(store):
     app = FastAPI()
     app.include_router(routes.router, prefix="/api/monitor")
-    return TestClient(app)
+    return TestClient(app, client=("127.0.0.1", 50000))
 
 
 def _db(calls=60, **extra):
@@ -734,7 +734,7 @@ def test_inbox_request_skips_the_integrity_check_after_first_open(monkeypatch, s
     app.include_router(routes.router, prefix="/api/monitor")
     statements.clear()
     for _ in range(3):
-        assert len(TestClient(app).get("/api/monitor/inbox?target=db&state=open")
+        assert len(TestClient(app, client=("127.0.0.1", 50000)).get("/api/monitor/inbox?target=db&state=open")
                    .json()["items"]) == 3
     assert not [sql for sql in statements if "quick_check" in sql]
     connects = [sql for sql in statements if sql.startswith("PRAGMA busy_timeout")]

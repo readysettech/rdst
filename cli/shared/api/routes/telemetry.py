@@ -97,7 +97,15 @@ async def get_telemetry_identity(request: Request) -> dict[str, Any]:
         internal_user = getattr(manager, "_internal_user_result", None)
         if internal_user is None:
             internal_user = manager._detect_internal_user()
-        return {"telemetry_enabled": True, **product_telemetry.identity(manager.device_id),
-                "internal_user": internal_user}
+        from shared.telemetry_manager import internal_install, posthog_project, routed_posthog_key
+
+        person = product_telemetry.identity(manager.device_id)
+        internal_user = bool(internal_user) or internal_install(person.get("email") or "")
+        # The renderer reports where this process would report this person's events.
+        key = routed_posthog_key(manager.POSTHOG_API_KEY, internal_user)
+        project = posthog_project(key)
+        return {"telemetry_enabled": True, **person, "internal_user": internal_user,
+                "posthog_project": project,
+                "posthog_key": key if project == "preview" else None}
 
     return await asyncio.to_thread(read)

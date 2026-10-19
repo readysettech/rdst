@@ -54,6 +54,37 @@ class StubService:
 
 class TestStartRoute:
     @pytest.mark.asyncio
+    async def test_a_second_start_joins_the_running_bootstrap(self, monkeypatch):
+        release = asyncio.Event()
+        starts = []
+
+        class SlowService(StubService):
+            async def run(self, target, target_config, options=None, key_wakeup=None):
+                starts.append(options.annotate)
+                await release.wait()
+                yield BootstrapStageEvent(
+                    type="bootstrap_stage", stage="connection_test", status="done"
+                )
+
+        app, registry = _app(monkeypatch, service_cls=SlowService)
+        first = (await _request(app, "POST", "/api/bootstrap", {"target": "imdb"})).json()
+        second = (await _request(app, "POST", "/api/bootstrap", {"target": "imdb"})).json()
+        annotated = (await _request(
+            app, "POST", "/api/bootstrap", {"target": "imdb", "annotate": True})).json()
+        await asyncio.sleep(0)
+
+        assert second["run_id"] == first["run_id"]
+        assert annotated["run_id"] != first["run_id"]
+        assert starts == [False, True]
+        release.set()
+        for _ in range(100):
+            if registry.status(first["run_id"]) == "done":
+                break
+            await asyncio.sleep(0.01)
+        again = (await _request(app, "POST", "/api/bootstrap", {"target": "imdb"})).json()
+        assert again["run_id"] != first["run_id"]
+
+    @pytest.mark.asyncio
     async def test_start_returns_run_id_immediately(self, monkeypatch):
         app, registry = _app(monkeypatch, service_cls=StubService)
 

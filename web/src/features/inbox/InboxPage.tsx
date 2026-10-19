@@ -7,8 +7,10 @@ import { TwoPane } from '@rs/ui-new/two-pane'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useOpenAddDatabase } from '@/components/configure/addDatabase'
+import { SigninBudgetCard } from '@/components/SigninPrompts'
 import { useDbFilter } from '@/hooks/useDbFilter'
 import { useTarget } from '@/hooks/useTarget'
+import { trackFirstEver } from '@/lib/analytics'
 import {
   useConfiguredDatabases,
   useInbox,
@@ -187,6 +189,7 @@ function QueueSkeleton() {
 
 export function InboxPage() {
   const { view, db, itemId, update, setDatabase } = useInboxSearch()
+  useEffect(() => trackFirstEver('inbox_first_viewed'), [])
   const target = db ?? undefined
   const { target: globalTarget } = useTarget()
   useInboxStream()
@@ -360,6 +363,7 @@ export function InboxPage() {
         }
       />
       <PageNoticeSlot className="px-6 pt-4" />
+      <SigninBudgetCard compact className="mx-6 mt-4" />
       <Scrollable rootClassName="min-h-0 flex-1" className="pt-1 pb-6">
         {open.error || done.error ? (
           <div className="px-6 pt-4">

@@ -31,9 +31,11 @@ const MIME_TYPES: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.map': 'application/json; charset=utf-8',
+  '.mp4': 'video/mp4',
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.ttf': 'font/ttf',
+  '.webm': 'video/webm',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
 }
@@ -124,20 +126,63 @@ export function resolveStaticPath(
   return path.join(rootDir, 'index.html')
 }
 
-function serveStatic(rootDir: string, pathname: string): Response {
+/** The byte range a `Range: bytes=a-b` header asks of a file of `size` bytes, or null. */
+export function parseByteRange(
+  header: string | null,
+  size: number
+): { start: number; end: number } | null {
+  const match = header && /^bytes=(\d*)-(\d*)$/.exec(header.trim())
+  if (!match || (match[1] === '' && match[2] === '')) return null
+  let start: number
+  let end: number
+  if (match[1] === '') {
+    start = Math.max(0, size - Number(match[2]))
+    end = size - 1
+  } else {
+    start = Number(match[1])
+    end = match[2] === '' ? size - 1 : Math.min(Number(match[2]), size - 1)
+  }
+  return start <= end && start < size ? { start, end } : null
+}
+
+// Media elements read video in byte ranges, so files answer Range requests with a 206.
+function serveStatic(
+  rootDir: string,
+  pathname: string,
+  rangeHeader: string | null = null
+): Response {
   const filePath = resolveStaticPath(rootDir, pathname)
   if (!filePath) return text(404, 'Not found')
+  const size = statSync(filePath).size
+  const headers: Record<string, string> = {
+    'content-type':
+      MIME_TYPES[path.extname(filePath)] ?? 'application/octet-stream',
+    'x-content-type-options': 'nosniff',
+    'accept-ranges': 'bytes',
+  }
+  if (rangeHeader) {
+    const range = parseByteRange(rangeHeader, size)
+    if (!range)
+      return new Response(null, {
+        status: 416,
+        headers: { ...headers, 'content-range': `bytes */${size}` },
+      })
+    const stream = Readable.toWeb(
+      createReadStream(filePath, range)
+    ) as unknown as ReadableStream
+    return new Response(stream, {
+      status: 206,
+      headers: {
+        ...headers,
+        'content-range': `bytes ${range.start}-${range.end}/${size}`,
+        'content-length': String(range.end - range.start + 1),
+      },
+    })
+  }
   const stream = Readable.toWeb(
     createReadStream(filePath)
   ) as unknown as ReadableStream
-  return new Response(stream, {
-    status: 200,
-    headers: {
-      'content-type':
-        MIME_TYPES[path.extname(filePath)] ?? 'application/octet-stream',
-      'x-content-type-options': 'nosniff',
-    },
-  })
+  return new Response(stream, { status: 200, headers })
 }
 
 /**
@@ -289,6 +334,6 @@ export function createAppRequestHandler(
       }
       return proxyApi(request, url, options)
     }
-    return serveStatic(rootDir, url.pathname)
+    return serveStatic(rootDir, url.pathname, request.headers.get('range'))
   }
 }

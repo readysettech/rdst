@@ -686,7 +686,13 @@ interface UseFleetStreamReturn {
   reset: () => void
 }
 
-function useFleetPostStream(url: string): UseFleetStreamReturn {
+// Provider imports add databases; the header attributes them in product telemetry.
+const PROVIDER_VIA = { 'X-RDST-Via': 'provider' }
+
+function useFleetPostStream(
+  url: string,
+  headers?: Record<string, string>
+): UseFleetStreamReturn {
   const [state, setState] = useState<FleetStreamState>('idle')
   const [progress, setProgress] = useState<FleetImportProgressEvent[]>([])
   const [result, setResult] = useState<FleetImportCompleteEvent | undefined>(
@@ -719,7 +725,7 @@ function useFleetPostStream(url: string): UseFleetStreamReturn {
       try {
         const response = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...headers },
           body: JSON.stringify(body),
           signal: controller.signal,
         })
@@ -754,7 +760,7 @@ function useFleetPostStream(url: string): UseFleetStreamReturn {
       }
       return completion
     },
-    [url]
+    [url, headers]
   )
 
   return { run, state, progress, result, errors, reset }
@@ -783,8 +789,10 @@ interface UseFleetImportReturn {
 }
 
 export function useFleetImport(): UseFleetImportReturn {
-  const { run, state, progress, result, errors, reset } =
-    useFleetPostStream('/api/fleet/import')
+  const { run, state, progress, result, errors, reset } = useFleetPostStream(
+    '/api/fleet/import',
+    PROVIDER_VIA
+  )
   const runImport = useCallback(
     (request: FleetImportRequest) => run(request),
     [run]

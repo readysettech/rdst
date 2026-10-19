@@ -2,6 +2,8 @@ import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWithClient } from '@/test-utils'
 import { selectGlobalTarget } from '../../features/database/targetSelection'
+import { addFlowFor, endAddFlow } from '../../lib/addFlow'
+import { trackEvent } from '../../lib/analytics'
 import { startBootstrapRun } from '../../lib/backgroundRuns'
 import { useConfigure } from '../../lib/useConfigure'
 import { useSystemStatus } from '../../lib/useSystemStatus'
@@ -22,6 +24,10 @@ vi.mock('@tanstack/react-router', async (importOriginal) => ({
 vi.mock('../../lib/useConfigure', () => ({ useConfigure: vi.fn() }))
 vi.mock('../../lib/useSystemStatus', () => ({ useSystemStatus: vi.fn() }))
 vi.mock('../../lib/backgroundRuns', () => ({ startBootstrapRun: vi.fn() }))
+vi.mock('../../lib/analytics', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/analytics')>()),
+  trackEvent: vi.fn(),
+}))
 vi.mock('../../features/database/targetSelection', () => ({
   selectGlobalTarget: vi.fn(),
 }))
@@ -138,7 +144,8 @@ describe('AddDatabaseDialog', () => {
     await waitFor(() => expect(navigate).toHaveBeenCalled())
     expect(configure.testConnection).toHaveBeenCalledWith(
       'storefront',
-      expect.objectContaining({ name: 'storefront', database: 'shop' })
+      expect.objectContaining({ name: 'storefront', database: 'shop' }),
+      'fields'
     )
     expect(configure.addTarget.mock.calls[0][0].name).toBe('storefront')
   })
@@ -225,7 +232,8 @@ describe('AddDatabaseDialog', () => {
           user: 'rdst',
           password: 'secret',
           tls: true,
-        })
+        }),
+        'url'
       )
     )
     expect(await screen.findByText('Connected.')).toBeTruthy()
@@ -279,6 +287,50 @@ describe('AddDatabaseDialog', () => {
     })
   })
 
+  it('sends how the database was entered with the add', async () => {
+    renderDialog()
+
+    type('Connection string', 'postgresql://rdst@localhost/demo')
+    fireEvent.click(screen.getByRole('button', { name: 'Add and monitor' }))
+
+    await waitFor(() => expect(configure.addTarget).toHaveBeenCalled())
+    expect(configure.addTarget.mock.calls[0][1]).toBe('url')
+  })
+
+  it('warns that the password lasts only this session when the keyring kept none', async () => {
+    configure.addTarget.mockResolvedValue({ persisted: false })
+    renderDialog()
+
+    type('Connection string', 'postgresql://rdst:pw@localhost/demo')
+    fireEvent.click(screen.getByRole('button', { name: 'Add and monitor' }))
+
+    const warning = await screen.findByTestId('password-session-only')
+    expect(warning.textContent).toContain(
+      "Your OS keyring isn't available, so RDST keeps this password only until you close the app."
+    )
+    expect(navigate).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Add and monitor' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith({
+        to: '/database',
+        search: { target: 'demo', panel: 'enable' },
+      })
+    )
+  })
+
+  it('goes straight on when the keyring kept the password', async () => {
+    configure.addTarget.mockResolvedValue({ persisted: true })
+    renderDialog()
+
+    type('Connection string', 'postgresql://rdst:pw@localhost/demo')
+    fireEvent.click(screen.getByRole('button', { name: 'Add and monitor' }))
+
+    await waitFor(() => expect(navigate).toHaveBeenCalled())
+    expect(screen.queryByTestId('password-session-only')).toBeNull()
+  })
+
   it('opens the new database by name so the URL carries it', async () => {
     renderDialog()
 
@@ -321,7 +373,7 @@ describe('AddDatabaseDialog', () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it('says what to change when the query statistics are unreadable and holds the add', async () => {
+  it('adds a database whose query stats are off and opens the turn-on dialog to fix them', async () => {
     configure.testConnection.mockResolvedValue({
       target: 'shop',
       connected: true,
@@ -334,8 +386,33 @@ describe('AddDatabaseDialog', () => {
     type('User', 'reader')
     fireEvent.click(screen.getByRole('button', { name: 'Add and monitor' }))
 
+    // The turn-on dialog says what to change, the same place the agent path lands.
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith({
+        to: '/database',
+        search: { target: 'shop', panel: 'enable' },
+      })
+    )
+    expect(configure.addTarget.mock.calls[0][0].name).toBe('shop')
+    expect(addFlowFor('shop')?.via).toBe('fields')
+    endAddFlow('shop')
+  })
+
+  it('shows what to change when a Test finds the query stats off', async () => {
+    configure.testConnection.mockResolvedValue({
+      target: 'shop',
+      connected: true,
+      queryCapture: CAPTURE_MISSING,
+    })
+    renderDialog()
+
+    type('Host', 'db.internal')
+    type('Database', 'shop')
+    type('User', 'reader')
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+
     expect(
-      await screen.findByText("Monitoring can't read query statistics yet")
+      await screen.findByText("Query stats are off, so monitoring can't start")
     ).toBeTruthy()
     for (const step of CAPTURE_MISSING.instructions)
       expect(screen.getByText(step)).toBeTruthy()
@@ -345,65 +422,71 @@ describe('AddDatabaseDialog', () => {
     expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2)
     expect(configure.addTarget).not.toHaveBeenCalled()
     expect(solidLabels()).toEqual(['Add and monitor'])
-
-    // Clicking again re-tests; still unreadable, nothing is added.
-    fireEvent.click(screen.getByRole('button', { name: 'Add and monitor' }))
-    await waitFor(() =>
-      expect(configure.testConnection).toHaveBeenCalledTimes(2)
-    )
-    expect(configure.addTarget).not.toHaveBeenCalled()
-    expect(navigate).not.toHaveBeenCalled()
-
-    // Fixed on the server: the next click adds and opens the turn-on dialog.
-    configure.testConnection.mockResolvedValue({
-      target: 'shop',
-      connected: true,
-      queryCapture: { ...CAPTURE_MISSING, available: true, instructions: [] },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Add and monitor' }))
-    await waitFor(() =>
-      expect(navigate).toHaveBeenCalledWith({
-        to: '/database',
-        search: { target: 'shop', panel: 'enable' },
-      })
-    )
-    expect(configure.addTarget.mock.calls[0][0].name).toBe('shop')
   })
 
-  it('adds a database whose statistics are unreadable only from the quiet link, with monitoring off', async () => {
+  it('reports field errors by name, test results and where an attempt stopped', async () => {
     configure.testConnection.mockResolvedValue({
       target: 'shop',
-      connected: true,
-      queryCapture: CAPTURE_MISSING,
+      connected: false,
+      error: 'connection refused',
     })
     renderDialog()
 
     type('Host', 'db.internal')
+    type('Port', 'abc')
+    fireEvent.click(screen.getByRole('button', { name: 'Add and monitor' }))
+    const fieldErrors = vi
+      .mocked(trackEvent)
+      .mock.calls.filter(([event]) => event === 'database_add_field_error')
+      .map(([, props]) => props)
+    expect(fieldErrors).toEqual([
+      { field: 'port', error_class: 'invalid' },
+      { field: 'database', error_class: 'missing' },
+      { field: 'user', error_class: 'missing' },
+    ])
+    // Field names only: never what was typed.
+    expect(JSON.stringify(vi.mocked(trackEvent).mock.calls)).not.toContain(
+      'db.internal'
+    )
+
+    type('Port', '5432')
     type('Database', 'shop')
     type('User', 'reader')
-    fireEvent.click(screen.getByRole('button', { name: 'Add and monitor' }))
-    const link = await screen.findByRole('button', {
-      name: 'Add without monitoring',
-    })
-    expect(
-      screen.getByText(
-        /RDST can't watch this database until the setup steps above are done/
-      )
-    ).toBeTruthy()
-    // Blocked by default: only the solid button is primary, and nothing is added yet.
-    expect(solidLabels()).toEqual(['Add and monitor'])
-    expect(configure.addTarget).not.toHaveBeenCalled()
-
-    fireEvent.click(link)
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+    await screen.findByText('connection refused')
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
     await waitFor(() =>
-      expect(navigate).toHaveBeenCalledWith({
-        to: '/database',
-        search: { target: 'shop' },
-      })
+      expect(configure.testConnection).toHaveBeenCalledTimes(2)
     )
-    expect(configure.addTarget.mock.calls[0][0].name).toBe('shop')
-    // It saves without testing again.
-    expect(configure.testConnection).toHaveBeenCalledTimes(1)
+    const results = vi
+      .mocked(trackEvent)
+      .mock.calls.filter(([event]) => event === 'database_add_test_result')
+    // Once per outcome per attempt.
+    expect(results).toEqual([
+      [
+        'database_add_test_result',
+        { ok: false, error_class: 'host_unreachable', via: 'fields' },
+      ],
+    ])
+
+    cleanup()
+    expect(trackEvent).toHaveBeenCalledWith('database_add_abandoned', {
+      last_stage: 'test_failed',
+      via: 'fields',
+      seconds_open: expect.any(Number),
+    })
+  })
+
+  it("doesn't count moving to another path as stopping", async () => {
+    renderDialog()
+    fireEvent.click(screen.getByTestId('agent-connect-option'))
+    await screen.findByRole('heading', {
+      name: 'Connect with your coding agent',
+    })
+    expect(trackEvent).not.toHaveBeenCalledWith(
+      'database_add_abandoned',
+      expect.anything()
+    )
   })
 
   it('adds without asking when the query statistics are readable', async () => {
@@ -420,7 +503,7 @@ describe('AddDatabaseDialog', () => {
       await screen.findByText('Connected. Query statistics are readable.')
     ).toBeTruthy()
     expect(
-      screen.queryByText("Monitoring can't read query statistics yet")
+      screen.queryByText("Query stats are off, so monitoring can't start")
     ).toBeNull()
     expect(solidLabels()).toEqual(['Add and monitor'])
   })
@@ -488,7 +571,7 @@ describe('AddDatabaseDialog', () => {
   it('shows the getting-started progress only for the first database', () => {
     renderDialog('form')
     expect(screen.getByTestId('get-started-strip').textContent).toContain(
-      'Step 2 of 3 · Connect database'
+      'Step 1 of 3 · Connect database'
     )
     cleanup()
 
@@ -601,8 +684,9 @@ describe('AddDatabaseDialog editing', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test' }))
 
     expect(
-      await screen.findByText("Monitoring can't read query statistics yet")
+      await screen.findByText("Query stats are off, so monitoring can't start")
     ).toBeTruthy()
+    expect(screen.getByText('Turn them on, then test again.')).toBeTruthy()
     expect(solidLabels()).toEqual(['Save changes'])
   })
 

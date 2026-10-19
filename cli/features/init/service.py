@@ -149,11 +149,20 @@ class InitService:
         provider = llm.get("provider")
         source = get_anthropic_source(cfg=cfg)
 
+        if provider != "claude" and source in {"missing", "trial", "trial_exhausted"}:
+            # Hosted AI works before sign-in through an anonymous session.
+            try:
+                from shared.account_session import ensure_access_token
+
+                ensure_access_token()
+            except Exception:
+                pass
+
         if is_signed_in_locally():
             from features.account.service import account_service
 
             status = account_service.status(include_quota=False)
-            if status.get("signed_in"):
+            if status.get("signed_in") or status.get("is_anonymous"):
                 return {
                     "success": True,
                     "model": HOSTED_MODEL,

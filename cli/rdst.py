@@ -569,6 +569,36 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             )
 
         if action == "add":
+            from features.agent_connect.discovery import read_discovery
+
+            # A running RDST app serves MCP over HTTP; register that so tools act on the
+            # app's own state instead of starting a process per call.
+            running = read_discovery()
+            if running:
+                mcp_url = f"{running['url']}/mcp"
+                http_add = [claude_path, "mcp", "add", "--transport", "http", server_name,
+                            mcp_url]
+                try:
+                    result = subprocess.run(http_add, capture_output=True, text=True,
+                                            encoding="utf-8", errors="replace")
+                    if result.returncode != 0 and "already exists" in result.stderr.lower():
+                        # The address may have changed: replace the entry.
+                        subprocess.run([claude_path, "mcp", "remove", server_name],
+                                       capture_output=True, text=True, encoding="utf-8",
+                                       errors="replace")
+                        result = subprocess.run(http_add, capture_output=True, text=True,
+                                                encoding="utf-8", errors="replace")
+                except Exception as e:
+                    return RdstResult(False, f"Error running claude command: {e}")
+                if result.returncode == 0:
+                    return RdstResult(
+                        True,
+                        f"RDST registered with Claude Code at {mcp_url}.\n\n"
+                        "Start a new Claude Code session to use its tools. If RDST's "
+                        "address changes, run `rdst claude add` again.",
+                    )
+                return RdstResult(False, f"Failed to register: {result.stderr}")
+
             # Register the MCP server
             # Determine the best way to run the MCP server:
             # 1. If rdst-mcp is in PATH (pip installed), use it
@@ -792,6 +822,9 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
             return RdstResult(False, f"Invalid UI mode: {ui_mode}")
 
         os.environ["RDST_WEB_SERVE_STATIC"] = "1" if serve_static else "0"
+        # The app advertises this address to local agents in desktop-server.json.
+        os.environ["RDST_WEB_HOST"] = host
+        os.environ["RDST_WEB_PORT"] = str(port)
         # The web server has no interactive terminal to theme; suppress the
         # OSC-11 /dev/tty probe so --reload worker respawns (which inherit this
         # env) never contend for the terminal on import.

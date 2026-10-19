@@ -1,3 +1,4 @@
+import { signinPromptOf, useAccountStatus } from './accountStatus'
 import { useTrialSource } from './trialQueries'
 import { useAnthropicValidity } from './useAnthropicValidity'
 
@@ -7,13 +8,19 @@ export type AiGate =
   | { status: 'ready' }
   /** The probe itself failed (network/provider) — run allowed, badge explains. */
   | { status: 'unverified' }
-  | { status: 'blocked'; reason: 'missing' | 'invalid' | 'exhausted' }
+  | {
+      status: 'blocked'
+      reason: 'missing' | 'invalid' | 'exhausted' | 'signin_required'
+    }
 
 /**
  * Resolves the AI-insights dependency up front instead of after a wasted run
  * (H-4). Reuses the cached `useAnthropicValidity` probe gated on key presence
  * so the provider is never pinged without a key. A missing or rejected key
  * blocks the primary run actions — no silent degraded runs.
+ *
+ * Without a key, Readyset-hosted AI runs signed in or on the free anonymous
+ * allowance, so only an ended allowance (`signin_required`) blocks it.
  */
 export function useAiGate(): AiGate {
   const {
@@ -34,6 +41,9 @@ export function useAiGate(): AiGate {
     !isTrialExhausted
   const validityQuery = useAnthropicValidity(hasKey && !isReadysetAccount)
   const validity = validityQuery.data
+  const account = useAccountStatus()
+  const prompt = signinPromptOf(account.data)
+  const ownKey = hasKey && !isReadysetAccount
 
   if (envRequirementsQuery.isError) {
     return {
@@ -45,8 +55,16 @@ export function useAiGate(): AiGate {
     }
   }
   if (!envRequirements) return { status: 'checking' }
-  // Legacy trial tokens are no longer an AI provider. Existing installations
-  // must choose Readyset sign-in or Anthropic BYOK just like a fresh install.
+  if (!ownKey) {
+    if (prompt === 'required')
+      return { status: 'blocked', reason: 'signin_required' }
+    if (isReadysetAccount && hasKey) return { status: 'ready' }
+    if (account.isPending) return { status: 'checking' }
+    // The anonymous session is created on first use.
+    if (prompt !== null) return { status: 'ready' }
+  }
+  // A backend without free hosted AI: legacy trial tokens are no longer an AI
+  // provider, so these installations choose Readyset sign-in or Anthropic BYOK.
   if (isTrialSource) return { status: 'blocked', reason: 'missing' }
   if (isTrialExhausted) return { status: 'blocked', reason: 'exhausted' }
   if (!hasKey) return { status: 'blocked', reason: 'missing' }

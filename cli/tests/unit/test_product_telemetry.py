@@ -111,6 +111,8 @@ def test_events_go_through_the_telemetry_gate(monkeypatch, tmp_path):
         for name, value in env.items():
             monkeypatch.setenv(name, value)
         manager = TelemetryManager()
+        # Under pytest the resolved key is empty; the gate under test is the env.
+        manager.POSTHOG_API_KEY = "phc_test"
         monkeypatch.setattr(manager, "track", lambda event, props=None: sent.append(event))
         monkeypatch.setattr(product_telemetry, "_telemetry", lambda: manager)
         sent.clear()
@@ -429,6 +431,7 @@ async def test_local_identity_route_respects_opt_out_and_reports_internal_users(
         "distinct_id": "usr_42", "device_id": device_id, "account_kind": "signed_in", "email": "person@example.com"})
     result = await telemetry_route.get_telemetry_identity(request)
     assert result["distinct_id"] == "usr_42" and result["internal_user"] is True
+    assert result["posthog_project"] == "preview"
     monkeypatch.setattr(product_telemetry, "enabled", lambda: False)
     assert await telemetry_route.get_telemetry_identity(request) == {"telemetry_enabled": False}
     remote = Request({**request.scope, "client": ("203.0.113.1", 1234)})

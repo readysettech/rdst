@@ -27,7 +27,7 @@ def client(monkeypatch, tmp_path):
                         lambda self, target: {"engine": "postgresql"} if target == "db" else None)
     app = FastAPI()
     app.include_router(routes.router, prefix="/api/monitor")
-    return app, TestClient(app)
+    return app, TestClient(app, client=("127.0.0.1", 50000))
 
 
 class RecordingScheduler:

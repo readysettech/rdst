@@ -1,6 +1,7 @@
 import type { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
@@ -9,7 +10,12 @@ import {
   type BackendHandle,
   backendEnvironment,
   backendExecutablePath,
+  discoveryFilePath,
+  findAvailablePort,
+  PREFERRED_PORT,
   parseStartupMarker,
+  preferredPort,
+  removeDiscoveryFile,
   StartupWatch,
   startBackend,
   stopBackend,
@@ -45,6 +51,55 @@ describe('terminateWindowsProcessTree', () => {
     taskkill.emit('exit', 1)
 
     await expect(termination).rejects.toThrow('taskkill exited with code 1')
+  })
+})
+
+describe('discovery file', () => {
+  it('lives in the data directory the backend environment selects', () => {
+    expect(discoveryFilePath({}, '/home/u')).toBe(
+      path.join('/home/u', '.rdst', 'desktop-server.json')
+    )
+    expect(discoveryFilePath({ RDST_INSTANCE: 'staging' }, '/home/u')).toBe(
+      path.join('/home/u', '.rdst-staging', 'desktop-server.json')
+    )
+    expect(discoveryFilePath({ RDST_DATA_DIR: '~/data' }, '/home/u')).toBe(
+      path.join('/home/u/data', 'desktop-server.json')
+    )
+  })
+
+  it("removes the stopped backend's file and leaves a newer one", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rdst-discovery-'))
+    const file = path.join(dir, 'desktop-server.json')
+    fs.writeFileSync(file, JSON.stringify({ port: 4100 }))
+    removeDiscoveryFile(file, 4200)
+    expect(fs.existsSync(file)).toBe(true)
+    removeDiscoveryFile(file, 4100)
+    expect(fs.existsSync(file)).toBe(false)
+    expect(() => removeDiscoveryFile(file, 4100)).not.toThrow()
+  })
+})
+
+describe('backend port', () => {
+  it('prefers a fixed port per build so agent registrations survive restarts', () => {
+    expect(preferredPort()).toBe(PREFERRED_PORT)
+    expect(preferredPort('')).toBe(PREFERRED_PORT)
+    expect(preferredPort('staging')).toBe(preferredPort('staging'))
+    expect(preferredPort('staging')).not.toBe(PREFERRED_PORT)
+  })
+
+  it('uses the preferred port when free and another free port when taken', async () => {
+    const preferred = await findAvailablePort('127.0.0.1')
+    expect(await findAvailablePort('127.0.0.1', preferred)).toBe(preferred)
+
+    const holder = net.createServer()
+    await new Promise<void>((resolve) => holder.listen(preferred, '127.0.0.1', resolve))
+    try {
+      const fallback = await findAvailablePort('127.0.0.1', preferred)
+      expect(fallback).not.toBe(preferred)
+      expect(fallback).toBeGreaterThan(0)
+    } finally {
+      await new Promise((resolve) => holder.close(resolve))
+    }
   })
 })
 

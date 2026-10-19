@@ -1,3 +1,4 @@
+import hashlib
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -64,6 +65,9 @@ def test_calls_only_bounded_keyservice_protocol(monkeypatch):
     assert "provider" not in payload
     assert "reasoning" not in payload
     assert payload["schema_cache_key"] == "a" * 64
+    # Keyservice holds the system prompt; the client names it by hash.
+    assert payload["prompt"] == {"sha256": hashlib.sha256(b"Generate SQL.").hexdigest()}
+    assert payload["messages"] == [{"role": "user", "content": "Count users."}]
 
 
 def test_billable_count_tracks_successful_keyservice_responses(monkeypatch):
@@ -162,10 +166,12 @@ def test_json_object_is_prompted_and_forwarded(monkeypatch):
         base_url="https://keyservice.example",
     )
 
-    # Keyservice drops the format for Claude, so the prompt carries the contract.
+    # Keyservice drops the format for Claude, so the prompt it renders carries the contract.
     payload = post.call_args.kwargs["json"]
     assert payload["response_format"] == {"type": "json_object"}
-    assert "valid JSON object" in payload["messages"][0]["content"]
+    assert payload["messages"] == [{"role": "user", "content": "Count users."}]
+    upstream = HostedProvider._messages(_request({"response_format": {"type": "json_object"}}))
+    assert "valid JSON object" in upstream[0]["content"]
 
 
 def test_json_schema_is_prompted_and_forwarded(monkeypatch):
@@ -187,8 +193,10 @@ def test_json_schema_is_prompted_and_forwarded(monkeypatch):
 
     payload = post.call_args.kwargs["json"]
     assert payload["response_format"] == schema
-    assert "JSON Schema" in payload["messages"][0]["content"]
-    assert '"required":["sql"]' in payload["messages"][0]["content"]
+    assert all(message["role"] != "system" for message in payload["messages"])
+    upstream = HostedProvider._messages(_request({"response_format": schema}))
+    assert "JSON Schema" in upstream[0]["content"]
+    assert '"required":["sql"]' in upstream[0]["content"]
 
 
 def test_preserves_keyservice_error_code(monkeypatch):

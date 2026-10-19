@@ -23,7 +23,7 @@ from shared.ui import (
 )
 
 # Embedded documentation for RDST
-RDST_DOCS = """
+RDST_DOCS_SOURCE = """
 # RDST (Readyset Data and SQL Toolkit) Documentation
 
 ## Overview
@@ -394,7 +394,7 @@ The scan command:
 
 Analysis modes:
 - **Shallow** (`--analyze --shallow`): Schema-only, no DB connection. Fast. Good for CI without DB access.
-- **Deep** (`--analyze`): Runs EXPLAIN ANALYZE against live DB + AI analysis. Requires Readyset sign-in or `ANTHROPIC_API_KEY`, plus the DB password. Shows execution time, index recommendations, query rewrites.
+- **Deep** (`--analyze`): Runs EXPLAIN ANALYZE against live DB + AI analysis. Uses Readyset-hosted AI (no sign-in needed to start) or `ANTHROPIC_API_KEY`, plus the DB password. Shows execution time, index recommendations, query rewrites.
 
 Options:
 - `--diff REF`: Only scan files changed since REF (HEAD, HEAD~1, commit ID, branch)
@@ -921,6 +921,12 @@ rdst claude add
 rdst claude remove
 ```
 
+While the RDST app (or `rdst web`) is running, `rdst claude add` registers the
+app's local MCP endpoint over HTTP. Its tools add, test and monitor databases
+and read the Inbox, actions and reports. If the app's address changes, run
+`rdst claude add` again.
+With no app running, it registers the stdio MCP server instead.
+
 After registering, start a new Claude Code session and type `/rdst` to activate
 RDST mode. Claude will have access to all RDST tools for query analysis and
 optimization.
@@ -1137,7 +1143,10 @@ rdst top --target mysql-prod --source digest
 ```
 
 ## AI access
-- Readyset-hosted AI after `rdst account login`
+- Readyset-hosted AI works without signing in: RDST starts an anonymous
+  session with a $1 monthly allowance per computer for 30 days
+- `rdst account login` keeps hosted AI going after that, with a $5 monthly
+  allowance, and carries your usage over
 - Anthropic Claude with your own `ANTHROPIC_API_KEY`
 
 ## Semantic Layer (Annotations)
@@ -1192,8 +1201,10 @@ Annotations are **optional** but recommended for complex schemas with business l
 - Check firewall rules
 - Ensure database is running
 
-### "AI access is required"
-- Run `rdst account login` for Readyset-hosted AI
+### "AI access is required" or "Sign in to keep AI monitoring running"
+- The free AI without an account has ended on this computer (30 days, or
+  the $1 monthly allowance is used up)
+- Run `rdst account login` to keep using Readyset-hosted AI
 - Or export your own `ANTHROPIC_API_KEY`
 
 ## Docker Requirements (Readyset Performance)
@@ -1256,7 +1267,17 @@ If digest source fails:
 - Conversation history: ~/.rdst/conversations/
 """
 
-RDST_DOCS = adapt_shell_guidance(RDST_DOCS)
+RDST_DOCS = adapt_shell_guidance(RDST_DOCS_SOURCE)
+
+HELP_SYSTEM_INSTRUCTIONS = """You are a helpful assistant for RDST, a database performance analysis CLI tool.
+Answer the user's question based on the documentation provided. Be concise and practical.
+Include command examples when relevant. If the question isn't covered in the docs, say so."""
+
+
+def help_system_prompt(*, windows: bool | None = None) -> str:
+    """Instructions and documentation, the fixed part of every help answer."""
+    docs = adapt_shell_guidance(RDST_DOCS_SOURCE, windows=windows)
+    return f"{HELP_SYSTEM_INSTRUCTIONS}\n\n## RDST Documentation\n{docs}"
 
 
 @dataclass
@@ -1310,8 +1331,10 @@ class HelpCommand:
             result = self._fallback_search(question, "no_api_key")
             result.answer += (
                 "\n\n---\n"
-                "For AI-powered help, run `rdst account login` or set "
-                "`ANTHROPIC_API_KEY`."
+                "AI-powered help isn't available right now. Readyset-hosted AI works "
+                "without an account until its free allowance runs out; after that, "
+                "`rdst account login` keeps it going, or set `ANTHROPIC_API_KEY` to use "
+                "your own key."
             )
             return result
 
@@ -1322,15 +1345,8 @@ class HelpCommand:
             from shared.llm_manager.claude_provider import AnthropicModel
             llm = LLMManager(defaults={"model": AnthropicModel.HAIKU_5_5.value})
 
-            # Build prompt
-            system_message = """You are a helpful assistant for RDST, a database performance analysis CLI tool.
-Answer the user's question based on the documentation provided. Be concise and practical.
-Include command examples when relevant. If the question isn't covered in the docs, say so."""
-
-            user_query = f"""## RDST Documentation
-{RDST_DOCS}
-
-## User Question
+            system_message = help_system_prompt()
+            user_query = f"""## User Question
 {question}
 
 ## Answer (be concise, include command examples):"""
@@ -1515,8 +1531,7 @@ This wizard will:
 Or manually:
 ```bash
 rdst configure add --target mydb --engine postgresql ...
-rdst account login
-# Or use your own key:
+# Readyset-hosted AI works without signing in. To use your own key instead:
 export ANTHROPIC_API_KEY="your-key"
 ```"""
         else:

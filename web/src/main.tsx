@@ -7,7 +7,7 @@ import { createRouter, RouterProvider } from '@tanstack/react-router'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { installAnalysisRunInvalidation } from './features/queries/results/analysisRunInvalidation'
-import { initAnalytics } from './lib/analytics'
+import { finishAnalyticsSetup, initAnalytics } from './lib/analytics'
 import { fetchEnvRequirements } from './lib/api'
 import {
   installBackendReachability,
@@ -26,6 +26,7 @@ void fetchEnvRequirements()
   // Fail closed: if the local preference cannot be read, do not initialize
   // browser analytics and risk overriding an explicit opt-out.
   .catch(() => undefined)
+  .then(finishAnalyticsSetup)
 
 const router = createRouter({ routeTree })
 // Built chunks only: the dev server serves every module on its own, and fetching all

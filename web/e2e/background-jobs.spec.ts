@@ -1,6 +1,7 @@
 import {
   acceptBrowserError,
   configureTestTarget,
+  continuePastSessionOnlyPassword,
   expect,
   setBackendFixtures,
   test,
@@ -91,6 +92,10 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
       new URL(response.url()).pathname === '/api/bootstrap'
   )
   await dialog.getByRole('button', { name: 'Add and monitor' }).click()
+  await continuePastSessionOnlyPassword(
+    page,
+    page.getByRole('dialog', { name: /^Monitor / })
+  )
   const { run_id: runId } = (await (await started).json()) as {
     run_id: string
   }

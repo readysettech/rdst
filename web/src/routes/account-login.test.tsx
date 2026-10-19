@@ -29,7 +29,7 @@ vi.mock('../lib/api', () => ({
 
 vi.mock('../lib/accountAuth', () => ({
   startAccountGoogleOAuth: vi.fn(async () => undefined),
-  sendAccountMagicLink: vi.fn(async () => undefined),
+  sendAccountMagicLink: vi.fn(async () => 'sent' as const),
   completeAccountRedirect: vi.fn(),
 }))
 
@@ -56,7 +56,7 @@ describe('SignInPage', () => {
     ).toBeNull()
     expect(
       screen.getByText(
-        'Signing in turns on AI monitoring and the free AI included with a Readyset account for analyses, checks and Ask.'
+        "Signing in keeps your monitoring history and AI checks running, and sends alerts by email. Everything you've set up carries over."
       )
     ).toBeTruthy()
     expect(document.getElementById('app-sidebar')).toBeNull()

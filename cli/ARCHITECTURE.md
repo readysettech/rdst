@@ -76,6 +76,7 @@ Current feature-owned domains:
 - `account`
 - `agent`
 - `agent_activity`
+- `agent_connect`
 - `allowlist`
 - `analyze`
 - `ask`
@@ -107,6 +108,7 @@ Each slice should be readable from its `models.py` and `service.py` first. That 
 
 - `agent`: agent runtime and MCP-facing agent behavior
 - `agent_activity`: audit log of the RDST agent's actions (deep analyses, Ask, classification, reports, benchmarks) and the statements and AI calls behind them
+- `agent_connect`: connecting a coding agent to the running RDST app over a local, loopback-only MCP endpoint, its connect prompt, and server discovery
 - `account`: Readyset account login, local session storage, and hosted-AI access
 - `allowlist`: provider IP-allowlist context and explicit one-click write-back (Supabase, Neon, DigitalOcean)
 - `analyze`: query analysis, explain flows, rewrite evaluation, analysis rendering

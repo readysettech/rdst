@@ -23,7 +23,7 @@ def test_inbox_actions_and_index_changes(monkeypatch, tmp_path):
                                "index_name": "idx", "definition": "CREATE INDEX idx ON orders (id)"}], 950)
     app = FastAPI()
     app.include_router(routes.router, prefix="/api/monitor")
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
     assert len(client.get("/api/monitor/inbox?state=new&target=db").json()["items"]) == 2
     assert client.post(f"/api/monitor/inbox/{first['id']}/snooze",
                        json={"until": 1100}).json()["state"] == "snoozed"
@@ -66,7 +66,7 @@ def test_query_page_has_constant_sqlite_read_count(monkeypatch, tmp_path):
     monkeypatch.setattr(routes, "_store", lambda: store)
     app = FastAPI()
     app.include_router(routes.router, prefix="/api/monitor")
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
     counts = []
     for n in (10, 2000):
         def seed(conn):
@@ -125,7 +125,7 @@ def test_judge_runs_returns_latest_and_validates_limit(monkeypatch, tmp_path):
     store.record_judge_run("other", 30, [], outcome="empty")
     app = FastAPI()
     app.include_router(routes.router, prefix="/api/monitor")
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
     response = client.get("/api/monitor/targets/db/judge-runs?limit=1")
     assert response.status_code == 200
     assert response.json()["runs"] == [{
@@ -231,7 +231,7 @@ def test_aurora_readers_cannot_turn_on_monitoring(tmp_path, monkeypatch):
                         lambda self, name: {"tags": tags[name]})
     app = FastAPI()
     app.include_router(routes.router, prefix="/api/monitor")
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
     refused = client.put("/api/monitor/targets/reader/settings", json={"enabled": True})
     assert refused.status_code == 409
     assert "through its writer" in refused.json()["detail"]

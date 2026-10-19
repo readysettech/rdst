@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
+import copy
 import hashlib
 import json
 import math
@@ -282,6 +283,29 @@ def accepts_hundred_indicator_result(
     return before == expected_native and after == float(total) / count
 
 
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "decision": {"type": "string", "enum": ["activate", "abstain"]},
+        "measure_kind": {
+            "type": "string",
+            "enum": ["quantity", "money", "identifier", "unknown"],
+        },
+        "source_excerpt": {"type": "string"},
+    },
+    "required": ["decision", "measure_kind", "source_excerpt"],
+    "additionalProperties": False,
+}
+BINARY_RESPONSE_SCHEMA = {
+    **RESPONSE_SCHEMA,
+    "properties": {
+        **RESPONSE_SCHEMA["properties"],
+        "output_units": {"type": "string", "enum": ["percentage", "fraction", "unknown"]},
+    },
+    "required": [*RESPONSE_SCHEMA["required"], "output_units"],
+}
+
+
 def route_mean_precision(
     question: str, sql: str, dialect: str, llm_manager, callback=None
 ) -> dict:
@@ -326,32 +350,10 @@ def route_mean_precision(
             "json_schema": {
                 "name": "integer_mean_precision",
                 "strict": True,
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "decision": {
-                            "type": "string",
-                            "enum": ["activate", "abstain"],
-                        },
-                        "measure_kind": {
-                            "type": "string",
-                            "enum": ["quantity", "money", "identifier", "unknown"],
-                        },
-                        "source_excerpt": {"type": "string"},
-                    },
-                    "required": ["decision", "measure_kind", "source_excerpt"],
-                    "additionalProperties": False,
-                },
+                "schema": copy.deepcopy(BINARY_RESPONSE_SCHEMA if binary else RESPONSE_SCHEMA),
             },
         }
     }
-    if binary:
-        schema = response_format["response_format"]["json_schema"]["schema"]
-        schema["properties"]["output_units"] = {
-            "type": "string",
-            "enum": ["percentage", "fraction", "unknown"],
-        }
-        schema["required"].append("output_units")
     started = perf_counter()
     response = llm_manager.generate_response(
         prompt=prompt,

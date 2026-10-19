@@ -42,7 +42,7 @@ def store(monkeypatch, tmp_path):
 def client(store):
     app = FastAPI()
     app.include_router(routes.router, prefix="/api/monitor")
-    return TestClient(app)
+    return TestClient(app, client=("127.0.0.1", 50000))
 
 
 def _db(calls: float) -> dict:

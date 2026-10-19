@@ -47,6 +47,12 @@ export interface DirectTelemetryConfig {
   key: string
   host: string
   internalProbeUrl: string
+  /** The preview project's key: Readyset's own people and builds report there. */
+  previewKey?: string
+  /** Known internal before the network probe: RDST_INTERNAL, a readyset.io account, a dev build. */
+  internal?: boolean
+  /** The production project's key, which internal events are routed away from. */
+  productionKey?: string
   deviceId: string
   appVersion: string
   os: string
@@ -58,8 +64,42 @@ export interface DirectTelemetryConfig {
 
 declare const __RDST_TELEMETRY_CONFIG__: Pick<
   DirectTelemetryConfig,
-  'key' | 'host' | 'internalProbeUrl'
+  'key' | 'host' | 'internalProbeUrl' | 'previewKey'
 >
+
+/** A Buildkite release number: major.minor.build, never a .dev, 0.0.x or .0 build. */
+export function isReleaseVersion(version: string): boolean {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version.trim())
+  return !!match && match[3] !== '0' && !(match[1] === '0' && match[2] === '0')
+}
+
+/** Readyset's own people and builds, short of the company-network probe. */
+export function internalInstall(
+  env: NodeJS.ProcessEnv,
+  email: string,
+  appVersion: string
+): boolean {
+  return (
+    ['1', 'true', 'yes'].includes(
+      String(env.RDST_INTERNAL ?? '')
+        .trim()
+        .toLowerCase()
+    ) ||
+    email.trim().toLowerCase().endsWith('@readyset.io') ||
+    !isReleaseVersion(appVersion)
+  )
+}
+
+/** An internal person's events go to the preview project; without its key, they're tagged. */
+export function routedKey(
+  config: Pick<DirectTelemetryConfig, 'key' | 'previewKey'>,
+  productionKey: string,
+  internal: boolean
+): string {
+  return internal && config.key === productionKey && config.previewKey
+    ? config.previewKey
+    : config.key
+}
 
 /** Read the opt-out and install identity from the same data directory as the sidecar. */
 export function loadDirectTelemetryConfig(options: {
@@ -67,12 +107,15 @@ export function loadDirectTelemetryConfig(options: {
   packaged: boolean
   appVersion: string
   dataDir: string
-  defaults?: Pick<DirectTelemetryConfig, 'key' | 'host' | 'internalProbeUrl'>
+  defaults?: Pick<
+    DirectTelemetryConfig,
+    'key' | 'host' | 'internalProbeUrl' | 'previewKey'
+  >
 }): DirectTelemetryConfig {
   const defaults =
     options.defaults ??
     (typeof __RDST_TELEMETRY_CONFIG__ === 'undefined'
-      ? { key: '', host: '', internalProbeUrl: '' }
+      ? { key: '', host: '', internalProbeUrl: '', previewKey: '' }
       : __RDST_TELEMETRY_CONFIG__)
   const { dataDir } = options
   let disabled = telemetryDisabled(options.env, options.packaged)
@@ -132,14 +175,29 @@ export function loadDirectTelemetryConfig(options: {
   } catch {
     /* An install can begin with no telemetry state. */
   }
+  const email = userId ? accountValue('email') : ''
+  const previewKey =
+    options.env.RDST_POSTHOG_PREVIEW_KEY ?? defaults.previewKey ?? ''
+  const internal = internalInstall(options.env, email, options.appVersion)
+  // A dev build never reports to production: preview, or nothing.
+  const startKey = routedKey({ key, previewKey }, defaults.key, internal)
+  if (
+    !isReleaseVersion(options.appVersion) &&
+    startKey === defaults.key &&
+    defaults.key
+  )
+    disabled = true
   disabled ||= !deviceId
   return {
     ...defaults,
     key,
+    previewKey,
+    internal,
+    productionKey: defaults.key,
     deviceId,
     disabled,
     userId,
-    email: userId ? accountValue('email') : '',
+    email,
     linkedAccountId,
     internalProbeUrl:
       options.env.RDST_INTERNAL_PROBE_URL ?? defaults.internalProbeUrl,
@@ -323,13 +381,18 @@ export class DesktopTelemetry {
         this.internalUser ??= config.internalProbeUrl
           ? this.probe(config.internalProbeUrl).catch(() => false)
           : Promise.resolve(false)
-        const internalUser = await this.internalUser
+        const internalUser = (await this.internalUser) || !!config.internal
+        const apiKey = routedKey(
+          config,
+          config.productionKey ?? '',
+          internalUser
+        )
         let ok = false
         try {
           const url = `${config.host.replace(/\/$/, '')}/capture/`
           if (config.userId && !this.identified) {
             const identified = await this.post(url, {
-              api_key: config.key,
+              api_key: apiKey,
               distinct_id: config.userId,
               event: '$identify',
               properties: {
@@ -348,7 +411,7 @@ export class DesktopTelemetry {
             this.identified = true
           }
           ok = await this.post(`${config.host.replace(/\/$/, '')}/capture/`, {
-            api_key: config.key,
+            api_key: apiKey,
             distinct_id: config.userId || config.deviceId,
             event: item.event,
             properties: {

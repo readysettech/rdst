@@ -7,16 +7,15 @@ import { Spinner } from '@rs/ui-new/spinner'
 import { HStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useQueryClient } from '@tanstack/react-query'
-import { type ReactNode, useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useMemo, useState } from 'react'
 import type { EnvRequirement } from '../lib/api'
 import {
   invalidateTrialRelatedQueries,
   useTrialSource,
 } from '../lib/trialQueries'
 import type { AiGate } from '../lib/useAiGate'
-import { useOpenAddDatabase } from './configure/addDatabase'
 import { EnvSecretsDialog } from './EnvSecretsDialog'
-import { claimFirstRunPopup, GetStarted, GetStartedButton } from './GetStarted'
+import { SigninRequiredStep } from './SigninPrompts'
 import { AccountLoginDialog } from './TrialRegistrationDialog'
 
 interface AiProviderGateProps {
@@ -57,13 +56,6 @@ export function AiProviderGate({
     useTrialSource()
   const [accountOpen, setAccountOpen] = useState(false)
   const [keyOpen, setKeyOpen] = useState(false)
-  const openAddDatabase = useOpenAddDatabase()
-  // A new install opens straight into sign-in: once per app session, and only
-  // when AI has never been set up (not when a saved key stopped working).
-  const firstRun = gate.status === 'blocked' && gate.reason === 'missing'
-  useEffect(() => {
-    if (firstRun && claimFirstRunPopup('sign-in')) setAccountOpen(true)
-  }, [firstRun])
 
   const keyRequirements = useMemo<EnvRequirement[]>(() => {
     if (anthropicRequirement) {
@@ -119,7 +111,7 @@ export function AiProviderGate({
     gate.reason === 'invalid'
       ? 'Anthropic rejected the saved key. Add a valid key or sign in to Readyset.'
       : gate.reason === 'exhausted'
-        ? 'Your AI access is no longer active. Sign in to Readyset or add an Anthropic key.'
+        ? 'Your AI access has ended. Sign in to Readyset or add an Anthropic key.'
         : null
 
   const refresh = () => void invalidateTrialRelatedQueries(queryClient)
@@ -135,24 +127,42 @@ export function AiProviderGate({
           className="mb-6 max-w-2xl"
         />
       )}
-      <GetStarted
-        step="sign-in"
-        action={
-          <GetStartedButton
-            label="Sign in"
-            onClick={() => setAccountOpen(true)}
-          />
-        }
-        footer={
-          <Button
-            variant="primary"
-            modifier="ghost"
-            size="small"
-            label="Use my own Anthropic key instead"
-            onClick={() => setKeyOpen(true)}
-          />
-        }
-      />
+      {gate.reason === 'signin_required' ? (
+        <SigninRequiredStep
+          onSignIn={() => setAccountOpen(true)}
+          onUseKey={() => setKeyOpen(true)}
+        />
+      ) : (
+        <div className="max-w-2xl" data-testid="ai-setup">
+          <Text as="h2" level="headline-2" className="text-content-layout-1">
+            Set up AI
+          </Text>
+          <Text
+            as="p"
+            level="body-medium"
+            className="mt-3 text-content-layout-3"
+          >
+            Sign in to Readyset for the included AI, or add your own Anthropic
+            key. Charts, alerts and the Inbox keep running either way.
+          </Text>
+          <div className="mt-8 flex flex-wrap items-center gap-3">
+            <Button
+              variant="rising"
+              modifier="solid"
+              size="large"
+              label="Sign in"
+              onClick={() => setAccountOpen(true)}
+            />
+            <Button
+              variant="primary"
+              modifier="ghost"
+              size="small"
+              label="Use my own Anthropic key instead"
+              onClick={() => setKeyOpen(true)}
+            />
+          </div>
+        </div>
+      )}
 
       <AccountLoginDialog
         isOpen={accountOpen}
@@ -160,18 +170,7 @@ export function AiProviderGate({
         onSuccess={() => {
           setAccountOpen(false)
           refresh()
-          if (firstRun) openAddDatabase()
         }}
-        getStarted={
-          firstRun
-            ? {
-                onNext: () => {
-                  setAccountOpen(false)
-                  openAddDatabase()
-                },
-              }
-            : undefined
-        }
       />
       <EnvSecretsDialog
         isOpen={keyOpen}

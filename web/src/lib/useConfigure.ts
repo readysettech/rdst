@@ -6,6 +6,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
 import { throwIfApiError } from './httpError';
+import { type DatabaseAddVia, maskInReplays } from './analytics';
 import type {
   ConfigureTarget,
   ConfigureTargetDetail,
@@ -41,13 +42,21 @@ interface UseConfigureReturn {
   // Actions
   listTargets: () => Promise<void>;
   getTarget: (name: string) => Promise<ConfigureTargetDetail | null>;
-  addTarget: (data: ConfigureFormData) => Promise<void>;
+  /**
+   * Resolves `persisted: false` when the password could not go into the OS keyring and
+   * lasts only for this app session.
+   */
+  addTarget: (
+    data: ConfigureFormData,
+    via?: DatabaseAddVia,
+  ) => Promise<{ persisted: boolean | null }>;
   updateTarget: (name: string, data: ConfigureFormData) => Promise<void>;
   removeTarget: (name: string) => Promise<void>;
   setDefaultTarget: (name: string) => Promise<void>;
   testConnection: (
     name: string,
     data?: ConfigureFormData,
+    via?: DatabaseAddVia,
   ) => Promise<ConfigureConnectionStatus | null>;
   cancel: () => void;
 
@@ -117,6 +126,9 @@ export function useConfigure(): UseConfigureReturn {
       if (!('targets' in data)) {
         throw new Error(data.message);
       }
+      maskInReplays(
+        data.targets.flatMap((target) => [target.name, target.host, target.database]),
+      );
       setTargets(data.targets);
       setDefaultTargetState(data.default_target ?? null);
       setState('success');
@@ -152,6 +164,7 @@ export function useConfigure(): UseConfigureReturn {
         throw new Error(data.message);
       }
       const detail = data as typeof data & { password_env?: string | null };
+      maskInReplays([detail.target_name, detail.host, detail.database, detail.user]);
 
       setState('success');
       return {
@@ -194,7 +207,7 @@ export function useConfigure(): UseConfigureReturn {
   }, []);
 
   // Add new target
-  const addTarget = useCallback(async (data: ConfigureFormData) => {
+  const addTarget = useCallback(async (data: ConfigureFormData, via?: DatabaseAddVia) => {
     const controller = beginRequest(controllers.current, 'addTarget');
 
     setState('loading');
@@ -219,6 +232,7 @@ export function useConfigure(): UseConfigureReturn {
             ssh: data.ssh,
           },
         },
+        headers: via ? { 'X-RDST-Via': via } : undefined,
         signal: controller.signal,
       });
       throwIfApiError(result.response, result.error, "Couldn't add the database");
@@ -226,11 +240,13 @@ export function useConfigure(): UseConfigureReturn {
       if (!result.data.success) {
         throw new Error(result.data.message || "Couldn't add the database");
       }
+      const persisted = 'persisted' in result.data ? (result.data.persisted ?? null) : null;
 
       setState('success');
       // Refresh target list and invalidate status for header dropdown
       await listTargets();
       invalidateStatus();
+      return { persisted };
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
         throw err;
@@ -370,7 +386,11 @@ export function useConfigure(): UseConfigureReturn {
   }, [listTargets]);
 
   // Test connection (SSE streaming)
-  const testConnection = useCallback(async (name: string, data?: ConfigureFormData) => {
+  const testConnection = useCallback(async (
+    name: string,
+    data?: ConfigureFormData,
+    via?: DatabaseAddVia,
+  ) => {
     const controller = beginRequest(controllers.current, 'testConnection');
     const databaseEngine = data?.engine;
 
@@ -386,7 +406,10 @@ export function useConfigure(): UseConfigureReturn {
           `/api/configure/targets/${encodeURIComponent(name)}/test`,
           {
           method: 'POST',
-          headers: data ? { 'content-type': 'application/json' } : undefined,
+          headers: {
+            ...(data ? { 'content-type': 'application/json' } : {}),
+            ...(via ? { 'X-RDST-Via': via } : {}),
+          },
           body: data
             ? JSON.stringify({
                 target: {

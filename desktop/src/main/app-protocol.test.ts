@@ -8,6 +8,7 @@ import {
   createAppRequestHandler,
   isAppUrl,
   isRendererUrl,
+  parseByteRange,
   resolveStaticPath,
   rewriteAccountReturnUrl,
   UNREACHABLE_HEADER,
@@ -88,6 +89,36 @@ describe('static files', () => {
     expect(await asset.text()).toBe('run()')
     expect(await (await handle(app('/inbox?item=2'))).text()).toBe('RDST')
     expect(await (await handle(app('/'))).text()).toBe('RDST')
+  })
+
+  it('answers byte ranges for video, which media elements stream in parts', async () => {
+    const dir = bundle()
+    mkdirSync(path.join(dir, 'onboarding'))
+    writeFileSync(path.join(dir, 'onboarding', 'clip.webm'), '0123456789')
+    const handle = createAppRequestHandler({
+      rootDir: dir,
+      apiBaseUrl: () => null,
+    })
+    const whole = await handle(app('/onboarding/clip.webm'))
+    expect(whole.status).toBe(200)
+    expect(whole.headers.get('content-type')).toBe('video/webm')
+    expect(whole.headers.get('accept-ranges')).toBe('bytes')
+    const part = await handle(
+      app('/onboarding/clip.webm', { headers: { range: 'bytes=2-5' } })
+    )
+    expect(part.status).toBe(206)
+    expect(part.headers.get('content-range')).toBe('bytes 2-5/10')
+    expect(await part.text()).toBe('2345')
+    const tail = await handle(
+      app('/onboarding/clip.webm', { headers: { range: 'bytes=7-' } })
+    )
+    expect(await tail.text()).toBe('789')
+    const past = await handle(
+      app('/onboarding/clip.webm', { headers: { range: 'bytes=20-' } })
+    )
+    expect(past.status).toBe(416)
+    expect(parseByteRange('bytes=-3', 10)).toEqual({ start: 7, end: 9 })
+    expect(parseByteRange('items=0-1', 10)).toBeNull()
   })
 
   it('never serves a file outside the bundle', () => {

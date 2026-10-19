@@ -46,6 +46,8 @@ export interface PrerequisitesCheckerProps {
   onPhaseChange?: (phase: CheckerPhase) => void
   /** Pre-fetched state, for callers that already hold the query. */
   state?: PrerequisitesState
+  /** Shows "Check again" by the live indicator; off when the caller has its own. */
+  recheckButton?: boolean
   className?: string
 }
 
@@ -67,7 +69,7 @@ function LiveIndicator({
   onRecheck,
 }: {
   state: PrerequisitesState
-  onRecheck: () => void
+  onRecheck?: () => void
 }) {
   const polling = state.interval !== false
   const now = useNow(polling)
@@ -144,13 +146,15 @@ function LiveIndicator({
         </span>
         <span className="tabular-nums">{label}</span>
       </output>
-      <Button
-        label="Check again"
-        modifier="ghost"
-        size="small"
-        disabled={state.checking}
-        onClick={onRecheck}
-      />
+      {onRecheck && (
+        <Button
+          label="Check again"
+          modifier="ghost"
+          size="small"
+          disabled={state.checking}
+          onClick={onRecheck}
+        />
+      )}
     </div>
   )
 }
@@ -515,6 +519,7 @@ export function PrerequisitesChecker({
   skipLabel = 'Skip for now',
   onPhaseChange,
   state: provided,
+  recheckButton = true,
   className,
 }: PrerequisitesCheckerProps) {
   const own = usePrerequisites(target, { enabled: !provided })
@@ -651,7 +656,10 @@ export function PrerequisitesChecker({
                     </Text>
                   )}
                 </div>
-                <LiveIndicator state={state} onRecheck={state.recheck} />
+                <LiveIndicator
+                  state={state}
+                  onRecheck={recheckButton ? state.recheck : undefined}
+                />
               </div>
               <Text
                 as="p"

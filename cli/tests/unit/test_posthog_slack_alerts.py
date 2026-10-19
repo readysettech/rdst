@@ -16,6 +16,14 @@ PROBE_URL = "http://internal-probe.example/"
 
 
 @pytest.fixture(autouse=True)
+def _release_build(monkeypatch):
+    """The internal_user tag under test comes from the network probe, as in a release."""
+    from shared import telemetry_manager
+
+    monkeypatch.setattr(telemetry_manager, "build_version", lambda: "0.1.4321")
+
+
+@pytest.fixture(autouse=True)
 def _no_trial_token_leak():
     """The registration flows under test export RDST_TRIAL_TOKEN; restore the
     environment afterwards so the fake token can't bleed into other tests."""

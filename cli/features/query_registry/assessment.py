@@ -29,6 +29,16 @@ from .assessment_rubric import MODEL, RUBRIC_VERSION, finding_mask, validate_res
 
 logger = logging.getLogger(__name__)
 
+
+def _start_anonymous_session() -> bool:
+    """Start an anonymous Readyset session so assessments run before sign-in."""
+    from shared import account_session
+
+    try:
+        return bool(account_session.ensure_access_token())
+    except Exception:
+        return False
+
 POLL_SECONDS = 0.5
 IDLE_SECONDS = 15.0
 CONCURRENCY = 8
@@ -234,7 +244,7 @@ class AssessmentWorker:
             return False
         eligible = await self._store(_eligible_keys, target)
         await self._store(store.prepare_assessments, target, identity, eligible_keys=eligible)
-        if not is_signed_in_locally():
+        if not is_signed_in_locally() and not await asyncio.to_thread(_start_anonymous_session):
             await self._store(store.set_target_assessment_state,
                 target,
                 identity,

@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { expect, mainContent } from '../fixtures'
+import { expect } from '../fixtures'
 import { ciAddress, waitForEmail } from './mailbox'
 
 const keyservice = process.env.RDST_KEYSERVICE_URL?.replace(/\/$/, '') ?? ''
@@ -46,30 +46,35 @@ export async function signInWithEmail(
   const email = ciAddress(emailLabel)
   const requestedAt = new Date()
 
-  // Signed out with no Anthropic key, Home is the get-started steps inside the
-  // app shell; the sign-in step opens the sign-in dialog with the email field.
+  // Sign-in is optional, so signed out the app runs as usual and the sidebar's
+  // account line leads to the sign-in page.
   await page.goto('/')
+  await page.getByTestId('sidebar-sign-in').click()
+  await expect(page).toHaveURL(/\/account-login/)
   await expect(
-    mainContent(page).getByText("Find out what's slowing your database.")
+    page.getByRole('button', { name: 'Continue with Google' })
   ).toBeVisible()
-  await mainContent(page)
-    .getByRole('button', { name: 'Sign in', exact: true })
-    .click()
-  const dialog = page.getByRole('dialog')
-  await expect(
-    dialog.getByRole('heading', { name: 'Sign in or sign up to get started' })
-  ).toBeVisible()
-  await expect(
-    dialog.getByRole('button', { name: 'Continue with Google' })
-  ).toBeVisible()
-  await dialog.getByLabel('Email address').fill(email)
-  await dialog.getByRole('button', { name: 'Send sign-in link' }).click()
-  await expect(dialog.getByText('Check your email')).toBeVisible()
+  await page.getByLabel('Email address').fill(email)
+  await page.getByRole('button', { name: 'Send sign-in link' }).click()
 
-  // The emailed link lands on /account-login, which finishes the sign-in.
-  const mail = await waitForEmail(email, { newerThan: requestedAt })
+  // A new address can upgrade the anonymous session on the spot; otherwise the
+  // page asks for the emailed link.
+  const linkSent = page.getByText('Check your email')
+  let emailed = false
+  await expect(async () => {
+    emailed = await linkSent.isVisible()
+    if (emailed) return
+    const response = await page.request.get('/api/account/status')
+    expect(response.ok()).toBe(true)
+    expect((await response.json()).signed_in).toBe(true)
+  }).toPass({ timeout: 30_000 })
+
   const signedInPage = await page.context().newPage()
-  await signedInPage.goto(supabaseMagicLink(mail.html ?? ''))
+  if (emailed) {
+    // The emailed link lands on /account-login, which finishes the sign-in.
+    const mail = await waitForEmail(email, { newerThan: requestedAt })
+    await signedInPage.goto(supabaseMagicLink(mail.html ?? ''))
+  }
   await expect(async () => {
     const response = await signedInPage.request.get('/api/account/status')
     expect(response.ok()).toBe(true)

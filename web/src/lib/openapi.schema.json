@@ -1,6 +1,24 @@
 {
   "components": {
     "schemas": {
+      "AccountAnonymousSession": {
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "refresh_token"
+        ],
+        "title": "AccountAnonymousSession",
+        "type": "object"
+      },
       "AccountBrowserCallbackStatusResponse": {
         "properties": {
           "code": {
@@ -95,6 +113,16 @@
       },
       "AccountLoginResponse": {
         "properties": {
+          "anonymous_session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccountAnonymousSession"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "auth_url": {
             "title": "Auth Url",
             "type": "string"
@@ -175,6 +203,17 @@
             ],
             "title": "Analytics Account Id"
           },
+          "days_remaining": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days Remaining"
+          },
           "detail": {
             "anyOf": [
               {
@@ -197,6 +236,27 @@
             ],
             "title": "Email"
           },
+          "has_session": {
+            "default": false,
+            "title": "Has Session",
+            "type": "boolean"
+          },
+          "is_anonymous": {
+            "default": false,
+            "title": "Is Anonymous",
+            "type": "boolean"
+          },
+          "limit_microusd": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Microusd"
+          },
           "model": {
             "anyOf": [
               {
@@ -207,6 +267,17 @@
               }
             ],
             "title": "Model"
+          },
+          "percent_used": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percent Used"
           },
           "quota": {
             "anyOf": [
@@ -223,6 +294,50 @@
           "signed_in": {
             "title": "Signed In",
             "type": "boolean"
+          },
+          "signin_prompt": {
+            "default": "none",
+            "enum": [
+              "none",
+              "soft",
+              "budget",
+              "required"
+            ],
+            "title": "Signin Prompt",
+            "type": "string"
+          },
+          "signin_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signin Reason"
+          },
+          "trial_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trial Days"
+          },
+          "used_microusd": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used Microusd"
           },
           "user_id": {
             "anyOf": [
@@ -1082,6 +1197,53 @@
           "target"
         ],
         "title": "AddTargetRequest",
+        "type": "object"
+      },
+      "AddTargetResponse": {
+        "description": "A new target; ``persisted`` is False when the OS keyring couldn't store the submitted\npassword, so it lasts only for this session, and None when no password was submitted.",
+        "properties": {
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "persisted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persisted"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "target_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Name"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "AddTargetResponse",
         "type": "object"
       },
       "AddTerminologyRequest": {
@@ -15847,6 +16009,41 @@
         "title": "MarkQueryReviewedResponse",
         "type": "object"
       },
+      "McpConfigResponse": {
+        "description": "How an agent reaches RDST's MCP server, for Settings.",
+        "properties": {
+          "command": {
+            "title": "Command",
+            "type": "string"
+          },
+          "mcp_url": {
+            "title": "Mcp Url",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "wsl_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wsl Url"
+          }
+        },
+        "required": [
+          "url",
+          "mcp_url",
+          "command"
+        ],
+        "title": "McpConfigResponse",
+        "type": "object"
+      },
       "MessageResponse": {
         "description": "Single message in conversation history.",
         "properties": {
@@ -19020,6 +19217,50 @@
         "title": "ProgressEvent",
         "type": "object"
       },
+      "PromptResponse": {
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "string"
+          },
+          "issued_at": {
+            "title": "Issued At",
+            "type": "integer"
+          },
+          "mcp_url": {
+            "title": "Mcp Url",
+            "type": "string"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "wsl_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wsl Url"
+          }
+        },
+        "required": [
+          "prompt",
+          "attempt",
+          "issued_at",
+          "url",
+          "mcp_url"
+        ],
+        "title": "PromptResponse",
+        "type": "object"
+      },
       "ProviderTokenRequest": {
         "properties": {
           "token": {
@@ -20904,6 +21145,19 @@
           }
         },
         "title": "ReadysetFacts",
+        "type": "object"
+      },
+      "RecheckRequest": {
+        "properties": {
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "title": "RecheckRequest",
         "type": "object"
       },
       "Recommendations": {
@@ -26226,6 +26480,17 @@
             ],
             "title": "Error"
           },
+          "installation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installation Id"
+          },
           "targets": {
             "items": {
               "$ref": "#/components/schemas/TargetInfo"
@@ -29595,6 +29860,142 @@
         ]
       }
     },
+    "/api/agent-connect/events": {
+      "get": {
+        "description": "Agent progress as unnamed SSE frames of {step, target?, message?, ts}.\n\nneeds_setup frames also carry check, source, ready_to_monitor, blocking_reason, next_step,\ninstructions, sql, needs_restart and prerequisites (the dialog's prerequisite result).\n\n`since` (epoch seconds, e.g. the prompt's issued_at) replays events from then on;\nLast-Event-ID resumes after that event.",
+        "operationId": "agent_connect_events_api_agent_connect_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Agent Connect Events",
+        "tags": [
+          "agent-connect"
+        ]
+      }
+    },
+    "/api/agent-connect/mcp-config": {
+      "get": {
+        "description": "RDST's MCP URL and the Claude Code command that registers it.",
+        "operationId": "agent_connect_mcp_config_api_agent_connect_mcp_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpConfigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Agent Connect Mcp Config",
+        "tags": [
+          "agent-connect"
+        ]
+      }
+    },
+    "/api/agent-connect/prompt": {
+      "post": {
+        "description": "A paste-ready prompt carrying RDST's MCP URL, and a new attempt.",
+        "operationId": "agent_connect_prompt_api_agent_connect_prompt_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Agent Connect Prompt",
+        "tags": [
+          "agent-connect"
+        ]
+      }
+    },
+    "/api/agent-connect/recheck": {
+      "post": {
+        "description": "Run the monitoring prerequisites again and publish tested or needs_setup for the UI.\n\nThe reply is rdst_check_prerequisites' result, so the modal can continue from that step.",
+        "operationId": "agent_connect_recheck_api_agent_connect_recheck_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Agent Connect Recheck Api Agent Connect Recheck Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Agent Connect Recheck",
+        "tags": [
+          "agent-connect"
+        ]
+      }
+    },
     "/api/allowlist/add": {
       "post": {
         "description": "On an explicit confirmed click, read-merge-write the provider allowlist.",
@@ -30267,7 +30668,7 @@
     },
     "/api/bootstrap": {
       "post": {
-        "description": "Start the add-database bootstrap for a target; returns immediately.",
+        "description": "Start the add-database bootstrap for a target; returns immediately.\n\nA bootstrap already running for the target with the same options is returned instead\nof a second one (the Add database dialog can ask twice, as can two windows).",
         "operationId": "start_bootstrap_api_bootstrap_post",
         "requestBody": {
           "content": {
@@ -30838,7 +31239,7 @@
                 "schema": {
                   "anyOf": [
                     {
-                      "$ref": "#/components/schemas/TargetResponse"
+                      "$ref": "#/components/schemas/AddTargetResponse"
                     },
                     {
                       "$ref": "#/components/schemas/ErrorResponse"

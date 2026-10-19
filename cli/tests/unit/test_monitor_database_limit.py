@@ -176,7 +176,7 @@ def client(monkeypatch, tmp_path, targets):
     monkeypatch.setattr(database_limit, "account_slots", lambda: None)
     app = FastAPI()
     app.include_router(routes.router, prefix="/api/monitor")
-    return TestClient(app)
+    return TestClient(app, client=("127.0.0.1", 50000))
 
 
 class FakeKeyService:

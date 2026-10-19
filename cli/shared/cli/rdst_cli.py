@@ -384,6 +384,12 @@ class RdstCLI:
 
         if subcommand == "status":
             status = account_service.status(include_quota=False)
+            if status.get("is_anonymous"):
+                return RdstResult(
+                    True,
+                    "Using Readyset-hosted AI without signing in. Run 'rdst account login' "
+                    "to keep your monitoring history.",
+                )
             if not status.get("signed_in"):
                 return RdstResult(False, "Not signed in. Run 'rdst account login'.")
             return RdstResult(

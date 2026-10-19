@@ -6,6 +6,10 @@ from typing import Dict, Any, List, Set
 
 from shared.db_connection import quote_identifier
 
+TEST_DATA_SYSTEM_PROMPT = """You are a database test data generator. Generate realistic test data based on the provided schema.
+Output ONLY valid SQL INSERT statements, one per line, without any explanation or markdown formatting.
+Use realistic values that match the column types and constraints."""
+
 
 def check_tables_have_data(
     container_name: str = None,
@@ -454,10 +458,6 @@ def generate_test_data_with_llm(
 
         print(f"Generating test data for schema...")
 
-        # Prepare LLM prompt
-        system_message = """You are a database test data generator. Generate realistic test data based on the provided schema.
-Output ONLY valid SQL INSERT statements, one per line, without any explanation or markdown formatting.
-Use realistic values that match the column types and constraints."""
 
         table_filter = f" for table '{table_name}'" if table_name else ""
         user_query = f"""Generate {row_count} INSERT statements{table_filter} based on this schema:
@@ -477,7 +477,7 @@ Requirements:
         llm = LLMManager()
 
         response = llm.query(
-            system_message=system_message,
+            system_message=TEST_DATA_SYSTEM_PROMPT,
             user_query=user_query,
             purpose="test_data_generation",
         )

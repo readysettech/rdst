@@ -339,6 +339,21 @@ def accepts_other_count(expected, rows):
 
 
 SYSTEM = "Interpret the effective question independently of generated SQL. Classify membership intent in any language, including typos. The host can change only a negative substring predicate, never output shape or other scope. Return the required JSON object; do not generate SQL."
+SET_ABSENCE_SYSTEM = (
+    "Interpret the effective question independently of generated SQL. "
+    "Classify membership intent in any language, including typos. "
+    "The host can change only a test for absence of a collection member, "
+    "never its column, output shape or other scope. "
+    "Before approving column correspondence, compare the collection "
+    "requested by the question with the predicate column's meaning. "
+    "Different collection concepts are not interchangeable merely "
+    "because both can store comma-separated values. If their equivalence "
+    "is not established, use no or unknown. "
+    "Interpret spelling mistakes, but preserve them when copying "
+    "source_excerpt: copy exact consecutive characters from the question, "
+    "without translating, correcting spelling or substituting SQL names. "
+    "Return only the required JSON object; do not generate SQL."
+)
 CATALOG = [
     {
         "intent": "other_member_of_collection",
@@ -416,21 +431,7 @@ def _route_list_membership(q, sql, d, a, callback=None, *, question_only=False):
     catalog = CATALOG
     system = SYSTEM
     if plan and plan.predicate_kind == "set_absence":
-        system = (
-            "Interpret the effective question independently of generated SQL. "
-            "Classify membership intent in any language, including typos. "
-            "The host can change only a test for absence of a collection member, "
-            "never its column, output shape or other scope. "
-            "Before approving column correspondence, compare the collection "
-            "requested by the question with the predicate column's meaning. "
-            "Different collection concepts are not interchangeable merely "
-            "because both can store comma-separated values. If their equivalence "
-            "is not established, use no or unknown. "
-            "Interpret spelling mistakes, but preserve them when copying "
-            "source_excerpt: copy exact consecutive characters from the question, "
-            "without translating, correcting spelling or substituting SQL names. "
-            "Return only the required JSON object; do not generate SQL."
-        )
+        system = SET_ABSENCE_SYSTEM
     prompt = json.dumps(
         {
             "effective_question": q,

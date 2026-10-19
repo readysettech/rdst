@@ -81,7 +81,7 @@ export function RoutableNotice({
       errorClass: 'provider' as const,
       title: 'This needs AI access',
       message:
-        'Sign in to Readyset for the included AI, or add your own Anthropic key.',
+        'Sign in to Readyset or add your own Anthropic key to keep using AI.',
       actionLabel: 'Configure AI',
       search: { section: 'ai' as const, returnTo: currentReturn },
     },

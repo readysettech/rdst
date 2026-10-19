@@ -191,7 +191,9 @@ describe('DatabaseRows', () => {
     renderRows()
     const notes = screen.getAllByTestId('sign-in-note')
     expect(notes).toHaveLength(1)
-    expect(notes[0].textContent).toBe('Sign in to run AI checks. Sign in')
+    expect(notes[0].textContent).toBe(
+      'Sign in to keep AI checks running. Sign in'
+    )
     expect(
       screen.getByRole('link', { name: 'Sign in' }).getAttribute('href')
     ).toBe('/account-login')

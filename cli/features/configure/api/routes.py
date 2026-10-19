@@ -20,6 +20,7 @@ from features.configure.events import (
 )
 from features.configure.models import ConfigureInput, ConfigureOptions
 from features.configure.service import ConfigureService
+from shared import product_telemetry
 from shared.api.guards import require_local_request
 from shared.config.targets import (
     TargetsConfig,
@@ -126,6 +127,13 @@ class TargetResponse(BaseModel):
     success: bool
     message: Optional[str] = None
     target_name: Optional[str] = None
+
+
+class AddTargetResponse(TargetResponse):
+    """A new target; ``persisted`` is False when the OS keyring couldn't store the submitted
+    password, so it lasts only for this session, and None when no password was submitted."""
+
+    persisted: Optional[bool] = None
 
 
 class TargetSummaryResponse(BaseModel):
@@ -240,17 +248,35 @@ def _name_taken(cfg: TargetsConfig, name: str, keep: Optional[str] = None) -> bo
     )
 
 
+class _RecordingSecretStore(SecretStoreService):
+    """Keeps whether the last secret written reached the OS keyring."""
+
+    persisted: Optional[bool] = None
+
+    def set_secret(self, name, value, *args, **kwargs):
+        result = super().set_secret(name, value, *args, **kwargs)
+        self.persisted = bool(result.get("persisted")) if isinstance(result, dict) else None
+        return result
+
+
 def _store_submitted_password(
     target: TargetData, password_env: Optional[str]
-) -> None:
+) -> Optional[bool]:
+    """Store a submitted password; whether the keyring kept it, or None with no password."""
     if target.password is None:
-        return
+        return None
+    store = _RecordingSecretStore()
     store_target_password(
         "target",
         target.password.get_secret_value(),
         password_env,
-        secret_store=SecretStoreService(),
+        secret_store=store,
     )
+    return store.persisted
+
+
+def _via(http_request: Request) -> Optional[str]:
+    return product_telemetry.normalize_via(http_request.headers.get("X-RDST-Via"))
 
 
 # ============================================================================
@@ -435,13 +461,14 @@ async def get_target(
 @router.post("/configure/targets")
 async def add_target(
     http_request: Request, request: AddTargetRequest
-) -> Union[TargetResponse, ErrorResponse]:
+) -> Union[AddTargetResponse, ErrorResponse]:
     """Add a new database target."""
     require_local_request(http_request)
     # Checked before the password is stored, so a duplicate never overwrites the existing
     # target's saved password.
     existing = TargetsConfig()
     existing.load()
+    is_first_database = not existing.list_targets()
     if _name_taken(existing, request.name):
         raise HTTPException(409, f"A database named {request.name} already exists.")
     saved_as = _saved_as(existing, request.target.model_dump())
@@ -464,7 +491,7 @@ async def add_target(
     }
     if request.target.ssh is not None:
         target_data["ssh"] = _ssh_target_data(request.target.ssh)
-    _store_submitted_password(request.target, password_env)
+    persisted = _store_submitted_password(request.target, password_env)
     options = ConfigureOptions(target_data=target_data)
 
     result = None
@@ -476,13 +503,20 @@ async def add_target(
         elif isinstance(event, ConfigureErrorEvent):
             error = event
 
+    via = _via(http_request)
     if result:
-        return TargetResponse(
+        product_telemetry.database_add_saved(request.target.engine, via=via,
+                                             is_first_database=is_first_database)
+        return AddTargetResponse(
             success=True,
             message=result.message,
             target_name=result.target_name,
+            persisted=persisted,
         )
-    elif error:
+    product_telemetry.database_add_failed(
+        request.target.engine, via=via,
+        error_class=product_telemetry.connection_error_class(error.message if error else ""))
+    if error:
         return ErrorResponse(message=error.message)
     else:
         return ErrorResponse(message="No response from service")
@@ -632,6 +666,7 @@ async def test_connection(
 ):
     """Test a saved target or the current unsaved form values (SSE stream)."""
     require_local_request(http_request)
+    via = _via(http_request)
 
     async def _test_generator():
         service = ConfigureService()
@@ -650,9 +685,26 @@ async def test_connection(
             target_data["name"] = name
 
         async for event in service.test_connection(name, target_data):
+            if isinstance(event, ConfigureConnectionTestEvent) and event.status != "in_progress":
+                _report_test(name, target_data, via, event)
             yield _event_to_sse(event)
 
     return EventSourceResponse(_test_generator())
+
+
+def _report_test(name: str, target_data: Optional[dict], via: Optional[str],
+                 event: ConfigureConnectionTestEvent) -> None:
+    """Send the connection test's outcome: engine, path and error class, never names."""
+    if not product_telemetry.enabled():
+        return
+    engine = (target_data or {}).get("engine")
+    if engine is None:
+        engine = product_telemetry.engine_of(name)
+    ok = event.status == "success"
+    product_telemetry.database_add_test_completed(
+        engine, via=via, ok=ok,
+        error_class=None if ok else product_telemetry.connection_error_class(
+            event.code, event.category, event.message))
 
 
 @router.get("/configure/targets/{name}/prerequisites")
@@ -670,6 +722,11 @@ async def get_prerequisites(http_request: Request, name: str) -> dict:
     require_local_request(http_request)
     guard = ensure_target_password(name)
     result = await asyncio.to_thread(check_target, guard.target_name, guard.target_config)
+    via = http_request.headers.get("x-rdst-via")
+    for check in result.get("checks") or []:
+        product_telemetry.database_add_prereq_result(
+            result.get("engine"), check=str(check.get("id")), ok=check.get("status") == "ok",
+            via=via, scope=guard.target_name)
     if result.get("ready"):
         # A fix applied while monitoring runs takes effect without a restart.
         from features.monitor.loop import setup_check_passed

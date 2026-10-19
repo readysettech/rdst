@@ -565,3 +565,27 @@ class TestInteractiveMenuCommands:
         """Exit is handled via 'q'/'quit' input, not as a menu command."""
         commands = self._get_menu_commands()
         assert "exit" not in commands, "exit should be handled via 'q' input, not as a menu item"
+
+
+class TestOfflineHelpAccountless:
+    """Help's local fallbacks describe AI that starts without an account."""
+
+    def test_setup_answer_does_not_make_sign_in_a_step(self):
+        from shared.cli.help_command import HelpCommand
+
+        answer = HelpCommand()._fallback_search("rdst setup", "no_api_key").answer
+        assert "rdst account login" not in answer
+        assert "without signing in" in answer
+
+    def test_no_ai_note_does_not_say_sign_in_is_required(self, monkeypatch):
+        from shared.cli import help_command
+        from shared.llm_manager import key_resolution
+
+        def unavailable(*args, **kwargs):
+            raise RuntimeError("offline")
+
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setattr(key_resolution, "resolve_api_key", unavailable)
+        answer = help_command.HelpCommand().run("what is rdst").answer
+        assert "without an account" in answer
+        assert "run `rdst account login` or set" not in answer

@@ -12,7 +12,8 @@ export interface PrerequisitesState {
   interval: number | false
   /** When the latest answer arrived (ms epoch), for "checked 3 s ago". */
   updatedAt: number
-  recheck: () => void
+  /** Checks now; settles when the answer is in. */
+  recheck: () => Promise<unknown>
 }
 
 /**
@@ -47,6 +48,6 @@ export function usePrerequisites(
     error: query.error,
     interval: live ? pollInterval(phase, query.data?.connection_error) : false,
     updatedAt: Math.max(query.dataUpdatedAt, query.errorUpdatedAt),
-    recheck: () => void query.refetch(),
+    recheck: () => query.refetch(),
   }
 }

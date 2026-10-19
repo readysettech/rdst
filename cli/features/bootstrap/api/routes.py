@@ -48,9 +48,19 @@ async def start_bootstrap(
     request: BootstrapStartRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> BootstrapStartResponse:
-    """Start the add-database bootstrap for a target; returns immediately."""
+    """Start the add-database bootstrap for a target; returns immediately.
+
+    A bootstrap already running for the target with the same options is returned instead
+    of a second one (the Add database dialog can ask twice, as can two windows).
+    """
     require_local_request(http_request)
 
+    metadata = {"annotate": request.annotate}
+    existing = _registry.find_active_matching(
+        "bootstrap", guard.target_name, metadata, keys=("annotate",)
+    )
+    if existing is not None:
+        return BootstrapStartResponse(run_id=existing)
     options = BootstrapOptions(annotate=request.annotate)
     service = TargetBootstrapService()
     key_wakeup = asyncio.Event()
@@ -58,7 +68,7 @@ async def start_bootstrap(
         guard.target_name, guard.target_config, options, key_wakeup=key_wakeup
     )
     run_id = _registry.start(
-        "bootstrap", guard.target_name, gen, resume_event=key_wakeup
+        "bootstrap", guard.target_name, gen, metadata=metadata, resume_event=key_wakeup
     )
     return BootstrapStartResponse(run_id=run_id)
 

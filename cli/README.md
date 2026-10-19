@@ -158,7 +158,7 @@ No database handy? `rdst demo setup` starts a local demo database to explore wit
 | `rdst agent` | Manage and run data agents with safety policies |
 | `rdst init` | First-time setup wizard |
 | `rdst configure` | Manage database targets and connection profiles |
-| `rdst account` | Sign in for capped Readyset-hosted AI inference |
+| `rdst account` | Sign in to keep Readyset-hosted AI past the free allowance |
 | `rdst tunnel` | List, close, and test SSH tunnels |
 | `rdst schema` | Manage the semantic layer that improves SQL generation |
 | `rdst query` | Manage the saved-query registry |
@@ -178,9 +178,11 @@ No database handy? `rdst demo setup` starts a local demo database to explore wit
 Run `rdst <command> --help` for options and examples.
 
 AI-assisted commands (`ask`, `analyze` insights, `schema annotate`) use capped
-Readyset-hosted Claude Haiku 5.5 after `rdst account login`. If you set
-`ANTHROPIC_API_KEY`, RDST uses Claude Haiku 5.5 directly without requiring a
-Readyset account. `RDST_ANTHROPIC_MODEL` can override the Claude BYOK model.
+Readyset-hosted Claude Haiku 5.5. You don't need to sign in to start: RDST
+opens an anonymous session that gets $1 of hosted AI a month on each computer
+for 30 days. Run `rdst account login` to keep going after that with a $5
+monthly allowance; your usage carries over. If you set `ANTHROPIC_API_KEY`,
+RDST uses Claude Haiku 5.5 directly without a Readyset account. `RDST_ANTHROPIC_MODEL` can override the Claude BYOK model.
 
 ## Requirements
 

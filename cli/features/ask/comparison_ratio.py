@@ -325,6 +325,19 @@ SCHEMA = {
 }
 
 
+SCALAR_REFERENCE_SCHEMA = {
+    **SCHEMA,
+    "properties": {
+        **SCHEMA["properties"],
+        **{
+            field: {"type": "string", "enum": ["money", "quantity", "unknown"]}
+            for field in ("question_measure", "operand_measure")
+        },
+    },
+    "required": [*SCHEMA["required"], "question_measure", "operand_measure"],
+}
+
+
 def route_comparison_ratio(q, sql, d, a, callback=None):
     tree = sqlglot.parse_one(sql, read=d)
     from sqlglot import exp
@@ -345,13 +358,7 @@ def route_comparison_ratio(q, sql, d, a, callback=None):
                 "claim": "Independently classify question_measure from effective_question alone and operand_measure from the two SQL numeric operands alone. Use money for monetary cost, price, revenue or budget; quantity for nonmonetary measured amounts or counts; unknown for unresolved or mixed measures. Do not derive one field from the other or from your activation decision. A shared entity or category name does not establish a shared measure. compared_measure_matches still requires the same exact metric and units in both operands and the question, including when both kinds are quantity. Host code rejects different or unknown kinds. Preserve the scalar subquery's full scope; never infer missing business definitions.",
             }
         ]
-        schema = json.loads(json.dumps(SCHEMA))
-        for field in ("question_measure", "operand_measure"):
-            schema["properties"][field] = {
-                "type": "string",
-                "enum": ["money", "quantity", "unknown"],
-            }
-            schema["required"].append(field)
+        schema = json.loads(json.dumps(SCALAR_REFERENCE_SCHEMA))
     prompt = json.dumps(
         {
             "effective_question": q,

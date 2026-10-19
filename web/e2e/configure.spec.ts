@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test'
 import {
   acceptBrowserError,
   configureTestTarget,
+  continuePastSessionOnlyPassword,
   expect,
   setBackendFixtures,
   test,
@@ -92,6 +93,10 @@ test('adds, updates, defaults, and deletes a database target', async ({
 
   // Adding tests again, saves and opens the database's page on the turn-on dialog.
   await dialog.getByRole('button', { name: 'Add and monitor' }).click()
+  await continuePastSessionOnlyPassword(
+    page,
+    page.getByRole('dialog', { name: 'Monitor primary-db' })
+  )
   await expect(page).toHaveURL(/\/database/)
   await page.goto('/configure')
 

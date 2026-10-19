@@ -1,3 +1,5 @@
+import hashlib
+
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from typing import Optional
@@ -22,6 +24,9 @@ class StatusResponse(BaseModel):
     targets: list[TargetInfo]
     version: Optional[str] = None
     data_directory: Optional[str] = None
+    # Names this installation (its data directory's device id, hashed): a new data
+    # directory gets a new one, so the UI scopes first-run state to it.
+    installation_id: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -39,6 +44,16 @@ def _get_version() -> str:
             return __version__
         except Exception:
             return "unknown"
+
+
+def _installation_id() -> Optional[str]:
+    try:
+        from shared.telemetry import telemetry
+
+        device_id = telemetry.device_id
+    except Exception:
+        return None
+    return hashlib.sha256(f"rdst-installation-v1:{device_id}".encode()).hexdigest()[:16]
 
 
 @router.get("/status")
@@ -80,6 +95,7 @@ async def get_status(request: Request) -> StatusResponse:
             targets=targets_list,
             version=_get_version(),
             data_directory=data_dir,
+            installation_id=_installation_id(),
         )
 
     except Exception as e:
@@ -87,5 +103,6 @@ async def get_status(request: Request) -> StatusResponse:
             configured=False,
             targets=[],
             version=_get_version(),
+            installation_id=_installation_id(),
             error=str(e),
         )

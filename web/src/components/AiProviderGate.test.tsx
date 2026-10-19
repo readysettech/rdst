@@ -61,23 +61,10 @@ describe('AI provider startup gate', () => {
     )
 
     expect(screen.getByRole('heading', { name: 'Ask', level: 1 })).toBeTruthy()
-    expect(
-      screen.getByText("Find out what's slowing your database.")
-    ).toBeTruthy()
-    // Signing in is the current step; the database and monitoring steps follow.
-    const steps = screen.getAllByRole('listitem')
-    expect(steps.map((step) => step.getAttribute('aria-current'))).toEqual([
-      'step',
-      null,
-      null,
-    ])
-    expect(screen.getByText('Sign in to Readyset')).toBeTruthy()
-    expect(screen.getByText('Connect your database')).toBeTruthy()
-    expect(screen.getByText('Turn on monitoring')).toBeTruthy()
-    expect(document.body.textContent).not.toMatch(/\bfree\b|trial|credit/i)
-    expect(document.body.textContent).not.toMatch(/change this later/i)
-    expect(screen.queryByRole('button', { name: /skip/i })).toBeNull()
-    // One solid action, no icons on the actions.
+    expect(screen.getByRole('heading', { name: 'Set up AI' })).toBeTruthy()
+    // Signing in is no longer a getting-started step.
+    expect(screen.queryByTestId('get-started')).toBeNull()
+    expect(document.body.textContent).not.toMatch(/trial|credit/i)
     const signIn = screen.getByRole('button', { name: 'Sign in' })
     expect(signIn.querySelector('svg')).toBeNull()
 
@@ -90,16 +77,66 @@ describe('AI provider startup gate', () => {
     expect(screen.getByText('Anthropic key setup')).toBeTruthy()
   })
 
-  it('opens sign-in on its own on first run, once per app session', () => {
-    const gate = { status: 'blocked', reason: 'missing' } as const
-    renderWithClient(<AiProviderGate gate={gate} />, createTestQueryClient())
-    expect(screen.getByRole('dialog').textContent).toBe(
-      'Readyset account login'
+  it('never pops sign-in up on its own', () => {
+    renderWithClient(
+      <AiProviderGate gate={{ status: 'blocked', reason: 'missing' }} />,
+      createTestQueryClient()
+    )
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('blocks on a sign-in once the free AI has run out', () => {
+    const client = createTestQueryClient()
+    client.setQueryData(['account-status'], {
+      signed_in: false,
+      is_anonymous: true,
+      signin_prompt: 'required',
+      percent_used: 100,
+      days_remaining: 12,
+      trial_days: 30,
+    })
+    renderWithClient(
+      <AiProviderGate
+        gate={{ status: 'blocked', reason: 'signin_required' }}
+      />,
+      client
     )
 
-    cleanup()
-    renderWithClient(<AiProviderGate gate={gate} />, createTestQueryClient())
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(
+      screen.getByRole('heading', {
+        name: 'Sign in to keep AI monitoring running',
+      })
+    ).toBeTruthy()
+    expect(screen.getByTestId('signin-required').textContent).toContain(
+      "You've used the free AI that comes with RDST on this computer."
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+    expect(screen.getByText('Readyset account login')).toBeTruthy()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use my own Anthropic key instead' })
+    )
+    expect(screen.getByText('Anthropic key setup')).toBeTruthy()
+  })
+
+  it('says the free days are up when the clock ended it', () => {
+    const client = createTestQueryClient()
+    client.setQueryData(['account-status'], {
+      signed_in: false,
+      is_anonymous: true,
+      signin_prompt: 'required',
+      percent_used: 40,
+      days_remaining: 0,
+      trial_days: 30,
+    })
+    renderWithClient(
+      <AiProviderGate
+        gate={{ status: 'blocked', reason: 'signin_required' }}
+      />,
+      client
+    )
+    expect(screen.getByTestId('signin-required').textContent).toContain(
+      'Your 30 days of free AI on this computer are up.'
+    )
   })
 
   it('does not pop sign-in up when a saved key stopped working', () => {

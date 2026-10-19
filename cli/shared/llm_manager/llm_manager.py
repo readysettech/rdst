@@ -279,6 +279,7 @@ class LLMManager:
         model: Optional[str] = None,
         api_key: Optional[str] = None,
         history: Optional[Sequence[Dict[str, str]]] = None,
+        purpose: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """Stream LLM response tokens asynchronously.
 
@@ -320,6 +321,10 @@ class LLMManager:
             top_p=top_p if top_p is not None else self.defaults.top_p,
             stop_sequences=stop_sequences or self.defaults.stop_sequences,
         )
+        if name == "readyset":
+            from .inference_attribution import attribution_for
+
+            request.extra["_rdst_attribution"] = attribution_for(purpose)
 
         # Queue-based async bridge
         loop = asyncio.get_running_loop()
@@ -408,9 +413,12 @@ class LLMManager:
             }
             filtered_kwargs.setdefault("purpose", "workflow_llm")
 
+            from .prompt_catalog import default_system_prompt
+
             result = self.query(
                 system_message=filtered_kwargs.get(
-                    "system_message", "You are a helpful assistant."
+                    "system_message",
+                    default_system_prompt(filtered_kwargs["purpose"]),
                 ),
                 user_query=prompt,
                 context=filtered_kwargs.get("context"),

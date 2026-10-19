@@ -193,7 +193,7 @@ function DatabaseLink({
           name={db.name}
           tooltip={false}
         />
-        <span className="min-w-0 truncate">{db.name}</span>
+        <span className="ph-mask min-w-0 truncate">{db.name}</span>
         {word && <span className="sr-only">{word}</span>}
         {note && <Count>{note}</Count>}
       </Link>

@@ -9,7 +9,7 @@ import time
 from functools import lru_cache
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -21,9 +21,17 @@ from features.monitor.presentation import RECOVERED_WINDOW_S
 from features.query_registry.discovery import query_discovery
 from features.schema.assessment_context import referenced_tables
 from shared import product_telemetry
+from shared.api.guards import require_local_request
 from shared.monitor.monitor_store import LocalMonitorLimitError, MonitorStore
 
-router = APIRouter()
+
+def _local_writes(request: Request) -> None:
+    """Every state-changing monitor route answers only the local or same-origin RDST UI."""
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        require_local_request(request)
+
+
+router = APIRouter(dependencies=[Depends(_local_writes)])
 logger = logging.getLogger(__name__)
 WINDOWS = {"1h": 3600, "24h": 86400, "7d": 7 * 86400, "90d": 90 * 86400}
 RangeParam = Literal["5m", "15m", "1h", "24h", "7d", "30d", "90d", "all"]
@@ -769,6 +777,22 @@ def settings(target: str):
 _SERVICES_LOCK = asyncio.Lock()
 
 
+def _enable_failed(update: dict[str, Any], reason: str) -> None:
+    """Report a refused request to turn monitoring on (never the target or the message)."""
+    if update.get("enabled"):
+        product_telemetry.monitoring_enable_failed(reason)
+
+
+# Set once the user turns monitoring on for a database in the app, after the Turn on
+# monitoring dialog's disclosure. Agents may toggle monitoring only for databases with it.
+MONITORING_APPROVED = "monitoring_approved"
+
+
+def monitoring_approved(target: str) -> bool:
+    """Whether the user turned monitoring on for ``target`` in the app at least once."""
+    return _store().lever_is_set(target, MONITORING_APPROVED)
+
+
 @router.put("/targets/{target}/settings", **documented(models.MonitorSettings))
 async def put_settings(target: str, body: MonitorSettingsUpdate, request: Request):
     from features.monitor import database_limit
@@ -780,13 +804,18 @@ async def put_settings(target: str, body: MonitorSettingsUpdate, request: Reques
             update["execute"] = mode == "execute"
         was_enabled = _store().levers(target)["enabled"]
         if update.get("enabled") and not was_enabled and (blocked := _monitor_unavailable(target)):
+            _enable_failed(update, "unavailable")
             raise HTTPException(409, blocked)
         values = _store().set_settings(target, update)
     except LocalMonitorLimitError as exc:
+        _enable_failed(update, "local_limit")
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
+        _enable_failed(update, "invalid")
         raise HTTPException(422, str(exc)) from exc
     turned_on = values["enabled"] and not was_enabled
+    if update.get("enabled") and request.headers.get("x-rdst-via") != "mcp":
+        await asyncio.to_thread(_store().write_setting, target, MONITORING_APPROVED, "1")
     if turned_on:
         # A full account still gets local monitoring; the claim decides whether AI joins.
         ai_state = await asyncio.to_thread(database_limit.claim_target, _store(), target)

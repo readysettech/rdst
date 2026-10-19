@@ -1,6 +1,7 @@
 import {
   acceptBrowserError,
   clearTargets,
+  continuePastSessionOnlyPassword,
   expect,
   mockPrerequisites,
   setBackendFixtures,
@@ -85,9 +86,10 @@ test('adds the first database from Home and persists it', async ({
       request.postDataJSON()?.enabled === true
   )
   await dialog.getByRole('button', { name: 'Add and monitor' }).click()
+  const enable = page.getByRole('dialog', { name: 'Monitor e2e-db' })
+  await continuePastSessionOnlyPassword(page, enable)
   await expect(page).toHaveURL(/\/database/)
   await expect(dialog).toHaveCount(0)
-  const enable = page.getByRole('dialog', { name: 'Monitor e2e-db' })
   await expect(enable.getByTestId('explain-analyze-warning')).toBeVisible()
   await enable.getByRole('button', { name: 'Turn on monitoring' }).click()
   await enabled

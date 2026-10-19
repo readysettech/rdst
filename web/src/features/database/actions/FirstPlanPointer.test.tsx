@@ -120,7 +120,7 @@ describe('FirstPlanPointer', () => {
           checkup: {
             ...building.checkup,
             held: 'sign_in',
-            held_text: 'Sign in to turn on AI monitoring',
+            held_text: 'Sign in to keep AI monitoring running',
           },
         }}
         seen={false}
@@ -130,13 +130,15 @@ describe('FirstPlanPointer', () => {
     const pointer = screen.getByTestId('first-plan-pointer')
     expect(screen.getByText('Sign in to run the first analyses')).toBeTruthy()
     expect(pointer.textContent).toContain(
-      'AI checks need a Readyset sign-in, even with your own key.'
+      'AI checks wait for you to sign in, even with your own key.'
     )
     expect(pointer.textContent).not.toContain('Building your first plan')
     expect(pointer.textContent).not.toContain('of 10 done')
     const link = screen.getByRole('link', { name: 'Sign in' })
     expect(link.getAttribute('href')).toBe('/account-login')
-    expect(link.getAttribute('title')).toBe('Sign in to turn on AI monitoring')
+    expect(link.getAttribute('title')).toBe(
+      'Sign in to keep AI monitoring running'
+    )
     expect(screen.queryByRole('button', { name: 'Go to Actions' })).toBeNull()
   })
 

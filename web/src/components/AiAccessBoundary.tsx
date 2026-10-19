@@ -1,6 +1,7 @@
 import { useRouterState } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
+import { type ReactNode, useEffect } from 'react'
 import { legacyTitle } from '../layout/Main'
+import { trackEventOnce } from '../lib/analytics'
 import { useAiGate } from '../lib/useAiGate'
 import { AiProviderGate } from './AiProviderGate'
 
@@ -27,6 +28,12 @@ export function AiAccessBoundary({
 }) {
   const path = useRouterState({ select: (state) => state.location.pathname })
   const gate = useAiGate()
+  const settled = gate.status !== 'checking'
+  const gated = gate.status === 'blocked' || gate.status === 'error'
+  useEffect(() => {
+    if (settled)
+      trackEventOnce('first-screen', 'first_screen_rendered', { gated })
+  }, [settled, gated])
 
   // Local monitoring, target setup and the account callback are available throughout AI setup.
   if (

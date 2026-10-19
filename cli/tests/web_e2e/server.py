@@ -86,5 +86,32 @@ sandbox_manager_module.sandbox_manager = fake_sandbox_manager
 from shared.api.app import create_app
 
 
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+from features.agent_connect import session as agent_connect_session
+
+
+# The real /api/agent-connect routes are mounted by create_app. Browser tests stand in for
+# the coding agent here: each call publishes one progress event to the UI's stream, as an
+# MCP tool call would.
+agent_connect_fake_router = APIRouter(prefix="/api/testing/agent-connect")
+
+
+class AgentConnectEvent(BaseModel):
+    step: str
+    target: str | None = None
+    message: str | None = None
+
+
+@agent_connect_fake_router.post("/emit")
+def emit_agent_connect_event(event: AgentConnectEvent) -> dict:
+    try:
+        return agent_connect_session.events.publish(event.step, event.target, event.message)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+
+
 app = create_app(static_dist_dir=os.environ.get("RDST_WEB_DIST_DIR"))
 app.include_router(monitor_fake_router)
+app.include_router(agent_connect_fake_router)

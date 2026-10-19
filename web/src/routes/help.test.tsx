@@ -15,6 +15,10 @@ vi.mock('../components/ReportDialog', () => ({
     isOpen ? <div role="dialog">feedback</div> : null,
 }))
 
+import {
+  onOpenTour,
+  saveTourStep,
+} from '../features/onboarding/onboardingState'
 import { HelpPage } from './-help-page'
 
 afterEach(cleanup)
@@ -49,5 +53,19 @@ describe('Help', () => {
     render(<HelpPage />)
     fireEvent.click(screen.getByRole('button', { name: /Give feedback/ }))
     expect(screen.getByRole('dialog')).toBeTruthy()
+  })
+
+  it('opens the tour, or resumes it where it was closed', () => {
+    const listener = vi.fn()
+    const stop = onOpenTour(listener)
+    render(<HelpPage />)
+    fireEvent.click(screen.getByRole('button', { name: /Take the tour/ }))
+    expect(listener).toHaveBeenLastCalledWith(0)
+    cleanup()
+    saveTourStep(1)
+    render(<HelpPage />)
+    fireEvent.click(screen.getByRole('button', { name: /Resume the tour/ }))
+    expect(listener).toHaveBeenLastCalledWith(1)
+    stop()
   })
 })

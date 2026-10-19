@@ -1,6 +1,13 @@
 import type { ChildProcess } from 'node:child_process'
 import { spawn } from 'node:child_process'
-import { accessSync, constants, existsSync, statSync } from 'node:fs'
+import {
+  accessSync,
+  constants,
+  existsSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+} from 'node:fs'
 import { createServer } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
@@ -22,6 +29,9 @@ const READINESS_REQUEST_TIMEOUT_MS = 1_000
 const SHUTDOWN_TIMEOUT_MS = 3_000
 const FORCE_KILL_TIMEOUT_MS = 1_000
 const MAX_OUTPUT_LINES = 10
+// The backend's usual port, so an agent's saved MCP registration and a prompt copied before
+// a restart keep working. Another build (RDST_INSTANCE) takes a nearby one so both can run.
+export const PREFERRED_PORT = 47787
 
 const POSIX_SYSTEM_PATHS = ['/usr/local/bin', '/usr/bin', '/bin']
 
@@ -78,6 +88,8 @@ export interface BackendHandle {
   binaryPath: string
   /** True while the backend reports a data migration in progress. */
   migrating: () => boolean
+  /** The backend's desktop-server.json and the port it advertises there. */
+  discovery?: { file: string; port: number }
 }
 
 export type StartupPhase = 'starting' | 'migrating'
@@ -92,6 +104,8 @@ export interface StartBackendOptions {
   resourcesPath: string
   host?: string
   port?: number
+  /** Tried first when `port` isn't set; 0 skips straight to a free port. */
+  preferredPort?: number
   sourceDir?: string
   /** Runs this instead of the bundled backend; tests use it for a stand-in process. */
   command?: { file: string; args: string[] }
@@ -194,6 +208,34 @@ export function backendEnvironment(
   return environment
 }
 
+/** Where the backend that `env` starts writes desktop-server.json (its data directory). */
+export function discoveryFilePath(
+  env: NodeJS.ProcessEnv,
+  home: string = os.homedir()
+): string {
+  const configured = env.RDST_DATA_DIR?.trim()
+  const dataDir = configured
+    ? configured.replace(/^~(?=$|[\\/])/, home)
+    : path.join(
+        home,
+        env.RDST_INSTANCE ? `.rdst-${env.RDST_INSTANCE}` : '.rdst'
+      )
+  return path.join(dataDir, 'desktop-server.json')
+}
+
+/**
+ * Removes the discovery file a stopped backend left behind. A forced stop (taskkill on
+ * Windows) skips the backend's own cleanup; the port check leaves a newer backend's file.
+ */
+export function removeDiscoveryFile(file: string, port: number): void {
+  try {
+    const info = JSON.parse(readFileSync(file, 'utf8')) as { port?: unknown }
+    if (info.port === port) unlinkSync(file)
+  } catch {
+    /* already gone, or not ours */
+  }
+}
+
 function backendBinaryName(platform: NodeJS.Platform): string {
   return platform === 'win32' ? `${BACKEND_NAME}.exe` : BACKEND_NAME
 }
@@ -282,13 +324,36 @@ async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-export async function findAvailablePort(host: string): Promise<number> {
+/** The port a build prefers: PREFERRED_PORT for production, a nearby one per instance. */
+export function preferredPort(instance = ''): number {
+  if (!instance) return PREFERRED_PORT
+  let hash = 0
+  for (const char of instance) hash = (hash * 31 + char.charCodeAt(0)) % 1_000
+  return PREFERRED_PORT + 1 + (hash % 50)
+}
+
+/** `preferred` when it's free on `host`, otherwise any free port. */
+export async function findAvailablePort(
+  host: string,
+  preferred?: number
+): Promise<number> {
+  if (preferred) {
+    try {
+      return await listenOnce(host, preferred)
+    } catch {
+      // Taken (often by another program): fall back to a free port the OS picks.
+    }
+  }
+  return await listenOnce(host, 0)
+}
+
+async function listenOnce(host: string, port: number): Promise<number> {
   const server = createServer()
   server.unref()
 
   return await new Promise<number>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(0, host, () => {
+    server.listen(port, host, () => {
       const address = server.address()
       if (!address || typeof address === 'string') {
         server.close()
@@ -360,7 +425,12 @@ export async function startBackend(
   options: StartBackendOptions
 ): Promise<BackendHandle> {
   const host = options.host ?? DEFAULT_HOST
-  const port = options.port ?? (await findAvailablePort(host))
+  const port =
+    options.port ??
+    (await findAvailablePort(
+      host,
+      options.preferredPort ?? preferredPort(options.identity?.instance)
+    ))
   const apiBaseUrl = `http://${host}:${port}`
   const binaryPath =
     options.command?.file ??
@@ -377,6 +447,11 @@ export async function startBackend(
   } | null = null
   let spawnError: Error | null = null
 
+  const environment = backendEnvironment(
+    process.env,
+    options.keyservice,
+    options.identity
+  )
   const child = spawn(
     binaryPath,
     [
@@ -403,11 +478,7 @@ export async function startBackend(
     {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      env: backendEnvironment(
-        process.env,
-        options.keyservice,
-        options.identity
-      ),
+      env: environment,
     }
   )
 
@@ -454,6 +525,7 @@ export async function startBackend(
     apiBaseUrl,
     binaryPath,
     migrating: () => watch.migrating,
+    discovery: { file: discoveryFilePath(environment), port },
   }
   options.onSpawn?.(handle)
 
@@ -589,4 +661,6 @@ export async function stopBackend(
   // but means a second, partial upgrade on the next launch. Let a running one finish.
   if (handle.migrating()) await waitForMigration(handle, migrationGraceMs)
   await terminateProcess(handle.process)
+  if (handle.discovery)
+    removeDiscoveryFile(handle.discovery.file, handle.discovery.port)
 }

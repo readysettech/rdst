@@ -1666,7 +1666,7 @@ function GuardsPage() {
                     <RoutableNotice
                       kind="key-needed"
                       title="Describe with AI uses an Anthropic key"
-                      message="Deriving a guard from intent requires Readyset sign-in or an Anthropic API key."
+                      message="Deriving a guard from intent uses Readyset's hosted AI or your own Anthropic API key."
                     />
                     <VStack className="gap-1.5 items-start">
                       <FieldLabel>Name</FieldLabel>

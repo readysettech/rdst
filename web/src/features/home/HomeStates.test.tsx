@@ -10,6 +10,7 @@ import { act, cleanup, fireEvent, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWithClient } from '@/test-utils'
 import { AddDatabaseHost } from '../../components/configure/AddDatabaseDialog'
+import { scopedKey } from '../../lib/installationScope'
 import { caFixtures } from '../../lib/monitor/fixturesCa'
 import { useConfigure } from '../../lib/useConfigure'
 import { useSystemStatus } from '../../lib/useSystemStatus'
@@ -20,7 +21,9 @@ vi.mock('../../lib/useSystemStatus', () => ({ useSystemStatus: vi.fn() }))
 
 afterEach(cleanup)
 // The add-database pop-up opens once per session; most tests start after it has.
-beforeEach(() => sessionStorage.setItem('rdst_get_started_add-database', '1'))
+beforeEach(() =>
+  sessionStorage.setItem(scopedKey('rdst_get_started_add-database'), '1')
+)
 afterEach(() => sessionStorage.clear())
 
 async function renderHome(path = '/') {
@@ -53,28 +56,33 @@ async function renderHome(path = '/') {
 describe('HomeEmpty', () => {
   it('pops the add-database dialog up once per session', async () => {
     sessionStorage.clear()
+    // The first-run tour comes first on a new install; this install has seen it.
+    localStorage.setItem(scopedKey('rdst_onboarding_tour_done'), '1')
     const router = await renderHome()
 
     expect(await screen.findByLabelText('Connection string')).toBeTruthy()
     expect(router.state.location.search).toEqual({ add: 1 })
-    expect(sessionStorage.getItem('rdst_get_started_add-database')).toBe('1')
+    expect(
+      sessionStorage.getItem(scopedKey('rdst_get_started_add-database'))
+    ).toBe('1')
   })
 
-  it('marks sign-in done and makes connecting a database the one action', async () => {
+  it('starts on connecting a database, with signing in last and optional', async () => {
     await renderHome()
 
     expect(await screen.findByText('Connect your database')).toBeTruthy()
     const steps = screen.getAllByRole('listitem')
     expect(steps.map((step) => step.getAttribute('aria-current'))).toEqual([
-      null,
       'step',
       null,
+      null,
     ])
-    expect(steps[0].querySelector('svg')).toBeTruthy()
-    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual([
-      'Add a database',
-    ])
-    expect(screen.getByText('Turn on monitoring')).toBeTruthy()
+    expect(steps[0].querySelector('svg')).toBeNull()
+    expect(steps[1].textContent).toContain('Turn on monitoring')
+    expect(steps[2].textContent).toContain('Sign in to Readyset')
+    expect(steps[2].textContent).toContain('AI works without an account.')
+    expect(screen.getByRole('button', { name: 'Add a database' })).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/Signed in as/)
   })
 
   it('opens the add-database dialog over Home', async () => {

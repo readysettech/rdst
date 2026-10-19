@@ -83,7 +83,7 @@ export function FirstPlanPointer({
           </Text>
           <Text as="p" level="caption" className="mt-0.5 text-content-layout-3">
             {held
-              ? 'AI checks need a Readyset sign-in, even with your own key. Your first plan follows once they run.'
+              ? 'The free AI on this computer has ended. AI checks wait for you to sign in, even with your own key. Your first plan follows once they run.'
               : wait
                 ? wait.detail
                 : ready

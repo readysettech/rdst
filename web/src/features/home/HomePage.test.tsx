@@ -295,7 +295,7 @@ describe('HomeView sentence', () => {
     signIn.held = new Set(['demo'])
     renderWithClient(<HomeView model={paused} />)
     const note = screen.getByTestId('sign-in-note')
-    expect(note.textContent).toBe('Sign in to run AI checks. Sign in')
+    expect(note.textContent).toBe('Sign in to keep AI checks running. Sign in')
     expect(href(within(note).getByRole('link', { name: 'Sign in' }))).toBe(
       '/account-login'
     )
@@ -336,7 +336,7 @@ describe('HomeView sentence', () => {
     expect(page).not.toMatch(/Next report/)
     expect(page).not.toMatch(/0 of 10/)
     expect(screen.getByTestId('sign-in-note').textContent).toBe(
-      'Sign in to run AI checks. Sign in'
+      'Sign in to keep AI checks running. Sign in'
     )
   })
 

@@ -532,7 +532,7 @@ describe('DatabasePage', () => {
     settingsPatch.value = { ai_monitoring: 'pending', ai_reason: 'signed_out' }
     renderPage()
     expect((await screen.findByTestId('ai-off-reason')).textContent).toBe(
-      'Sign in to turn on AI monitoring'
+      'Sign in to keep AI monitoring running'
     )
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy()
   })

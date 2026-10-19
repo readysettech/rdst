@@ -197,6 +197,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agent-connect/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Agent Connect Events
+         * @description Agent progress as unnamed SSE frames of {step, target?, message?, ts}.
+         *
+         *     needs_setup frames also carry check, source, ready_to_monitor, blocking_reason, next_step,
+         *     instructions, sql, needs_restart and prerequisites (the dialog's prerequisite result).
+         *
+         *     `since` (epoch seconds, e.g. the prompt's issued_at) replays events from then on;
+         *     Last-Event-ID resumes after that event.
+         */
+        get: operations["agent_connect_events_api_agent_connect_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-connect/mcp-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Agent Connect Mcp Config
+         * @description RDST's MCP URL and the Claude Code command that registers it.
+         */
+        get: operations["agent_connect_mcp_config_api_agent_connect_mcp_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-connect/prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Agent Connect Prompt
+         * @description A paste-ready prompt carrying RDST's MCP URL, and a new attempt.
+         */
+        post: operations["agent_connect_prompt_api_agent_connect_prompt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-connect/recheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Agent Connect Recheck
+         * @description Run the monitoring prerequisites again and publish tested or needs_setup for the UI.
+         *
+         *     The reply is rdst_check_prerequisites' result, so the modal can continue from that step.
+         */
+        post: operations["agent_connect_recheck_api_agent_connect_recheck_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/allowlist/add": {
         parameters: {
             query?: never;
@@ -503,6 +591,9 @@ export interface paths {
         /**
          * Start Bootstrap
          * @description Start the add-database bootstrap for a target; returns immediately.
+         *
+         *     A bootstrap already running for the target with the same options is returned instead
+         *     of a second one (the Add database dialog can ask twice, as can two windows).
          */
         post: operations["start_bootstrap_api_bootstrap_post"];
         delete?: never;
@@ -4363,6 +4454,13 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AccountAnonymousSession */
+        AccountAnonymousSession: {
+            /** Access Token */
+            access_token: string;
+            /** Refresh Token */
+            refresh_token: string;
+        };
         /** AccountBrowserCallbackStatusResponse */
         AccountBrowserCallbackStatusResponse: {
             /** Code */
@@ -4397,6 +4495,7 @@ export interface components {
         };
         /** AccountLoginResponse */
         AccountLoginResponse: {
+            anonymous_session?: components["schemas"]["AccountAnonymousSession"] | null;
             /** Auth Url */
             auth_url: string;
             /** Callback Url */
@@ -4426,18 +4525,46 @@ export interface components {
         AccountStatusResponse: {
             /** Analytics Account Id */
             analytics_account_id?: string | null;
+            /** Days Remaining */
+            days_remaining?: number | null;
             /** Detail */
             detail?: string | null;
             /** Email */
             email?: string | null;
+            /**
+             * Has Session
+             * @default false
+             */
+            has_session?: boolean;
+            /**
+             * Is Anonymous
+             * @default false
+             */
+            is_anonymous?: boolean;
+            /** Limit Microusd */
+            limit_microusd?: number | null;
             /** Model */
             model?: string | null;
+            /** Percent Used */
+            percent_used?: number | null;
             /** Quota */
             quota?: {
                 [key: string]: unknown;
             } | null;
             /** Signed In */
             signed_in: boolean;
+            /**
+             * Signin Prompt
+             * @default none
+             * @enum {string}
+             */
+            signin_prompt?: "none" | "soft" | "budget" | "required";
+            /** Signin Reason */
+            signin_reason?: string | null;
+            /** Trial Days */
+            trial_days?: number | null;
+            /** Used Microusd */
+            used_microusd?: number | null;
             /** User Id */
             user_id?: string | null;
         };
@@ -4756,6 +4883,21 @@ export interface components {
             /** Name */
             name: string;
             target: components["schemas"]["TargetData"];
+        };
+        /**
+         * AddTargetResponse
+         * @description A new target; ``persisted`` is False when the OS keyring couldn't store the submitted
+         *     password, so it lasts only for this session, and None when no password was submitted.
+         */
+        AddTargetResponse: {
+            /** Message */
+            message?: string | null;
+            /** Persisted */
+            persisted?: boolean | null;
+            /** Success */
+            success: boolean;
+            /** Target Name */
+            target_name?: string | null;
         };
         /** AddTerminologyRequest */
         AddTerminologyRequest: {
@@ -9919,6 +10061,20 @@ export interface components {
             success: boolean;
         };
         /**
+         * McpConfigResponse
+         * @description How an agent reaches RDST's MCP server, for Settings.
+         */
+        McpConfigResponse: {
+            /** Command */
+            command: string;
+            /** Mcp Url */
+            mcp_url: string;
+            /** Url */
+            url: string;
+            /** Wsl Url */
+            wsl_url?: string | null;
+        };
+        /**
          * MessageResponse
          * @description Single message in conversation history.
          */
@@ -10920,6 +11076,21 @@ export interface components {
              */
             type: "progress";
         };
+        /** PromptResponse */
+        PromptResponse: {
+            /** Attempt */
+            attempt: string;
+            /** Issued At */
+            issued_at: number;
+            /** Mcp Url */
+            mcp_url: string;
+            /** Prompt */
+            prompt: string;
+            /** Url */
+            url: string;
+            /** Wsl Url */
+            wsl_url?: string | null;
+        };
         /** ProviderTokenRequest */
         ProviderTokenRequest: {
             /** Token */
@@ -11676,6 +11847,11 @@ export interface components {
              * @default false
              */
             verified?: boolean;
+        };
+        /** RecheckRequest */
+        RecheckRequest: {
+            /** Target */
+            target: string;
         };
         /** Recommendations */
         Recommendations: {
@@ -13541,6 +13717,8 @@ export interface components {
             default_target?: string | null;
             /** Error */
             error?: string | null;
+            /** Installation Id */
+            installation_id?: string | null;
             /** Targets */
             targets: components["schemas"]["TargetInfo"][];
             /** Version */
@@ -14906,6 +15084,112 @@ export interface operations {
             };
         };
     };
+    agent_connect_events_api_agent_connect_events_get: {
+        parameters: {
+            query?: {
+                since?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    agent_connect_mcp_config_api_agent_connect_mcp_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConfigResponse"];
+                };
+            };
+        };
+    };
+    agent_connect_prompt_api_agent_connect_prompt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptResponse"];
+                };
+            };
+        };
+    };
+    agent_connect_recheck_api_agent_connect_recheck_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     add_allowlist_ip_api_allowlist_add_post: {
         parameters: {
             query?: never;
@@ -15758,7 +16042,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TargetResponse"] | components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["AddTargetResponse"] | components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */

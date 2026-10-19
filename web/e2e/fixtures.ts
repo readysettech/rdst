@@ -315,6 +315,25 @@ export async function mockPrerequisites(
 }
 
 /**
+ * The browser suites run without an OS keyring, so a database added with a password
+ * stops on the warning that the password lasts only for this session. Continue past it
+ * once it shows, or once `next` (what follows a kept password) shows instead.
+ */
+export async function continuePastSessionOnlyPassword(
+  page: Page,
+  next: Locator
+) {
+  const warning = page.getByTestId('password-session-only')
+  await expect(warning.or(next).first()).toBeVisible({ timeout: 60_000 })
+  if (await warning.isVisible()) {
+    await page
+      .getByRole('dialog', { name: 'Add a database' })
+      .getByRole('button', { name: 'Continue' })
+      .click()
+  }
+}
+
+/**
  * Add a database through the add-database dialog over Home: the fields, then "Add
  * and monitor", which tests and saves before the new database's page opens on the
  * turn-on dialog. That dialog's prerequisites check passes and its EXPLAIN ANALYZE
@@ -340,10 +359,11 @@ export async function addDatabaseThroughDialog(
   await dialog.locator('[name="user"]').fill(fields.user)
   await dialog.locator('[name="password"]').fill(fields.password)
   await dialog.getByRole('button', { name: 'Add and monitor' }).click()
-  await expect(page).toHaveURL(/\/database/, { timeout: 60_000 })
   const enable = page.getByRole('dialog', {
     name: `Monitor ${fields.database}`,
   })
+  await continuePastSessionOnlyPassword(page, enable)
+  await expect(page).toHaveURL(/\/database/, { timeout: 60_000 })
   await expect(enable.getByTestId('explain-analyze-warning')).toBeVisible()
   const turnOn = enable.getByRole('button', { name: 'Turn on monitoring' })
   await expect(turnOn).toBeEnabled({ timeout: 60_000 })

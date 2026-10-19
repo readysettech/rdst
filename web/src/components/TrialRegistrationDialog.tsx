@@ -7,11 +7,14 @@ import { VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useId, useRef, useState } from 'react'
+import { SignInTrustNote } from '../features/onboarding/TrustNote'
 import {
   completeAccountRedirect,
   sendAccountMagicLink,
   startAccountGoogleOAuth,
 } from '../lib/accountAuth'
+import { isSignedInAccount } from '../lib/accountStatus'
+import { trackEvent } from '../lib/analytics'
 import {
   fetchAccountBrowserCallback,
   fetchAccountStatus,
@@ -21,18 +24,12 @@ import { isDesktopRuntime } from '../lib/desktop'
 import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
 import { DialogShell } from './DialogShell'
 import { isValidEmail, normalizeEmail } from './emailValidation'
-import { GetStartedStrip } from './GetStarted'
 
 interface AccountLoginDialogProps {
   isOpen: boolean
   onClose: () => void
   onSuccess?: () => void
   callbackLoginId?: string | null
-  /**
-   * First run: title it as sign in or sign up, show the three get-started steps,
-   * and finish on the next step instead of Done.
-   */
-  getStarted?: { onNext: () => void }
 }
 
 // The mark on the sign-in page, so the dialog offers the same button.
@@ -93,7 +90,6 @@ export function AccountLoginDialog({
   onClose,
   onSuccess,
   callbackLoginId = null,
-  getStarted,
 }: AccountLoginDialogProps) {
   const queryClient = useQueryClient()
   const emailFieldId = useId()
@@ -114,6 +110,7 @@ export function AccountLoginDialog({
 
   const finish = async () => {
     setComplete(true)
+    trackEvent('signin_completed')
     await invalidateTrialRelatedQueries(queryClient)
     onSuccess?.()
   }
@@ -123,16 +120,22 @@ export function AccountLoginDialog({
 
   const magicLinkMutation = useMutation({
     mutationFn: async () => {
+      trackEvent('signin_started', { method: 'email' })
       rememberReturn()
       const context = await startAccountLogin(accountCallbackUrl())
-      await sendAccountMagicLink(context, email.trim())
-      if (isDesktopRuntime()) setDesktopLoginId(context.login_id)
+      const outcome = await sendAccountMagicLink(context, email.trim())
+      if (outcome === 'sent' && isDesktopRuntime())
+        setDesktopLoginId(context.login_id)
+      return outcome
     },
-    onSuccess: () => setLinkSent(true),
+    // An anonymous session can be upgraded without a link.
+    onSuccess: (outcome) =>
+      outcome === 'signed_in' ? finishRef.current() : setLinkSent(true),
   })
 
   const googleMutation = useMutation({
     mutationFn: async () => {
+      trackEvent('signin_started', { method: 'google' })
       rememberReturn()
       const context = await startAccountLogin(accountCallbackUrl())
       await startAccountGoogleOAuth(context)
@@ -159,7 +162,7 @@ export function AccountLoginDialog({
     const id = window.setInterval(async () => {
       try {
         const status = await fetchAccountStatus()
-        if (!cancelled && status.signed_in) {
+        if (!cancelled && isSignedInAccount(status)) {
           window.clearInterval(id)
           void finishRef.current()
         }
@@ -247,6 +250,14 @@ export function AccountLoginDialog({
   }
 
   const handleClose = () => {
+    if (!complete)
+      trackEvent('signin_abandoned', {
+        stage: linkSent
+          ? 'link_sent'
+          : callbackLoginId || desktopLoginId
+            ? 'callback'
+            : 'choose',
+      })
     reset()
     onClose()
   }
@@ -278,13 +289,7 @@ export function AccountLoginDialog({
     <DialogShell
       open={isOpen}
       onClose={handleClose}
-      title={
-        complete
-          ? 'Signed in to Readyset'
-          : getStarted
-            ? 'Sign in or sign up to get started'
-            : 'Sign in to Readyset'
-      }
+      title={complete ? 'Signed in to Readyset' : 'Sign in to Readyset'}
       // Radix would open with focus on the first control, which here is a
       // one-Enter trip into a third-party OAuth redirect. The email field
       // is the safe landing spot. [F-45]
@@ -327,25 +332,15 @@ export function AccountLoginDialog({
             <Button
               variant="primary"
               modifier="solid"
-              label={getStarted ? 'Next: connect your database' : 'Done'}
-              onClick={
-                getStarted
-                  ? () => {
-                      reset()
-                      getStarted.onNext()
-                    }
-                  : handleClose
-              }
+              label="Done"
+              onClick={handleClose}
             />
           )}
         </>
       }
     >
       <VStack className="items-stretch gap-4">
-        {getStarted && (
-          <GetStartedStrip step={complete ? 'add-database' : 'sign-in'} />
-        )}
-        {getStarted && showProviders && (
+        {showProviders && (
           <ModalDescription>
             New here? This creates your Readyset account.
           </ModalDescription>
@@ -365,7 +360,8 @@ export function AccountLoginDialog({
 
         {complete ? (
           <ModalDescription>
-            Readyset account connected. Your included AI is ready to use.
+            Readyset account connected. Your databases, history and AI checks
+            carry over.
           </ModalDescription>
         ) : completingCallback ? (
           <ModalDescription>
@@ -405,8 +401,8 @@ export function AccountLoginDialog({
               {!googleMutation.isPending && <span className="w-2" />}
             </Button>
             <Text as="p" level="caption" className="text-content-layout-3">
-              Signing in turns on AI monitoring and the free AI included with a
-              Readyset account for analyses, checks and Ask.
+              Signing in keeps your monitoring history and AI checks running,
+              and sends alerts by email. Everything you've set up carries over.
             </Text>
             <Field.Root className="mt-2 px-0 py-0">
               <Field.Label htmlFor={emailFieldId}>Email address</Field.Label>
@@ -440,6 +436,7 @@ export function AccountLoginDialog({
                 </div>
               </Field.Content>
             </Field.Root>
+            <SignInTrustNote className="mt-1" />
           </VStack>
         )}
       </VStack>

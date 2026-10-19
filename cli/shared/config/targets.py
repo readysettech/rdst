@@ -323,7 +323,8 @@ class TargetsConfig:
     def set_account_config(self, account: Dict[str, Any]) -> None:
         self._data["account"] = {
             key: account[key]
-            for key in ("user_id", "email", "analytics_account_id", "status")
+            for key in ("user_id", "email", "analytics_account_id", "status", "is_anonymous",
+                        "machine_first_seen_at", "trial_days")
             if account.get(key)
         }
 

@@ -164,6 +164,13 @@ async def lifespan(app: FastAPI):
     product_telemetry.install_asyncio_capture(asyncio.get_running_loop())
     daily_summaries = DailySummaries().start()
 
+    # desktop-server.json tells local agents and `rdst claude add` where /mcp is.
+    from features.agent_connect.discovery import AgentConnectRuntime
+
+    agent_connect = AgentConnectRuntime()
+    if app is not None:
+        await agent_connect.start(app)
+
     # A large cache.db from an older install is pruned and rewritten once, off the startup
     # path, so later pruning can shrink it.
     try:
@@ -245,6 +252,7 @@ async def lifespan(app: FastAPI):
                     app.state.analyze_queue = analyze_queue
         yield
     finally:
+        await agent_connect.stop()
         if app is not None:
             scheduler = app.state.monitor_scheduler
             monitor_loop = app.state.monitor_loop
@@ -469,6 +477,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     register_error_handlers(app)
 
     from features.account.api import routes as account
+    from features.agent_connect.api import routes as agent_connect
     from features.allowlist.api import routes as allowlist
     from features.agent_activity.api import routes as agent_activity
     from features.analyze.api import routes as analyze
@@ -504,6 +513,8 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     )
 
     app.include_router(account.router, prefix="/api", tags=["account"])
+    app.include_router(agent_connect.router, prefix="/api", tags=["agent-connect"])
+    app.include_router(agent_connect.mcp_router)
     app.include_router(allowlist.router, prefix="/api")
     app.include_router(agent_activity.router, prefix="/api", tags=["agent-activity"])
     app.include_router(analyze.router, prefix="/api")

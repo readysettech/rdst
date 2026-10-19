@@ -15,7 +15,7 @@ def _client(tmp_path, monkeypatch):
     app.include_router(routes.router, prefix="/api/monitor")
     monkeypatch.setattr(routes, "_store", lambda: store)
     monkeypatch.setattr(routes, "_now", lambda: NOW)
-    return store, TestClient(app)
+    return store, TestClient(app, client=("127.0.0.1", 50000))
 
 
 def _seed(store):

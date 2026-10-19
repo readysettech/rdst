@@ -8,6 +8,10 @@ import { Text } from '@rs/ui-new/text'
 import { type ReactNode, useState } from 'react'
 import { DesktopUpdateControl } from '../components/DesktopUpdateControl'
 import { ReportDialog } from '../components/ReportDialog'
+import {
+  openTour,
+  useSavedTourStep,
+} from '../features/onboarding/onboardingState'
 import { DISCORD_INVITE_URL, DOCS_URL } from '../features/settings/links'
 import { useDesktopUpdates } from '../lib/useDesktopUpdates'
 import { useSystemStatus } from '../lib/useSystemStatus'
@@ -78,12 +82,27 @@ export function HelpPage() {
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const { data: status } = useSystemStatus()
   const updates = useDesktopUpdates()
+  const tourStep = useSavedTourStep()
 
   return (
     <>
       <PageBar title="Help" />
       <PageContainer className="pt-9 pb-24">
         <div className="grid grid-cols-2 gap-3">
+          <Pressable
+            className={`col-span-2 ${doorClass}`}
+            onClick={() => openTour(tourStep ?? 0)}
+            data-testid="help-tour"
+          >
+            <DoorBody
+              name={tourStep == null ? 'Take the tour' : 'Resume the tour'}
+              line={
+                tourStep == null
+                  ? 'Four short scenes of how RDST works, from connecting a database to the first fix.'
+                  : `Pick up at step ${tourStep + 1}, where you left off.`
+              }
+            />
+          </Pressable>
           <a
             href={DOCS_URL}
             target="_blank"

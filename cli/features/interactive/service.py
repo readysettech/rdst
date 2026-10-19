@@ -99,6 +99,21 @@ TONE: Experienced database engineer explaining to another engineer. Direct, tech
 _get_interactive_mode_prompt = get_interactive_mode_prompt
 
 
+
+def _llm_inputs(conversation) -> tuple[str, str | None, list[dict[str, str]]]:
+    """The fixed interactive prompt, the stored analysis context, and the turns so far.
+
+    Stored system messages carry this conversation's analysis data, which goes to the model
+    as context; the instructions are always the current interactive prompt.
+    """
+    messages = conversation.get_messages_for_llm()
+    context = "\n\n".join(
+        msg["content"] for msg in messages
+        if msg["role"] == "system" and "INTERACTIVE MODE ACTIVATED" not in msg["content"]
+    )
+    history = [msg for msg in messages if msg["role"] in {"user", "assistant"}]
+    return get_interactive_mode_prompt(), context or None, history
+
 class InteractiveService:
     """Service for interactive analysis conversations."""
 
@@ -122,21 +137,18 @@ class InteractiveService:
             conversation = self._load_or_create_conversation(
                 query_hash, analysis_results, continue_existing
             )
-            messages = conversation.get_messages_for_llm()
-            system_messages = [
-                msg["content"] for msg in messages if msg["role"] == "system"
-            ]
-            combined_system_message = "\n\n".join(system_messages)
-            history = [msg for msg in messages if msg["role"] in {"user", "assistant"}]
+            system_message, context, history = _llm_inputs(conversation)
 
             full_response = ""
             async for token in self.llm_manager.query_stream(
-                system_message=combined_system_message,
+                system_message=system_message,
                 user_query=message,
+                context=context,
                 history=history,
                 max_tokens=2000,
                 temperature=0.1,
                 model=conversation.model,
+                purpose="interactive_answer",
             ):
                 full_response += token
                 yield ChunkEvent(type="chunk", text=token)
@@ -300,15 +312,11 @@ class InteractiveService:
         self, conversation: InteractiveConversation, user_question: str
     ) -> str | None:
         try:
-            messages = conversation.get_messages_for_llm()
-            system_messages = [
-                msg["content"] for msg in messages if msg["role"] == "system"
-            ]
-            combined_system_message = "\n\n".join(system_messages)
-            history = [msg for msg in messages if msg["role"] in {"user", "assistant"}]
+            system_message, context, history = _llm_inputs(conversation)
             response_data = self.llm_manager.query(
-                system_message=combined_system_message,
+                system_message=system_message,
                 user_query=user_question,
+                context=context,
                 history=history,
                 max_tokens=2000,
                 temperature=0.1,

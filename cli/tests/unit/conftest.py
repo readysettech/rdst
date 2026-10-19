@@ -260,3 +260,22 @@ def _monitor_account_session(request, monkeypatch):
         from features.monitor import database_limit
 
         monkeypatch.setattr(database_limit, "_signed_in", lambda: True)
+
+
+class _NoAnonymousSignup:
+    status_code = 503
+    headers: dict[str, str] = {}
+
+    @staticmethod
+    def json() -> dict[str, str]:
+        return {"code": "unavailable_in_tests"}
+
+
+@pytest.fixture(autouse=True)
+def _no_anonymous_signup(monkeypatch):
+    """Unit tests never start a real anonymous Readyset session; tests that need one stub
+    `account_session._post_anonymous`."""
+    from shared import account_session
+
+    monkeypatch.setattr(account_session, "_post_anonymous", lambda payload: _NoAnonymousSignup())
+    monkeypatch.setattr(account_session, "_mint_retry_at", 0.0)

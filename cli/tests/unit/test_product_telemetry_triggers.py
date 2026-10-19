@@ -87,6 +87,8 @@ def receiver(monkeypatch, tmp_path):
     manager._initialized = True
     manager._device_id = 'test-install'
     manager._internal_user_result = False
+    # A release build, so internal_user comes from the probe and the account's address.
+    monkeypatch.setattr(telemetry_manager, 'build_version', lambda: '0.1.4321')
     monkeypatch.setattr(product, '_telemetry', lambda: manager)
     monkeypatch.setattr(product, 'own_key', lambda: False)
     monkeypatch.setattr(product, '_gate', product._ErrorGate())
@@ -115,7 +117,7 @@ async def fire(event, store, monkeypatch):
         monkeypatch.setattr(routes, '_start_first_run', lambda *args: None)
         app = FastAPI()
         app.state.analyze_queue = SimpleNamespace(wake=lambda: None)
-        request = Request({'type': 'http', 'app': app})
+        request = Request({'type': 'http', 'app': app, 'headers': []})
         if event == 'monitoring_disabled':
             store.set_settings(TARGET, {'enabled': True})
             app.state.analyze_queue = None
@@ -260,10 +262,14 @@ def test_internal_user_flag_and_email_profile_exception(receiver, monkeypatch, i
     manager._internal_user_result = internal
     product.connection_lost(TARGET)
     manager._wait_for_background_threads()
-    profile, event = events
+    profile, alias, event = events
     assert profile['event'] == '$identify'
+    assert profile['distinct_id'] == 'account-test'
+    assert alias['event'] == '$create_alias'
+    assert alias['properties']['alias'] == 'usr_test'
     assert profile['properties']['$set'] == {'account_kind': 'signed_in', 'email': 'canary@readyset.io'}
-    assert event['properties']['internal_user'] is internal
+    # A readyset.io account is internal whatever the probe says.
+    assert event['properties']['internal_user'] is True
     assert event['properties']['analytics_account_id'] == 'account-test'
     assert 'canary@readyset.io' not in json.dumps(event)
 

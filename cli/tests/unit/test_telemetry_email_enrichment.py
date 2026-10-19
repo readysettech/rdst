@@ -105,7 +105,7 @@ def test_track_identifies_install_without_attaching_stored_email(tmp_path, monke
     assert cap_props["account_kind"] == "device_only"
 
 
-def test_track_uses_account_user_id_and_joins_install_history(tmp_path, monkeypatch):
+def test_track_uses_analytics_account_id_and_joins_install_history(tmp_path, monkeypatch):
     fake = _FakePosthog()
     monkeypatch.setattr(tm_mod, "_get_posthog", lambda: fake)
     monkeypatch.setattr(tm_mod.threading, "Thread", _ImmediateThread)
@@ -131,11 +131,14 @@ def test_track_uses_account_user_id_and_joins_install_history(tmp_path, monkeypa
 
     assert fake.identify_calls == []
     identify_id, identify_event, identify_props = fake.capture_calls[0]
-    assert identify_id == "usr_42" and identify_event == "$identify"
+    assert identify_id == "rdst_account_hash" and identify_event == "$identify"
     assert identify_props["$anon_distinct_id"] == "dev-telemetry-123"
     assert identify_props["$set"] == {"email": "person@example.com", "account_kind": "signed_in"}
-    distinct_id, _, properties = fake.capture_calls[1]
-    assert distinct_id == "usr_42"
+    alias_id, alias_event, alias_props = fake.capture_calls[1]
+    assert (alias_id, alias_event) == ("rdst_account_hash", "$create_alias")
+    assert alias_props["alias"] == "usr_42"
+    distinct_id, _, properties = fake.capture_calls[2]
+    assert distinct_id == "rdst_account_hash"
     assert properties["analytics_account_id"] == "rdst_account_hash"
     assert properties["installation_id"] == "dev-telemetry-123"
     assert "email" not in properties

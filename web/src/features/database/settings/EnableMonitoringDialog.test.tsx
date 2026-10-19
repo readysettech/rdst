@@ -1,14 +1,32 @@
-import { cleanup, fireEvent, screen } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import {
+  addFlowFor,
+  endAddFlow,
+  handOffAddFlow,
+  newAddAttempt,
+} from '@/lib/addFlow'
+import { trackEvent } from '@/lib/analytics'
 import { settingsFixture } from '@/lib/monitor/fixtures'
 import { renderWithClient } from '@/test-utils'
 
 const mutate = vi.hoisted(() => vi.fn())
 const account = vi.hoisted(() => ({
   signedIn: true,
+  signinRequired: true,
   limit: {} as Record<string, unknown>,
 }))
-const prereq = vi.hoisted(() => ({ phase: 'ready' }))
+const prereq = vi.hoisted(() => ({
+  phase: 'ready',
+  result: undefined as unknown,
+  recheck: vi.fn(),
+}))
 const saved = vi.hoisted(() => ({ value: {} as Record<string, unknown> }))
 vi.mock('@tanstack/react-router', () => ({
   useRouter: () => null,
@@ -36,19 +54,68 @@ vi.mock('@/lib/monitor/hooks', async (original) => ({
   }),
 }))
 
+vi.mock('@/lib/accountStatus', () => ({
+  useSigninRequired: () => account.signinRequired,
+}))
+
 vi.mock('@/features/prerequisites', () => ({
-  usePrerequisites: () => ({ phase: prereq.phase }),
+  usePrerequisites: () => ({
+    phase: prereq.phase,
+    result: prereq.result,
+    recheck: prereq.recheck,
+  }),
   PrerequisitesChecker: ({ state }: { state: { phase: string } }) => (
     <div data-testid="prereq-checker">{state.phase}</div>
   ),
 }))
 
+vi.mock('@/lib/analytics', async (original) => ({
+  ...(await original<typeof import('@/lib/analytics')>()),
+  trackEvent: vi.fn(),
+}))
+
+/** The agent's progress stream, driven by the test. */
+class FakeEventSource {
+  static last: FakeEventSource | null = null
+  url: string
+  listeners = new Map<string, (event: MessageEvent<string>) => void>()
+  onerror: (() => void) | null = null
+  constructor(url: string) {
+    this.url = url
+    FakeEventSource.last = this
+  }
+  addEventListener(
+    name: string,
+    listener: (event: MessageEvent<string>) => void
+  ) {
+    this.listeners.set(name, listener)
+  }
+  close() {}
+  emit(payload: object) {
+    act(() => {
+      this.listeners.get('message')?.({
+        data: JSON.stringify(payload),
+      } as MessageEvent<string>)
+    })
+  }
+}
+
 const { EnableMonitoringDialog } = await import('./EnableMonitoringDialog')
 
-beforeEach(() => mutate.mockReset())
+beforeEach(() => {
+  mutate.mockReset()
+  vi.mocked(trackEvent).mockClear()
+  prereq.recheck = vi.fn().mockResolvedValue(undefined)
+  FakeEventSource.last = null
+  vi.stubGlobal('EventSource', FakeEventSource)
+})
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
+  endAddFlow('reports')
+  prereq.result = undefined
   account.signedIn = true
+  account.signinRequired = true
   account.limit = {}
   prereq.phase = 'ready'
   saved.value = {}
@@ -124,20 +191,139 @@ it('keeps the analysis choices folded under Advanced', () => {
   )
 })
 
-it('holds Turn on monitoring until the prerequisites pass', () => {
+it('says plainly that missing query stats block monitoring, with Check again and Finish later', async () => {
   prereq.phase = 'blocked'
+  prereq.result = {
+    engine: 'postgresql',
+    checks: [{ id: 'pg_stat_statements', blocking: true, status: 'missing' }],
+  }
+  const onClose = vi.fn()
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={onClose} />
+  )
+  expect(screen.getByTestId('monitoring-blocked').textContent).toContain(
+    "Query stats are off, so monitoring can't start"
+  )
+  expect(
+    screen.queryByRole('button', { name: 'Turn on monitoring' })
+  ).toBeNull()
+  expect(
+    screen.getByText('reports is saved. Finish any time from its page.')
+  ).toBeTruthy()
+  const solids = screen
+    .getAllByRole('button')
+    .filter((button) => button.className.includes('bg-surface-primary-solid'))
+  expect(solids.map((button) => button.textContent)).toEqual(['Check again'])
+
+  fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+  await waitFor(() => expect(prereq.recheck).toHaveBeenCalled())
+  expect(mutate).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Finish later' }))
+  expect(onClose).toHaveBeenCalled()
+})
+
+it('reports where an add attempt stopped when it closes before monitoring is on', () => {
+  prereq.phase = 'blocked'
+  const attempt = newAddAttempt()
+  handOffAddFlow('reports', { attempt, via: 'url' })
   renderWithClient(
     <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
   )
-  const button = screen.getByRole('button', { name: 'Turn on monitoring' })
-  expect(button.hasAttribute('disabled')).toBe(true)
-  expect(
-    screen.getByText(
-      'Run the setup steps above first. This check updates on its own once it passes.'
-    )
-  ).toBeTruthy()
-  fireEvent.click(button)
+  expect(trackEvent).toHaveBeenCalledWith('monitoring_dialog_shown', {
+    via: 'url',
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Finish later' }))
+  expect(trackEvent).toHaveBeenCalledWith('database_add_abandoned', {
+    last_stage: 'monitoring_blocked',
+    via: 'url',
+    seconds_open: expect.any(Number),
+  })
+  expect(addFlowFor('reports')).toBeNull()
+})
+
+it('follows a database the agent added until the agent turns monitoring on', () => {
+  prereq.phase = 'blocked'
+  handOffAddFlow('reports', {
+    attempt: newAddAttempt(),
+    via: 'agent',
+    agentSince: 1700000000,
+  })
+  const onClose = vi.fn()
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={onClose} />
+  )
+  const stream = FakeEventSource.last as FakeEventSource
+  expect(stream.url).toBe('/api/agent-connect/events?since=1700000000')
+
+  stream.emit({ step: 'needs_setup', target: 'reports', check: 'query_stats' })
+  expect(prereq.recheck).toHaveBeenCalledTimes(1)
+  expect(trackEvent).toHaveBeenCalledWith('database_add_test_result', {
+    ok: true,
+    error_class: null,
+    via: 'agent',
+  })
+
+  // Another database's progress is someone else's.
+  stream.emit({ step: 'tested', target: 'orders' })
+  expect(prereq.recheck).toHaveBeenCalledTimes(1)
+
+  stream.emit({ step: 'tested', target: 'reports' })
+  expect(prereq.recheck).toHaveBeenCalledTimes(2)
+  stream.emit({ step: 'monitoring_enabled', target: 'reports' })
+  expect(onClose).toHaveBeenCalled()
+  expect(addFlowFor('reports')).toBeNull()
+  expect(trackEvent).not.toHaveBeenCalledWith(
+    'database_add_abandoned',
+    expect.anything()
+  )
+})
+
+it("when the agent asks to turn monitoring on, says it's the user's turn and stays open until they click", () => {
+  handOffAddFlow('reports', {
+    attempt: newAddAttempt(),
+    via: 'agent',
+    agentSince: 1700000000,
+  })
+  const onClose = vi.fn()
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={onClose} />
+  )
+  expect(screen.queryByTestId('agent-awaiting-user')).toBeNull()
+  const stream = FakeEventSource.last as FakeEventSource
+
+  // Another database's request is someone else's.
+  stream.emit({ step: 'awaiting_user', target: 'orders' })
+  expect(screen.queryByTestId('agent-awaiting-user')).toBeNull()
+
+  stream.emit({ step: 'awaiting_user', target: 'reports', ts: 1700000005 })
+  expect(screen.getByTestId('agent-awaiting-user').textContent).toContain(
+    'Your turn: read and click Turn on monitoring'
+  )
+  expect(prereq.recheck).toHaveBeenCalledTimes(1)
+  expect(screen.getByTestId('explain-analyze-warning')).toBeTruthy()
+  expect(onClose).not.toHaveBeenCalled()
   expect(mutate).not.toHaveBeenCalled()
+  expect(addFlowFor('reports')).not.toBeNull()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Turn on monitoring' }))
+  expect(mutate).toHaveBeenCalledWith(
+    { enabled: true, deep_analysis: true, analysis_mode: 'execute' },
+    expect.anything()
+  )
+  expect(onClose).not.toHaveBeenCalled()
+  mutate.mock.calls[0][1].onSuccess()
+  expect(onClose).toHaveBeenCalled()
+  expect(addFlowFor('reports')).toBeNull()
+})
+
+it('says where the dialog was opened from when no add led here', () => {
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  expect(trackEvent).toHaveBeenCalledWith('monitoring_dialog_shown', {
+    via: 'page',
+  })
 })
 
 it('signed out, signing in leads and turning on stays secondary', () => {
@@ -162,7 +348,25 @@ it('signed out, signing in leads and turning on stays secondary', () => {
   expect(
     screen.getByRole('button', { name: 'Turn on monitoring' })
   ).toBeTruthy()
-  expect(screen.getByText(/You're signed out\./)).toBeTruthy()
+  expect(
+    screen.getByText(/The free AI on this computer has ended\./)
+  ).toBeTruthy()
+})
+
+it('without an account but within the free AI, asks for no sign-in', () => {
+  account.signedIn = false
+  account.signinRequired = false
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  expect(
+    screen.queryByRole('button', { name: 'Sign in to Readyset' })
+  ).toBeNull()
+  expect(
+    screen.getByText(
+      'Deep analysis is on. Change it any time in Monitoring settings.'
+    )
+  ).toBeTruthy()
 })
 
 it("with the account's AI slots full, says deep analysis waits for a free one", () => {

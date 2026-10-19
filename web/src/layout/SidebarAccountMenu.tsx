@@ -4,6 +4,7 @@ import { Pressable } from '@rs/ui-new/pressable'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
+import { isSignedInAccount } from '../lib/accountStatus'
 import { fetchAccountStatus, logoutAccount } from '../lib/api'
 import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
 
@@ -35,7 +36,7 @@ export function SidebarAccountMenu() {
     },
   })
 
-  const email = data?.signed_in ? data.email || 'Signed in' : null
+  const email = isSignedInAccount(data) ? data?.email || 'Signed in' : null
   if (!email)
     return (
       <Link
@@ -60,7 +61,7 @@ export function SidebarAccountMenu() {
           aria-label={`Account: ${email}`}
           className={lineClass}
         >
-          <span className="truncate">{email}</span>
+          <span className="ph-mask truncate">{email}</span>
         </Pressable>
       </Dropdown.Trigger>
       <Dropdown.Content

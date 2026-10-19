@@ -14,6 +14,8 @@ import {
   sendAccountMagicLink,
   startAccountGoogleOAuth,
 } from '../lib/accountAuth'
+import { isSignedInAccount } from '../lib/accountStatus'
+import { trackEvent } from '../lib/analytics'
 import {
   type AccountLoginResponse,
   fetchAccountBrowserCallback,
@@ -115,7 +117,7 @@ function useEmailSignIn(waiting: boolean, onSignedIn: () => void) {
     const id = window.setInterval(async () => {
       try {
         const status = await fetchAccountStatus()
-        if (!cancelled && status.signed_in) {
+        if (!cancelled && isSignedInAccount(status)) {
           window.clearInterval(id)
           signedIn.current()
         }
@@ -153,24 +155,36 @@ export function SignInPage({
   const [focusEmail, setFocusEmail] = useState(false)
 
   const finish = async () => {
+    trackEvent('signin_completed')
     await invalidateTrialRelatedQueries(queryClient)
     void navigate({ href: takeLoginReturn() })
   }
-  const start = async (
-    open: (context: AccountLoginResponse) => Promise<void>
-  ) => {
+  const start = async <T,>(
+    open: (context: AccountLoginResponse) => Promise<T>
+  ): Promise<T> => {
     const context = await startAccountLogin(accountCallbackUrl())
-    await open(context)
+    const outcome = await open(context)
     if (isDesktopRuntime()) setDesktopLoginId(context.login_id)
+    return outcome
   }
   const google = useMutation({
-    mutationFn: () => start(startAccountGoogleOAuth),
+    mutationFn: () => {
+      trackEvent('signin_started', { method: 'google' })
+      return start(startAccountGoogleOAuth)
+    },
   })
   const magicLink = useMutation({
-    mutationFn: () =>
-      start((context) => sendAccountMagicLink(context, email.trim())),
+    mutationFn: () => {
+      trackEvent('signin_started', { method: 'email' })
+      return start((context) => sendAccountMagicLink(context, email.trim()))
+    },
+    // An anonymous session can be upgraded without a link.
+    onSuccess: (outcome) => {
+      if (outcome === 'signed_in') return finish()
+    },
   })
-  useEmailSignIn(magicLink.isSuccess, () => void finish())
+  const linkSent = magicLink.data === 'sent'
+  useEmailSignIn(linkSent, () => void finish())
   const validateEmail = () => {
     const valid = isValidEmail(normalizeEmail(email))
     setEmailError(valid ? null : 'Enter a valid email address.')
@@ -197,8 +211,17 @@ export function SignInPage({
     !abandonedCallback &&
     !callback.isError &&
     !callback.isSuccess
-  const goBack = () =>
-    canGoBack ? router.history.back() : void navigate({ to: '/' })
+  const goBack = () => {
+    trackEvent('signin_abandoned', {
+      stage: linkSent
+        ? 'link_sent'
+        : callbackLoginId || desktopLoginId
+          ? 'callback'
+          : 'choose',
+    })
+    if (canGoBack) router.history.back()
+    else void navigate({ to: '/' })
+  }
   // Escape leaves the way Back does.
   const leave = useRef<(() => void) | null>(goBack)
   leave.current = finishing ? null : goBack
@@ -272,7 +295,7 @@ export function SignInPage({
           >
             Finishing sign-in...
           </Text>
-        ) : magicLink.isSuccess ? (
+        ) : linkSent ? (
           <div className="mt-8 flex w-full flex-col gap-1">
             <Text as="p" level="body-small" className="text-content-layout-1">
               Check your email
@@ -357,8 +380,8 @@ export function SignInPage({
           </div>
         )}
         <Text as="p" level="caption" className="mt-4 text-content-layout-3">
-          Signing in turns on AI monitoring and the free AI included with a
-          Readyset account for analyses, checks and Ask.
+          Signing in keeps your monitoring history and AI checks running, and
+          sends alerts by email. Everything you've set up carries over.
         </Text>
       </div>
     </main>

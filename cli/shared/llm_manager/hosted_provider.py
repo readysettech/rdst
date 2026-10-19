@@ -17,6 +17,7 @@ from shared.keyservice import keyservice_base_url
 
 from .base import LLMError, Provider, ProviderRequest, ProviderResponse, provider_unreachable
 from .key_resolution import HOSTED_MODEL
+from .prompt_reference import prompt_reference
 
 _HTTP_SESSION = requests.Session()
 # Schema annotation deliberately uses worker threads, while an interactive Ask
@@ -59,7 +60,26 @@ class HostedProvider(Provider):
         return HOSTED_MODEL
 
     @staticmethod
+    def _prompt_and_turns(request: ProviderRequest) -> tuple[dict[str, Any], list[dict[str, str]]]:
+        """The registered prompt to name and the turns sent beside it.
+
+        Keyservice holds each operation's system prompt and its structured-output
+        instruction, so the system message itself never leaves this process.
+        """
+        if (request.extra or {}).get("tools"):
+            raise LLMError("Readyset-hosted AI does not run tool calls",
+                           code="HOSTED_TOOLS_UNSUPPORTED")
+        messages = request.as_chat_dicts()
+        system = [message["content"] for message in messages if message["role"] == "system"]
+        if len(system) > 1:
+            raise LLMError("Readyset-hosted AI takes one system prompt",
+                           code="HOSTED_PROMPT_INVALID")
+        turns = [message for message in messages if message["role"] != "system"]
+        return prompt_reference(system[0] if system else ""), turns
+
+    @staticmethod
     def _messages(request: ProviderRequest) -> list[dict[str, str]]:
+        """The messages Keyservice sends upstream for this request."""
         messages = request.as_chat_dicts()
         extra = dict(request.extra or {})
         response_format = extra.get("response_format")
@@ -95,6 +115,11 @@ class HostedProvider(Provider):
             body = {}
         code = str(body.get("code") or "HOSTED_INFERENCE_ERROR")
         detail = str(body.get("detail") or f"Hosted inference returned HTTP {response.status_code}")
+        reason = account_session.signin_required_reason(body)
+        if reason:
+            account_session.record_signin_required(reason)
+            raise LLMError(f"{account_session.signin_required_message(reason)} ({reason})",
+                           code="LOGIN_REQUIRED", status=response.status_code)
         from shared import product_telemetry
 
         product_telemetry.refusal(code, feature="hosted")
@@ -135,9 +160,11 @@ class HostedProvider(Provider):
         debug: bool = False,
     ) -> ProviderResponse:
         del extra_headers
+        prompt, turns = self._prompt_and_turns(request)
         payload: dict[str, Any] = {
             "request_id": str(uuid.uuid4()),
-            "messages": self._messages(request),
+            "prompt": prompt,
+            "messages": turns,
             "max_tokens": request.max_tokens or 800,
             "temperature": request.temperature,
         }
@@ -159,6 +186,13 @@ class HostedProvider(Provider):
         except Exception:
             payload.setdefault("attribution", {})["analytics_disabled"] = True
         payload.setdefault("attribution", {})["client_version"] = _client_version()
+        try:
+            from shared import product_telemetry
+
+            # The Key Service keeps Readyset's own use out of production analytics.
+            payload["attribution"]["internal_user"] = product_telemetry.internal_user()
+        except Exception:
+            pass
         # Forward the caller's contract as given. Callers that ask for a strict
         # json_schema validate the reply strictly, so the host must enforce it.
         response_format = (request.extra or {}).get("response_format")

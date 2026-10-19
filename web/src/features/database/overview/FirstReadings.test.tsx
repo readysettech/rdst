@@ -117,7 +117,7 @@ it('signed out, the waiting card says the analyses wait for a sign-in', () => {
     />
   )
   expect(screen.getByTestId('sign-in-note').textContent).toBe(
-    'Sign in to run AI checks. Sign in'
+    'Sign in to keep AI checks running. Sign in'
   )
   const steps = Object.fromEntries(
     model.steps.map((step) => [step.id, [step.state, step.meta]])

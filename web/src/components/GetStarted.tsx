@@ -2,22 +2,20 @@ import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
 import { Progress } from '@rs/ui-new/progress'
 import { Text } from '@rs/ui-new/text'
-import type { ReactNode } from 'react'
+import { type ReactNode, useEffect } from 'react'
+import { tourPending } from '../features/onboarding/onboardingState'
+import { TourEntry } from '../features/onboarding/TourEntry'
+import { type OnboardingStep, trackEventOnce } from '../lib/analytics'
+import { scopedKey } from '../lib/installationScope'
 
-export type GetStartedStep = 'sign-in' | 'add-database'
+export type GetStartedStep = OnboardingStep
 
 const STEPS: {
-  key: GetStartedStep | 'monitor'
+  key: GetStartedStep
   title: string
   short: string
   caption: string
 }[] = [
-  {
-    key: 'sign-in',
-    title: 'Sign in to Readyset',
-    short: 'Sign in',
-    caption: 'AI analysis is included, with no API key to manage.',
-  },
   {
     key: 'add-database',
     title: 'Connect your database',
@@ -31,12 +29,29 @@ const STEPS: {
     caption:
       'RDST checks every query each minute. Your first fixes show up in about 10 minutes.',
   },
+  {
+    key: 'sign-in',
+    title: 'Sign in to Readyset',
+    short: 'Sign in (optional)',
+    caption:
+      'Optional. Keeps your monitoring history and sends alerts by email. AI works without an account.',
+  },
 ]
+
+/** Reports each step's first view in an app session. */
+function useStepViewed(step: GetStartedStep) {
+  useEffect(() => {
+    trackEventOnce(`onboarding-view-${step}`, 'onboarding_step_viewed', {
+      step,
+    })
+  }, [step])
+}
 
 /**
  * The first-run screen: what RDST does, then three numbered steps with one big
- * button on the current one. Sign-in and the empty Home both render it, at their
- * own step, so a new install always shows the next thing to do.
+ * button on the current one. The empty Home renders it at connecting a database,
+ * so a new install always shows the next thing to do. Signing in comes last and
+ * is optional: AI works without an account.
  */
 export function GetStarted({
   step,
@@ -53,6 +68,7 @@ export function GetStarted({
   footer?: ReactNode
 }) {
   const current = STEPS.findIndex((item) => item.key === step)
+  useStepViewed(step)
   return (
     <div className="max-w-2xl" data-testid="get-started">
       <Text as="h2" level="headline-2" className="text-content-layout-1">
@@ -62,6 +78,7 @@ export function GetStarted({
         RDST watches your database and hands you the fix for every slow query,
         with the SQL to run.
       </Text>
+      <TourEntry className="mt-2 -ml-3" />
       <ol className="mt-9 flex flex-col gap-3">
         {STEPS.map((item, index) => {
           const done = index < current
@@ -139,12 +156,9 @@ export function GetStartedButton({
  * Where a first-run dialog sits among the three steps: a progress bar over the step's
  * name and the one after it.
  */
-export function GetStartedStrip({
-  step,
-}: {
-  step: (typeof STEPS)[number]['key']
-}) {
+export function GetStartedStrip({ step }: { step: GetStartedStep }) {
   const current = STEPS.findIndex((item) => item.key === step)
+  useStepViewed(step)
   const next = STEPS[current + 1]
   return (
     <div className="flex flex-col gap-2" data-testid="get-started-strip">
@@ -177,18 +191,31 @@ export function GetStartedStrip({
  * True the first time a first-run pop-up asks to open in this app session, so it
  * opens on its own once and stays closed after the user closes it.
  */
-export function claimFirstRunPopup(key: 'sign-in' | 'add-database'): boolean {
+export function claimFirstRunPopup(key: 'add-database'): boolean {
   // Browser automation drives these screens step by step, so the pop-ups wait for
   // a click there unless a test asks for them.
   const optIn = (window as { __RDST_FIRST_RUN_POPUPS__?: boolean })
     .__RDST_FIRST_RUN_POPUPS__
   if (navigator.webdriver && !optIn) return false
-  const storageKey = `rdst_get_started_${key}`
+  // A new install sees the tour first; finishing it opens this dialog.
+  if (tourPending()) return false
   try {
-    if (sessionStorage.getItem(storageKey)) return false
-    sessionStorage.setItem(storageKey, '1')
+    if (sessionStorage.getItem(firstRunPopupKey(key))) return false
   } catch {
     /* without storage it opens on each visit to the page */
   }
+  markFirstRunPopupShown(key)
   return true
+}
+
+const firstRunPopupKey = (key: 'add-database') =>
+  scopedKey(`rdst_get_started_${key}`)
+
+/** The pop-up opened another way, such as from the tour, so it doesn't open again. */
+export function markFirstRunPopupShown(key: 'add-database'): void {
+  try {
+    sessionStorage.setItem(firstRunPopupKey(key), '1')
+  } catch {
+    /* without storage it opens on each visit to the page */
+  }
 }

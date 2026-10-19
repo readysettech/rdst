@@ -572,7 +572,7 @@ def test_api_queries_health_and_series(monkeypatch, tmp_path):
         )
     app = FastAPI()
     app.include_router(routes.router, prefix="/api/monitor")
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
     settings = client.put("/api/monitor/targets/db/settings", json={"enabled": True})
     assert settings.status_code == 200
     assert client.get("/api/monitor/targets/db/settings").json()["enabled"]
@@ -613,7 +613,7 @@ def test_api_reads_demoted_query_history(monkeypatch, tmp_path):
             self, 0.01 if timeout is None else min(timeout, 0.01)
         ),
     )
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
     row = client.get("/api/monitor/targets/db/queries").json()["queries"][0]
     assert row["key"] == "tail"
     # Rates cover the recorded part of the range, from the first reading.

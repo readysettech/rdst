@@ -9,7 +9,10 @@ import {
   detectInstallChange,
   type EventPoster,
   errorClass,
+  internalInstall,
+  isReleaseVersion,
   loadDirectTelemetryConfig,
+  routedKey,
   scrubMessage,
   startFailureClass,
   telemetryDisabled,
@@ -399,5 +402,92 @@ describe('sidecar config and install identity', () => {
       'telemetry_enabled = false\n'
     )
     expect(load().disabled).toBe(true)
+  })
+})
+
+describe("Readyset's own people and builds", () => {
+  it.each([
+    ['1.2.3', true],
+    ['0.1.4321', true],
+    ['0.1.0', false],
+    ['0.0.0.dev0', false],
+    ['0.1.0.dev20261019', false],
+    ['', false],
+  ])('treats %s as a release: %s', (version, release) => {
+    expect(isReleaseVersion(version)).toBe(release)
+  })
+
+  it.each([
+    [{}, '', '1.2.3', false],
+    [{}, 'person@example.com', '1.2.3', false],
+    [{}, 'Dev@Readyset.io', '1.2.3', true],
+    [{ RDST_INTERNAL: '1' }, '', '1.2.3', true],
+    [{}, '', '0.1.0', true],
+  ])('internal for %j %s %s: %s', (env, email, version, internal) => {
+    expect(internalInstall(env, email, version)).toBe(internal)
+  })
+
+  it('routes internal production events to preview, or keeps them tagged', () => {
+    const config = { key: 'prod', previewKey: 'preview' }
+    expect(routedKey(config, 'prod', false)).toBe('prod')
+    expect(routedKey(config, 'prod', true)).toBe('preview')
+    expect(routedKey({ key: 'prod', previewKey: '' }, 'prod', true)).toBe(
+      'prod'
+    )
+    expect(
+      routedKey({ key: 'other', previewKey: 'preview' }, 'prod', true)
+    ).toBe('other')
+  })
+
+  const defaults = {
+    key: 'prod',
+    previewKey: 'preview',
+    host: 'https://posthog.invalid',
+    internalProbeUrl: '',
+  }
+  const load = (appVersion: string, env: NodeJS.ProcessEnv = {}) =>
+    loadDirectTelemetryConfig({
+      env,
+      packaged: true,
+      dataDir: dir,
+      appVersion,
+      defaults,
+    })
+
+  it('never lets a dev build report to production', () => {
+    expect(load('0.1.0').internal).toBe(true)
+    expect(load('0.1.0').disabled).toBe(false)
+    expect(load('0.1.0', { RDST_POSTHOG_PREVIEW_KEY: '' }).disabled).toBe(true)
+    expect(load('1.2.3').internal).toBe(false)
+  })
+
+  it('sends an internal startup failure to the preview project', async () => {
+    const post = vi.fn<EventPoster>(async () => true)
+    const telemetry = new DesktopTelemetry(
+      path.join(dir, 'queue.json'),
+      false,
+      post,
+      {
+        key: 'prod',
+        previewKey: 'preview',
+        productionKey: 'prod',
+        host: 'https://posthog.invalid',
+        internalProbeUrl: 'http://canary.invalid',
+        deviceId: 'install-1',
+        appVersion: '2.3.4',
+        os: 'win32',
+        disabled: false,
+      },
+      async () => true
+    )
+    telemetry.capture('desktop_startup_failed', { stage: 'start' })
+    await telemetry.flush()
+    expect(post).toHaveBeenCalledWith(
+      'https://posthog.invalid/capture/',
+      expect.objectContaining({
+        api_key: 'preview',
+        properties: expect.objectContaining({ internal_user: true }),
+      })
+    )
   })
 })

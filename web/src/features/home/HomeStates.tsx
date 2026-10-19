@@ -1,5 +1,4 @@
 import { StatusLine, statusLinkClass } from '@rs/ui-new/status-line'
-import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { useOpenAddDatabase } from '../../components/configure/addDatabase'
@@ -8,7 +7,6 @@ import {
   GetStarted,
   GetStartedButton,
 } from '../../components/GetStarted'
-import { fetchAccountStatus } from '../../lib/api'
 import type { HomeStatus } from '../../lib/monitor/types'
 import { formatClock, plural } from '../monitor-kit/format'
 import { monitorLinkTo } from './homeModel'
@@ -153,23 +151,13 @@ export function homeCaption(
 /** Home with no database yet: the Get started steps, at connecting a database. */
 export function HomeEmpty() {
   const openAddDatabase = useOpenAddDatabase()
-  // The next step pops up on its own once per app session, right after sign-in.
+  // The first step pops up on its own once per app session.
   useEffect(() => {
     if (claimFirstRunPopup('add-database')) openAddDatabase()
   }, [openAddDatabase])
-  const { data: account } = useQuery({
-    queryKey: ['account-status'],
-    queryFn: fetchAccountStatus,
-    staleTime: 60_000,
-  })
   return (
     <GetStarted
       step="add-database"
-      doneCaption={
-        account?.signed_in
-          ? `Signed in${account.email ? ` as ${account.email}` : ''}.`
-          : 'AI is set up with your own key.'
-      }
       action={
         <GetStartedButton
           label="Add a database"
