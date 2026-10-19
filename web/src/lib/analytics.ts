@@ -45,10 +45,14 @@ export async function initAnalytics(serverEnabled = true): Promise<void> {
       isIdentifiedID: person.account_kind === 'signed_in',
     },
     api_host: import.meta.env.VITE_POSTHOG_HOST || 'https://us.i.posthog.com',
-    before_send: (event) =>
-      event
-        ? { ...event, properties: scrubEventProperties(event.properties) }
-        : null,
+    // Replay snapshots carry the rrweb DOM stream, which the property scrubber would
+    // truncate into an unplayable recording; the session_recording masking below
+    // governs what replay captures.
+    before_send: (event) => {
+      if (!event) return null
+      if (event.event === '$snapshot') return event
+      return { ...event, properties: scrubEventProperties(event.properties) }
+    },
     loaded: (client) => client.register(analyticsProperties(person)),
     // SPA-aware pageviews: capture on history navigation, not just boot.
     capture_pageview: 'history_change',

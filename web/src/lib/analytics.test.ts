@@ -414,6 +414,36 @@ describe('telemetry receiver privacy and gates', () => {
     expect(JSON.stringify(payload)).not.toMatch(/canary|secret_canary/)
     expect(options.session_recording?.maskAllInputs).toBe(true)
   })
+
+  it('sends session replay snapshots through before_send intact', async () => {
+    const { initAnalytics } = await import('./analytics')
+    await initAnalytics()
+    const options = initMock.mock.calls[0][1]
+    expect(options.disable_session_recording).toBeUndefined()
+    // An rrweb full snapshot: a DOM tree nested deeper than the event scrubber keeps,
+    // with node text longer than its string limit.
+    let node: Record<string, unknown> = {
+      type: 3,
+      id: 9,
+      textContent: 'x'.repeat(500),
+    }
+    for (let id = 8; id > 0; id--)
+      node = { type: 2, id, tagName: 'div', attributes: {}, childNodes: [node] }
+    const snapshot = {
+      event: '$snapshot',
+      properties: {
+        $snapshot_bytes: 1024,
+        $snapshot_data: [
+          { type: 4, timestamp: 1, data: { href: 'rdst-app://ui/', width: 1 } },
+          { type: 2, timestamp: 2, data: { node, initialOffset: {} } },
+        ],
+        $session_id: 'session-1',
+        $window_id: 'window-1',
+        distinct_id: 'install',
+      },
+    }
+    expect(options.before_send(structuredClone(snapshot))).toEqual(snapshot)
+  })
 })
 
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => vi.fn() }))
