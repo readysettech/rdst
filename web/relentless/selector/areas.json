@@ -1,0 +1,160 @@
+{
+  "budget": {
+    "areas": 3,
+    "max_areas": 8
+  },
+  "smoke": ["onboarding-connect", "shell-navigation", "ai-access"],
+  "frontend": {
+    "tsconfig": "web-apps/apps/rdst/tsconfig.json",
+    "sources": [
+      "web-apps/apps/rdst/src",
+      "web-apps/apps/rdst-desktop/src",
+      "web-apps/packages/ui-new/src",
+      "web-apps/packages/utils/src",
+      "web-apps/packages/tailwind-base/src"
+    ],
+    "roots": [
+      "web-apps/apps/rdst/src/main.tsx",
+      "web-apps/apps/rdst/src/routeTree.gen.ts"
+    ],
+    "routes": "web-apps/apps/rdst/src/routes",
+    "excludedRoutes": {
+      "web-apps/apps/rdst/src/routes/-benchmark-page.tsx": "an old page, not user facing",
+      "web-apps/apps/rdst/src/routes/-caching-page.tsx": "an old page, not user facing",
+      "web-apps/apps/rdst/src/routes/queries.tsx": "an old page, not user facing",
+      "web-apps/apps/rdst/src/routes/analyze.tsx": "an old page, not user facing",
+      "web-apps/apps/rdst/src/routes/query-registry.tsx": "an old page, not user facing",
+      "web-apps/apps/rdst/src/routes/top.tsx": "an old page, not user facing",
+      "web-apps/apps/rdst/src/routes/schema.tsx": "an old page, not user facing",
+      "web-apps/apps/rdst/src/routes/cache.tsx": "an old page, not user facing",
+      "web-apps/apps/rdst/src/routes/benchmark.tsx": "an old page, not user facing",
+      "web-apps/apps/rdst/src/routes/audit.tsx": "an old page, not user facing",
+      "web-apps/apps/rdst/src/routes/scan.tsx": "not linked in the app",
+      "web-apps/apps/rdst/src/routes/guards.tsx": "not linked in the app"
+    }
+  },
+  "areas": {
+    "onboarding-connect": {
+      "minutes": 12,
+      "entries": [
+        "web-apps/apps/rdst/src/routes/onboarding.tsx",
+        "web-apps/apps/rdst/src/components/configure/AddDatabaseDialog.tsx"
+      ]
+    },
+    "settings-targets": {
+      "minutes": 20,
+      "entries": [
+        "web-apps/apps/rdst/src/routes/configure.tsx",
+        "web-apps/apps/rdst/src/routes/fleet.tsx",
+        "web-apps/apps/rdst/src/routes/dev-settings.tsx",
+        "web-apps/apps/rdst/src/features/settings/SettingsPage.tsx"
+      ]
+    },
+    "home": {
+      "minutes": 20,
+      "entries": [
+        "web-apps/apps/rdst/src/routes/index.tsx",
+        "web-apps/apps/rdst/src/features/home/HomePage.tsx"
+      ]
+    },
+    "ai-access": {
+      "minutes": 9,
+      "entries": [
+        "web-apps/apps/rdst/src/components/AiAccessBoundary.tsx",
+        "web-apps/apps/rdst/src/routes/account-login.tsx",
+        "web-apps/apps/rdst/src/routes/-sign-in-page.tsx"
+      ]
+    },
+    "ask": {
+      "minutes": 17,
+      "entries": [
+        "web-apps/apps/rdst/src/routes/ask.tsx",
+        "web-apps/apps/rdst/src/routes/-ask-page.tsx",
+        "web-apps/apps/rdst/src/routes/agents.tsx"
+      ]
+    },
+    "actions": {
+      "minutes": 20,
+      "entries": [
+        "web-apps/apps/rdst/src/routes/actions.tsx",
+        "web-apps/apps/rdst/src/features/actions/ActionsPage.tsx"
+      ]
+    },
+    "platform": {
+      "minutes": 18,
+      "entries": [
+        "web-apps/apps/rdst/src/routes/platform.tsx",
+        "web-apps/apps/rdst/src/routes/demo.tsx",
+        "web-apps/apps/rdst/src/features/platform/PlatformPage.tsx"
+      ]
+    },
+    "activity": {
+      "minutes": 20,
+      "entries": [
+        "web-apps/apps/rdst/src/routes/agent-activity.tsx",
+        "web-apps/apps/rdst/src/features/agent-activity/AgentActivityPage.tsx"
+      ]
+    },
+    "shell-navigation": {
+      "minutes": 18,
+      "entries": [
+        "web-apps/apps/rdst/src/routes/__root.tsx",
+        "web-apps/apps/rdst/src/routes/help.tsx",
+        "web-apps/apps/rdst/src/routes/-help-page.tsx"
+      ]
+    },
+    "app-lifecycle": {
+      "minutes": 9,
+      "entries": ["web-apps/apps/rdst-desktop/src/main/index.ts"]
+    },
+    "desktop-shell": {
+      "minutes": 11,
+      "entries": [
+        "web-apps/apps/rdst-desktop/src/main/index.ts",
+        "web-apps/apps/rdst-desktop/src/preload/index.ts",
+        "web-apps/apps/rdst/src/components/DesktopUpdateControl.tsx"
+      ]
+    },
+    "monitoring": {
+      "minutes": 40,
+      "entries": [
+        "web-apps/apps/rdst/src/routes/database.tsx",
+        "web-apps/apps/rdst/src/routes/database_.reports.$reportId.tsx",
+        "web-apps/apps/rdst/src/routes/db.$target.tsx",
+        "web-apps/apps/rdst/src/routes/db.$target.report.tsx",
+        "web-apps/apps/rdst/src/routes/results.tsx",
+        "web-apps/apps/rdst/src/routes/-results-page.tsx"
+      ]
+    },
+    "inbox": {
+      "minutes": 25,
+      "entries": ["web-apps/apps/rdst/src/routes/inbox.tsx"]
+    }
+  },
+  "uncalledRoutes": {
+    "DELETE /api/fleet/snapshots/{snapshot_id}": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
+    "GET /api/bootstrap/runs/{run_id}": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
+    "GET /api/bootstrap/runs/{run_id}/events": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
+    "GET /api/demo/workload": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
+    "GET /api/fleet/diff": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
+    "GET /api/init/monitoring-upgrade": "no page requests it since the redesign; only a query key of that name is invalidated",
+    "GET /api/monitor/targets/{target}/index-changes": "a diagnostic read for the monitoring soak checker, not called by the UI",
+    "GET /api/monitor/targets/{target}/judge-runs": "a diagnostic read for the monitoring soak checker, not called by the UI",
+    "DELETE /mcp": "the local MCP endpoint a coding agent calls, not the UI",
+    "GET /mcp": "the local MCP endpoint a coding agent calls, not the UI",
+    "POST /mcp": "the local MCP endpoint a coding agent calls, not the UI",
+    "GET /api/providers/supabase-callback": "the OAuth redirect Supabase opens in the system browser, not app code",
+    "GET /api/top/realtime": "the legacy top view; /top now redirects to Queries",
+    "POST /api/analyze/quick": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
+    "POST /api/init/monitoring-upgrade/dismiss": "no page requests it since the redesign",
+    "POST /api/init/validate/stream": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
+    "POST /api/providers/discover": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
+    "POST /api/query-registry/benchmark": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
+    "POST /api/scan/json": "Scan is not linked in the app",
+    "POST /api/semantic-layer/annotate": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
+    "POST /api/semantic-layer/init/stream": "not called by the UI; listed as unused in UX_MAP.md section 8.2",
+    "POST /api/settings/email": "no page sets the report email; the report dialog only reads it",
+    "POST /api/settings/email/verify-poll": "no page verifies the report email",
+    "POST /api/tunnel/close": "not called by the UI; listed as unused in UX_MAP.md section 8.2"
+  }
+}

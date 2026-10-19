@@ -1,0 +1,84 @@
+{
+  "note": "Consumers of paths only older trees had, for replays of them: evaluation/replay.ts sets RT_SELECTOR_HISTORY to this file, and a selection of the current tree never reads it. Each pattern must match no current file.",
+  "history": [
+    {
+      "match": [
+        "rdst/lib/functions/db_config_check.py",
+        "rdst/lib/top_{display,realtime}.py"
+      ],
+      "action": "none",
+      "reason": "CLI, MCP agent, self-update and terminal rendering"
+    },
+    {
+      "match": ["rdst/lib/debug/**", "rdst/lib/llm_manager/demo.py"],
+      "action": "none",
+      "reason": "dev tooling, tests, design-lab pages and code no route renders"
+    },
+    {
+      "match": [
+        "rdst/lib/{guard,slack}/**",
+        "rdst/lib/{api/routes/scan,services/scan_service}.py"
+      ],
+      "action": "none",
+      "reason": "/scan and /guards pages and the Slack bot, all out of scope"
+    },
+    {
+      "match": [
+        "rdst/lib/{constants,db_connection}.py",
+        "rdst/lib/services/__init__.py"
+      ],
+      "action": "broad",
+      "reason": "request guard, /api/status, DB connections and on-disk state every page uses"
+    },
+    {
+      "match": [
+        "rdst/lib/llm_manager/key_resolution.py",
+        "rdst/lib/api/routes/{env,trial}.py",
+        "rdst/lib/services/{anthropic_env,env_requirements_service,trial_service}.py",
+        "web-apps/apps/rdst/src/components/EmailGate.tsx"
+      ],
+      "action": "areas",
+      "areas": ["ai-access"],
+      "reason": "AI gate: key setup, trial and included-AI balance"
+    },
+    {
+      "match": [
+        "rdst/lib/{engines/**,history/**,prompts/ask_prompts*.py,prompts/agent_prompts.py}",
+        "rdst/lib/{services/ask_service,api/routes/ask}.py",
+        "rdst/lib/functions/{ambiguity_detection,sql_generation,sql_validation}.py"
+      ],
+      "action": "areas",
+      "areas": ["ask"],
+      "reason": "Ask engine, history and answer card"
+    },
+    {
+      "match": [
+        "rdst/lib/{cache_manager/**,deploy/**,api/docker_prepull.py,services/cache_service.py}",
+        "rdst/lib/api/routes/{cache,readyset}.py",
+        "rdst/shared/api/docker_prepull.py",
+        "rdst/lib/functions/{readyset_container,readyset_explain_cache,target_setup}.py",
+        "web-apps/apps/rdst/src/routes/{-cache-page,readyset}.tsx"
+      ],
+      "action": "none",
+      "reason": "Readyset container, compare and load test; an old page, not user facing"
+    },
+    {
+      "match": [
+        "rdst/lib/functions/**",
+        "rdst/lib/prompts/analyze_prompts.py",
+        "rdst/lib/services/{analyze_service,interactive_service,query_service,top_service,types}.py",
+        "rdst/lib/api/routes/{analyze,interactive,registry,top,browse}.py",
+        "rdst/lib/top_monitor.py",
+        "web-apps/apps/rdst/src/routes/{-analyze-page,-query-registry-page,-top-page}.tsx"
+      ],
+      "action": "none",
+      "reason": "query discovery, library, analysis and follow-up chat; an old page, not user facing"
+    },
+    {
+      "match": ["rdst/lib/telemetry/**", "rdst/lib/api/routes/report.py"],
+      "action": "areas",
+      "areas": ["shell-navigation"],
+      "reason": "feedback, telemetry opt-out and the sidebar version and tagline"
+    }
+  ]
+}

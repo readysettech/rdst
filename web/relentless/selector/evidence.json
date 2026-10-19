@@ -1,0 +1,2530 @@
+{
+  "areas": {
+    "ai-access": {
+      "runs": ["67c71fb5c261", "b1d3aad064f5", "d8e58bfd9efc"],
+      "last_run": "2026-09-28T15:04:02.456Z",
+      "prompt_sha256": [],
+      "endpoints": {
+        "GET /api/account/status": {
+          "runs": 3,
+          "renderer": 3,
+          "rt_api": 0
+        },
+        "GET /api/audit/runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets": {
+          "runs": 3,
+          "renderer": 3,
+          "rt_api": 0
+        },
+        "GET /api/demo/load/history": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/patterns": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/preflight": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/tour": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/env/requirements": {
+          "runs": 3,
+          "renderer": 3,
+          "rt_api": 0
+        },
+        "GET /api/fleet/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/targets": {
+          "runs": 3,
+          "renderer": 3,
+          "rt_api": 0
+        },
+        "GET /api/init/status": {
+          "runs": 3,
+          "renderer": 3,
+          "rt_api": 0
+        },
+        "GET /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/discovery/stream": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}/events": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/setup-progress": {
+          "runs": 3,
+          "renderer": 3,
+          "rt_api": 0
+        },
+        "GET /api/status": {
+          "runs": 3,
+          "renderer": 3,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-keys": {
+          "runs": 2,
+          "renderer": 2,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-profiles": {
+          "runs": 2,
+          "renderer": 2,
+          "rt_api": 0
+        },
+        "POST /api/account/login": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/bootstrap": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets/{name}/test": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/anthropic/validate": {
+          "runs": 3,
+          "renderer": 3,
+          "rt_api": 0
+        },
+        "POST /api/env/set": {
+          "runs": 3,
+          "renderer": 3,
+          "rt_api": 0
+        },
+        "POST /api/init/complete": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/settings/reset-local-data": {
+          "runs": 3,
+          "renderer": 3,
+          "rt_api": 0
+        },
+        "PUT /api/configure/default": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        }
+      }
+    },
+    "app-lifecycle": {
+      "runs": ["9b9c85980841"],
+      "last_run": "2026-09-25T17:35:04.078Z",
+      "prompt_sha256": [],
+      "endpoints": {
+        "GET /api/account/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/audit/runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/load/history": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/patterns": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/preflight": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/tour": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/env/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/init/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/discovery/stream": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}/events": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/setup-progress": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-keys": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-profiles": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/bootstrap": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets/{name}/test": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/demo/provision": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/anthropic/validate": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/init/complete": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PUT /api/configure/default": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        }
+      }
+    },
+    "ask": {
+      "runs": ["cc9b0a972970"],
+      "last_run": "2026-09-26T05:40:36.004Z",
+      "prompt_sha256": [],
+      "endpoints": {
+        "GET /api/account/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/ask/examples": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/ask/history": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/audit/runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets/{name}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/env/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/init/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/{query_hash}/analyses": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/{query_hash}/analysis/latest": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/discovery/stream": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}/events": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/setup-progress": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-keys": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-profiles": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/ask": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/bootstrap": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets/{name}/test": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/anthropic/validate": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/set": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/init/complete": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/query-registry/{query_hash}/reviewed": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PUT /api/configure/default": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PUT /api/configure/targets/{name}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        }
+      }
+    },
+    "activity": {
+      "runs": ["b1e1ddbabf2b"],
+      "last_run": "2026-09-26T07:36:30.258Z",
+      "prompt_sha256": [],
+      "endpoints": {
+        "DELETE /api/configure/targets/{name}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "DELETE /api/runs/{run_id}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/account/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/audit/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/audit/runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/cache/sandbox": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/env/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/snapshots": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/init/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/interactive/{query_hash}/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/{query_hash}/analyses": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/{query_hash}/analysis/{analysis_id}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/{query_hash}/analysis/latest": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/discovery/stream": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}/events": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/schema": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/setup-progress": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-keys": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-profiles": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PATCH /api/cache/compare-runs/{run_id}/load": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PATCH /api/query-registry/queries/{query_hash}/parameters": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/analyze": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/analyze/parameter-suggestions": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/audit/capture": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/bootstrap": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/cache/compare-runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/cache/sandbox/prewarm": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/cache/test-runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets/{name}/test": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/anthropic/validate": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/set": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/init/complete": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/query-registry/{query_hash}/reviewed": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/query-registry/load-test-runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/query-registry/queries/{query_hash}/compare-outcome": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PUT /api/configure/default": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        }
+      }
+    },
+    "benchmarks": {
+      "runs": ["2f4fc16d0671"],
+      "last_run": "2026-09-26T06:52:33.650Z",
+      "prompt_sha256": [],
+      "endpoints": {
+        "GET /api/account/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/cache/sandbox": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/env/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/init/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/discovery/stream": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}/events": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/schema": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/setup-progress": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-keys": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-profiles": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PATCH /api/query-registry/queries/{query_hash}/parameters": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/analyze/parameter-suggestions": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/bootstrap": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/cache/compare-runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/cache/sandbox/prewarm": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets/{name}/test": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/anthropic/validate": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/set": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/init/complete": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/query-registry/load-test-runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/query-registry/queries/{query_hash}/compare-outcome": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PUT /api/configure/default": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        }
+      }
+    },
+    "platform": {
+      "runs": ["6dcf29fcc771"],
+      "last_run": "2026-09-26T07:52:26.203Z",
+      "prompt_sha256": [],
+      "endpoints": {
+        "GET /api/account/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/load/history": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/load/stream": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/patterns": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/preflight": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/tour": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/env/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/init/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/setup-progress": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-keys": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-profiles": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PATCH /api/demo/discovery-mode": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/demo/cache": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/demo/load/start": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/demo/load/stop": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/demo/provision": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/demo/querypilot": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/demo/teardown": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/demo/tour-done": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/anthropic/validate": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/set": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        }
+      }
+    },
+    "desktop-shell": {
+      "runs": ["2cc5a5bc6415"],
+      "last_run": "2026-09-26T06:10:30.756Z",
+      "prompt_sha256": [],
+      "endpoints": {
+        "GET /api/account/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/ask/examples": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/ask/history": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/audit/runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/cache/sandbox": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/env/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/init/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/discovery/stream": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}/events": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/settings/email": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/setup-progress": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-keys": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-profiles": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/analyze/parameter-suggestions": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/ask": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/bootstrap": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/cache/sandbox/prewarm": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets/{name}/test": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/anthropic/validate": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/set": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/init/complete": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PUT /api/configure/default": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        }
+      }
+    },
+    "health-check": {
+      "runs": ["c5f499153a5c"],
+      "last_run": "2026-09-26T07:06:12.116Z",
+      "prompt_sha256": [],
+      "endpoints": {
+        "DELETE /api/runs/{run_id}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/account/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/audit/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/audit/runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/audit/runs/{run_id}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/cache/sandbox": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/env/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/snapshots": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/snapshots/{snapshot_id}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/init/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/providers/aws-status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/discovery/stream": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}/events": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/schema": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/settings/email": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/setup-progress": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-keys": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-profiles": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PATCH /api/query-registry/queries/{query_hash}/parameters": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/analyze/parameter-suggestions": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/audit/capture": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/bootstrap": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets/{name}/test": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/anthropic/validate": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/set": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/fleet/audit": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/init/complete": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/query-registry/load-test-runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PUT /api/configure/default": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        }
+      }
+    },
+    "home": {
+      "runs": ["dd8416c4ab11"],
+      "last_run": "2026-09-26T13:09:52.759Z",
+      "prompt_sha256": [],
+      "endpoints": {
+        "DELETE /api/configure/targets/{name}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/account/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/ask/examples": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/ask/history": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/audit/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/audit/runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/cache/sandbox": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/load/history": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/patterns": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/preflight": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/tour": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/env/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/snapshots": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/init/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/interactive/{query_hash}/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/providers/aws-status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/{query_hash}/analysis/latest": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/discovery/stream": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}/events": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/setup-progress": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-keys": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-profiles": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/analyze": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/analyze/parameter-suggestions": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/ask": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/audit/capture": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/bootstrap": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/cache/sandbox/prewarm": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets/{name}/test": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/anthropic/validate": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/set": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/init/complete": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/semantic-layer/init": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PUT /api/configure/default": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        }
+      }
+    },
+    "onboarding-connect": {
+      "runs": ["809256fb86e9"],
+      "last_run": "2026-09-26T03:19:16.950Z",
+      "prompt_sha256": [],
+      "endpoints": {
+        "DELETE /api/configure/targets/{name}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/account/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/audit/runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets/{name}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/env/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/init/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/providers/aws-status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/discovery/stream": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}/events": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/setup-progress": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-keys": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-profiles": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/bootstrap": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets/{name}/test": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/anthropic/validate": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/set": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/init/complete": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PUT /api/configure/default": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        }
+      }
+    },
+    "queries-analyze": {
+      "runs": ["ea8c574a0946"],
+      "last_run": "2026-09-26T06:29:54.802Z",
+      "prompt_sha256": [],
+      "endpoints": {
+        "DELETE /api/interactive/{query_hash}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "DELETE /api/query-registry/{query_hash}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/account/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/ask/examples": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/ask/history": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/env/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/init/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/interactive/{query_hash}/history": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/interactive/{query_hash}/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/{query_hash}/analyses": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/{query_hash}/analysis/{analysis_id}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/{query_hash}/analysis/latest": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/discovery/stream": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}/events": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/schema": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/setup-progress": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-keys": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-profiles": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PATCH /api/query-registry/{query_hash}/tag": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PATCH /api/query-registry/queries/{query_hash}/starred": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/analyze": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/analyze/parameter-suggestions": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/ask": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/bootstrap": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets/{name}/test": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/anthropic/validate": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/set": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/init/complete": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/interactive/{query_hash}/message": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/query-registry/{query_hash}/reviewed": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PUT /api/configure/default": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        }
+      }
+    },
+    "schema": {
+      "runs": ["758539a99d1d"],
+      "last_run": "2026-09-26T06:29:54.799Z",
+      "prompt_sha256": [],
+      "endpoints": {
+        "DELETE /api/semantic-layer": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/account/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/ask/examples": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/ask/history": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/audit/runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/env/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/init/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/discovery/stream": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}/events": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer/export": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/setup-progress": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-keys": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-profiles": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/ask": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/bootstrap": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets/{name}/test": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/anthropic/validate": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/set": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/init/complete": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/semantic-layer/column": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/semantic-layer/init": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/semantic-layer/metric": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/semantic-layer/profile": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/semantic-layer/refresh": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/semantic-layer/relationship": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/semantic-layer/table": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/semantic-layer/terminology": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PUT /api/configure/default": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        }
+      }
+    },
+    "settings-targets": {
+      "runs": ["2baa5a27d6d5"],
+      "last_run": "2026-09-26T13:09:53.146Z",
+      "prompt_sha256": [],
+      "endpoints": {
+        "DELETE /api/configure/targets/{name}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/account/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/audit/runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/cache/sandbox": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets/{name}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/env/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/snapshots": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/init/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/providers/aws-status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/providers/digitalocean-status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/providers/neon-status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/providers/supabase-login/{login_id}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/providers/supabase-status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/discovery/stream": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}/events": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/setup-progress": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-keys": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-profiles": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PATCH /api/fleet/targets/{name}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/bootstrap": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/cache/sandbox/prewarm": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets/{name}/test": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/anthropic/validate": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/set": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/fleet/import": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/init/complete": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/providers/aws-sso-login": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/providers/neon-key": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/providers/supabase-login": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/settings/reset-local-data": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/tunnel/test": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PUT /api/configure/default": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PUT /api/configure/targets/{name}": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        }
+      }
+    },
+    "shell-navigation": {
+      "runs": ["2d87811559fe"],
+      "last_run": "2026-09-26T13:09:53.192Z",
+      "prompt_sha256": [],
+      "endpoints": {
+        "GET /api/account/login/{login_id}/browser-callback": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/account/login/{login_id}/context": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/account/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/ask/examples": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/ask/history": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/audit/runs": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/cache/sandbox": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/load/history": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/patterns": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/preflight": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/demo/tour": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/env/requirements": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/snapshots": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/fleet/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/init/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/{query_hash}/analyses": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/{query_hash}/analysis/latest": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/query-registry/discovery/stream": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/runs/{run_id}/events": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/semantic-layer/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/settings/email": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/setup-progress": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/status": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-keys": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "GET /api/tunnel/ssh-profiles": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/account/login": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/account/login/complete": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/account/logout": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/ask": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/bootstrap": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/cache/sandbox/prewarm": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/configure/targets/{name}/test": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/ai-provider": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/anthropic/validate": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/env/set": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/init/complete": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/query-registry/{query_hash}/reviewed": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "POST /api/report": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        },
+        "PUT /api/configure/default": {
+          "runs": 1,
+          "renderer": 1,
+          "rt_api": 0
+        }
+      }
+    }
+  },
+  "unmatched": {
+    "GET /api/llm/status": 1
+  },
+  "flows": {
+    "ai-access/key-update-recovery": {
+      "runs": ["0b72badb7ea8"],
+      "minutes": [3.1],
+      "statuses": {
+        "failed": 1
+      }
+    },
+    "server/desktop-sidecar-start": {
+      "runs": ["0b72badb7ea8"],
+      "minutes": [4.4],
+      "statuses": {
+        "failed": 1
+      }
+    },
+    "activity/server-run-reload": {
+      "runs": ["667dcdfb6895"],
+      "minutes": [6.1],
+      "statuses": {
+        "failed": 1
+      }
+    },
+    "server/browser-start": {
+      "runs": ["667dcdfb6895"],
+      "minutes": [2.6],
+      "statuses": {
+        "failed": 1
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "note": "Paths moved since the contract was written: old path to new. The selector reads an older tree through these, so ownership, entry points, and flows still resolve.",
+  "moves": {}
+}

@@ -1,0 +1,5 @@
+{
+  "capability": "actions",
+  "areas": ["actions"],
+  "flows": ["actions/plan-follow-through"]
+}

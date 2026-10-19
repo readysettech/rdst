@@ -1,0 +1,1686 @@
+{
+  "note": "Which pilot flows each past change needs, labeled by agents from the description, files, and diff without seeing the selector's output. Changes from before the web app need none.",
+  "changes": [
+    {
+      "commit": "c4fa944d51",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "License text and package metadata only."
+    },
+    {
+      "commit": "ab440bbbc9",
+      "flows": ["server/browser-start", "server/desktop-sidecar-start"],
+      "confidence": "medium",
+      "rationale": "Adds a query-assessment worker started and stopped in the API lifespan, so server start-up and shutdown change in both modes."
+    },
+    {
+      "commit": "1ca96b093f",
+      "flows": ["ai-access/key-update-recovery", "server/browser-start"],
+      "confidence": "high",
+      "rationale": "Restores the full-screen AI provider gate and AiAccessBoundary in __root, changing first load and gate behavior."
+    },
+    {
+      "commit": "49fa9b2cd2",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Keyservice signup/quota alerts plus an analytics flag on account sign-in; no key, run, or server start-up path."
+    },
+    {
+      "commit": "01c187c91f",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Hosted GLM response-format contract; not the Anthropic key gate or any flow surface."
+    },
+    {
+      "commit": "99b1e9ca1d",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Keyservice staging email config only."
+    },
+    {
+      "commit": "6a795e17f9",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Test guard and CI agent change."
+    },
+    {
+      "commit": "6391fb5282",
+      "flows": ["activity/server-run-reload"],
+      "confidence": "medium",
+      "rationale": "Sandbox readiness cancellation changes how stopping a load test/comparison settles; desktop change is only zoom shortcuts."
+    },
+    {
+      "commit": "5e3a4c8cd9",
+      "flows": ["activity/server-run-reload"],
+      "confidence": "medium",
+      "rationale": "Health-check capture run now awaits a concurrent model verdict before saving, changing run completion and stop behavior."
+    },
+    {
+      "commit": "2672867d97",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Hosted inference routing, step timeout, and hosted-timeout error copy; no key validation, run registry, or cancel path."
+    },
+    {
+      "commit": "0ecf9ef41b",
+      "flows": [
+        "ai-access/key-update-recovery",
+        "activity/server-run-reload",
+        "server/browser-start",
+        "server/desktop-sidecar-start"
+      ],
+      "confidence": "high",
+      "rationale": "UX audit stack adds the Jobs popover, reworks analysis runs and the drawer, replaces the AI gate, touches Settings/__root/app.py, and installs a custom desktop View menu."
+    },
+    {
+      "commit": "c387d070d1",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Prompt/schema caching in AI requests; no key, run, stream-cancel, or start-up change."
+    },
+    {
+      "commit": "a28aaf577d",
+      "flows": ["ai-access/key-update-recovery"],
+      "confidence": "high",
+      "rationale": "Persists the active AI provider and changes key resolution, env routes, and Settings switching."
+    },
+    {
+      "commit": "2c03d6d4c4",
+      "flows": ["activity/server-run-reload"],
+      "confidence": "medium",
+      "rationale": "Target-setup bootstrap run drops its default annotate/key-gate phase, changing the setup job; rest is hosted inference and Ask."
+    },
+    {
+      "commit": "0df865a859",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Ask profile and keyservice quota."
+    },
+    {
+      "commit": "8eb45c8c98",
+      "flows": [
+        "ai-access/key-update-recovery",
+        "server/browser-start",
+        "server/desktop-sidecar-start"
+      ],
+      "confidence": "high",
+      "rationale": "Introduces the AI provider gate in __root, key resolution/env/Settings changes, account router in the app, and desktop main-process startup/deep-link changes."
+    },
+    {
+      "commit": "8ca26c84ca",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI command AI-access gating only."
+    },
+    {
+      "commit": "7741a336b5",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Ask accuracy and benchmark changes."
+    },
+    {
+      "commit": "4a3229b54b",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Checks in a placeholder version file for source builds; no runtime start-up change."
+    },
+    {
+      "commit": "3d6824ed3b",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Keeps an empty web_dist dir for source builds; server still keys off index.html."
+    },
+    {
+      "commit": "374c36dfdd",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Test guard only."
+    },
+    {
+      "commit": "25d3b40214",
+      "flows": [
+        "ai-access/key-update-recovery",
+        "server/browser-start",
+        "server/desktop-sidecar-start"
+      ],
+      "confidence": "medium",
+      "rationale": "Lifespan now retires legacy trial credentials from keyring/config at start-up and adds request middleware, touching start-up and key persistence."
+    },
+    {
+      "commit": "ffe1060758",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Font/icon asset plumbing and plan doc."
+    },
+    {
+      "commit": "e3771573d8",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Ask correction pipeline."
+    },
+    {
+      "commit": "e0d8bcd331",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Ask SQL corrections."
+    },
+    {
+      "commit": "de0063d0f7",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Keyservice email transport."
+    },
+    {
+      "commit": "d689dee998",
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "medium",
+      "rationale": "Rewires desktop sidecar build, lock, and dev launch scripts for the mirror layout, which affects sidecar packaging."
+    },
+    {
+      "commit": "d23389bebb",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Benchmark qualification tooling."
+    },
+    {
+      "commit": "bbd67bf6de",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Keyservice trial follow-up email and a copy tweak."
+    },
+    {
+      "commit": "5ec07467ce",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Ask alternate selection."
+    },
+    {
+      "commit": "16f1637e40",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Public mirror asset overlay tooling."
+    },
+    {
+      "commit": "16aadf7484",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Ask SQL repairs."
+    },
+    {
+      "commit": "0e409d25e9",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Ask value grounding."
+    },
+    {
+      "commit": "d2d8ee5f56",
+      "flows": [
+        "ai-access/key-update-recovery",
+        "server/desktop-sidecar-start"
+      ],
+      "confidence": "medium",
+      "rationale": "Replaces the Claude transport used for key validation and error normalization, and pins anthropic==0.122.0 while the sidecar lock stays on 0.116.0."
+    },
+    {
+      "commit": "bcc97dc0a5",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CI and docs for BIRD qualification."
+    },
+    {
+      "commit": "a86898ab45",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Benchmark harness."
+    },
+    {
+      "commit": "a03995ff4e",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Sidebar Discord link."
+    },
+    {
+      "commit": "99bbac77a6",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Ask clarification flow."
+    },
+    {
+      "commit": "5c200fb66e",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Schema annotation determinism."
+    },
+    {
+      "commit": "5826fcd5e7",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Benchmark provider and CI."
+    },
+    {
+      "commit": "4ca34c466a",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Benchmark diagnostics and Ask internals."
+    },
+    {
+      "commit": "390689837e",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Benchmark tooling."
+    },
+    {
+      "commit": "37ae4055c6",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Ask schema prompts."
+    },
+    {
+      "commit": "31111b4c1f",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Ask SQL generation."
+    },
+    {
+      "commit": "1daad11a1a",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CI schedule for BIRD."
+    },
+    {
+      "commit": "ae16732898",
+      "flows": ["activity/server-run-reload", "server/browser-start"],
+      "confidence": "medium",
+      "rationale": "Rebuilds analysis runs, the analyze drawer, stored-analysis viewing, and background runs, and mounts a global SetupGuide in __root."
+    },
+    {
+      "commit": "850296298a",
+      "flows": ["activity/server-run-reload"],
+      "confidence": "medium",
+      "rationale": "Changes backgroundRuns reattach/seenLive and load-test progress handling plus analyze drawer tabs and state."
+    },
+    {
+      "commit": "767496dc8c",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Persists analysis bodies with history and stored-payload endpoints for redisplay, which is what the stored-analysis check covers."
+    },
+    {
+      "commit": "3ceafcaa45",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Query normalizer and self-traffic tagging; no stream, run, key, or startup behavior."
+    },
+    {
+      "commit": "2c5cfdce8e",
+      "flows": [],
+      "confidence": "low",
+      "rationale": "Adds Readyset lane to load test measurement content; run registry and Jobs mechanics untouched."
+    },
+    {
+      "commit": "21a804a8d8",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Compare/load test parameter pipeline and migration safety; no run lifecycle, key, or startup change."
+    },
+    {
+      "commit": "20a43e0c10",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Docker sandbox networking fallback only."
+    },
+    {
+      "commit": "ba74b8d6e8",
+      "flows": ["activity/server-run-reload"],
+      "confidence": "medium",
+      "rationale": "Health-check capture runs change timing/window enforcement, run_registry error path, and RunProgress."
+    },
+    {
+      "commit": "45e9bd0fbc",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Sandbox Docker lifecycle recovery and test infra; not run registry or Jobs behavior."
+    },
+    {
+      "commit": "77cb7d4368",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Docker topology for Linux localhost comparisons only."
+    },
+    {
+      "commit": "60c21ddba6",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Connection write-privilege guidance in Settings DB section, not the AI key section."
+    },
+    {
+      "commit": "1d0029854e",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Adds a hypopg index-testing step and payload field to the analysis stream and results."
+    },
+    {
+      "commit": "8cde81b0be",
+      "flows": [
+        "ai-access/key-update-recovery",
+        "activity/server-run-reload",
+        "server/browser-start",
+        "server/desktop-sidecar-start"
+      ],
+      "confidence": "medium",
+      "rationale": "Sweeping rework touching SettingsPage, backgroundRuns/BackgroundRuns, analyze controller/results, __root, and Electron main window."
+    },
+    {
+      "commit": "1a79bb7b1d",
+      "flows": ["server/browser-start", "server/desktop-sidecar-start"],
+      "confidence": "medium",
+      "rationale": "Adds lifespan scheduler hooks and SQLite stores to app start and changes sidecar build Python/sqlite probing."
+    },
+    {
+      "commit": "e7c62bcb8f",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Josh filter CI config only."
+    },
+    {
+      "commit": "bb85fa7371",
+      "flows": [
+        "server/browser-start",
+        "server/desktop-sidecar-start",
+        "activity/server-run-reload"
+      ],
+      "confidence": "medium",
+      "rationale": "Tightens CORS in the app factory and adds local-request guards on status, analyze, and run cancel; sidecar lock changes."
+    },
+    {
+      "commit": "1b0acd7280",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "E2E test bed and keyservice preview tooling."
+    },
+    {
+      "commit": "bd92c82187",
+      "flows": ["server/browser-start", "server/desktop-sidecar-start"],
+      "confidence": "low",
+      "rationale": "Boots posthog-js in the renderer entry point for web and desktop, which could affect first load."
+    },
+    {
+      "commit": "19759dbe94",
+      "flows": ["ai-access/key-update-recovery", "server/browser-start"],
+      "confidence": "medium",
+      "rationale": "Rewrites the local-request guard for all API calls and surfaces Anthropic provider error details via env/llm_manager."
+    },
+    {
+      "commit": "cec15ac24c",
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "medium",
+      "rationale": "Changes sidecar build base and packaging via build-sidecar.mjs and lock."
+    },
+    {
+      "commit": "cb356b315c",
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "high",
+      "rationale": "Modifies desktop main process, backend.ts sidecar spawning, and packaging."
+    },
+    {
+      "commit": "65b2a4c85e",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Per-target password import for fleet/providers; not key, runs, or startup."
+    },
+    {
+      "commit": "00e84c7cd4",
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "medium",
+      "rationale": "Bundles paramiko into the sidecar and changes Electron main process OAuth handling."
+    },
+    {
+      "commit": "a72a171903",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Feedback email requirement and CI node provisioning."
+    },
+    {
+      "commit": "9c7e2d58b2",
+      "flows": [
+        "ai-access/key-update-recovery",
+        "server/browser-start",
+        "server/desktop-sidecar-start"
+      ],
+      "confidence": "low",
+      "rationale": "Portability changes to secret store set_secret, persistent config writes, CLI entry stdio, and desktop dev/lock."
+    },
+    {
+      "commit": "9aeaf52f7a",
+      "flows": [
+        "ai-access/key-update-recovery",
+        "server/desktop-sidecar-start",
+        "activity/server-run-reload"
+      ],
+      "confidence": "medium",
+      "rationale": "Changes EnvSecretsDialog persistence/keychain UI, sidecar spawn env and main deep links, and backgroundRuns kickoff failures."
+    },
+    {
+      "commit": "fe3c3cdd12",
+      "flows": ["activity/server-run-reload"],
+      "confidence": "medium",
+      "rationale": "Extends run_registry (partial status, start_factory, cancel_target) and makes web Analyze static by default."
+    },
+    {
+      "commit": "efb16f794a",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Adds sandbox manager backend only."
+    },
+    {
+      "commit": "8a0e90e268",
+      "flows": [
+        "activity/server-run-reload",
+        "server/browser-start",
+        "server/desktop-sidecar-start"
+      ],
+      "confidence": "medium",
+      "rationale": "Adds sandbox start/stop to app lifespan, reworks backgroundRuns/BackgroundRuns run replay and cancellation, and the analysis SSE client."
+    },
+    {
+      "commit": "2711aa1d2a",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI installer and update command only."
+    },
+    {
+      "commit": "54fd64d013",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Telemetry classification only."
+    },
+    {
+      "commit": "c4e9a996e3",
+      "flows": ["server/browser-start"],
+      "confidence": "medium",
+      "rationale": "Changes static bundle cache headers in the app factory alongside provider discovery."
+    },
+    {
+      "commit": "facec3f88e",
+      "flows": ["ai-access/key-update-recovery", "activity/server-run-reload"],
+      "confidence": "high",
+      "rationale": "Changes Anthropic validity results and env guards plus moves audits and captures onto detached background runs."
+    },
+    {
+      "commit": "8596556f10",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Settings target list and Add Targets drawer UI; not the AI section or runs."
+    },
+    {
+      "commit": "482fd8c368",
+      "flows": ["activity/server-run-reload"],
+      "confidence": "medium",
+      "rationale": "Adds run_registry.reset and clearAllBackgroundRuns on local data reset."
+    },
+    {
+      "commit": "f85bdae9d6",
+      "flows": ["ai-access/key-update-recovery"],
+      "confidence": "high",
+      "rationale": "Removes EmailGate, changes EnvSecretsDialog and ConfigWarning around AI credit/key access."
+    },
+    {
+      "commit": "b4ce9af0cf",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Schema profile completion surfacing only."
+    },
+    {
+      "commit": "8b94716980",
+      "flows": ["activity/server-run-reload", "ai-access/key-update-recovery"],
+      "confidence": "high",
+      "rationale": "Introduces runs API and Jobs popover and wakes key-parked jobs when a key is stored via env/EnvSecretsDialog."
+    },
+    {
+      "commit": "57133bce17",
+      "flows": ["activity/server-run-reload"],
+      "confidence": "low",
+      "rationale": "Adds bootstrap orchestrator backend that runs target setup as a registry run."
+    },
+    {
+      "commit": "536bb82794",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Annotation batching inside schema service; no run lifecycle change."
+    },
+    {
+      "commit": "365a4b094b",
+      "flows": ["activity/server-run-reload"],
+      "confidence": "high",
+      "rationale": "Adds client-side bootstrap run state with SSE replay and reload reattach in the sidebar."
+    },
+    {
+      "commit": "16f8a23da9",
+      "flows": ["activity/server-run-reload"],
+      "confidence": "high",
+      "rationale": "Introduces the background run registry with replay and cancellation."
+    },
+    {
+      "commit": "b6f54630dc",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Keyservice signup, demo tour, and trial dialog fixes; not the Anthropic key gate."
+    },
+    {
+      "commit": "ac686e0289",
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "medium",
+      "rationale": "Changes sidecar PyInstaller data collection."
+    },
+    {
+      "commit": "a85ddef6a0",
+      "flows": ["ai-access/key-update-recovery"],
+      "confidence": "medium",
+      "rationale": "Restructures the settings page hosting the Anthropic key section and validity display."
+    },
+    {
+      "commit": "394695b3fd",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Queries workbench and cache page UI rework; no stream, run, key, or startup change."
+    },
+    {
+      "commit": "f09ddfafa9",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Docs only."
+    },
+    {
+      "commit": "e478dae5cd",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Shared confirm dialog, responsive layout, and self-hosted fonts are UI chrome with no key, run, analysis stream, or server start-up change."
+    },
+    {
+      "commit": "e423e6407f",
+      "flows": ["server/browser-start"],
+      "confidence": "medium",
+      "rationale": "Sets an env var in the rdst web command so reload workers skip the TTY probe that could hang start-up; the rest is Ask/Schema/Home UX."
+    },
+    {
+      "commit": "a3a51a565e",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Design-token sheet and lint check only."
+    },
+    {
+      "commit": "8cc2855abd",
+      "flows": [],
+      "confidence": "low",
+      "rationale": "Mostly Ask; also adds an in-place Re-analyze on results and carries query and params into Analyze, which touches how analyses restart."
+    },
+    {
+      "commit": "796b38e9b9",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Timing units, schema re-init confirm, and benchmark safety; benchmarks were page streams then, not server-owned runs."
+    },
+    {
+      "commit": "7906c81d87",
+      "flows": ["ai-access/key-update-recovery"],
+      "confidence": "high",
+      "rationale": "Adds the Anthropic key validity probe, key resolution precedence, and EnvSecretsDialog changes: the core of key update and recovery."
+    },
+    {
+      "commit": "7129765150",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Small UX fixes plus bundle chunking config; no server, key, or analysis-stream lifecycle change."
+    },
+    {
+      "commit": "59fc29c580",
+      "flows": ["server/browser-start"],
+      "confidence": "high",
+      "rationale": "Adds an SSE error envelope to the analyze stream and results route, and registers global error handlers in the app factory plus root error pages."
+    },
+    {
+      "commit": "4c4d9dc04c",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Desktop update progress UI and updater events; does not touch sidecar spawning or static serving."
+    },
+    {
+      "commit": "3a1edf3d57",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Visual design-system migration; results page moved to a lazy module with the same streaming logic."
+    },
+    {
+      "commit": "05b70889a6",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "QueryPilot demo copy and chart changes only."
+    },
+    {
+      "commit": "f2e558b030",
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "high",
+      "rationale": "Changes the sidecar environment PATH in the desktop main-process backend spawner."
+    },
+    {
+      "commit": "eac6c4545d",
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "medium",
+      "rationale": "Enables hardened runtime and new macOS entitlements, which can change whether the packaged sidecar launches."
+    },
+    {
+      "commit": "f97a5403e3",
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "medium",
+      "rationale": "Adds auto-update setup to the Electron main-process start-up path before the renderer loads."
+    },
+    {
+      "commit": "f2a545e8a7",
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "high",
+      "rationale": "Changes the Electron main boot sequence and exit paths (smoke mode, watchdog, sidecar stop)."
+    },
+    {
+      "commit": "cb5702314d",
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "high",
+      "rationale": "Changes how sidecar shared-library symlinks are staged into the package, directly affecting sidecar launch."
+    },
+    {
+      "commit": "c9af5e3699",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Demo load-driver pacing only."
+    },
+    {
+      "commit": "9c2d9eb8b8",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CI Slack notification only."
+    },
+    {
+      "commit": "9779f812f0",
+      "flows": ["server/browser-start", "ai-access/key-update-recovery"],
+      "confidence": "medium",
+      "rationale": "Removes the docker pre-pull from app start-up and makes rdst web open the browser; also moves the key-warning banner off Home."
+    },
+    {
+      "commit": "7fd7a709a3",
+      "flows": [],
+      "confidence": "low",
+      "rationale": "Mainly Playwright test tiers, but changes analyze SSE event serialization used by the live stream."
+    },
+    {
+      "commit": "728fc08be4",
+      "flows": ["server/browser-start", "ai-access/key-update-recovery"],
+      "confidence": "medium",
+      "rationale": "Removes the global email gate from first load and changes the rdst web WSL opener; Claude provider now reports a rejected Anthropic key distinctly."
+    },
+    {
+      "commit": "3d0befa07f",
+      "flows": [],
+      "confidence": "low",
+      "rationale": "macOS package CI build and artifact naming; no runtime change to the shell or sidecar."
+    },
+    {
+      "commit": "34ab03a01d",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Readyset deploy image reference only."
+    },
+    {
+      "commit": "2b0475f762",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CI pipeline status reporting only."
+    },
+    {
+      "commit": "1c8ecbaebf",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CI update-channel publishing only."
+    },
+    {
+      "commit": "14aaa5dedb",
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "medium",
+      "rationale": "Adds Linux deb/rpm packaging targets for the desktop app, a packaging change to how the shell and sidecar ship."
+    },
+    {
+      "commit": "00838de662",
+      "flows": ["server/browser-start"],
+      "confidence": "medium",
+      "rationale": "Adds a signup gate on first rdst web load and a new browser-open helper in the rdst web command."
+    },
+    {
+      "commit": "93225f7e2e",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "New demo page UI only."
+    },
+    {
+      "commit": "60e926e625",
+      "flows": ["server/browser-start"],
+      "confidence": "medium",
+      "rationale": "Adds a blocking email gate to the root route on first load and a new settings router to the app factory."
+    },
+    {
+      "commit": "1a40f24df1",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "New demo backend; the app factory only gains a router include."
+    },
+    {
+      "commit": "0521639e8b",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Demo stability tuning only."
+    },
+    {
+      "commit": "8f1c237ffd",
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "high",
+      "rationale": "Hardens the Electron main lifecycle, backend spawning, static server, and pinned sidecar build."
+    },
+    {
+      "commit": "678f6f2f6b",
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "high",
+      "rationale": "Introduces the Electron shell, sidecar spawner, and static server."
+    },
+    {
+      "commit": "004ecb84e9",
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "medium",
+      "rationale": "Changes Electron main window creation and chrome, plus packaging and sidecar build scripts."
+    },
+    {
+      "commit": "f3002ad25b",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "New web pages for audit, fleet, agents, and guards; no run registry or Jobs popover existed yet."
+    },
+    {
+      "commit": "91f008720c",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Test fixture isolation only."
+    },
+    {
+      "commit": "88f1df9050",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "New API routes; the app factory only registers routers and SSE schemas."
+    },
+    {
+      "commit": "59b7bef158",
+      "flows": ["ai-access/key-update-recovery"],
+      "confidence": "medium",
+      "rationale": "New Home adds a missing-key banner that opens the key dialog, a new place to recover the key."
+    },
+    {
+      "commit": "36dbecfceb",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI child-process invocation only."
+    },
+    {
+      "commit": "5faea1d289",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CI diff-area mapping and integration tests only."
+    },
+    {
+      "commit": "930b823935",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "rdst top CLI launch and registry fixes."
+    },
+    {
+      "commit": "d2c5625104",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CI container cleanup and a unit test."
+    },
+    {
+      "commit": "f57592b6fc",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "The analyze service now deploys or starts an ephemeral Readyset container per run, which changes what stopping an analysis leaves behind."
+    },
+    {
+      "commit": "6d0d1b30ee",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI cache deploy and lifecycle commands."
+    },
+    {
+      "commit": "ddf94b3fcc",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Integration tests only."
+    },
+    {
+      "commit": "d39e98eb56",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Integration test suite, with minor cacheability helper changes."
+    },
+    {
+      "commit": "af23d30fee",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Test or docs only change."
+    },
+    {
+      "commit": "9ecef11160",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Wraps the web analyze SSE generator in a new telemetry context manager, which can change how a stopped or disconnected analysis stream terminates."
+    },
+    {
+      "commit": "92edf28904",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "35622907ec",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Mechanical refactor of ~/.rdst path constants into getter functions with no intended behavioral delta."
+    },
+    {
+      "commit": "c489b2aac5",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CI pipeline change only."
+    },
+    {
+      "commit": "d55ed65096",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "b4118b8614",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Test or docs only change."
+    },
+    {
+      "commit": "a2c02010ac",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CI pipeline change only."
+    },
+    {
+      "commit": "eb21291ea5",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "c569d8cdc9",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CI pipeline change only."
+    },
+    {
+      "commit": "b1e72de3c5",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Email/report verification and keyservice URL cleanup; key_resolution change only reroutes the trial proxy URL, not own-key validation or the gate."
+    },
+    {
+      "commit": "38cc413580",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "e444199302",
+      "flows": ["ai-access/key-update-recovery", "server/browser-start"],
+      "confidence": "medium",
+      "rationale": "Adds typed response models (Literal env requirement sources) and a new useEnvRequirements hook feeding the AI gate, plus a custom OpenAPI hook in the app factory and a typed fetch client used for every REST call."
+    },
+    {
+      "commit": "9c0fa3db7a",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "9b9ee9e6e5",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "CLI-oriented bugfixes; the analyze service only adds an explain error event, not stream cancellation or stored analysis behavior."
+    },
+    {
+      "commit": "8dd6ff1036",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "1d5b99256d",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "c678b66cb3",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "d3bf055f13",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "b65b342b98",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "a9b0f7be1f",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "9a48b6ae8e",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "e8ec67d8bf",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Adds a cache management page and router; the anthropic_env edit is whitespace only and app factory only registers a new router."
+    },
+    {
+      "commit": "b003da2181",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "9cc07824af",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "7e0a0692ae",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "52eb0cb26c",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "4ec6a37514",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "2dcd0c037c",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "10714914c0",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "02ab2c4796",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "a13acdc246",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "f9fb58c2a0",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "e4378c01bc",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "c8bb4eda4e",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI, telemetry, audit, or engine change with no effect on the flows' web behavior."
+    },
+    {
+      "commit": "7e50474685",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+    },
+    {
+      "commit": "26aeb8dc8a",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+    },
+    {
+      "commit": "254692ecae",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+    },
+    {
+      "commit": "851ebe48bc",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+    },
+    {
+      "commit": "6b4025ef7e",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+    },
+    {
+      "commit": "677ac31e11",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Adds a data storage path to the status payload and a configure edit pre-fill; no start-up or lifecycle change."
+    },
+    {
+      "commit": "5906522b2d",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+    },
+    {
+      "commit": "289f326770",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+    },
+    {
+      "commit": "1b7b6d0833",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "EXPLAIN metric parsing and analysis result display, unrelated to stream stop/reload."
+    },
+    {
+      "commit": "09871a3d6b",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Frontend change to pages outside AI access, jobs, analysis streaming, and server lifecycle."
+    },
+    {
+      "commit": "1ded920c7c",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CI pipeline change only."
+    },
+    {
+      "commit": "8100d3e5ca",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Integration test and CI infrastructure only."
+    },
+    {
+      "commit": "4af9fb452d",
+      "flows": ["server/browser-start"],
+      "confidence": "high",
+      "rationale": "Adds a lifespan hook to the API app that pre-pulls a Docker image on web server start."
+    },
+    {
+      "commit": "3bd37d1987",
+      "flows": ["ai-access/key-update-recovery"],
+      "confidence": "medium",
+      "rationale": "Reworks anthropic_env and env requirements for trial lifecycle and touches EnvSecretsDialog; scan page and router additions are outside the flows."
+    },
+    {
+      "commit": "fa74db5bc9",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Analyze prompt and workflow output content only."
+    },
+    {
+      "commit": "f18b3f9975",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI interactive menu and formatter fixes."
+    },
+    {
+      "commit": "eddd95c707",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "LLM prompt text only."
+    },
+    {
+      "commit": "ec08e5947b",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI analyze --json output only."
+    },
+    {
+      "commit": "c381761e75",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "LLM prompt text only."
+    },
+    {
+      "commit": "b57d13d7be",
+      "flows": ["ai-access/key-update-recovery", "server/browser-start"],
+      "confidence": "medium",
+      "rationale": "Changes key setup from exhausted-trial flows, EnvSecretsDialog and env requirements; also enables the React compiler for the whole bundle."
+    },
+    {
+      "commit": "a02f9b6ea5",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "LLM prompt text only."
+    },
+    {
+      "commit": "8f1839ef50",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Ask dry-run execution fix; not analysis streaming or key handling."
+    },
+    {
+      "commit": "56c11ef9d9",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI help text only."
+    },
+    {
+      "commit": "4e9fb5bd05",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI display fixes for ask and analyze output."
+    },
+    {
+      "commit": "4b9fed3c7a",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI output formatter wording."
+    },
+    {
+      "commit": "3301d1bef4",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Ask logging levels and index column ordering in analysis output."
+    },
+    {
+      "commit": "1ab1c48f2e",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI output formatter rendering of rewrites."
+    },
+    {
+      "commit": "d069b741ec",
+      "flows": ["ai-access/key-update-recovery"],
+      "confidence": "high",
+      "rationale": "Adds trial and trial_exhausted key sources to env requirements and changes EnvSecretsDialog and gate warnings."
+    },
+    {
+      "commit": "8eefab0f38",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Docker/cache error messages in analyze results; not stream control or persistence."
+    },
+    {
+      "commit": "859b8dc3db",
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Pre-fills parameter dialog values; does not change analysis stream, stop, or stored-result display."
+    },
+    {
+      "commit": "f4bc9baf86",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Cache timing measurement fix."
+    },
+    {
+      "commit": "4ea97b99ed",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI shallow cache command."
+    },
+    {
+      "commit": "fc50a4a0fa",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Schema enrichment for ask; CLI and schema internals."
+    },
+    {
+      "commit": "faac657cd8",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Ask pipeline null-schema guard."
+    },
+    {
+      "commit": "f0e56a2db7",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI analyze target fallback."
+    },
+    {
+      "commit": "df631c3d2b",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Ask SQL generation gate, provider JSON format, CLI top crash."
+    },
+    {
+      "commit": "be7cbd6a7e",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Schema filter JSON parsing and CLI flag rename."
+    },
+    {
+      "commit": "a0fa1086f1",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "E2E test infrastructure only."
+    },
+    {
+      "commit": "495a806444",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Dev tmux harness script only."
+    },
+    {
+      "commit": "3be979cc7e",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI LLM-guided schema annotation."
+    },
+    {
+      "commit": "16a4e9c783",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Test and skill file cleanup."
+    },
+    {
+      "commit": "bb3616ecde",
+      "flows": ["ai-access/key-update-recovery"],
+      "confidence": "medium",
+      "rationale": "Fixes keyring availability detection on macOS, which decides where a saved Anthropic key persists."
+    },
+    {
+      "commit": "2598a222f8",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI SQL rendering."
+    },
+    {
+      "commit": "279b77ed61",
+      "flows": ["server/browser-start"],
+      "confidence": "high",
+      "rationale": "Changes how the rdst web command locates and serves the embedded frontend bundle."
+    },
+    {
+      "commit": "12892af24a",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI cacheability display."
+    },
+    {
+      "commit": "dcae07f515",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CI josh filter config."
+    },
+    {
+      "commit": "d10bd36c02",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI scan subprocess timeout."
+    },
+    {
+      "commit": "b3ef4fa28a",
+      "flows": ["ai-access/key-update-recovery"],
+      "confidence": "medium",
+      "rationale": "Adds key_resolution and makes has_anthropic_api_key accept an active trial, changing what the AI gate treats as a usable key."
+    },
+    {
+      "commit": "813b5e94d3",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "MySQL TLS and CLI top error display."
+    },
+    {
+      "commit": "6a6679b4a5",
+      "flows": ["ai-access/key-update-recovery"],
+      "confidence": "medium",
+      "rationale": "Renames the accepted Anthropic key env names used by env requirements and key resolution."
+    },
+    {
+      "commit": "57ab2d5d27",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "CLI message text."
+    },
+    {
+      "commit": "48658c0cfd",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Default model change; not key handling or gate."
+    },
+    {
+      "commit": "0987e77167",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Dev shadow workspace files only."
+    },
+    {
+      "commit": "83cb1102fd",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Public release prep: CI, docs, telemetry defaults."
+    },
+    {
+      "commit": "38bb3d3202",
+      "flows": ["server/browser-start", "ai-access/key-update-recovery"],
+      "confidence": "high",
+      "rationale": "Introduces the FastAPI app, rdst web serving, env/key routes with EnvSecretsDialog, and the SSE analyze stream."
+    },
+    {
+      "commit": "ff47993aa7",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "996c7b4ce0",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "e20e6f1fa7",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "aae711a604",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "9d2167c27e",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "83bccde334",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "80af071233",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "347dc843a5",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "21a6d89daf",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "8bd3eddf46",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "2c00b1297c",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "c80ea00f7f",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "b553e16def",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "ddf38a010a",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "cbcd185600",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "345c542a12",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "2138730493",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "80b190fedb",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "5d027f9075",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "0b0c39459b",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "e18cbd6471",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "9ed378eddb",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "42213bbbb1",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "1e0f82549e",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "6bfb516f34",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "2cd6e12156",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "12f76f411e",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "c5f8089139",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "bc707b5736",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "688adf7d26",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "588a37f3e4",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "8a3592f499",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "09912d4273",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "4293b86149",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "eaa6e6a40d",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "ea5af16664",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "da50781e60",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "b2d701d329",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "6e447cd337",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "44ac437c80",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "c4ff80ba80",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "82134b33af",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "a1b6a661e3",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "5678d307a8",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "46c4c50872",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    },
+    {
+      "commit": "9712044811",
+      "flows": [],
+      "confidence": "high",
+      "rationale": "before the web app existed"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "capability": "ask",
+  "areas": ["ask"],
+  "flows": ["ask/across-databases", "ask/answer-correctness", "ask/read-only"]
+}

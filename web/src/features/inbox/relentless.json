@@ -1,0 +1,5 @@
+{
+  "capability": "inbox",
+  "areas": ["inbox"],
+  "flows": ["monitoring/outage-alert", "inbox/put-away"]
+}

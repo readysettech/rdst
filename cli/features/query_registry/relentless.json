@@ -1,0 +1,7 @@
+{
+  "capability": "query-registry",
+  "areas": [
+    "monitoring",
+    "ask"
+  ]
+}

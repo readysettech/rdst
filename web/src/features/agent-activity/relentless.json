@@ -1,0 +1,5 @@
+{
+  "capability": "activity",
+  "areas": ["activity"],
+  "flows": ["activity/server-run-reload"]
+}

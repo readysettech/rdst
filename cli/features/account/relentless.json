@@ -1,0 +1,10 @@
+{
+  "capability": "ai-access",
+  "areas": [
+    "ai-access"
+  ],
+  "flows": [
+    "ai-access/hosted-inference",
+    "ai-access/key-update-recovery"
+  ]
+}

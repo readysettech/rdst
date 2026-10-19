@@ -1,0 +1,7 @@
+{
+  "capability": "monitor-engine",
+  "areas": [
+    "monitoring",
+    "inbox"
+  ]
+}

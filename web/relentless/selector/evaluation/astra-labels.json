@@ -1,0 +1,685 @@
+{
+  "note": "Blind labels from gpt-6-astra (high reasoning) for a seeded sample of 80 web-app-era changes, 2026-09-28. Same instructions as the original labelers; the selector, its contract, earlier labels, and replays were off limits.",
+  "changes": [
+    {
+      "commit": "254692ecae",
+      "required": ["queries-analyze"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes query storage limits and the database truncation warnings shown in query discovery."
+    },
+    {
+      "commit": "92edf28904",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "The new telemetry helper is used only by CLI audit and fleet commands."
+    },
+    {
+      "commit": "fe3c3cdd12",
+      "required": [
+        "settings-targets",
+        "queries-analyze",
+        "benchmarks",
+        "health-check",
+        "activity"
+      ],
+      "flows": ["activity/server-run-reload"],
+      "confidence": "high",
+      "rationale": "Changes analysis verdicts, managed comparisons, health-check benchmarking, target deletion cleanup, and server-run cancellation and completion."
+    },
+    {
+      "commit": "851ebe48bc",
+      "required": ["benchmarks"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Adds benchmark destination selection, source filtering, and destination table mismatch warnings."
+    },
+    {
+      "commit": "8eefab0f38",
+      "required": [],
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "The changed Docker paths serve CLI operations and the unlinked Readyset page, while web Analyze leaves its Docker branch disabled."
+    },
+    {
+      "commit": "a02f9b6ea5",
+      "required": ["queries-analyze"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes the optimization recommendations and nondeterministic-function findings produced by analysis."
+    },
+    {
+      "commit": "16a4e9c783",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Only test infrastructure and development skill instructions change."
+    },
+    {
+      "commit": "5e3a4c8cd9",
+      "required": ["health-check"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Adds health verdict generation, progress reporting, failure reporting, and verdict persistence to UI health checks."
+    },
+    {
+      "commit": "77cb7d4368",
+      "required": ["benchmarks", "health-check", "platform"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes Docker networking for comparisons and health checks, plus shared Docker context detection used by the demo."
+    },
+    {
+      "commit": "e0d8bcd331",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Adds SQL correction modules and tests without wiring the modules into the running Ask pipeline."
+    },
+    {
+      "commit": "57ab2d5d27",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Only CLI save-all error text changes."
+    },
+    {
+      "commit": "3d0befa07f",
+      "required": ["desktop-shell"],
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Adds macOS desktop packaging commands and versioned package naming alongside excluded CI changes."
+    },
+    {
+      "commit": "394695b3fd",
+      "required": [
+        "home",
+        "ask",
+        "queries-analyze",
+        "benchmarks",
+        "health-check",
+        "shell-navigation"
+      ],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Reworks query caching and comparisons, database scoping, Home counts, Ask history, health-report rendering, and navigation."
+    },
+    {
+      "commit": "9a48b6ae8e",
+      "required": ["queries-analyze", "benchmarks"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes automatic Readyset analysis, query discovery filtering, and shared cache deployment behavior."
+    },
+    {
+      "commit": "21a804a8d8",
+      "required": ["queries-analyze", "benchmarks", "activity"],
+      "flows": ["activity/server-run-reload"],
+      "confidence": "high",
+      "rationale": "Changes library migration and parameters, comparison persistence, and load-test scheduling, progress, and stopping behavior."
+    },
+    {
+      "commit": "1b7b6d0833",
+      "required": ["queries-analyze"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes EXPLAIN metric extraction and row-count mismatch warnings in analysis results."
+    },
+    {
+      "commit": "365a4b094b",
+      "required": [
+        "onboarding-connect",
+        "settings-targets",
+        "ai-access",
+        "activity",
+        "platform"
+      ],
+      "flows": ["activity/server-run-reload"],
+      "confidence": "high",
+      "rationale": "Both add-target paths launch persistent setup jobs, the trial dialog gains an own-key route, and demo streaming uses the extracted reader."
+    },
+    {
+      "commit": "36dbecfceb",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "The changed subprocess calls serve terminal demo and interactive CLI analysis, not web workflows."
+    },
+    {
+      "commit": "be7cbd6a7e",
+      "required": ["ask"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Schema filtering changes which tables Ask selects when generating SQL."
+    },
+    {
+      "commit": "b3ef4fa28a",
+      "required": ["ai-access", "ask", "queries-analyze", "schema"],
+      "flows": ["ai-access/key-update-recovery"],
+      "confidence": "medium",
+      "rationale": "Client-side credential resolution, trial routing, and model defaults affect AI availability, Ask, analysis, and schema annotation."
+    },
+    {
+      "commit": "00838de662",
+      "required": [
+        "ai-access",
+        "platform",
+        "app-lifecycle",
+        "shell-navigation"
+      ],
+      "flows": ["server/browser-start"],
+      "confidence": "high",
+      "rationale": "The change adds verified signup and sidebar identity, revises trial activation, fixes demo provisioning, and changes browser launch."
+    },
+    {
+      "commit": "6391fb5282",
+      "required": ["home", "benchmarks", "activity", "desktop-shell"],
+      "flows": ["activity/server-run-reload"],
+      "confidence": "medium",
+      "rationale": "Desktop zoom and Home cards change alongside benchmark sandbox TLS, cancellation, cleanup, and queue release."
+    },
+    {
+      "commit": "65b2a4c85e",
+      "required": ["onboarding-connect", "settings-targets", "health-check"],
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Imported and manually saved target credentials change, including connection recovery and health-check credential error reporting."
+    },
+    {
+      "commit": "e4378c01bc",
+      "required": ["settings-targets", "ask", "queries-analyze", "schema"],
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "The refactor changes target, conversation, query, and schema storage access plus query filtering and registry responses."
+    },
+    {
+      "commit": "48658c0cfd",
+      "required": ["ai-access", "queries-analyze"],
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Provider initialization changes alongside analysis model reporting and exclusion of EXPLAIN statements from query discovery."
+    },
+    {
+      "commit": "05b70889a6",
+      "required": ["platform", "onboarding-connect"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Demo results, waiting states, shutdown confirmation, and the handoff into database connection change."
+    },
+    {
+      "commit": "2dcd0c037c",
+      "required": ["ask", "queries-analyze"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Beyond CLI help, the commit changes JSON parsing for Ask SQL generation and analysis responses."
+    },
+    {
+      "commit": "c569d8cdc9",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Only Buildkite configuration changes."
+    },
+    {
+      "commit": "7e50474685",
+      "required": ["queries-analyze", "benchmarks"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Both analysis and benchmark parameter entry now use shared detection, substitution, and saved-value helpers."
+    },
+    {
+      "commit": "6d0d1b30ee",
+      "required": ["benchmarks"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "The web cache deployment service uses the changed deployment defaults and resource settings."
+    },
+    {
+      "commit": "de0063d0f7",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes are confined to the separately deployed keyservice and documentation."
+    },
+    {
+      "commit": "0df865a859",
+      "required": ["ask"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "The web Ask endpoint enables a new generation and correction profile; quota changes belong to the separate keyservice."
+    },
+    {
+      "commit": "3ceafcaa45",
+      "required": ["queries-analyze", "schema"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Query identity repairs, library cleanup, and schema probe tagging need coverage of discovery, stored analyses, parameters, and profiling."
+    },
+    {
+      "commit": "9c7e2d58b2",
+      "required": [
+        "onboarding-connect",
+        "settings-targets",
+        "ai-access",
+        "queries-analyze",
+        "schema",
+        "benchmarks",
+        "health-check",
+        "platform",
+        "activity",
+        "desktop-shell"
+      ],
+      "flows": ["ai-access/key-update-recovery", "activity/server-run-reload"],
+      "confidence": "medium",
+      "rationale": "The change alters target validation, credential and data persistence, Docker connectivity, sandbox metadata, and Windows window controls."
+    },
+    {
+      "commit": "35622907ec",
+      "required": ["queries-analyze", "schema"],
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Runtime path resolution changes where the web backend finds saved queries, analyses, follow-up conversations, and semantic layers."
+    },
+    {
+      "commit": "6a795e17f9",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Only test import guards and CI worker selection change."
+    },
+    {
+      "commit": "bb85fa7371",
+      "required": [
+        "onboarding-connect",
+        "settings-targets",
+        "ask",
+        "queries-analyze",
+        "schema",
+        "benchmarks",
+        "health-check",
+        "platform",
+        "activity",
+        "app-lifecycle",
+        "shell-navigation"
+      ],
+      "flows": [
+        "activity/server-run-reload",
+        "server/browser-start",
+        "server/desktop-sidecar-start"
+      ],
+      "confidence": "medium",
+      "rationale": "SQL restrictions, database session rules, endpoint guards, and CORS affect reachable operations, job cancellation, feedback, and initial API access."
+    },
+    {
+      "commit": "8f1c237ffd",
+      "required": ["app-lifecycle", "desktop-shell"],
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "high",
+      "rationale": "Desktop startup, sidecar readiness, port allocation, preload loading, window handling, and shutdown all change."
+    },
+    {
+      "commit": "b003da2181",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "The optional chat progress callback is consumed by the CLI agent, while web Ask uses a separate engine."
+    },
+    {
+      "commit": "e444199302",
+      "required": [
+        "onboarding-connect",
+        "settings-targets",
+        "ai-access",
+        "queries-analyze",
+        "benchmarks",
+        "shell-navigation"
+      ],
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Runtime API client, response validation, query hooks, and benchmark event handling change these interfaces beyond the generated types."
+    },
+    {
+      "commit": "8a0e90e268",
+      "required": [
+        "onboarding-connect",
+        "settings-targets",
+        "home",
+        "queries-analyze",
+        "benchmarks",
+        "health-check",
+        "activity",
+        "app-lifecycle",
+        "shell-navigation"
+      ],
+      "flows": [
+        "activity/server-run-reload",
+        "server/browser-start",
+        "server/desktop-sidecar-start"
+      ],
+      "confidence": "high",
+      "rationale": "Managed comparisons replace cache workflows and change target bootstrap, home counts, navigation, background runs, and backend startup and shutdown."
+    },
+    {
+      "commit": "495a806444",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "This adds only a developer tool for testing interactive CLI sessions."
+    },
+    {
+      "commit": "1daad11a1a",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Only benchmark CI scheduling, tests, and documentation change."
+    },
+    {
+      "commit": "bb3616ecde",
+      "required": ["ai-access", "settings-targets"],
+      "flows": ["ai-access/key-update-recovery"],
+      "confidence": "high",
+      "rationale": "Recognizing the macOS keyring changes secure key and password availability, saving, and recovery through the web API."
+    },
+    {
+      "commit": "45e9bd0fbc",
+      "required": [
+        "settings-targets",
+        "benchmarks",
+        "activity",
+        "app-lifecycle"
+      ],
+      "flows": [
+        "activity/server-run-reload",
+        "server/browser-start",
+        "server/desktop-sidecar-start"
+      ],
+      "confidence": "medium",
+      "rationale": "Sandbox port allocation, cancellation, crash reconciliation, and target retirement affect comparisons, running jobs, deletion, and restart recovery."
+    },
+    {
+      "commit": "ae16732898",
+      "required": [
+        "home",
+        "ask",
+        "queries-analyze",
+        "benchmarks",
+        "health-check",
+        "activity",
+        "shell-navigation",
+        "desktop-shell"
+      ],
+      "flows": ["jobs/local-analysis-cancel", "activity/server-run-reload"],
+      "confidence": "high",
+      "rationale": "The redesign changes stored analysis navigation, setup guidance, comparison history, job ownership, report entry points, and desktop instance focusing."
+    },
+    {
+      "commit": "1d0029854e",
+      "required": ["queries-analyze"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Planner verdicts, sampled parameters, JSON-path normalization, and MySQL discovery directly change the query library and analysis experience."
+    },
+    {
+      "commit": "4b9fed3c7a",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "The wording change is confined to the CLI output formatter."
+    },
+    {
+      "commit": "1b0acd7280",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes affect test infrastructure and the separately deployed keyservice."
+    },
+    {
+      "commit": "37ae4055c6",
+      "required": ["ask", "schema"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes alter Ask's schema context, generation errors, and shared foreign-key introspection."
+    },
+    {
+      "commit": "f09ddfafa9",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Only documentation and ignore rules change."
+    },
+    {
+      "commit": "cec15ac24c",
+      "required": ["app-lifecycle", "desktop-shell"],
+      "flows": ["server/desktop-sidecar-start"],
+      "confidence": "medium",
+      "rationale": "Sidecar packaging changes alter the bundled backend's modules and runtime dependencies."
+    },
+    {
+      "commit": "c9af5e3699",
+      "required": ["platform"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Demo pacing and displayed statistics now depend on cache existence and warmup."
+    },
+    {
+      "commit": "c4fa944d51",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Only licensing text and package metadata change."
+    },
+    {
+      "commit": "1ca96b093f",
+      "required": ["ai-access"],
+      "flows": ["ai-access/key-update-recovery"],
+      "confidence": "high",
+      "rationale": "The restored provider gate changes credential checks, invalid-key recovery, and account-login access."
+    },
+    {
+      "commit": "a13acdc246",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes only add telemetry properties and an analytics event."
+    },
+    {
+      "commit": "f9fb58c2a0",
+      "required": ["queries-analyze"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Re-saving an existing query now overwrites its stored alias."
+    },
+    {
+      "commit": "a85ddef6a0",
+      "required": [
+        "settings-targets",
+        "ask",
+        "queries-analyze",
+        "schema",
+        "benchmarks",
+        "health-check",
+        "platform",
+        "shell-navigation"
+      ],
+      "flows": ["ai-access/key-update-recovery"],
+      "confidence": "medium",
+      "rationale": "The polish pass changes query controls, Settings recovery, schema presentation, benchmarks, saved reports, demo persistence, and navigation."
+    },
+    {
+      "commit": "59b7bef158",
+      "required": ["home", "queries-analyze", "shell-navigation"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "The new Home launcher replaces the analyzer route and changes sidebar organization and analysis return links."
+    },
+    {
+      "commit": "9c0fa3db7a",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Both changes are confined to CLI command implementations."
+    },
+    {
+      "commit": "a28aaf577d",
+      "required": ["ai-access", "settings-targets", "shell-navigation"],
+      "flows": ["ai-access/key-update-recovery"],
+      "confidence": "high",
+      "rationale": "Provider selection now persists and controls credential resolution, key validation, Settings actions, and sidebar identity."
+    },
+    {
+      "commit": "e7c62bcb8f",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Only mirror CI configuration and release documentation change."
+    },
+    {
+      "commit": "b4118b8614",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Only README examples change."
+    },
+    {
+      "commit": "bd92c82187",
+      "required": ["shell-navigation"],
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Analytics initializes before rendering and adds shared navigation and interaction instrumentation."
+    },
+    {
+      "commit": "26aeb8dc8a",
+      "required": ["queries-analyze", "benchmarks"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes parameter entry, SQL formatting, and large-query layouts in analysis and benchmark dialogs."
+    },
+    {
+      "commit": "1d5b99256d",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "The connectivity preflight and crash fix affect only the fleet CLI."
+    },
+    {
+      "commit": "0521639e8b",
+      "required": ["platform"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes demo provisioning limits, workload generation, cache resets, and displayed results."
+    },
+    {
+      "commit": "a2c02010ac",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes only CI infrastructure and test-data tooling."
+    },
+    {
+      "commit": "38bb3d3202",
+      "required": [
+        "onboarding-connect",
+        "settings-targets",
+        "ai-access",
+        "ask",
+        "queries-analyze",
+        "schema",
+        "benchmarks",
+        "app-lifecycle",
+        "shell-navigation"
+      ],
+      "flows": [
+        "ai-access/key-update-recovery",
+        "jobs/local-analysis-cancel",
+        "server/browser-start"
+      ],
+      "confidence": "medium",
+      "rationale": "Introduces the navigable web app, shared services, credential storage, analysis streams, and browser server startup."
+    },
+    {
+      "commit": "9c2d9eb8b8",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes release gating and build notifications without changing desktop runtime behavior."
+    },
+    {
+      "commit": "01c187c91f",
+      "required": ["ask", "queries-analyze"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Preserving hosted response schemas affects structured model replies used by Ask and query analysis."
+    },
+    {
+      "commit": "e3771573d8",
+      "required": ["ask"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes Ask's SQL correction routing and alternate selection."
+    },
+    {
+      "commit": "e478dae5cd",
+      "required": ["schema", "benchmarks", "platform", "shell-navigation"],
+      "flows": [],
+      "confidence": "medium",
+      "rationale": "Replaces feature confirmation dialogs and changes shared navigation, responsive layout, and keyboard behavior."
+    },
+    {
+      "commit": "8b94716980",
+      "required": [
+        "onboarding-connect",
+        "settings-targets",
+        "queries-analyze",
+        "schema",
+        "benchmarks",
+        "activity"
+      ],
+      "flows": ["activity/server-run-reload"],
+      "confidence": "high",
+      "rationale": "Moves target setup, schema annotation, and cache comparisons into cancellable background runs with reload reattachment."
+    },
+    {
+      "commit": "31111b4c1f",
+      "required": ["ask"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes Ask clarification, schema selection, SQL validation, and recovery."
+    },
+    {
+      "commit": "0e409d25e9",
+      "required": ["ask"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes generated Ask predicates using database value probes and validated rewrites."
+    },
+    {
+      "commit": "d3bf055f13",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Adds deployment telemetry identifiers without changing navigable app behavior."
+    },
+    {
+      "commit": "8ca26c84ca",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Adds access checks to CLI paths and the out-of-scope Scan service."
+    },
+    {
+      "commit": "5faea1d289",
+      "required": [],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes only CI area mapping and integration tests."
+    },
+    {
+      "commit": "d55ed65096",
+      "required": ["health-check"],
+      "flows": [],
+      "confidence": "high",
+      "rationale": "Changes the MySQL database-size metric collected for health-check reports."
+    }
+  ]
+}

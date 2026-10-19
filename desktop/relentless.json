@@ -1,0 +1,5 @@
+{
+  "capability": "desktop",
+  "areas": ["desktop-shell", "app-lifecycle"],
+  "flows": ["server/desktop-sidecar-start"]
+}

@@ -1,0 +1,9 @@
+{
+  "capability": "monitoring",
+  "areas": ["monitoring"],
+  "flows": [
+    "monitoring/local-lifecycle",
+    "monitoring/outage-alert",
+    "monitoring/hosted-ai"
+  ]
+}

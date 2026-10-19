@@ -1,0 +1,5 @@
+{
+  "capability": "platform",
+  "areas": ["platform"],
+  "flows": ["platform/demo-lifecycle"]
+}

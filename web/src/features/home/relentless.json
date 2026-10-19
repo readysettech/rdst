@@ -1,0 +1,5 @@
+{
+  "capability": "home",
+  "areas": ["home"],
+  "flows": ["home/getting-started"]
+}

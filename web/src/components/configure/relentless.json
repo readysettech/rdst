@@ -1,0 +1,4 @@
+{
+  "capability": "connections",
+  "areas": ["onboarding-connect", "settings-targets"]
+}

@@ -1,0 +1,8 @@
+{
+  "capability": "model-layer",
+  "areas": [
+    "ai-access",
+    "ask",
+    "monitoring"
+  ]
+}

@@ -1,0 +1,180 @@
+{
+  "rules": [
+    {
+      "match": ["web-apps/apps/rdst/relentless/areas/*.md"],
+      "action": "area-file",
+      "reason": "the area's own instructions changed"
+    },
+    {
+      "match": [
+        "web-apps/apps/rdst/relentless/selector/**",
+        "web-apps/apps/rdst/relentless/UX_MAP.md",
+        "web-apps/apps/rdst/relentless/README.md",
+        "web-apps/apps/rdst/relentless/report.ts",
+        "web-apps/apps/rdst/relentless/to-spec.ts",
+        "**/relentless.json"
+      ],
+      "action": "none",
+      "reason": "tester documentation, tooling, and capability manifests, checked on their own"
+    },
+    {
+      "match": [
+        "**/LICENSE",
+        "**/LICENSE.*",
+        "**/.gitignore",
+        "**/.gitkeep",
+        "**/.env.example",
+        "rdst/install.sh"
+      ],
+      "action": "none",
+      "reason": "license, ignore lists, placeholders, and the CLI installer"
+    },
+    {
+      "match": ["web-apps/apps/rdst/relentless/**"],
+      "action": "areas",
+      "areas": ["ai-access"],
+      "reason": "the tester itself changed; its shortest area proves it end to end",
+      "owner": "rdst-web",
+      "review_by": "2027-03-28"
+    },
+    {
+      "match": [
+        "web-apps/package.json",
+        "web-apps/apps/rdst/package.json",
+        "web-apps/apps/rdst-desktop/package.json",
+        "web-apps/packages/*/package.json",
+        "rdst/pyproject.toml"
+      ],
+      "action": "manifest",
+      "reason": "a dependency manifest, read to tell runtime changes from metadata and test tooling"
+    },
+    {
+      "match": ["web-apps/pnpm-lock.yaml", "rdst/uv.lock"],
+      "action": "lockfile",
+      "reason": "a lockfile, which follows its manifests"
+    },
+    {
+      "match": [
+        "web-apps/pnpm-workspace.yaml",
+        "web-apps/apps/rdst/vite.config.ts",
+        "web-apps/apps/rdst/tsconfig.json",
+        "web-apps/apps/rdst/index.html",
+        "web-apps/apps/rdst/src/style.css"
+      ],
+      "action": "broad",
+      "reason": "build, dependency, or global style configuration"
+    },
+    {
+      "match": [
+        "**/*.test.{ts,tsx,mts,mjs,js}",
+        "web-apps/apps/rdst/scripts/*.sh",
+        "**/*.spec.ts",
+        "rdst/tests/**",
+        "web-apps/apps/rdst/e2e/**",
+        "aidoc/**",
+        "**/*.md",
+        "rdst/.buildkite/**",
+        "web-apps/apps/rdst/playwright*.config.ts",
+        "web-apps/apps/rdst/vitest.setup.ts"
+      ],
+      "action": "none",
+      "reason": "tests, documentation, or CI configuration"
+    },
+    {
+      "match": ["rdst/devtools/**"],
+      "action": "none",
+      "reason": "developer tools, not part of the app"
+    },
+    {
+      "match": ["web-apps/apps/rdst/src/lib/openapi.schema.json"],
+      "action": "none",
+      "reason": "generated from the backend, whose change carries the impact"
+    },
+    {
+      "match": ["rdst/keyservice/**"],
+      "action": "none",
+      "reason": "runs test against the staging keyservice, not this change"
+    },
+    {
+      "match": [
+        "web-apps/apps/rdst-desktop/scripts/dev*.mjs",
+        "web-apps/apps/rdst/scripts/dev*.mjs",
+        "web-apps/apps/rdst-desktop/.gitignore",
+        "rdst/scripts/emit_*.py"
+      ],
+      "action": "none",
+      "reason": "development and code generation tooling"
+    },
+    {
+      "match": [
+        "rdst/requirements.txt",
+        "web-apps/packages/tailwind-base/style.css"
+      ],
+      "action": "broad",
+      "reason": "dependencies or global styles"
+    },
+    {
+      "match": [
+        "rdst/{rdst,mcp_server}.py",
+        "rdst/**/cli/**",
+        "rdst/{features,lib}/agent/**",
+        "rdst/features/update/**",
+        "rdst/{shared,lib}/ui/**",
+        "rdst/shared/workflows/**",
+        "rdst/shared/{editor,parameter_prompt,stdio,db_config_check,child_process}.py"
+      ],
+      "action": "none",
+      "reason": "CLI, MCP agent, self-update and terminal rendering (out of scope for the UI tester)"
+    },
+    {
+      "match": [
+        "rdst/{devtools,keyservice,scripts,tests,docs}/**",
+        "rdst/shared/llm_manager/{gemini,openai,lmstudio}_provider.py",
+        "web-apps/apps/rdst/src/{test-utils.tsx,lib/contract-test.ts,routes/test.tsx,routes/lab.*.tsx}"
+      ],
+      "action": "none",
+      "reason": "dev tooling, tests, design-lab pages and code no route renders (out of scope for the UI tester)"
+    },
+    {
+      "match": [
+        "rdst/features/{scan,guard,slack}/**",
+        "web-apps/apps/rdst/src/{routes/scan.tsx,routes/guards.tsx,components/scan/**,components/ExperimentalBanner.tsx}",
+        "web-apps/apps/rdst/src/{hooks/**,lib/useScan.ts,lib/useGuards.ts,types/scan.ts,types/guards.ts}"
+      ],
+      "action": "none",
+      "reason": "/scan and /guards pages and the Slack bot, all out of scope (out of scope for the UI tester)"
+    },
+    {
+      "match": ["rdst/shared/api/app.py", "rdst/shared/api/guards.py"],
+      "action": "areas",
+      "areas": ["app-lifecycle"],
+      "reason": "the API app every page talks to and the checks on each request; the start-up flows cover it",
+      "owner": "rdst-web",
+      "review_by": "2027-04-15"
+    },
+    {
+      "match": [
+        "web-apps/apps/rdst/src/**/*.{ts,tsx,css}",
+        "web-apps/apps/rdst-desktop/src/**/*.ts",
+        "web-apps/packages/ui-new/src/**",
+        "web-apps/packages/utils/src/**",
+        "web-apps/packages/tailwind-base/src/**"
+      ],
+      "action": "frontend-graph"
+    },
+    {
+      "match": ["rdst/**/*.py"],
+      "action": "backend-graph"
+    },
+    {
+      "match": [
+        "rdst/**",
+        "web-apps/apps/rdst/**",
+        "web-apps/apps/rdst-desktop/**",
+        "web-apps/packages/**"
+      ],
+      "action": "unknown",
+      "reason": "part of the app, but no rule or graph covers this file"
+    }
+  ]
+}

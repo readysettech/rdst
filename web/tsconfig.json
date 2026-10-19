@@ -1,5 +1,7 @@
 {
   "include": ["**/*.ts", "**/*.tsx"],
+  // pi loads its extension with its own packages, which this app does not have.
+  "exclude": ["node_modules", "relentless/agent/pi-harness.ts"],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",

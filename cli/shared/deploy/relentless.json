@@ -1,0 +1,7 @@
+{
+  "capability": "readyset-sandbox",
+  "areas": [
+    "platform",
+    "monitoring"
+  ]
+}

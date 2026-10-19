@@ -1,0 +1,2597 @@
+{
+  "note": "Areas each past RDST change needs, labeled without seeing the selector's output. 'reviewed' labels were checked by hand against the change's tree; 'agent' labels come from agents reading the description, files, and diff. An empty list means no area is needed.",
+  "changes": [
+    {
+      "commit": "c4fa944d51",
+      "date": "2026-09-23",
+      "title": "Relicense from MIT to Apache 2.0",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Relicensing touches only license files, README and package metadata."
+    },
+    {
+      "commit": "ab440bbbc9",
+      "date": "2026-09-23",
+      "title": "Add Jev quick assessments to the Queries page",
+      "required": ["queries-analyze", "onboarding-connect"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Adds Jev assessment tags, filters and panels to the Queries page, plus a query-capture notice in the connection test."
+    },
+    {
+      "commit": "1ca96b093f",
+      "date": "2026-09-18",
+      "title": "Restore the full-screen AI provider choice",
+      "required": ["ai-access"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Restores the full-screen AI provider choice gate before entering the app."
+    },
+    {
+      "commit": "49fa9b2cd2",
+      "date": "2026-09-14",
+      "title": "Add signup and quota Slack alerts",
+      "required": ["ai-access"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Mostly keyservice; the client changes the Readyset sign-in completion payload."
+    },
+    {
+      "commit": "01c187c91f",
+      "date": "2026-09-11",
+      "title": "Forward the caller's response contract to hosted inference",
+      "required": ["ask", "queries-analyze"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Hosted provider now forwards strict json_schema contracts that Ask clarification and analyze calls depend on."
+    },
+    {
+      "commit": "99b1e9ca1d",
+      "date": "2026-09-10",
+      "title": "Send staging keyservice email through Cloudflare",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Keyservice wrangler email provider flip."
+    },
+    {
+      "commit": "6a795e17f9",
+      "date": "2026-09-10",
+      "title": "Skip the keyservice migration guard before importing keyservice",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Test and CI changes only."
+    },
+    {
+      "commit": "6391fb5282",
+      "date": "2026-09-10",
+      "title": "Fix desktop controls and sandbox lifecycle",
+      "required": ["desktop-shell", "home", "benchmarks"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Changes desktop zoom shortcuts, home job link layout, and sandbox cancellation/TLS for comparisons."
+    },
+    {
+      "commit": "5e3a4c8cd9",
+      "date": "2026-09-10",
+      "title": "Ask the model for the health verdict on the capture path",
+      "required": ["health-check"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Health check capture path now requests and stores the AI health verdict."
+    },
+    {
+      "commit": "2672867d97",
+      "date": "2026-09-10",
+      "title": "Serve hosted inference from Cloudflare then Novita, with time",
+      "required": ["queries-analyze", "ask"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Raises analyze LLM step timeouts, adds model-timeout error UI, and downgrades hosted responses to json_object, which Ask also uses."
+    },
+    {
+      "commit": "0ecf9ef41b",
+      "date": "2026-09-10",
+      "title": "Close the September UX audit and add account lifecycle emails",
+      "required": ["queries-analyze", "health-check", "benchmarks"],
+      "confidence": "high",
+      "source": "reviewed",
+      "rationale": "many areas at once"
+    },
+    {
+      "commit": "c387d070d1",
+      "date": "2026-09-09",
+      "title": "Cache schema context across AI requests",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "a28aaf577d",
+      "date": "2026-09-08",
+      "title": "Fix AI switching and CI secrets",
+      "required": ["ai-access"],
+      "confidence": "high",
+      "source": "reviewed",
+      "rationale": "AI panel in Settings"
+    },
+    {
+      "commit": "2c03d6d4c4",
+      "date": "2026-09-08",
+      "title": "Harden hosted inference and update Ask CI",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "0df865a859",
+      "date": "2026-09-08",
+      "title": "Enable candidate v4 and raise hosted quota",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "8eb45c8c98",
+      "date": "2026-09-04",
+      "title": "Add capped hosted GLM inference",
+      "required": ["ask", "ai-access"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "8ca26c84ca",
+      "date": "2026-09-04",
+      "title": "Gate AI-backed CLI commands",
+      "required": [],
+      "confidence": "high",
+      "source": "reviewed",
+      "rationale": "CLI only"
+    },
+    {
+      "commit": "7741a336b5",
+      "date": "2026-09-04",
+      "title": "Harden Ask accuracy candidates",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "4a3229b54b",
+      "date": "2026-09-04",
+      "title": "Make the package buildable from a source checkout",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Makes the package buildable from source; no UI behavior."
+    },
+    {
+      "commit": "3d6824ed3b",
+      "date": "2026-09-04",
+      "title": "Keep web_dist present for source builds",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Tracked .gitkeep and README edits have no runtime UI effect."
+    },
+    {
+      "commit": "374c36dfdd",
+      "date": "2026-09-04",
+      "title": "Skip the keyservice migration guard where keyservice is absent",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Test-only change."
+    },
+    {
+      "commit": "25d3b40214",
+      "date": "2026-09-04",
+      "title": "Attribute hosted inference usage",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "reviewed",
+      "rationale": "every AI caller"
+    },
+    {
+      "commit": "ffe1060758",
+      "date": "2026-09-02",
+      "title": "Plan the open-source suite and lay the groundwork",
+      "required": ["shell-navigation"],
+      "confidence": "low",
+      "source": "agent",
+      "rationale": "Moves the UI font into fonts.css behind a CSS variable and removes a sprite copy, which affects every page's chrome."
+    },
+    {
+      "commit": "e3771573d8",
+      "date": "2026-09-02",
+      "title": "Promote qualified Ask accuracy pipeline",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "e0d8bcd331",
+      "date": "2026-09-02",
+      "title": "Add bounded Ask SQL corrections",
+      "required": [],
+      "confidence": "high",
+      "source": "reviewed",
+      "rationale": "adds modules only the Ask benchmark imports at this change (checked in its tree); no product path uses them yet"
+    },
+    {
+      "commit": "de0063d0f7",
+      "date": "2026-09-02",
+      "title": "Send keyservice email through Cloudflare",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Keyservice email consolidation; no client code."
+    },
+    {
+      "commit": "d689dee998",
+      "date": "2026-09-02",
+      "title": "Publish the suite through a filtered mirror",
+      "required": ["desktop-shell"],
+      "confidence": "low",
+      "source": "agent",
+      "rationale": "Mostly mirror tooling, but desktop dev/build-sidecar/build-web scripts now resolve repo paths differently."
+    },
+    {
+      "commit": "d23389bebb",
+      "date": "2026-09-02",
+      "title": "Add Ask accuracy qualification",
+      "required": [],
+      "confidence": "high",
+      "source": "reviewed",
+      "rationale": "benchmark tooling only"
+    },
+    {
+      "commit": "bbd67bf6de",
+      "date": "2026-09-02",
+      "title": "Send a trial check-in email after signup",
+      "required": ["ai-access"],
+      "confidence": "high",
+      "source": "reviewed",
+      "rationale": "trial dialog; rest is keyservice"
+    },
+    {
+      "commit": "5ec07467ce",
+      "date": "2026-09-02",
+      "title": "Add bounded Ask alternate selection",
+      "required": [],
+      "confidence": "high",
+      "source": "reviewed",
+      "rationale": "adds modules only the Ask benchmark imports at this change (checked in its tree); no product path uses them yet"
+    },
+    {
+      "commit": "16f1637e40",
+      "date": "2026-09-02",
+      "title": "Build the open-asset overlay for the public mirror",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Adds overlay assets and check scripts outside the shipped app."
+    },
+    {
+      "commit": "16aadf7484",
+      "date": "2026-09-02",
+      "title": "Add model-routed SQL repairs",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "0e409d25e9",
+      "date": "2026-09-02",
+      "title": "Add bounded Ask value grounding",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "d2d8ee5f56",
+      "date": "2026-08-26",
+      "title": "Use Anthropic SDK for Claude requests",
+      "required": ["ask", "ai-access"],
+      "confidence": "high",
+      "source": "reviewed",
+      "rationale": "every AI call"
+    },
+    {
+      "commit": "bcc97dc0a5",
+      "date": "2026-08-26",
+      "title": "Add manual BIRD qualification workflow",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Manual BIRD CI workflow."
+    },
+    {
+      "commit": "a86898ab45",
+      "date": "2026-08-26",
+      "title": "Add reproducible BIRD benchmark foundation",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "BIRD benchmark foundation outside product code paths."
+    },
+    {
+      "commit": "a03995ff4e",
+      "date": "2026-08-26",
+      "title": "Add Discord link to sidebar",
+      "required": ["shell-navigation"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "99bbac77a6",
+      "date": "2026-08-26",
+      "title": "Improve interactive clarification flow",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "5c200fb66e",
+      "date": "2026-08-26",
+      "title": "Make MySQL schema annotation deterministic",
+      "required": ["schema"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "5826fcd5e7",
+      "date": "2026-08-26",
+      "title": "Add Claude subscription benchmark provider",
+      "required": ["ask"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Mostly benchmark tooling, but Ask SQL generation's validation-repair parsing and error handling change."
+    },
+    {
+      "commit": "4ca34c466a",
+      "date": "2026-08-26",
+      "title": "Add deterministic Ask benchmark diagnostics",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Changes Ask clarify, generate and validate phases, prompts and SQL validation."
+    },
+    {
+      "commit": "390689837e",
+      "date": "2026-08-26",
+      "title": "Add BIRD qualification tooling",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "BIRD qualification tooling."
+    },
+    {
+      "commit": "37ae4055c6",
+      "date": "2026-08-26",
+      "title": "Use adaptive full-schema prompts for Ask",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "31111b4c1f",
+      "date": "2026-08-26",
+      "title": "Improve Ask SQL generation and recovery",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "1daad11a1a",
+      "date": "2026-08-26",
+      "title": "Run BIRD qualification after every merge",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "BIRD CI scheduling change."
+    },
+    {
+      "commit": "ae16732898",
+      "date": "2026-08-24",
+      "title": "Rebuild the desktop app around recall",
+      "required": [
+        "queries-analyze",
+        "home",
+        "shell-navigation",
+        "benchmarks",
+        "activity",
+        "health-check",
+        "desktop-shell"
+      ],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Broad UI rebuild: analyze drawer and stored analyses, setup guide, wayfinding/nav, compare and load test, jobs, health check empty state, desktop single-instance."
+    },
+    {
+      "commit": "850296298a",
+      "date": "2026-08-24",
+      "title": "Polish the query and comparison surfaces",
+      "required": ["queries-analyze", "benchmarks"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "767496dc8c",
+      "date": "2026-08-24",
+      "title": "Store analyses, setup progress, and stars",
+      "required": ["queries-analyze", "home"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "3ceafcaa45",
+      "date": "2026-08-24",
+      "title": "Purge self-traffic and repair query identity",
+      "required": ["queries-analyze"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "2c5cfdce8e",
+      "date": "2026-08-24",
+      "title": "Run Load Test against origin and Readyset",
+      "required": ["benchmarks"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "21a804a8d8",
+      "date": "2026-08-24",
+      "title": "Make Compare and Load Test work reliably",
+      "required": ["benchmarks"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "20a43e0c10",
+      "date": "2026-08-24",
+      "title": "Fall back to bridge networking under userns",
+      "required": ["benchmarks"],
+      "confidence": "high",
+      "source": "reviewed",
+      "rationale": "managed sandbox"
+    },
+    {
+      "commit": "ba74b8d6e8",
+      "date": "2026-08-21",
+      "title": "time audit phases and surface analysis failures",
+      "required": ["health-check"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "45e9bd0fbc",
+      "date": "2026-08-21",
+      "title": "Harden sandbox lifecycle recovery",
+      "required": ["benchmarks"],
+      "confidence": "high",
+      "source": "reviewed",
+      "rationale": "managed sandbox"
+    },
+    {
+      "commit": "77cb7d4368",
+      "date": "2026-08-20",
+      "title": "Fix Linux localhost comparisons",
+      "required": ["benchmarks"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "60c21ddba6",
+      "date": "2026-08-19",
+      "title": "Harden diagnostic database access",
+      "required": ["settings-targets"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "1d0029854e",
+      "date": "2026-08-19",
+      "title": "hypopg index checks, sampled params, JSON paths",
+      "required": ["queries-analyze"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "8cde81b0be",
+      "date": "2026-08-18",
+      "title": "Unify product workspaces",
+      "required": [
+        "onboarding-connect",
+        "settings-targets",
+        "home",
+        "ai-access",
+        "ask",
+        "queries-analyze",
+        "schema",
+        "benchmarks",
+        "health-check",
+        "platform",
+        "activity",
+        "shell-navigation",
+        "desktop-shell"
+      ],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Massive workspace unification touching nearly every page, the settings rewrite, trial dialog, demo and desktop window."
+    },
+    {
+      "commit": "1a79bb7b1d",
+      "date": "2026-08-18",
+      "title": "Make query observation durable and bounded",
+      "required": ["queries-analyze"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "e7c62bcb8f",
+      "date": "2026-08-11",
+      "title": "restore the josh filter to unblock the GitHub mirror",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Mirror sync CI fix."
+    },
+    {
+      "commit": "bb85fa7371",
+      "date": "2026-08-11",
+      "title": "harden the CLI ahead of open sourcing",
+      "required": [
+        "ask",
+        "queries-analyze",
+        "schema",
+        "onboarding-connect",
+        "benchmarks",
+        "platform",
+        "health-check",
+        "desktop-shell"
+      ],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Security pass across API guards/CORS, Ask and analyze SQL validation, read-only targets, identifier quoting, docker containers, audit report escaping and sidecar deps."
+    },
+    {
+      "commit": "1b0acd7280",
+      "date": "2026-08-11",
+      "title": "add an end-to-end test bed for RDST web",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Adds a browser test project; no product change."
+    },
+    {
+      "commit": "bd92c82187",
+      "date": "2026-08-10",
+      "title": "Add PostHog analytics and session replay to the web UI",
+      "required": [],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Analytics instrumentation only."
+    },
+    {
+      "commit": "19759dbe94",
+      "date": "2026-08-07",
+      "title": "Fix remote web and AI follow-up flows",
+      "required": ["ai-access", "queries-analyze"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Surfaces keyservice/Anthropic error details, changes trial/env guards, and fixes analysis follow-up conversation history."
+    },
+    {
+      "commit": "cec15ac24c",
+      "date": "2026-08-05",
+      "title": "Ship the CLI as a signed platform archive",
+      "required": ["desktop-shell"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Changes what the packaged desktop sidecar bundles; the rest is CLI installer and CI."
+    },
+    {
+      "commit": "cb356b315c",
+      "date": "2026-08-05",
+      "title": "Add native Windows desktop builds",
+      "required": ["desktop-shell", "app-lifecycle"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Desktop main process gains Windows packaging, updater feed and backend process-tree termination."
+    },
+    {
+      "commit": "65b2a4c85e",
+      "date": "2026-08-05",
+      "title": "store imported target passwords per target",
+      "required": ["settings-targets"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "00e84c7cd4",
+      "date": "2026-08-05",
+      "title": "fix Windows desktop SSH tunnels and OAuth sign-in",
+      "required": ["onboarding-connect", "desktop-shell"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "a72a171903",
+      "date": "2026-08-04",
+      "title": "Require email for feedback",
+      "required": ["shell-navigation"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "9c7e2d58b2",
+      "date": "2026-08-04",
+      "title": "Make CLI portable on Windows",
+      "required": [
+        "settings-targets",
+        "ai-access",
+        "queries-analyze",
+        "platform",
+        "benchmarks",
+        "desktop-shell"
+      ],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Portability rewrite of config persistence, keyring access, query registry saves, docker topology for demo/readyset and frameless window controls."
+    },
+    {
+      "commit": "9aeaf52f7a",
+      "date": "2026-08-04",
+      "title": "add SSH jump-host tunnels for private databases",
+      "required": ["onboarding-connect", "settings-targets"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "fe3c3cdd12",
+      "date": "2026-08-03",
+      "title": "Integrate Readyset experiments",
+      "required": [
+        "queries-analyze",
+        "benchmarks",
+        "health-check",
+        "settings-targets",
+        "activity"
+      ],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Routes analyze, audit, query registry comparisons, load tests and target deletion through managed Readyset experiments."
+    },
+    {
+      "commit": "efb16f794a",
+      "date": "2026-08-03",
+      "title": "Add managed Readyset sandbox",
+      "required": [],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Additive sandbox module and test config."
+    },
+    {
+      "commit": "8a0e90e268",
+      "date": "2026-08-03",
+      "title": "Adopt managed Readyset comparisons",
+      "required": [
+        "benchmarks",
+        "queries-analyze",
+        "health-check",
+        "activity",
+        "settings-targets",
+        "onboarding-connect",
+        "home"
+      ],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Replaces persistent cache management with managed comparisons across analyze, library, audit, jobs, configure form and home."
+    },
+    {
+      "commit": "2711aa1d2a",
+      "date": "2026-08-03",
+      "title": "Add first-party CLI installer",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI-only installer and update flow."
+    },
+    {
+      "commit": "54fd64d013",
+      "date": "2026-07-31",
+      "title": "Classify internal PostHog events",
+      "required": [],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Internal-user classification and PostHog-only alert routing."
+    },
+    {
+      "commit": "c4e9a996e3",
+      "date": "2026-07-30",
+      "title": "Discover Supabase, Neon and DigitalOcean targets",
+      "required": ["settings-targets"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "facec3f88e",
+      "date": "2026-07-28",
+      "title": "Redesign Health Check with honest audits",
+      "required": [
+        "health-check",
+        "activity",
+        "ai-access",
+        "settings-targets",
+        "ask",
+        "queries-analyze"
+      ],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Health check redesign with background runs in jobs popover, AI key gate, configure request changes, Ask trial errors and auto-saved captured queries."
+    },
+    {
+      "commit": "8596556f10",
+      "date": "2026-07-28",
+      "title": "Merge Fleet into the Settings target list",
+      "required": ["settings-targets"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "482fd8c368",
+      "date": "2026-07-24",
+      "title": "Unblock web onboarding gate and demo table layout",
+      "required": ["platform"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "f85bdae9d6",
+      "date": "2026-07-22",
+      "title": "Unify the web trial-credit and email flow",
+      "required": [
+        "ai-access",
+        "settings-targets",
+        "onboarding-connect",
+        "platform"
+      ],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Unifies trial and key flows across banner, key dialog, onboarding, configure page and demo."
+    },
+    {
+      "commit": "b4ce9af0cf",
+      "date": "2026-07-22",
+      "title": "Surface schema profile completion end to end",
+      "required": ["schema"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Semantic layer page shows column profile completion."
+    },
+    {
+      "commit": "8b94716980",
+      "date": "2026-07-22",
+      "title": "Run long-lived web tasks in background",
+      "required": ["activity"],
+      "confidence": "high",
+      "source": "reviewed"
+    },
+    {
+      "commit": "57133bce17",
+      "date": "2026-07-22",
+      "title": "Add target bootstrap orchestrator and API",
+      "required": [],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Backend orchestrator not yet wired into the web app."
+    },
+    {
+      "commit": "536bb82794",
+      "date": "2026-07-22",
+      "title": "Batch schema AI annotation per table",
+      "required": ["schema"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Changes schema AI annotation batching and prompts."
+    },
+    {
+      "commit": "365a4b094b",
+      "date": "2026-07-22",
+      "title": "Wire the add-database bootstrap into the web app",
+      "required": [
+        "onboarding-connect",
+        "settings-targets",
+        "activity",
+        "platform",
+        "schema",
+        "ai-access"
+      ],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Adding a target now starts a background bootstrap with a sidebar progress chip; demo SSE reader and trial dialog also change."
+    },
+    {
+      "commit": "16f8a23da9",
+      "date": "2026-07-22",
+      "title": "Add background run registry with replay",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "New unused backend primitive."
+    },
+    {
+      "commit": "b6f54630dc",
+      "date": "2026-07-21",
+      "title": "Fix web demo signup and provision blockers",
+      "required": ["platform", "ai-access"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Demo tour persistence and image pull progress, plus trial signup dialog fixes."
+    },
+    {
+      "commit": "ac686e0289",
+      "date": "2026-07-21",
+      "title": "Bundle sidecar data files",
+      "required": ["desktop-shell", "queries-analyze", "platform"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Packaged sidecar now bundles workflow JSON, templates and demo SQL needed for analysis and demo."
+    },
+    {
+      "commit": "a85ddef6a0",
+      "date": "2026-07-21",
+      "title": "Polish screens from owner review",
+      "required": [
+        "queries-analyze",
+        "settings-targets",
+        "platform",
+        "schema",
+        "benchmarks",
+        "ask",
+        "health-check",
+        "shell-navigation"
+      ],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Screen-by-screen polish across query surfaces, settings restructure, demo card, schema, cache/benchmark, ask, audit run detail, and header/sidebar."
+    },
+    {
+      "commit": "394695b3fd",
+      "date": "2026-07-21",
+      "title": "Rework caching around the Queries workbench",
+      "required": [
+        "queries-analyze",
+        "benchmarks",
+        "ask",
+        "home",
+        "health-check",
+        "shell-navigation"
+      ],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Queries workbench and Cache page rework, ask history scoping, Home cache counts, audit report rendering fix, and sidebar regrouping."
+    },
+    {
+      "commit": "f09ddfafa9",
+      "date": "2026-07-20",
+      "title": "Add launch audit and polish plan docs",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Adds audit and plan documentation only."
+    },
+    {
+      "commit": "e478dae5cd",
+      "date": "2026-07-20",
+      "title": "Add shared confirm dialog and responsive chrome",
+      "required": ["shell-navigation", "schema", "benchmarks", "platform"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Responsive sidebar/header chrome plus shared confirm dialog replacing schema, benchmark, and demo confirmations."
+    },
+    {
+      "commit": "e423e6407f",
+      "date": "2026-07-20",
+      "title": "Adaptive Home, Ask, and Schema UX with fixes",
+      "required": ["home", "ask", "schema", "platform"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Adaptive Home, Ask history rail scoping, staged schema discovery with gated annotate, and demo ungating with in-demo identity capture."
+    },
+    {
+      "commit": "a3a51a565e",
+      "date": "2026-07-20",
+      "title": "Lay the design-system token foundation",
+      "required": ["shell-navigation"],
+      "confidence": "low",
+      "source": "agent",
+      "rationale": "Token foundation mostly adds unused tokens; only visible effects are light-mode tertiary text and error-state styling shared by every page."
+    },
+    {
+      "commit": "8cc2855abd",
+      "date": "2026-07-20",
+      "title": "Connect the diagnose and ask journeys end to end",
+      "required": ["ask", "queries-analyze", "benchmarks"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Ask answer-first rebuild with examples/history, analysis handoffs, and cache deploy no longer auto-firing."
+    },
+    {
+      "commit": "796b38e9b9",
+      "date": "2026-07-20",
+      "title": "Fix query timings, guard destructive and unsafe actions",
+      "required": ["queries-analyze", "schema", "benchmarks"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Slow-query timing units, schema re-init confirmation, and benchmark consent plus read-only enforcement."
+    },
+    {
+      "commit": "7906c81d87",
+      "date": "2026-07-20",
+      "title": "Streamline setup, identity, and first-run experience",
+      "required": [
+        "onboarding-connect",
+        "settings-targets",
+        "ai-access",
+        "shell-navigation"
+      ],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Single Connect page, key resolution and validity check, Settings footer entry and target switcher, error deep links."
+    },
+    {
+      "commit": "7129765150",
+      "date": "2026-07-20",
+      "title": "Land quick-win fixes and route code-splitting",
+      "required": [
+        "ask",
+        "queries-analyze",
+        "benchmarks",
+        "platform",
+        "settings-targets",
+        "schema",
+        "shell-navigation"
+      ],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Many small fixes across Ask, Slow Queries, benchmark/cache, demo, settings, schema, plus route code-splitting and dialog/sidebar chrome."
+    },
+    {
+      "commit": "59fc29c580",
+      "date": "2026-07-20",
+      "title": "Add shared error contract and branded error states",
+      "required": ["queries-analyze", "ask", "shell-navigation", "benchmarks"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Shared error envelope for analyze/top/ask/cache streams, cacheability verdict fix, and branded root error/404 pages."
+    },
+    {
+      "commit": "4c4d9dc04c",
+      "date": "2026-07-20",
+      "title": "Add desktop update progress",
+      "required": ["desktop-shell"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Desktop update progress and restart control in the Electron shell and its updater."
+    },
+    {
+      "commit": "3a1edf3d57",
+      "date": "2026-07-20",
+      "title": "Migrate all screens to the design system",
+      "required": [
+        "onboarding-connect",
+        "settings-targets",
+        "home",
+        "ask",
+        "queries-analyze",
+        "schema",
+        "benchmarks",
+        "health-check",
+        "platform"
+      ],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Design-system migration rewrites nearly every screen's layout and controls."
+    },
+    {
+      "commit": "05b70889a6",
+      "date": "2026-07-20",
+      "title": "Make the demo funnel honest and bridge to real use",
+      "required": ["platform"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Demo copy, chart, shutdown confirm, and the demo-to-connect bridge banner reached from the demo."
+    },
+    {
+      "commit": "f2e558b030",
+      "date": "2026-07-19",
+      "title": "Fix Docker lookup in desktop builds",
+      "required": ["desktop-shell", "benchmarks"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Desktop sidecar PATH for Docker and clearer Docker-missing errors used by the Readyset container flow."
+    },
+    {
+      "commit": "eac6c4545d",
+      "date": "2026-07-19",
+      "title": "Single artifact set, signed and notarized macOS packages",
+      "required": ["desktop-shell"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "CI artifact changes plus hardened runtime and new macOS entitlements that alter the packaged desktop app."
+    },
+    {
+      "commit": "f97a5403e3",
+      "date": "2026-07-17",
+      "title": "Add auto-update support to the desktop shell",
+      "required": ["desktop-shell"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Adds electron-updater auto-update and its renderer notification to the desktop shell."
+    },
+    {
+      "commit": "f2a545e8a7",
+      "date": "2026-07-17",
+      "title": "Smoke test desktop packages install and launch",
+      "required": ["desktop-shell"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Smoke mode in the Electron main process and new deb/rpm package dependencies."
+    },
+    {
+      "commit": "cb5702314d",
+      "date": "2026-07-17",
+      "title": "Stage desktop sidecar symlinks verbatim",
+      "required": ["desktop-shell"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Changes how the packaged sidecar's symlinks are staged into desktop packages."
+    },
+    {
+      "commit": "c9af5e3699",
+      "date": "2026-07-17",
+      "title": "pace demo on ReadySet caches, gate manual stats",
+      "required": ["platform"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Demo load pacing and manual-cache stats behavior."
+    },
+    {
+      "commit": "9c2d9eb8b8",
+      "date": "2026-07-17",
+      "title": "Post desktop package links to #builds-rdst",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Buildkite Slack notification and release gating only."
+    },
+    {
+      "commit": "9779f812f0",
+      "date": "2026-07-17",
+      "title": "demo fit-and-finish from Tanmay's feedback",
+      "required": ["platform", "home"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Demo provisioning progress and startup pre-pull removal, and banner-free Home with the green demo chip."
+    },
+    {
+      "commit": "7fd7a709a3",
+      "date": "2026-07-17",
+      "title": "Add Playwright browser test tiers for the web UI",
+      "required": ["queries-analyze", "ai-access"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Mostly test tiers and test ids, but fixes analyze stream serialization, top filters, and the email gate flash."
+    },
+    {
+      "commit": "728fc08be4",
+      "date": "2026-07-17",
+      "title": "Fix launch regressions",
+      "required": [
+        "ai-access",
+        "platform",
+        "home",
+        "onboarding-connect",
+        "settings-targets",
+        "benchmarks",
+        "queries-analyze",
+        "ask",
+        "shell-navigation"
+      ],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Signup gate moved to Demo, Home before targets, passwords at creation, selector hides Readyset targets, cache status polling, cacheability and error fixes."
+    },
+    {
+      "commit": "3d0befa07f",
+      "date": "2026-07-17",
+      "title": "Build and publish macOS desktop packages",
+      "required": ["desktop-shell"],
+      "confidence": "low",
+      "source": "agent",
+      "rationale": "Mostly CI for macOS packages; adds mac artifact naming and a package script for the desktop app."
+    },
+    {
+      "commit": "34ab03a01d",
+      "date": "2026-07-17",
+      "title": "Point deploys at the public Readyset image",
+      "required": ["benchmarks"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Readyset container image used by cache deploys and the Readyset container switches to the public image."
+    },
+    {
+      "commit": "2b0475f762",
+      "date": "2026-07-17",
+      "title": "Report CL status from build state, gate steps at generation time",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Buildkite pipeline generation only."
+    },
+    {
+      "commit": "1c8ecbaebf",
+      "date": "2026-07-17",
+      "title": "Publish the desktop update channel from main builds",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Buildkite update-channel publishing only."
+    },
+    {
+      "commit": "14aaa5dedb",
+      "date": "2026-07-17",
+      "title": "Build and publish Linux desktop packages",
+      "required": ["desktop-shell"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Adds deb and rpm desktop package targets alongside CI build scripts."
+    },
+    {
+      "commit": "00838de662",
+      "date": "2026-07-17",
+      "title": "web signup gate, browser open, demo fixes",
+      "required": ["ai-access", "platform", "shell-navigation"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Global signup gate with name and verified email, trial dialog changes, sidebar identity, and demo preflight/deploy fixes."
+    },
+    {
+      "commit": "93225f7e2e",
+      "date": "2026-07-15",
+      "title": "add QueryPilot demo web UI",
+      "required": ["platform", "home"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "New demo page plus a Home launcher tile and sidebar entry for it."
+    },
+    {
+      "commit": "60e926e625",
+      "date": "2026-07-15",
+      "title": "email gate and demo funnel telemetry",
+      "required": ["ai-access"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Blocking email gate on first web load and trial dialog email prefill."
+    },
+    {
+      "commit": "1a40f24df1",
+      "date": "2026-07-15",
+      "title": "add QueryPilot demo backend",
+      "required": ["onboarding-connect"],
+      "confidence": "low",
+      "source": "agent",
+      "rationale": "Demo backend has no UI yet; the shared atomic config save affects writing targets."
+    },
+    {
+      "commit": "0521639e8b",
+      "date": "2026-07-15",
+      "title": "stabilize QueryPilot demo for small machines",
+      "required": ["platform"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Demo resource caps, TTL, load, and UI changes for small machines."
+    },
+    {
+      "commit": "8f1c237ffd",
+      "date": "2026-07-13",
+      "title": "pin the desktop sidecar build and harden shell lifecycle",
+      "required": ["desktop-shell", "app-lifecycle"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Pinned sidecar build and desktop startup/shutdown/backend-spawn failure handling."
+    },
+    {
+      "commit": "678f6f2f6b",
+      "date": "2026-07-13",
+      "title": "scaffold desktop electron shell",
+      "required": ["desktop-shell", "app-lifecycle"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Scaffolds the Electron shell with bundled backend spawn and local static server."
+    },
+    {
+      "commit": "004ecb84e9",
+      "date": "2026-07-13",
+      "title": "Add desktop branding and native window chrome",
+      "required": ["desktop-shell", "shell-navigation"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Electron window chrome and branding plus app-wide header, sidebar, and main scroll-area changes."
+    },
+    {
+      "commit": "f3002ad25b",
+      "date": "2026-07-11",
+      "title": "add web UI for audit, fleet, agents, and guards",
+      "required": [
+        "health-check",
+        "schema",
+        "benchmarks",
+        "queries-analyze",
+        "shell-navigation"
+      ],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Adds audit page, schema refresh/profile, cache lifecycle controls, registry/top tweaks, and new nav entries and icon sprites."
+    },
+    {
+      "commit": "91f008720c",
+      "date": "2026-07-11",
+      "title": "stop trial-registration tests leaking the fake token",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Unit test isolation only."
+    },
+    {
+      "commit": "88f1df9050",
+      "date": "2026-07-11",
+      "title": "add web API for audit, fleet, agents, and guards",
+      "required": ["queries-analyze"],
+      "confidence": "low",
+      "source": "agent",
+      "rationale": "New APIs have no UI yet; the query registry listing now skips malformed entries."
+    },
+    {
+      "commit": "59b7bef158",
+      "date": "2026-07-11",
+      "title": "add Home launcher and regroup sidebar navigation",
+      "required": ["home", "shell-navigation", "queries-analyze"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "New Home launcher, regrouped sidebar, and analyze moved to its own route."
+    },
+    {
+      "commit": "36dbecfceb",
+      "date": "2026-07-06",
+      "title": "spawn child processes via python -m rdst",
+      "required": [],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Child process spawning for CLI demo, scan, and top only."
+    },
+    {
+      "commit": "5faea1d289",
+      "date": "2026-05-27",
+      "title": "map test files to areas in check_diff_areas.sh",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CI area mapping and integration test scripts only."
+    },
+    {
+      "commit": "930b823935",
+      "date": "2026-05-26",
+      "title": "Fix top analyze launch and registry skew",
+      "required": ["queries-analyze"],
+      "confidence": "low",
+      "source": "agent",
+      "rationale": "Mainly CLI top fixes; shared registry loading now drops unknown fields, which feeds the Queries page."
+    },
+    {
+      "commit": "d2c5625104",
+      "date": "2026-05-18",
+      "title": "Fix container leak in CI integration tests",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CI container cleanup and a unit test only."
+    },
+    {
+      "commit": "f57592b6fc",
+      "date": "2026-05-14",
+      "title": "Wrap analyze and audit in ephemeral readyset lifecycle",
+      "required": ["queries-analyze"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Analyze service now deploys or starts an ephemeral Readyset container, which web analysis uses."
+    },
+    {
+      "commit": "6d0d1b30ee",
+      "date": "2026-05-14",
+      "title": "Default cache deploy to in-request-path with lifecycle commands",
+      "required": ["benchmarks"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Shared docker deploy now defaults to in-request-path caching with resource limits, used by the web cache deploy."
+    },
+    {
+      "commit": "ddf94b3fcc",
+      "date": "2026-05-07",
+      "title": "add realdb integration coverage for command_run telemetry",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Adds integration tests for telemetry; no product code."
+    },
+    {
+      "commit": "d39e98eb56",
+      "date": "2026-05-07",
+      "title": "Add real-database integration test suite for HTTP API",
+      "required": ["queries-analyze"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Cacheability verdict now carries checked=True, so the analyze stream emits readyset_checked and results change; readyset setup fix only serves the unlinked /readyset page."
+    },
+    {
+      "commit": "af23d30fee",
+      "date": "2026-05-07",
+      "title": "add manual PostHog smoke test for end-to-end telemetry verification",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Adds a manual PostHog smoke script under tests/manual."
+    },
+    {
+      "commit": "9ecef11160",
+      "date": "2026-05-07",
+      "title": "generic command_run CM for SSE telemetry; fix web first_analyze",
+      "required": ["ask", "queries-analyze"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Wraps the web ask, analyze and top SSE generators in a new telemetry context manager and changes TargetGuard, which can break those streams."
+    },
+    {
+      "commit": "92edf28904",
+      "date": "2026-05-07",
+      "title": "collapse audit/fleet first-event boilerplate via telemetry helper",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Audit and fleet were CLI-only at this point; helper consolidation has no UI effect."
+    },
+    {
+      "commit": "35622907ec",
+      "date": "2026-05-07",
+      "title": "Convert ~/.rdst path constants to functions",
+      "required": [],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Path constants become call-time getters returning the same ~/.rdst locations; no user-visible delta."
+    },
+    {
+      "commit": "c489b2aac5",
+      "date": "2026-05-04",
+      "title": "Selective integration tests and relentless pipeline fixes",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Buildkite scripts and pipeline changes."
+    },
+    {
+      "commit": "d55ed65096",
+      "date": "2026-04-29",
+      "title": "Sum audit database_size across all non-system schemas",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "MySQL audit size query is used only by the CLI audit at this revision."
+    },
+    {
+      "commit": "b4118b8614",
+      "date": "2026-04-29",
+      "title": "Add fleet audit examples to README",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "README update."
+    },
+    {
+      "commit": "a2c02010ac",
+      "date": "2026-04-29",
+      "title": "Add Hetzner-based relentless tester pipeline",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Hetzner relentless pipeline plus an IMDb loader script."
+    },
+    {
+      "commit": "eb21291ea5",
+      "date": "2026-04-28",
+      "title": "Clean up repo for public release",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Docs, license and tmux test harness path cleanup."
+    },
+    {
+      "commit": "c569d8cdc9",
+      "date": "2026-04-28",
+      "title": "Clean up repo for public release",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Josh pipeline config cleanup."
+    },
+    {
+      "commit": "b1e72de3c5",
+      "date": "2026-04-28",
+      "title": "Email verification refactor + cleanup batch",
+      "required": ["ai-access"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Trial registration and trial LLM proxy now resolve the keyservice URL through a new helper, and email storage changes; cache changes are only Readyset spelling."
+    },
+    {
+      "commit": "38cc413580",
+      "date": "2026-04-27",
+      "title": "Fix issues found during IMDb testing",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Fixes broken imports in ask3 execute and schema phases that web Ask runs."
+    },
+    {
+      "commit": "e444199302",
+      "date": "2026-04-24",
+      "title": "typed OpenAPI contract between FastAPI backend and React frontend",
+      "required": [
+        "onboarding-connect",
+        "settings-targets",
+        "ask",
+        "queries-analyze",
+        "benchmarks",
+        "ai-access"
+      ],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Rewrites the frontend API client onto a generated typed client and adds response_model to most routes, touching onboarding, configure, ask, top/analyze, cache/benchmark and trial surfaces."
+    },
+    {
+      "commit": "9c0fa3db7a",
+      "date": "2026-04-23",
+      "title": "fleet audit fixes",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Audit/fleet telemetry and preflight are CLI commands."
+    },
+    {
+      "commit": "9b9ee9e6e5",
+      "date": "2026-04-23",
+      "title": "relentless tester tier 2 bugfixes",
+      "required": ["ask", "queries-analyze", "schema", "settings-targets"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Fixes ask3 LLMManager imports and dry-run save, adds analyze explain error events, coerces semantic layer stats types, and changes configure test-connection events."
+    },
+    {
+      "commit": "8dd6ff1036",
+      "date": "2026-04-21",
+      "title": "Add relentless router and skills",
+      "required": ["ask"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Fixes the ask3 schema phase import of SemanticLayerManager used by web Ask; the rest is CLI, scan, guard and error-text tweaks."
+    },
+    {
+      "commit": "1d5b99256d",
+      "date": "2026-04-21",
+      "title": "fix fleet audit crash + add connectivity preflight",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Fleet audit command fix."
+    },
+    {
+      "commit": "c678b66cb3",
+      "date": "2026-04-20",
+      "title": "Fleet + Audit Overhaul",
+      "required": ["benchmarks"],
+      "confidence": "low",
+      "source": "agent",
+      "rationale": "Audit/fleet are CLI-only, but the shared deploy script generator now checks bound Docker ports when allocating cache ports for web cache deploy."
+    },
+    {
+      "commit": "d3bf055f13",
+      "date": "2026-04-09",
+      "title": "Set DEPLOYMENT_ENV in deploy templates",
+      "required": [],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Adds DEPLOYMENT_ENV to remote deploy templates."
+    },
+    {
+      "commit": "b65b342b98",
+      "date": "2026-04-06",
+      "title": "Fix Query Normalization",
+      "required": ["benchmarks", "queries-analyze"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "SQL normalizer drops AS aliases, changing stored registry SQL and cache add matching, and local cache deploy exposes a metrics port."
+    },
+    {
+      "commit": "a9b0f7be1f",
+      "date": "2026-04-03",
+      "title": "Fix cache add",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "cache add registry lookup lives in the CLI command."
+    },
+    {
+      "commit": "9a48b6ae8e",
+      "date": "2026-04-03",
+      "title": "PLG flow \u2014 frictionless onboarding and cache management",
+      "required": ["queries-analyze", "benchmarks"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Analyze service now always tests Readyset against an existing cache target, top filters system queries, and cache deploy port allocation changes."
+    },
+    {
+      "commit": "e8ec67d8bf",
+      "date": "2026-04-01",
+      "title": "add ReadySet cache management feature (web UI + service + API + CLI refactor)",
+      "required": ["benchmarks", "queries-analyze"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Adds the web cache management page plus cache buttons on top queries, registry and analyze results."
+    },
+    {
+      "commit": "b003da2181",
+      "date": "2026-03-31",
+      "title": "Stream chat agent progress events",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Streams progress events in the CLI agent command."
+    },
+    {
+      "commit": "9cc07824af",
+      "date": "2026-03-31",
+      "title": "Improve chat UX and add schema hints",
+      "required": ["ask", "queries-analyze"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Ask service now auto-saves generated SQL to the registry with hash/tag on results, and the analyze prompt/schema context changes."
+    },
+    {
+      "commit": "7e0a0692ae",
+      "date": "2026-03-31",
+      "title": "Add selectivity-aware index analysis",
+      "required": ["queries-analyze"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Injects column stats into analyze schema context and adds selectivity rules to the analyze prompt."
+    },
+    {
+      "commit": "52eb0cb26c",
+      "date": "2026-03-31",
+      "title": "Add demo command with guided tours",
+      "required": ["queries-analyze"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "The CLI demo is not the web demo, but the analyze LLM prompt gets a selectivity refinement."
+    },
+    {
+      "commit": "4ec6a37514",
+      "date": "2026-03-31",
+      "title": "Persist column stats in semantic layer",
+      "required": ["schema", "ask"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Semantic layer model persists column stats and ask3 schema context surfaces them."
+    },
+    {
+      "commit": "2dcd0c037c",
+      "date": "2026-03-31",
+      "title": "Group CLI help commands by category",
+      "required": ["ask", "queries-analyze"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Besides CLI help grouping, LLM JSON parsing in sql_generation (ask3) and llm_analysis (analyze) becomes lenient."
+    },
+    {
+      "commit": "10714914c0",
+      "date": "2026-03-31",
+      "title": "Wire trial and first_analyze events to PostHog Slack",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Wires trial and first_analyze events to Slack; no user-visible delta."
+    },
+    {
+      "commit": "02ab2c4796",
+      "date": "2026-03-31",
+      "title": "Remove run_sql tool from chat agent",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Removes run_sql from the CLI chat agent."
+    },
+    {
+      "commit": "a13acdc246",
+      "date": "2026-03-30",
+      "title": "Add display_name to PostHog Slack alerts",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Adds display_name to PostHog events."
+    },
+    {
+      "commit": "f9fb58c2a0",
+      "date": "2026-03-27",
+      "title": "ensure query alias updates persist",
+      "required": ["queries-analyze"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Re-adding a query now overwrites its registry tag, changing names shown in the query library."
+    },
+    {
+      "commit": "e4378c01bc",
+      "date": "2026-03-25",
+      "title": "Clean up lib utilities",
+      "required": ["queries-analyze"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Refactors top and registry API routes (drops last_target, adds min_total_time_s) and explain row counting."
+    },
+    {
+      "commit": "c8bb4eda4e",
+      "date": "2026-03-25",
+      "title": "Add light/dark terminal theme detection for UI",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Terminal color detection for CLI output."
+    },
+    {
+      "commit": "7e50474685",
+      "date": "2026-03-25",
+      "title": "extract shared SQL parameter utilities into lib/sqlParameters",
+      "required": ["queries-analyze", "benchmarks"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Extracts shared SQL parameter helpers used by the analyze parameter dialog and benchmark page."
+    },
+    {
+      "commit": "26aeb8dc8a",
+      "date": "2026-03-25",
+      "title": "improve ParameterDialog for large queries with many parameters",
+      "required": ["queries-analyze", "benchmarks"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Reworks the top-queries ParameterDialog and the benchmark parameter dialog."
+    },
+    {
+      "commit": "254692ecae",
+      "date": "2026-03-25",
+      "title": "raise query size limit to 64KB and remove env var override",
+      "required": ["queries-analyze"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Raises the query length limit across top, analyze and registry with web top changes."
+    },
+    {
+      "commit": "851ebe48bc",
+      "date": "2026-03-24",
+      "title": "Add benchmark destination selector",
+      "required": ["benchmarks"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Benchmark page destination selector."
+    },
+    {
+      "commit": "6b4025ef7e",
+      "date": "2026-03-24",
+      "title": "Add registry pagination and detail info",
+      "required": ["queries-analyze", "benchmarks"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Registry server-side pagination changes the shared useQueryRegistry hook that the query library and benchmark picker use."
+    },
+    {
+      "commit": "677ac31e11",
+      "date": "2026-03-24",
+      "title": "Add data storage panel and edit pre-fill",
+      "required": ["settings-targets"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Configure page data storage panel and edit-form pre-fill."
+    },
+    {
+      "commit": "5906522b2d",
+      "date": "2026-03-24",
+      "title": "Add skip and custom answer to Ask",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Ask panel clarification skip and custom answer."
+    },
+    {
+      "commit": "289f326770",
+      "date": "2026-03-24",
+      "title": "Add query search and param passthrough",
+      "required": ["queries-analyze"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Query history search/pagination and stored param passthrough on top queries."
+    },
+    {
+      "commit": "1b7b6d0833",
+      "date": "2026-03-24",
+      "title": "Fix EXPLAIN metrics and row mismatch",
+      "required": ["queries-analyze"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "EXPLAIN metric parsing and analysis sections rendering."
+    },
+    {
+      "commit": "09871a3d6b",
+      "date": "2026-03-24",
+      "title": "Fix load %, add QPS and filters",
+      "required": ["queries-analyze"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Top queries load %, QPS and filters in backend and UI."
+    },
+    {
+      "commit": "1ded920c7c",
+      "date": "2026-03-13",
+      "title": "Fix GitHub sanity check to run after release approval\\",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Buildkite pipeline change for the GitHub sanity check."
+    },
+    {
+      "commit": "8100d3e5ca",
+      "date": "2026-03-12",
+      "title": "Use Docker containers for integration tests",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Moves integration tests to local Docker containers; no product code."
+    },
+    {
+      "commit": "4af9fb452d",
+      "date": "2026-03-12",
+      "title": "Pre-pull ReadySet Docker image on web server start",
+      "required": ["benchmarks"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "A background pull of the Readyset image at server start changes the first benchmark/cache run."
+    },
+    {
+      "commit": "3bd37d1987",
+      "date": "2026-03-12",
+      "title": "Add web scan page and refactor scan service",
+      "required": [
+        "ai-access",
+        "onboarding-connect",
+        "settings-targets",
+        "queries-analyze",
+        "schema",
+        "ask",
+        "shell-navigation"
+      ],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Besides the out-of-scope scan page, it reworks Anthropic credential resolution, routes every DB password lookup through a new resolver, refactors AnalysisResults, and changes the sidebar and target dropdown."
+    },
+    {
+      "commit": "fa74db5bc9",
+      "date": "2026-03-10",
+      "title": "Fix analyze rewrite and cacheability",
+      "required": ["queries-analyze"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "The analysis prompt and workflow now pass Readyset cacheability through to the results."
+    },
+    {
+      "commit": "f18b3f9975",
+      "date": "2026-03-10",
+      "title": "Fix two interactive menu and display bugs",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Interactive CLI menu and CLI formatter engine fallback."
+    },
+    {
+      "commit": "eddd95c707",
+      "date": "2026-03-10",
+      "title": "Add self-join O(n^2) warning to prompt",
+      "required": ["queries-analyze"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Adds a self-join warning to the analysis prompt."
+    },
+    {
+      "commit": "ec08e5947b",
+      "date": "2026-03-10",
+      "title": "Strip FormatFinalResults from JSON output",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Only strips a step from analyze --json CLI output."
+    },
+    {
+      "commit": "c381761e75",
+      "date": "2026-03-10",
+      "title": "Add estimate vs actual analysis to prompt",
+      "required": ["queries-analyze"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Changes the LLM analysis prompt used by web analysis."
+    },
+    {
+      "commit": "b57d13d7be",
+      "date": "2026-03-10",
+      "title": "improve trial key flows and normalize TanStack query/mutation state",
+      "required": [
+        "ai-access",
+        "settings-targets",
+        "onboarding-connect",
+        "queries-analyze",
+        "shell-navigation"
+      ],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Trial/key dialog flows, configure page, validate step, query registry canonicalization and top saving, and the feedback dialog mutation."
+    },
+    {
+      "commit": "a02f9b6ea5",
+      "date": "2026-03-10",
+      "title": "Improve analyze prompt quality guards",
+      "required": ["queries-analyze"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Changes analysis prompt guidance on WHERE reordering and non-deterministic functions."
+    },
+    {
+      "commit": "8f1839ef50",
+      "date": "2026-03-10",
+      "title": "Fix ask --dry-run executing queries",
+      "required": ["ask"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "ask_service/context gain a dry_run skip of execution on the path the web Ask uses."
+    },
+    {
+      "commit": "56c11ef9d9",
+      "date": "2026-03-10",
+      "title": "Add descriptions to subcommand help",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Subcommand --help descriptions."
+    },
+    {
+      "commit": "4e9fb5bd05",
+      "date": "2026-03-10",
+      "title": "Fix display bugs in ask and analyze",
+      "required": ["queries-analyze"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "default_model enum leak shows in the web analysis header's model; other fixes are CLI renderers."
+    },
+    {
+      "commit": "4b9fed3c7a",
+      "date": "2026-03-10",
+      "title": "Fix misleading rewrite messaging",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Rewrite messaging lives in the CLI output_formatter."
+    },
+    {
+      "commit": "3301d1bef4",
+      "date": "2026-03-10",
+      "title": "Fix ask error leaks and index ordering",
+      "required": ["queries-analyze"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Index column reordering post-processing changes analysis recommendations; the ask change is only log levels."
+    },
+    {
+      "commit": "1ab1c48f2e",
+      "date": "2026-03-10",
+      "title": "Show rewrites when baseline is skipped",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "The rewrite display fix is in the CLI output_formatter, which the web API does not use."
+    },
+    {
+      "commit": "d069b741ec",
+      "date": "2026-03-09",
+      "title": "add free trial registration, balance tracking, and exhaustion handling",
+      "required": ["ai-access", "onboarding-connect"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Adds the free trial registration dialog, balance badge, and trial states to the onboarding validate step."
+    },
+    {
+      "commit": "8eefab0f38",
+      "date": "2026-03-09",
+      "title": "Add clean error handling for Docker/cache failures",
+      "required": ["benchmarks"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "The Docker availability check and error classification in readyset_setup affect the web Readyset cache flows."
+    },
+    {
+      "commit": "859b8dc3db",
+      "date": "2026-03-09",
+      "title": "Pre-populate parameter dialog with stored values",
+      "required": ["queries-analyze", "benchmarks"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Parameter dialogs prefill stored values from the registry for analyze and benchmark."
+    },
+    {
+      "commit": "f4bc9baf86",
+      "date": "2026-03-06",
+      "title": "Fix cache timing measurement with autocommit",
+      "required": [],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Persistent-connection timing is only used by warm_cache_and_measure, which web analysis never calls."
+    },
+    {
+      "commit": "4ea97b99ed",
+      "date": "2026-03-06",
+      "title": "Add shallow cache command",
+      "required": ["benchmarks"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Changes the Readyset container image/env and makes it CREATE SHALLOW CACHE, which the web Readyset cache routes use."
+    },
+    {
+      "commit": "fc50a4a0fa",
+      "date": "2026-03-04",
+      "title": "Strip enrichment to delimiter detection",
+      "required": ["schema", "ask"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Changes semantic layer enrichment data model and introspection that feed the schema page and Ask."
+    },
+    {
+      "commit": "faac657cd8",
+      "date": "2026-03-04",
+      "title": "Fix null schema silent failure in ask",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Ask now fails early with a clear error on a null schema."
+    },
+    {
+      "commit": "f0e56a2db7",
+      "date": "2026-03-04",
+      "title": "Use registry target for analyze fallback",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Registry target fallback in CLI analyze_command/rdst_cli."
+    },
+    {
+      "commit": "df631c3d2b",
+      "date": "2026-03-04",
+      "title": "Fix ask fabrication and top crash bugs",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Ask SQL generation confidence gate, prompts, and json_object handling for filter extraction."
+    },
+    {
+      "commit": "be7cbd6a7e",
+      "date": "2026-03-04",
+      "title": "Fix schema filter and rename --llm-guided",
+      "required": ["ask"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Ask schema filtering JSON parsing and heuristic matching fix; the flag rename is CLI-only."
+    },
+    {
+      "commit": "a0fa1086f1",
+      "date": "2026-03-04",
+      "title": "Add e2e test infrastructure for ask command",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Adds tmux-based e2e tests."
+    },
+    {
+      "commit": "495a806444",
+      "date": "2026-03-04",
+      "title": "Add tmux-based testing harness",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "tmux harness script under hacks."
+    },
+    {
+      "commit": "3be979cc7e",
+      "date": "2026-03-04",
+      "title": "Add LLM-guided schema annotation",
+      "required": ["ask"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Mostly the CLI guided annotation; the ask filter now treats an empty LLM response as a failure."
+    },
+    {
+      "commit": "16a4e9c783",
+      "date": "2026-03-04",
+      "title": "Refine e2e tests and ticket-work skill",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "E2E test cleanup and ticket-work skill."
+    },
+    {
+      "commit": "bb3616ecde",
+      "date": "2026-03-03",
+      "title": "fix keyring not working on macos",
+      "required": ["ai-access", "onboarding-connect"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Keyring availability detection changes where the API key and target passwords get stored."
+    },
+    {
+      "commit": "2598a222f8",
+      "date": "2026-03-03",
+      "title": "unify SQL syntax rendering and make query output copy-friendly",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "SQL syntax rendering in CLI presenter/renderer and Rich UI components."
+    },
+    {
+      "commit": "279b77ed61",
+      "date": "2026-03-02",
+      "title": "fix rdst web command",
+      "required": ["app-lifecycle"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "Changes how rdst web finds and serves the embedded frontend at startup."
+    },
+    {
+      "commit": "12892af24a",
+      "date": "2026-02-27",
+      "title": "Fix duplicate status display in Readyset cacheability analysis",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Duplicate status display in CLI output_formatter and Rich components."
+    },
+    {
+      "commit": "dcae07f515",
+      "date": "2026-02-26",
+      "title": "Fix josh filter exclude syntax for keyservice",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "josh filter syntax for keyservice."
+    },
+    {
+      "commit": "d10bd36c02",
+      "date": "2026-02-26",
+      "title": "Scan threshold 60 secs",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "scan_command timeout; scan is out of scope."
+    },
+    {
+      "commit": "b3ef4fa28a",
+      "date": "2026-02-26",
+      "title": "Key service",
+      "required": ["ai-access", "ask", "queries-analyze"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "The keyservice is out of scope, but client LLM key resolution/proxy routing and the default models (Sonnet 4.6, Haiku 4.5 filter) change every web LLM call."
+    },
+    {
+      "commit": "813b5e94d3",
+      "date": "2026-02-26",
+      "title": "Fix MySQL TLS and top error display",
+      "required": ["onboarding-connect"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "MySQL TLS connections stop verifying certificates in the shared db_connection; top display fix is CLI."
+    },
+    {
+      "commit": "6a6679b4a5",
+      "date": "2026-02-26",
+      "title": "Fix Trial Token Naming",
+      "required": ["ai-access"],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Renames accepted key env vars and reorders trial key resolution in the env requirements shown by the AI gate."
+    },
+    {
+      "commit": "57ab2d5d27",
+      "date": "2026-02-26",
+      "title": "Fix query size limit message in top",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Message text in CLI top.py."
+    },
+    {
+      "commit": "48658c0cfd",
+      "date": "2026-02-26",
+      "title": "Downgrade sonnet to 4.5",
+      "required": ["queries-analyze", "ask"],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "The default model written by web init and used for analysis goes back to Sonnet 4.5; top queries now exclude EXPLAIN."
+    },
+    {
+      "commit": "0987e77167",
+      "date": "2026-02-26",
+      "title": "Set up shadow workspace for rdst dev",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "hacks shadow workspace setup."
+    },
+    {
+      "commit": "83cb1102fd",
+      "date": "2026-02-25",
+      "title": "Prepare codebase for public GitHub release",
+      "required": ["shell-navigation"],
+      "confidence": "low",
+      "source": "agent",
+      "rationale": "Removes the default Slack feedback webhook used by the web feedback dialog's report submission."
+    },
+    {
+      "commit": "38bb3d3202",
+      "date": "2026-02-19",
+      "title": "Add web client and service layer architecture for RDST",
+      "required": [
+        "onboarding-connect",
+        "settings-targets",
+        "ai-access",
+        "ask",
+        "queries-analyze",
+        "schema",
+        "benchmarks",
+        "shell-navigation",
+        "app-lifecycle"
+      ],
+      "confidence": "medium",
+      "source": "agent",
+      "rationale": "The initial web app and FastAPI backend introduce every page that existed then."
+    },
+    {
+      "commit": "ff47993aa7",
+      "date": "2026-02-13",
+      "title": "Addressing Scan Feedback",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Scan feedback cleanup in CLI components."
+    },
+    {
+      "commit": "996c7b4ce0",
+      "date": "2026-02-13",
+      "title": "Fix Windows",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Windows fixes in CLI/functions before any web UI existed."
+    },
+    {
+      "commit": "e20e6f1fa7",
+      "date": "2026-02-12",
+      "title": "rdst agent conversation mode",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "aae711a604",
+      "date": "2026-02-12",
+      "title": "Fix ask timeout and add semantic filtering",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "9d2167c27e",
+      "date": "2026-02-12",
+      "title": "Add Slack bot integration",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "83bccde334",
+      "date": "2026-02-12",
+      "title": "Add guard system and chat agent tools",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "80af071233",
+      "date": "2026-02-12",
+      "title": "Refine guard CLI args and subcommands",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "347dc843a5",
+      "date": "2026-02-12",
+      "title": "Rdst research docs",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Adds research documentation under aidoc only."
+    },
+    {
+      "commit": "21a6d89daf",
+      "date": "2026-02-12",
+      "title": "rdst : rdst agent basic framework",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "8bd3eddf46",
+      "date": "2026-02-06",
+      "title": "Add MySQL slow log support and improve documentation",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "2c00b1297c",
+      "date": "2026-01-26",
+      "title": "exclude symlink from wheel build",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Wheel packaging config only, predating the web app."
+    },
+    {
+      "commit": "c80ea00f7f",
+      "date": "2026-01-23",
+      "title": "increase query registry limit from 1KB to 4KB",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "b553e16def",
+      "date": "2026-01-15",
+      "title": "extract centralized design system with theming and components",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "ddf38a010a",
+      "date": "2026-01-09",
+      "title": "Merge howdoi with help",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "cbcd185600",
+      "date": "2026-01-09",
+      "title": "Remove tune cmd, add welcome msg, fix timeouts",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "345c542a12",
+      "date": "2026-01-09",
+      "title": "improve MCP tool descriptions and workflow guidance",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "2138730493",
+      "date": "2026-01-09",
+      "title": "Fix webhook",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "80b190fedb",
+      "date": "2026-01-08",
+      "title": "Improve UX for ask and top commands",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "5d027f9075",
+      "date": "2026-01-08",
+      "title": "Add query cancellation on Ctrl+C",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "0b0c39459b",
+      "date": "2026-01-08",
+      "title": "Add SQLGlot-based SQL parameterization",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "e18cbd6471",
+      "date": "2026-01-07",
+      "title": "add ask and schema to main command menu list",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "9ed378eddb",
+      "date": "2026-01-07",
+      "title": "Rename package from rdst-staging to rdst for PyPI release",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "42213bbbb1",
+      "date": "2026-01-07",
+      "title": "Update howdoi documentation",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "1e0f82549e",
+      "date": "2026-01-07",
+      "title": "Add `query run` for benchmarking and load generation",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "6bfb516f34",
+      "date": "2026-01-06",
+      "title": "Improve `rdst top` UX and fix UV deprecation warning",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "2cd6e12156",
+      "date": "2026-01-06",
+      "title": "Improve `rdst query` command UX",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "12f76f411e",
+      "date": "2026-01-06",
+      "title": "Add query size limits and --large-query-bypass option",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "c5f8089139",
+      "date": "2026-01-05",
+      "title": "Fix init --force error message for existing config",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "bc707b5736",
+      "date": "2026-01-05",
+      "title": "Add PostgreSQL extension and custom type detection to semantic layer",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "688adf7d26",
+      "date": "2025-12-30",
+      "title": "Update config wizard to default to Sonnet 4.5",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "588a37f3e4",
+      "date": "2025-12-30",
+      "title": "connection string parsing to rdst configure add",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "8a3592f499",
+      "date": "2025-12-19",
+      "title": "Add missing package dependencies",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Dependency additions only, predating the web app."
+    },
+    {
+      "commit": "09912d4273",
+      "date": "2025-12-17",
+      "title": "Enable Ask and Schema commands",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "4293b86149",
+      "date": "2025-12-16",
+      "title": "Add experimental Ask and Schema features",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "eaa6e6a40d",
+      "date": "2025-12-12",
+      "title": "Install twine in build script",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Buildkite deploy scripts only."
+    },
+    {
+      "commit": "ea5af16664",
+      "date": "2025-12-12",
+      "title": "MCP, howdoi, rdst docs",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "da50781e60",
+      "date": "2025-12-10",
+      "title": "AWS CodeArtifact for RDST Builds",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Build/packaging and CI configuration only."
+    },
+    {
+      "commit": "b2d701d329",
+      "date": "2025-12-10",
+      "title": "Lower Python requirement to 3.10+",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Python version requirement change only."
+    },
+    {
+      "commit": "6e447cd337",
+      "date": "2025-12-10",
+      "title": "Add caveats, rewrite improvements, TPC-H benchmarks",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "44ac437c80",
+      "date": "2025-12-10",
+      "title": "report version",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "c4ff80ba80",
+      "date": "2025-12-09",
+      "title": "Merge Cache into Analyze",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "82134b33af",
+      "date": "2025-12-08",
+      "title": "Add telemetry, token tracking, BYOK",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "a1b6a661e3",
+      "date": "2025-12-03",
+      "title": "(build) Adjust location of set-gerrit-status step",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Buildkite pipeline configuration only."
+    },
+    {
+      "commit": "5678d307a8",
+      "date": "2025-12-03",
+      "title": "Feedback fixes and UX improvements",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "CLI/library change predating the rdst web app and FastAPI backend (added 2026-02-19); no UI exists to exercise."
+    },
+    {
+      "commit": "46c4c50872",
+      "date": "2025-12-03",
+      "title": "Fix Gerrit status update timing in pipeline",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Buildkite pipeline configuration only."
+    },
+    {
+      "commit": "9712044811",
+      "date": "2025-11-13",
+      "title": "Rename tag command to query for UX clarity",
+      "required": [],
+      "confidence": "high",
+      "source": "agent",
+      "rationale": "Touches the old cloud/cloud_agent CLI and docs, not the rdst app."
+    }
+  ]
+}
