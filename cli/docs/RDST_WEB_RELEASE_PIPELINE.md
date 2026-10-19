@@ -25,6 +25,12 @@ For both scopes above, `readyset-rdst` is the release owner for RDST web assets.
 6. Step `build-package` (depends on `build-rdst-web`) downloads those artifacts from the same build.
 7. `build-package` validates metadata + checksum + commit and embeds assets into `rdst/lib/web_dist/`.
 8. RDST package build/publish continues from the embedded frontend assets.
+9. The sidecar builds of the same main build (`build-rdst-sidecar-linux`, `build-rdst-cli-macos`,
+   the macOS and Windows `prepare-rdst-desktop-*` steps) run with `RDST_WEB_ARTIFACT=1` and depend on
+   `build-rdst-web`: `web-apps/apps/rdst-desktop/scripts/build-web.mjs` downloads and validates the same
+   artifacts and stages them as the renderer the sidecar embeds, so the desktop apps and the CLI
+   archives ship the bundle `build-rdst-web` keyed. Change builds, which have no artifact, build the
+   renderer from source, unkeyed.
 
 ## Sequence Diagram
 ```text
@@ -47,6 +53,7 @@ build-package -> publish steps: wheel/sdist -> deploy
 - RDST artifact consumer + embedder:
   - `rdst/.buildkite/build_package.sh`
   - `rdst/pyproject.toml`
+  - `web-apps/apps/rdst-desktop/scripts/build-web.mjs` (sidecar and desktop builds)
 
 `web-apps` pipeline has no RDST-web release responsibility in this model.
 

@@ -183,14 +183,15 @@ def test_desktop_pipeline_builds_smokes_and_publishes_windows(tmp_path: Path):
         "GIT_CONFIG_KEY_0": "core.longpaths",
         "GIT_CONFIG_VALUE_0": "true",
     }
-    for key, mode in (
-        ("prepare-rdst-desktop-windows", "-Mode Prepare"),
-        ("package-rdst-desktop-windows-release", "-Mode Package -Flavor release"),
-        ("package-rdst-desktop-windows-staging", "-Mode Package -Flavor staging"),
+    for key, mode, env in (
+        # The prepare step builds the sidecar, which embeds the keyed web bundle.
+        ("prepare-rdst-desktop-windows", "-Mode Prepare", windows_git_env | {"RDST_WEB_ARTIFACT": "1"}),
+        ("package-rdst-desktop-windows-release", "-Mode Package -Flavor release", windows_git_env),
+        ("package-rdst-desktop-windows-staging", "-Mode Package -Flavor staging", windows_git_env),
     ):
         step = steps[key]
         assert step["agents"]["queue"] == "windows-c6a-2xlarge"
-        assert step["env"] == windows_git_env
+        assert step["env"] == env
         assert "artifact_paths" not in step
         assert step["command"].endswith(f"build_rdst_desktop_windows.ps1 {mode}")
 
@@ -1013,3 +1014,31 @@ def test_older_build_cannot_rewind_latest(publication_env):
     assert "newer installer build" in result.stdout
     assert current.read_text(encoding="utf-8") == "newer installer\n"
     assert latest_build.read_text(encoding="utf-8") == "999\n"
+
+
+def test_sidecar_builds_embed_the_keyed_web_bundle_only_on_main(tmp_path: Path):
+    # A main build keys the web bundle once, in build-rdst-web; every step that
+    # embeds it waits for that step and stages the artifact instead of building
+    # the renderer again on its own agent.
+    main = desktop_pipeline(tmp_path, "main")
+    for key in ("build-rdst-sidecar-linux", "build-rdst-cli-macos"):
+        assert main[key]["depends_on"] == "build-rdst-web"
+        assert main[key]["env"] == {"RDST_WEB_ARTIFACT": "1"}
+    for key in ("prepare-rdst-desktop-macos", "prepare-rdst-desktop-windows"):
+        assert main[key]["depends_on"] == ["build-rdst-web"]
+        assert main[key]["env"]["RDST_WEB_ARTIFACT"] == "1"
+    linux_docker = next(p for p in main["build-rdst-sidecar-linux"]["plugins"] if any("docker" in k for k in p))
+    docker = next(iter(linux_docker.values()))
+    assert docker["mount-buildkite-agent"] is True
+    assert "RDST_WEB_ARTIFACT" in docker["environment"]
+
+    # Change and promotion builds have no keyed artifact: nothing waits for one.
+    for steps in (
+        desktop_pipeline(tmp_path, "refs/changes/52/16352/6"),
+        desktop_pipeline(tmp_path, "refs/changes/52/16352/6", **PROMOTION),
+    ):
+        assert "build-rdst-web" not in steps
+        assert "depends_on" not in steps["build-rdst-sidecar-linux"]
+        for key in ("prepare-rdst-desktop-macos", "prepare-rdst-desktop-windows"):
+            assert steps[key]["depends_on"] == []
+            assert steps[key]["env"]["RDST_WEB_ARTIFACT"] == "0"
