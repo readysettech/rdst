@@ -6573,6 +6573,100 @@
         "title": "ChartMarker",
         "type": "object"
       },
+      "ChatMessage": {
+        "properties": {
+          "content": {
+            "maxLength": 4000,
+            "title": "Content",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ChatMessage",
+        "type": "object"
+      },
+      "ChatRequest": {
+        "description": "The help chat so far; the last message is the user's newest turn.",
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            },
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Messages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "title": "ChatRequest",
+        "type": "object"
+      },
+      "ChatResponse": {
+        "properties": {
+          "ai": {
+            "default": true,
+            "title": "Ai",
+            "type": "boolean"
+          },
+          "reply": {
+            "title": "Reply",
+            "type": "string"
+          },
+          "suggestion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatSuggestion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "reply"
+        ],
+        "title": "ChatResponse",
+        "type": "object"
+      },
+      "ChatSuggestion": {
+        "description": "A ready-to-send note for the team, drafted from the conversation.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "feedback",
+              "feature_request",
+              "bug"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "summary"
+        ],
+        "title": "ChatSuggestion",
+        "type": "object"
+      },
       "CheckupState": {
         "properties": {
           "ai_reason": {
@@ -22156,6 +22250,16 @@
             "title": "Include Query",
             "type": "boolean"
           },
+          "kind": {
+            "default": "feedback",
+            "enum": [
+              "feedback",
+              "feature_request",
+              "bug"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
           "query_hash": {
             "anyOf": [
               {
@@ -22180,6 +22284,18 @@
             ],
             "title": "Sentiment",
             "type": "string"
+          },
+          "transcript": {
+            "anyOf": [
+              {
+                "maxLength": 20000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transcript"
           }
         },
         "required": [
@@ -38208,6 +38324,48 @@
           }
         },
         "summary": "Submit Report",
+        "tags": [
+          "report"
+        ]
+      }
+    },
+    "/api/report/chat": {
+      "post": {
+        "description": "Answer a help question or draft feedback from the conversation so far.",
+        "operationId": "report_chat_api_report_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report Chat",
         "tags": [
           "report"
         ]

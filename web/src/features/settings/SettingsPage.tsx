@@ -35,7 +35,7 @@ import {
 import type { AddTab } from '../../components/configure/addTabs'
 import { DesktopUpdateControl } from '../../components/DesktopUpdateControl'
 import { EnvSecretsDialog } from '../../components/EnvSecretsDialog'
-import { ReportDialog } from '../../components/ReportDialog'
+import { FeedbackChat } from '../../components/FeedbackChat'
 import { TrialRegistrationDialog } from '../../components/TrialRegistrationDialog'
 import { useTarget } from '../../hooks/useTarget'
 import { isSignedInAccount, signinPromptOf } from '../../lib/accountStatus'
@@ -871,7 +871,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
         ) : null}
       </ConfirmDialog>
 
-      <ReportDialog
+      <FeedbackChat
         isOpen={feedbackOpen}
         onClose={() => setFeedbackOpen(false)}
       />

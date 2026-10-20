@@ -319,6 +319,15 @@ type RdstEventProperties = {
     age_bucket: AnalysisAgeBucket
     via: 'database' | 'route'
   }
+  /** The occasional Feedback & help invitation (lib/feedbackNudge). */
+  feedback_nudge_shown: undefined
+  feedback_nudge_clicked: undefined
+  feedback_nudge_dismissed: { forever: boolean }
+  /** A note sent from the Feedback & help chat; `drafted` when the assistant wrote it. */
+  feedback_chat_sent: {
+    kind: 'feedback' | 'feature_request' | 'bug'
+    drafted: boolean
+  }
   /** An uncaught UI error, unhandled rejection or error-boundary catch (lib/appErrors). */
   app_error: AppErrorEvent
   /** The first screen of an app session rendered. */

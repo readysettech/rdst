@@ -7,7 +7,7 @@ import { Pressable } from '@rs/ui-new/pressable'
 import { Text } from '@rs/ui-new/text'
 import { type ReactNode, useState } from 'react'
 import { DesktopUpdateControl } from '../components/DesktopUpdateControl'
-import { ReportDialog } from '../components/ReportDialog'
+import { FeedbackChat } from '../components/FeedbackChat'
 import {
   openTour,
   useSavedTourStep,
@@ -131,7 +131,10 @@ export function HelpPage() {
             className={doorClass}
             onClick={() => setFeedbackOpen(true)}
           >
-            <DoorBody name="Give feedback" line="Goes straight to the team." />
+            <DoorBody
+              name="Ask or give feedback"
+              line="Get a quick answer, or request a feature. Goes straight to the team."
+            />
           </Pressable>
           <a
             href={DISCORD_INVITE_URL}
@@ -193,7 +196,7 @@ export function HelpPage() {
           />
         </div>
       </PageContainer>
-      <ReportDialog
+      <FeedbackChat
         isOpen={feedbackOpen}
         onClose={() => setFeedbackOpen(false)}
       />

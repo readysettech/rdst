@@ -10,8 +10,8 @@ vi.mock('@tanstack/react-query', () => ({
   useQuery: () => ({ data: { version: '0.9.4', targets: [] } }),
 }))
 
-vi.mock('../components/ReportDialog', () => ({
-  ReportDialog: ({ isOpen }: { isOpen: boolean }) =>
+vi.mock('../components/FeedbackChat', () => ({
+  FeedbackChat: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div role="dialog">feedback</div> : null,
 }))
 
@@ -33,7 +33,9 @@ describe('Help', () => {
     expect(
       screen.getByRole('button', { name: /Keyboard shortcuts/ })
     ).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Give feedback/ })).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: /Ask or give feedback/ })
+    ).toBeTruthy()
     expect(
       screen.getByRole('link', { name: /Join Discord/ }).getAttribute('target')
     ).toBe('_blank')
@@ -51,7 +53,9 @@ describe('Help', () => {
 
   it('opens the feedback dialog from its door', () => {
     render(<HelpPage />)
-    fireEvent.click(screen.getByRole('button', { name: /Give feedback/ }))
+    fireEvent.click(
+      screen.getByRole('button', { name: /Ask or give feedback/ })
+    )
     expect(screen.getByRole('dialog')).toBeTruthy()
   })
 

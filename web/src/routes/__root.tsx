@@ -18,6 +18,7 @@ import { BackendDownBanner } from '../components/BackendDownBanner'
 // which would statically pull CodeMirror into the eager entry chunk.
 import { ConfigWarning } from '../components/ConfigWarning'
 import { DesktopNotificationsBanner } from '../components/DesktopNotificationsBanner'
+import { FeedbackNudge } from '../components/FeedbackNudge'
 import { SigninSoftStrip } from '../components/SigninPrompts'
 import { hydrateSelectedTarget } from '../features/database/selectedTarget'
 import { useAgentTurnOnRequests } from '../features/database/settings/useAgentTurnOnRequests'
@@ -87,6 +88,7 @@ function AppShell({
       <div className="draggable-region fixed inset-x-0 top-0 z-40 h-(--titlebar-right-height)" />
       <BackendDownBanner />
       <Sidebar />
+      <FeedbackNudge />
       <Main
         layout={layout}
         scrollKey={pathname}

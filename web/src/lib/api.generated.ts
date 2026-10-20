@@ -3531,6 +3531,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/report/chat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report Chat
+         * @description Answer a help question or draft feedback from the conversation so far.
+         */
+        post: operations["report_chat_api_report_chat_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{run_id}": {
         parameters: {
             query?: never;
@@ -6836,6 +6856,48 @@ export interface components {
             table?: string | null;
             /** Ts */
             ts: number;
+        };
+        /** ChatMessage */
+        ChatMessage: {
+            /** Content */
+            content: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "user" | "assistant";
+        };
+        /**
+         * ChatRequest
+         * @description The help chat so far; the last message is the user's newest turn.
+         */
+        ChatRequest: {
+            /** Messages */
+            messages: components["schemas"]["ChatMessage"][];
+        };
+        /** ChatResponse */
+        ChatResponse: {
+            /**
+             * Ai
+             * @default true
+             */
+            ai?: boolean;
+            /** Reply */
+            reply: string;
+            suggestion?: components["schemas"]["ChatSuggestion"] | null;
+        };
+        /**
+         * ChatSuggestion
+         * @description A ready-to-send note for the team, drafted from the conversation.
+         */
+        ChatSuggestion: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "feedback" | "feature_request" | "bug";
+            /** Summary */
+            summary: string;
         };
         /** CheckupState */
         CheckupState: {
@@ -12225,6 +12287,12 @@ export interface components {
              * @default false
              */
             include_query?: boolean;
+            /**
+             * Kind
+             * @default feedback
+             * @enum {string}
+             */
+            kind?: "feedback" | "feature_request" | "bug";
             /** Query Hash */
             query_hash?: string | null;
             /** Reason */
@@ -12235,6 +12303,8 @@ export interface components {
              * @enum {string}
              */
             sentiment?: "positive" | "negative" | "neutral";
+            /** Transcript */
+            transcript?: string | null;
         };
         /**
          * ReportResponse
@@ -20452,6 +20522,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_chat_api_report_chat_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatResponse"];
                 };
             };
             /** @description Validation Error */

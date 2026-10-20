@@ -652,6 +652,23 @@ export type InteractiveMessageRequest =
 export type ReportRequest = apiComponents['schemas']['ReportRequest']
 export type ReportSentiment = NonNullable<ReportRequest['sentiment']>
 export type ReportResponse = apiComponents['schemas']['ReportResponse']
+export type ReportKind = NonNullable<ReportRequest['kind']>
+export type ChatMessage = apiComponents['schemas']['ChatMessage']
+export type ChatResponse = apiComponents['schemas']['ChatResponse']
+
+export async function chatReport(
+  messages: ChatMessage[]
+): Promise<ChatResponse> {
+  const response = await fetch('/api/report/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages }),
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to reach help: ${response.status}`)
+  }
+  return response.json()
+}
 
 export async function submitReport(
   request: ReportRequest

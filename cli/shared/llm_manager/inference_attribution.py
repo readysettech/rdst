@@ -72,6 +72,7 @@ PURPOSE_FEATURES = {
     "init_connectivity_check": "init",
     "interactive_answer": "interactive",
     "help_answer": "help",
+    "help_chat": "help",
     "orm_conversion": "scan",
     "query_registry_analysis": "queries",
     "schema_annotation": "schema",

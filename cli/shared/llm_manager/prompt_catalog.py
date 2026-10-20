@@ -195,6 +195,12 @@ def _help_prompts():
     return (help_system_prompt(windows=False), help_system_prompt(windows=True))
 
 
+def _help_chat_prompts():
+    from shared.api.routes.report import help_chat_system_prompt
+
+    return (help_chat_system_prompt(),)
+
+
 def _test_data_prompts():
     from features.cache.test_data_generator import TEST_DATA_SYSTEM_PROMPT
 
@@ -303,6 +309,8 @@ OPERATIONS: dict[str, Operation] = {
     "help_answer": Operation(1000, max_user_bytes=16 * 1024, legacy_max_user_bytes=64 * 1024,
                              prompts=_help_prompts, response_formats=lambda: (None,),
                              legacy_prompts=(_HELP_LEGACY_PROMPT,)),
+    "help_chat": Operation(1000, max_user_bytes=64 * 1024, multi_turn=True,
+                           prompts=_help_chat_prompts, response_formats=lambda: (None,)),
 }
 
 # Call sites whose operation is a parameter. Each operation they serve lists its prompts

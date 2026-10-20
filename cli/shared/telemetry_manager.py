@@ -1575,6 +1575,7 @@ class TelemetryManager:
         plan_json: Optional[str] = None,
         suggestion_text: Optional[str] = None,
         sentiment: str = "neutral",  # positive, negative, neutral
+        kind: str = "feedback",  # feedback, feature_request, bug
         include_query: bool = False,
         include_plan: bool = False,
         flags_used: Optional[list] = None,
@@ -1608,6 +1609,7 @@ class TelemetryManager:
         properties = {
             "reason": reason,
             "sentiment": sentiment,
+            "kind": kind,
             "has_email": bool(email),
             "email": email,
             "include_query": include_query,
