@@ -67,7 +67,8 @@ function stageArtifact() {
   });
   rmSync(targetDist, { recursive: true, force: true });
   mkdirSync(targetDist, { recursive: true });
-  run(exe("tar"), ["-xzf", artifact.archive, "-C", targetDist], { shell: false });
+  // Relative paths: GNU tar on Windows reads "C:" in an archive path as a remote host.
+  run(exe("tar"), ["-xzf", path.relative(targetDist, artifact.archive)], { cwd: targetDist, shell: false });
   if (!existsSync(path.join(targetDist, "index.html"))) {
     throw new Error(`RDST web artifact has no index.html: ${artifact.archive}`);
   }
