@@ -46,11 +46,33 @@ CANDIDATE_V4_FLAGS = {
     "declared_count_enabled": False,
 }
 
+# Post-execution stages that only reshape a correct answer (its columns, their order,
+# numeric precision, name or month layout, counting convention) are off, and SQL the database
+# rejects or whose result looks wrong (no rows, an all-NULL column, repeated rows) gets one
+# repair.
+CANDIDATE_V5_FLAGS = {
+    **CANDIDATE_V4_FLAGS,
+    "execution_error_repair_enabled": True,
+    "percentage_scaling_enabled": True,
+    "name_format_enabled": False,
+    "projection_contract_enabled": False,
+    "projection_order_enabled": False,
+    "output_completion_enabled": False,
+    "outer_rounding_enabled": False,
+    "integer_mean_precision_enabled": False,
+    "text_mean_precision_enabled": False,
+    "fraction_precision_enabled": False,
+    "scaled_ratio_enabled": False,
+    "month_component_enabled": False,
+    "occurrence_percentage_enabled": False,
+    "result_check_repair_enabled": True,
+}
+
 
 def default_ask_service_options() -> dict:
-    """Return candidate-v4 settings without changing interaction or execution limits."""
+    """Return candidate-v5 settings without changing interaction or execution limits."""
     return {
-        **CANDIDATE_V4_FLAGS,
+        **CANDIDATE_V5_FLAGS,
         "enum_overlap_advisory": True,
         "correction_intent_routing_intent_scope": CORRECTION_INTENT_EXPERIMENTAL_SCOPE,
     }

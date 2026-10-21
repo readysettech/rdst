@@ -412,6 +412,8 @@ def build_parser() -> argparse.ArgumentParser:
             "encoded-identifier, empty-result time-storage, and full-month "
             "axis-storage repairs. candidate-v3 records the hardened selector, "
             "scope, value-location, and probe semantics. candidate-v4 selects the frozen experimental fullv56 profile."
+            " candidate-v5, the product profile, is candidate-v4 without the stages that"
+            " only reshape a correct answer."
         ),
     )
     run.add_argument("--max-cases", type=_positive_int)

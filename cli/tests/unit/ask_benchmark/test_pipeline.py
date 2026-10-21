@@ -815,7 +815,7 @@ def test_rdst_runner_binds_compact_semantic_formatter(tmp_path: Path):
     runner = _rdst_runner(
         tmp_path,
         context_mode=ContextMode.AUTO_INIT,
-        semantic_schema_format="rdst-compact-schema-v2",
+        semantic_schema_format="rdst-compact-schema-v3",
     )
     runner.preflight_gold([_case()])
     with (

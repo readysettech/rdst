@@ -22,6 +22,8 @@ class StableFirstPlan:
 def plan_stable_first(sql, dialect, schema):
     if schema is None:
         return None
+    # Ask names PostgreSQL "postgresql"; sqlglot names it "postgres".
+    dialect = "postgres" if dialect == "postgresql" else dialect
     if dialect not in {"mysql", "postgres"} or not check_read_only(sql, dialect)["is_read_only"]:
         return None
     try:

@@ -206,6 +206,35 @@ def test_service_accepts_only_complete_proofs_and_restores(failure):
     assert restored.stable_first_probe_diagnostics == ctx.stable_first_probe_diagnostics
 
 
+def test_service_resolves_a_postgresql_tie():
+    responses = [
+        {"success": True, "rows": [["old", 9, 2]], "columns": ["label", "rating", "key"]},
+        {
+            "success": True,
+            "rows": [["new", 9, 1, 1]],
+            "columns": ["label", "rating", "key", "unique"],
+        },
+        {"success": True, "rows": [["new"]], "columns": ["label"]},
+    ]
+    calls = []
+
+    def execute(sql, config):
+        calls.append(sql)
+        return responses[len(calls) - 1]
+
+    ctx = context()
+    ctx.db_type = "postgresql"
+    ctx.target_config = {"engine": "postgresql"}
+
+    ctx = asyncio.run(
+        AskService(llm_manager=Mock(), db_executor=execute)._apply_stable_first(ctx)
+    )
+
+    assert ctx.stable_first["status"] == "normalized"
+    assert ctx.execution_result.rows == [["new"]]
+    assert len(calls) == 3
+
+
 def test_probe_count_deadline_and_read_only(monkeypatch):
     now = [0.0]
     monkeypatch.setattr("features.ask.value_probe.time.monotonic", lambda: now[0])

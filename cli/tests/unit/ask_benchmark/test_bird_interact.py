@@ -264,6 +264,26 @@ def test_postgres_ask_executor_maps_bounds(monkeypatch):
     assert result["error_kind"] == "timeout"
 
 
+def test_postgres_ask_executor_passes_the_sqlstate_so_ask_can_repair(monkeypatch):
+    from features.ask import execution_error_repair
+
+    executor = PostgresQualificationExecutor(PostgresConnectionConfig())
+    monkeypatch.setattr(
+        executor,
+        "execute",
+        lambda sql, db_id: QueryResult(
+            error='column "amout" does not exist', error_code="42703"
+        ),
+    )
+
+    result = executor.as_ask_executor("fixture_db")("SELECT amout FROM t", {})
+
+    assert result["error_code"] == "42703"
+    assert execution_error_repair.qualifies(
+        result["error"], result["error_kind"], result["error_code"], "postgresql"
+    )
+
+
 def test_summary_reports_qualification_not_publication():
     attempts = [
         {

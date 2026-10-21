@@ -1,4 +1,4 @@
-"""Prototype constrained measure-source selection, not imported by Ask."""
+"""Constrained measure-source selection for Ask's post-execution metric-source stage."""
 
 import hashlib, json
 from time import perf_counter

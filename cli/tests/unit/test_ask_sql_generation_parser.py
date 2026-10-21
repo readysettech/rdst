@@ -72,6 +72,11 @@ class _BenchmarkManager:
         return {"response": json.dumps(self.response)}
 
 
+class _TextManager(_BenchmarkManager):
+    def generate_response(self, **kwargs):
+        return {"response": self.response}
+
+
 def _generate(response):
     return generate_sql_from_nl(
         "List events", "Table: events (name text)", "mysql", "fixture",
@@ -79,28 +84,96 @@ def _generate(response):
     )
 
 
+_ANSWER = {
+    "sql": "SELECT name FROM events", "explanation": "List names.",
+    "confidence": 0.9, "assumptions": [], "cannot_answer": False,
+    "cannot_answer_reason": "", "missing_schema": [],
+}
+
+
 @pytest.mark.parametrize("invalid", [
-    {"additionalProperties": False},
     {"sql": 123},
-    {"explanation": []},
-    {"confidence": True},
-    {"confidence": 2},
-    {"assumptions": "none"},
     {"cannot_answer": "false"},
-    {"cannot_answer_reason": []},
-    {"missing_schema": "events"},
 ])
 def test_invalid_model_fields_return_failure_in_benchmark_mode(invalid):
-    response = {
-        "sql": "SELECT name FROM events", "explanation": "List names.",
-        "confidence": 0.9, "assumptions": [], "cannot_answer": False,
-        "cannot_answer_reason": "", "missing_schema": [],
-        **invalid,
-    }
-    result = _generate(response)
+    result = _generate({**_ANSWER, **invalid})
     assert result["success"] is False
     assert result["sql"] == ""
     assert result["error"]
+
+
+@pytest.mark.parametrize(("slip", "relaxed"), [
+    ({"additionalProperties": False}, {}),
+    ({"explanation": []}, {"explanation": ""}),
+    ({"confidence": True}, {"confidence": 0.0}),
+    ({"confidence": 2}, {"confidence": 1.0}),
+    ({"confidence": -0.5}, {"confidence": 0.0}),
+    ({"confidence": "high"}, {"confidence": 0.0}),
+    ({"assumptions": "Names are unique."}, {"assumptions": ["Names are unique."]}),
+    ({"assumptions": ["Names are unique.", 3]}, {"assumptions": ["Names are unique."]}),
+    ({"cannot_answer_reason": "missing_schema"}, {}),
+    ({"cannot_answer_reason": []}, {}),
+    ({"missing_schema": ["event dates"]}, {}),
+    ({"missing_schema": "events"}, {}),
+    ({"cannot_answer": None}, {}),
+])
+def test_format_slips_beside_usable_sql_keep_the_answer(slip, relaxed):
+    result = _generate({**_ANSWER, **slip})
+    assert result["success"] is True
+    assert result["sql"] == "SELECT name FROM events"
+    expected = {**_ANSWER, **relaxed}
+    assert {key: result[key] for key in expected} == expected
+    assert result["raw_response"] == {**_ANSWER, **slip}
+
+
+@pytest.mark.parametrize("missing", ["explanation", "confidence", "missing_schema"])
+def test_missing_fields_beside_usable_sql_keep_the_answer(missing):
+    response = {key: value for key, value in _ANSWER.items() if key != missing}
+    result = _generate(response)
+    assert result["success"] is True
+    assert result["sql"] == "SELECT name FROM events"
+
+
+def test_answer_object_with_stray_fields_is_parsed_from_prose():
+    answer = {**_ANSWER, "notes": "checked"}
+    text = f"Here is the query: {json.dumps(answer)} It lists every name."
+    result = generate_sql_from_nl(
+        "List events", "Table: events (name text)", "mysql", "fixture",
+        _TextManager(text),
+    )
+    assert result["success"] is True
+    assert result["sql"] == "SELECT name FROM events"
+
+
+@pytest.mark.parametrize(("refusal", "error"), [
+    ({"sql": "", "cannot_answer": True, "cannot_answer_reason": "missing_schema",
+      "confidence": 2}, "confidence must be a number between 0 and 1"),
+    ({"cannot_answer": True, "cannot_answer_reason": "missing_schema"},
+     "cannot_answer responses must leave sql empty"),
+])
+def test_refusals_keep_the_strict_contract(refusal, error):
+    result = _generate({**_ANSWER, **refusal})
+    assert result["success"] is False
+    assert result["error"] == error
+
+
+def test_genuine_refusal_stays_a_refusal():
+    result = _generate({
+        **_ANSWER, "sql": "", "cannot_answer": True,
+        "cannot_answer_reason": "missing_schema", "missing_schema": ["event dates"],
+    })
+    assert result["success"] is True
+    assert result["cannot_answer"] is True
+    assert result["cannot_answer_reason"] == "missing_schema"
+    assert result["missing_schema"] == ["event dates"]
+
+
+def test_relaxed_answers_still_refuse_writes():
+    result = _generate({
+        **_ANSWER, "sql": "DELETE FROM events", "cannot_answer_reason": "missing_schema",
+    })
+    assert result["success"] is False
+    assert result["error_code"] == "ask_unsafe_sql"
 
 
 def test_json_array_returns_failure_in_benchmark_mode():

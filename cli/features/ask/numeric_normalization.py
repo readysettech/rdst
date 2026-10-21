@@ -180,8 +180,13 @@ def normalize_explicit_ratio_sql(
     sql: str,
     dialect: str,
     intent_hints: Collection[str] = (),
+    percentage_scaling: bool = True,
 ) -> tuple[str, dict[str, Any]]:
-    """Use floating division when the request explicitly asks for a ratio."""
+    """Use floating division when the request explicitly asks for a ratio.
+
+    For an explicit percentage request, also scale an unscaled fraction of two aggregates by
+    100 unless `percentage_scaling` is off; the floating cast applies either way.
+    """
     diagnostics: dict[str, Any] = {
         "version": EXPLICIT_RATIO_NORMALIZER_VERSION,
         "status": "unchanged",
@@ -240,15 +245,18 @@ def normalize_explicit_ratio_sql(
         and not _already_percent_scaled(percentage_divisions[0])
         and _fractional_population_ratio(percentage_divisions[0])
     ):
-        division = percentage_divisions[0]
-        division.set(
-            "this",
-            exp.Mul(
-                this=division.this.copy(),
-                expression=exp.Literal.number(100),
-            ),
-        )
-        scaled = 1
+        if percentage_scaling:
+            division = percentage_divisions[0]
+            division.set(
+                "this",
+                exp.Mul(
+                    this=division.this.copy(),
+                    expression=exp.Literal.number(100),
+                ),
+            )
+            scaled = 1
+        else:
+            diagnostics["percentage_scaling"] = "disabled"
 
     changed = 0
     divisions = (
@@ -291,7 +299,7 @@ def normalize_explicit_ratio_sql(
     return normalized, diagnostics
 
 
-def normalize_context(ctx: Any) -> Any:
+def normalize_context(ctx: Any, *, percentage_scaling: bool = True) -> Any:
     sql = ctx.sql or ""
     selected_intents = selected_correction_intents(
         getattr(ctx, "correction_intent_routing", None)
@@ -302,6 +310,7 @@ def normalize_context(ctx: Any) -> Any:
         sql=sql,
         dialect=ctx.db_type,
         intent_hints=selected_intents,
+        percentage_scaling=percentage_scaling,
     )
     if normalized != sql:
         ctx.sql = normalized

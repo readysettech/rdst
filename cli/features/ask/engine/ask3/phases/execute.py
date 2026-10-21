@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import math
-import re
 import time
 import uuid
 from typing import TYPE_CHECKING, Dict, Any, List
@@ -57,7 +56,11 @@ def execute_query(
     # The validate phase covers the linear flow only: agent escalation and direct
     # agent mode hand their own SQL straight to execution. Validate here so every
     # path is gated at the point of no return.
-    from features.ask.sql_validation import describe_validation_issues, validate_sql_for_ask
+    from features.ask.sql_validation import (
+        describe_validation_issues,
+        probe_outer_limit,
+        validate_sql_for_ask,
+    )
 
     db_type = ctx.db_type or ctx.target_config.get('engine', 'postgresql').lower()
     validation = validate_sql_for_ask(
@@ -87,7 +90,7 @@ def execute_query(
     ctx.rows_capped = False
     fetch_limit = MAX_RESULT_ROWS + 1 if ctx.enforce_result_limit else None
     # One row past an Ask-imposed cap tells a cut result from one that fits exactly.
-    run_sql = (_with_trailing_limit(ctx.sql, row_limit) if capped else None) or ctx.sql
+    run_sql = (probe_outer_limit(ctx.sql, row_limit, db_type) if capped else None) or ctx.sql
     probed = run_sql != ctx.sql
 
     start_time = time.time()
@@ -120,6 +123,7 @@ def execute_query(
             ctx.execution_result = ExecutionResult(
                 error=error,
                 error_kind=result.get('error_kind'),
+                error_code=result.get('error_code'),
                 execution_time_ms=execution_time_ms
             )
             presenter.execution_error(error)
@@ -129,13 +133,13 @@ def execute_query(
         columns = result.get('columns', [])
         rows = result.get('rows', [])
         if not capped:
-            # Nothing Ask imposed cut the result; a full page still reads as possibly
-            # partial to the post-execution repairs.
-            truncated = len(rows) >= ctx.max_rows
+            # Ask imposed no cap, so only an executor that stopped early cut the result.
+            truncated = bool(result.get('truncated'))
         elif probed:
             truncated = len(rows) > row_limit
             rows = rows[:row_limit]
         else:
+            # A capped WITH TIES count has no exact probe; a full page may hide cut rows.
             truncated = len(rows) >= row_limit
         if fetch_limit is not None and len(rows) > MAX_RESULT_ROWS:
             # A limit form Ask doesn't rewrite (FETCH ... WITH TIES) returned more rows
@@ -188,17 +192,6 @@ def _refuse(ctx: 'Ask3Context', presenter: 'Ask3Presenter', message: str) -> 'As
     ctx.execution_result = ExecutionResult(error=message, error_kind="refused")
     presenter.error(message)
     return ctx
-
-
-_TRAILING_LIMIT = re.compile(r"\bLIMIT\s+(\d+)(\s*;?\s*)$", re.IGNORECASE)
-
-
-def _with_trailing_limit(sql: str, limit: Any) -> str | None:
-    """The SQL with its trailing ``LIMIT n`` raised to n + 1, or None when it has none."""
-    match = _TRAILING_LIMIT.search(sql)
-    if not isinstance(limit, int) or match is None or int(match.group(1)) != limit:
-        return None
-    return f"{sql[:match.start()]}LIMIT {limit + 1}{match.group(2)}"
 
 
 def _cancelled_result() -> Dict[str, Any]:
@@ -331,6 +324,7 @@ def _execute_postgres(
             'success': False,
             'error': message,
             'error_kind': error_kind,
+            'error_code': getattr(e, "pgcode", None),
             'rows': [],
             'columns': []
         }

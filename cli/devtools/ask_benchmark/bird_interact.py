@@ -217,6 +217,7 @@ class PostgresQualificationExecutor:
                 execution_time_ms=(time.perf_counter() - started) * 1000,
                 error=message,
                 timed_out="statement timeout" in message.casefold(),
+                error_code=getattr(exc, "pgcode", None),
             )
         finally:
             if connection is not None:
@@ -239,6 +240,8 @@ class PostgresQualificationExecutor:
                 "columns": list(result.columns),
                 "error": result.error,
                 "error_kind": error_kind,
+                # Ask repairs a statement the database rejected only when it knows why.
+                "error_code": result.error_code,
             }
 
         return execute

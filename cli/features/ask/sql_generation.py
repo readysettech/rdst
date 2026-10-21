@@ -7,6 +7,7 @@ disambiguation detection, and iterative refinement.
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -43,10 +44,12 @@ class _SQLGenerationResponseError(ValueError):
 # expire before those routes emit any structured output. Keep the response
 # contract concise while allowing the same Ask pipeline to evaluate such models.
 SQL_GENERATION_MAX_TOKENS = 4000
-SQL_GENERATION_RESPONSE_PARSER_VERSION = "last-valid-json-object-v2"
+SQL_GENERATION_RESPONSE_PARSER_VERSION = "last-valid-json-object-v3"
 _SCHEMA_SIZE_ERROR_CODES = {
     "ANTHROPIC_CONTEXT_WINDOW_EXCEEDED",
     "ANTHROPIC_REQUEST_TOO_LARGE",
+    # Keyservice's request-body limit for Readyset-hosted inference.
+    "REQUEST_TOO_LARGE",
 }
 
 
@@ -99,6 +102,8 @@ def _schema_size_failure(
     limit = (
         "Anthropic's model context window"
         if error.code == "ANTHROPIC_CONTEXT_WINDOW_EXCEEDED"
+        else "Readyset-hosted AI's request size limit"
+        if error.code == "REQUEST_TOO_LARGE"
         else "Anthropic's Messages API request-body limit"
     )
     attempts = (
@@ -191,6 +196,41 @@ def _parse_json_object_response(
     if not isinstance(parsed, dict):
         raise TypeError("LLM response must be a JSON object")
     return parsed
+
+
+def _usable_answer(result_data: Dict[str, Any]) -> Dict[str, Any] | None:
+    """An answer with SQL that the model did not refuse, minus its format-only slips.
+
+    Stray fields, refusal details, and a malformed explanation, confidence or
+    assumptions list do not change the SQL, so they are dropped or coerced. Returns
+    None for refusals and for responses without SQL, which keep the strict contract.
+    """
+    sql = result_data.get("sql")
+    if not isinstance(sql, str) or not sql.strip():
+        return None
+    if result_data.get("cannot_answer") not in (False, None):
+        return None
+    properties = SQL_GENERATION_RESPONSE_SCHEMA["properties"]
+    answer = {key: value for key, value in result_data.items() if key in properties}
+    answer.update(cannot_answer=False, cannot_answer_reason="", missing_schema=[])
+    if not isinstance(answer.get("explanation"), str):
+        answer["explanation"] = ""
+    confidence = answer.get("confidence")
+    numeric = isinstance(confidence, (int, float)) and not isinstance(confidence, bool)
+    answer["confidence"] = (
+        min(max(float(confidence), 0.0), 1.0)
+        if numeric and math.isfinite(confidence)
+        else 0.0
+    )
+    assumptions = answer.get("assumptions")
+    if isinstance(assumptions, str):
+        assumptions = [assumptions] if assumptions.strip() else []
+    answer["assumptions"] = (
+        [item for item in assumptions if isinstance(item, str)]
+        if isinstance(assumptions, list)
+        else []
+    )
+    return answer
 
 
 @dataclass
@@ -400,17 +440,24 @@ def generate_sql_from_nl(
         logger.debug(f"LLM response (first 500 chars): {response_text[:500]}")
 
         try:
-            result_data = _parse_json_object_response(
-                response_text,
-                required_fields=set(SQL_GENERATION_RESPONSE_SCHEMA["required"]),
-                allowed_fields=set(SQL_GENERATION_RESPONSE_SCHEMA["properties"]),
-            )
+            try:
+                result_data = _parse_json_object_response(
+                    response_text,
+                    required_fields=set(SQL_GENERATION_RESPONSE_SCHEMA["required"]),
+                    allowed_fields=set(SQL_GENERATION_RESPONSE_SCHEMA["properties"]),
+                )
+            except json.JSONDecodeError:
+                # An answer object with missing or stray fields can still carry SQL.
+                result_data = _parse_json_object_response(
+                    response_text, required_fields={"sql"}
+                )
         except TypeError as exc:
             raise _SQLGenerationResponseError(str(exc)) from exc
 
+        answer = _usable_answer(result_data)
         required_fields = set(SQL_GENERATION_RESPONSE_SCHEMA["required"])
         missing_fields = sorted(required_fields - result_data.keys())
-        if missing_fields:
+        if missing_fields and answer is None:
             return {
                 "success": False,
                 "sql": "",
@@ -425,21 +472,22 @@ def generate_sql_from_nl(
         unexpected_fields = sorted(
             result_data.keys() - SQL_GENERATION_RESPONSE_SCHEMA["properties"].keys()
         )
-        if unexpected_fields:
+        if unexpected_fields and answer is None:
             raise _SQLGenerationResponseError(
                 "SQL generation response has unexpected fields: "
                 + ", ".join(unexpected_fields)
             )
 
+        fields = answer if answer is not None else result_data
         result = SQLGenerationResult(
             success=True,
-            sql=result_data.get("sql", ""),
-            explanation=result_data.get("explanation", ""),
-            confidence=result_data.get("confidence", 0.0),
-            assumptions=result_data.get("assumptions", []),
-            cannot_answer=result_data.get("cannot_answer", False),
-            cannot_answer_reason=result_data.get("cannot_answer_reason", ""),
-            missing_schema=result_data.get("missing_schema", []),
+            sql=fields.get("sql", ""),
+            explanation=fields.get("explanation", ""),
+            confidence=fields.get("confidence", 0.0),
+            assumptions=fields.get("assumptions", []),
+            cannot_answer=fields.get("cannot_answer", False),
+            cannot_answer_reason=fields.get("cannot_answer_reason", ""),
+            missing_schema=fields.get("missing_schema", []),
             raw_response=result_data,
         )
 

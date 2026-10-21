@@ -33,6 +33,7 @@ import requests
 from requests.adapters import BaseAdapter
 from requests.structures import CaseInsensitiveDict
 
+from features.ask import execution_error_repair, result_check
 from shared.llm_manager import hosted_provider
 from shared.llm_manager.key_resolution import KeyResolution
 from shared.llm_manager.llm_manager import LLMManager
@@ -64,6 +65,24 @@ def load_keyservice_module(name: str) -> ModuleType:
         del sys.modules[name]
         raise
     return module
+
+
+def _call_stage(operation: str, turns: list[dict[str, Any]]) -> str:
+    """The stage a call record names: the hosted operation, or one of Ask's repairs.
+
+    Ask sends its database-error and result-check repairs as validation repairs, so their
+    feedback tells them apart.
+    """
+    if operation != "sql_validation_repair":
+        return operation
+    feedback = " ".join(
+        str(turn.get("content")) for turn in turns if turn.get("role") == "user"
+    )
+    if execution_error_repair.FEEDBACK_PREFIX in feedback:
+        return "sql_execution_repair"
+    if result_check.FEEDBACK_PREFIX in feedback:
+        return "sql_result_check_repair"
+    return operation
 
 
 def keyservice_route(spec: ModelSpec) -> Any:
@@ -221,6 +240,7 @@ class _KeyserviceStandIn(BaseAdapter):
             )
             code, status = self._policy.rejection_response(exc.reason)
             return status, {"code": code, "reason": exc.reason, "detail": exc.detail}
+        stage = _call_stage(admitted.operation, body.get("messages") or [])
         body["messages"] = admitted.messages
         body.pop("prompt", None)
         production_route = hosted.select_route(body)
@@ -229,7 +249,7 @@ class _KeyserviceStandIn(BaseAdapter):
         )
         return self._send_upstream(
             payload,
-            stage=admitted.operation,
+            stage=stage,
             request_id=str(body["request_id"]),
             max_tokens=int(body.get("max_tokens") or 800),
             feature=self._policy.prompt_registry.OPERATIONS[admitted.operation][

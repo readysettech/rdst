@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import functools
 import hashlib
 import json
 import logging
@@ -76,6 +77,8 @@ from .encoded_identifier_storage import (
     normalize_context as normalize_encoded_identifier_storage_context,
 )
 from .engine.ask3.phases.generate import repair_validation_error
+from . import execution_error_repair
+from . import result_check
 from .engine.ask3.phases.validate import build_error_message
 from .engine.ask3.types import StatementCancel
 from .events import (
@@ -336,6 +339,7 @@ _CORRECTION_STATE_FIELDS = (
     "error_category",
     "phase",
     "validation_errors",
+    "validation_resolution",
     "limit_added",
     "limit_reduced",
     "row_limit",
@@ -357,6 +361,7 @@ _CORRECTION_STATE_FIELDS = (
 _CORRECTION_COPIED_FIELDS = frozenset(
     {
         "validation_errors",
+        "validation_resolution",
         "explicit_ratio_normalization",
         "scalar_derived_metric_normalization",
         "all_rows_aggregate_normalization",
@@ -506,6 +511,7 @@ class AskService:
         dual_candidate_selection_fn: Callable[..., Any] | None = None,
         explicit_ratio_normalization_enabled: bool = True,
         explicit_ratio_normalization_fn: Callable[..., Any] | None = None,
+        percentage_scaling_enabled: bool = True,
         scalar_derived_metric_normalization_enabled: bool = True,
         scalar_derived_metric_normalization_fn: Callable[..., Any] | None = None,
         all_rows_aggregate_normalization_enabled: bool = True,
@@ -554,6 +560,8 @@ class AskService:
         enum_overlap_advisory: bool = False,
         stable_first_enabled: bool = False,
         declared_count_enabled: bool = False,
+        execution_error_repair_enabled: bool = False,
+        result_check_repair_enabled: bool = False,
     ):
         self._llm_manager = llm_manager
         self._period_literal_enabled = period_literal_enabled
@@ -586,6 +594,8 @@ class AskService:
         self._enum_overlap_advisory = enum_overlap_advisory
         self._stable_first_enabled = stable_first_enabled
         self._declared_count_enabled = declared_count_enabled
+        self._execution_error_repair_enabled = execution_error_repair_enabled
+        self._result_check_repair_enabled = result_check_repair_enabled
         self._semantic_manager = semantic_manager
         self._db_executor = db_executor
         self._targets_config_factory = targets_config_factory
@@ -615,8 +625,23 @@ class AskService:
             )
         if len(set(requested_scope)) != len(requested_scope):
             raise ValueError("correction intent scope must contain unique names")
+        # The router is offered only intents whose correction this service would apply.
+        rewrite_enabled = {
+            "percentage_output": explicit_ratio_normalization_enabled,
+            "ratio_output": explicit_ratio_normalization_enabled,
+            "scalar_difference_output": scalar_derived_metric_normalization_enabled,
+            "all_rows_population": all_rows_aggregate_normalization_enabled,
+            "entity_at_extremum": extremum_entity_normalization_enabled,
+            "all_matching_categories": unbounded_categorical_normalization_enabled,
+            "shared_scope_all_answers": shared_entity_scope_normalization_enabled,
+            "encoded_identifier_storage": encoded_identifier_storage_enabled,
+            "temporal_text_storage": temporal_text_storage_enabled,
+            "month_axis_storage": month_axis_storage_enabled,
+        }
         self._correction_intent_routing_intent_scope = tuple(
-            intent for intent in CORRECTION_INTENTS if intent in requested_scope
+            intent
+            for intent in CORRECTION_INTENTS
+            if intent in requested_scope and rewrite_enabled[intent]
         )
         self._dual_candidate_selection_enabled = bool(dual_candidate_selection_enabled)
         self._dual_candidate_selection_fn = (
@@ -625,8 +650,12 @@ class AskService:
         self._explicit_ratio_normalization_enabled = bool(
             explicit_ratio_normalization_enabled
         )
-        self._explicit_ratio_normalization_fn = (
-            explicit_ratio_normalization_fn or normalize_numeric_context
+        self._percentage_scaling_enabled = bool(percentage_scaling_enabled)
+        self._explicit_ratio_normalization_fn = explicit_ratio_normalization_fn or (
+            functools.partial(
+                normalize_numeric_context,
+                percentage_scaling=self._percentage_scaling_enabled,
+            )
         )
         self._scalar_derived_metric_normalization_enabled = bool(
             scalar_derived_metric_normalization_enabled
@@ -1278,6 +1307,10 @@ class AskService:
             ctx = await self._apply_stable_first(ctx)
         if self._declared_count_enabled:
             ctx = await self._apply_declared_count(ctx)
+        if self._execution_error_repair_enabled:
+            ctx = await self._apply_execution_error_repair(ctx)
+        if self._result_check_repair_enabled:
+            ctx = await self._apply_result_check_repair(ctx)
         sql_changed = not _sql_candidates_equivalent(
             executed_sql,
             str(ctx.sql or ""),
@@ -1312,6 +1345,8 @@ class AskService:
             or self._calendar_day_enabled
             or self._stable_first_enabled
             or self._declared_count_enabled
+            or self._execution_error_repair_enabled
+            or self._result_check_repair_enabled
         ):
             self._observe(AskPhase.EXECUTE, ctx)
         if sql_changed:
@@ -1369,6 +1404,151 @@ class AskService:
             snapshot_correction=_snapshot_correction_state,
             restore_correction=_restore_correction_state,
         )
+
+    async def _apply_execution_error_repair(self, ctx: Any) -> Any:
+        """Ask the model once to fix SQL the database rejected, and run its fix once."""
+        original = _snapshot_correction_state(ctx)
+        original_response = ctx.generation_response
+        result = ctx.execution_result
+        diagnostics = {"version": execution_error_repair.VERSION, "status": "unchanged"}
+        ctx.execution_error_repair = diagnostics
+        if result is None or not result.error:
+            diagnostics["reason"] = "no-execution-error"
+            return ctx
+        if not execution_error_repair.qualifies(
+            result.error, result.error_kind, result.error_code, ctx.db_type
+        ):
+            diagnostics["reason"] = "error-not-caused-by-the-statement"
+            return ctx
+        failed_sql = ctx.sql
+        diagnostics["error"] = result.error[: execution_error_repair.MAX_ERROR_CHARS]
+
+        def revert(reason: str, **details: Any) -> Any:
+            _restore_correction_state(ctx, original)
+            ctx.generation_response = original_response
+            diagnostics.update(status="reverted", reason=reason, **details)
+            ctx.execution_error_repair = diagnostics
+            return ctx
+
+        try:
+            ctx = await asyncio.to_thread(
+                repair_validation_error,
+                ctx,
+                _NullPresenter(),
+                execution_error_repair.repair_feedback(result.error),
+                self._llm_manager,
+                phase="execution_repair",
+            )
+            if not ctx.sql or ctx.sql == failed_sql:
+                return revert("no-usable-repair")
+            diagnostics["candidate_sql"] = ctx.sql
+            ctx = await asyncio.to_thread(validate_sql, ctx, _NullPresenter())
+            if ctx.has_validation_errors():
+                issues = [str(error) for error in ctx.validation_errors]
+                return revert("candidate-validation-failed", issues=issues)
+            # A worker that outlives the deadline keeps writing to its context, so it
+            # runs on a copy that is adopted only once it finishes.
+            candidate = copy.copy(ctx)
+            try:
+                candidate = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        execute_query, candidate, _NullPresenter(), self._db_executor
+                    ),
+                    _execution_deadline(ctx),
+                )
+            except asyncio.TimeoutError:
+                if ctx.statement_cancel is not None:
+                    ctx.statement_cancel.abort()
+                return revert("candidate-timed-out")
+            after = candidate.execution_result
+            if after is None or after.error or not after.columns:
+                candidate_error = str(after.error or "") if after is not None else ""
+                limit = execution_error_repair.MAX_ERROR_CHARS
+                return revert(
+                    "candidate-execution-failed",
+                    candidate_error=candidate_error[:limit],
+                )
+            _restore_correction_state(ctx, _snapshot_correction_state(candidate))
+        except Exception as exc:
+            return revert("repair-failed", error_kind=type(exc).__name__)
+        diagnostics["status"] = "normalized"
+        ctx.execution_error_repair = diagnostics
+        return ctx
+
+    async def _apply_result_check_repair(self, ctx: Any) -> Any:
+        """Ask the model once to revisit SQL whose result shows a sign of a wrong query."""
+        original = _snapshot_correction_state(ctx)
+        original_response = ctx.generation_response
+        result = ctx.execution_result
+        diagnostics = {"version": result_check.VERSION, "status": "unchanged"}
+        ctx.result_check_repair = diagnostics
+        if result is None or result.error or not result.columns:
+            diagnostics["reason"] = "no-result"
+            return ctx
+        found = result_check.issues(result.columns, result.rows)
+        if not found:
+            diagnostics["reason"] = "no-signs"
+            return ctx
+        checked_sql = ctx.sql
+        diagnostics["signs"] = found
+
+        def revert(reason: str, **details: Any) -> Any:
+            _restore_correction_state(ctx, original)
+            ctx.generation_response = original_response
+            diagnostics.update(status="reverted", reason=reason, **details)
+            ctx.result_check_repair = diagnostics
+            return ctx
+
+        try:
+            ctx = await asyncio.to_thread(
+                repair_validation_error,
+                ctx,
+                _NullPresenter(),
+                result_check.repair_feedback(found),
+                self._llm_manager,
+                phase="result_check_repair",
+            )
+            if not ctx.sql or _sql_candidates_equivalent(checked_sql, ctx.sql, ctx.db_type):
+                return revert("kept-original")
+            diagnostics["candidate_sql"] = ctx.sql
+            ctx = await asyncio.to_thread(validate_sql, ctx, _NullPresenter())
+            if ctx.has_validation_errors():
+                issues = [str(error) for error in ctx.validation_errors]
+                return revert("candidate-validation-failed", issues=issues)
+            candidate = copy.copy(ctx)
+            try:
+                candidate = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        execute_query, candidate, _NullPresenter(), self._db_executor
+                    ),
+                    _execution_deadline(ctx),
+                )
+            except asyncio.TimeoutError:
+                if ctx.statement_cancel is not None:
+                    ctx.statement_cancel.abort()
+                return revert("candidate-timed-out")
+            after = candidate.execution_result
+            if after is None or after.error or not after.columns:
+                return revert("candidate-execution-failed")
+            if [name.casefold() for name in after.columns] != [
+                name.casefold() for name in result.columns
+            ]:
+                return revert("candidate-changed-columns", candidate_columns=after.columns)
+            if result_check.distinct_rows(after.rows) < result_check.distinct_rows(result.rows):
+                return revert("candidate-lost-rows")
+            remaining = result_check.issues(after.columns, after.rows)
+            # Better means some sign is gone and none is new, so one column emptied to fill
+            # another is not better.
+            before_signs = result_check.signs(result.columns, result.rows)
+            after_signs = result_check.signs(after.columns, after.rows)
+            if not after_signs < before_signs:
+                return revert("candidate-not-better", candidate_signs=remaining)
+            _restore_correction_state(ctx, _snapshot_correction_state(candidate))
+        except Exception as exc:
+            return revert("repair-failed", error_kind=type(exc).__name__)
+        diagnostics["status"] = "normalized"
+        ctx.result_check_repair = diagnostics
+        return ctx
 
     async def _apply_period_literal(self, ctx: Any) -> Any:
         """Prove compact month storage and independently verify the aggregate."""

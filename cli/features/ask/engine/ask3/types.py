@@ -156,6 +156,7 @@ class ExecutionResult:
     execution_time_ms: float = 0.0
     error: Optional[str] = None
     error_kind: Optional[str] = None
+    error_code: Optional[str] = None  # The database's own code, such as a SQLSTATE
     truncated: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
@@ -167,6 +168,7 @@ class ExecutionResult:
             "execution_time_ms": self.execution_time_ms,
             "error": self.error,
             "error_kind": self.error_kind,
+            **({"error_code": self.error_code} if self.error_code else {}),
             "truncated": self.truncated,
         }
 

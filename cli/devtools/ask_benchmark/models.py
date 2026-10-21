@@ -183,6 +183,8 @@ class QueryResult:
     error: str | None = None
     timed_out: bool = False
     result_too_large: bool = False
+    # The database's own error code (a PostgreSQL SQLSTATE), when it gave one.
+    error_code: str | None = None
 
     @property
     def succeeded(self) -> bool:

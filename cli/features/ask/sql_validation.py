@@ -9,7 +9,9 @@ Multi-layer validation to ensure queries are safe for execution:
 """
 
 import re
+from dataclasses import dataclass
 from datetime import date
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 
 import sqlglot
@@ -628,13 +630,20 @@ def _get_first_keyword(sql: str) -> Optional[str]:
     return None
 
 
-_TOP_LIMIT = re.compile(r"\bLIMIT\s+(\d+)(?:\s*,\s*(\d+)|\s+OFFSET\s+\d+)?", re.IGNORECASE)
-_TOP_FETCH = re.compile(
-    r"\bFETCH\s+(?:FIRST|NEXT)\s+(\d+)?\s*ROWS?\s+(?:ONLY|WITH\s+TIES)\b", re.IGNORECASE
-)
+_MYSQL_EXECUTABLE_COMMENT = re.compile(r"(/\*!\d*)(.*?)\*/", re.DOTALL)
 
 
-_DOLLAR_QUOTE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$")
+@dataclass(frozen=True)
+class _RowLimit:
+    """The outermost query's LIMIT or FETCH FIRST clause, as offsets into the SQL."""
+
+    fetch: bool
+    with_ties: bool
+    count: int | None  # None for "FETCH FIRST ROW ONLY", which means one row
+    skips: bool  # MySQL's "LIMIT offset, count" or "LIMIT n OFFSET m"
+    count_span: tuple[int, int] | None
+    start: int
+    end: int
 
 
 def _is_mysql(dialect: str) -> bool:
@@ -654,122 +663,122 @@ def is_catalog_relation(table: exp.Table, schema_names: set[str], dialect: str) 
     return not mysql and name.startswith("pg_") and name not in schema_names
 
 
-def _continues_identifier(sql: str, i: int) -> bool:
-    """Whether the character before ``i`` belongs to an identifier or keyword."""
-    return i > 0 and (sql[i - 1].isalnum() or sql[i - 1] in "_$")
+def _outer_limit(sql: str, dialect: str = "") -> _RowLimit | None:
+    """The outermost query's LIMIT or FETCH FIRST clause, or None.
+
+    The tokenizer skips strings, quoted names, comments and dollar-quoted bodies in the
+    dialect's own rules; a clause inside parentheses belongs to a subquery.
+    """
+    text = sql
+    if _is_mysql(dialect):
+        # MySQL runs the SQL inside /*! ... */ (optionally /*!NNNNN, a minimum version), so
+        # its markers become spaces and its body is read as SQL; offsets stay the same.
+        text = _MYSQL_EXECUTABLE_COMMENT.sub(
+            lambda m: " " * len(m.group(1)) + m.group(2) + "  ", sql
+        )
+    try:
+        tokens = sqlglot.tokenize(text, read="mysql" if _is_mysql(dialect) else "postgres")
+    except sqlglot.errors.TokenError:
+        return None
+    words = [token.text.upper() for token in tokens]
+    depth = 0
+    for i, token in enumerate(tokens):
+        if token.token_type in (sqlglot.TokenType.L_PAREN, sqlglot.TokenType.L_BRACKET):
+            depth += 1
+        elif token.token_type in (sqlglot.TokenType.R_PAREN, sqlglot.TokenType.R_BRACKET):
+            depth = max(0, depth - 1)
+        elif depth == 0 and token.token_type == sqlglot.TokenType.LIMIT:
+            found = _limit_clause(tokens, words, i)
+            if found is not None:
+                return found
+        elif depth == 0 and token.token_type == sqlglot.TokenType.FETCH:
+            found = _fetch_clause(tokens, words, i)
+            if found is not None:
+                return found
+    return None
 
 
-def _quoted_end(sql: str, start: int, backslash_escapes: bool) -> int:
-    """The index just past the quoted span opening at ``start``; a doubled quote is
-    always an escape, a backslash only when ``backslash_escapes``."""
-    quote, i, n = sql[start], start + 1, len(sql)
-    while i < n:
-        if backslash_escapes and sql[i] == "\\":
-            i += 2
-        elif sql[i] == quote:
-            if i + 1 < n and sql[i + 1] == quote:
-                i += 2
-            else:
-                return i + 1
-        else:
-            i += 1
-    return n
+_MAX_ROW_COUNT = Decimal(2**63 - 1)
 
 
-def _block_comment_end(sql: str, start: int, nested: bool) -> int:
-    """The index just past the ``/* */`` comment opening at ``start``."""
-    depth, i, n = 1, start + 2, len(sql)
-    while i < n and depth:
-        if nested and sql.startswith("/*", i):
-            depth, i = depth + 1, i + 2
-        elif sql.startswith("*/", i):
-            depth, i = depth - 1, i + 2
-        else:
-            i += 1
-    return i
+def _row_count(text: str) -> int | None:
+    """A row count written as a number ("100", "100.0", "1e2"), rounded as PostgreSQL
+    rounds it; None when it is not a finite number."""
+    try:
+        value = Decimal(text)
+    except InvalidOperation:
+        return None
+    if not value.is_finite():
+        return None
+    # A count past any table's size ("1e999999999") reads as the largest; turning it into
+    # an exact integer would take time and memory that grow with its exponent.
+    if value.copy_abs() >= _MAX_ROW_COUNT:
+        return int(_MAX_ROW_COUNT) if value > 0 else -int(_MAX_ROW_COUNT)
+    return int(value.to_integral_value(rounding=ROUND_HALF_UP))
 
 
-def _top_level_text(sql: str, dialect: str = "") -> str:
-    """``sql`` with string literals, quoted names, comments and everything inside
-    parentheses blanked out, so a match in it belongs to the outermost query. Offsets are
-    preserved.
-
-    MySQL strings take backslash escapes and ``#`` starts a comment; PostgreSQL takes
-    backslash escapes only in ``E''`` strings, and has dollar-quoted bodies and nested
-    block comments. Any other dialect reads as PostgreSQL."""
-    mysql = _is_mysql(dialect)
-    out = list(sql)
-    i, depth, n = 0, 0, len(sql)
-    executable = False
-    while i < n:
-        ch = sql[i]
-        dollar = None
-        # MySQL runs the SQL inside /*! ... */ (optionally /*!NNNNN, a minimum version).
-        if mysql and sql.startswith("/*!", i):
-            end = i + 3
-            while end < n and sql[end].isdigit():
-                end += 1
-            out[i:end] = " " * (end - i)
-            i, executable = end, True
-            continue
-        if executable and sql.startswith("*/", i):
-            out[i:i + 2] = "  "
-            i, executable = i + 2, False
-            continue
-        if not mysql and ch == "$" and not _continues_identifier(sql, i):
-            dollar = _DOLLAR_QUOTE.match(sql, i)
-        if ch in "'\"`":
-            backslash = ch != "`" and (
-                mysql
-                or (
-                    ch == "'"
-                    and i > 0
-                    and sql[i - 1] in "eE"
-                    and not _continues_identifier(sql, i - 1)
-                )
-            )
-            end = _quoted_end(sql, i, backslash)
-        elif dollar is not None:
-            close = sql.find(dollar.group(), dollar.end())
-            end = n if close < 0 else close + len(dollar.group())
-        # MySQL reads "--" as a comment only before whitespace, a control character or the end:
-        # "2--1" subtracts.
-        elif (sql.startswith("--", i) and (not mysql or i + 2 >= n or sql[i + 2] <= " "
-                                           or sql[i + 2].isspace())) \
-                or (mysql and ch == "#"):
-            end = sql.find("\n", i)
-            end = n if end < 0 else end
-        elif sql.startswith("/*", i):
-            end = _block_comment_end(sql, i, nested=not mysql)
-        else:
-            if ch == "(":
-                depth += 1
-            if depth:
-                out[i] = " "
-            if ch == ")":
-                depth = max(0, depth - 1)
-            i += 1
-            continue
-        out[i:end] = " " * (end - i)
-        i = end
-    return "".join(out)
+def _limit_clause(tokens, words, i) -> _RowLimit | None:
+    """``LIMIT n``, ``LIMIT n OFFSET m`` or MySQL's ``LIMIT offset, count``."""
+    number = sqlglot.TokenType.NUMBER
+    if i + 1 >= len(tokens) or tokens[i + 1].token_type != number:
+        return None
+    count, last, skips = tokens[i + 1], i + 1, False
+    if i + 3 < len(tokens) and words[i + 2] == "," and tokens[i + 3].token_type == number:
+        count, last, skips = tokens[i + 3], i + 3, True
+    elif i + 3 < len(tokens) and words[i + 2] == "OFFSET" and tokens[i + 3].token_type == number:
+        last, skips = i + 3, True
+    value = _row_count(count.text)
+    if value is None:
+        return None
+    return _RowLimit(
+        fetch=False,
+        with_ties=False,
+        count=value,
+        skips=skips,
+        count_span=(count.start, count.end + 1),
+        start=tokens[i].start,
+        end=tokens[last].end + 1,
+    )
 
 
-def _outer_limit(sql: str, dialect: str = ""):
-    """The outermost query's LIMIT or FETCH FIRST match, or None."""
-    text = _top_level_text(sql, dialect)
-    return _TOP_LIMIT.search(text) or _TOP_FETCH.search(text)
+def _fetch_clause(tokens, words, i) -> _RowLimit | None:
+    """``FETCH FIRST|NEXT [n] ROW|ROWS ONLY|WITH TIES``."""
+    j = i + 1
+    if j >= len(tokens) or words[j] not in ("FIRST", "NEXT"):
+        return None
+    j += 1
+    count = None
+    if j < len(tokens) and tokens[j].token_type == sqlglot.TokenType.NUMBER:
+        count, j = tokens[j], j + 1
+    if j >= len(tokens) or words[j] not in ("ROW", "ROWS"):
+        return None
+    j += 1
+    if j < len(tokens) and words[j] == "ONLY":
+        with_ties = False
+    elif j + 1 < len(tokens) and words[j] == "WITH" and words[j + 1] == "TIES":
+        with_ties, j = True, j + 1
+    else:
+        return None
+    value = _row_count(count.text) if count is not None else None
+    if count is not None and value is None:
+        return None
+    return _RowLimit(
+        fetch=True,
+        with_ties=with_ties,
+        count=value,
+        skips=False,
+        count_span=(count.start, count.end + 1) if count is not None else None,
+        start=tokens[i].start,
+        end=tokens[j].end + 1,
+    )
 
 
 def _extract_limit_clause(sql: str, dialect: str = "") -> Dict[str, Any]:
     """Whether the outermost query has a row limit (LIMIT or FETCH FIRST), and its count."""
-    match = _outer_limit(sql, dialect)
-    if match is None:
+    limit = _outer_limit(sql, dialect)
+    if limit is None:
         return {"has_limit": False, "limit_value": None}
-    if match.re is _TOP_FETCH:
-        return {"has_limit": True, "limit_value": int(match.group(1) or 1)}
-    # MySQL "LIMIT offset, count" keeps the count in group 2.
-    return {"has_limit": True, "limit_value": int(match.group(2) or match.group(1))}
+    return {"has_limit": True, "limit_value": 1 if limit.count is None else limit.count}
 
 
 def uncapped_sql(
@@ -784,23 +793,43 @@ def uncapped_sql(
     original = _extract_limit_clause(original_sql, dialect)
     if original["has_limit"]:
         return _replace_limit(capped_sql, original["limit_value"], dialect)
-    match = _outer_limit(capped_sql, dialect)
-    if (
-        match is None
-        or re.search(r"\bTIES\b", match.group(0), re.IGNORECASE)
-        or capped_sql[match.end():].strip(" ;\n\t")
-    ):
+    limit = _outer_limit(capped_sql, dialect)
+    if limit is None or limit.with_ties or capped_sql[limit.end :].strip(" ;\n\t"):
         return original_sql if fallback is None else fallback
-    return capped_sql[: match.start()].rstrip()
+    return capped_sql[: limit.start].rstrip()
+
+
+def probe_outer_limit(sql: str, limit: int, dialect: str = "") -> str | None:
+    """The SQL with its outermost row limit raised from ``limit`` to ``limit + 1``.
+
+    The extra row tells a result the limit cut from one that fits exactly. None when the
+    outermost limit is not ``limit``, or is WITH TIES, whose count does not bound its rows.
+    """
+    found = _outer_limit(sql, dialect)
+    if found is None or found.with_ties or (found.count or 1) != limit:
+        return None
+    probe = _replace_limit(sql, limit + 1, dialect)
+    return probe if probe != sql else None
 
 
 def has_outer_offset(sql: str, dialect: str = "") -> bool:
     """Whether the outermost query skips rows (OFFSET, or MySQL's "LIMIT offset, count")."""
-    match = _outer_limit(sql, dialect)
-    return bool(
-        re.search(r"\bOFFSET\b", _top_level_text(sql, dialect), re.IGNORECASE)
-        or (match is not None and match.re is _TOP_LIMIT and match.group(2))
-    )
+    limit = _outer_limit(sql, dialect)
+    if limit is not None and limit.skips:
+        return True
+    try:
+        tokens = sqlglot.tokenize(sql, read="mysql" if _is_mysql(dialect) else "postgres")
+    except sqlglot.errors.TokenError:
+        return False
+    depth = 0
+    for token in tokens:
+        if token.token_type in (sqlglot.TokenType.L_PAREN, sqlglot.TokenType.L_BRACKET):
+            depth += 1
+        elif token.token_type in (sqlglot.TokenType.R_PAREN, sqlglot.TokenType.R_BRACKET):
+            depth = max(0, depth - 1)
+        elif depth == 0 and token.token_type == sqlglot.TokenType.OFFSET:
+            return True
+    return False
 
 
 def _inject_limit(sql: str, limit: int) -> str:
@@ -814,16 +843,11 @@ def _inject_limit(sql: str, limit: int) -> str:
 def _replace_limit(sql: str, new_limit: int, dialect: str = "") -> str:
     """Lower the outermost query's row limit to ``new_limit``, keeping any offset and the
     FETCH FIRST form (WITH TIES may still return more rows than its count)."""
-    match = _outer_limit(sql, dialect)
-    if match is None:
+    limit = _outer_limit(sql, dialect)
+    # "FETCH FIRST ROW ONLY" means one row, already under any cap.
+    if limit is None or limit.count_span is None:
         return sql
-    if match.re is _TOP_FETCH:
-        # "FETCH FIRST ROW ONLY" means one row, already under any cap.
-        if not match.group(1):
-            return sql
-        start, end = match.span(1)
-        return sql[:start] + str(new_limit) + sql[end:]
-    start, end = match.span(2) if match.group(2) else match.span(1)
+    start, end = limit.count_span
     return sql[:start] + str(new_limit) + sql[end:]
 
 
@@ -1340,6 +1364,66 @@ def quote_case_sensitive_identifiers(
     for start, end, quoted in reversed(replacements):
         sql = sql[:start] + quoted + sql[end:]
     return sql
+
+
+def cast_rounded_values_to_numeric(sql: str, dialect: str) -> str:
+    """Cast the value of each two-argument PostgreSQL ROUND to numeric.
+
+    PostgreSQL defines ROUND with a precision only for numeric, so ROUND(x, 2) fails when x
+    is double precision. A value already cast to numeric, or a nested two-argument ROUND,
+    is kept as written, as is the rest of the text.
+    """
+    if dialect != "postgresql":
+        return sql
+    try:
+        tokens = sqlglot.tokenize(sql, read="postgres")
+    except sqlglot.errors.TokenError:
+        return sql
+
+    insertions = []
+    for index, token in enumerate(tokens[:-1]):
+        if (
+            token.token_type != sqlglot.TokenType.VAR
+            or token.text.upper() != "ROUND"
+            or tokens[index + 1].token_type != sqlglot.TokenType.L_PAREN
+            or (index and tokens[index - 1].token_type == sqlglot.TokenType.DOT)
+        ):
+            continue
+        arguments, depth, start = [], 0, index + 2
+        for position in range(index + 1, len(tokens)):
+            kind = tokens[position].token_type
+            if kind in (sqlglot.TokenType.L_PAREN, sqlglot.TokenType.L_BRACKET):
+                depth += 1
+            elif kind in (sqlglot.TokenType.R_PAREN, sqlglot.TokenType.R_BRACKET):
+                depth -= 1
+            if depth == 0 or (depth == 1 and kind == sqlglot.TokenType.COMMA):
+                arguments.append((start, position - 1))
+                start = position + 1
+            if depth == 0:
+                break
+        if depth != 0 or len(arguments) != 2 or arguments[0][0] > arguments[0][1]:
+            continue
+        first, last = tokens[arguments[0][0]], tokens[arguments[0][1]]
+        if _is_numeric_value(sql[first.start : last.end + 1]):
+            continue
+        insertions += [(first.start, "("), (last.end + 1, ")::numeric")]
+    for position, text in sorted(insertions, reverse=True):
+        sql = sql[:position] + text + sql[position:]
+    return sql
+
+
+def _is_numeric_value(text: str) -> bool:
+    try:
+        value = sqlglot.parse_one(text, read="postgres")
+    except sqlglot.errors.SqlglotError:
+        return False
+    value = value.unnest()
+    if isinstance(value, exp.Round):
+        return value.args.get("decimals") is not None
+    return isinstance(value, (exp.Cast, exp.TryCast)) and value.to.this in (
+        exp.DataType.Type.DECIMAL,
+        exp.DataType.Type.BIGDECIMAL,
+    )
 
 
 def _find_similar_columns(

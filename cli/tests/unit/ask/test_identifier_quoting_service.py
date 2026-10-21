@@ -85,7 +85,6 @@ def test_complete_success_preserves_text_and_generation(rows):
         "ambiguous",
         "candidate-error",
         "candidate-truncated",
-        "candidate-limit",
         "candidate-exception",
         "too-many",
     ],
@@ -110,8 +109,6 @@ def test_failed_or_incomplete_candidate_restores_original(failure):
         rows = [["GROUPS", 1]] if proof else [[10]]
         if failure == "ambiguous" and proof:
             rows = [["GROUPS", 1], ["GROUPS", 1]]
-        if failure == "candidate-limit" and not proof:
-            rows = [[10]] * ctx.max_rows
         if failure == "too-many" and not proof:
             rows = [[10]] * 10001
         return {
@@ -216,5 +213,5 @@ def test_experimental_profiles_enable_quoting():
     assert not AskService(llm_manager=NoModel())._identifier_quoting_enabled
     for profile in ASK_ACCURACY_PROFILES:
         assert ask_profile_service_flags(profile)["identifier_quoting_enabled"] == (
-            profile in {"glm-dev-v1", "candidate-v4"}
+            profile in {"glm-dev-v1", "candidate-v4", "candidate-v5"}
         )

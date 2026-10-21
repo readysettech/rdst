@@ -8,9 +8,9 @@ from features.ask.profiles import default_ask_service_options
 from features.ask.service import AskService
 
 
-def test_product_uses_complete_candidate_v4_profile():
+def test_product_uses_complete_candidate_v5_profile():
     options = default_ask_service_options()
-    flags = ask_profile_service_flags("candidate-v4")
+    flags = ask_profile_service_flags("candidate-v5")
     assert {key: options[key] for key in flags} == flags
     assert options["enum_overlap_advisory"] is True
     assert (
@@ -24,8 +24,26 @@ def test_product_uses_complete_candidate_v4_profile():
     assert default_ask_service_options()["correction_intent_routing_enabled"] is True
 
 
+def test_product_runs_only_stages_that_can_change_a_wrong_answer():
+    options = default_ask_service_options()
+    presentation_stages = (
+        "name_format", "projection_contract", "projection_order", "output_completion",
+        "outer_rounding", "integer_mean_precision", "text_mean_precision",
+        "fraction_precision", "scaled_ratio", "month_component", "occurrence_percentage",
+    )
+    assert not any(options[f"{stage}_enabled"] for stage in presentation_stages)
+    correcting_stages = (
+        "identifier_quoting", "ranked_union", "stable_first", "null_extremum",
+        "grouped_extremum", "execution_error_repair", "period_literal", "calendar_day",
+        "endpoint_component", "list_membership", "state_lookup", "comparison_ratio",
+        "matched_percentage", "percentage_threshold", "metric_source",
+        "percentage_scaling", "result_check_repair",
+    )
+    assert all(options[f"{stage}_enabled"] for stage in correcting_stages)
+
+
 @pytest.mark.parametrize("entrypoint", ["api", "cli"])
-def test_product_entrypoints_select_candidate_v4(monkeypatch, entrypoint):
+def test_product_entrypoints_select_candidate_v5(monkeypatch, entrypoint):
     from features.ask.api import routes
     from features.ask.cli.command import AskCommand
     from features.ask import service

@@ -1,4 +1,4 @@
-"""Experimental MySQL integer-mean precision plan, awaiting replay qualification.
+"""MySQL integer-mean precision plan for Ask's post-execution integer-mean stage.
 
 The caller must obtain model confirmation of an unrounded arithmetic mean, use
 bounded read-only execution for the proof and candidate, validate the candidate,

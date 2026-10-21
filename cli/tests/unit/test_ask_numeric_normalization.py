@@ -8,6 +8,7 @@ from features.ask.numeric_normalization import (
     normalize_context,
     normalize_explicit_ratio_sql,
 )
+from features.ask.service import AskService
 
 
 def normalize(question: str, sql: str, dialect: str = "mysql"):
@@ -168,6 +169,25 @@ def test_percentage_hint_handles_a_misspelled_request(dialect):
     assert diagnostics["status"] == "normalized"
     assert diagnostics["scaled_percentages"] == 1
     assert "100" in sql
+    assert "DOUBLE" in sql
+
+
+@pytest.mark.parametrize("dialect", ["mysql", "postgresql"])
+def test_percentage_hint_keeps_the_floating_cast_without_scaling(dialect):
+    sql, diagnostics = normalize_explicit_ratio_sql(
+        question="What percentage of members are active?",
+        provided_context="",
+        sql="SELECT SUM(active) / COUNT(*) AS member_share FROM members",
+        dialect=dialect,
+        intent_hints=("percentage_output",),
+        percentage_scaling=False,
+    )
+
+    assert diagnostics["status"] == "normalized"
+    assert diagnostics["changed_divisions"] == 1
+    assert diagnostics["scaled_percentages"] == 0
+    assert diagnostics["percentage_scaling"] == "disabled"
+    assert "100" not in sql
     assert "DOUBLE" in sql
 
 
@@ -356,3 +376,32 @@ def test_context_wrapper_uses_only_an_activated_routing_hint():
     assert blocked_result.explicit_ratio_normalization["reason"] == (
         "no-explicit-ratio-intent"
     )
+
+
+def test_service_passes_its_percentage_scaling_flag_to_the_normalizer():
+    original = "SELECT SUM(active) / COUNT(*) AS member_share FROM members"
+
+    def routed_ctx():
+        return SimpleNamespace(
+            question="What percentage of members are active?",
+            refined_question=None,
+            provided_context="",
+            sql=original,
+            generated_sql=original,
+            db_type="postgresql",
+            correction_intent_routing={
+                "status": "activate",
+                "verdict": "activate",
+                "selected_intent": "percentage_output",
+                "activation_allowed": True,
+            },
+            explicit_ratio_normalization={},
+        )
+
+    scaled = AskService(percentage_scaling_enabled=True)
+    unscaled = AskService(percentage_scaling_enabled=False)
+
+    assert "100" in scaled._explicit_ratio_normalization_fn(routed_ctx()).sql
+    result = unscaled._explicit_ratio_normalization_fn(routed_ctx())
+    assert "100" not in result.sql
+    assert "DOUBLE" in result.sql

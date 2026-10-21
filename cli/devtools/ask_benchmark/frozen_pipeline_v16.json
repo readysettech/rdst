@@ -2,7 +2,7 @@
   "freeze_id": "rdst-ask-ci-candidate-v4-v16",
   "supersedes": "rdst-ask-auto-init-no-evidence-v15",
   "supersession_reason": "Import experimental candidate-v4 fullv56 runtime and run CI with only auto-init and bird-curated contexts. This receipt records configuration, not a new accuracy measurement.",
-  "benchmark_protocol_sha256": "ff1acf1c6d27c784250041f12c0259794f2241b3bd3b383b28668d7e11d7efa4",
+  "benchmark_protocol_sha256": "7b1083719e3203b243bcb2b00baa1f21b1281bcc3190d652cc84182634b2d4e7",
   "source_snapshot": "candidate-v4-full500-20260908/source/rdst",
   "ask_accuracy_profile": "candidate-v4",
   "enum_overlap_advisory": true,

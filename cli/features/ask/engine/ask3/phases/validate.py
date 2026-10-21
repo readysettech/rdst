@@ -63,6 +63,7 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
     # Import validation functions
     # Path: lib/engines/ask3/phases/validate.py -> lib/functions/sql_validation.py
     from features.ask.sql_validation import (
+        cast_rounded_values_to_numeric,
         has_outer_offset,
         quote_case_sensitive_identifiers,
         uncapped_sql,
@@ -74,6 +75,7 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
     )
 
     ctx.sql = quote_case_sensitive_identifiers(ctx.sql, ctx.get_schema_as_dict(), ctx.db_type)
+    ctx.sql = cast_rounded_values_to_numeric(ctx.sql, ctx.db_type)
 
     # Step 1: Read-only and LIMIT validation
     validation_result = validate_sql_for_ask(
@@ -228,6 +230,10 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
                         )
                     )
                 presenter.validation_error(ctx.validation_errors)
+            else:
+                # Advisory findings reach the user with the other validation warnings.
+                for warning in literal_validation["warnings"]:
+                    presenter.warning(warning["message"])
 
     # Check for any warnings
     warnings = validation_result.get("warnings", [])

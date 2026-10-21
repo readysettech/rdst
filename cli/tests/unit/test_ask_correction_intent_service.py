@@ -89,6 +89,28 @@ def test_router_receives_question_sql_and_complete_catalog():
     assert captured["allowed_intent_sets"] is None
 
 
+def test_router_is_offered_only_intents_whose_correction_is_enabled():
+    from features.ask.profiles import default_ask_service_options
+
+    captured = {}
+
+    def router(**kwargs):
+        captured.update(kwargs)
+        return _RoutingResult()
+
+    service = AskService(
+        **{
+            **default_ask_service_options(),
+            "llm_manager": object(),
+            "correction_intent_routing_fn": router,
+        }
+    )
+
+    service._route_correction_intent(_context())
+
+    assert captured["allowed_intents"] == ("percentage_output", "ratio_output")
+
+
 @pytest.mark.asyncio
 async def test_selected_ratio_correction_handles_typo_without_question_regex():
     service = AskService(

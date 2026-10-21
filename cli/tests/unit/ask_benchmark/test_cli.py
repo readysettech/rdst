@@ -69,7 +69,7 @@ def test_run_parser_accepts_positive_paid_run_limits():
     assert args.max_normalized_cost_usd == Decimal("1.25")
     assert args.max_wall_time_seconds == 90.5
     assert args.context == ContextMode.AUTO_INIT.value
-    assert args.schema_format == "rdst-adaptive-schema-v2"
+    assert args.schema_format == "rdst-adaptive-schema-v3"
     assert args.ask_accuracy_profile == "baseline"
 
 
@@ -143,11 +143,11 @@ def test_run_parser_accepts_compact_v2_schema_format():
             "--models",
             "claude-sonnet-4.6-anthropic-sdk",
             "--schema-format",
-            "rdst-compact-schema-v2",
+            "rdst-compact-schema-v3",
         ]
     )
 
-    assert args.schema_format == "rdst-compact-schema-v2"
+    assert args.schema_format == "rdst-compact-schema-v3"
 
 
 def test_protocol_fingerprint_covers_canonical_schema_loading():

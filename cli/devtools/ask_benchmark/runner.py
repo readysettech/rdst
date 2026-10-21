@@ -33,7 +33,7 @@ from features.ask.events import (
     AskSqlGeneratedEvent,
 )
 from features.ask.models import AskInput, AskOptions
-from features.ask.profiles import CANDIDATE_V4_FLAGS
+from features.ask.profiles import CANDIDATE_V4_FLAGS, CANDIDATE_V5_FLAGS
 from features.ask.service import AskService
 from features.ask.sql_validation import validate_sql_for_ask
 from features.schema.semantic_layer.manager import SemanticLayerManager
@@ -85,6 +85,7 @@ ASK_ACCURACY_PROFILE_CANDIDATE_V1 = "candidate-v1"
 ASK_ACCURACY_PROFILE_CANDIDATE_V2 = "candidate-v2"
 ASK_ACCURACY_PROFILE_CANDIDATE_V3 = "candidate-v3"
 ASK_ACCURACY_PROFILE_CANDIDATE_V4 = "candidate-v4"
+ASK_ACCURACY_PROFILE_CANDIDATE_V5 = "candidate-v5"
 ASK_ACCURACY_PROFILE_GLM_DEV_V1 = "glm-dev-v1"
 ASK_ACCURACY_PROFILES = (
     ASK_ACCURACY_PROFILE_BASELINE,
@@ -93,6 +94,7 @@ ASK_ACCURACY_PROFILES = (
     ASK_ACCURACY_PROFILE_CANDIDATE_V2,
     ASK_ACCURACY_PROFILE_CANDIDATE_V3,
     ASK_ACCURACY_PROFILE_CANDIDATE_V4,
+    ASK_ACCURACY_PROFILE_CANDIDATE_V5,
 )
 _ASK_ACCURACY_ROUTED_PROFILES = frozenset(
     {
@@ -103,6 +105,14 @@ _ASK_ACCURACY_ROUTED_PROFILES = frozenset(
 )
 _ASK_ACCURACY_STORAGE_PROFILES = frozenset(
     {ASK_ACCURACY_PROFILE_CANDIDATE_V2, ASK_ACCURACY_PROFILE_CANDIDATE_V3}
+)
+# Profiles with advisory enum-overlap validation and the experimental intent scope.
+_ASK_ACCURACY_ADVISORY_PROFILES = frozenset(
+    {
+        ASK_ACCURACY_PROFILE_GLM_DEV_V1,
+        ASK_ACCURACY_PROFILE_CANDIDATE_V4,
+        ASK_ACCURACY_PROFILE_CANDIDATE_V5,
+    }
 )
 # A user who continues past a clarification submits each question's first option: the
 # CLI prompt's default choice and the web's preselected "Run with" button.
@@ -115,6 +125,8 @@ def ask_profile_service_flags(profile: str) -> dict[str, bool]:
         raise ValueError(f"Unsupported Ask accuracy profile: {profile}")
     if profile == ASK_ACCURACY_PROFILE_CANDIDATE_V4:
         return dict(CANDIDATE_V4_FLAGS)
+    if profile == ASK_ACCURACY_PROFILE_CANDIDATE_V5:
+        return dict(CANDIDATE_V5_FLAGS)
     glm = profile == ASK_ACCURACY_PROFILE_GLM_DEV_V1
     routed = profile in _ASK_ACCURACY_ROUTED_PROFILES
     storage = profile in _ASK_ACCURACY_STORAGE_PROFILES
@@ -1086,13 +1098,11 @@ class BenchmarkRunner:
         profile = self.ask_accuracy_profile
         return {
             **ask_profile_service_flags(profile),
-            "enum_overlap_advisory": profile
-            in {ASK_ACCURACY_PROFILE_CANDIDATE_V4, ASK_ACCURACY_PROFILE_GLM_DEV_V1},
+            "enum_overlap_advisory": profile in _ASK_ACCURACY_ADVISORY_PROFILES,
             "correction_intent_routing_intent_scope": (
                 CORRECTION_INTENT_EXPERIMENTAL_SCOPE
                 if profile in _ASK_ACCURACY_STORAGE_PROFILES
-                or profile
-                in {ASK_ACCURACY_PROFILE_GLM_DEV_V1, ASK_ACCURACY_PROFILE_CANDIDATE_V4}
+                or profile in _ASK_ACCURACY_ADVISORY_PROFILES
                 else None
             ),
         }

@@ -9,10 +9,12 @@ from devtools.ask_benchmark.keyservice_adapter import (
     keyservice_route,
     load_keyservice_module,
 )
+from features.ask import execution_error_repair, result_check
 from features.ask.prompts.ask_prompts import SQL_GENERATION_SYSTEM_PROMPT
 from features.ask.sql_generation import (
     _generation_response_format,
     generate_sql_from_nl,
+    repair_sql_after_validation,
 )
 from shared.llm_manager.base import LLMError, ProviderRequest
 from shared.llm_manager.hosted_provider import HostedProvider
@@ -152,6 +154,28 @@ def test_primary_route_sends_the_keyservice_payload_and_product_parses_reply():
     assert str(record.actual_cost_usd) == "0.00002"
     assert record.transport_attempts == 1
     assert record.error is None
+
+
+def test_database_error_repair_is_sent_as_validation_repair_and_recorded_apart():
+    repair = json.dumps({"sql": "SELECT COUNT(*) FROM t", "explanation": "Fixed."})
+    upstream = _Upstream(*(
+        _completion("anthropic/claude-haiku-5.5", "Anthropic", repair) for _ in range(3)
+    ))
+    adapter = _adapter("claude-haiku-5.5-keyservice", upstream)
+
+    for feedback in (
+        "Column 'n' does not exist",
+        execution_error_repair.repair_feedback("(1054, \"Unknown column 'n'\")"),
+        result_check.repair_feedback(["it returned no rows."]),
+    ):
+        result = repair_sql_after_validation(
+            nl_question="How many rows are there?", failed_sql="SELECT n FROM t",
+            error_message=feedback, filtered_schema="Table: t\n  id (int)",
+            database_engine="mysql", llm_manager=adapter)
+        assert result["success"] is True
+
+    assert [record.stage for record in adapter.drain_call_records()] == [
+        "sql_validation_repair", "sql_execution_repair", "sql_result_check_repair"]
 
 
 def test_long_prompt_route_keeps_temperature_and_downgrades_unservable_schema():

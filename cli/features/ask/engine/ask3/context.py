@@ -101,6 +101,8 @@ class Ask3Context:
     percentage_threshold: Dict[str, Any] = field(default_factory=dict)
     projection_contract: Dict[str, Any] = field(default_factory=dict)
     declared_count: Dict[str, Any] = field(default_factory=dict)
+    execution_error_repair: Dict[str, Any] = field(default_factory=dict)
+    result_check_repair: Dict[str, Any] = field(default_factory=dict)
     count_native: Dict[str, Any] = field(default_factory=dict)
     count_native_probe_diagnostics: Dict[str, Any] = field(default_factory=dict)
     ranked_union: Dict[str, Any] = field(default_factory=dict)
@@ -279,6 +281,16 @@ class Ask3Context:
             "projection_contract": self.projection_contract,
             # Keep flag-off snapshots byte-compatible; include attempted corrections.
             **({"declared_count": self.declared_count} if self.declared_count else {}),
+            **(
+                {"execution_error_repair": self.execution_error_repair}
+                if self.execution_error_repair
+                else {}
+            ),
+            **(
+                {"result_check_repair": self.result_check_repair}
+                if self.result_check_repair
+                else {}
+            ),
             **({"count_native": self.count_native} if self.count_native else {}),
             **({"count_native_probe_diagnostics": self.count_native_probe_diagnostics} if self.count_native_probe_diagnostics else {}),
             "ranked_union": self.ranked_union,
@@ -456,6 +468,8 @@ class Ask3Context:
         ctx.percentage_threshold = data.get("percentage_threshold", {})
         ctx.projection_contract = data.get("projection_contract", {})
         ctx.declared_count = data.get("declared_count", {})
+        ctx.execution_error_repair = data.get("execution_error_repair", {})
+        ctx.result_check_repair = data.get("result_check_repair", {})
         ctx.count_native = data.get("count_native", {})
         ctx.count_native_probe_diagnostics = data.get("count_native_probe_diagnostics", {})
         ctx.ranked_union = data.get("ranked_union", {})

@@ -19,6 +19,7 @@ from features.ask.engine.ask3.phases.validate import validate_sql
 from features.ask.engine.ask3.types import ColumnInfo, SchemaInfo, Status, TableInfo
 from features.ask.sql_generation import generate_sql_from_nl
 from features.ask.sql_validation import (
+    cast_rounded_values_to_numeric,
     check_read_only,
     describe_validation_issues,
     quote_case_sensitive_identifiers,
@@ -194,6 +195,45 @@ class TestFilterLiteralProvenance:
         assert len(ctx.validation_errors) == 2
         assert "free-text column" in ctx.validation_errors[0].message
         assert "Alameda" in ctx.validation_errors[1].message
+
+
+def test_phase_surfaces_advisory_literal_warnings_without_blocking():
+    ctx = Ask3Context(
+        question="How many students attend the State Special School school?",
+        target="california_schools",
+        db_type="mysql",
+        enforce_result_limit=False,
+    )
+    ctx.enum_overlap_advisory = True
+    ctx.schema_formatted = Q72_SCHEMA
+    ctx.schema_info = SchemaInfo(
+        target=ctx.target,
+        db_type=ctx.db_type,
+        tables={
+            "frpm": TableInfo(
+                name="frpm",
+                columns={
+                    name: ColumnInfo(name=name, data_type=data_type)
+                    for name, data_type in {
+                        "School Name": "text",
+                        "Educational Option Type": "enum",
+                        "Enrollment (Ages 5-17)": "double",
+                    }.items()
+                },
+            )
+        },
+    )
+    ctx.sql = (
+        "SELECT `Enrollment (Ages 5-17)` FROM frpm "
+        "WHERE `School Name` = 'State Special School'"
+    )
+    presenter = MagicMock()
+
+    validate_sql(ctx, presenter)
+
+    assert ctx.validation_errors == []
+    [warning] = [call.args[0] for call in presenter.warning.call_args_list]
+    assert "free-text column" in warning
 
 
 def test_literal_provenance_parses_postgresql_targets() -> None:
@@ -594,6 +634,60 @@ class TestExecutionGate:
         assert ctx.row_limit == 10
         assert not (ctx.limit_added or ctx.limit_reduced)
         assert ctx.execution_result.truncated is False
+
+    @pytest.mark.parametrize(
+        ("sql", "returned", "executor_truncated", "truncated"),
+        [
+            ("SELECT id FROM users LIMIT 100", 100, False, False),
+            ("SELECT id FROM users LIMIT 500", 500, False, False),
+            ("SELECT id FROM users LIMIT 100", 100, True, True),
+        ],
+    )
+    def test_a_query_own_full_page_is_truncated_only_when_cut(
+        self, sql, returned, executor_truncated, truncated
+    ):
+        def executor(run_sql, config):
+            return {
+                "success": True,
+                "rows": [[1]] * returned,
+                "columns": ["id"],
+                "truncated": executor_truncated,
+            }
+
+        ctx = execute_query(self._ctx(sql), MagicMock(), executor)
+
+        assert ctx.execution_result.row_count == returned
+        assert ctx.execution_result.truncated is truncated
+
+    @pytest.mark.parametrize(
+        ("sql", "executed_sql"),
+        [
+            (
+                "SELECT id FROM users LIMIT 5000 OFFSET 10",
+                "SELECT id FROM users LIMIT 1001 OFFSET 10",
+            ),
+            ("SELECT id FROM users LIMIT 10, 5000", "SELECT id FROM users LIMIT 10, 1001"),
+            (
+                "SELECT id FROM users ORDER BY id FETCH FIRST 5000 ROWS ONLY",
+                "SELECT id FROM users ORDER BY id FETCH FIRST 1001 ROWS ONLY",
+            ),
+        ],
+    )
+    @pytest.mark.parametrize(("returned", "truncated"), [(1000, False), (1001, True)])
+    def test_every_exact_limit_form_is_probed_one_row_past_the_cap(
+        self, sql, executed_sql, returned, truncated
+    ):
+        executed = []
+
+        def executor(run_sql, config):
+            executed.append(run_sql)
+            return {"success": True, "rows": [[1]] * returned, "columns": ["id"]}
+
+        ctx = execute_query(self._ctx(sql), MagicMock(), executor)
+
+        assert executed == [executed_sql]
+        assert ctx.execution_result.row_count == 1000
+        assert ctx.execution_result.truncated is truncated
 
     def test_evaluation_select_executes_without_limit_mutation(self):
         executed = []
@@ -1072,6 +1166,13 @@ def test_limit_handling_reads_only_the_outermost_query(
         # A parameter is not a dollar quote.
         ("SELECT id FROM t WHERE a = $1 AND b = $2 LIMIT 5", "postgresql",
          "SELECT id FROM t WHERE a = $1 AND b = $2 LIMIT 5"),
+        # A count written as a decimal or in exponent form is still a count.
+        ("SELECT id FROM t LIMIT 10.0", "postgresql", "SELECT id FROM t LIMIT 10.0"),
+        ("SELECT id FROM t LIMIT 5e3", "postgresql", "SELECT id FROM t LIMIT 1000"),
+        # A count past any table's size is lowered to the cap without building its integer.
+        ("SELECT id FROM t LIMIT 1e999999999", "postgresql", "SELECT id FROM t LIMIT 1000"),
+        # The word LIMIT in a string is no clause.
+        ("SELECT 'limit' 5 FROM t", "postgresql", "SELECT 'limit' 5 FROM t LIMIT 100"),
     ],
 )
 def test_outer_limit_survives_dialect_quoting(sql, dialect, validated):
@@ -1113,3 +1214,50 @@ def test_ambiguous_or_resolvable_names_stay_unquoted(schema, sql):
 def test_mysql_names_are_left_as_written():
     sql = "SELECT Name FROM Equipment"
     assert quote_case_sensitive_identifiers(sql, MIXED_CASE_SCHEMA, "mysql") == sql
+
+
+@pytest.mark.parametrize("sql,expected", [
+    ("SELECT ROUND(AVG(score), 2) AS s FROM t",
+     "SELECT ROUND((AVG(score))::numeric, 2) AS s FROM t"),
+    ("SELECT round(a / b * 100, 1), ROUND(c) FROM t",
+     "SELECT round((a / b * 100)::numeric, 1), ROUND(c) FROM t"),
+    # The outer ROUND takes a numeric value once the inner one is cast.
+    ("SELECT ROUND(ROUND(x::float, 1), 2) FROM t",
+     "SELECT ROUND(ROUND((x::float)::numeric, 1), 2) FROM t"),
+    ("SELECT ROUND(COALESCE(f(x, y), 0), 2) FROM t",
+     "SELECT ROUND((COALESCE(f(x, y), 0))::numeric, 2) FROM t"),
+])
+def test_postgres_round_with_precision_casts_its_value_to_numeric(sql, expected):
+    assert cast_rounded_values_to_numeric(sql, "postgresql") == expected
+    assert cast_rounded_values_to_numeric(expected, "postgresql") == expected
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT ROUND(x) FROM t",
+    "SELECT ROUND(x::numeric, 2), ROUND(CAST(y AS DECIMAL(10, 4)), 1) FROM t",
+    "SELECT ROUND((x)::NUMERIC(12, 2), 2) FROM t",
+    "SELECT 'ROUND(x, 2)' AS label FROM t -- ROUND(y, 2)",
+    "SELECT util.round(x, 2) FROM t",
+])
+def test_postgres_round_without_a_double_value_is_left_as_written(sql):
+    assert cast_rounded_values_to_numeric(sql, "postgresql") == sql
+
+
+def test_mysql_round_is_left_as_written():
+    sql = "SELECT ROUND(AVG(score), 2) FROM t"
+    assert cast_rounded_values_to_numeric(sql, "mysql") == sql
+
+
+def test_validation_phase_casts_postgres_round_values():
+    ctx = Ask3Context(question="Average score", target="fixture")
+    ctx.db_type = "postgresql"
+    ctx.enforce_result_limit = False
+    ctx.sql = "SELECT ROUND(AVG(score), 2) FROM events"
+    ctx.schema_info = SchemaInfo(target="fixture", db_type="postgresql", tables={
+        "events": TableInfo(name="events", columns={
+            "score": ColumnInfo(name="score", data_type="double precision")
+        })
+    })
+    validate_sql(ctx, MagicMock())
+    assert not ctx.validation_errors
+    assert ctx.sql == "SELECT ROUND((AVG(score))::numeric, 2) FROM events"

@@ -3,6 +3,8 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from features.ask.engine.ask3.context import Ask3Context
 from features.ask.engine.ask3.types import Status
 from shared.llm_manager.base import LLMError
@@ -280,7 +282,7 @@ def test_generation_retries_lossless_compact_schema_after_context_rejection() ->
         nl_question="Return one",
         filtered_schema="VERBOSE_SCHEMA_MARKER" * 10_000,
         compact_fallback_schema=compact_schema,
-        compact_fallback_format="rdst-compact-schema-v2",
+        compact_fallback_format="rdst-compact-schema-v3",
         database_engine="mysql",
         target_database="fixture",
         llm_manager=manager,
@@ -289,7 +291,7 @@ def test_generation_retries_lossless_compact_schema_after_context_rejection() ->
     assert result["success"] is True
     assert result["schema_context_fallback_used"] is True
     assert result["schema_context_fallback_reason"] == "context_window"
-    assert result["schema_format"] == "rdst-compact-schema-v2"
+    assert result["schema_format"] == "rdst-compact-schema-v3"
     assert result["prompt_utf8_bytes"] == len(manager.prompts[1].encode("utf-8"))
     assert len(manager.prompts) == 2
     assert "VERBOSE_SCHEMA_MARKER" in manager.prompts[0]
@@ -321,7 +323,7 @@ def test_generation_reports_when_both_lossless_formats_exceed_context() -> None:
         nl_question="Return one",
         filtered_schema="VERBOSE_SCHEMA_MARKER" * 20_000,
         compact_fallback_schema=compact_schema,
-        compact_fallback_format="rdst-compact-schema-v2",
+        compact_fallback_format="rdst-compact-schema-v3",
         database_engine="mysql",
         target_database="fixture",
         llm_manager=manager,
@@ -353,7 +355,7 @@ def test_generation_labels_an_initial_compact_schema_correctly() -> None:
     result = generate_sql_from_nl(
         nl_question="Return one",
         filtered_schema="COMPACT_SCHEMA_MARKER",
-        schema_format="rdst-compact-schema-v2",
+        schema_format="rdst-compact-schema-v3",
         database_engine="mysql",
         target_database="fixture",
         llm_manager=Manager(),
@@ -386,7 +388,7 @@ def test_generation_retries_compact_schema_after_request_body_rejection() -> Non
         nl_question="Return one",
         filtered_schema="VERBOSE_SCHEMA_MARKER" * 10_000,
         compact_fallback_schema="COMPACT_SCHEMA_MARKER",
-        compact_fallback_format="rdst-compact-schema-v2",
+        compact_fallback_format="rdst-compact-schema-v3",
         database_engine="mysql",
         target_database="fixture",
         llm_manager=manager,
@@ -396,6 +398,45 @@ def test_generation_retries_compact_schema_after_request_body_rejection() -> Non
     assert result["schema_context_fallback_used"] is True
     assert result["schema_context_fallback_reason"] == "request_body_limit"
     assert len(manager.prompts) == 2
+
+
+@pytest.mark.parametrize("compact_fits", [True, False])
+def test_generation_retries_compact_schema_after_hosted_size_rejection(
+    compact_fits,
+) -> None:
+    from features.ask.sql_generation import generate_sql_from_nl
+
+    class Manager:
+        def __init__(self):
+            self.calls = 0
+
+        def generate_response(self, **_kwargs):
+            self.calls += 1
+            if self.calls == 1 or not compact_fits:
+                raise LLMError(
+                    "Inference request is too large",
+                    code="REQUEST_TOO_LARGE",
+                    status=413,
+                )
+            return _successful_generation_response()
+
+    manager = Manager()
+    result = generate_sql_from_nl(
+        nl_question="Return one",
+        filtered_schema="VERBOSE_SCHEMA_MARKER" * 10_000,
+        compact_fallback_schema="COMPACT_SCHEMA_MARKER",
+        compact_fallback_format="rdst-compact-schema-v3",
+        database_engine="mysql",
+        target_database="fixture",
+        llm_manager=manager,
+    )
+
+    assert manager.calls == 2
+    assert result["success"] is compact_fits
+    assert result["schema_context_fallback_reason"] == "request_body_limit"
+    if not compact_fits:
+        assert result["schema_request_failure_code"] == "REQUEST_TOO_LARGE"
+        assert "Readyset-hosted AI's request size limit" in result["error"]
 
 
 def test_generation_does_not_retry_unrelated_invalid_request() -> None:
@@ -418,7 +459,7 @@ def test_generation_does_not_retry_unrelated_invalid_request() -> None:
         nl_question="Return one",
         filtered_schema="verbose schema",
         compact_fallback_schema="compact schema",
-        compact_fallback_format="rdst-compact-schema-v2",
+        compact_fallback_format="rdst-compact-schema-v3",
         database_engine="mysql",
         target_database="fixture",
         llm_manager=manager,
@@ -470,8 +511,8 @@ def test_context_round_trip_preserves_provided_context() -> None:
         question="Return active users",
         target="fixture",
         provided_context="Active means enabled = true.",
-        schema_format="rdst-compact-schema-v2",
-        schema_format_policy="rdst-adaptive-schema-v2",
+        schema_format="rdst-compact-schema-v3",
+        schema_format_policy="rdst-adaptive-schema-v3",
         schema_verbose_chars=1000,
         schema_compact_chars=700,
         schema_compact_savings_ratio=0.3,
@@ -485,8 +526,8 @@ def test_context_round_trip_preserves_provided_context() -> None:
     restored = Ask3Context.from_dict(context.to_dict())
 
     assert restored.provided_context == context.provided_context
-    assert restored.schema_format == "rdst-compact-schema-v2"
-    assert restored.schema_format_policy == "rdst-adaptive-schema-v2"
+    assert restored.schema_format == "rdst-compact-schema-v3"
+    assert restored.schema_format_policy == "rdst-adaptive-schema-v3"
     assert restored.schema_verbose_chars == 1000
     assert restored.schema_compact_chars == 700
     assert restored.schema_compact_savings_ratio == 0.3

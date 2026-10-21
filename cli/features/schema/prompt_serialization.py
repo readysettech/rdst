@@ -9,6 +9,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from .join_hints import possible_joins
+
 
 def _format_semantic_schema(layer) -> str:
     """
@@ -66,6 +68,21 @@ def _format_semantic_schema(layer) -> str:
                 )
         parts.append("")  # Blank line between tables
 
+    joins = possible_joins(layer)
+    if joins:
+        parts.append(
+            "Possible joins (not declared foreign keys; the columns hold the same key):"
+        )
+        for join in joins:
+            columns = " = ".join(f"{table}.{column}" for table, column in join.columns)
+            source = (
+                "all reference {}.{}".format(*join.references)
+                if join.references
+                else "same column name"
+            )
+            parts.append(f"  {columns} ({source})")
+        parts.append("")
+
     # Add extensions and custom types context if available
     extensions_context = layer.get_extensions_context()
     if extensions_context:
@@ -74,9 +91,9 @@ def _format_semantic_schema(layer) -> str:
     return "\n".join(parts)
 
 
-VERBOSE_SCHEMA_FORMAT_VERSION = "rdst-verbose-schema-v1"
-COMPACT_SCHEMA_FORMAT_VERSION = "rdst-compact-schema-v2"
-ADAPTIVE_SCHEMA_FORMAT_VERSION = "rdst-adaptive-schema-v2"
+VERBOSE_SCHEMA_FORMAT_VERSION = "rdst-verbose-schema-v2"
+COMPACT_SCHEMA_FORMAT_VERSION = "rdst-compact-schema-v3"
+ADAPTIVE_SCHEMA_FORMAT_VERSION = "rdst-adaptive-schema-v3"
 ADAPTIVE_SCHEMA_MIN_SAVINGS_PERCENT = 15
 ADAPTIVE_SCHEMA_MIN_SAVINGS_RATIO = ADAPTIVE_SCHEMA_MIN_SAVINGS_PERCENT / 100
 _COMPACT_SCHEMA_CODE_ALPHABET = (
@@ -190,7 +207,10 @@ def format_semantic_schema_compact(layer) -> str:
             ">source-column<TAB>target-table<TAB>optional-target-column"
             "<TAB>optional-relationship-type; >!<TAB>type<TAB>target<TAB>join "
             "preserves full relationship; "
-            "default target column=id and relationship=many_to_one"
+            "default target column=id and relationship=many_to_one; "
+            "~table.column<TAB>table.column... possible join, not a declared foreign key, "
+            "between columns that hold the same key, with optional =table.column for the "
+            "key they all reference"
         ),
         f"!default_type\t{_compact_schema_escape(default_type)}",
     ]
@@ -253,6 +273,18 @@ def format_semantic_schema_compact(layer) -> str:
                 _compact_relationship_line(table_name, relationship)
                 for relationship in table.relationships
             )
+
+    for join in possible_joins(layer):
+        fields = [
+            f"{_compact_schema_escape(table)}.{_compact_schema_escape(column)}"
+            for table, column in join.columns
+        ]
+        if join.references:
+            table, column = join.references
+            fields.append(
+                f"={_compact_schema_escape(table)}.{_compact_schema_escape(column)}"
+            )
+        lines.append("~" + "\t".join(fields))
 
     extensions_context = layer.get_extensions_context()
     if extensions_context:

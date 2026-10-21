@@ -217,8 +217,10 @@ def repair_validation_error(
     presenter: "Ask3Presenter",
     error_message: str,
     llm_manager=None,
+    *,
+    phase: str = "validation_repair",
 ) -> "Ask3Context":
-    """Apply one narrowly scoped LLM repair for deterministic validation errors."""
+    """Apply one narrowly scoped LLM repair; ``phase`` names it in the recorded calls."""
     from features.ask.sql_generation import repair_sql_after_validation
     from shared.llm_manager import LLMManager
 
@@ -233,10 +235,10 @@ def repair_validation_error(
         llm_manager=llm_manager,
         provided_context=ctx.provided_context,
         matched_database_values=ctx.matched_database_values,
-        callback=lambda **kw: _track_llm_call(ctx, "validation_repair", **kw),
+        callback=lambda **kw: _track_llm_call(ctx, phase, **kw),
     )
     if not result.get("success"):
-        logger.warning("SQL validation repair failed: %s", result.get("error"))
+        logger.warning("SQL %s failed: %s", phase.replace("_", " "), result.get("error"))
         return ctx
     ctx.generated_sql = result["sql"]
     ctx.sql = result["sql"]
