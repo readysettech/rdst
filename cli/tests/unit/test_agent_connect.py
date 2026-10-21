@@ -36,12 +36,13 @@ def app(data_dir, monkeypatch):
     from shared.api.app import create_app
 
     async def account_status(request):
-        return {"signed_in": False, "is_anonymous": True, "signin_prompt": "none"}
+        return {"signed_in": True, "detail": None}
 
     async def stop():
         return None
 
     monkeypatch.setattr(account, "account_status", account_status)
+    monkeypatch.setattr(tools, "_signed_in", lambda: True)
     monkeypatch.setattr(database_limit, "claim_target", lambda *args, **kwargs: "local")
     monkeypatch.setattr(monitor, "_release_monitoring_slot", lambda target: None)
     application = create_app()
@@ -334,7 +335,7 @@ def test_status_and_add_database_store_the_password_in_the_keyring(app, _isolate
     failed, status = _tool(app, "rdst_status")
     assert not failed
     assert status["targets"] == []
-    assert status["ai_access"]["is_anonymous"] is True
+    assert status["ai_access"] == {"signed_in": True, "detail": None}
     failed, added = _add_shop(app)
     assert not failed, added
     assert added == {"target": "shop", "added": True, "persisted": True,
@@ -466,6 +467,27 @@ def test_the_user_turns_monitoring_on_the_first_time(app, prereqs):
 
     _turn_on_in_app(app)
     assert monitor.monitoring_approved("shop") and _monitoring(app)
+
+
+def test_signed_out_the_user_signs_in_and_turns_monitoring_on_in_the_app(
+        app, prereqs, monkeypatch):
+    _add_shop(app)
+    monkeypatch.setattr(tools, "_signed_in", lambda: False)
+    (failed, waiting), events = _events_from(
+        lambda: _tool(app, "rdst_enable_monitoring", name="shop"))
+    assert not failed and waiting["waiting_for_user"] is True
+    assert waiting["signed_in"] is False
+    assert "sign in" in waiting["message"] and "free with a Readyset account" in waiting["message"]
+    assert [(event["step"], event["target"]) for event in events] == [("awaiting_user", "shop")]
+    assert "sign in" in events[0]["message"]
+    assert not _monitoring(app)
+
+
+def test_a_turn_on_left_to_the_user_counts_as_waiting_not_done():
+    waiting = {"target": "shop", "enabled": False, "waiting_for_user": True}
+    assert tools._outcome({**waiting, "signed_in": True}) == (False, "awaiting_user")
+    assert tools._outcome({**waiting, "signed_in": False}) == (False, "signin_required")
+    assert tools._outcome({"target": "shop", "enabled": True}) == (True, None)
 
 
 def test_after_the_user_turned_it_on_the_agent_may_toggle_monitoring(app, prereqs, monkeypatch):
@@ -996,7 +1018,8 @@ def test_prompt_works_in_a_fresh_agent_session():
     assert "Once I confirm, add it with rdst_add_database" in text
     assert "Turn on monitoring with rdst_enable_monitoring" not in text
     assert "waiting_for_user: true" in text
-    assert "Tell me to read it and click Turn on monitoring in the RDST app" in text
+    assert "sign in to Readyset if it asks" in text
+    assert "click Turn on monitoring in the RDST app" in text
     assert "check rdst_status" in text and "monitoring: true" in text
     assert "call rdst_action with did_it" in text
     assert "rdst_query_timeseries" in text

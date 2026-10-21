@@ -19,7 +19,6 @@ import { BackendDownBanner } from '../components/BackendDownBanner'
 import { ConfigWarning } from '../components/ConfigWarning'
 import { DesktopNotificationsBanner } from '../components/DesktopNotificationsBanner'
 import { FeedbackNudge } from '../components/FeedbackNudge'
-import { SigninSoftStrip } from '../components/SigninPrompts'
 import { hydrateSelectedTarget } from '../features/database/selectedTarget'
 import { useAgentTurnOnRequests } from '../features/database/settings/useAgentTurnOnRequests'
 import { hydrateDesktopNotifications } from '../features/inbox/desktopNotifications'
@@ -145,7 +144,6 @@ function ReadyRoot() {
         <PageNotices>
           <DesktopNotificationsBanner />
           <ConfigWarning />
-          <SigninSoftStrip />
         </PageNotices>
         <Outlet />
         {/* Outside the notice slot: pages without a PageBar open it too. */}

@@ -299,24 +299,43 @@ async def _require_ready(name: str) -> None:
 
 AWAITING_USER = ("RDST is showing the Turn on monitoring screen. Ask the user to read it and "
                  "click Turn on monitoring in the RDST app.")
+AWAITING_SIGNIN = ("RDST is showing the Turn on monitoring screen. Monitoring's AI is free with "
+                   "a Readyset account, so ask the user to sign up or sign in there and turn "
+                   "monitoring on in the RDST app.")
 
 
-def _needs_user(name: str) -> bool:
-    """Monitoring for a database starts with the user, in the app, the first time: the Turn
-    on monitoring dialog explains what RDST reads and runs, including EXPLAIN ANALYZE."""
+def _signed_in() -> bool:
+    from shared import account_session
+
+    try:
+        return account_session.is_signed_in_locally()
+    except Exception:
+        return False
+
+
+def _needs_user(name: str) -> str | None:
+    """Why the user turns monitoring on in the app, or None when the agent may.
+
+    The first time, the Turn on monitoring dialog explains what RDST reads and runs,
+    including EXPLAIN ANALYZE. Signed out, it asks the user to sign in for monitoring's AI.
+    Once the user has turned a database on, the agent may turn it back on.
+    """
     from features.monitor.api import routes as monitor
 
-    return not (monitor.monitoring_approved(name) or monitor._store().levers(name)["enabled"])
+    if monitor._store().levers(name)["enabled"] or monitor.monitoring_approved(name):
+        return None
+    return AWAITING_USER if _signed_in() else AWAITING_SIGNIN
 
 
 async def _await_user(name: str) -> dict | None:
-    """Hand the first turn-on to the user: the app opens its dialog for ``name``."""
-    if not await asyncio.to_thread(_needs_user, name):
+    """Hand the turn-on to the user: the app opens its dialog for ``name``."""
+    message = await asyncio.to_thread(_needs_user, name)
+    if message is None:
         return None
-    session.events.publish("awaiting_user", target=name, message=AWAITING_USER)
+    session.events.publish("awaiting_user", target=name, message=message)
     return {"target": name, "enabled": False, "waiting_for_user": True,
-            "message": f"{AWAITING_USER} Then call rdst_status until {name} shows monitoring: "
-                       "true."}
+            "signed_in": message is not AWAITING_SIGNIN,
+            "message": f"{message} Then call rdst_status until {name} shows monitoring: true."}
 
 
 async def enable_monitoring(app: FastAPI, args: dict) -> dict:
@@ -384,9 +403,8 @@ async def status(app: FastAPI, args: dict) -> dict:
         account_status = await asyncio.wait_for(
             account.account_status(internal_request(app)), timeout=10)
         data = jsonable_encoder(account_status)
-        reply["ai_access"] = {key: data.get(key) for key in (
-            "signed_in", "is_anonymous", "signin_prompt", "percent_used", "days_remaining",
-            "trial_days", "detail") if key in data}
+        reply["ai_access"] = {key: data.get(key) for key in ("signed_in", "detail")
+                              if key in data}
     except Exception:
         reply["ai_access"] = {"detail": "RDST couldn't check AI access right now"}
     reply["own_api_key"] = bool(os.environ.get("ANTHROPIC_API_KEY"))
@@ -528,7 +546,8 @@ Handler = Callable[[FastAPI, dict], Awaitable[Any]]
 TOOLS: dict[str, tuple[str, dict, Handler]] = {
     "rdst_status": (
         "What RDST has: each database, whether its password is saved and whether it's "
-        "monitored, plus AI access and any sign-in prompt.",
+        "monitored, plus whether the user is signed in to Readyset, which monitoring's AI "
+        "needs.",
         _schema(), status),
     "rdst_add_database": (
         "Save a PostgreSQL or MySQL database in RDST. Pass url, or env_file plus env_var so "
@@ -567,8 +586,9 @@ TOOLS: dict[str, tuple[str, dict, Handler]] = {
         "background and files findings in its Inbox. Refused, with the prerequisite result, "
         "until rdst_check_prerequisites reports ready_to_monitor: true. The first time for a "
         "database the user turns it on in the app: the reply has waiting_for_user: true and "
-        "RDST shows the user its Turn on monitoring screen. Tell the user to read it and click "
-        "Turn on monitoring, then call rdst_status until the database shows monitoring: true.",
+        "RDST shows the user its Turn on monitoring screen, which asks them to sign up or sign "
+        "in when they're signed out (monitoring's AI is free with an account). Pass on the "
+        "reply's message, then call rdst_status until the database shows monitoring: true.",
         _schema({**_NAME, **_SETTING_FIELDS}, ["name"]), enable_monitoring),
     "rdst_disable_monitoring": (
         "Turn off monitoring for a database. Its history stays.",
@@ -697,6 +717,8 @@ def _outcome(result: Any) -> tuple[bool, str | None]:
         return False, product_telemetry.connection_error_class(result["connection_error"])
     if result.get("ready_to_monitor") is False:
         return False, "needs_setup"
+    if result.get("waiting_for_user"):
+        return False, "awaiting_user" if result.get("signed_in", True) else "signin_required"
     return True, None
 
 

@@ -56,7 +56,7 @@ describe('SignInPage', () => {
     ).toBeNull()
     expect(
       screen.getByText(
-        "Signing in keeps your monitoring history and AI checks running, and sends alerts by email. Everything you've set up carries over."
+        'A Readyset account is free and comes with AI for monitoring, analyses, checks and Ask.'
       )
     ).toBeTruthy()
     expect(document.getElementById('app-sidebar')).toBeNull()

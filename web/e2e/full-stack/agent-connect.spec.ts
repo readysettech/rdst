@@ -1,4 +1,4 @@
-import { McpClient } from '../accountless'
+import { McpClient } from '../firstRun'
 import { acceptBrowserError, clearTargets, expect, test } from '../fixtures'
 
 // A database with no report yet answers report/latest with 404, which the browser logs.
@@ -107,8 +107,10 @@ test('a coding agent connects and adds a database, then the user turns monitorin
 
   const tested = await agent.callTool('rdst_test_database', { name: TARGET })
   expect(tested).toMatchObject({ target: TARGET, ok: true })
+  // This tier runs signed out, so turning on asks for a sign-in to get AI first.
+  await expect(turnOn.getByTestId('monitoring-signin-gate')).toBeVisible()
   await expect(
-    turnOn.getByRole('button', { name: 'Turn on monitoring' })
+    turnOn.getByRole('button', { name: 'Sign up or sign in' })
   ).toBeEnabled({ timeout: 15_000 })
 
   // The agent asks to turn monitoring on. The first time is the user's call: the dialog
@@ -125,7 +127,7 @@ test('a coding agent connects and adds a database, then the user turns monitorin
     'RDST is showing the Turn on monitoring screen.'
   )
   await expect(turnOn.getByTestId('agent-awaiting-user')).toContainText(
-    'Your turn: read and click Turn on monitoring'
+    'Your turn: read and click Sign up or sign in'
   )
   await expect(turnOn.getByTestId('explain-analyze-warning')).toBeVisible()
   await page.waitForTimeout(1_500)
@@ -137,8 +139,8 @@ test('a coding agent connects and adds a database, then the user turns monitorin
     ])
   )
 
-  // The user clicks; the dialog closes on the monitored page.
-  await turnOn.getByRole('button', { name: 'Turn on monitoring' }).click()
+  // The user turns it on without AI; the dialog closes on the monitored page.
+  await turnOn.getByRole('button', { name: 'Turn on without AI' }).click()
   await expect(turnOn).toHaveCount(0, { timeout: 15_000 })
   await expect(
     page.getByRole('heading', { level: 1, name: TARGET })

@@ -95,7 +95,6 @@ def test_complete_login_parks_then_picks_up_and_saves_session(monkeypatch, enabl
         "features.account.service.account_session.save_session",
         lambda tokens, account: saved.append((tokens, account)),
     )
-    monkeypatch.setattr("shared.machine_id.machine_hash", lambda: "m" * 64)
 
     result = service.complete_login(
         "login-1", "state-1", "access", "refresh", 3600
@@ -113,7 +112,6 @@ def test_complete_login_parks_then_picks_up_and_saves_session(monkeypatch, enabl
                 "analytics_disabled": not enabled,
                 # A source checkout is a dev build, so Readyset's own.
                 "internal_user": True,
-                "machine_hash": "m" * 64,
             },
         ),
         (
@@ -128,7 +126,7 @@ def test_complete_login_parks_then_picks_up_and_saves_session(monkeypatch, enabl
     assert saved == [
         (
             {"access_token": "access", "refresh_token": "refresh"},
-            {"user_id": "user-1", "email": "person@example.com", "is_anonymous": False},
+            {"user_id": "user-1", "email": "person@example.com"},
         )
     ]
     assert result == {"state": "success", "detail": "Signed in to Readyset"}

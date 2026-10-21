@@ -1,24 +1,6 @@
 {
   "components": {
     "schemas": {
-      "AccountAnonymousSession": {
-        "properties": {
-          "access_token": {
-            "title": "Access Token",
-            "type": "string"
-          },
-          "refresh_token": {
-            "title": "Refresh Token",
-            "type": "string"
-          }
-        },
-        "required": [
-          "access_token",
-          "refresh_token"
-        ],
-        "title": "AccountAnonymousSession",
-        "type": "object"
-      },
       "AccountBrowserCallbackStatusResponse": {
         "properties": {
           "code": {
@@ -113,16 +95,6 @@
       },
       "AccountLoginResponse": {
         "properties": {
-          "anonymous_session": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AccountAnonymousSession"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "auth_url": {
             "title": "Auth Url",
             "type": "string"
@@ -203,17 +175,6 @@
             ],
             "title": "Analytics Account Id"
           },
-          "days_remaining": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Days Remaining"
-          },
           "detail": {
             "anyOf": [
               {
@@ -236,27 +197,6 @@
             ],
             "title": "Email"
           },
-          "has_session": {
-            "default": false,
-            "title": "Has Session",
-            "type": "boolean"
-          },
-          "is_anonymous": {
-            "default": false,
-            "title": "Is Anonymous",
-            "type": "boolean"
-          },
-          "limit_microusd": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Limit Microusd"
-          },
           "model": {
             "anyOf": [
               {
@@ -267,17 +207,6 @@
               }
             ],
             "title": "Model"
-          },
-          "percent_used": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Percent Used"
           },
           "quota": {
             "anyOf": [
@@ -294,50 +223,6 @@
           "signed_in": {
             "title": "Signed In",
             "type": "boolean"
-          },
-          "signin_prompt": {
-            "default": "none",
-            "enum": [
-              "none",
-              "soft",
-              "budget",
-              "required"
-            ],
-            "title": "Signin Prompt",
-            "type": "string"
-          },
-          "signin_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Signin Reason"
-          },
-          "trial_days": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trial Days"
-          },
-          "used_microusd": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Used Microusd"
           },
           "user_id": {
             "anyOf": [
@@ -6603,7 +6488,7 @@
             "items": {
               "$ref": "#/components/schemas/ChatMessage"
             },
-            "maxItems": 30,
+            "maxItems": 200,
             "minItems": 1,
             "title": "Messages",
             "type": "array"
@@ -22288,7 +22173,7 @@
           "transcript": {
             "anyOf": [
               {
-                "maxLength": 20000,
+                "maxLength": 400000,
                 "type": "string"
               },
               {

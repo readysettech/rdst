@@ -8,7 +8,7 @@ import { getSettings } from '@/lib/monitor/api'
 import { monitorKeys } from '@/lib/monitor/keys'
 import type { MonitorSettings } from '@/lib/monitor/types'
 
-export const SIGN_IN_TO_RUN = 'Sign in to keep AI checks running.'
+export const SIGN_IN_TO_RUN = 'Sign in to run AI checks.'
 
 /** Monitoring is on and its AI checks wait for a sign-in. */
 export const heldForSignIn = (settings: MonitorSettings | undefined): boolean =>

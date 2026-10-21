@@ -91,7 +91,10 @@ test('adds the first database from Home and persists it', async ({
   await expect(page).toHaveURL(/\/database/)
   await expect(dialog).toHaveCount(0)
   await expect(enable.getByTestId('explain-analyze-warning')).toBeVisible()
-  await enable.getByRole('button', { name: 'Turn on monitoring' }).click()
+  // A new install is signed out, so turning on asks for a sign-in to get AI; this spec
+  // takes the way without it (monitoring-signin-gate.spec.ts covers signing in).
+  await expect(enable.getByTestId('monitoring-signin-gate')).toBeVisible()
+  await enable.getByRole('button', { name: 'Turn on without AI' }).click()
   await enabled
 
   // The sidebar lists the persisted database beside Home.

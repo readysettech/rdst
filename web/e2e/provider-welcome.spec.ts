@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { mockAnonymousAccess } from './accountless'
+import { mockSignedOut } from './firstRun'
 import { test as base, clearTargets, expect, mainContent } from './fixtures'
 
 // Other product tests assume AI is configured. Exercise the real startup
@@ -35,55 +35,30 @@ async function mockCredentials(page: Page, source: 'missing' | 'trial') {
 }
 
 for (const source of ['missing', 'trial'] as const) {
-  test(`free anonymous AI opens Home for ${source} credentials`, async ({
+  test(`a signed-out install opens Home for ${source} credentials`, async ({
     page,
   }) => {
-    // A fresh install: Home offers the first database.
+    // A fresh install: Home offers the first database, and sign-in waits for monitoring.
     await clearTargets(page.request)
-    await mockAnonymousAccess(page, 'none')
+    await mockSignedOut(page)
     await mockCredentials(page, source)
     await page.goto('/')
     const main = mainContent(page)
-    // Anonymous access counts as AI access: Home, not a provider choice.
     await expect(
       main.getByRole('button', { name: 'Add a database' }).first()
     ).toBeVisible()
     await expect(main.getByText(SETUP_HEADING)).toHaveCount(0)
-    await expect(main.getByTestId('signin-required')).toHaveCount(0)
+    await expect(
+      main.getByText('Sign in there for free AI.', { exact: false })
+    ).toBeVisible()
   })
 }
 
-test('an ended free allowance stands in for Home with sign-in or an own key', async ({
+test('AI pages offer sign-in or an own key while signed out', async ({
   page,
 }) => {
-  await mockAnonymousAccess(page, 'required')
-  await page.goto('/')
-  const main = mainContent(page)
-  const step = main.getByTestId('signin-required')
-  await expect(step).toBeVisible()
-  await expect(
-    step.getByRole('button', { name: 'Sign in', exact: true })
-  ).toBeVisible()
-  await expect(
-    step.getByRole('button', { name: 'Use my own Anthropic key instead' })
-  ).toBeVisible()
-  await expect(
-    main.getByRole('button', { name: 'Add a database' })
-  ).toHaveCount(0)
-  await expect(page.getByRole('button', { name: /skip/i })).toHaveCount(0)
-  await page.reload()
-  await expect(step).toBeVisible()
-})
-
-test('a backend without free hosted AI still shows the provider choice', async ({
-  page,
-}) => {
-  await mockCredentials(page, 'missing')
-  // An older backend answers account status without a sign-in prompt state.
-  await page.route('**/api/account/status', (route) =>
-    route.fulfill({ json: { signed_in: false } })
-  )
-  await page.goto('/')
+  await mockSignedOut(page)
+  await page.goto('/ask')
   const main = mainContent(page)
   await expect(main.getByText(SETUP_HEADING)).toBeVisible()
   await expect(
@@ -92,12 +67,15 @@ test('a backend without free hosted AI still shows the provider choice', async (
   await expect(
     main.getByRole('button', { name: 'Use my own Anthropic key instead' })
   ).toBeVisible()
+  await expect(page.getByRole('button', { name: /skip/i })).toHaveCount(0)
+  await page.reload()
+  await expect(main.getByText(SETUP_HEADING)).toBeVisible()
 })
 
-test('settings offers the provider choice to an anonymous install', async ({
+test('settings offers the provider choice to a signed-out install', async ({
   page,
 }) => {
-  await mockAnonymousAccess(page, 'none')
+  await mockSignedOut(page)
   await page.goto('/configure?section=ai')
   // The deep link opens the own-key dialog, which also offers Readyset sign-in.
   const dialog = page.getByRole('dialog')

@@ -9,13 +9,13 @@ APP_GUIDE = """
 
 RDST is a database performance app from Readyset. It watches your PostgreSQL or MySQL database, finds the slow queries, and hands you the fix with the SQL to run. RDST only reads from your database. It never runs the fixes for you.
 
-AI is included for free. You don't need to sign in or add a key to start: each computer gets a free AI allowance, and you can sign in to Readyset later to keep AI running after it ends.
+AI is included for free with a Readyset account. You can add a database without signing in; turning on monitoring asks you to sign in so its AI checks can run. You can use your own Anthropic key instead.
 
 ## Getting started
 
 On a new install, RDST opens a four-step tour, "Welcome to RDST". Its last step's "Add a database" button opens the add-database dialog. You can replay it from Help with "Take the tour".
 
-Home's "Get started" has three steps: "Connect your database", "Turn on monitoring" (your first fixes show up in about 10 minutes), and the optional "Sign in to Readyset".
+Home's "Get started" has two steps: "Connect your database" and "Turn on monitoring" (your first fixes show up in about 10 minutes). Turning on monitoring asks you to sign in to Readyset for the free AI.
 
 ## The sidebar
 
@@ -80,7 +80,7 @@ Under "Advanced" you can choose:
 - "Analyze automatically" - busiest queries first, new ones as they appear.
 - "Measure real timings" - runs read-only SELECTs with a time limit (EXPLAIN ANALYZE). Off, RDST reads plans with EXPLAIN only and your queries never run.
 
-Click "Turn on monitoring". If you're not ready, "Finish later" saves the database so you can finish from its page.
+Click "Turn on monitoring". Signed out, the dialog asks you to sign in first, because monitoring's AI is free with a Readyset account; after you sign in, monitoring turns on. "Turn on without AI" is there too, but then monitoring only charts the database. If you're not ready, "Finish later" saves the database so you can finish from its page.
 
 **What monitoring collects.** RDST reads your database's query statistics: which queries ran, how often, and how long they took, plus health numbers like connections, cache hit ratio, and rollbacks and deadlocks. It reads every minute, and every 10 seconds for the first few minutes after you turn it on. Detailed readings are kept for a while and then rolled up. "Keep readings" in Settings sets how long (7, 30 or 90 days).
 
@@ -180,7 +180,7 @@ While it runs, you can cache queries, "Turn on QueryPilot", and compare the Read
 
 ## Settings
 
-- **Account** - shows your email and "Sign out", or "Sign in". Not signed in, it shows how many days of free AI are left on this computer.
+- **Account** - shows your email and "Sign out", or "Sign in".
 - **AI** - "Hosted by Readyset" uses the included AI. "Use my own key" lets you "Add key" or "Update key" for an Anthropic API key, billed by Anthropic, and "Test key" checks it. "What each key covers" explains which work uses which key.
 - **Notifications** - "Push to this computer".
 - **Data** - "Keep readings" (7, 30 or 90 days) and "Clear local data", which deletes RDST's local configuration, history, schema descriptions and stored RDST keys. It can't be undone.
@@ -189,11 +189,9 @@ While it runs, you can cache queries, "Turn on QueryPilot", and compare the Read
 
 ## AI access and signing in
 
-Without an account, each computer gets $1 of hosted AI a month for 30 days. It belongs to the computer, so reinstalling doesn't reset it.
+AI is free with a Readyset account. Signed out, AI pages ask you to "Sign in" or "Use my own Anthropic key instead".
 
-- After about a week, a line suggests signing in, with "Not now".
-- At 80% of the allowance, a "Sign in to keep AI monitoring running" card appears on Home and in the Inbox.
-- When the free AI ends, AI pages ask you to "Sign in" or "Use my own Anthropic key instead". Charts, the Inbox and alerts keep running either way.
+Turning on monitoring asks you to sign in, because its checks, deep analysis and nightly reports use AI. You can turn it on without AI, but then RDST only charts the database and alerts on connection problems; deep analysis and Actions wait until you sign in.
 
 To sign in, choose "Sign in", then "Continue with Google" or enter your email for a sign-in link. Your databases, history and settings carry over.
 
@@ -236,7 +234,7 @@ Monitoring resumes by itself once the database answers.
 
 **AI isn't working.**
 
-- "AI off: signed out" or "Sign in to keep AI monitoring running" - the free AI on this computer has ended. Sign in, or add your own Anthropic key.
+- "AI off: signed out" or "Sign in to run AI checks" - monitoring's AI needs a Readyset sign-in, even with your own Anthropic key. Sign in from the sidebar.
 - "Key rejected by Anthropic" - update the key in Settings.
 - "AI reconnecting" - RDST retries every minute.
 - "Local monitoring only" - all your AI monitoring slots are in use. Use "Manage databases" to free one.

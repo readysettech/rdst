@@ -115,10 +115,12 @@ describe('analytics', () => {
     vi.stubEnv('VITE_POSTHOG_KEY', 'test-key')
     const { initAnalytics, trackEventOnce } = await import('./analytics')
     await initAnalytics()
-    trackEventOnce('soft', 'signin_prompt_shown', { state: 'soft' })
-    trackEventOnce('soft', 'signin_prompt_shown', { state: 'soft' })
+    trackEventOnce('gate', 'monitoring_signin_gate_shown', { via: 'page' })
+    trackEventOnce('gate', 'monitoring_signin_gate_shown', { via: 'page' })
     expect(
-      captureMock.mock.calls.filter(([name]) => name === 'signin_prompt_shown')
+      captureMock.mock.calls.filter(
+        ([name]) => name === 'monitoring_signin_gate_shown'
+      )
     ).toHaveLength(1)
   })
 

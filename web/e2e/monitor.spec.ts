@@ -3,6 +3,7 @@ import {
   configureTestTarget,
   expect,
   mockPrerequisites,
+  mockSignedIn,
   test,
 } from './fixtures'
 
@@ -29,6 +30,7 @@ test('database page shows the bar, the query list and a query pane', async ({
 }) => {
   // A monitored query has no Query Library record, so that lookup returns 404.
   acceptBrowserError(browserErrors, NOT_FOUND)
+  await mockSignedIn(page)
   await mockPrerequisites(page, 'e2e-guard')
   // The classic per-target URL still lands on the Database page for that target.
   await page.goto('/db/e2e-guard')

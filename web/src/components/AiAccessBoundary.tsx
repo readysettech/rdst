@@ -7,13 +7,23 @@ import { AiProviderGate } from './AiProviderGate'
 
 /** The bar title of each page the gate can stand in for. */
 const PAGE_TITLES: Record<string, string> = {
-  '/': 'Home',
   '/ask': 'Ask',
   '/results': 'Full analysis',
   '/agent-activity': 'Activity',
   '/platform': 'Readyset Platform',
   '/help': 'Help',
 }
+
+// Home, local monitoring, target setup and the account callback are available throughout AI
+// setup. Turning on monitoring asks for a sign-in where AI starts.
+const OPEN_PATHS = [
+  '/',
+  '/database',
+  '/inbox',
+  '/actions',
+  '/configure',
+  '/account-login',
+]
 
 /** Keep local database monitoring available during AI setup. */
 export function AiAccessBoundary({
@@ -28,24 +38,15 @@ export function AiAccessBoundary({
 }) {
   const path = useRouterState({ select: (state) => state.location.pathname })
   const gate = useAiGate()
-  const settled = gate.status !== 'checking'
-  const gated = gate.status === 'blocked' || gate.status === 'error'
+  const open = OPEN_PATHS.includes(path)
+  const settled = open || gate.status !== 'checking'
+  const gated = !open && (gate.status === 'blocked' || gate.status === 'error')
   useEffect(() => {
     if (settled)
       trackEventOnce('first-screen', 'first_screen_rendered', { gated })
   }, [settled, gated])
 
-  // Local monitoring, target setup and the account callback are available throughout AI setup.
-  if (
-    [
-      '/database',
-      '/inbox',
-      '/actions',
-      '/configure',
-      '/account-login',
-    ].includes(path)
-  )
-    return children
+  if (open) return children
   if (
     gate.status === 'checking' ||
     gate.status === 'error' ||

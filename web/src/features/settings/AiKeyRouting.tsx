@@ -15,7 +15,7 @@ export function keyRoutingLines(
 ): string[] {
   const jev = signedIn
     ? 'Quick checks and monitoring alerts always run through Readyset and use your Readyset allowance.'
-    : "Quick checks and monitoring alerts always run through Readyset, on this computer's free AI until you sign in."
+    : 'Quick checks and monitoring alerts always run through Readyset, so they need you signed in.'
   if (provider === 'claude')
     return [
       'Your Anthropic key covers Analyze, Ask, deep analysis and nightly reports.',
@@ -27,7 +27,7 @@ export function keyRoutingLines(
       'With your own Anthropic key, it covers Analyze, Ask, deep analysis and reports instead, and you can use AI monitoring on more databases.',
     ]
   return [
-    'Sign in to Readyset or add your own Anthropic key to keep using AI.',
+    'Sign in to Readyset or add your own Anthropic key to use AI.',
     'Quick checks and monitoring alerts always run through Readyset.',
   ]
 }

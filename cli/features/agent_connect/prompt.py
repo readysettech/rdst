@@ -33,9 +33,10 @@ CREATE EXTENSION) only after I say yes, and don't change server settings or rest
 database unless I ask. Then check again. Don't turn on monitoring until it reports \
 ready_to_monitor: true.
 5. Then call rdst_enable_monitoring. The first time, RDST answers waiting_for_user: true \
-and shows me its Turn on monitoring screen. Tell me to read it and click Turn on \
-monitoring in the RDST app, then check rdst_status every 10 seconds or so, for up to 10 \
-minutes, until the database shows monitoring: true.
+and shows me its Turn on monitoring screen. Tell me what its message says (read the \
+screen, sign in to Readyset if it asks, and click Turn on monitoring in the RDST app), \
+then check rdst_status every 10 seconds or so, for up to 10 minutes, until the database \
+shows monitoring: true.
 6. Tell me the name RDST saved the database under and whether monitoring is on.
 
 Keep connection details out of your replies.

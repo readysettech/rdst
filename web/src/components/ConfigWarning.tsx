@@ -3,7 +3,6 @@ import { Text } from '@rs/ui-new/text'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { signinPromptOf } from '../lib/accountStatus'
 import { type EnvRequirement, fetchAccountStatus } from '../lib/api'
 import { TRIAL_EXHAUSTED_MESSAGE } from '../lib/errorContract'
 import {
@@ -33,9 +32,7 @@ interface TrialState {
 
 function getWarningConfig(
   missingAnthropicRequirements: EnvRequirement[],
-  trialState?: TrialState,
-  /** The free AI without an account has ended on this computer. */
-  allowanceEnded = false
+  trialState?: TrialState
 ): WarningConfig | null {
   // Trial exhausted — needs a real key
   if (
@@ -71,9 +68,8 @@ function getWarningConfig(
   if (missingAnthropicRequirements.length > 0) {
     return {
       title: 'AI sign-in required',
-      description: allowanceEnded
-        ? 'The free AI on this computer has ended. Sign in to Readyset to keep going, or add your own Anthropic API key.'
-        : 'Sign in to Readyset for the included AI, or add your own Anthropic API key.',
+      description:
+        'Sign in to Readyset for the included AI, or add your own Anthropic API key.',
       severity: 'warning',
       actionLabel: 'Sign in to Readyset',
       actionType: 'open-trial-dialog',
@@ -162,16 +158,12 @@ function AiAccessNotice() {
     queryFn: fetchAccountStatus,
   })
 
-  // A Readyset sign-in provides the included AI, and without one the free allowance does
-  // until it ends: a stale requirement never asks for one.
-  const prompt = signinPromptOf(account.data)
-  const allowanceEnded = prompt === 'required'
-  const missingAnthropicRequirements =
-    account.data?.signed_in || (prompt !== null && !allowanceEnded)
-      ? []
-      : envRequirements?.requirements.filter(
-          (item) => !item.satisfied && item.kind === 'anthropic_api_key'
-        ) || []
+  // A Readyset sign-in provides the included AI: a stale requirement never asks for one.
+  const missingAnthropicRequirements = account.data?.signed_in
+    ? []
+    : envRequirements?.requirements.filter(
+        (item) => !item.satisfied && item.kind === 'anthropic_api_key'
+      ) || []
 
   const trialState: TrialState | undefined =
     isTrialSource &&
@@ -190,15 +182,11 @@ function AiAccessNotice() {
 
   // Reset dismissed state when status changes
   useEffect(() => {
-    const config = getWarningConfig(
-      missingAnthropicRequirements,
-      trialState,
-      allowanceEnded
-    )
+    const config = getWarningConfig(missingAnthropicRequirements, trialState)
     if (config?.title !== dismissed) {
       setDismissed(null)
     }
-  }, [missingAnthropicRequirements, trialState, allowanceEnded, dismissed])
+  }, [missingAnthropicRequirements, trialState, dismissed])
 
   if (isLoading || account.isPending) {
     return null
@@ -210,8 +198,7 @@ function AiAccessNotice() {
 
   const warningConfig = getWarningConfig(
     missingAnthropicRequirements,
-    trialState,
-    allowanceEnded
+    trialState
   )
 
   if (!warningConfig || dismissed === warningConfig.title) {

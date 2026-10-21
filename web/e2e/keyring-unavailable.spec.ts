@@ -1,4 +1,4 @@
-import { mockAnonymousAccess } from './accountless'
+import { mockSignedOut } from './firstRun'
 import {
   acceptBrowserError,
   clearTargets,
@@ -22,7 +22,7 @@ test('a password the OS keyring could not keep is called out before moving on', 
   )
   await clearTargets(page.request)
   setBackendFixtures()
-  await mockAnonymousAccess(page, 'none')
+  await mockSignedOut(page)
   // "Add and monitor" tests the connection before it saves.
   await page.route('**/api/configure/targets/keyring-db/test', (route) =>
     route.fulfill({

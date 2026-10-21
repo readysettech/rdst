@@ -4474,13 +4474,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** AccountAnonymousSession */
-        AccountAnonymousSession: {
-            /** Access Token */
-            access_token: string;
-            /** Refresh Token */
-            refresh_token: string;
-        };
         /** AccountBrowserCallbackStatusResponse */
         AccountBrowserCallbackStatusResponse: {
             /** Code */
@@ -4515,7 +4508,6 @@ export interface components {
         };
         /** AccountLoginResponse */
         AccountLoginResponse: {
-            anonymous_session?: components["schemas"]["AccountAnonymousSession"] | null;
             /** Auth Url */
             auth_url: string;
             /** Callback Url */
@@ -4545,46 +4537,18 @@ export interface components {
         AccountStatusResponse: {
             /** Analytics Account Id */
             analytics_account_id?: string | null;
-            /** Days Remaining */
-            days_remaining?: number | null;
             /** Detail */
             detail?: string | null;
             /** Email */
             email?: string | null;
-            /**
-             * Has Session
-             * @default false
-             */
-            has_session?: boolean;
-            /**
-             * Is Anonymous
-             * @default false
-             */
-            is_anonymous?: boolean;
-            /** Limit Microusd */
-            limit_microusd?: number | null;
             /** Model */
             model?: string | null;
-            /** Percent Used */
-            percent_used?: number | null;
             /** Quota */
             quota?: {
                 [key: string]: unknown;
             } | null;
             /** Signed In */
             signed_in: boolean;
-            /**
-             * Signin Prompt
-             * @default none
-             * @enum {string}
-             */
-            signin_prompt?: "none" | "soft" | "budget" | "required";
-            /** Signin Reason */
-            signin_reason?: string | null;
-            /** Trial Days */
-            trial_days?: number | null;
-            /** Used Microusd */
-            used_microusd?: number | null;
             /** User Id */
             user_id?: string | null;
         };

@@ -7,7 +7,6 @@ import { TwoPane } from '@rs/ui-new/two-pane'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useOpenAddDatabase } from '@/components/configure/addDatabase'
-import { SigninBudgetCard } from '@/components/SigninPrompts'
 import { useDbFilter } from '@/hooks/useDbFilter'
 import { useTarget } from '@/hooks/useTarget'
 import { trackFirstEver } from '@/lib/analytics'
@@ -363,7 +362,6 @@ export function InboxPage() {
         }
       />
       <PageNoticeSlot className="px-6 pt-4" />
-      <SigninBudgetCard compact className="mx-6 mt-4" />
       <Scrollable rootClassName="min-h-0 flex-1" className="pt-1 pb-6">
         {open.error || done.error ? (
           <div className="px-6 pt-4">

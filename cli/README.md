@@ -25,7 +25,6 @@ slow, and shows what an index, a rewrite, or a Readyset cache would do about it.
 - **`rdst analyze`** — EXPLAIN-driven analysis with AI index and rewrite recommendations, plus a real Readyset cache benchmark (`--readyset-cache`)
 - **`rdst ask`** — ask questions about your data in natural language; guarded, read-only SQL generation
 - **`rdst audit` / `rdst fleet`** — deep health audits of one database or a whole fleet
-- **`rdst scan`** — find ORM queries (SQLAlchemy, Django, Prisma, Drizzle) in your codebase and flag performance issues, deterministic and CI-friendly
 - **`rdst demo`** — try everything against a local demo database in one command
 - **MCP built in** — `rdst claude add` registers RDST as an MCP server so Claude Code can use your targets
 
@@ -158,14 +157,13 @@ No database handy? `rdst demo setup` starts a local demo database to explore wit
 | `rdst agent` | Manage and run data agents with safety policies |
 | `rdst init` | First-time setup wizard |
 | `rdst configure` | Manage database targets and connection profiles |
-| `rdst account` | Sign in to keep Readyset-hosted AI past the free allowance |
+| `rdst account` | Sign in for capped Readyset-hosted AI inference |
 | `rdst tunnel` | List, close, and test SSH tunnels |
 | `rdst schema` | Manage the semantic layer that improves SQL generation |
 | `rdst query` | Manage the saved-query registry |
 | `rdst guard` | Manage reusable safety policies |
 | `rdst audit` | Run a deep health audit of a database target |
 | `rdst fleet` | Manage and audit database fleets |
-| `rdst scan` | Scan a codebase for ORM queries (experimental) |
 | `rdst demo` | Try RDST with a demo database |
 | `rdst claude` | Register RDST with Claude Code (MCP) |
 | `rdst slack` | Deploy a Slack bot for database queries |
@@ -178,11 +176,9 @@ No database handy? `rdst demo setup` starts a local demo database to explore wit
 Run `rdst <command> --help` for options and examples.
 
 AI-assisted commands (`ask`, `analyze` insights, `schema annotate`) use capped
-Readyset-hosted Claude Haiku 5.5. You don't need to sign in to start: RDST
-opens an anonymous session that gets $1 of hosted AI a month on each computer
-for 30 days. Run `rdst account login` to keep going after that with a $5
-monthly allowance; your usage carries over. If you set `ANTHROPIC_API_KEY`,
-RDST uses Claude Haiku 5.5 directly without a Readyset account. `RDST_ANTHROPIC_MODEL` can override the Claude BYOK model.
+Readyset-hosted Claude Haiku 5.5 after `rdst account login`. If you set
+`ANTHROPIC_API_KEY`, RDST uses Claude Haiku 5.5 directly without requiring a
+Readyset account. `RDST_ANTHROPIC_MODEL` can override the Claude BYOK model.
 
 ## Requirements
 

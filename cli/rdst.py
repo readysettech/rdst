@@ -491,26 +491,6 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
         tour_name = getattr(args, 'tour_name', 'quickstart')
         return demo_cmd.run(demo_subcommand, tour_name=tour_name)
 
-    elif command == 'scan':
-        from features.scan.cli.command import ScanCommand
-        scan_cmd = ScanCommand()
-        output_format = getattr(args, 'output', 'table')
-        return scan_cmd.execute(
-            subcommand=getattr(args, 'subcommand', 'scan'),
-            directory=getattr(args, 'directory', '.'),
-            dry_run=getattr(args, 'dry_run', False),
-            analyze=getattr(args, 'analyze', False),
-            target=getattr(args, 'target', None),
-            output_json=(output_format == 'json'),
-            file_pattern=getattr(args, 'file_pattern', None),
-            diff=getattr(args, 'diff', None),
-            shallow=getattr(args, 'shallow', False),
-            warn_threshold=getattr(args, 'warn_threshold', 50),
-            fail_threshold=getattr(args, 'fail_threshold', 30),
-            nosave=getattr(args, 'nosave', False),
-            sequential=getattr(args, 'sequential', False),
-        )
-
     # =========================================================================
     # Fleet — Multi-target management
     # =========================================================================
@@ -991,7 +971,7 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
         # Build the commands list from parser_data so descriptions stay in sync.
         # Order matches what --help shows; 'exit' is appended as a menu-only entry.
         _menu_command_names = [
-            "account", "configure", "top", "analyze", "ask", "scan", "agent", "guard",
+            "account", "configure", "top", "analyze", "ask", "agent", "guard",
             "init", "query", "schema", "tunnel", "fleet", "audit", "demo",
             "version", "update", "report", "help", "claude", "slack", "web",
         ]
@@ -1099,25 +1079,6 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
                 return cli.query(subcommand="delete", name=queryname)
             else:
                 return RdstResult(False, "Invalid query subcommand")
-        elif cmd == "scan":
-            directory = input("Directory to scan [.]: ").strip() or "."
-            from features.scan.cli.command import ScanCommand
-            scan_cmd = ScanCommand()
-            return scan_cmd.execute(
-                subcommand="scan",
-                directory=directory,
-                dry_run=False,
-                analyze=False,
-                target=None,
-                output_json=False,
-                file_pattern=None,
-                diff=None,
-                shallow=False,
-                warn_threshold=50,
-                fail_threshold=30,
-                nosave=False,
-                sequential=False,
-            )
         elif cmd == "agent":
             from features.agent.cli import AgentCommand
             agent_cmd = AgentCommand()

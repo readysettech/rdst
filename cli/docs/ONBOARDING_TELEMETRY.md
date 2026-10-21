@@ -43,6 +43,8 @@ Sent at most once per (attempt_id, step, tool, ok) per RDST process.
 `rdst_test_database` reported a failed connection (`ok: false` in its result), or when the
 result says `ready_to_monitor: false`. `error_class` is a connection class from the list
 above or one of `needs_setup` (query statistics aren't available: monitoring is blocked),
+`awaiting_user` (the user turns monitoring on in the app the first time), `signin_required`
+(the same, and the user isn't signed in, so the app asks them to sign up or sign in),
 `invalid_arguments`, `unknown_target`, `tool_error`, `unexpected`.
 
 Funnel: prompt_issued -> connected -> tool_called(rdst_add_database, ok) ->
@@ -70,9 +72,25 @@ Properties: `engine`, `check`, `ok`, `via`, and `attempt_id` on the agent path.
 | `database_add_saved` | `POST /api/configure/targets` saved a database | `engine`, `via`, `is_first_database` |
 | `database_add_failed` | Saving a database failed | `engine`, `via`, `error_class` |
 | `monitoring_enable_failed` | Turning on monitoring was refused (the 409/422 paths) | `reason`: `unavailable`, `local_limit`, `invalid`, `unknown` |
-| `account_anonymous_created` | A new anonymous session was created for hosted AI | `trial_days`, `machine_age_days` |
-| `account_linked` | An anonymous user signed in | `from_anonymous`, `days_since_first_seen` |
-| `signin_prompt_state_changed` | The sign-in prompt moved to a new state | `state`: `none`, `soft`, `budget`, `required` |
+
+## Turning on monitoring signed out
+
+Monitoring's AI needs a Readyset account, so the Turn on monitoring dialog asks a signed-out
+user to sign up or sign in. The app sends these events; `monitoring_enabled` comes from the
+server.
+
+| Event | When it fires | Properties |
+| --- | --- | --- |
+| `monitoring_dialog_shown` | The Turn on monitoring dialog opened | `via` (how the database arrived, or `page`) |
+| `monitoring_signin_gate_shown` | The dialog asked a signed-out user to sign in | `via` |
+| `monitoring_signin_gate_choice` | The user picked a way past it | `choice`: `sign_in` (opened sign-in), `signed_in_after` (signed in, so monitoring turned on), `without_ai` |
+| `signin_started`, `signin_completed` | A sign-in began or finished | `method` (started only), `source`: `monitoring_gate` or `sign_in_page`, absent elsewhere |
+| `monitoring_enabled` (server) | Monitoring turned on for a database | `ai_monitoring`: `on` (signed in, AI running), `signed_out` (turned on without AI), `local_only` (the account's AI databases are full), `pending` (signed in, the Key Service hasn't answered) |
+
+Funnel: monitoring_dialog_shown -> monitoring_signin_gate_shown ->
+monitoring_signin_gate_choice(sign_in) -> signin_completed(source monitoring_gate) ->
+monitoring_signin_gate_choice(signed_in_after) -> monitoring_enabled(ai_monitoring on).
+`choice: without_ai` followed by `ai_monitoring: signed_out` is the path that skips AI.
 
 ## The agent-connect progress feed (not telemetry)
 

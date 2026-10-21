@@ -1,11 +1,11 @@
 import type { Page } from '@playwright/test'
 import {
-  mockAnonymousAccess,
+  mockSignedOut,
   onboardingTour,
   optInToOnboardingTour,
   PRIVACY_DOC_URL,
   PRIVACY_POLICY_URL,
-} from './accountless'
+} from './firstRun'
 import { clearTargets, expect, setBackendFixtures, test } from './fixtures'
 
 const TITLES = [
@@ -37,7 +37,7 @@ async function openTour(page: Page) {
 test.beforeEach(async ({ page }) => {
   setBackendFixtures()
   await clearTargets(page.request)
-  await mockAnonymousAccess(page, 'none')
+  await mockSignedOut(page)
   await optInToOnboardingTour(page)
 })
 

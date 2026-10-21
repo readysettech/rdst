@@ -300,10 +300,10 @@ class TestHelpFallbackText:
         text = self._get_fallback_text()
         assert "agent" in text, "Fallback help text is missing 'agent'."
 
-    def test_fallback_lists_scan(self):
-        """Fallback help text must mention 'scan'."""
+    def test_fallback_does_not_list_scan(self):
+        """Code scanning isn't an RDST command."""
         text = self._get_fallback_text()
-        assert "scan" in text, "Fallback help text is missing 'scan'."
+        assert "rdst scan" not in text
 
     def test_fallback_lists_cache(self):
         """Fallback help text must mention 'cache'."""
@@ -529,13 +529,9 @@ class TestInteractiveMenuCommands:
                 return [elt.value for elt in node.value.elts if isinstance(elt, ast.Constant)]
         return []
 
-    def test_scan_in_interactive_menu(self):
-        """Interactive menu must include 'scan'."""
-        commands = self._get_menu_commands()
-        assert "scan" in commands, (
-            f"'scan' is missing from the interactive menu commands list. "
-            f"Current menu commands: {commands}"
-        )
+    def test_scan_not_in_interactive_menu(self):
+        """Code scanning isn't an RDST command."""
+        assert "scan" not in self._get_menu_commands()
 
     def test_agent_in_interactive_menu(self):
         """Interactive menu must include 'agent'."""
@@ -567,17 +563,17 @@ class TestInteractiveMenuCommands:
         assert "exit" not in commands, "exit should be handled via 'q' input, not as a menu item"
 
 
-class TestOfflineHelpAccountless:
-    """Help's local fallbacks describe AI that starts without an account."""
+class TestOfflineHelpSignIn:
+    """Help's local fallbacks say hosted AI needs a sign-in or an own key."""
 
-    def test_setup_answer_does_not_make_sign_in_a_step(self):
+    def test_setup_answer_makes_sign_in_a_step(self):
         from shared.cli.help_command import HelpCommand
 
         answer = HelpCommand()._fallback_search("rdst setup", "no_api_key").answer
-        assert "rdst account login" not in answer
-        assert "without signing in" in answer
+        assert "rdst account login" in answer
+        assert "ANTHROPIC_API_KEY" in answer
 
-    def test_no_ai_note_does_not_say_sign_in_is_required(self, monkeypatch):
+    def test_no_ai_note_says_to_sign_in_or_set_a_key(self, monkeypatch):
         from shared.cli import help_command
         from shared.llm_manager import key_resolution
 
@@ -587,5 +583,4 @@ class TestOfflineHelpAccountless:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.setattr(key_resolution, "resolve_api_key", unavailable)
         answer = help_command.HelpCommand().run("what is rdst").answer
-        assert "without an account" in answer
-        assert "run `rdst account login` or set" not in answer
+        assert "run `rdst account login` or set" in answer

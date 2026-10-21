@@ -115,11 +115,6 @@ class HostedProvider(Provider):
             body = {}
         code = str(body.get("code") or "HOSTED_INFERENCE_ERROR")
         detail = str(body.get("detail") or f"Hosted inference returned HTTP {response.status_code}")
-        reason = account_session.signin_required_reason(body)
-        if reason:
-            account_session.record_signin_required(reason)
-            raise LLMError(f"{account_session.signin_required_message(reason)} ({reason})",
-                           code="LOGIN_REQUIRED", status=response.status_code)
         from shared import product_telemetry
 
         product_telemetry.refusal(code, feature="hosted")

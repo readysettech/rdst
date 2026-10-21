@@ -27,14 +27,7 @@ const STEPS: {
     title: 'Turn on monitoring',
     short: 'Turn on monitoring',
     caption:
-      'RDST checks every query each minute. Your first fixes show up in about 10 minutes.',
-  },
-  {
-    key: 'sign-in',
-    title: 'Sign in to Readyset',
-    short: 'Sign in (optional)',
-    caption:
-      'Optional. Keeps your monitoring history and sends alerts by email. AI works without an account.',
+      'Sign in there for free AI. RDST checks every query each minute, and your first fixes show up in about 10 minutes.',
   },
 ]
 
@@ -48,10 +41,10 @@ function useStepViewed(step: GetStartedStep) {
 }
 
 /**
- * The first-run screen: what RDST does, then three numbered steps with one big
- * button on the current one. The empty Home renders it at connecting a database,
- * so a new install always shows the next thing to do. Signing in comes last and
- * is optional: AI works without an account.
+ * The first-run screen: what RDST does, then numbered steps with one big button on
+ * the current one. The empty Home renders it at connecting a database, so a new
+ * install always shows the next thing to do. Signing in happens when monitoring
+ * is turned on, since that's where AI starts.
  */
 export function GetStarted({
   step,
@@ -153,7 +146,7 @@ export function GetStartedButton({
 }
 
 /**
- * Where a first-run dialog sits among the three steps: a progress bar over the step's
+ * Where a first-run dialog sits among the steps: a progress bar over the step's
  * name and the one after it.
  */
 export function GetStartedStrip({ step }: { step: GetStartedStep }) {

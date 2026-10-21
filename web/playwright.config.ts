@@ -64,7 +64,7 @@ export default defineConfig({
       RDST_WEB_DIST_DIR: distDir,
       RDST_TESTING: '1',
       RDST_TELEMETRY: 'off',
-      // Nothing reachable, so a page load can never mint an anonymous session on a real key service.
+      // Nothing reachable, so a run never reaches a real key service.
       RDST_KEYSERVICE_URL: 'http://127.0.0.1:9',
       TEST_DB_PASSWORD: 'testpassword',
       PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',

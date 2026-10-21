@@ -14,7 +14,7 @@ import {
   startAccountGoogleOAuth,
 } from '../lib/accountAuth'
 import { isSignedInAccount } from '../lib/accountStatus'
-import { trackEvent } from '../lib/analytics'
+import { type SigninSource, trackEvent } from '../lib/analytics'
 import {
   fetchAccountBrowserCallback,
   fetchAccountStatus,
@@ -30,6 +30,8 @@ interface AccountLoginDialogProps {
   onClose: () => void
   onSuccess?: () => void
   callbackLoginId?: string | null
+  /** Where the sign-in was asked for, sent with the sign-in events. */
+  source?: SigninSource
 }
 
 // The mark on the sign-in page, so the dialog offers the same button.
@@ -90,6 +92,7 @@ export function AccountLoginDialog({
   onClose,
   onSuccess,
   callbackLoginId = null,
+  source,
 }: AccountLoginDialogProps) {
   const queryClient = useQueryClient()
   const emailFieldId = useId()
@@ -110,7 +113,7 @@ export function AccountLoginDialog({
 
   const finish = async () => {
     setComplete(true)
-    trackEvent('signin_completed')
+    trackEvent('signin_completed', { source })
     await invalidateTrialRelatedQueries(queryClient)
     onSuccess?.()
   }
@@ -120,22 +123,18 @@ export function AccountLoginDialog({
 
   const magicLinkMutation = useMutation({
     mutationFn: async () => {
-      trackEvent('signin_started', { method: 'email' })
+      trackEvent('signin_started', { method: 'email', source })
       rememberReturn()
       const context = await startAccountLogin(accountCallbackUrl())
-      const outcome = await sendAccountMagicLink(context, email.trim())
-      if (outcome === 'sent' && isDesktopRuntime())
-        setDesktopLoginId(context.login_id)
-      return outcome
+      await sendAccountMagicLink(context, email.trim())
+      if (isDesktopRuntime()) setDesktopLoginId(context.login_id)
     },
-    // An anonymous session can be upgraded without a link.
-    onSuccess: (outcome) =>
-      outcome === 'signed_in' ? finishRef.current() : setLinkSent(true),
+    onSuccess: () => setLinkSent(true),
   })
 
   const googleMutation = useMutation({
     mutationFn: async () => {
-      trackEvent('signin_started', { method: 'google' })
+      trackEvent('signin_started', { method: 'google', source })
       rememberReturn()
       const context = await startAccountLogin(accountCallbackUrl())
       await startAccountGoogleOAuth(context)
@@ -360,8 +359,7 @@ export function AccountLoginDialog({
 
         {complete ? (
           <ModalDescription>
-            Readyset account connected. Your databases, history and AI checks
-            carry over.
+            Readyset account connected. Your free AI is ready to use.
           </ModalDescription>
         ) : completingCallback ? (
           <ModalDescription>
@@ -401,8 +399,8 @@ export function AccountLoginDialog({
               {!googleMutation.isPending && <span className="w-2" />}
             </Button>
             <Text as="p" level="caption" className="text-content-layout-3">
-              Signing in keeps your monitoring history and AI checks running,
-              and sends alerts by email. Everything you've set up carries over.
+              A Readyset account is free and comes with AI for monitoring,
+              analyses, checks and Ask.
             </Text>
             <Field.Root className="mt-2 px-0 py-0">
               <Field.Label htmlFor={emailFieldId}>Email address</Field.Label>

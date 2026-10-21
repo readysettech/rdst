@@ -67,7 +67,7 @@ describe('HomeEmpty', () => {
     ).toBe('1')
   })
 
-  it('starts on connecting a database, with signing in last and optional', async () => {
+  it('starts on connecting a database, with sign-in at turning on monitoring', async () => {
     await renderHome()
 
     expect(await screen.findByText('Connect your database')).toBeTruthy()
@@ -75,12 +75,10 @@ describe('HomeEmpty', () => {
     expect(steps.map((step) => step.getAttribute('aria-current'))).toEqual([
       'step',
       null,
-      null,
     ])
     expect(steps[0].querySelector('svg')).toBeNull()
     expect(steps[1].textContent).toContain('Turn on monitoring')
-    expect(steps[2].textContent).toContain('Sign in to Readyset')
-    expect(steps[2].textContent).toContain('AI works without an account.')
+    expect(steps[1].textContent).toContain('Sign in there for free AI.')
     expect(screen.getByRole('button', { name: 'Add a database' })).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/Signed in as/)
   })

@@ -12,7 +12,6 @@ import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { type ReactNode, useState } from 'react'
-import { SigninBudgetCard } from '../../components/SigninPrompts'
 import { useDbFilter } from '../../hooks/useDbFilter'
 import { useApplied } from '../../lib/monitor/actions'
 import type {
@@ -592,7 +591,6 @@ export function HomeView({
               />
             </StatusLine>
             {signIn && <SignInNote className="mt-2" />}
-            <SigninBudgetCard className="mt-6" />
             {day && (
               <DayCard
                 day={day}

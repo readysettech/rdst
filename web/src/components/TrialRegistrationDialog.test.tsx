@@ -14,6 +14,7 @@ import {
   sendAccountMagicLink,
   startAccountGoogleOAuth,
 } from '../lib/accountAuth'
+import { trackEvent } from '../lib/analytics'
 import { fetchAccountBrowserCallback, startAccountLogin } from '../lib/api'
 import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
 import { AccountLoginDialog } from './TrialRegistrationDialog'
@@ -24,6 +25,10 @@ vi.mock('../lib/accountAuth', () => ({
   startAccountGoogleOAuth: vi.fn(),
 }))
 
+vi.mock('../lib/analytics', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/analytics')>()),
+  trackEvent: vi.fn(),
+}))
 vi.mock('../lib/api', async () => {
   const actual = await vi.importActual('../lib/api')
   return {
@@ -57,7 +62,7 @@ describe('AccountLoginDialog', () => {
       error: null,
       error_description: null,
     })
-    vi.mocked(sendAccountMagicLink).mockResolvedValue('sent')
+    vi.mocked(sendAccountMagicLink).mockResolvedValue(undefined)
     vi.mocked(startAccountGoogleOAuth).mockResolvedValue(undefined)
     vi.mocked(completeAccountRedirect).mockResolvedValue({
       state: 'success',
@@ -94,6 +99,23 @@ describe('AccountLoginDialog', () => {
       )
     )
     expect(screen.getByText('Check your email')).toBeTruthy()
+  })
+
+  it('tags its sign-in events with the screen that asked', async () => {
+    renderWithClient(
+      <AccountLoginDialog isOpen onClose={vi.fn()} source="monitoring_gate" />,
+      createTestQueryClient()
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: 'Email address' }), {
+      target: { value: 'person@example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send sign-in link' }))
+    await waitFor(() =>
+      expect(trackEvent).toHaveBeenCalledWith('signin_started', {
+        method: 'email',
+        source: 'monitoring_gate',
+      })
+    )
   })
 
   it('completes a Supabase redirect inside RDST', async () => {
@@ -220,7 +242,7 @@ describe('AccountLoginDialog', () => {
     ).toContain('bg-surface-primary-solid')
     expect(
       screen.getByText(
-        "Signing in keeps your monitoring history and AI checks running, and sends alerts by email. Everything you've set up carries over."
+        'A Readyset account is free and comes with AI for monitoring, analyses, checks and Ask.'
       )
     ).toBeTruthy()
   })

@@ -155,35 +155,30 @@ export function SignInPage({
   const [focusEmail, setFocusEmail] = useState(false)
 
   const finish = async () => {
-    trackEvent('signin_completed')
+    trackEvent('signin_completed', { source: 'sign_in_page' })
     await invalidateTrialRelatedQueries(queryClient)
     void navigate({ href: takeLoginReturn() })
   }
-  const start = async <T,>(
-    open: (context: AccountLoginResponse) => Promise<T>
-  ): Promise<T> => {
+  const start = async (
+    open: (context: AccountLoginResponse) => Promise<void>
+  ) => {
     const context = await startAccountLogin(accountCallbackUrl())
-    const outcome = await open(context)
+    await open(context)
     if (isDesktopRuntime()) setDesktopLoginId(context.login_id)
-    return outcome
   }
   const google = useMutation({
     mutationFn: () => {
-      trackEvent('signin_started', { method: 'google' })
+      trackEvent('signin_started', { method: 'google', source: 'sign_in_page' })
       return start(startAccountGoogleOAuth)
     },
   })
   const magicLink = useMutation({
     mutationFn: () => {
-      trackEvent('signin_started', { method: 'email' })
+      trackEvent('signin_started', { method: 'email', source: 'sign_in_page' })
       return start((context) => sendAccountMagicLink(context, email.trim()))
     },
-    // An anonymous session can be upgraded without a link.
-    onSuccess: (outcome) => {
-      if (outcome === 'signed_in') return finish()
-    },
   })
-  const linkSent = magicLink.data === 'sent'
+  const linkSent = magicLink.isSuccess
   useEmailSignIn(linkSent, () => void finish())
   const validateEmail = () => {
     const valid = isValidEmail(normalizeEmail(email))
@@ -380,8 +375,8 @@ export function SignInPage({
           </div>
         )}
         <Text as="p" level="caption" className="mt-4 text-content-layout-3">
-          Signing in keeps your monitoring history and AI checks running, and
-          sends alerts by email. Everything you've set up carries over.
+          A Readyset account is free and comes with AI for monitoring, analyses,
+          checks and Ask.
         </Text>
       </div>
     </main>

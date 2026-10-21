@@ -74,7 +74,6 @@ source "${SCRIPT_DIR}/tests/test_cache.sh"
 source "${SCRIPT_DIR}/tests/test_top_and_registry.sh"
 source "${SCRIPT_DIR}/tests/test_query_command.sh"
 source "${SCRIPT_DIR}/tests/test_errors.sh"
-source "${SCRIPT_DIR}/tests/test_scan.sh"
 source "${SCRIPT_DIR}/tests/test_fleet.sh"
 source "${SCRIPT_DIR}/tests/test_audit_duration.sh"
 
@@ -108,7 +107,7 @@ fixtures_for_area() {
 # Resolve selected areas, collect their fixtures (deduped), and run them.
 run_area_fixtures() {
   local resolved=""
-  for area in analyze top cache query scan fleet audit; do
+  for area in analyze top cache query fleet audit; do
     should_run_area "$area" || continue
     for fn in $(fixtures_for_area "$area"); do
       case " $resolved " in
@@ -175,10 +174,6 @@ run_test_suite() {
     if should_run_area "query"; then
       test_query_commands
       test_registry_and_files
-    fi
-
-    if should_run_area "scan"; then
-      test_scan_commands
     fi
 
     if should_run_area "fleet"; then

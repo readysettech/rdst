@@ -214,10 +214,10 @@ const REASON_COPY: Record<
   signed_out: {
     label: 'AI off: signed out',
     short: 'Signed out',
-    reasonLabel: 'the free AI on this computer has ended',
-    headline: 'Sign in to keep AI monitoring running',
+    reasonLabel: "you're signed out",
+    headline: 'Sign in to turn on AI monitoring',
     detail:
-      'The free AI on this computer has ended. Sign in to keep AI checks, deep analysis and nightly reports going. Charts and alerts keep running.',
+      'Sign in to get AI checks, deep analysis and nightly reports. Charts and alerts keep running.',
     action: { kind: 'sign_in', label: 'Sign in' },
   },
   limit: {
@@ -480,7 +480,7 @@ function waitCopy(blocker: AiBlocker): Omit<AiWaitCopy, 'line'> {
       return {
         title: 'Sign in to run AI checks',
         detail:
-          'The free AI on this computer has ended. AI checks wait for you to sign in, even with your own key.',
+          'AI checks need a Readyset sign-in, even with your own key. They start once you sign in.',
         signIn: true,
       }
     case 'monitoring_off':

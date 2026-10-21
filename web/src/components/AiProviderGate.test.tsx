@@ -85,60 +85,6 @@ describe('AI provider startup gate', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('blocks on a sign-in once the free AI has run out', () => {
-    const client = createTestQueryClient()
-    client.setQueryData(['account-status'], {
-      signed_in: false,
-      is_anonymous: true,
-      signin_prompt: 'required',
-      percent_used: 100,
-      days_remaining: 12,
-      trial_days: 30,
-    })
-    renderWithClient(
-      <AiProviderGate
-        gate={{ status: 'blocked', reason: 'signin_required' }}
-      />,
-      client
-    )
-
-    expect(
-      screen.getByRole('heading', {
-        name: 'Sign in to keep AI monitoring running',
-      })
-    ).toBeTruthy()
-    expect(screen.getByTestId('signin-required').textContent).toContain(
-      "You've used the free AI that comes with RDST on this computer."
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
-    expect(screen.getByText('Readyset account login')).toBeTruthy()
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use my own Anthropic key instead' })
-    )
-    expect(screen.getByText('Anthropic key setup')).toBeTruthy()
-  })
-
-  it('says the free days are up when the clock ended it', () => {
-    const client = createTestQueryClient()
-    client.setQueryData(['account-status'], {
-      signed_in: false,
-      is_anonymous: true,
-      signin_prompt: 'required',
-      percent_used: 40,
-      days_remaining: 0,
-      trial_days: 30,
-    })
-    renderWithClient(
-      <AiProviderGate
-        gate={{ status: 'blocked', reason: 'signin_required' }}
-      />,
-      client
-    )
-    expect(screen.getByTestId('signin-required').textContent).toContain(
-      'Your 30 days of free AI on this computer are up.'
-    )
-  })
-
   it('does not pop sign-in up when a saved key stopped working', () => {
     renderWithClient(
       <AiProviderGate gate={{ status: 'blocked', reason: 'invalid' }} />,

@@ -571,7 +571,7 @@ describe('AddDatabaseDialog', () => {
   it('shows the getting-started progress only for the first database', () => {
     renderDialog('form')
     expect(screen.getByTestId('get-started-strip').textContent).toContain(
-      'Step 1 of 3 · Connect database'
+      'Step 1 of 2 · Connect database'
     )
     cleanup()
 

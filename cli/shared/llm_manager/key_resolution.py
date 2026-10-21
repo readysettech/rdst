@@ -31,56 +31,12 @@ class KeyResolution:
 
 
 def require_monitoring_session() -> None:
-    """Automatic monitoring requires a current session, including own-key inference.
-
-    An anonymous session counts; one is started when there's no session at all.
-    """
+    """Automatic monitoring requires a current session, including own-key inference."""
     from .base import LLMError
     from shared import account_session
 
-    try:
-        token = account_session.ensure_access_token()
-    except account_session.SignInRequiredError as exc:
-        raise LLMError(f"{exc} ({exc.reason})", code="LOGIN_REQUIRED") from exc
-    if not token:
+    if not account_session.access_token():
         raise LLMError("Sign in to turn on AI monitoring (signed out)", code="LOGIN_REQUIRED")
-
-
-def own_key_configured() -> bool:
-    """Whether the user's own Anthropic key pays for AI, without starting any session."""
-    try:
-        resolution = resolve_api_key("claude")
-    except Exception:
-        return False
-    if resolution.provider != "claude":
-        return False
-    try:
-        from shared.config.targets import TargetsConfig
-
-        cfg = TargetsConfig()
-        cfg.load()
-        return (cfg.get_llm_provider() or "").lower() != "readyset"
-    except Exception:
-        return True
-
-
-def hosted_ai_ready() -> bool:
-    """Whether a session can carry Readyset-hosted work now (an anonymous one counts).
-
-    Starts an anonymous session when there's none. A sign-in requirement only blocks
-    hosted inference, so an own-key user's monitoring keeps running.
-    """
-    from shared import account_session
-
-    try:
-        token = account_session.ensure_access_token()
-    except Exception:
-        return False
-    if not token:
-        return False
-    if account_session.signin_required() and account_session.is_anonymous_session():
-        return own_key_configured()
-    return True
 
 
 def resolve_api_key(provider: str = "auto") -> KeyResolution:
@@ -90,8 +46,7 @@ def resolve_api_key(provider: str = "auto") -> KeyResolution:
     Otherwise, resolution order is:
       1. ANTHROPIC_API_KEY env var → direct to Anthropic
       2. ANTHROPIC_API_KEY in OS keyring (set via RDST) → direct
-      3. Readyset account session -> hosted inference through Keyservice (an
-         anonymous session is started when there's none)
+      3. Readyset account session -> hosted inference through Keyservice
 
     Without a saved preference, the keyring is checked after the environment
     and before a Readyset account for backward compatibility.
@@ -159,23 +114,12 @@ def resolve_api_key(provider: str = "auto") -> KeyResolution:
     if requested_provider != "claude":
         import requests
 
-        from shared import account_session
-        from shared.account_session import AccountSessionError, SignInRequiredError
+        from shared.account_session import AccountSessionError, access_token
 
         from .base import provider_unreachable
 
         try:
-            # Without a session, an anonymous one is started: AI works before sign-in.
-            account_token = account_session.ensure_access_token()
-            reason = account_token and account_session.signin_required()
-            if reason and account_session.is_anonymous_session():
-                raise SignInRequiredError(reason)
-        except SignInRequiredError as exc:
-            raise LLMError(
-                f"{exc}. Run 'rdst account login' or set your own Anthropic key:\n"
-                f"  {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}",
-                code="LOGIN_REQUIRED",
-            ) from exc
+            account_token = access_token()
         except AccountSessionError as exc:
             # Offline, the session can't refresh: a network problem, not a signed-out one.
             if isinstance(exc.__cause__, requests.RequestException):

@@ -46,8 +46,8 @@ export async function signInWithEmail(
   const email = ciAddress(emailLabel)
   const requestedAt = new Date()
 
-  // Sign-in is optional, so signed out the app runs as usual and the sidebar's
-  // account line leads to the sign-in page.
+  // Signed out, the app runs up to turning on monitoring, and the sidebar's account
+  // line leads to the sign-in page.
   await page.goto('/')
   await page.getByTestId('sidebar-sign-in').click()
   await expect(page).toHaveURL(/\/account-login/)
@@ -56,25 +56,12 @@ export async function signInWithEmail(
   ).toBeVisible()
   await page.getByLabel('Email address').fill(email)
   await page.getByRole('button', { name: 'Send sign-in link' }).click()
+  await expect(page.getByText('Check your email')).toBeVisible()
 
-  // A new address can upgrade the anonymous session on the spot; otherwise the
-  // page asks for the emailed link.
-  const linkSent = page.getByText('Check your email')
-  let emailed = false
-  await expect(async () => {
-    emailed = await linkSent.isVisible()
-    if (emailed) return
-    const response = await page.request.get('/api/account/status')
-    expect(response.ok()).toBe(true)
-    expect((await response.json()).signed_in).toBe(true)
-  }).toPass({ timeout: 30_000 })
-
+  // The emailed link lands on /account-login, which finishes the sign-in.
+  const mail = await waitForEmail(email, { newerThan: requestedAt })
   const signedInPage = await page.context().newPage()
-  if (emailed) {
-    // The emailed link lands on /account-login, which finishes the sign-in.
-    const mail = await waitForEmail(email, { newerThan: requestedAt })
-    await signedInPage.goto(supabaseMagicLink(mail.html ?? ''))
-  }
+  await signedInPage.goto(supabaseMagicLink(mail.html ?? ''))
   await expect(async () => {
     const response = await signedInPage.request.get('/api/account/status')
     expect(response.ok()).toBe(true)

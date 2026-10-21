@@ -1400,48 +1400,6 @@ that can be applied to one or more agents.""",
             ("rdst agent create --name bot --target prod --guard pii-safe", "Create agent with guard"),
         ],
     ),
-    "scan": CommandDef(
-        name="scan",
-        short_help="Scan codebase for ORM queries (experimental)",
-        description="""Scan a codebase directory for ORM queries and analyze them.
-
-This command finds SQL queries in ORM code and can optionally analyze them for
-performance issues.
-
-Supported ORMs: SQLAlchemy, Django ORM, Prisma, Drizzle
-
-Modes:
-  Default              Scan and list all queries found
-  --analyze            Deep analysis with EXPLAIN ANALYZE (requires DB connection)
-  --analyze --shallow  Schema-only analysis, no DB connection needed
-  --check              CI mode with exit codes (0=pass, 1=fail)
-  --diff               Only scan files changed in git (uncommitted changes)""",
-        args=[
-            ArgDef("directory", nargs="?", default=".", help="Directory to scan"),
-            ArgDef("--dry-run", action="store_true", help="Show what would be scanned without scanning"),
-            ArgDef("--analyze", action="store_true", help="Analyze queries for performance issues (runs EXPLAIN ANALYZE, requires DB connection)"),
-            ArgDef("--shallow", action="store_true", help="Schema-only analysis, no DB connection needed (use with --analyze)"),
-            ArgDef("--schema", dest="target", help="Target name for schema context"),
-            ArgDef("--output", choices=["table", "json"], default="table", help="Output format"),
-            ArgDef("--diff", metavar="REF", help="Only scan changed files since REF. Use HEAD for uncommitted, HEAD~1 for last commit, or any commit/branch"),
-            ArgDef("--check", action="store_true", help="CI mode: exit 1 if issues found"),
-            ArgDef("--warn-threshold", type=int, default=50, help="Risk score threshold for warnings (0-100)"),
-            ArgDef("--fail-threshold", type=int, default=30, help="Risk score threshold for failures (0-100)"),
-            ArgDef("--file-pattern", help="Glob pattern to filter files (e.g., '*.py')"),
-            ArgDef("--nosave", action="store_true", help="Don't save queries to the registry"),
-            ArgDef("--sequential", action="store_true", help="Run analysis queries one at a time (more deterministic scores, slower)"),
-        ],
-        examples=[
-            ("rdst scan ./backend --schema mydb", "Scan directory for ORM queries"),
-            ("rdst scan /path/to/app/services --schema mydb", "Scan specific subdirectory"),
-            ("rdst scan . --analyze --schema mydb", "Deep analysis (EXPLAIN ANALYZE)"),
-            ("rdst scan . --analyze --shallow --schema mydb", "Schema-only analysis"),
-            ("rdst scan . --diff HEAD --analyze --schema mydb", "Analyze only changed files"),
-            ("rdst scan . --check --analyze --schema mydb", "CI mode with exit codes"),
-            ("rdst scan ./backend --schema mydb --nosave", "Scan without saving to registry"),
-            ("rdst scan . --analyze --schema mydb --sequential", "Deterministic analysis (one query at a time)"),
-        ],
-    ),
     # =========================================================================
     # Fleet — Multi-target management and fleet-wide audit
     # =========================================================================
@@ -1629,7 +1587,6 @@ COMMAND_ORDER = [
     "schema",
     "slack",
     "guard",
-    "scan",
     "fleet",
     "audit",
     "demo",
@@ -1646,7 +1603,7 @@ COMMAND_GROUPS: list[tuple[str, list[str]]] = [
     ("Configuration", ["account", "init", "configure", "tunnel", "schema", "query", "guard"]),
     ("Fleet", ["fleet", "audit"]),
     ("Integrations", ["claude", "slack", "web"]),
-    ("Other", ["demo", "scan", "report", "help", "version", "update"]),
+    ("Other", ["demo", "report", "help", "version", "update"]),
 ]
 
 

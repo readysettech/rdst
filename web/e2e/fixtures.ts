@@ -206,6 +206,23 @@ export async function mockAiKeyReady(page: Page) {
 }
 
 /**
+ * Answer /api/account/status as signed in, for specs that turn monitoring on the way a
+ * signed-in user does. The browser suites' backend has no account session.
+ */
+export async function mockSignedIn(page: Page) {
+  await page.route('**/api/account/status', (route) =>
+    route.fulfill({
+      json: {
+        signed_in: true,
+        has_session: true,
+        email: 'e2e@example.com',
+        detail: 'Signed in',
+      },
+    })
+  )
+}
+
+/**
  * Pin the connectivity probe to a settled `ok` result. Left unstubbed, the
  * page probes the target for real and the reachability verdict lands at an
  * arbitrary moment, relocating rows between the available and unavailable
@@ -365,7 +382,10 @@ export async function addDatabaseThroughDialog(
   await continuePastSessionOnlyPassword(page, enable)
   await expect(page).toHaveURL(/\/database/, { timeout: 60_000 })
   await expect(enable.getByTestId('explain-analyze-warning')).toBeVisible()
-  const turnOn = enable.getByRole('button', { name: 'Turn on monitoring' })
+  // Signed out, the dialog asks for a sign-in; these tests turn on without AI.
+  const turnOn = enable.getByRole('button', {
+    name: /^(Turn on monitoring|Turn on without AI)$/,
+  })
   await expect(turnOn).toBeEnabled({ timeout: 60_000 })
   await turnOn.click()
   await expect(enable).toHaveCount(0)

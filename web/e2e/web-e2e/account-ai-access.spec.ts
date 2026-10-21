@@ -24,9 +24,7 @@ async function resetLocalState(page: Page): Promise<void> {
 }
 
 /** Signed out: the sidebar offers sign-in and the backend reports no account. */
-async function expectSignedOut(
-  page: Page
-): Promise<{ signin_prompt?: string }> {
+async function expectSignedOut(page: Page): Promise<void> {
   await page.goto('/')
   await expect(page.getByTestId('sidebar-sign-in')).toBeVisible()
   await expect(page.getByTestId('sidebar-account-email')).toHaveCount(0)
@@ -34,10 +32,9 @@ async function expectSignedOut(
   expect(status.ok()).toBe(true)
   const body = await status.json()
   expect(body.signed_in).toBe(false)
-  return body
 }
 
-test('account login unlocks hosted Ask and sign-out asks this computer to sign in again', async ({
+test('account login unlocks hosted Ask and sign-out asks for a sign-in again', async ({
   browserErrors,
   page,
 }) => {
@@ -49,18 +46,18 @@ test('account login unlocks hosted Ask and sign-out asks this computer to sign i
     'Failed to load resource: the server responded with a status of 429 ()'
   )
   await resetLocalState(page)
-  const firstRun = await expectSignedOut(page)
-  if (test.info().retry === 0) {
-    // A computer that has never signed in gets hosted AI without an account, so Home
-    // is the get-started steps with sign-in as an optional last step.
-    expect(firstRun.signin_prompt).toBe('none')
-    const main = mainContent(page)
-    await expect(
-      main.getByText("Find out what's slowing your database.")
-    ).toBeVisible()
-    await expect(main.getByText('AI works without an account.')).toBeVisible()
-    await expect(page.getByTestId('ai-setup')).toHaveCount(0)
-  }
+  await expectSignedOut(page)
+  // Signed out, Home is the get-started steps; signing in comes with turning on
+  // monitoring, and AI pages ask for a sign-in or an own key.
+  const main = mainContent(page)
+  await expect(
+    main.getByText("Find out what's slowing your database.")
+  ).toBeVisible()
+  await expect(
+    main.getByText('Sign in there for free AI.', { exact: false })
+  ).toBeVisible()
+  await page.goto('/ask')
+  await expect(page.getByTestId('ai-setup')).toBeVisible()
 
   // The alternate BYOK path must remain usable without creating an account.
   await page.goto('/configure?panel=ai')
@@ -229,19 +226,16 @@ test('account login unlocks hosted Ask and sign-out asks this computer to sign i
     }).toPass({ timeout: 120_000 })
   })
 
-  await test.step('sign out and require a sign-in on this computer again', async () => {
+  await test.step('sign out and require a sign-in again', async () => {
     await signedInPage.goto('/configure?panel=ai')
     const account = signedInPage.getByRole('region', { name: 'Account' })
     await account.getByRole('button', { name: 'Sign out' }).click()
     await expect(account.getByText('Not signed in')).toBeVisible()
-    // The free allowance without an account is once per computer. This one has signed
-    // in, so signed out it needs a sign-in or an own key for AI again.
-    const status = await expectSignedOut(signedInPage)
-    expect(status.signin_prompt).toBe('required')
+    // Signed out, AI needs a sign-in or an own key again.
+    await expectSignedOut(signedInPage)
+    await signedInPage.goto('/ask')
     const main = mainContent(signedInPage)
-    await expect(
-      main.getByText('Sign in to keep AI monitoring running')
-    ).toBeVisible()
+    await expect(main.getByText('Set up AI')).toBeVisible()
     await expect(
       main.getByRole('button', { name: 'Sign in', exact: true })
     ).toBeVisible()

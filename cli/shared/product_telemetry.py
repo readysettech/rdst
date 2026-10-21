@@ -153,10 +153,10 @@ def _telemetry() -> Any:
 
 
 def _signed_in_metadata() -> dict[str, Any]:
-    """Account metadata for a signed-in (not anonymous) session, else empty."""
+    """Account metadata for a signed-in session, else empty."""
     from shared import account_session
 
-    if not account_session.is_signed_in_locally() or account_session.is_anonymous_session():
+    if not account_session.is_signed_in_locally():
         return {}
     return account_session.account_metadata()
 
@@ -184,8 +184,7 @@ def identity(device_id: str) -> dict[str, Any]:
     """The local person identity. Email is used only to set the PostHog profile.
 
     Signed in, the person is the account's analytics id (``rdst_account_<hmac>``), the same
-    id the Key Service reports under. An anonymous session stays a device-only person until
-    it signs in.
+    id the Key Service reports under.
     """
     metadata = _signed_in_metadata()
     person_id = str(metadata.get("analytics_account_id") or metadata.get("user_id") or "")
@@ -391,7 +390,8 @@ def monitoring_enabled(target: str, *, monitored_count: int, ai_monitoring: str 
                 signed_in = check()
             except Exception:
                 signed_in = False
-        ai_monitoring = "on" if (signed_in or key) else "local_only"
+        # Monitoring's AI runs through a Readyset session, even with an own key.
+        ai_monitoring = "on" if signed_in else "local_only"
     capture("monitoring_enabled", {
         **database_properties(target),
         "display_name": "RDST Monitoring Enabled",
@@ -449,14 +449,11 @@ ADMIN_USER_PATH = "/admin#/users/{user_id}"
 
 
 def account_kind() -> str:
-    """``signed_in`` with a Readyset account, ``anonymous`` with an anonymous session, else
-    ``device_only``."""
+    """``signed_in`` with a Readyset account, else ``device_only``."""
     try:
         from shared import account_session
 
-        if not account_session.is_signed_in_locally():
-            return "device_only"
-        return "anonymous" if account_session.is_anonymous_session() else "signed_in"
+        return "signed_in" if account_session.is_signed_in_locally() else "device_only"
     except Exception:
         return "device_only"
 
@@ -660,7 +657,6 @@ VIAS = frozenset({"url", "fields", "provider", "agent", "cli", "mcp"})
 ERROR_CLASSES = ("auth_failed", "host_unreachable", "timeout", "tls", "db_not_found",
                  "permission_denied", "ssh_failed", "unknown")
 MONITORING_ENABLE_FAILURES = frozenset({"unavailable", "local_limit", "invalid", "unknown"})
-SIGNIN_PROMPT_STATES = frozenset({"none", "soft", "budget", "required"})
 _CONNECTION_ERRORS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("ssh_failed", ("ssh", "jump host", "bastion", "tunnel")),
     ("tls", ("tls", "ssl", "certificate", "x509")),
@@ -737,52 +733,13 @@ def monitoring_enable_failed(reason: str) -> None:
             {"reason": reason if reason in MONITORING_ENABLE_FAILURES else "unknown"})
 
 
-def account_anonymous_created(*, trial_days: Any = None,
-                              machine_first_seen_at: Any = None) -> None:
-    """A new anonymous session; ``reinstall`` when this machine had used RDST before."""
-    if not enabled():
-        return
-    props: dict[str, Any] = {}
-    if isinstance(trial_days, int) and not isinstance(trial_days, bool):
-        props["trial_days"] = trial_days
-    if isinstance(machine_first_seen_at, (int, float)) and not isinstance(
-            machine_first_seen_at, bool) and machine_first_seen_at > 0:
-        props["machine_age_days"] = max(0, int((time.time() - machine_first_seen_at) // 86400))
-    capture("account_anonymous_created", props)
-
-
-def account_linked(*, from_anonymous: bool, days_since_first_seen: Any = None) -> None:
-    if not enabled():
-        return
-    days = days_since_first_seen if isinstance(days_since_first_seen, int) and not isinstance(
-        days_since_first_seen, bool) else None
-    capture("account_linked", {"from_anonymous": bool(from_anonymous),
-                               "days_since_first_seen": days})
-
-
-def signin_prompt_state(state: str) -> None:
-    """Send signin_prompt_state_changed when the sign-in prompt moves to a new state."""
-    if state not in SIGNIN_PROMPT_STATES:
-        return
-    with _state_lock:
-        if state_value("signin_prompt_state") == state:
-            return
-        previous = state_value("signin_prompt_state")
-        set_state_value("signin_prompt_state", state)
-    if previous is None and state == "none":
-        return
-    if not enabled():
-        return
-    capture("signin_prompt_state_changed", {"state": state})
-
-
 
 # Agent connect: a coding agent connecting to RDST and calling its MCP tools
 
 AGENT_CONNECT_STEPS = frozenset({"prompt_issued", "connected", "tool_called"})
 AGENT_ERROR_CLASSES = frozenset(ERROR_CLASSES) | {
-    "needs_setup", "invalid_arguments", "unknown_target", "tool_error",
-    "unexpected"}
+    "needs_setup", "awaiting_user", "signin_required", "invalid_arguments", "unknown_target",
+    "tool_error", "unexpected"}
 PREREQ_CHECKS = frozenset({
     "pg_stat_statements_preload", "pg_stat_statements", "read_all_stats", "visibility_probe",
     "performance_schema", "statement_consumers", "query_text_size", "statement_history"})

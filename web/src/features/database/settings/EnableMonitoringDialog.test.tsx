@@ -19,7 +19,6 @@ import { renderWithClient } from '@/test-utils'
 const mutate = vi.hoisted(() => vi.fn())
 const account = vi.hoisted(() => ({
   signedIn: true,
-  signinRequired: true,
   limit: {} as Record<string, unknown>,
 }))
 const prereq = vi.hoisted(() => ({
@@ -55,7 +54,30 @@ vi.mock('@/lib/monitor/hooks', async (original) => ({
 }))
 
 vi.mock('@/lib/accountStatus', () => ({
-  useSigninRequired: () => account.signinRequired,
+  useSignedOut: () => !account.signedIn,
+}))
+
+// Sign-in itself is the dialog's own business; here it opens and finishes on a click.
+vi.mock('@/components/TrialRegistrationDialog', () => ({
+  AccountLoginDialog: ({
+    isOpen,
+    onClose,
+    onSuccess,
+  }: {
+    isOpen: boolean
+    onClose: () => void
+    onSuccess?: () => void
+  }) =>
+    isOpen ? (
+      <div data-testid="sign-in-dialog">
+        <button type="button" onClick={() => onSuccess?.()}>
+          Finish sign-in
+        </button>
+        <button type="button" onClick={onClose}>
+          Close sign-in
+        </button>
+      </div>
+    ) : null,
 }))
 
 vi.mock('@/features/prerequisites', () => ({
@@ -115,7 +137,6 @@ afterEach(() => {
   endAddFlow('reports')
   prereq.result = undefined
   account.signedIn = true
-  account.signinRequired = true
   account.limit = {}
   prereq.phase = 'ready'
   saved.value = {}
@@ -326,47 +347,99 @@ it('says where the dialog was opened from when no add led here', () => {
   })
 })
 
-it('signed out, signing in leads and turning on stays secondary', () => {
+it('signed in, turns on with one action and asks for no sign-in', () => {
   renderWithClient(
     <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
   )
   expect(
     screen.getByRole('button', { name: 'Turn on monitoring' })
   ).toBeTruthy()
+  expect(screen.queryByTestId('monitoring-signin-gate')).toBeNull()
   expect(
-    screen.queryByRole('button', { name: 'Sign in to Readyset' })
+    screen.queryByRole('button', { name: 'Sign up or sign in' })
   ).toBeNull()
-  cleanup()
-
-  account.signedIn = false
-  renderWithClient(
-    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  expect(trackEvent).not.toHaveBeenCalledWith(
+    'monitoring_signin_gate_shown',
+    expect.anything()
   )
-  expect(
-    screen.getByRole('button', { name: 'Sign in to Readyset' })
-  ).toBeTruthy()
-  expect(
-    screen.getByRole('button', { name: 'Turn on monitoring' })
-  ).toBeTruthy()
-  expect(
-    screen.getByText(/The free AI on this computer has ended\./)
-  ).toBeTruthy()
 })
 
-it('without an account but within the free AI, asks for no sign-in', () => {
+it('signed out, asks for a sign-in to get AI and keeps turning on without AI secondary', () => {
   account.signedIn = false
-  account.signinRequired = false
   renderWithClient(
     <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
   )
+  expect(screen.getByTestId('monitoring-signin-gate').textContent).toContain(
+    'Turning on monitoring needs AI, which is free with a Readyset account.'
+  )
   expect(
-    screen.queryByRole('button', { name: 'Sign in to Readyset' })
+    screen.queryByRole('button', { name: 'Turn on monitoring' })
   ).toBeNull()
-  expect(
-    screen.getByText(
-      'Deep analysis is on. Change it any time in Monitoring settings.'
-    )
-  ).toBeTruthy()
+  expect(screen.getByTestId('monitoring-signin-gate').textContent).toContain(
+    'Without AI, RDST only charts query stats and alerts on connection problems.'
+  )
+  expect(trackEvent).toHaveBeenCalledWith('monitoring_signin_gate_shown', {
+    via: 'page',
+  })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Turn on without AI' }))
+  expect(trackEvent).toHaveBeenCalledWith('monitoring_signin_gate_choice', {
+    choice: 'without_ai',
+  })
+  expect(mutate).toHaveBeenCalledWith(
+    { enabled: true, deep_analysis: true, analysis_mode: 'execute' },
+    expect.anything()
+  )
+})
+
+it('signed out, signing in turns monitoring on with the choices made', () => {
+  account.signedIn = false
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  fireEvent.click(screen.getByRole('button', { name: /Advanced/ }))
+  fireEvent.click(screen.getByRole('switch', { name: 'Measure real timings' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Sign up or sign in' }))
+  expect(trackEvent).toHaveBeenCalledWith('monitoring_signin_gate_choice', {
+    choice: 'sign_in',
+  })
+  expect(mutate).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Finish sign-in' }))
+  expect(trackEvent).toHaveBeenCalledWith('monitoring_signin_gate_choice', {
+    choice: 'signed_in_after',
+  })
+  expect(mutate).toHaveBeenCalledWith(
+    { enabled: true, deep_analysis: true, analysis_mode: 'plans_only' },
+    expect.anything()
+  )
+  expect(screen.queryByTestId('sign-in-dialog')).toBeNull()
+})
+
+it('signed out, closing sign-in leaves monitoring off', () => {
+  account.signedIn = false
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Sign up or sign in' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Close sign-in' }))
+  expect(mutate).not.toHaveBeenCalled()
+})
+
+it("signed out, the agent's turn-on request names the sign-in button", () => {
+  account.signedIn = false
+  handOffAddFlow('reports', {
+    attempt: newAddAttempt(),
+    via: 'agent',
+    agentSince: 1700000000,
+  })
+  renderWithClient(
+    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
+  )
+  FakeEventSource.last?.emit({ step: 'awaiting_user', target: 'reports' })
+  expect(screen.getByTestId('agent-awaiting-user').textContent).toContain(
+    'Your turn: read and click Sign up or sign in'
+  )
 })
 
 it("with the account's AI slots full, says deep analysis waits for a free one", () => {
@@ -382,22 +455,4 @@ it("with the account's AI slots full, says deep analysis waits for a free one", 
       'Deep analysis is on. Change it any time in Monitoring settings.'
     )
   ).toBeNull()
-})
-
-it('signed out, says deep analysis runs once you sign in', () => {
-  account.signedIn = false
-  renderWithClient(
-    <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
-  )
-  expect(
-    screen.getByText('Deep analysis is on, and runs once you sign in.')
-  ).toBeTruthy()
-  expect(screen.queryByText(/^Deep analysis is on\. /)).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: /Advanced/ }))
-  fireEvent.click(screen.getByRole('switch', { name: 'Analyze automatically' }))
-  expect(
-    screen.getByText(
-      'Deep analysis is off. Change it any time in Monitoring settings.'
-    )
-  ).toBeTruthy()
 })

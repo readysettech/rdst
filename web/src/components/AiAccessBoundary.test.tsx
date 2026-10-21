@@ -4,7 +4,7 @@ import type { AiGate } from '../lib/useAiGate'
 import { AiAccessBoundary } from './AiAccessBoundary'
 
 const state = vi.hoisted(() => ({
-  path: '/',
+  path: '/ask',
   gate: { status: 'checking' } as AiGate,
 }))
 vi.mock('@tanstack/react-router', () => ({
@@ -21,7 +21,7 @@ vi.mock('./AiProviderGate', () => ({
 }))
 afterEach(() => {
   cleanup()
-  state.path = '/'
+  state.path = '/ask'
 })
 
 describe('AI startup boundary', () => {
@@ -103,6 +103,7 @@ describe('AI startup boundary', () => {
 })
 
 it.each([
+  '/',
   '/inbox',
   '/configure',
 ])('allows local operations on %s without AI access', (path) => {
@@ -116,10 +117,7 @@ it.each([
   expect(screen.getByText('Local operation')).toBeTruthy()
 })
 
-it.each([
-  '/',
-  '/onboarding',
-])('keeps the fresh-install chooser on %s', (path) => {
+it.each(['/onboarding'])('keeps the fresh-install chooser on %s', (path) => {
   state.path = path
   state.gate = { status: 'blocked', reason: 'missing' }
   render(

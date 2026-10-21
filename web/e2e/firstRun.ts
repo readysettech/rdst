@@ -1,6 +1,5 @@
-// Helpers for hosted AI without sign-in: the Key Service stub's request log, the account
-// states the sign-in prompts follow, the first-run tour, and a scripted MCP client that
-// plays the user's coding agent.
+// First-run helpers: a signed-out install with no Anthropic key, the first-run tour, and
+// a scripted MCP client that plays the user's coding agent.
 import {
   type APIRequestContext,
   expect,
@@ -8,49 +7,17 @@ import {
   type Page,
 } from '@playwright/test'
 
-export const KEYSERVICE_STUB_URL = `http://127.0.0.1:${
-  process.env.RDST_E2E_KEYSERVICE_PORT ?? '8786'
-}`
-
-export type StubRequest = { method: string; path: string; at: number }
-
-/** Every request RDST's backend made to the Key Service stub, oldest first. */
-export async function keyserviceRequests(
-  request: APIRequestContext
-): Promise<StubRequest[]> {
-  const response = await request.get(`${KEYSERVICE_STUB_URL}/__stub/requests`)
-  expect(response.ok()).toBe(true)
-  return ((await response.json()) as { requests: StubRequest[] }).requests
-}
-
-export type SigninPrompt = 'none' | 'soft' | 'budget' | 'required'
-
 /**
- * Answer /api/account/status as an anonymous session in `prompt` state, and report no
- * Anthropic key, so the hosted-AI path (not an own key) decides what the app shows.
+ * Answer /api/account/status as signed out and report no Anthropic key, so the app shows
+ * what a new install sees before signing in.
  */
-export async function mockAnonymousAccess(
-  page: Page,
-  prompt: SigninPrompt,
-  extra: Record<string, unknown> = {}
-) {
+export async function mockSignedOut(page: Page) {
   await page.route('**/api/account/status', (route) =>
     route.fulfill({
       json: {
         signed_in: false,
-        has_session: true,
-        is_anonymous: true,
-        user_id: 'anon-e2e',
-        detail: 'Using Readyset-hosted AI without signing in',
-        signin_prompt: prompt,
-        signin_reason:
-          prompt === 'required' ? 'anonymous_signin_required' : null,
-        percent_used: 12,
-        days_remaining: 23,
-        trial_days: 30,
-        limit_microusd: 1_000_000,
-        used_microusd: 120_000,
-        ...extra,
+        has_session: false,
+        detail: 'Not signed in',
       },
     })
   )

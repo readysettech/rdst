@@ -5,6 +5,8 @@
 // "Finish later". A database a coding agent just added lands here too, and the dialog
 // follows the agent's progress until monitoring is on. The first turn-on is always the
 // user's: when the agent asks for it, the dialog says it's their turn and waits.
+// Monitoring's AI runs through a Readyset account, so a signed-out user is asked to sign
+// in right here, and turning on without AI stays possible but discouraged.
 import { Alert } from '@rs/ui-new/alert'
 import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
 import { Button } from '@rs/ui-new/button'
@@ -20,7 +22,7 @@ import {
   PrerequisitesChecker,
   usePrerequisites,
 } from '@/features/prerequisites'
-import { useSigninRequired } from '@/lib/accountStatus'
+import { useSignedOut } from '@/lib/accountStatus'
 import {
   type AddFlow,
   abandonAttempt,
@@ -136,14 +138,12 @@ export function EnableMonitoringDialog({
   const settings = useMonitorSettings(target)
   // Turning on the only database is the last step of getting started.
   const onlyDatabase = useSystemStatus().data?.targets.length === 1
-  // AI checks run through Readyset: once the free allowance without an account has ended,
-  // deep analysis waits for a sign-in. A full account or used-up AI usage holds it too.
+  // AI checks run through a Readyset account, even with an own key, so a signed-out user
+  // signs in here. A full account or used-up AI usage holds deep analysis too.
   const limit = useMonitoringLimit(target, open).data
-  const signinRequired = useSigninRequired()
-  const signedOut = limit?.signed_in === false && signinRequired
-  const deepWaits = signedOut
-    ? 'once you sign in'
-    : limit?.target_fits === false && limit.limit != null
+  const signedOut = useSignedOut()
+  const deepWaits =
+    limit?.target_fits === false && limit.limit != null
       ? 'once an AI slot is free'
       : limit?.allowance?.includes('hosted') && !limit.own_key
         ? 'once your AI usage is raised'
@@ -153,11 +153,14 @@ export function EnableMonitoringDialog({
   const [automatic, setAutomatic] = useState(true)
   const [measure, setMeasure] = useState(true)
   const [signInOpen, setSignInOpen] = useState(false)
+  // Set by "Sign up or sign in": monitoring turns on once the sign-in finishes.
+  const turnOnAfterSignIn = useRef(false)
   const initialized = useRef(false)
   const saved = settings.data
   useEffect(() => {
     if (!open) {
       initialized.current = false
+      turnOnAfterSignIn.current = false
       return
     }
     if (initialized.current || !saved) return
@@ -247,14 +250,23 @@ export function EnableMonitoringDialog({
     for (const check of failedKey.split(','))
       trackEventOnce(`prereq-${check}`, 'monitoring_prereq_failed', { check })
   }, [open, failedKey])
+  const gated = signedOut && phase !== 'blocked' && phase !== 'unreachable'
+  useEffect(() => {
+    if (open && gated)
+      trackEvent('monitoring_signin_gate_shown', {
+        via: addFlowFor(target)?.via ?? 'page',
+      })
+  }, [open, gated, target])
   const note =
     phase === 'blocked'
       ? `${target} is saved. Finish any time from its page.`
       : phase === 'unreachable'
         ? 'RDST needs to reach the database first.'
-        : automatic && deepWaits
-          ? `Deep analysis is on, and runs ${deepWaits}.`
-          : `Deep analysis is ${automatic ? 'on' : 'off'}. Change it any time in Monitoring settings.`
+        : gated
+          ? null
+          : automatic && deepWaits
+            ? `Deep analysis is on, and runs ${deepWaits}.`
+            : `Deep analysis is ${automatic ? 'on' : 'off'}. Change it any time in Monitoring settings.`
 
   const turnOn = () =>
     update.mutate(
@@ -314,21 +326,37 @@ export function EnableMonitoringDialog({
               data-testid="monitoring-check-again"
             />
           </div>
-        ) : signedOut ? (
-          <div className="flex flex-wrap justify-end gap-2">
+        ) : gated ? (
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
               variant="primary"
               modifier="ghost"
-              label="Turn on monitoring"
-              loading={update.isPending}
+              size="small"
+              label="Turn on without AI"
+              loading={update.isPending && !turnOnAfterSignIn.current}
               disabled={Boolean(unavailable) || !settings.data || !ready}
-              onClick={turnOn}
+              onClick={() => {
+                trackEvent('monitoring_signin_gate_choice', {
+                  choice: 'without_ai',
+                })
+                turnOn()
+              }}
+              data-testid="monitoring-without-ai"
             />
             <Button
               variant="primary"
               modifier="solid"
-              label="Sign in to Readyset"
-              onClick={() => setSignInOpen(true)}
+              label="Sign up or sign in"
+              loading={update.isPending && turnOnAfterSignIn.current}
+              disabled={Boolean(unavailable) || !settings.data || !ready}
+              onClick={() => {
+                trackEvent('monitoring_signin_gate_choice', {
+                  choice: 'sign_in',
+                })
+                turnOnAfterSignIn.current = true
+                setSignInOpen(true)
+              }}
+              data-testid="monitoring-sign-in"
             />
           </div>
         ) : (
@@ -360,7 +388,8 @@ export function EnableMonitoringDialog({
               level="label-medium"
               className="block text-content-layout-1"
             >
-              Your turn: read and click Turn on monitoring
+              Your turn: read and click{' '}
+              {gated ? 'Sign up or sign in' : 'Turn on monitoring'}
             </Text>
             <Text
               as="span"
@@ -377,6 +406,35 @@ export function EnableMonitoringDialog({
         <div className="mb-4">
           <GetStartedStrip step="monitor" />
         </div>
+      )}
+      {gated && (
+        <section
+          aria-label="Sign in for AI"
+          data-testid="monitoring-signin-gate"
+          className="mb-4 flex items-start gap-3 rounded-panel border border-border-primary-soft bg-surface-primary-soft px-4 py-3"
+        >
+          <Icon
+            name="sparkles"
+            label=""
+            size="small"
+            className="mt-0.5 shrink-0 text-content-primary-soft"
+          />
+          <div className="min-w-0">
+            <Text as="p" level="label-medium" className="text-content-layout-1">
+              Turning on monitoring needs AI, which is free with a Readyset
+              account.
+            </Text>
+            <Text as="p" level="caption" className="mt-1 text-content-layout-2">
+              AI finds what's slowing each query, works out the indexes worth
+              adding and writes your nightly report. Sign up or sign in with
+              Google or email, and monitoring turns on right after.
+            </Text>
+            <Text as="p" level="caption" className="mt-2 text-content-layout-3">
+              Without AI, RDST only charts query stats and alerts on connection
+              problems. Deep analysis, Actions and nightly reports don't run.
+            </Text>
+          </div>
+        </section>
       )}
       {phase === 'blocked' && (
         <StatsBlocked
@@ -416,13 +474,6 @@ export function EnableMonitoringDialog({
             for real: read-only SELECTs only, each with a time limit.
           </Text>
         </output>
-      )}
-      {signedOut && (
-        <Text as="p" level="caption" className="mt-2 text-content-layout-2">
-          The free AI on this computer has ended. Until you sign in, RDST charts
-          your database and alerts on connection problems, and deep analysis and
-          Actions wait.
-        </Text>
       )}
       <Disclosure title="Advanced" className="mt-3">
         <SettingRow
@@ -475,12 +526,22 @@ export function EnableMonitoringDialog({
       )}
       <AccountLoginDialog
         isOpen={signInOpen}
-        onClose={() => setSignInOpen(false)}
+        source="monitoring_gate"
+        onClose={() => {
+          turnOnAfterSignIn.current = false
+          setSignInOpen(false)
+        }}
         onSuccess={() => {
-          // Back to this dialog, choices kept: the limit now says signed in.
           setSignInOpen(false)
           void invalidateTrialRelatedQueries(client)
           void client.invalidateQueries({ queryKey: monitorKeys.limitAll })
+          // The user asked to turn on once signed in, with the choices made here.
+          if (turnOnAfterSignIn.current) {
+            trackEvent('monitoring_signin_gate_choice', {
+              choice: 'signed_in_after',
+            })
+            turnOn()
+          }
         }}
       />
     </DialogShell>

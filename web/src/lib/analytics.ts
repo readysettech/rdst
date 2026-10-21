@@ -215,16 +215,16 @@ export type DatabaseAddVia = 'url' | 'fields' | 'provider' | 'agent'
 export type OnboardingStep =
   | 'add-database'
   | 'monitor'
-  | 'sign-in'
   | 'tour-connect'
   | 'tour-watch'
   | 'tour-inbox'
   | 'tour-agent'
 
-export type SigninPromptState = 'soft' | 'budget' | 'required'
-
 /** The view the add-database dialog opened on. */
 export type AddDatabaseEntry = 'form' | 'agent' | 'provider'
+
+/** The screen that asked for a sign-in. */
+export type SigninSource = 'monitoring_gate' | 'sign_in_page'
 
 /** A connection form field, by name only. */
 export type DatabaseAddField =
@@ -357,9 +357,18 @@ type RdstEventProperties = {
   /** `via` is how the database arrived, or `page` when opened from its page. */
   monitoring_dialog_shown: { via: DatabaseAddVia | 'page' }
   monitoring_prereq_failed: { check: string }
-  signin_prompt_shown: { state: SigninPromptState }
-  signin_started: { method: 'google' | 'email' }
-  signin_completed: undefined
+  /** Turning on monitoring asked a signed-out user to sign in for AI. */
+  monitoring_signin_gate_shown: { via: DatabaseAddVia | 'page' }
+  /**
+   * The way past that ask: `sign_in` opened sign-in, `signed_in_after` turned monitoring
+   * on once the sign-in finished, `without_ai` turned it on with no AI.
+   */
+  monitoring_signin_gate_choice: {
+    choice: 'sign_in' | 'signed_in_after' | 'without_ai'
+  }
+  /** `source` names the screen that asked for the sign-in, when one did. */
+  signin_started: { method: 'google' | 'email'; source?: SigninSource }
+  signin_completed: { source?: SigninSource }
   signin_abandoned: { stage: 'choose' | 'link_sent' | 'callback' }
   onboarding_step_viewed: { step: OnboardingStep }
   onboarding_step_completed: { step: OnboardingStep }

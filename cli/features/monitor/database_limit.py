@@ -333,7 +333,7 @@ def _request(method: str, path: str, **kwargs: Any) -> tuple[int, dict[str, Any]
     from shared.keyservice import keyservice_url
 
     try:
-        token = account_session.ensure_access_token()
+        token = account_session.access_token()
     except Exception:
         return _NoAnswer("signed_out")
     if not token:
@@ -352,12 +352,11 @@ def _request(method: str, path: str, **kwargs: Any) -> tuple[int, dict[str, Any]
 
 
 def _signed_in() -> bool:
-    """Read current authorization at admission, including sign-out during a run. An anonymous
-    session counts until the Key Service says this computer has to sign in."""
+    """Read current authorization at admission, including sign-out during a run."""
     try:
-        from shared.llm_manager.key_resolution import hosted_ai_ready
+        from shared import account_session
 
-        return hosted_ai_ready()
+        return bool(account_session.access_token())
     except Exception:
         return False
 

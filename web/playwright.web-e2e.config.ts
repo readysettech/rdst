@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, devices } from '@playwright/test'
@@ -70,10 +69,6 @@ export default defineConfig({
       RDST_TELEMETRY: 'off',
       // Points every keyservice call in the app at this build's Worker.
       RDST_KEYSERVICE_URL: keyserviceUrl,
-      // A computer that signs in can't go back to anonymous AI, and CI agents can share a
-      // machine id, so each run is its own computer to the shared preview key service.
-      RDST_MACHINE_ID_OVERRIDE:
-        process.env.RDST_MACHINE_ID_OVERRIDE ?? `rdst-e2e-${randomUUID()}`,
       RDST_E2E_DB_PASSWORD:
         process.env.RDST_E2E_DB_PASSWORD ?? 'rdst_e2e_password',
       RDST_E2E_FAST_MONITOR: '1',

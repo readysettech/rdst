@@ -367,3 +367,20 @@ def test_error_dedupe_rate_limit_expiry_and_process_restart(receiver, monkeypatc
     manager._wait_for_background_threads()
     assert len(events) == 7
     assert events[-1]['properties']['suppressed_repeats'] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('signed_in', 'expected'), [(False, 'signed_out'), (True, 'pending')])
+async def test_turning_on_without_ai_reports_why(signed_in, expected, receiver, monkeypatch):
+    _manager, events, store = receiver
+    monkeypatch.setattr(routes, '_store', lambda: store)
+    monkeypatch.setattr(database_limit, 'claim_target', lambda *args: 'pending')
+    monkeypatch.setattr(database_limit, '_signed_in', lambda: signed_in)
+    monkeypatch.setattr(routes, '_start_first_run', lambda *args: None)
+    app = FastAPI()
+    app.state.analyze_queue = SimpleNamespace(wake=lambda: None)
+    request = Request({'type': 'http', 'app': app, 'headers': []})
+    await routes.put_settings(TARGET, routes.MonitorSettingsUpdate(enabled=True), request)
+    _manager._wait_for_background_threads()
+    enabled = [e for e in events if e.get('event') == 'monitoring_enabled']
+    assert [e['properties']['ai_monitoring'] for e in enabled] == [expected]

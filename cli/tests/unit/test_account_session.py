@@ -263,3 +263,59 @@ def test_failure_to_persist_fallback_clears_process_session(monkeypatch, tmp_pat
         account_session.save_session({"access_token": "access", "refresh_token": "refresh"},
                                      store=UnavailableStore())
     assert account_session.load_session(FakeStore()) is None
+
+
+def _jwt(claims):
+    import base64
+
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    return f"header.{payload}.signature"
+
+
+@pytest.mark.parametrize("token, metadata", [
+    (_jwt({"sub": "anon-user", "is_anonymous": True}), {}),
+    ("", {"user_id": "anon-user", "is_anonymous": True}),
+])
+def test_anonymous_session_from_an_earlier_build_counts_as_signed_out(monkeypatch, token, metadata):
+    store = FakeStore({
+        account_session.ACCESS_TOKEN_NAME: token,
+        account_session.REFRESH_TOKEN_NAME: "anon-refresh",
+        account_session.EXPIRES_AT_NAME: str(time.time() + 3600),
+    })
+    cleared = []
+    monkeypatch.setattr(account_session, "account_metadata", lambda: metadata)
+    monkeypatch.setattr(account_session.TargetsConfig, "load", lambda self: None)
+    monkeypatch.setattr(account_session.TargetsConfig, "save", lambda self: None)
+    monkeypatch.setattr(account_session.TargetsConfig, "clear_account_config",
+                        lambda self: cleared.append(True))
+    monkeypatch.setattr(account_session.requests, "post", MagicMock(
+        side_effect=AssertionError("an anonymous session is never refreshed")))
+
+    assert account_session.load_session(store) is None
+    assert account_session.access_token(store=store) is None
+    assert store.values == {}
+    assert cleared
+
+
+def test_signed_in_session_is_kept(monkeypatch):
+    token = _jwt({"sub": "user-1", "is_anonymous": False})
+    store = FakeStore({
+        account_session.ACCESS_TOKEN_NAME: token,
+        account_session.REFRESH_TOKEN_NAME: "refresh",
+        account_session.EXPIRES_AT_NAME: str(time.time() + 3600),
+    })
+
+    assert account_session.access_token(store=store) == token
+
+
+def test_monitoring_without_a_session_needs_sign_in(monkeypatch):
+    from shared.llm_manager.base import LLMError
+    from shared.llm_manager.key_resolution import require_monitoring_session
+
+    monkeypatch.setattr(account_session, "load_session", lambda store=None: None)
+    monkeypatch.setattr(account_session.requests, "post", MagicMock(
+        side_effect=AssertionError("no session is started")))
+
+    with pytest.raises(LLMError) as raised:
+        require_monitoring_session()
+    assert raised.value.code == "LOGIN_REQUIRED"

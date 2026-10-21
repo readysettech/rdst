@@ -151,7 +151,6 @@ tests/integration/
 │   ├── test_cache.sh             # Cache command tests
 │   ├── test_top_and_registry.sh  # Top queries and registry tests
 │   ├── test_query_command.sh     # Query management tests
-│   ├── test_scan.sh              # ORM scanning tests
 │   └── test_errors.sh            # Error handling tests
 └── fixtures/
     └── scan/                     # ORM fixture files for scan tests

@@ -38,7 +38,7 @@ import { EnvSecretsDialog } from '../../components/EnvSecretsDialog'
 import { FeedbackChat } from '../../components/FeedbackChat'
 import { TrialRegistrationDialog } from '../../components/TrialRegistrationDialog'
 import { useTarget } from '../../hooks/useTarget'
-import { isSignedInAccount, signinPromptOf } from '../../lib/accountStatus'
+import { isSignedInAccount } from '../../lib/accountStatus'
 import {
   type AnthropicKeyValidation,
   type EnvRequirement,
@@ -297,11 +297,6 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
   })
   const signedInAccount = isSignedInAccount(accountStatusQuery.data)
   const email = signedInAccount ? accountStatusQuery.data?.email : null
-  // Hosted AI without an account runs on this computer's free allowance until it ends.
-  const prompt = signinPromptOf(accountStatusQuery.data)
-  const freeAllowance =
-    prompt !== null && prompt !== 'required' && !signedInAccount
-  const daysLeft = accountStatusQuery.data?.days_remaining
   const aiProviderMutation = useMutation({
     mutationFn: setAiProvider,
     onSuccess: async ({ provider }) => {
@@ -541,13 +536,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
         <SettingsGroup id="account" title="Account">
           <SettingsRow
             title={email ?? 'Readyset account'}
-            line={
-              email
-                ? 'Signed in'
-                : freeAllowance && daysLeft != null
-                  ? `Not signed in. ${daysLeft === 1 ? '1 day' : `${daysLeft} days`} of free AI left on this computer.`
-                  : 'Not signed in'
-            }
+            line={email ? 'Signed in' : 'Not signed in'}
           >
             {email ? (
               <Button
@@ -574,13 +563,11 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
           <SettingsRow
             title="Hosted by Readyset"
             line={
-              readysetAccountConnected && !freeAllowance
+              readysetAccountConnected
                 ? 'Analyze, Ask, and Health check use your Readyset account.'
-                : freeAllowance && !anthropicKeyConfigured
-                  ? 'Analyze, Ask, and Health check use the free AI on this computer.'
-                  : usingReadyset
-                    ? 'Sign in again to use the included AI.'
-                    : undefined
+                : usingReadyset
+                  ? 'Sign in again to use the included AI.'
+                  : undefined
             }
           >
             <BaseInputSwitch

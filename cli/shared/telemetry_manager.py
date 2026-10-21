@@ -530,10 +530,10 @@ class TelemetryManager:
             except Exception:
                 pass
             try:
-                from shared.account_session import is_anonymous_session, is_signed_in_locally
+                from shared.account_session import is_signed_in_locally
 
                 if is_signed_in_locally():
-                    return "readyset_anonymous" if is_anonymous_session() else "readyset_account"
+                    return "readyset_account"
             except Exception:
                 pass
         except Exception:
@@ -556,8 +556,7 @@ class TelemetryManager:
             from shared import account_session
 
             account_id = ""
-            if account_session.is_signed_in_locally() and \
-                    not account_session.is_anonymous_session():
+            if account_session.is_signed_in_locally():
                 account_id = str(
                     account_session.account_metadata().get("analytics_account_id")
                     or ""

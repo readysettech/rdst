@@ -26,11 +26,7 @@ const STEPS = [
   { label: 'Monitoring on', at: 8.8 },
 ]
 
-const HOME_STEPS = [
-  'Connect your database',
-  'Turn on monitoring',
-  'Sign in (optional)',
-]
+const HOME_STEPS = ['Connect your database', 'Turn on monitoring']
 
 const PRESS_ADD = 3.45
 const PRESS_AGENT = 5.15

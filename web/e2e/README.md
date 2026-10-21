@@ -64,11 +64,9 @@ pnpm --filter rdst-web test:e2e:postgres
 
 The defaults are `127.0.0.1:15432` and `rdst_e2e_password`.
 
-This tier runs without an Anthropic key, so hosted AI starts an anonymous
-session. `e2e/keyservice-stub.mjs` answers those Key Service calls (anonymous
-sessions, the hosted-AI status, monitoring slots) on `127.0.0.1:8786`, or
-`RDST_E2E_KEYSERVICE_PORT`, and refuses everything else, so no run reaches
-production. Specs read its request log through `keyserviceRequests`.
+This tier runs signed out with no Anthropic key, as a new install does, so
+turning on monitoring shows the sign-in ask. Its Key Service URL points at
+nothing, so no run reaches production.
 
 ## Failure evidence
 

@@ -384,12 +384,6 @@ class RdstCLI:
 
         if subcommand == "status":
             status = account_service.status(include_quota=False)
-            if status.get("is_anonymous"):
-                return RdstResult(
-                    True,
-                    "Using Readyset-hosted AI without signing in. Run 'rdst account login' "
-                    "to keep your monitoring history.",
-                )
             if not status.get("signed_in"):
                 return RdstResult(False, "Not signed in. Run 'rdst account login'.")
             return RdstResult(
@@ -507,7 +501,6 @@ class RdstCLI:
             "  - rdst fleet            Manage and audit database fleets\n"
             "  - rdst audit            Run a deep health audit of a database target\n"
             "  - rdst guard            Manage reusable safety policies\n"
-            "  - rdst scan             Scan codebase for ORM queries (experimental)\n"
             "  - rdst report           Submit feedback or bug reports\n"
             "  - rdst version          Show version information\n"
             "\n"

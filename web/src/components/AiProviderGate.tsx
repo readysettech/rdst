@@ -15,7 +15,6 @@ import {
 } from '../lib/trialQueries'
 import type { AiGate } from '../lib/useAiGate'
 import { EnvSecretsDialog } from './EnvSecretsDialog'
-import { SigninRequiredStep } from './SigninPrompts'
 import { AccountLoginDialog } from './TrialRegistrationDialog'
 
 interface AiProviderGateProps {
@@ -127,42 +126,31 @@ export function AiProviderGate({
           className="mb-6 max-w-2xl"
         />
       )}
-      {gate.reason === 'signin_required' ? (
-        <SigninRequiredStep
-          onSignIn={() => setAccountOpen(true)}
-          onUseKey={() => setKeyOpen(true)}
-        />
-      ) : (
-        <div className="max-w-2xl" data-testid="ai-setup">
-          <Text as="h2" level="headline-2" className="text-content-layout-1">
-            Set up AI
-          </Text>
-          <Text
-            as="p"
-            level="body-medium"
-            className="mt-3 text-content-layout-3"
-          >
-            Sign in to Readyset for the included AI, or add your own Anthropic
-            key. Charts, alerts and the Inbox keep running either way.
-          </Text>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            <Button
-              variant="rising"
-              modifier="solid"
-              size="large"
-              label="Sign in"
-              onClick={() => setAccountOpen(true)}
-            />
-            <Button
-              variant="primary"
-              modifier="ghost"
-              size="small"
-              label="Use my own Anthropic key instead"
-              onClick={() => setKeyOpen(true)}
-            />
-          </div>
+      <div className="max-w-2xl" data-testid="ai-setup">
+        <Text as="h2" level="headline-2" className="text-content-layout-1">
+          Set up AI
+        </Text>
+        <Text as="p" level="body-medium" className="mt-3 text-content-layout-3">
+          Sign in to Readyset for the included AI, or add your own Anthropic
+          key. Charts, alerts and the Inbox keep running either way.
+        </Text>
+        <div className="mt-8 flex flex-wrap items-center gap-3">
+          <Button
+            variant="rising"
+            modifier="solid"
+            size="large"
+            label="Sign in"
+            onClick={() => setAccountOpen(true)}
+          />
+          <Button
+            variant="primary"
+            modifier="ghost"
+            size="small"
+            label="Use my own Anthropic key instead"
+            onClick={() => setKeyOpen(true)}
+          />
         </div>
-      )}
+      </div>
 
       <AccountLoginDialog
         isOpen={accountOpen}

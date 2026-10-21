@@ -88,10 +88,13 @@ def _window_rows(store: MonitorStore, target: str, start: int, end: int,
 
 
 def signed_in() -> bool:
-    """Whether a session (anonymous included) can carry AI monitoring right now."""
-    from shared.llm_manager.key_resolution import hosted_ai_ready
+    """Whether the account session yields a usable access token right now."""
+    from shared import account_session
 
-    return hosted_ai_ready()
+    try:
+        return bool(account_session.access_token())
+    except Exception:
+        return False
 
 
 def _scan_indexes(target: str) -> list[dict[str, str]]:

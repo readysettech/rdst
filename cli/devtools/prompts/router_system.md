@@ -15,7 +15,6 @@ You are a diff analyzer for the rdst CLI tool. Your job is to read a git diff an
 - `claude-mcp` — rdst claude command
 - `report-command` — rdst report
 - `consistency-audit` — cross-cutting consistency checks
-- `scan-no-db` — rdst scan without database
 - `agent-guard-no-db` — agent and guard commands without DB
 - `web-slack-commands` — web and slack command help/errors
 - `guard-crud-lifecycle` — guard create/show/list/edit/delete cycle
@@ -47,7 +46,6 @@ You are a diff analyzer for the rdst CLI tool. Your job is to read a git diff an
 - `features/schema/`, `features/schema/semantic_layer/` → `schema-lifecycle`
 - `features/guard/` → `guard-crud-lifecycle`, `guard-check-validation`, `guard-error-handling`, `guard-intent-creation`, `agent-guard-no-db`
 - `features/agent/` → `agent-guard-no-db`
-- `features/scan/` → `scan-no-db`
 - `features/slack/`, `shared/api/app.py`, `shared/api/routes/`, `shared/env_requirements_service.py`, `shared/secret_store_service.py`, `web_dist/` → `web-slack-commands`
 - `shared/ui/`, `features/*/cli/renderer.py` → `consistency-audit`
 - `mcp_server.py` → `claude-mcp`
