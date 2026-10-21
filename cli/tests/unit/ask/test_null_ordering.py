@@ -228,6 +228,23 @@ def test_validation_ranks_nulls_last_under_the_result_cap():
     validated = validate_sql(context(sql, enforce_result_limit=True), MagicMock())
     assert validated.limit_added
     assert "ORDER BY runtimeminutes DESC NULLS LAST LIMIT" in validated.sql
+    assert validated.unlimited_sql == (
+        "SELECT primarytitle FROM title_basics ORDER BY runtimeminutes DESC NULLS LAST"
+    )
+
+
+def test_the_sql_before_the_cap_keeps_the_ranking_rewrite_of_a_subquery():
+    sql = (
+        "SELECT primarytitle FROM title_basics WHERE runtimeminutes = "
+        "(SELECT runtimeminutes FROM title_basics ORDER BY runtimeminutes DESC LIMIT 1)"
+    )
+    validated = validate_sql(context(sql, enforce_result_limit=True), MagicMock())
+    assert validated.limit_added
+    assert validated.unlimited_sql == (
+        "SELECT primarytitle FROM title_basics WHERE runtimeminutes = "
+        "(SELECT runtimeminutes FROM title_basics ORDER BY runtimeminutes DESC NULLS LAST "
+        "LIMIT 1)"
+    )
 
 
 @pytest.mark.parametrize("question", [

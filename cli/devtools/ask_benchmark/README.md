@@ -27,12 +27,14 @@ The runtime defaults are:
 ```text
 host: 127.0.0.1
 port: 13316
-user prefix: rdst_bird
+user prefix: rdst_ask
 password: rdst-benchmark
-database prefix: bird_
+database prefix: (none)
 ```
 
 Override them with `BIRD_MYSQL_*` environment variables or CLI arguments. Preparation derives one MySQL account from the user prefix for each BIRD database and grants that account access to only its matching database.
+
+Each database carries its BIRD `db_id` as its name, the name Ask shows the model as the target database, so SQL that qualifies tables with it runs as it would on a user's server. A database prefix provisions a separate layout on the same server: each prefix has its own marker row, manifest, and views over the shared BIRD import, and preparing one prefix leaves the others in place. Give each layout its own user prefix, since accounts are named per user prefix and database ID.
 
 ## CI mode
 
@@ -171,6 +173,22 @@ Temperature, top-p, and stop sequences are recorded as unsupported by this trans
 This provider exists only under `devtools.ask_benchmark`; desktop and web Ask continue
 to use production `LLMManager` routing.
 
+The `keyservice` transport measures Readyset-hosted inference as users receive it. Ask
+calls the product's `LLMManager` and `HostedProvider`, which post to an in-process
+stand-in for Keyservice. The stand-in runs Keyservice's own `prompt_policy.admit`,
+`hosted_inference.openrouter_payload`, upstream retry, downgrade and widening rules, and
+response parsing, then sends the request to OpenRouter with `OPENROUTER_API_KEY`. Ask
+parses the returned text with its own tolerant parser. A prompt Keyservice would refuse
+stops the run. `claude-haiku-5.5-keyservice` serves every call on the primary route and
+`glm-5.3-flash-keyservice` on the long-prompt route; call receipts record the route
+Keyservice would choose for each request. This transport serves only the `rdst-ask`
+track, because the direct-model prompt is not a registered RDST prompt.
+
+The PydanticAI transports (`openrouter`, `openai`, `google`) send each structured request
+in the entry's `structured_output_mode` and return the reply text as the model wrote it,
+so Ask parses it with the same tolerant parser it uses on the `keyservice` route. Tool
+mode returns the output tool's arguments.
+
 ## Runs
 
 Verify the local scorer against the pinned official BIRD implementation before a paid run:
@@ -241,6 +259,13 @@ uv run --group eval python -m devtools.ask_benchmark run \
   --interaction-mode auto \
   --models claude-sonnet-4.6-subscription-medium
 ```
+
+Canonical `rdst-ask` runs with the product's result limit: validation adds `LIMIT 100`
+to a query without one, lowers a limit above 1,000, and marks a result truncated when
+that cap cut rows, so post-execution stages see what they see for users. Ask records the
+SQL as it stood before it imposed the cap. Scoring re-executes that SQL, removing only
+the LIMIT Ask imposed, so answers with more than 100 rows remain scorable. Reports count
+Ask-capped answers, truncated product answers, and answers scored without Ask's cap.
 
 `auto-init` identifies schema provenance; it does not control clarification behavior.
 Ask sends every loaded table. For semantic schemas it builds the complete verbose and
@@ -496,6 +521,14 @@ artifacts retain their original identities and must not be compared as the curre
 policy.
 `--interaction-mode interactive-no-answer` records clarification events as scored
 no-answer outcomes for a separate cohort.
+
+The default `--interaction-mode auto` is the path `rdst ask --no-interactive` takes.
+`--interaction-mode interactive-default` is a diagnostic for interactive CLI and web
+sessions: Ask makes the clarification-detector model call before generation and can
+stop to ask. When it stops, the benchmark answers every question with its first
+option, which is what the CLI prompt's default choice and the web's preselected "Run
+with" button submit, then scores the resumed answer. Reports state the stop rate,
+accuracy on stopped questions, and the detector's call count, latency, and cost.
 
 The 50-case canary is the fixed development partition. The 450-case complement was
 subsequently included in the opened 496-case transfer replay, so it is no longer an
@@ -968,6 +1001,11 @@ The comparison directory contains `leaderboard.json`, `leaderboard.csv`,
 `leaderboard.md`, and `leaderboard.html`.
 
 ## Headline rule
+
+The headline context is `auto-init`: the introspected schema with no BIRD evidence
+hints, which is what users have. Reports list `auto-init` boards first, then the other
+schema contexts as secondary boards, and label `evidence` boards as an upper bound,
+because BIRD's per-question hints are information no user supplies.
 
 For each track, context, and transport leaderboard:
 

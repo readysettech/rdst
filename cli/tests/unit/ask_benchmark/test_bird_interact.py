@@ -26,6 +26,7 @@ from devtools.ask_benchmark.bird_interact_selection import (
 from devtools.ask_benchmark.models import QueryResult
 from features.ask.events import AskClarificationNeededEvent, AskResultEvent
 from features.ask.models import AskClarificationQuestion
+from features.ask.profiles import default_ask_service_options
 
 
 def test_official_qualification_selection_is_frozen_and_valid():
@@ -380,8 +381,77 @@ def test_run_case_uses_canonical_ask_and_resume(monkeypatch):
     assert captured["ask_input"].question == case.ambiguous_query
     assert captured["options"].no_interactive is False
     assert captured["options"].enforce_result_limit is True
+    assert {key: captured[key] for key in default_ask_service_options()} == (
+        default_ask_service_options()
+    )
     assert captured["resume"][0] == "session-1"
     assert captured["resume"][1] == {"metric": "Use Quality Index (QI)."}
+
+
+def test_run_case_answers_the_writers_second_round(monkeypatch):
+    resumes = []
+
+    def question(question_id, text):
+        return AskClarificationNeededEvent(
+            type="clarification_needed",
+            session_id=f"session-{question_id}",
+            interpretations=[],
+            questions=[AskClarificationQuestion(id=question_id, question=text, options=[])],
+        )
+
+    class FakeService:
+        def __init__(self, **kwargs):
+            pass
+
+        async def ask(self, ask_input, options):
+            yield question("metric", "What defines the quality score?")
+
+        async def resume(self, session_id, answers):
+            resumes.append((session_id, answers))
+            if len(resumes) == 1:
+                yield question("missing-1", "I couldn't find QI in this database.")
+                return
+            yield AskResultEvent(
+                type="result", success=True, sql="SELECT value FROM metrics", rows=[[1]],
+                columns=["value"], row_count=1, execution_time_ms=1, llm_calls=3,
+                total_tokens=10,
+            )
+
+        def abandon(self, session_id):
+            raise AssertionError(f"unexpected abandon: {session_id}")
+
+    class FakeExecutor:
+        bounds = SimpleNamespace(timeout_seconds=30)
+        config = SimpleNamespace(host="h", port=1, user="u", password="p")
+
+        def as_ask_executor(self, db_id):
+            return lambda sql, config: {"success": True, "rows": [[1]], "columns": ["value"]}
+
+        def execute(self, sql, *, db_id):
+            return QueryResult(columns=("value",), rows=((1,),))
+
+    case = BirdInteractCase(
+        instance_id="case_1",
+        database="fixture_db",
+        ambiguous_query="Show the quality score.",
+        reference_sql="SELECT value FROM metrics",
+        target_terms=("quality score",),
+        exchanges=(),
+        max_clarification_turns=5,
+        order_sensitive=False,
+    )
+    monkeypatch.setattr(bird_interact, "AskService", FakeService)
+
+    result = bird_interact._run_case(
+        run_id="run", attempt_id="attempt", attempt_key="key", case=case, adapter=object(),
+        executor=FakeExecutor(), reference=QueryResult(columns=("value",), rows=((1,),)),
+        product_max_rows=100,
+    )
+
+    assert [session for session, _ in resumes] == ["session-metric", "session-missing-1"]
+    assert result["outcome"] == "correct"
+    assert [record["answer_key"] for record in result["clarification_questions"]] == [
+        "metric", "missing-1"]
 
 
 def test_rescore_uses_order_for_labeled_sort_task(tmp_path: Path, monkeypatch):

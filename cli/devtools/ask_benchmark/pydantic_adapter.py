@@ -31,6 +31,7 @@ from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
     TextPart,
+    ToolCallPart,
     UserPromptPart,
 )
 from pydantic_ai.models.anthropic import AnthropicModel
@@ -238,6 +239,10 @@ class PydanticAIAdapter:
                     None,
                 ):
                     raise RouteMismatchError(route_error) from exc
+                # Ask parses the reply with its own tolerant parser, as on the hosted route.
+                if error_kind == "model_output":
+                    text = _response_text(responses[-1])
+                    return _query_result(spec, responses[-1], run_usage, text)
             elif responses:
                 raise RuntimeError("Model response receipt was not persisted") from exc
             else:
@@ -291,19 +296,13 @@ class PydanticAIAdapter:
         ):
             raise RouteMismatchError(route_error)
 
-        output = json.dumps(result.output) if structured else str(result.output)
-        usage = result.usage
-        return {
-            "text": output,
-            "usage": {
-                "prompt_tokens": usage.input_tokens,
-                "completion_tokens": usage.output_tokens,
-                "total_tokens": usage.total_tokens,
-                "cache_read_tokens": usage.cache_read_tokens,
-            },
-            "provider": spec.transport,
-            "model": result.response.model_name or spec.model,
-        }
+        # Output tools can wrap the schema's arguments; PydanticAI returns them unwrapped.
+        text = (
+            json.dumps(result.output)
+            if structured and spec.structured_output_mode == "tool"
+            else _response_text(result.response)
+        )
+        return _query_result(spec, result.response, result.usage, text)
 
     def generate_response(
         self, prompt: str, model: str | None = None, **kwargs
@@ -447,6 +446,32 @@ class PydanticAIAdapter:
             )
             records.append(record)
         return records
+
+
+def _query_result(
+    spec: ModelSpec, response: ModelResponse, usage: RunUsage, text: str
+) -> dict[str, Any]:
+    return {
+        "text": text,
+        "usage": {
+            "prompt_tokens": usage.input_tokens,
+            "completion_tokens": usage.output_tokens,
+            "total_tokens": usage.total_tokens,
+            "cache_read_tokens": usage.cache_read_tokens,
+        },
+        "provider": spec.transport,
+        "model": response.model_name or spec.model,
+    }
+
+
+def _response_text(response: ModelResponse) -> str:
+    """The reply as the model sent it: its text, else its tool-call arguments."""
+    if response.text is not None:
+        return response.text
+    call = next(
+        (part for part in response.parts if isinstance(part, ToolCallPart)), None
+    )
+    return call.args_as_json_str() if call is not None else ""
 
 
 def _build_model(spec: ModelSpec):

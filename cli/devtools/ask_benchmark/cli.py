@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path, PurePosixPath
@@ -86,14 +86,14 @@ from .clarification_qualification import (
     score_gold_alignment_packet,
 )
 from .claude_subscription_adapter import (
-    CLAUDE_SUBSCRIPTION_MODEL,
     CLAUDE_SUBSCRIPTION_TRANSPORT,
     PINNED_CLAUDE_CODE_VERSION,
 )
 from .comparison import compare_runs
-from .config import load_filter_spec, load_model_specs, select_models
+from .config import load_model_specs, select_models
 from .dashboard import write_dashboard
 from .executor import (
+    PRODUCTION_SQL_MODE,
     MySQLConnectionConfig,
     MySQLExecutor,
     QueryBounds,
@@ -108,6 +108,12 @@ from .gold_replay import (
 from .models import ContextMode, EvaluationTrack, InteractionMode, RunLimits
 from .openrouter import check_model_route
 from .oracle import GOLD_FINGERPRINT_CODEC, UNSTABLE_GOLD_CASE_IDS
+from .oracle_user import (
+    ORACLE_USER_DEFAULT_MODEL,
+    ORACLE_USER_KNOWLEDGE,
+    OracleUserSimulator,
+    gateway_completer,
+)
 from .prompt_ablation import PROMPT_ABLATION_EXPERIMENTS, run_prompt_ablation
 from .provision import (
     DEFAULT_ROOT_PASSWORD,
@@ -348,10 +354,39 @@ def build_parser() -> argparse.ArgumentParser:
         "--interaction-mode",
         choices=[
             InteractionMode.AUTO.value,
+            InteractionMode.INTERACTIVE_DEFAULT.value,
             InteractionMode.INTERACTIVE_NO_ANSWER.value,
+            InteractionMode.INTERACTIVE_ORACLE.value,
         ],
         default=InteractionMode.AUTO.value,
-        help="Clarification policy for rdst-ask; model-only records not-applicable",
+        help=(
+            "Clarification policy for rdst-ask: auto matches rdst ask --no-interactive; "
+            "interactive-default runs the clarification detector and continues with "
+            "each question's default option; interactive-oracle answers each question "
+            "as a simulated user who knows the BIRD hint and gold SQL; model-only "
+            "records not-applicable"
+        ),
+    )
+    run.add_argument(
+        "--oracle-user-model",
+        default=ORACLE_USER_DEFAULT_MODEL,
+        help="Claude model of the interactive-oracle user, through the Claude gateway",
+    )
+    run.add_argument(
+        "--oracle-max-answers",
+        type=_positive_int,
+        help="Answer at most this many clarification questions per round",
+    )
+    run.add_argument(
+        "--oracle-user-knowledge",
+        choices=sorted(ORACLE_USER_KNOWLEDGE),
+        default="hint-and-sql",
+        help="What the interactive-oracle user knows: the hint and gold SQL, or the hint only",
+    )
+    run.add_argument(
+        "--oracle-user-cache",
+        type=Path,
+        help="Answer cache shared across runs (default: oracle-user-cache.jsonl in --output)",
     )
     run.add_argument(
         "--schema-format",
@@ -974,25 +1009,12 @@ def _bird_interact_qualify(args) -> int:
     model_spec = select_models(load_model_specs(), [args.model])[0]
     if model_spec.transport != "anthropic" or model_spec.model != "claude-sonnet-4-6":
         raise ValueError("Qualification requires direct claude-sonnet-4-6")
-    filter_spec, filter_aliases = load_filter_spec()
-    filter_spec = replace(
-        filter_spec,
-        model="claude-haiku-4-5-20251001",
-        transport="anthropic",
-        provider_order=(),
-        reasoning_effort=None,
-    )
     model_route = check_model_route(
         model_spec,
         structured_output=True,
         runtime_parameters={"max_tokens"},
     )
-    filter_route = check_model_route(
-        filter_spec,
-        structured_output=True,
-        runtime_parameters={"max_tokens"},
-    )
-    if not model_route.scoreable or not filter_route.scoreable:
+    if not model_route.scoreable:
         raise ValueError(
             "BIRD-Interact qualification requires controlled Anthropic routes"
         )
@@ -1030,12 +1052,7 @@ def _bird_interact_qualify(args) -> int:
         output_dir=args.output / run_id,
         cases=cases,
         model_spec=model_spec,
-        filter_spec=filter_spec,
-        filter_aliases=filter_aliases,
-        route_checks={
-            model_spec.name: asdict(model_route),
-            filter_spec.name: asdict(filter_route),
-        },
+        route_checks={model_spec.name: asdict(model_route)},
         executor=executor,
         database_provision=database_provision,
         protocol_sha256=_benchmark_protocol_sha256(),
@@ -1422,7 +1439,6 @@ def _run(args) -> int:
         raise ValueError(
             f"{args.suite.capitalize()} runs require exactly one model and one repetition"
         )
-    filter_spec, filter_aliases = load_filter_spec()
     track = EvaluationTrack(args.track)
     if (
         args.ask_accuracy_profile != ASK_ACCURACY_PROFILE_BASELINE
@@ -1445,32 +1461,8 @@ def _run(args) -> int:
     required_transports = {spec.transport for spec in selected}
     if len(required_transports) != 1:
         raise ValueError("Run each model transport in a separate benchmark cohort")
-    selected_transport = next(iter(required_transports))
-    if track == EvaluationTrack.RDST and selected_transport == "anthropic":
-        filter_spec = replace(
-            filter_spec,
-            model="claude-haiku-4-5-20251001",
-            transport="anthropic",
-            provider_order=(),
-            reasoning_effort=None,
-        )
-    elif (
-        track == EvaluationTrack.RDST
-        and selected_transport == CLAUDE_SUBSCRIPTION_TRANSPORT
-    ):
-        filter_spec = replace(
-            filter_spec,
-            name="claude-sonnet-4.6-subscription-medium-filter",
-            model=CLAUDE_SUBSCRIPTION_MODEL,
-            transport=CLAUDE_SUBSCRIPTION_TRANSPORT,
-            provider_order=(),
-            pricing=selected[0].pricing,
-            reasoning_effort=selected[0].reasoning_effort,
-            provider_data_training=selected[0].provider_data_training,
-            provider_retains_prompts=selected[0].provider_retains_prompts,
-        )
-    elif track == EvaluationTrack.RDST:
-        required_transports.add(filter_spec.transport)
+    if "keyservice" in required_transports and track != EvaluationTrack.RDST:
+        raise ValueError("The keyservice transport serves only RDST's own prompts")
     missing_credentials = [
         variable
         for variable in sorted(_credential_env(value) for value in required_transports)
@@ -1502,17 +1494,6 @@ def _run(args) -> int:
             raise ValueError(
                 f"Model {spec.name} has no controlled compatible route: {check}"
             )
-    if track == EvaluationTrack.RDST:
-        filter_check = check_model_route(
-            filter_spec,
-            structured_output=True,
-            runtime_parameters={"max_tokens"},
-        )
-        route_checks[filter_spec.name] = asdict(filter_check)
-        if not filter_check.scoreable:
-            raise ValueError(
-                f"Filter model has no controlled compatible route: {filter_check}"
-            )
 
     args.cache_dir.mkdir(parents=True, exist_ok=True)
     global_lock = _global_prepare_lock()
@@ -1523,8 +1504,6 @@ def _run(args) -> int:
         return _run_database_locked(
             args,
             selected=selected,
-            filter_spec=filter_spec,
-            filter_aliases=filter_aliases,
             track=track,
             context_mode=context_mode,
             interaction_mode=interaction_mode,
@@ -1538,8 +1517,6 @@ def _run_database_locked(
     args,
     *,
     selected,
-    filter_spec,
-    filter_aliases,
     track,
     context_mode,
     interaction_mode,
@@ -1607,9 +1584,25 @@ def _run_database_locked(
             max_rows=args.max_result_rows,
             max_result_bytes=args.max_result_bytes,
         ),
+        production_session=True,
     )
     run_id = require_safe_file_stem(args.run_id or _new_run_id(), "run ID")
     store = ArtifactStore(args.output / run_id)
+    oracle_user = None
+    if interaction_mode == InteractionMode.INTERACTIVE_ORACLE:
+        cache_path = args.oracle_user_cache or args.output / "oracle-user-cache.jsonl"
+        policy, system_prompt, build_message = ORACLE_USER_KNOWLEDGE[
+            args.oracle_user_knowledge
+        ]
+        oracle_user = OracleUserSimulator(
+            gateway_completer(args.oracle_user_model),
+            model=args.oracle_user_model,
+            cache_path=cache_path,
+            max_answers=args.oracle_max_answers,
+            policy=policy,
+            system_prompt=system_prompt,
+            build_message=build_message,
+        )
     protocol_fingerprint = _benchmark_protocol_sha256()
     benchmark_started = perf_counter()
     runner = BenchmarkRunner(
@@ -1619,8 +1612,6 @@ def _run_database_locked(
         executor=executor,
         schema_loader=schema_loader,
         artifact_store=store,
-        filter_spec=filter_spec,
-        filter_aliases=filter_aliases,
         semantic_dir=semantic_dir,
         interaction_mode=interaction_mode,
         protocol_fingerprint=protocol_fingerprint,
@@ -1631,6 +1622,7 @@ def _run_database_locked(
         ),
         semantic_schema_format=args.schema_format,
         ask_accuracy_profile=args.ask_accuracy_profile,
+        oracle_user=oracle_user,
     )
     cases, gold_failures = runner.preflight_gold(cases)
     if gold_failures:
@@ -1691,6 +1683,7 @@ def _run_database_locked(
         "track": track.value,
         "context_mode": context_mode.value,
         "interaction_mode": interaction_mode.value,
+        "oracle_user": oracle_user.describe() if oracle_user else None,
         "semantic_schema_format": args.schema_format,
         "ask_accuracy_profile": args.ask_accuracy_profile,
         "ask_accuracy_features": {
@@ -1717,11 +1710,11 @@ def _run_database_locked(
             spec.name: runner.configuration_fingerprint(spec) for spec in selected
         },
         "route_checks": route_checks,
-        "filter_model": asdict(filter_spec),
         "database_provision": database_provision,
         "context_hashes": context_hashes,
         "context_provenance": context_provenance,
         "query_bounds": asdict(executor.bounds),
+        "candidate_sql_mode": PRODUCTION_SQL_MODE,
         "run_limits": asdict(runner.run_limits),
     }
     if args.suite == "holdout":
@@ -2069,7 +2062,7 @@ def _add_mysql_arguments(parser, *, include_root: bool) -> None:
         default=os.getenv("BIRD_MYSQL_PORT", "13316"),
     )
     parser.add_argument(
-        "--mysql-user", default=os.getenv("BIRD_MYSQL_USER", "rdst_bird")
+        "--mysql-user", default=os.getenv("BIRD_MYSQL_USER", "rdst_ask")
     )
     parser.add_argument(
         "--mysql-password",
@@ -2077,7 +2070,7 @@ def _add_mysql_arguments(parser, *, include_root: bool) -> None:
     )
     parser.add_argument(
         "--mysql-database-prefix",
-        default=os.getenv("BIRD_MYSQL_DATABASE_PREFIX", "bird_"),
+        default=os.getenv("BIRD_MYSQL_DATABASE_PREFIX", ""),
     )
     if not include_root:
         parser.add_argument("--query-timeout", type=_positive_int, default=30)
@@ -2294,15 +2287,23 @@ def _benchmark_protocol_paths() -> tuple[Path, ...]:
         Path(__file__).with_name("runner.py"),
         Path(__file__).with_name("executor.py"),
         Path(__file__).with_name("oracle.py"),
+        Path(__file__).with_name("oracle_user.py"),
         Path(__file__).with_name("schema.py"),
         Path(__file__).with_name("semantic.py"),
         Path(__file__).with_name("value_profiles.py"),
         Path(__file__).with_name("anthropic_adapter.py"),
         Path(__file__).with_name("claude_subscription_adapter.py"),
+        Path(__file__).with_name("keyservice_adapter.py"),
+        RDST_ROOT / "keyservice" / "src" / "hosted_inference.py",
+        RDST_ROOT / "keyservice" / "src" / "prompt_policy.py",
+        RDST_ROOT / "keyservice" / "src" / "prompt_registry.py",
+        RDST_ROOT / "shared" / "llm_manager" / "hosted_provider.py",
+        RDST_ROOT / "shared" / "llm_manager" / "llm_manager.py",
         Path(__file__).with_name("bird_interact.py"),
         RDST_ROOT / "features" / "ask" / "ask3.py",
         RDST_ROOT / "features" / "ask" / "events.py",
         RDST_ROOT / "features" / "ask" / "models.py",
+        RDST_ROOT / "features" / "ask" / "profiles.py",
         RDST_ROOT / "features" / "ask" / "service.py",
         RDST_ROOT / "features" / "schema" / "inference_context.py",
         RDST_ROOT / "features" / "schema" / "prompt_serialization.py",
@@ -2615,6 +2616,7 @@ def _credential_env(transport: str) -> str:
         "gemini": "GEMINI_API_KEY",
         "openai": "OPENAI_API_KEY",
         "openrouter": "OPENROUTER_API_KEY",
+        "keyservice": "OPENROUTER_API_KEY",
     }
     try:
         return variables[transport]

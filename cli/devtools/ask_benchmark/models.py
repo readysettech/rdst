@@ -13,7 +13,9 @@ class EvaluationTrack(str, Enum):
 
 class InteractionMode(str, Enum):
     AUTO = "auto"
+    INTERACTIVE_DEFAULT = "interactive-default"
     INTERACTIVE_NO_ANSWER = "interactive-no-answer"
+    INTERACTIVE_ORACLE = "interactive-oracle"
     NOT_APPLICABLE = "not-applicable"
 
 

@@ -19,6 +19,8 @@ from plotly.offline import get_plotlyjs
 
 from shared.persistence import write_text
 
+from .report import context_role
+
 
 class DashboardError(ValueError):
     pass
@@ -149,6 +151,8 @@ def write_dashboard(summary: dict[str, Any], path: Path) -> Path:
         f"RDST Text-to-SQL: {board['track']} / {board['context_mode']} / "
         f"{board['transport']}"
     )
+    if context_role(str(board["context_mode"])) == "upper-bound":
+        title += " (upper bound: BIRD evidence hints users do not have)"
     sections = "\n".join(
         (
             _header_section(summary, board, title),

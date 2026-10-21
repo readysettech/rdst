@@ -46,6 +46,7 @@ from .claude_subscription_adapter import (
     ClaudeSubscriptionAdapter,
 )
 from .executor import MySQLExecutor, QueryBounds
+from .keyservice_adapter import KEYSERVICE_TRANSPORT, KeyserviceAdapter
 from .models import (
     AttemptRecord,
     BenchmarkCase,
@@ -59,6 +60,7 @@ from .models import (
     RunLimits,
 )
 from .oracle import UNSTABLE_GOLD_CASE_IDS, result_fingerprint, score_results
+from .oracle_user import ORACLE_MAX_ROUNDS, OracleUserSimulator, OracleUserUnavailable
 from .pipeline import (
     build_model_only_prompt,
     extract_sql,
@@ -102,6 +104,9 @@ _ASK_ACCURACY_ROUTED_PROFILES = frozenset(
 _ASK_ACCURACY_STORAGE_PROFILES = frozenset(
     {ASK_ACCURACY_PROFILE_CANDIDATE_V2, ASK_ACCURACY_PROFILE_CANDIDATE_V3}
 )
+# A user who continues past a clarification submits each question's first option: the
+# CLI prompt's default choice and the web's preselected "Run with" button.
+CLARIFICATION_DEFAULT_ANSWER_POLICY = "first-option-v1"
 
 
 def ask_profile_service_flags(profile: str) -> dict[str, bool]:
@@ -288,12 +293,14 @@ class _BudgetedAdapter:
         return self._inner.generate_response(**kwargs)
 
 
-def _build_adapter(spec: ModelSpec, aliases: dict[str, ModelSpec]):
+def _build_adapter(spec: ModelSpec):
     if spec.transport == "anthropic":
-        return AnthropicSDKAdapter(spec, model_aliases=aliases)
+        return AnthropicSDKAdapter(spec)
     if spec.transport == CLAUDE_SUBSCRIPTION_TRANSPORT:
-        return ClaudeSubscriptionAdapter(spec, model_aliases=aliases)
-    return PydanticAIAdapter(spec, model_aliases=aliases)
+        return ClaudeSubscriptionAdapter(spec)
+    if spec.transport == KEYSERVICE_TRANSPORT:
+        return KeyserviceAdapter(spec)
+    return PydanticAIAdapter(spec)
 
 
 class BenchmarkRunner:
@@ -306,16 +313,15 @@ class BenchmarkRunner:
         executor: MySQLExecutor,
         schema_loader: MySQLSchemaLoader,
         artifact_store: ArtifactStore,
-        filter_spec: ModelSpec,
-        filter_aliases: tuple[str, ...],
         semantic_dir: Path,
         interaction_mode: InteractionMode | None = None,
         protocol_fingerprint: str = "",
         oracle_executor: MySQLExecutor | None = None,
-        adapter_factory: Callable[[ModelSpec, dict[str, ModelSpec]], Any] | None = None,
+        adapter_factory: Callable[[ModelSpec], Any] | None = None,
         run_limits: RunLimits | None = None,
         semantic_schema_format: str = ADAPTIVE_SCHEMA_FORMAT_VERSION,
         ask_accuracy_profile: str = ASK_ACCURACY_PROFILE_BASELINE,
+        oracle_user: OracleUserSimulator | None = None,
     ):
         self.run_id = run_id
         self.track = track
@@ -330,6 +336,12 @@ class BenchmarkRunner:
             and self.interaction_mode != InteractionMode.NOT_APPLICABLE
         ):
             raise ValueError("Interaction mode only applies to the rdst-ask track")
+        if (self.interaction_mode == InteractionMode.INTERACTIVE_ORACLE) != (
+            oracle_user is not None
+        ):
+            raise ValueError("The oracle user goes with the interactive-oracle mode")
+        self.oracle_user = oracle_user
+        self._harness_ms = 0.0
         self.executor = executor
         if oracle_executor is not None:
             self.oracle_executor = oracle_executor
@@ -346,8 +358,6 @@ class BenchmarkRunner:
             self.oracle_executor = executor
         self.schema_loader = schema_loader
         self.artifact_store = artifact_store
-        self.filter_spec = filter_spec
-        self.filter_aliases = filter_aliases
         self.semantic_dir = semantic_dir
         self.value_profile_store = (
             ExactValueProfileStore(semantic_dir)
@@ -443,11 +453,10 @@ class BenchmarkRunner:
             self.artifact_store.load_call_receipts(),
         )
         self.budget_stop_reason = None
-        aliases = {alias: self.filter_spec for alias in self.filter_aliases}
         adapters = {}
         fingerprints = {}
         for spec in model_specs:
-            adapter = _BudgetedAdapter(self.adapter_factory(spec, aliases), budget)
+            adapter = _BudgetedAdapter(self.adapter_factory(spec), budget)
             if hasattr(adapter, "set_call_receipt_sink"):
                 adapter.set_call_receipt_sink(self.artifact_store.append_call_receipt)
             adapters[spec.name] = adapter
@@ -503,6 +512,9 @@ class BenchmarkRunner:
             adapter.set_attempt_id(invocation_id)
         started_at = _now_iso()
         start = perf_counter()
+        # Time the benchmark spends outside Ask (the simulated user, the scoring re-run),
+        # kept out of Ask's latency even when the attempt ends in an exception.
+        self._harness_ms = 0.0
         scored = True
         try:
             if self.track == EvaluationTrack.MODEL_ONLY:
@@ -587,7 +599,12 @@ class BenchmarkRunner:
             ordered_correct=attempt.get("ordered_correct", False),
             candidate_row_count=attempt.get("candidate_row_count", 0),
             gold_row_count=attempt.get("gold_row_count", 0),
-            latency_ms=max((perf_counter() - start) * 1000 - oracle_latency_ms, 0.0),
+            latency_ms=max(
+                (perf_counter() - start) * 1000
+                - oracle_latency_ms
+                - self._harness_ms,
+                0.0,
+            ),
             candidate_execution_ms=float(attempt.get("candidate_execution_ms", 0.0)),
             oracle_latency_ms=oracle_latency_ms,
             started_at=started_at,
@@ -702,26 +719,12 @@ class BenchmarkRunner:
                 if self.semantic_schema_format == "verbose-v1"
                 else None
             ),
-            **ask_profile_service_flags(self.ask_accuracy_profile),
-            enum_overlap_advisory=self.ask_accuracy_profile in {
-                ASK_ACCURACY_PROFILE_CANDIDATE_V4,
-                ASK_ACCURACY_PROFILE_GLM_DEV_V1,
-            },
-            correction_intent_routing_intent_scope=(
-                CORRECTION_INTENT_EXPERIMENTAL_SCOPE
-                if self.ask_accuracy_profile in _ASK_ACCURACY_STORAGE_PROFILES
-                or self.ask_accuracy_profile in {
-                    ASK_ACCURACY_PROFILE_GLM_DEV_V1,
-                    ASK_ACCURACY_PROFILE_CANDIDATE_V4,
-                }
-                else None
-            ),
+            **self._ask_service_options(),
         )
+        # Ask keeps its product row limit; scoring removes only the LIMIT Ask imposed.
         options = AskOptions(
             timeout_seconds=self.executor.bounds.timeout_seconds,
-            max_rows=self.executor.bounds.max_rows,
             no_interactive=self.interaction_mode == InteractionMode.AUTO,
-            enforce_result_limit=False,
             persist_query=False,
             raise_unexpected_errors=True,
         )
@@ -743,10 +746,75 @@ class BenchmarkRunner:
                 )
             ]
 
-        if self._rdst_event_loop is None:
-            events = asyncio.run(collect_events())
-        else:
-            events = self._rdst_event_loop.run_until_complete(collect_events())
+        events = self._run_async(collect_events())
+        clarification = next(
+            (
+                event
+                for event in events
+                if isinstance(event, AskClarificationNeededEvent)
+            ),
+            None,
+        )
+        default_answers = None
+        if (
+            clarification is not None
+            and self.interaction_mode == InteractionMode.INTERACTIVE_DEFAULT
+        ):
+            default_answers = {
+                question.id: question.options[0]
+                for question in clarification.questions
+                if question.options
+            }
+
+            async def collect_resumed_events():
+                return [
+                    event
+                    async for event in service.resume(
+                        clarification.session_id, default_answers
+                    )
+                ]
+
+            events.extend(self._run_async(collect_resumed_events()))
+        oracle_rounds = None
+        pending = clarification
+        if (
+            clarification is not None
+            and self.interaction_mode == InteractionMode.INTERACTIVE_ORACLE
+        ):
+            oracle_rounds = []
+            while pending is not None and len(oracle_rounds) < ORACLE_MAX_ROUNDS:
+                answer_started = perf_counter()
+                try:
+                    answers, exchanges = self.oracle_user.answer(case, pending.questions)
+                except OracleUserUnavailable as exc:
+                    service.abandon(pending.session_id)
+                    raise BenchmarkTransportError(str(exc)) from exc
+                self._harness_ms += (perf_counter() - answer_started) * 1000
+                oracle_rounds.append(
+                    {
+                        "session_id": pending.session_id,
+                        "answers": answers,
+                        "exchanges": [exchange.to_dict() for exchange in exchanges],
+                    }
+                )
+
+                async def collect_oracle_events(
+                    session_id=pending.session_id, answers=answers
+                ):
+                    return [
+                        event async for event in service.resume(session_id, answers)
+                    ]
+
+                resumed = self._run_async(collect_oracle_events())
+                events.extend(resumed)
+                pending = next(
+                    (
+                        event
+                        for event in resumed
+                        if isinstance(event, AskClarificationNeededEvent)
+                    ),
+                    None,
+                )
         ctx = observed["context"]
         diagnostics = {
             "ask_service_phases": observed["phases"],
@@ -754,6 +822,8 @@ class BenchmarkRunner:
             "ask_service_events": [event.type for event in events],
             "matched_database_values": value_matches.to_dict(),
         }
+        if self.interaction_mode != InteractionMode.AUTO:
+            diagnostics["clarification_stopped"] = clarification is not None
         if ctx is not None:
             diagnostics.update(_context_diagnostics(ctx, case))
             required_source = (
@@ -766,16 +836,7 @@ class BenchmarkRunner:
                     f"AskService used {ctx.schema_source}; expected {required_source}"
                 )
 
-        clarification = next(
-            (
-                event
-                for event in events
-                if isinstance(event, AskClarificationNeededEvent)
-            ),
-            None,
-        )
         if clarification is not None:
-            service.abandon(clarification.session_id)
             diagnostics["clarification"] = {
                 "session_id": clarification.session_id,
                 "questions": [
@@ -796,6 +857,19 @@ class BenchmarkRunner:
                     for interpretation in clarification.interpretations
                 ],
             }
+        if default_answers is not None:
+            diagnostics["clarification"].update(
+                answers=default_answers,
+                answer_policy=CLARIFICATION_DEFAULT_ANSWER_POLICY,
+            )
+        elif oracle_rounds is not None and pending is None:
+            diagnostics["clarification"].update(
+                oracle_rounds=oracle_rounds, answer_policy=self.oracle_user.policy
+            )
+        elif clarification is not None:
+            if oracle_rounds is not None:
+                diagnostics["clarification"]["oracle_rounds"] = oracle_rounds
+            service.abandon(pending.session_id)
             return {
                 **_failed_attempt(
                     Outcome.CLARIFICATION_REQUIRED,
@@ -857,14 +931,34 @@ class BenchmarkRunner:
         generated_sql = getattr(ctx, "generated_sql", None) or (
             generated_event.sql if generated_event else None
         )
-        candidate = QueryResult(
-            columns=tuple(result_event.columns),
-            rows=tuple(tuple(row) for row in result_event.rows),
-            execution_time_ms=result_event.execution_time_ms,
-        )
+        scoring_sql, scoring_source = _scoring_sql(ctx)
+        if scoring_sql is None:
+            candidate = QueryResult(
+                columns=tuple(result_event.columns),
+                rows=tuple(tuple(row) for row in result_event.rows),
+                execution_time_ms=result_event.execution_time_ms,
+            )
+        else:
+            rerun_started = perf_counter()
+            candidate = self._ask_session_executor().execute(scoring_sql, db_id=case.db_id)
+            self._harness_ms += (perf_counter() - rerun_started) * 1000
         result = self._score_execution(case, generated_sql, result_event.sql, candidate)
-        result["diagnostics"].update(diagnostics)
+        result.setdefault("diagnostics", {}).update(
+            diagnostics,
+            scoring_sql_source=scoring_source,
+            scoring_sql=scoring_sql,
+            scoring_execution_ms=candidate.execution_time_ms,
+            product_row_count=result_event.row_count,
+            product_truncated=result_event.truncated,
+        )
+        # Ask's own execution, not the benchmark's re-run of its SQL.
+        result["candidate_execution_ms"] = result_event.execution_time_ms
         return result
+
+    def _run_async(self, awaitable):
+        if self._rdst_event_loop is None:
+            return asyncio.run(awaitable)
+        return self._rdst_event_loop.run_until_complete(awaitable)
 
     def _score_execution(
         self,
@@ -950,15 +1044,19 @@ class BenchmarkRunner:
             "context_mode": self.context_mode.value,
             "interaction_mode": self.interaction_mode.value,
             "protocol_fingerprint": self.protocol_fingerprint,
+            "candidate_production_session": getattr(
+                self.executor, "production_session", False
+            ),
             "model": _spec_identity(spec),
-            "filter_model": _spec_identity(self.filter_spec)
-            if self.track == EvaluationTrack.RDST
-            else None,
             "pipeline": {
                 "entrypoint": "features.ask.service.AskService",
                 "clarification_policy": (
                     NON_INTERACTIVE_CLARIFICATION_POLICY
                     if self.interaction_mode == InteractionMode.AUTO
+                    else CLARIFICATION_DEFAULT_ANSWER_POLICY
+                    if self.interaction_mode == InteractionMode.INTERACTIVE_DEFAULT
+                    else self.oracle_user.describe()
+                    if self.interaction_mode == InteractionMode.INTERACTIVE_ORACLE
                     else self.interaction_mode.value
                 ),
                 "provided_context_policy": "first-class-authoritative-v1",
@@ -969,35 +1067,35 @@ class BenchmarkRunner:
                 ),
                 "semantic_schema_format": self.semantic_schema_format,
                 "ask_accuracy_profile": self.ask_accuracy_profile,
-                "correction_intent_routing": (
-                    self.ask_accuracy_profile in _ASK_ACCURACY_ROUTED_PROFILES
-                ),
-                "dual_candidate_selection": (
-                    self.ask_accuracy_profile in _ASK_ACCURACY_ROUTED_PROFILES
-                ),
-                "value_location_normalization": (
-                    self.ask_accuracy_profile in _ASK_ACCURACY_ROUTED_PROFILES
-                ),
-                "encoded_identifier_storage": (
-                    self.ask_accuracy_profile in _ASK_ACCURACY_STORAGE_PROFILES
-                ),
-                "temporal_text_storage": (
-                    self.ask_accuracy_profile in _ASK_ACCURACY_STORAGE_PROFILES
-                ),
-                "month_axis_storage": (
-                    self.ask_accuracy_profile in _ASK_ACCURACY_STORAGE_PROFILES
-                ),
-                "generation_attempts": 1,
-                "max_validation_repair_attempts": 1,
-                "validation_attempts": 2,
+                "ask_service_options": self._ask_service_options(),
                 "query_persistence": False,
-                "enforce_result_limit": False,
+                "result_limit": {
+                    "max_rows": AskOptions().max_rows,
+                    "enforce_result_limit": AskOptions().enforce_result_limit,
+                    "scoring_sql": "product-limit-removed-v1",
+                },
             },
         }
         encoded = json.dumps(
             payload, sort_keys=True, separators=(",", ":"), default=str
         ).encode()
         return hashlib.sha256(encoded).hexdigest()
+
+    def _ask_service_options(self) -> dict[str, Any]:
+        """The accuracy options AskService receives, also bound into the fingerprint."""
+        profile = self.ask_accuracy_profile
+        return {
+            **ask_profile_service_flags(profile),
+            "enum_overlap_advisory": profile
+            in {ASK_ACCURACY_PROFILE_CANDIDATE_V4, ASK_ACCURACY_PROFILE_GLM_DEV_V1},
+            "correction_intent_routing_intent_scope": (
+                CORRECTION_INTENT_EXPERIMENTAL_SCOPE
+                if profile in _ASK_ACCURACY_STORAGE_PROFILES
+                or profile
+                in {ASK_ACCURACY_PROFILE_GLM_DEV_V1, ASK_ACCURACY_PROFILE_CANDIDATE_V4}
+                else None
+            ),
+        }
 
     def _matched_database_values(self, case: BenchmarkCase) -> ValueMatchResult:
         if self.value_profile_store is None:
@@ -1008,6 +1106,13 @@ class BenchmarkRunner:
                 matches=(),
             )
         return self.value_profile_store.match(case.db_id, case.question)
+
+    def _ask_session_executor(self):
+        """An executor whose session matches the one Ask ran in: Ask's connection keeps the
+        provisioned server's sql_mode, so its SQL is re-run in that mode too."""
+        if isinstance(self.executor, MySQLExecutor) and self.executor.production_session:
+            return MySQLExecutor(self.executor.config, self.executor.bounds)
+        return self.executor
 
     def _target_config(self, db_id: str):
         config = self.executor.config
@@ -1050,6 +1155,18 @@ def _failed_attempt(outcome: Outcome, stage: str, error: str):
         "failure_stage": stage,
         "error": error,
     }
+
+
+def _scoring_sql(ctx: Any) -> tuple[str | None, str]:
+    """The SQL to score in place of Ask's rows, if any, and where the scored rows come from."""
+    if getattr(ctx, "limit_added", False) or getattr(ctx, "limit_reduced", False):
+        unlimited_sql = getattr(ctx, "unlimited_sql", None)
+        if unlimited_sql:
+            return unlimited_sql, "product-limit-removed"
+        return None, "product-limit-unrecoverable"
+    if getattr(ctx, "rows_capped", False) and getattr(ctx, "sql", None):
+        return ctx.sql, "product-row-cap-removed"
+    return None, "product-result"
 
 
 def _classify_context_error(phase: str, message: str | None):
@@ -1134,7 +1251,19 @@ def _context_diagnostics(ctx, case: BenchmarkCase):
         "month_axis_storage": dict(getattr(ctx, "month_axis_storage", {})),
         "db_probe_diagnostics": dict(getattr(ctx, "db_probe_diagnostics", {})),
         "gold_table_recall": gold_table_recall,
+        "post_execution_stages": _post_execution_stages(ctx),
         **_provided_context_diagnostics(getattr(ctx, "provided_context", "")),
+    }
+
+
+def _post_execution_stages(ctx: Any) -> dict[str, dict[str, Any]]:
+    """Each versioned Ask stage's final status and reason, keyed by stage name."""
+    if not callable(getattr(ctx, "to_dict", None)):
+        return {}
+    return {
+        name: {"status": value["status"], "reason": value.get("reason")}
+        for name, value in ctx.to_dict().items()
+        if isinstance(value, dict) and "version" in value and "status" in value
     }
 
 

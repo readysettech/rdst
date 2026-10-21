@@ -8,16 +8,17 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models import override_allow_model_requests
 from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.usage import RequestUsage
 
 from devtools.ask_benchmark.models import ModelSpec, Pricing
 from devtools.ask_benchmark.pydantic_adapter import (
-    BenchmarkModelOutputError,
     BenchmarkTransportError,
     PydanticAIAdapter,
     RouteMismatchError,
     _model_error_kind,
 )
+from features.ask.sql_generation import generate_sql_from_nl
 
 
 def _spec(transport: str = "openrouter"):
@@ -264,7 +265,7 @@ def test_json_schema_is_forwarded_to_the_output_tool():
     }
 
 
-def test_structured_output_failure_retains_billable_usage():
+def test_structured_output_the_schema_rejects_reaches_ask_with_its_usage():
     receipts = []
 
     def respond(_messages, _info):
@@ -279,17 +280,61 @@ def test_structured_output_failure_retains_billable_usage():
         verify_route=False,
         call_receipt_sink=receipts.append,
     )
-    with override_allow_model_requests(False), pytest.raises(BenchmarkModelOutputError):
-        adapter.generate_response(
+    with override_allow_model_requests(False):
+        result = adapter.generate_response(
             "generate",
             extra={"response_format": {"type": "json_object"}},
         )
 
+    assert result["response"] == "not structured"
+    assert result["usage"]["total_tokens"] == 12
     record = adapter.call_records[0]
     assert record.input_tokens == 10
     assert record.output_tokens == 2
     assert record.normalized_cold_cost_usd == Decimal("0.14")
+    assert record.error is None
     assert receipts == [record]
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "{answer}\nThe query counts every row.",
+        'Draft: {{"sql": "SELECT 0"}}\nCorrected: {answer}',
+    ],
+)
+@pytest.mark.parametrize("mode", ["native", "prompted"])
+def test_ask_parses_schema_requests_the_transport_cannot(template, mode):
+    answer = json.dumps(
+        {
+            "sql": "SELECT COUNT(*) FROM t",
+            "explanation": "Counts rows.",
+            "confidence": 0.9,
+            "assumptions": [],
+            "cannot_answer": False,
+            "cannot_answer_reason": "",
+            "missing_schema": [],
+        }
+    )
+
+    def respond(_messages, info):
+        assert info.model_request_parameters.output_mode == mode
+        return ModelResponse(parts=[TextPart(template.format(answer=answer))])
+
+    adapter = PydanticAIAdapter(
+        replace(_spec("mock"), structured_output_mode=mode),
+        model_factory=lambda _spec: FunctionModel(
+            respond, profile=ModelProfile(supports_json_schema_output=True)
+        ),
+        verify_route=False,
+    )
+    with override_allow_model_requests(False):
+        result = generate_sql_from_nl(
+            "How many rows?", "CREATE TABLE t (id INT)", "mysql", "db", adapter
+        )
+
+    assert result["success"] is True
+    assert result["sql"] == "SELECT COUNT(*) FROM t"
 
 
 def test_hard_request_timeout_is_repairable():

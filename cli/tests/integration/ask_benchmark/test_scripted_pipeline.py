@@ -263,8 +263,6 @@ def _runner(
         executor=executor,
         schema_loader=MySQLSchemaLoader(mysql_config),
         artifact_store=store,
-        filter_spec=_spec(),
-        filter_aliases=(),
         semantic_dir=tmp_path / "semantic",
         interaction_mode=(
             InteractionMode.AUTO
@@ -272,7 +270,7 @@ def _runner(
             else InteractionMode.NOT_APPLICABLE
         ),
         protocol_fingerprint="scripted-contract-v1",
-        adapter_factory=lambda _spec, _aliases: adapter,
+        adapter_factory=lambda _spec: adapter,
     )
     return runner, store
 

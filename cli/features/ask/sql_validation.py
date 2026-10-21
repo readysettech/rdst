@@ -772,6 +772,37 @@ def _extract_limit_clause(sql: str, dialect: str = "") -> Dict[str, Any]:
     return {"has_limit": True, "limit_value": int(match.group(2) or match.group(1))}
 
 
+def uncapped_sql(
+    capped_sql: str, original_sql: str, dialect: str = "", fallback: str | None = None
+) -> str | None:
+    """``capped_sql`` with the row cap validation imposed undone and every other rewrite kept.
+
+    A limit validation appended is dropped, and a limit it lowered gets the count it had in
+    ``original_sql`` back. When the cap cannot be found where validation put it, the result
+    is ``fallback``, or ``original_sql`` when no fallback is given.
+    """
+    original = _extract_limit_clause(original_sql, dialect)
+    if original["has_limit"]:
+        return _replace_limit(capped_sql, original["limit_value"], dialect)
+    match = _outer_limit(capped_sql, dialect)
+    if (
+        match is None
+        or re.search(r"\bTIES\b", match.group(0), re.IGNORECASE)
+        or capped_sql[match.end():].strip(" ;\n\t")
+    ):
+        return original_sql if fallback is None else fallback
+    return capped_sql[: match.start()].rstrip()
+
+
+def has_outer_offset(sql: str, dialect: str = "") -> bool:
+    """Whether the outermost query skips rows (OFFSET, or MySQL's "LIMIT offset, count")."""
+    match = _outer_limit(sql, dialect)
+    return bool(
+        re.search(r"\bOFFSET\b", _top_level_text(sql, dialect), re.IGNORECASE)
+        or (match is not None and match.re is _TOP_LIMIT and match.group(2))
+    )
+
+
 def _inject_limit(sql: str, limit: int) -> str:
     """Append a LIMIT to a query whose outermost level has none."""
     sql = sql.rstrip()

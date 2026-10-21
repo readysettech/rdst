@@ -183,3 +183,18 @@ def test_write_dashboard_requires_positive_task_costs(tmp_path: Path, cost):
 
     with pytest.raises(DashboardError, match="standardized task costs"):
         write_dashboard(summary, tmp_path / "summary.html")
+
+
+@pytest.mark.parametrize(
+    ("context_mode", "labelled"), [("evidence", True), ("auto-init", False)]
+)
+def test_write_dashboard_labels_evidence_as_an_upper_bound(
+    tmp_path: Path, context_mode, labelled
+):
+    summary = _summary([_model("model-a", 0.6, "0.02")], context_mode=context_mode)
+
+    document = write_dashboard(summary, tmp_path / "summary.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert ("upper bound: BIRD evidence hints" in document) is labelled

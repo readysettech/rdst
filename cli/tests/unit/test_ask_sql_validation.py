@@ -857,6 +857,56 @@ class TestLimitFlagsFollowTheExecutedSql:
         assert ctx.limit_added is True and ctx.limit_reduced is False
         assert ctx.row_limit == 100
 
+    def test_the_sql_before_ask_capped_it_follows_the_flags(self):
+        added = self._validated("SELECT id FROM users")
+        assert added.unlimited_sql == "SELECT id FROM users"
+        added = execute_query(added, MagicMock(), self._executor([], 3))
+        assert added.unlimited_sql == "SELECT id FROM users"
+
+        reduced = self._validated("SELECT id FROM users LIMIT 5000")
+        assert reduced.unlimited_sql == "SELECT id FROM users LIMIT 5000"
+        reduced.sql = "SELECT id FROM users WHERE active LIMIT 10"
+        reduced = execute_query(reduced, MagicMock(), self._executor([], 3))
+        assert reduced.unlimited_sql is None
+
+        assert self._validated("SELECT id FROM users LIMIT 10").unlimited_sql is None
+
+    def test_a_repair_that_keeps_asks_cap_keeps_it_as_asks(self):
+        ctx = self._validated("SELECT id FROM users")
+        assert ctx.limit_added and ctx.sql == "SELECT id FROM users LIMIT 100"
+        # A repair rewrote the filter and kept the cap it was given.
+        ctx.sql = "SELECT id FROM users WHERE active LIMIT 100"
+        ctx = validate_sql(ctx, MagicMock())
+
+        assert ctx.limit_added is True and ctx.row_limit == 100
+        assert ctx.unlimited_sql == "SELECT id FROM users WHERE active"
+        executed = []
+        ctx = execute_query(ctx, MagicMock(), self._executor(executed, 101))
+        assert executed == ["SELECT id FROM users WHERE active LIMIT 101"]
+        assert ctx.execution_result.truncated is True
+
+    def test_a_repair_that_rewrites_asks_cap_as_fetch_keeps_it_as_asks(self):
+        ctx = self._validated("SELECT id FROM users")
+        ctx.sql = "SELECT id FROM users WHERE active FETCH FIRST 100 ROWS ONLY"
+        ctx = validate_sql(ctx, MagicMock())
+
+        assert ctx.limit_added is True
+        assert ctx.unlimited_sql == "SELECT id FROM users WHERE active"
+
+    def test_a_cap_with_an_offset_the_repair_added_is_not_asks(self):
+        ctx = self._validated("SELECT id FROM users ORDER BY id")
+        ctx.sql = "SELECT id FROM users ORDER BY id LIMIT 100 OFFSET 50"
+        ctx = validate_sql(ctx, MagicMock())
+
+        assert ctx.limit_added is False and ctx.unlimited_sql is None
+
+    def test_a_limit_the_repair_chose_is_not_asks(self):
+        ctx = self._validated("SELECT id FROM users")
+        ctx.sql = "SELECT id FROM users WHERE active LIMIT 10"
+        ctx = validate_sql(ctx, MagicMock())
+
+        assert ctx.limit_added is False and ctx.unlimited_sql is None
+
 
 class TestAskExecutionEvidence:
     """Q11 attribution: a successful ask execution records exactly one run."""

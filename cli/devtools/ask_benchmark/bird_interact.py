@@ -28,6 +28,7 @@ from features.ask.events import (
     AskSqlGeneratedEvent,
 )
 from features.ask.models import AskInput, AskOptions
+from features.ask.profiles import default_ask_service_options
 from features.ask.service import AskService
 from shared.db_connection import postgres_connection_kwargs
 from shared.persistence import write_json
@@ -36,6 +37,7 @@ from .anthropic_adapter import AnthropicSDKAdapter
 from .artifacts import ArtifactStore
 from .models import ModelSpec, QueryResult
 from .oracle import result_fingerprint, score_results
+from .oracle_user import ORACLE_MAX_ROUNDS
 
 BIRD_INTERACT_SOURCE_REVISION = "451fe2c3518ee1cf908d8139e2913483bd519381"
 BIRD_INTERACT_PUBLIC_REVISION = "10253f235dbc6092a97e9c0acd30dba6203d8e59"
@@ -496,8 +498,6 @@ def run_frozen_qualification(
     output_dir: Path,
     cases: list[BirdInteractCase],
     model_spec: ModelSpec,
-    filter_spec: ModelSpec,
-    filter_aliases: tuple[str, ...],
     route_checks: dict[str, Any],
     executor: PostgresQualificationExecutor,
     database_provision: dict[str, Any],
@@ -549,7 +549,7 @@ def run_frozen_qualification(
         "excluded_capabilities": BIRD_INTERACT_EXCLUDED_CAPABILITIES,
         "repetitions": 1,
         "models": [asdict(model_spec)],
-        "filter_model": asdict(filter_spec),
+        "ask_service_options": default_ask_service_options(),
         "route_checks": route_checks,
         "database_provision": database_provision,
         "query_bounds": asdict(executor.bounds),
@@ -564,8 +564,7 @@ def run_frozen_qualification(
     }
     store.initialize(manifest)
 
-    aliases = {alias: filter_spec for alias in filter_aliases}
-    adapter = AnthropicSDKAdapter(model_spec, model_aliases=aliases)
+    adapter = AnthropicSDKAdapter(model_spec)
     adapter.set_call_receipt_sink(store.append_call_receipt)
     completed = store.completed_keys()
     with store.run_lock():
@@ -896,6 +895,7 @@ def _run_case(
         persist_queries=False,
         session_store={},
         phase_observer=observe,
+        **default_ask_service_options(),
     )
     options = AskOptions(
         timeout_seconds=executor.bounds.timeout_seconds,
@@ -920,16 +920,28 @@ def _run_case(
         ]
 
     events = asyncio.run(collect_initial())
-    clarification = next(
-        (event for event in events if isinstance(event, AskClarificationNeededEvent)),
-        None,
-    )
     simulator = FrozenTranscriptSimulator(case)
     question_records = []
-    answers: dict[str, str] = {}
     covered_terms: set[str] = set()
-    if clarification is not None:
-        if len(clarification.questions) > case.max_clarification_turns:
+    asked = 0
+    # The SQL writer can raise a second round after the answers, so rounds repeat up to the
+    # simulated user's limit.
+    for _ in range(ORACLE_MAX_ROUNDS):
+        clarification = next(
+            (
+                event
+                for event in reversed(events)
+                if isinstance(event, AskClarificationNeededEvent)
+            ),
+            None,
+        )
+        if clarification is None or any(
+            isinstance(event, (AskResultEvent, AskErrorEvent))
+            for event in events[events.index(clarification) :]
+        ):
+            break
+        asked += len(clarification.questions)
+        if asked > case.max_clarification_turns:
             service.abandon(clarification.session_id)
             return _base_attempt(
                 run_id,
@@ -940,12 +952,13 @@ def _run_case(
                 outcome="turn_budget_exceeded",
                 scored=True,
                 error=(
-                    f"AskService requested {len(clarification.questions)} turns; "
+                    f"AskService requested {asked} turns; "
                     f"budget is {case.max_clarification_turns}"
                 ),
-                question_records=[],
-                covered_terms=set(),
+                question_records=question_records,
+                covered_terms=covered_terms,
             )
+        answers: dict[str, str] = {}
         for question in clarification.questions:
             match = simulator.answer(question.question, question.options)
             record = {
@@ -974,14 +987,8 @@ def _run_case(
                 )
             question_records.append(record)
 
-        async def collect_resume():
-            return [
-                event
-                async for event in service.resume(
-                    clarification.session_id,
-                    answers,
-                )
-            ]
+        async def collect_resume(session_id=clarification.session_id, answers=answers):
+            return [event async for event in service.resume(session_id, answers)]
 
         events.extend(asyncio.run(collect_resume()))
 

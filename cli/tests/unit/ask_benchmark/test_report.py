@@ -327,3 +327,123 @@ def test_report_exposes_filter_bypass_and_model_stage_latency() -> None:
     assert "Filter bypass rate" in markdown
     assert "Model stage timings" in markdown
     assert "| model | clarification | 1 | 2.50s | 2.50s | 1200.0 | 140.0 |" in markdown
+
+
+def test_report_counts_answers_scored_without_the_ask_limit():
+    attempts = _attempts("model", 2, 3, "0.1")
+    for attempt in attempts:
+        attempt["track"] = "rdst-ask"
+    attempts[0]["diagnostics"] = {
+        "limit_added": True,
+        "product_truncated": True,
+        "scoring_sql_source": "product-limit-removed",
+    }
+    attempts[1]["diagnostics"] = {
+        "limit_added": True,
+        "product_truncated": False,
+        "scoring_sql_source": "product-limit-removed",
+    }
+
+    summary = build_summary(attempts, expected_attempts_per_model=3)
+    model = summary["leaderboards"][0]["models"][0]
+
+    assert model["ask_capped_attempt_count"] == 2
+    assert model["product_truncated_attempt_count"] == 1
+    assert model["scored_without_ask_limit_count"] == 2
+    assert "### Product result limit" in render_markdown(summary)
+
+
+def test_report_states_the_interactive_clarification_stop_rate():
+    attempts = _attempts("model", 1, 2, "0.1")
+    for attempt in attempts:
+        attempt["track"] = "rdst-ask"
+        attempt["diagnostics"] = {"clarification_stopped": False}
+    attempts[0]["diagnostics"]["clarification_stopped"] = True
+    attempts[0]["call_records"] = [
+        {
+            "stage": "clarification",
+            "latency_ms": 2000.0,
+            "input_tokens": 100,
+            "output_tokens": 10,
+            "actual_cost_usd": "0.0001",
+            "normalized_cold_cost_usd": "0.0001",
+            "expected_billed_cost_usd": "0.0001",
+        }
+    ]
+
+    summary = build_summary(attempts, expected_attempts_per_model=2)
+    model = summary["leaderboards"][0]["models"][0]
+    markdown = render_markdown(summary)
+
+    assert model["clarification_stop_attempt_count"] == 1
+    assert model["clarification_stop_rate"] == 0.5
+    assert model["clarification_stop_correct_count"] == 1
+    assert "### Interactive clarification" in markdown
+    assert "| model | 1 | 50.0% | 1/1 | 1 | 2.00s | 2.00s | $0.000100 |" in markdown
+
+    for attempt in attempts:
+        attempt["interaction_mode"] = "interactive-oracle"
+    markdown = render_markdown(build_summary(attempts, expected_attempts_per_model=2))
+    assert "a simulated user answers the questions" in markdown
+    assert "first option" not in markdown
+
+
+def test_auto_init_leads_and_evidence_is_labelled_an_upper_bound():
+    evidence = _attempts("model", 2, 2, "0.1")
+    auto_init = _attempts("model", 1, 2, "0.1")
+    for attempt in auto_init:
+        attempt["context_mode"] = "auto-init"
+        attempt["attempt_key"] += "-auto"
+
+    summary = build_summary(evidence + auto_init, expected_attempts_per_model=2)
+    markdown = render_markdown(summary)
+
+    assert summary["headline_context_mode"] == "auto-init"
+    assert [board["context_mode"] for board in summary["leaderboards"]] == [
+        "auto-init",
+        "evidence",
+    ]
+    assert [board["context_role"] for board in summary["leaderboards"]] == [
+        "headline",
+        "upper-bound",
+    ]
+    assert "## Headline: model-only / auto-init" in markdown
+    assert (
+        "## Upper bound with BIRD evidence hints users do not have: "
+        "model-only / evidence"
+    ) in markdown
+    assert markdown.index("## Headline") < markdown.index("## Upper bound")
+
+
+def test_report_summarizes_post_execution_stage_activity():
+    attempts = _attempts("model", 1, 2, "0.1")
+    for attempt in attempts:
+        attempt["track"] = "rdst-ask"
+    attempts[0]["diagnostics"] = {
+        "post_execution_stages": {
+            "outer_rounding": {"status": "normalized", "reason": None},
+            "stable_first": {
+                "status": "unchanged",
+                "reason": "complete-primary-unavailable",
+            },
+        }
+    }
+    attempts[1]["diagnostics"] = {
+        "post_execution_stages": {
+            "outer_rounding": {
+                "status": "unchanged",
+                "reason": "primary-result-unavailable",
+            },
+        }
+    }
+
+    summary = build_summary(attempts, expected_attempts_per_model=2)
+    activity = summary["leaderboards"][0]["models"][0]["post_execution_stage_activity"]
+
+    assert activity["outer_rounding"] == {
+        "statuses": {"normalized": 1, "unchanged": 1},
+        "top_reason": "primary-result-unavailable",
+    }
+    assert "| model | outer_rounding | 1 | 0 | 1 | primary-result-unavailable |" in (
+        render_markdown(summary)
+    )

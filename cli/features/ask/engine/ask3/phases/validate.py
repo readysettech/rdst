@@ -39,10 +39,15 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
     """
     ctx.phase = "validate"
     ctx.clear_validation_errors()
+    # SQL being re-validated after a repair may still carry the cap Ask put on it.
+    prior_cap = ctx.row_limit if (ctx.limit_added or ctx.limit_reduced) else None
+    prior_flags = (ctx.limit_added, ctx.limit_reduced)
+    prior_unlimited = ctx.unlimited_sql
     ctx.limit_added = False
     ctx.limit_reduced = False
     ctx.row_limit = None
     ctx.limit_sql = None
+    ctx.unlimited_sql = None
 
     if not ctx.sql:
         ctx.validation_errors.append(
@@ -58,7 +63,9 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
     # Import validation functions
     # Path: lib/engines/ask3/phases/validate.py -> lib/functions/sql_validation.py
     from features.ask.sql_validation import (
+        has_outer_offset,
         quote_case_sensitive_identifiers,
+        uncapped_sql,
         validate_columns_against_schema,
         validate_resolved_columns_against_schema,
         validate_filter_literal_provenance,
@@ -96,6 +103,7 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
 
     # Update SQL with the validated form
     validated_sql = validation_result.get("validated_sql")
+    before_cap = ctx.sql
     if validated_sql and validated_sql != ctx.sql:
         ctx.sql = validated_sql
     if ctx.ranked_nulls_last_enabled:
@@ -103,6 +111,20 @@ def validate_sql(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context
 
         if not mentions_missing_values(ctx.refined_question or ctx.question):
             ctx.sql = place_nulls_last(ctx.sql, ctx.db_type, ctx.schema_info) or ctx.sql
+    if ctx.limit_added or ctx.limit_reduced:
+        ctx.unlimited_sql = uncapped_sql(ctx.sql, before_cap, ctx.db_type)
+    elif (
+        prior_cap is not None
+        and prior_unlimited
+        and ctx.row_limit == prior_cap
+        and not has_outer_offset(ctx.sql, ctx.db_type)
+    ):
+        # A repair kept Ask's cap, so it is still Ask's and still comes off for a probe or
+        # for scoring; the uncapped form is the repaired SQL, not the SQL before the repair.
+        restored = uncapped_sql(ctx.sql, prior_unlimited, ctx.db_type, fallback="")
+        if restored:
+            ctx.limit_added, ctx.limit_reduced = prior_flags
+            ctx.unlimited_sql = restored
     ctx.limit_sql = ctx.sql
 
     # Step 2: Column validation against schema

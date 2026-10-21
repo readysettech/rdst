@@ -14,6 +14,12 @@ from .models import QueryResult
 
 _DATABASE_NAME = re.compile(r"[A-Za-z0-9_]+")
 _MYSQL_TIMEOUT_ERROR = 3024
+# The provisioned server disables ONLY_FULL_GROUP_BY so released BIRD gold SQL runs. A
+# candidate gets MySQL 8.4's default mode, which a stock production server applies.
+PRODUCTION_SQL_MODE = (
+    "ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,"
+    "ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
+)
 
 
 @dataclass(frozen=True)
@@ -43,10 +49,16 @@ class MySQLConnectionConfig:
 
 class MySQLExecutor:
     def __init__(
-        self, config: MySQLConnectionConfig, bounds: QueryBounds | None = None
+        self,
+        config: MySQLConnectionConfig,
+        bounds: QueryBounds | None = None,
+        *,
+        production_session: bool = False,
     ):
+        """Run statements in a relaxed read-only session, or as Ask runs them."""
         self.config = config
         self.bounds = bounds or QueryBounds()
+        self.production_session = production_session
 
     def execute(self, sql: str, *, db_id: str) -> QueryResult:
         start = time.perf_counter()
@@ -55,7 +67,14 @@ class MySQLExecutor:
         result_queue = context.Queue(maxsize=1)
         process = context.Process(
             target=_execute_worker,
-            args=(self.config, self.bounds, sql, db_id, result_queue),
+            args=(
+                self.config,
+                self.bounds,
+                self.production_session,
+                sql,
+                db_id,
+                result_queue,
+            ),
             daemon=True,
         )
         process.start()
@@ -105,11 +124,14 @@ class MySQLExecutor:
             cursor = connection.cursor()
             timeout_ms = self.bounds.timeout_seconds * 1000
             cursor.execute(f"SET SESSION max_execution_time = {timeout_ms}")
-            cursor.execute(
-                "SET SESSION sql_mode = "
-                "REPLACE(@@SESSION.sql_mode, 'ONLY_FULL_GROUP_BY', '')"
-            )
-            cursor.execute("START TRANSACTION READ ONLY")
+            if self.production_session:
+                cursor.execute(f"SET SESSION sql_mode = '{PRODUCTION_SQL_MODE}'")
+            else:
+                cursor.execute(
+                    "SET SESSION sql_mode = "
+                    "REPLACE(@@SESSION.sql_mode, 'ONLY_FULL_GROUP_BY', '')"
+                )
+                cursor.execute("START TRANSACTION READ ONLY")
             cursor.execute(sql)
             columns = tuple(
                 description[0] for description in (cursor.description or ())
@@ -177,9 +199,13 @@ class MySQLExecutor:
         return rows, False
 
 
-def _execute_worker(config, bounds, sql: str, db_id: str, result_queue) -> None:
+def _execute_worker(
+    config, bounds, production_session: bool, sql: str, db_id: str, result_queue
+) -> None:
     try:
-        result = MySQLExecutor(config, bounds)._execute_direct(sql, db_id=db_id)
+        result = MySQLExecutor(
+            config, bounds, production_session=production_session
+        )._execute_direct(sql, db_id=db_id)
     except Exception as exc:  # noqa: BLE001 - propagate worker failures to parent
         result_queue.put(("error", repr(exc)))
     else:

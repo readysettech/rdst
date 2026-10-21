@@ -73,10 +73,12 @@ def execute_query(
     if validation.get('limit_added') or validation.get('limit_reduced'):
         ctx.limit_added = bool(validation.get('limit_added'))
         ctx.limit_reduced = bool(validation.get('limit_reduced'))
+        ctx.unlimited_sql = ctx.sql
     elif ctx.sql != getattr(ctx, "limit_sql", None):
         # The flags describe the cap validation put on another statement (the agent,
         # escalation and repairs replace the SQL), so none of them applies to this one.
         ctx.limit_added = ctx.limit_reduced = False
+        ctx.unlimited_sql = None
     ctx.sql = validation.get('validated_sql', ctx.sql)
     ctx.limit_sql = ctx.sql
     row_limit = validation.get('limit_value')

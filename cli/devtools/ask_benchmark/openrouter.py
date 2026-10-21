@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from functools import lru_cache
 from typing import Any
@@ -10,6 +10,7 @@ import requests
 from .models import ModelSpec
 
 CLAUDE_SUBSCRIPTION_TRANSPORT = "claude-subscription"
+KEYSERVICE_TRANSPORT = "keyservice"
 
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 _ANTHROPIC_PRICING = {
@@ -75,6 +76,21 @@ def check_model_route(
     if spec.transport == "openrouter":
         return check_openrouter_route(
             spec,
+            structured_output=structured_output,
+            runtime_parameters=runtime_parameters,
+            timeout_seconds=timeout_seconds,
+        )
+    if spec.transport == KEYSERVICE_TRANSPORT:
+        from .keyservice_adapter import keyservice_route
+
+        route = keyservice_route(spec)
+        return check_openrouter_route(
+            replace(
+                spec,
+                transport="openrouter",
+                provider_order=route.providers,
+                structured_output_mode="native",
+            ),
             structured_output=structured_output,
             runtime_parameters=runtime_parameters,
             timeout_seconds=timeout_seconds,

@@ -2,21 +2,6 @@ version = 3
 captured_at = "2026-08-30"
 source = "https://openrouter.ai/api/v1/models"
 
-[filter_model]
-name = "claude-haiku-4.5-filter"
-model = "anthropic/claude-haiku-4.5"
-transport = "openrouter"
-provider_order = ["anthropic"]
-temperature = 0.0
-max_tokens = 300
-timeout_seconds = 120
-input_usd_per_token = "0.000001"
-output_usd_per_token = "0.000005"
-cached_input_usd_per_token = "0.0000001"
-provider_data_training = false
-provider_retains_prompts = true
-aliases = ["claude-haiku-4-5-20251001"]
-
 [[models]]
 name = "claude-fable-5-max"
 model = "anthropic/claude-fable-5"
@@ -78,6 +63,26 @@ output_usd_per_token = "0.000015"
 cached_input_usd_per_token = "0.0000003"
 provider_data_training = false
 provider_retains_prompts = true
+
+[[models]]
+name = "claude-haiku-5.5-keyservice"
+model = "anthropic/claude-haiku-5.5"
+transport = "keyservice"
+reasoning_effort = "medium"
+input_usd_per_token = "0.0000001"
+output_usd_per_token = "0.0000005"
+cached_input_usd_per_token = "0.00000001"
+provider_data_training = false
+provider_retains_prompts = true
+
+[[models]]
+name = "glm-5.3-flash-keyservice"
+model = "z-ai/glm-5.3-flash"
+transport = "keyservice"
+reasoning_effort = "high"
+input_usd_per_token = "0.00000015"
+output_usd_per_token = "0.0000005"
+cached_input_usd_per_token = "0.00000003"
 
 [[models]]
 name = "claude-sonnet-4.6-default-no-cap"
@@ -231,14 +236,12 @@ provider_retains_prompts = true
 name = "glm-5.3-flash-high"
 model = "z-ai/glm-5.3-flash"
 transport = "openrouter"
-provider_order = ["deepinfra"]
+provider_order = ["baseten", "novita", "gmicloud"]
 reasoning_effort = "high"
 structured_output_mode = "prompted"
-input_usd_per_token = "0.000000075"
-output_usd_per_token = "0.00000025"
-cached_input_usd_per_token = "0.000000015"
-provider_data_training = false
-provider_retains_prompts = false
+input_usd_per_token = "0.00000015"
+output_usd_per_token = "0.0000005"
+cached_input_usd_per_token = "0.00000003"
 
 [[models]]
 name = "glm-5.3-flash-high-cloudflare"

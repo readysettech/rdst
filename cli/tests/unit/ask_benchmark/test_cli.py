@@ -73,6 +73,21 @@ def test_run_parser_accepts_positive_paid_run_limits():
     assert args.ask_accuracy_profile == "baseline"
 
 
+@pytest.mark.parametrize(
+    ("flags", "expected"),
+    [
+        ([], "auto"),
+        (["--interaction-mode", "interactive-default"], "interactive-default"),
+    ],
+)
+def test_run_parser_defaults_to_the_non_interactive_ask_path(flags, expected):
+    args = cli.build_parser().parse_args(
+        ["run", "--models", "claude-sonnet-4.6-anthropic-sdk", *flags]
+    )
+
+    assert args.interaction_mode == expected
+
+
 def test_run_parser_accepts_candidate_ask_accuracy_profile():
     args = cli.build_parser().parse_args(
         [

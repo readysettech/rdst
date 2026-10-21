@@ -10,6 +10,7 @@ import pytest
 
 from devtools.ask_benchmark.artifacts import ArtifactStore
 from devtools.ask_benchmark.executor import (
+    PRODUCTION_SQL_MODE,
     MySQLConnectionConfig,
     MySQLExecutor,
     QueryBounds,
@@ -25,6 +26,7 @@ from devtools.ask_benchmark.models import (
     QueryResult,
     RunLimits,
 )
+from devtools.ask_benchmark.oracle_user import ORACLE_USER_POLICY, OracleUserSimulator
 from devtools.ask_benchmark.pipeline import (
     build_model_only_prompt,
     extract_sql,
@@ -191,7 +193,6 @@ def _rdst_runner(
 ):
     store = ArtifactStore(tmp_path / "run")
     store.initialize({"run_id": "run"})
-    spec = _spec()
     return BenchmarkRunner(
         run_id="run",
         track=EvaluationTrack.RDST,
@@ -199,11 +200,9 @@ def _rdst_runner(
         executor=_RDSTExecutor(),
         schema_loader=_SchemaLoader(),
         artifact_store=store,
-        filter_spec=spec,
-        filter_aliases=(),
         semantic_dir=tmp_path / "semantic",
         interaction_mode=interaction_mode,
-        adapter_factory=lambda model, _aliases: _Adapter(model),
+        adapter_factory=lambda model: _Adapter(model),
         semantic_schema_format=semantic_schema_format,
         ask_accuracy_profile=ask_accuracy_profile,
     )
@@ -224,6 +223,72 @@ def test_query_worker_enforces_wall_clock_timeout(monkeypatch):
 
     assert result.timed_out is True
     assert result.error == "Query exceeded benchmark wall-clock timeout"
+
+
+@pytest.mark.parametrize(
+    ("production_session", "expected"),
+    [
+        (
+            True,
+            [
+                "SET SESSION max_execution_time = 30000",
+                f"SET SESSION sql_mode = '{PRODUCTION_SQL_MODE}'",
+                "SELECT 1",
+            ],
+        ),
+        (
+            False,
+            [
+                "SET SESSION max_execution_time = 30000",
+                "SET SESSION sql_mode = "
+                "REPLACE(@@SESSION.sql_mode, 'ONLY_FULL_GROUP_BY', '')",
+                "START TRANSACTION READ ONLY",
+                "SELECT 1",
+            ],
+        ),
+    ],
+)
+def test_candidate_session_matches_production_and_gold_stays_relaxed(
+    monkeypatch, production_session, expected
+):
+    statements = []
+
+    class Cursor:
+        description = (("value",),)
+
+        def execute(self, sql):
+            statements.append(sql)
+
+        def fetchone(self):
+            return None
+
+        def close(self):
+            pass
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        "devtools.ask_benchmark.executor.pymysql.connect",
+        lambda **_kwargs: Connection(),
+    )
+    executor = MySQLExecutor(
+        MySQLConnectionConfig("localhost", 3306, "user", "password"),
+        production_session=production_session,
+    )
+
+    result = executor._execute_direct("SELECT 1", db_id="fixture")
+
+    assert result.succeeded
+    assert statements == expected
+    assert "ONLY_FULL_GROUP_BY" in PRODUCTION_SQL_MODE.split(",")
 
 
 @pytest.mark.parametrize(
@@ -300,10 +365,8 @@ def test_model_only_runner_scores_and_persists_a_fixture(tmp_path: Path):
         executor=_Executor(),
         schema_loader=_SchemaLoader(),
         artifact_store=store,
-        filter_spec=spec,
-        filter_aliases=(),
         semantic_dir=tmp_path / "semantic",
-        adapter_factory=lambda model, _aliases: _Adapter(model),
+        adapter_factory=lambda model: _Adapter(model),
     )
     cases, failures = runner.preflight_gold([_case()])
 
@@ -327,10 +390,8 @@ def test_runner_stops_at_cumulative_provider_call_limit(tmp_path: Path):
         executor=_Executor(),
         schema_loader=_SchemaLoader(),
         artifact_store=store,
-        filter_spec=spec,
-        filter_aliases=(),
         semantic_dir=tmp_path / "semantic",
-        adapter_factory=lambda model, _aliases: _ReceiptAdapter(model),
+        adapter_factory=lambda model: _ReceiptAdapter(model),
         run_limits=RunLimits(max_provider_calls=1),
     )
     second = BenchmarkCase(
@@ -366,10 +427,8 @@ def test_paid_run_limits_require_durable_adapter_receipts(tmp_path: Path):
         executor=_Executor(),
         schema_loader=_SchemaLoader(),
         artifact_store=store,
-        filter_spec=spec,
-        filter_aliases=(),
         semantic_dir=tmp_path / "semantic",
-        adapter_factory=lambda model, _aliases: _Adapter(model),
+        adapter_factory=lambda model: _Adapter(model),
         run_limits=RunLimits(max_provider_calls=1),
     )
     cases, _ = runner.preflight_gold([_case()])
@@ -391,10 +450,8 @@ def test_runner_stops_on_normalized_cost_at_completed_call_boundary(
         executor=_Executor(),
         schema_loader=_SchemaLoader(),
         artifact_store=store,
-        filter_spec=spec,
-        filter_aliases=(),
         semantic_dir=tmp_path / "semantic",
-        adapter_factory=lambda model, _aliases: _ReceiptAdapter(model),
+        adapter_factory=lambda model: _ReceiptAdapter(model),
         run_limits=RunLimits(max_normalized_cost_usd=Decimal("0.20")),
     )
     second = BenchmarkCase(
@@ -422,7 +479,8 @@ def test_rdst_runner_consumes_ask_service_result_events(tmp_path: Path):
             self.observer = kwargs["phase_observer"]
 
         async def ask(self, _input, options):
-            assert options.enforce_result_limit is False
+            assert options.enforce_result_limit is True
+            assert options.max_rows == 100
             assert options.persist_query is False
             self.observer("schema", ctx)
             self.observer("filter", ctx)
@@ -460,6 +518,139 @@ def test_rdst_runner_consumes_ask_service_result_events(tmp_path: Path):
         "validate",
         "execute",
     ]
+
+
+def test_asks_sql_is_rerun_in_the_session_ask_ran_in(tmp_path: Path):
+    runner = _rdst_runner(tmp_path)
+    runner.executor = MySQLExecutor(
+        MySQLConnectionConfig("localhost", 3306, "user", "password"),
+        QueryBounds(timeout_seconds=7),
+        production_session=True,
+    )
+
+    rerun = runner._ask_session_executor()
+
+    # Ask's own connection keeps the server's relaxed sql_mode, so its SQL is scored in it.
+    assert rerun.production_session is False
+    assert rerun.bounds.timeout_seconds == 7
+
+
+def test_rdst_runner_scores_ask_capped_answers_without_the_ask_limit(
+    tmp_path: Path,
+):
+    ctx = _rdst_context()
+    ctx.sql = "SELECT 1 LIMIT 100"
+    ctx.limit_added = True
+    ctx.unlimited_sql = "SELECT 1"
+    executed = []
+
+    class RecordingExecutor(_RDSTExecutor):
+        def execute(self, sql, *, db_id):
+            executed.append(sql)
+            return super().execute(sql, db_id=db_id)
+
+    class FakeAskService:
+        def __init__(self, **kwargs):
+            self.observer = kwargs["phase_observer"]
+
+        async def ask(self, _input, _options):
+            self.observer("execute", ctx)
+            yield AskResultEvent(
+                type="result",
+                success=True,
+                sql=ctx.sql,
+                rows=[],
+                columns=["value"],
+                row_count=0,
+                execution_time_ms=1.0,
+                llm_calls=1,
+                total_tokens=10,
+                limit_added=True,
+                truncated=True,
+            )
+
+        def abandon(self, _session_id):
+            raise AssertionError("Successful runs have no session")
+
+    runner = _rdst_runner(tmp_path)
+    runner.executor = RecordingExecutor()
+    runner.preflight_gold([_case()])
+    with patch("devtools.ask_benchmark.runner.AskService", FakeAskService):
+        result = runner._run_rdst(_case(), _Adapter(_spec()))
+
+    assert executed == ["SELECT 1"]
+    assert result["outcome"] == "correct"
+    assert result["validated_sql"] == "SELECT 1 LIMIT 100"
+    assert result["diagnostics"]["scoring_sql_source"] == "product-limit-removed"
+    assert result["diagnostics"]["product_truncated"] is True
+    # Ask's execution time is reported; the re-run counts as benchmark time.
+    assert result["candidate_execution_ms"] == 1.0
+    assert runner._harness_ms > 0
+
+
+def test_rdst_runner_scores_a_failed_unlimited_rerun_as_its_outcome(
+    tmp_path: Path,
+):
+    ctx = _rdst_context()
+    ctx.sql = "SELECT 1 LIMIT 100"
+    ctx.limit_added = True
+    ctx.unlimited_sql = "SELECT 1"
+
+    class TimeoutExecutor(_RDSTExecutor):
+        def execute(self, _sql, *, db_id):
+            return QueryResult(error="Query timed out", timed_out=True)
+
+    class FakeAskService:
+        def __init__(self, **kwargs):
+            self.observer = kwargs["phase_observer"]
+
+        async def ask(self, _input, _options):
+            self.observer("execute", ctx)
+            yield AskResultEvent(
+                type="result",
+                success=True,
+                sql=ctx.sql,
+                rows=[(1,)],
+                columns=["value"],
+                row_count=1,
+                execution_time_ms=1.0,
+                llm_calls=1,
+                total_tokens=10,
+                limit_added=True,
+            )
+
+        def abandon(self, _session_id):
+            raise AssertionError("Successful runs have no session")
+
+    runner = _rdst_runner(tmp_path)
+    runner.preflight_gold([_case()])
+    runner.executor = TimeoutExecutor()
+    with patch("devtools.ask_benchmark.runner.AskService", FakeAskService):
+        result = runner._run_rdst(_case(), _Adapter(_spec()))
+
+    assert result["outcome"] == "timeout"
+    assert result["failure_stage"] == "execute"
+    assert result["diagnostics"]["scoring_sql_source"] == "product-limit-removed"
+
+
+def test_runner_records_each_versioned_stage_outcome():
+    from devtools.ask_benchmark.runner import _post_execution_stages
+
+    class Context:
+        def to_dict(self):
+            return {
+                "outer_rounding": {
+                    "version": "v1",
+                    "status": "unchanged",
+                    "reason": "primary-result-unavailable",
+                },
+                "ambiguity_report": {"requires_clarification": False},
+                "sql": "SELECT 1",
+            }
+
+    assert _post_execution_stages(Context()) == {
+        "outer_rounding": {"status": "unchanged", "reason": "primary-result-unavailable"}
+    }
 
 
 def test_rdst_runner_keeps_one_worker_pool_for_all_cases(tmp_path: Path):
@@ -768,6 +959,196 @@ def test_rdst_runner_scores_unnecessary_clarification_and_abandons_session(
     assert abandoned == ["session-1"]
 
 
+def test_rdst_runner_continues_a_clarification_with_default_options(
+    tmp_path: Path,
+):
+    ctx = _rdst_context()
+    resumed = []
+
+    class FakeAskService:
+        def __init__(self, **kwargs):
+            self.observer = kwargs["phase_observer"]
+
+        async def ask(self, _input, options):
+            assert options.no_interactive is False
+            self.observer("clarify", ctx)
+            yield AskClarificationNeededEvent(
+                type="clarification_needed",
+                session_id="session-1",
+                interpretations=[],
+                questions=[
+                    AskClarificationQuestion(
+                        id="time_range",
+                        question="Which period?",
+                        options=["2024", "2025"],
+                    ),
+                    AskClarificationQuestion(
+                        id="free_text", question="Anything else?", options=[]
+                    ),
+                ],
+            )
+
+        async def resume(self, session_id, answers):
+            resumed.append((session_id, answers))
+            self.observer("execute", ctx)
+            yield AskResultEvent(
+                type="result",
+                success=True,
+                sql="SELECT 1",
+                rows=[(1,)],
+                columns=["value"],
+                row_count=1,
+                execution_time_ms=1.0,
+                llm_calls=2,
+                total_tokens=10,
+            )
+
+        def abandon(self, _session_id):
+            raise AssertionError("A continued clarification is resumed, not abandoned")
+
+    runner = _rdst_runner(tmp_path, InteractionMode.INTERACTIVE_DEFAULT)
+    runner.preflight_gold([_case()])
+    with patch("devtools.ask_benchmark.runner.AskService", FakeAskService):
+        result = runner._run_rdst(_case(), _Adapter(_spec()))
+
+    assert resumed == [("session-1", {"time_range": "2024"})]
+    assert result["outcome"] == "correct"
+    assert result["diagnostics"]["clarification_stopped"] is True
+    assert result["diagnostics"]["clarification"]["answer_policy"] == "first-option-v1"
+    assert runner.configuration_fingerprint(_spec()) != _rdst_runner(
+        tmp_path / "no-answer"
+    ).configuration_fingerprint(_spec())
+
+
+def test_rdst_runner_answers_a_clarification_as_the_oracle_user(tmp_path: Path):
+    ctx = _rdst_context()
+    resumed = []
+    prompts = []
+
+    def model(_system, user):
+        prompts.append(user)
+        return '{"option": 2, "answer": ""}'
+
+    class FakeAskService:
+        def __init__(self, **kwargs):
+            self.observer = kwargs["phase_observer"]
+
+        async def ask(self, _input, options):
+            assert options.no_interactive is False
+            self.observer("clarify", ctx)
+            yield AskClarificationNeededEvent(
+                type="clarification_needed",
+                session_id="session-1",
+                interpretations=[],
+                questions=[
+                    AskClarificationQuestion(
+                        id="value", question="Which value?", options=["0", "1"]
+                    )
+                ],
+            )
+
+        async def resume(self, session_id, answers):
+            resumed.append((session_id, answers))
+            self.observer("execute", ctx)
+            yield AskResultEvent(
+                type="result",
+                success=True,
+                sql="SELECT 1",
+                rows=[(1,)],
+                columns=["value"],
+                row_count=1,
+                execution_time_ms=1.0,
+                llm_calls=2,
+                total_tokens=10,
+            )
+
+        def abandon(self, _session_id):
+            raise AssertionError("An answered clarification is resumed, not abandoned")
+
+    store = ArtifactStore(tmp_path / "run")
+    store.initialize({"run_id": "run"})
+    runner = BenchmarkRunner(
+        run_id="run",
+        track=EvaluationTrack.RDST,
+        context_mode=ContextMode.RAW,
+        executor=_RDSTExecutor(),
+        schema_loader=_SchemaLoader(),
+        artifact_store=store,
+        semantic_dir=tmp_path / "semantic",
+        interaction_mode=InteractionMode.INTERACTIVE_ORACLE,
+        adapter_factory=lambda model: _Adapter(model),
+        semantic_schema_format="verbose-v1",
+        oracle_user=OracleUserSimulator(model),
+    )
+    runner.preflight_gold([_case()])
+    with patch("devtools.ask_benchmark.runner.AskService", FakeAskService):
+        result = runner._run_rdst(_case(), _Adapter(_spec()))
+
+    assert resumed == [("session-1", {"value": "1"})]
+    assert "one means 1" in prompts[0] and "SELECT 1" in prompts[0]
+    assert result["outcome"] == "correct"
+    clarification = result["diagnostics"]["clarification"]
+    assert clarification["answer_policy"] == ORACLE_USER_POLICY
+    assert clarification["oracle_rounds"][0]["exchanges"][0]["choice"] == 2
+
+
+def test_an_unreachable_oracle_user_leaves_the_attempt_unscored(tmp_path: Path):
+    from devtools.ask_benchmark.oracle_user import OracleUserUnavailable
+
+    ctx = _rdst_context()
+    abandoned = []
+
+    def model(_system, _user):
+        raise OracleUserUnavailable("Oracle user call failed: 529 overloaded")
+
+    class FakeAskService:
+        def __init__(self, **kwargs):
+            self.observer = kwargs["phase_observer"]
+
+        async def ask(self, _input, _options):
+            self.observer("clarify", ctx)
+            yield AskClarificationNeededEvent(
+                type="clarification_needed",
+                session_id="session-1",
+                interpretations=[],
+                questions=[
+                    AskClarificationQuestion(id="value", question="Which value?", options=["0"])
+                ],
+            )
+
+        def abandon(self, session_id):
+            abandoned.append(session_id)
+
+    store = ArtifactStore(tmp_path / "run")
+    store.initialize({"run_id": "run"})
+    runner = BenchmarkRunner(
+        run_id="run",
+        track=EvaluationTrack.RDST,
+        context_mode=ContextMode.RAW,
+        executor=_RDSTExecutor(),
+        schema_loader=_SchemaLoader(),
+        artifact_store=store,
+        semantic_dir=tmp_path / "semantic",
+        interaction_mode=InteractionMode.INTERACTIVE_ORACLE,
+        adapter_factory=lambda model: _Adapter(model),
+        semantic_schema_format="verbose-v1",
+        oracle_user=OracleUserSimulator(model),
+    )
+    runner.preflight_gold([_case()])
+    with (
+        patch("devtools.ask_benchmark.runner.AskService", FakeAskService),
+        pytest.raises(BenchmarkTransportError, match="529 overloaded"),
+    ):
+        runner._run_rdst(_case(), _Adapter(_spec()))
+
+    assert abandoned == ["session-1"]
+
+
+def test_rdst_runner_requires_the_oracle_user_with_its_mode(tmp_path: Path):
+    with pytest.raises(ValueError, match="oracle user"):
+        _rdst_runner(tmp_path, InteractionMode.INTERACTIVE_ORACLE)
+
+
 def test_rdst_runner_scores_safe_auto_abstention_as_clarification_required(
     tmp_path: Path,
 ):
@@ -828,10 +1209,8 @@ def test_runner_repairs_unscored_transport_invocation(tmp_path: Path):
         executor=_Executor(),
         schema_loader=_SchemaLoader(),
         artifact_store=store,
-        filter_spec=spec,
-        filter_aliases=(),
         semantic_dir=tmp_path / "semantic",
-        adapter_factory=lambda model, _aliases: FlakyAdapter(model),
+        adapter_factory=lambda model: FlakyAdapter(model),
     )
     cases, _ = runner.preflight_gold([_case()])
 

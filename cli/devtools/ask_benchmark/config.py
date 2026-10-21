@@ -17,6 +17,7 @@ _SUPPORTED_TRANSPORTS = {
     "openai",
     "google",
     "gemini",
+    "keyservice",
 }
 _REASONING_EFFORTS = {"max", "xhigh", "high", "medium", "low", "minimal", "none"}
 _STRUCTURED_OUTPUT_MODES = {"tool", "native", "prompted"}
@@ -41,21 +42,6 @@ def load_model_specs(path: Path = DEFAULT_MODEL_MATRIX) -> dict[str, ModelSpec]:
             raise ConfigurationError(f"Duplicate model name: {spec.name}")
         specs[spec.name] = spec
     return specs
-
-
-def load_filter_spec(
-    path: Path = DEFAULT_MODEL_MATRIX,
-) -> tuple[ModelSpec, tuple[str, ...]]:
-    entry = _load_matrix(path).get("filter_model")
-    if not isinstance(entry, dict):
-        raise ConfigurationError(f"Model matrix {path} has no filter_model")
-    spec = _parse_model(entry, -1)
-    aliases = entry.get("aliases", [])
-    if not isinstance(aliases, list) or not all(
-        isinstance(alias, str) and alias for alias in aliases
-    ):
-        raise ConfigurationError("filter_model has invalid aliases")
-    return spec, tuple(aliases)
 
 
 def select_models(

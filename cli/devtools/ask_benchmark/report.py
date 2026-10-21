@@ -10,6 +10,38 @@ from statistics import median
 from typing import Any
 
 GroupKey = tuple[str, str, str, str]
+# Users ask with the introspected schema and no BIRD hints; that context is the headline.
+# BIRD evidence hints are an upper bound no user has.
+HEADLINE_CONTEXT_MODE = "auto-init"
+UPPER_BOUND_CONTEXT_MODES = frozenset({"evidence"})
+_CONTEXT_ROLE_ORDER = {"headline": 0, "secondary": 1, "upper-bound": 2}
+_CONTEXT_ROLE_HEADINGS = {
+    "headline": "Headline",
+    "secondary": "Secondary",
+    "upper-bound": "Upper bound with BIRD evidence hints users do not have",
+}
+
+
+# What the benchmark does after Ask stops to ask, by interaction mode.
+_CLARIFICATION_FOLLOW_UP = {
+    "interactive-default": (
+        "the benchmark continues with each question's first option, the CLI prompt's "
+        "default and the web's preselected choice, and scores the resumed answer."
+    ),
+    "interactive-oracle": (
+        "a simulated user answers the questions and the benchmark scores the resumed "
+        "answer."
+    ),
+    "interactive-no-answer": "the benchmark records the stop and does not answer.",
+}
+
+
+def context_role(context_mode: str) -> str:
+    if context_mode == HEADLINE_CONTEXT_MODE:
+        return "headline"
+    if context_mode in UPPER_BOUND_CONTEXT_MODES:
+        return "upper-bound"
+    return "secondary"
 
 
 def build_summary(
@@ -33,7 +65,10 @@ def build_summary(
         grouped[group_key][str(attempt["model_name"])].append(attempt)
 
     leaderboards = []
-    for group_key, models in sorted(grouped.items()):
+    for group_key, models in sorted(
+        grouped.items(),
+        key=lambda item: (_CONTEXT_ROLE_ORDER[context_role(item[0][1])], item[0]),
+    ):
         model_summaries = []
         for name, rows in sorted(models.items()):
             receipts = [
@@ -62,6 +97,7 @@ def build_summary(
             {
                 "track": group_key[0],
                 "context_mode": group_key[1],
+                "context_role": context_role(group_key[1]),
                 "interaction_mode": group_key[2],
                 "transport": group_key[3],
                 "expected_attempts_per_model": expected_attempts_per_model,
@@ -80,6 +116,7 @@ def build_summary(
     )
     return {
         "attempt_count": len(attempts),
+        "headline_context_mode": HEADLINE_CONTEXT_MODE,
         "benchmark_elapsed_ms": benchmark_elapsed_ms,
         "headline_excluded_case_ids": excluded_case_ids,
         "leaderboards": leaderboards,
@@ -148,6 +185,16 @@ def render_markdown(summary: dict[str, Any]) -> str:
                 f"{len(comparison['second_only_correct'])} | {p_text} |"
             )
         lines.append("")
+    lines.extend(
+        [
+            (
+                f"Headline context: `{HEADLINE_CONTEXT_MODE}`, the introspected schema "
+                "with no BIRD evidence hints, which is what users have. `evidence` "
+                "boards are an upper bound."
+            ),
+            "",
+        ]
+    )
     excluded = summary.get("headline_excluded_case_ids", [])
     if excluded:
         lines.extend(
@@ -161,7 +208,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         lines.extend(
             [
                 (
-                    f"## {board['track']} / {board['context_mode']} / "
+                    f"## {_CONTEXT_ROLE_HEADINGS[context_role(board['context_mode'])]}: "
+                    f"{board['track']} / {board['context_mode']} / "
                     f"{board['interaction_mode']} / {board['transport']}"
                 ),
                 "",
@@ -250,6 +298,79 @@ def render_markdown(summary: dict[str, Any]) -> str:
                     f"{model.get('mean_generation_output_tokens', 0.0):.1f} | "
                     f"{model.get('schema_expansion_rate', 0.0):.1%} | "
                     f"{repair_text} |"
+                )
+            lines.append("")
+        if any(model.get("clarification_detector_observed") for model in board["models"]):
+            lines.extend(
+                [
+                    "### Interactive clarification",
+                    "",
+                    "Ask runs the clarification detector before generation, as "
+                    "interactive CLI and web sessions do. When it stops to ask, "
+                    + _CLARIFICATION_FOLLOW_UP.get(
+                        board["interaction_mode"], "the benchmark records the stop."
+                    ),
+                    "",
+                    "| Model | Stops | Stop rate | EX when stopped | Detector calls | Mean latency | P95 latency | Billed cost | Normalized cost |",
+                    "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+                ]
+            )
+            for model in board["models"]:
+                stops = model.get("clarification_stop_attempt_count", 0)
+                detector = model.get("cost_by_stage", {}).get("clarification", {})
+                billed = detector.get("actual_cost_usd")
+                lines.append(
+                    f"| {model['model_name']} | {stops} | "
+                    f"{model.get('clarification_stop_rate', 0.0):.1%} | "
+                    f"{model.get('clarification_stop_correct_count', 0)}/{stops} | "
+                    f"{detector.get('call_count', 0)} | "
+                    f"{float(detector.get('mean_latency_ms', 0.0)) / 1000:.2f}s | "
+                    f"{float(detector.get('p95_latency_ms', 0.0)) / 1000:.2f}s | "
+                    f"{f'${Decimal(billed):.6f}' if billed is not None else 'n/a'} | "
+                    f"${Decimal(detector.get('normalized_cold_cost_usd', '0')):.6f} |"
+                )
+            lines.append("")
+        if any(model.get("post_execution_stage_activity") for model in board["models"]):
+            lines.extend(
+                [
+                    "### Post-execution stage activity",
+                    "",
+                    "| Model | Stage | Normalized | Reverted | Unchanged | Most common reason |",
+                    "|---|---|---:|---:|---:|---|",
+                ]
+            )
+            for model in board["models"]:
+                activity = model.get("post_execution_stage_activity", {})
+                for stage, stats in activity.items():
+                    statuses = stats.get("statuses", {})
+                    lines.append(
+                        f"| {model['model_name']} | {stage} | "
+                        f"{statuses.get('normalized', 0)} | "
+                        f"{statuses.get('reverted', 0)} | "
+                        f"{statuses.get('unchanged', 0)} | "
+                        f"{stats.get('top_reason') or ''} |"
+                    )
+            lines.append("")
+        if any(model.get("ask_capped_attempt_count") for model in board["models"]):
+            lines.extend(
+                [
+                    "### Product result limit",
+                    "",
+                    (
+                        "Ask runs with its product row limit. Scoring re-executes an "
+                        "answer without the LIMIT Ask added or lowered."
+                    ),
+                    "",
+                    "| Model | Ask-capped answers | Truncated product answers | Scored without Ask's cap |",
+                    "|---|---:|---:|---:|",
+                ]
+            )
+            for model in board["models"]:
+                lines.append(
+                    f"| {model['model_name']} | "
+                    f"{model.get('ask_capped_attempt_count', 0)} | "
+                    f"{model.get('product_truncated_attempt_count', 0)} | "
+                    f"{model.get('scored_without_ask_limit_count', 0)} |"
                 )
             lines.append("")
         if any(model.get("matched_value_attempt_count") for model in board["models"]):
@@ -561,6 +682,12 @@ def _summarize_model(
         for match in item.get("matches", [])
         if isinstance(match, dict)
     ]
+    scored_diagnostics = [attempt.get("diagnostics", {}) for attempt in scored_attempts]
+    clarification_stops = [
+        attempt
+        for attempt in scored_attempts
+        if attempt.get("diagnostics", {}).get("clarification_stopped") is True
+    ]
     latencies = [float(attempt.get("latency_ms", 0.0)) for attempt in scored_attempts]
     total_latency_ms = sum(latencies)
     reasoning_efforts = {
@@ -720,6 +847,30 @@ def _summarize_model(
             len(schema_expansion_attempts) / len(scored_attempts)
             if scored_attempts
             else 0.0
+        ),
+        "clarification_detector_observed": any(
+            "clarification_stopped" in diagnostics for diagnostics in scored_diagnostics
+        ),
+        "clarification_stop_attempt_count": len(clarification_stops),
+        "clarification_stop_rate": (
+            len(clarification_stops) / len(scored_attempts) if scored_attempts else 0.0
+        ),
+        "clarification_stop_correct_count": sum(
+            bool(attempt.get("execution_correct")) for attempt in clarification_stops
+        ),
+        "post_execution_stage_activity": _stage_activity(scored_diagnostics),
+        "ask_capped_attempt_count": sum(
+            bool(diagnostics.get("limit_added") or diagnostics.get("limit_reduced"))
+            for diagnostics in scored_diagnostics
+        ),
+        "product_truncated_attempt_count": sum(
+            diagnostics.get("product_truncated") is True
+            for diagnostics in scored_diagnostics
+        ),
+        "scored_without_ask_limit_count": sum(
+            diagnostics.get("scoring_sql_source")
+            in {"product-limit-removed", "product-row-cap-removed"}
+            for diagnostics in scored_diagnostics
         ),
         "validation_repair_attempt_count": len(validation_repair_attempts),
         "validation_repair_rate": (
@@ -882,6 +1033,23 @@ def _stage_costs(call_records: list[dict[str, Any]]):
             ),
         }
     return result
+
+
+def _stage_activity(diagnostics: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    statuses: dict[str, Counter] = defaultdict(Counter)
+    reasons: dict[str, Counter] = defaultdict(Counter)
+    for item in diagnostics:
+        for stage, outcome in (item.get("post_execution_stages") or {}).items():
+            statuses[stage][str(outcome.get("status"))] += 1
+            if outcome.get("reason"):
+                reasons[stage][str(outcome["reason"])] += 1
+    return {
+        stage: {
+            "statuses": dict(sorted(statuses[stage].items())),
+            "top_reason": reasons[stage].most_common(1)[0][0] if reasons[stage] else None,
+        }
+        for stage in sorted(statuses)
+    }
 
 
 def _accuracy_breakdown(attempts: list[dict[str, Any]], field: str):

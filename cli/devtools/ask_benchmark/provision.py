@@ -29,6 +29,17 @@ COMPOSE_FILE = Path(__file__).with_name("compose.yaml")
 COMPOSE_PROJECT = "rdst-bird-benchmark"
 DEFAULT_MYSQL_IMAGE = "mysql:8.4.0"
 DEFAULT_ROOT_PASSWORD = "rdst-bird-root"
+# Databases a layout must not take over: the server's own and the shared BIRD import.
+_RESERVED_DATABASES = frozenset(
+    {
+        "bird",
+        "information_schema",
+        "mysql",
+        "performance_schema",
+        "rdst_benchmark_meta",
+        "sys",
+    }
+)
 
 
 class ProvisioningError(RuntimeError):
@@ -154,20 +165,23 @@ def provision_mysql(
     archive_sha256: str,
     cache_dir: Path,
     root_password: str = DEFAULT_ROOT_PASSWORD,
-    runtime_user: str = "rdst_bird",
+    runtime_user: str = "rdst_ask",
     runtime_password: str = "rdst-benchmark",
     port: int = 13316,
-    database_prefix: str = "bird_",
+    database_prefix: str = "",
     force: bool = False,
 ) -> dict[str, Any]:
+    """Provision the databases for one prefix, leaving other prefixes' layouts in place."""
     tables_path = extracted_dir.joinpath(*PurePosixPath(TABLES_ENTRY).parts)
     dump_path = extracted_dir.joinpath(*PurePosixPath(MYSQL_DUMP_ENTRY).parts)
     database_tables = _load_database_tables(tables_path)
+    _reject_reserved_databases(database_tables, database_prefix)
     start_mysql(root_password=root_password, port=port)
+    manifest_path = provision_manifest_path(cache_dir, database_prefix)
 
     connection = _admin_connection(root_password, port)
     try:
-        previous_user_prefix = _marker_runtime_user(connection)
+        previous_user_prefix = _marker_runtime_user(connection, database_prefix)
         if previous_user_prefix and previous_user_prefix != runtime_user:
             _drop_runtime_users(connection, database_tables, previous_user_prefix)
         if (
@@ -183,25 +197,30 @@ def provision_mysql(
             )
             manifest = _provision_manifest(
                 connection,
+                database_tables,
                 archive_sha256=archive_sha256,
                 database_prefix=database_prefix,
                 runtime_user=runtime_user,
                 port=port,
             )
-            write_json(cache_dir / "mysql-provision.json", manifest)
+            write_json(manifest_path, manifest)
             return manifest
+        import_dump = force or not _dump_imported(connection, archive_sha256)
         _drop_benchmark_databases(connection, database_tables, database_prefix)
-        with connection.cursor() as cursor:
-            cursor.execute("DROP DATABASE IF EXISTS `BIRD`")
-            cursor.execute(
-                "CREATE DATABASE `BIRD` CHARACTER SET utf8mb4 "
-                "COLLATE utf8mb4_0900_ai_ci"
-            )
-        connection.commit()
+        if import_dump:
+            with connection.cursor() as cursor:
+                cursor.execute("DROP DATABASE IF EXISTS `rdst_benchmark_meta`")
+                cursor.execute("DROP DATABASE IF EXISTS `BIRD`")
+                cursor.execute(
+                    "CREATE DATABASE `BIRD` CHARACTER SET utf8mb4 "
+                    "COLLATE utf8mb4_0900_ai_ci"
+                )
+            connection.commit()
     finally:
         connection.close()
 
-    _import_dump(dump_path, root_password=root_password, port=port)
+    if import_dump:
+        _import_dump(dump_path, root_password=root_password, port=port)
     connection = _admin_connection(root_password, port)
     try:
         _create_isolated_views(connection, database_tables, database_prefix)
@@ -217,6 +236,7 @@ def provision_mysql(
         )
         manifest = _provision_manifest(
             connection,
+            database_tables,
             archive_sha256=archive_sha256,
             database_prefix=database_prefix,
             runtime_user=runtime_user,
@@ -224,14 +244,19 @@ def provision_mysql(
         )
     finally:
         connection.close()
-    write_json(cache_dir / "mysql-provision.json", manifest)
+    write_json(manifest_path, manifest)
     return manifest
+
+
+def provision_manifest_path(cache_dir: Path, database_prefix: str) -> Path:
+    """Each database prefix is its own layout with its own manifest."""
+    return cache_dir / f"mysql-provision-{database_prefix or 'db-id'}.json"
 
 
 def verify_mysql_provision(
     cache_dir: Path, config: MySQLConnectionConfig, db_id: str
 ) -> dict[str, Any]:
-    path = cache_dir / "mysql-provision.json"
+    path = provision_manifest_path(cache_dir, config.database_prefix)
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -263,7 +288,8 @@ def verify_mysql_provision(
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT archive_sha256, database_prefix "
-                "FROM `rdst_benchmark_meta`.`provision` LIMIT 1"
+                "FROM `rdst_benchmark_meta`.`provision` WHERE database_prefix = %s",
+                (config.database_prefix,),
             )
             marker = cursor.fetchone()
             cursor.execute("SELECT VERSION(), @@SESSION.sql_mode")
@@ -315,6 +341,20 @@ def _load_database_tables(path: Path) -> dict[str, list[str]]:
     return result
 
 
+def _reject_reserved_databases(
+    database_tables: dict[str, list[str]], database_prefix: str
+) -> None:
+    reserved = sorted(
+        database
+        for database in (f"{database_prefix}{db_id}" for db_id in database_tables)
+        if database.lower() in _RESERVED_DATABASES
+    )
+    if reserved:
+        raise ProvisioningError(
+            "BIRD databases would replace server databases: " + ", ".join(reserved)
+        )
+
+
 def _create_isolated_views(
     connection, database_tables: dict[str, list[str]], database_prefix: str
 ) -> None:
@@ -346,8 +386,12 @@ def _create_runtime_users(
         for db_id in sorted(database_tables):
             user = database_user(user_prefix, db_id)
             database = _identifier(f"{database_prefix}{db_id}")
-            cursor.execute(f"DROP USER IF EXISTS '{user}'@'%'")
-            cursor.execute(f"CREATE USER '{user}'@'%%' IDENTIFIED BY %s", (password,))
+            # Users are shared by every database layout (their names do not carry the
+            # database prefix), so grants are added rather than the user re-created.
+            cursor.execute(
+                f"CREATE USER IF NOT EXISTS '{user}'@'%%' IDENTIFIED BY %s", (password,)
+            )
+            cursor.execute(f"ALTER USER '{user}'@'%%' IDENTIFIED BY %s", (password,))
             cursor.execute(f"GRANT SELECT, SHOW VIEW ON `{database}`.* TO '{user}'@'%'")
             cursor.execute(
                 f"GRANT SELECT ON `rdst_benchmark_meta`.`provision` TO '{user}'@'%'"
@@ -359,12 +403,7 @@ def _write_provision_marker(
     connection, archive_sha256: str, prefix: str, runtime_user_prefix: str
 ) -> None:
     with connection.cursor() as cursor:
-        cursor.execute("CREATE DATABASE `rdst_benchmark_meta`")
-        cursor.execute(
-            "CREATE TABLE `rdst_benchmark_meta`.`provision` "
-            "(archive_sha256 CHAR(64) NOT NULL, database_prefix VARCHAR(64) NOT NULL, "
-            "runtime_user_prefix VARCHAR(32) NOT NULL)"
-        )
+        _create_marker_table(cursor)
         cursor.execute(
             "INSERT INTO `rdst_benchmark_meta`.`provision` VALUES (%s, %s, %s)",
             (archive_sha256, prefix, runtime_user_prefix),
@@ -372,12 +411,23 @@ def _write_provision_marker(
     connection.commit()
 
 
-def _marker_runtime_user(connection) -> str | None:
+def _create_marker_table(cursor) -> None:
+    """One row per database layout, keyed by its database prefix."""
+    cursor.execute("CREATE DATABASE IF NOT EXISTS `rdst_benchmark_meta`")
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS `rdst_benchmark_meta`.`provision` "
+        "(archive_sha256 CHAR(64) NOT NULL, database_prefix VARCHAR(64) NOT NULL, "
+        "runtime_user_prefix VARCHAR(32) NOT NULL)"
+    )
+
+
+def _marker_runtime_user(connection, prefix: str) -> str | None:
     try:
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT runtime_user_prefix "
-                "FROM `rdst_benchmark_meta`.`provision` LIMIT 1"
+                "SELECT runtime_user_prefix FROM `rdst_benchmark_meta`.`provision` "
+                "WHERE database_prefix = %s",
+                (prefix,),
             )
             row = cursor.fetchone()
     except pymysql.MySQLError:
@@ -399,20 +449,38 @@ def _provision_matches(connection, archive_sha256: str, prefix: str) -> bool:
     try:
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT archive_sha256, database_prefix "
-                "FROM `rdst_benchmark_meta`.`provision` LIMIT 1"
+                "SELECT archive_sha256 FROM `rdst_benchmark_meta`.`provision` "
+                "WHERE database_prefix = %s",
+                (prefix,),
             )
             row = cursor.fetchone()
     except pymysql.MySQLError:
         return False
-    return row == (archive_sha256, prefix)
+    return row == (archive_sha256,)
+
+
+def _dump_imported(connection, archive_sha256: str) -> bool:
+    """Whether the shared BIRD import holds this archive for every recorded layout."""
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT archive_sha256 FROM `rdst_benchmark_meta`.`provision`"
+            )
+            archives = {row[0] for row in cursor.fetchall()}
+    except pymysql.MySQLError:
+        return False
+    return archives == {archive_sha256}
 
 
 def _drop_benchmark_databases(
     connection, database_tables: dict[str, list[str]], prefix: str
 ) -> None:
     with connection.cursor() as cursor:
-        cursor.execute("DROP DATABASE IF EXISTS `rdst_benchmark_meta`")
+        _create_marker_table(cursor)
+        cursor.execute(
+            "DELETE FROM `rdst_benchmark_meta`.`provision` WHERE database_prefix = %s",
+            (prefix,),
+        )
         for db_id in database_tables:
             database = _identifier(f"{prefix}{db_id}")
             cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
@@ -421,6 +489,7 @@ def _drop_benchmark_databases(
 
 def _provision_manifest(
     connection,
+    database_tables: dict[str, list[str]],
     *,
     archive_sha256: str,
     database_prefix: str,
@@ -430,10 +499,11 @@ def _provision_manifest(
     with connection.cursor() as cursor:
         cursor.execute("SELECT VERSION()")
         version = cursor.fetchone()[0]
+        databases = [f"{database_prefix}{db_id}" for db_id in sorted(database_tables)]
         cursor.execute(
-            "SELECT COUNT(*) FROM information_schema.VIEWS "
-            "WHERE LEFT(TABLE_SCHEMA, %s) = %s",
-            (len(database_prefix), database_prefix),
+            "SELECT COUNT(*) FROM information_schema.VIEWS WHERE TABLE_SCHEMA IN "
+            f"({', '.join(['%s'] * len(databases))})",
+            databases,
         )
         view_count = int(cursor.fetchone()[0])
     if view_count != 75:

@@ -30,6 +30,7 @@ from features.ask.engine.ask3.phases.schema import (
 )
 from features.ask.events import AskErrorEvent, AskResultEvent
 from features.ask.models import AskInput, AskOptions
+from features.ask.profiles import default_ask_service_options
 from features.ask.service import AskService
 from features.schema.semantic_layer.manager import SemanticLayerManager
 from shared.persistence import write_json, write_text
@@ -316,6 +317,7 @@ def _run_attempt(
             if condition == "compact"
             else _format_semantic_schema
         ),
+        **default_ask_service_options(),
     )
     started = perf_counter()
     error = None

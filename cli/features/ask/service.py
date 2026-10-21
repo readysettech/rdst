@@ -340,6 +340,7 @@ _CORRECTION_STATE_FIELDS = (
     "limit_reduced",
     "row_limit",
     "limit_sql",
+    "unlimited_sql",
     "rows_capped",
     "explicit_ratio_normalization",
     "scalar_derived_metric_normalization",

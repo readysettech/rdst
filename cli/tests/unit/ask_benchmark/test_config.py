@@ -5,20 +5,21 @@ import pytest
 
 from devtools.ask_benchmark.config import (
     ConfigurationError,
-    load_filter_spec,
     load_model_specs,
 )
+from devtools.ask_benchmark.keyservice_adapter import load_keyservice_module
 
 
 def test_default_model_matrix_has_controlled_routes():
     specs = load_model_specs()
 
-    assert len(specs) == 21
+    assert len(specs) == 23
     assert specs["glm-5.3-flash-high"].model == "z-ai/glm-5.3-flash"
-    assert specs["glm-5.3-flash-high"].provider_order == ("deepinfra",)
+    # Production's long-prompt route pins these fp8 providers.
+    long_prompt_route = load_keyservice_module("hosted_inference").LONG_PROMPT_ROUTE
+    assert specs["glm-5.3-flash-high"].provider_order == long_prompt_route.providers
     assert specs["glm-5.3-flash-high"].reasoning_effort == "high"
     assert specs["glm-5.3-flash-high"].structured_output_mode == "prompted"
-    assert specs["glm-5.3-flash-high"].provider_retains_prompts is False
     cloudflare = specs["glm-5.3-flash-high-cloudflare"]
     assert cloudflare.model == "z-ai/glm-5.3-flash"
     assert cloudflare.provider_order == ("cloudflare",)
@@ -62,7 +63,11 @@ def test_default_model_matrix_has_controlled_routes():
         spec.reasoning_effort is not None or spec.name in default_reasoning_specs
         for spec in current_specs
     )
-    documented_policy_specs = [spec for spec in current_specs if spec != cloudflare]
+    # The route pins several third-party providers whose policies are unverified.
+    long_prompt = {specs["glm-5.3-flash-keyservice"], specs["glm-5.3-flash-high"]}
+    documented_policy_specs = [
+        spec for spec in current_specs if spec != cloudflare and spec not in long_prompt
+    ]
     assert all(spec.provider_data_training is not None for spec in documented_policy_specs)
     assert all(spec.provider_retains_prompts is not None for spec in documented_policy_specs)
     assert specs["gpt-5.6-sol-max"].reasoning_effort == "max"
@@ -70,10 +75,6 @@ def test_default_model_matrix_has_controlled_routes():
         specs[f"claude-sonnet-4.6-{effort}"].reasoning_effort
         for effort in ("low", "medium", "high", "max")
     } == {"low", "medium", "high", "max"}
-
-    filter_spec, aliases = load_filter_spec()
-    assert filter_spec.model == "anthropic/claude-haiku-4.5"
-    assert aliases == ("claude-haiku-4-5-20251001",)
 
 
 def test_router_alias_is_rejected(tmp_path: Path):

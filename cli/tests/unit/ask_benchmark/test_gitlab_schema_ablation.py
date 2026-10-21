@@ -77,3 +77,39 @@ def test_summary_uses_manifest_conditions():
         "full",
         "compact",
     ]
+
+
+def test_attempt_constructs_ask_with_the_product_profile(monkeypatch):
+    from devtools.ask_benchmark import gitlab_schema_ablation
+    from features.ask.profiles import default_ask_service_options
+
+    captured = {}
+
+    class FakeService:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def ask(self, _input, _options):
+            return
+            yield
+
+    class FakeAdapter:
+        def set_attempt_id(self, _attempt_id):
+            pass
+
+        def drain_call_records(self):
+            return []
+
+    monkeypatch.setattr(gitlab_schema_ablation, "AskService", FakeService)
+
+    gitlab_schema_ablation._run_attempt(
+        case=CASES[0],
+        condition="verbose",
+        semantic_manager=object(),
+        adapter=FakeAdapter(),
+        schema_sha256="0" * 64,
+        schema_prompt_sha256="1" * 64,
+    )
+
+    options = default_ask_service_options()
+    assert {key: captured[key] for key in options} == options

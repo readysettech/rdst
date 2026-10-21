@@ -173,6 +173,7 @@ class Ask3Context:
     limit_reduced: bool = False
     row_limit: Optional[int] = None  # Effective LIMIT of the SQL that ran
     limit_sql: Optional[str] = None  # The SQL the three fields above describe
+    unlimited_sql: Optional[str] = None  # limit_sql before Ask added or reduced its LIMIT
     rows_capped: bool = False  # Ask's row cap cut a result its own limit form let through
 
     # === Execution (Phase 5) ===
@@ -329,6 +330,7 @@ class Ask3Context:
             "limit_reduced": self.limit_reduced,
             "row_limit": self.row_limit,
             "limit_sql": self.limit_sql,
+            "unlimited_sql": self.unlimited_sql,
             "rows_capped": self.rows_capped,
             # Execution
             "execution_result": self.execution_result.to_dict()
@@ -548,6 +550,7 @@ class Ask3Context:
         ctx.limit_reduced = data.get("limit_reduced", False)
         ctx.row_limit = data.get("row_limit")
         ctx.limit_sql = data.get("limit_sql")
+        ctx.unlimited_sql = data.get("unlimited_sql")
         ctx.rows_capped = data.get("rows_capped", False)
 
         # Status
