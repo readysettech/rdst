@@ -9,154 +9,39 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as TopRouteImport } from './routes/top'
-import { Route as SchemaRouteImport } from './routes/schema'
-import { Route as ScanRouteImport } from './routes/scan'
-import { Route as ResultsRouteImport } from './routes/results'
-import { Route as QueryRegistryRouteImport } from './routes/query-registry'
-import { Route as QueriesRouteImport } from './routes/queries'
-import { Route as PlatformRouteImport } from './routes/platform'
-import { Route as OnboardingRouteImport } from './routes/onboarding'
-import { Route as InboxRouteImport } from './routes/inbox'
-import { Route as HelpRouteImport } from './routes/help'
-import { Route as GuardsRouteImport } from './routes/guards'
-import { Route as FleetRouteImport } from './routes/fleet'
-import { Route as DevSettingsRouteImport } from './routes/dev-settings'
-import { Route as DemoRouteImport } from './routes/demo'
-import { Route as DatabaseRouteImport } from './routes/database'
-import { Route as ConfigureRouteImport } from './routes/configure'
-import { Route as CacheRouteImport } from './routes/cache'
-import { Route as BenchmarkRouteImport } from './routes/benchmark'
-import { Route as AuditRouteImport } from './routes/audit'
-import { Route as AskRouteImport } from './routes/ask'
-import { Route as AnalyzeRouteImport } from './routes/analyze'
-import { Route as AgentsRouteImport } from './routes/agents'
-import { Route as AgentActivityRouteImport } from './routes/agent-activity'
-import { Route as ActionsRouteImport } from './routes/actions'
-import { Route as AccountLoginRouteImport } from './routes/account-login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AccountLoginRouteImport } from './routes/account-login'
+import { Route as ActionsRouteImport } from './routes/actions'
+import { Route as AgentActivityRouteImport } from './routes/agent-activity'
+import { Route as AgentsRouteImport } from './routes/agents'
+import { Route as AnalyzeRouteImport } from './routes/analyze'
+import { Route as AskRouteImport } from './routes/ask'
+import { Route as AuditRouteImport } from './routes/audit'
+import { Route as BenchmarkRouteImport } from './routes/benchmark'
+import { Route as CacheRouteImport } from './routes/cache'
+import { Route as ConfigureRouteImport } from './routes/configure'
+import { Route as DatabaseRouteImport } from './routes/database'
+import { Route as DemoRouteImport } from './routes/demo'
+import { Route as DevSettingsRouteImport } from './routes/dev-settings'
+import { Route as FleetRouteImport } from './routes/fleet'
+import { Route as GuardsRouteImport } from './routes/guards'
+import { Route as HelpRouteImport } from './routes/help'
+import { Route as InboxRouteImport } from './routes/inbox'
+import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as PlatformRouteImport } from './routes/platform'
+import { Route as QueriesRouteImport } from './routes/queries'
+import { Route as QueryRegistryRouteImport } from './routes/query-registry'
+import { Route as ResultsRouteImport } from './routes/results'
+import { Route as ScanRouteImport } from './routes/scan'
+import { Route as SchemaRouteImport } from './routes/schema'
+import { Route as TopRouteImport } from './routes/top'
 import { Route as DbTargetRouteImport } from './routes/db.$target'
-import { Route as DbTargetReportRouteImport } from './routes/db.$target.report'
 import { Route as DatabaseReportsReportIdRouteImport } from './routes/database_.reports.$reportId'
+import { Route as DbTargetReportRouteImport } from './routes/db.$target.report'
 
-const TopRoute = TopRouteImport.update({
-  id: '/top',
-  path: '/top',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SchemaRoute = SchemaRouteImport.update({
-  id: '/schema',
-  path: '/schema',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ScanRoute = ScanRouteImport.update({
-  id: '/scan',
-  path: '/scan',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ResultsRoute = ResultsRouteImport.update({
-  id: '/results',
-  path: '/results',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const QueryRegistryRoute = QueryRegistryRouteImport.update({
-  id: '/query-registry',
-  path: '/query-registry',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const QueriesRoute = QueriesRouteImport.update({
-  id: '/queries',
-  path: '/queries',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PlatformRoute = PlatformRouteImport.update({
-  id: '/platform',
-  path: '/platform',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OnboardingRoute = OnboardingRouteImport.update({
-  id: '/onboarding',
-  path: '/onboarding',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const InboxRoute = InboxRouteImport.update({
-  id: '/inbox',
-  path: '/inbox',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const HelpRoute = HelpRouteImport.update({
-  id: '/help',
-  path: '/help',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const GuardsRoute = GuardsRouteImport.update({
-  id: '/guards',
-  path: '/guards',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const FleetRoute = FleetRouteImport.update({
-  id: '/fleet',
-  path: '/fleet',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DevSettingsRoute = DevSettingsRouteImport.update({
-  id: '/dev-settings',
-  path: '/dev-settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DemoRoute = DemoRouteImport.update({
-  id: '/demo',
-  path: '/demo',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DatabaseRoute = DatabaseRouteImport.update({
-  id: '/database',
-  path: '/database',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ConfigureRoute = ConfigureRouteImport.update({
-  id: '/configure',
-  path: '/configure',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CacheRoute = CacheRouteImport.update({
-  id: '/cache',
-  path: '/cache',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const BenchmarkRoute = BenchmarkRouteImport.update({
-  id: '/benchmark',
-  path: '/benchmark',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuditRoute = AuditRouteImport.update({
-  id: '/audit',
-  path: '/audit',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AskRoute = AskRouteImport.update({
-  id: '/ask',
-  path: '/ask',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AnalyzeRoute = AnalyzeRouteImport.update({
-  id: '/analyze',
-  path: '/analyze',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentsRoute = AgentsRouteImport.update({
-  id: '/agents',
-  path: '/agents',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentActivityRoute = AgentActivityRouteImport.update({
-  id: '/agent-activity',
-  path: '/agent-activity',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ActionsRoute = ActionsRouteImport.update({
-  id: '/actions',
-  path: '/actions',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AccountLoginRoute = AccountLoginRouteImport.update({
@@ -164,9 +49,124 @@ const AccountLoginRoute = AccountLoginRouteImport.update({
   path: '/account-login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const ActionsRoute = ActionsRouteImport.update({
+  id: '/actions',
+  path: '/actions',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentActivityRoute = AgentActivityRouteImport.update({
+  id: '/agent-activity',
+  path: '/agent-activity',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsRoute = AgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AnalyzeRoute = AnalyzeRouteImport.update({
+  id: '/analyze',
+  path: '/analyze',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AskRoute = AskRouteImport.update({
+  id: '/ask',
+  path: '/ask',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuditRoute = AuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BenchmarkRoute = BenchmarkRouteImport.update({
+  id: '/benchmark',
+  path: '/benchmark',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CacheRoute = CacheRouteImport.update({
+  id: '/cache',
+  path: '/cache',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConfigureRoute = ConfigureRouteImport.update({
+  id: '/configure',
+  path: '/configure',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DatabaseRoute = DatabaseRouteImport.update({
+  id: '/database',
+  path: '/database',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DemoRoute = DemoRouteImport.update({
+  id: '/demo',
+  path: '/demo',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DevSettingsRoute = DevSettingsRouteImport.update({
+  id: '/dev-settings',
+  path: '/dev-settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FleetRoute = FleetRouteImport.update({
+  id: '/fleet',
+  path: '/fleet',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GuardsRoute = GuardsRouteImport.update({
+  id: '/guards',
+  path: '/guards',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HelpRoute = HelpRouteImport.update({
+  id: '/help',
+  path: '/help',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InboxRoute = InboxRouteImport.update({
+  id: '/inbox',
+  path: '/inbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OnboardingRoute = OnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlatformRoute = PlatformRouteImport.update({
+  id: '/platform',
+  path: '/platform',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QueriesRoute = QueriesRouteImport.update({
+  id: '/queries',
+  path: '/queries',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QueryRegistryRoute = QueryRegistryRouteImport.update({
+  id: '/query-registry',
+  path: '/query-registry',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResultsRoute = ResultsRouteImport.update({
+  id: '/results',
+  path: '/results',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ScanRoute = ScanRouteImport.update({
+  id: '/scan',
+  path: '/scan',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SchemaRoute = SchemaRouteImport.update({
+  id: '/schema',
+  path: '/schema',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TopRoute = TopRouteImport.update({
+  id: '/top',
+  path: '/top',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DbTargetRoute = DbTargetRouteImport.update({
@@ -174,15 +174,15 @@ const DbTargetRoute = DbTargetRouteImport.update({
   path: '/db/$target',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DbTargetReportRoute = DbTargetReportRouteImport.update({
-  id: '/report',
-  path: '/report',
-  getParentRoute: () => DbTargetRoute,
-} as any)
 const DatabaseReportsReportIdRoute = DatabaseReportsReportIdRouteImport.update({
   id: '/database_/reports/$reportId',
   path: '/database/reports/$reportId',
   getParentRoute: () => rootRouteImport,
+} as any)
+const DbTargetReportRoute = DbTargetReportRouteImport.update({
+  id: '/report',
+  path: '/report',
+  getParentRoute: () => DbTargetRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -408,172 +408,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/top': {
-      id: '/top'
-      path: '/top'
-      fullPath: '/top'
-      preLoaderRoute: typeof TopRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/schema': {
-      id: '/schema'
-      path: '/schema'
-      fullPath: '/schema'
-      preLoaderRoute: typeof SchemaRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/scan': {
-      id: '/scan'
-      path: '/scan'
-      fullPath: '/scan'
-      preLoaderRoute: typeof ScanRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/results': {
-      id: '/results'
-      path: '/results'
-      fullPath: '/results'
-      preLoaderRoute: typeof ResultsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/query-registry': {
-      id: '/query-registry'
-      path: '/query-registry'
-      fullPath: '/query-registry'
-      preLoaderRoute: typeof QueryRegistryRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/queries': {
-      id: '/queries'
-      path: '/queries'
-      fullPath: '/queries'
-      preLoaderRoute: typeof QueriesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/platform': {
-      id: '/platform'
-      path: '/platform'
-      fullPath: '/platform'
-      preLoaderRoute: typeof PlatformRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/onboarding': {
-      id: '/onboarding'
-      path: '/onboarding'
-      fullPath: '/onboarding'
-      preLoaderRoute: typeof OnboardingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/inbox': {
-      id: '/inbox'
-      path: '/inbox'
-      fullPath: '/inbox'
-      preLoaderRoute: typeof InboxRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/help': {
-      id: '/help'
-      path: '/help'
-      fullPath: '/help'
-      preLoaderRoute: typeof HelpRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/guards': {
-      id: '/guards'
-      path: '/guards'
-      fullPath: '/guards'
-      preLoaderRoute: typeof GuardsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/fleet': {
-      id: '/fleet'
-      path: '/fleet'
-      fullPath: '/fleet'
-      preLoaderRoute: typeof FleetRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dev-settings': {
-      id: '/dev-settings'
-      path: '/dev-settings'
-      fullPath: '/dev-settings'
-      preLoaderRoute: typeof DevSettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/demo': {
-      id: '/demo'
-      path: '/demo'
-      fullPath: '/demo'
-      preLoaderRoute: typeof DemoRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/database': {
-      id: '/database'
-      path: '/database'
-      fullPath: '/database'
-      preLoaderRoute: typeof DatabaseRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/configure': {
-      id: '/configure'
-      path: '/configure'
-      fullPath: '/configure'
-      preLoaderRoute: typeof ConfigureRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/cache': {
-      id: '/cache'
-      path: '/cache'
-      fullPath: '/cache'
-      preLoaderRoute: typeof CacheRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/benchmark': {
-      id: '/benchmark'
-      path: '/benchmark'
-      fullPath: '/benchmark'
-      preLoaderRoute: typeof BenchmarkRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/audit': {
-      id: '/audit'
-      path: '/audit'
-      fullPath: '/audit'
-      preLoaderRoute: typeof AuditRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/ask': {
-      id: '/ask'
-      path: '/ask'
-      fullPath: '/ask'
-      preLoaderRoute: typeof AskRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/analyze': {
-      id: '/analyze'
-      path: '/analyze'
-      fullPath: '/analyze'
-      preLoaderRoute: typeof AnalyzeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/agents': {
-      id: '/agents'
-      path: '/agents'
-      fullPath: '/agents'
-      preLoaderRoute: typeof AgentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/agent-activity': {
-      id: '/agent-activity'
-      path: '/agent-activity'
-      fullPath: '/agent-activity'
-      preLoaderRoute: typeof AgentActivityRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/actions': {
-      id: '/actions'
-      path: '/actions'
-      fullPath: '/actions'
-      preLoaderRoute: typeof ActionsRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/account-login': {
@@ -583,11 +422,172 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AccountLoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/actions': {
+      id: '/actions'
+      path: '/actions'
+      fullPath: '/actions'
+      preLoaderRoute: typeof ActionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agent-activity': {
+      id: '/agent-activity'
+      path: '/agent-activity'
+      fullPath: '/agent-activity'
+      preLoaderRoute: typeof AgentActivityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents': {
+      id: '/agents'
+      path: '/agents'
+      fullPath: '/agents'
+      preLoaderRoute: typeof AgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/analyze': {
+      id: '/analyze'
+      path: '/analyze'
+      fullPath: '/analyze'
+      preLoaderRoute: typeof AnalyzeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ask': {
+      id: '/ask'
+      path: '/ask'
+      fullPath: '/ask'
+      preLoaderRoute: typeof AskRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/audit': {
+      id: '/audit'
+      path: '/audit'
+      fullPath: '/audit'
+      preLoaderRoute: typeof AuditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/benchmark': {
+      id: '/benchmark'
+      path: '/benchmark'
+      fullPath: '/benchmark'
+      preLoaderRoute: typeof BenchmarkRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cache': {
+      id: '/cache'
+      path: '/cache'
+      fullPath: '/cache'
+      preLoaderRoute: typeof CacheRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/configure': {
+      id: '/configure'
+      path: '/configure'
+      fullPath: '/configure'
+      preLoaderRoute: typeof ConfigureRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/database': {
+      id: '/database'
+      path: '/database'
+      fullPath: '/database'
+      preLoaderRoute: typeof DatabaseRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/demo': {
+      id: '/demo'
+      path: '/demo'
+      fullPath: '/demo'
+      preLoaderRoute: typeof DemoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dev-settings': {
+      id: '/dev-settings'
+      path: '/dev-settings'
+      fullPath: '/dev-settings'
+      preLoaderRoute: typeof DevSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/fleet': {
+      id: '/fleet'
+      path: '/fleet'
+      fullPath: '/fleet'
+      preLoaderRoute: typeof FleetRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guards': {
+      id: '/guards'
+      path: '/guards'
+      fullPath: '/guards'
+      preLoaderRoute: typeof GuardsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/help': {
+      id: '/help'
+      path: '/help'
+      fullPath: '/help'
+      preLoaderRoute: typeof HelpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/inbox': {
+      id: '/inbox'
+      path: '/inbox'
+      fullPath: '/inbox'
+      preLoaderRoute: typeof InboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/onboarding': {
+      id: '/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof OnboardingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/platform': {
+      id: '/platform'
+      path: '/platform'
+      fullPath: '/platform'
+      preLoaderRoute: typeof PlatformRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/queries': {
+      id: '/queries'
+      path: '/queries'
+      fullPath: '/queries'
+      preLoaderRoute: typeof QueriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/query-registry': {
+      id: '/query-registry'
+      path: '/query-registry'
+      fullPath: '/query-registry'
+      preLoaderRoute: typeof QueryRegistryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/results': {
+      id: '/results'
+      path: '/results'
+      fullPath: '/results'
+      preLoaderRoute: typeof ResultsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/scan': {
+      id: '/scan'
+      path: '/scan'
+      fullPath: '/scan'
+      preLoaderRoute: typeof ScanRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/schema': {
+      id: '/schema'
+      path: '/schema'
+      fullPath: '/schema'
+      preLoaderRoute: typeof SchemaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/top': {
+      id: '/top'
+      path: '/top'
+      fullPath: '/top'
+      preLoaderRoute: typeof TopRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/db/$target': {
@@ -597,19 +597,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DbTargetRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/db/$target/report': {
-      id: '/db/$target/report'
-      path: '/report'
-      fullPath: '/db/$target/report'
-      preLoaderRoute: typeof DbTargetReportRouteImport
-      parentRoute: typeof DbTargetRoute
-    }
     '/database_/reports/$reportId': {
       id: '/database_/reports/$reportId'
       path: '/database/reports/$reportId'
       fullPath: '/database/reports/$reportId'
       preLoaderRoute: typeof DatabaseReportsReportIdRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/db/$target/report': {
+      id: '/db/$target/report'
+      path: '/report'
+      fullPath: '/db/$target/report'
+      preLoaderRoute: typeof DbTargetReportRouteImport
+      parentRoute: typeof DbTargetRoute
     }
   }
 }

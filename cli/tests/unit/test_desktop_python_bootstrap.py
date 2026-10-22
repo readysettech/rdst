@@ -112,7 +112,7 @@ def test_windows_bootstrap_is_pinned_self_healing_and_fail_closed():
     script = WINDOWS_BUILD.read_text(encoding="utf-8")
 
     assert "uv-x86_64-pc-windows-msvc.zip" in script
-    assert "0a23463216d09c6a72ff80ef5dc5a795f07dc1575cb84d24596c2f124a441b7b" in script
+    assert "7c38608c8a18ee137d748a1773053b07ec8f3a30fab49aebaa6f4e4efeceb019" in script
     assert "'python', 'install', '--managed-python', '--reinstall', '3.12'" in script
     assert "python find --managed-python --no-project 3.12" in script
     assert "sqlite3.sqlite_version_info" in script

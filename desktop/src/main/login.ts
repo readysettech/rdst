@@ -12,11 +12,7 @@ export interface LoginStatus {
 
 interface LoginApp {
   getLoginItemSettings: (options?: { args?: string[] }) => { openAtLogin: boolean }
-  setLoginItemSettings: (settings: {
-    openAtLogin: boolean
-    openAsHidden: boolean
-    args: string[]
-  }) => void
+  setLoginItemSettings: (settings: { openAtLogin: boolean; args: string[] }) => void
 }
 
 /** Names the Linux autostart entry: its file is `<appId>.desktop`. */
@@ -93,7 +89,7 @@ export function setStartAtLogin(
     return getStartAtLogin(app, platform, env, identity)
   }
   if (platform === 'darwin' || platform === 'win32') {
-    app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: true, args: [HIDDEN_ARG] })
+    app.setLoginItemSettings({ openAtLogin: enabled, args: [HIDDEN_ARG] })
   }
   return getStartAtLogin(app, platform, env, identity)
 }

@@ -59,7 +59,7 @@ uv sync --directory "$RDST_ROOT" --quiet
 
 echo "--- Installing frontend dependencies"
 cd "$WEB_APPS_DIR"
-ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install --frozen-lockfile
+pnpm install --frozen-lockfile
 
 echo "--- Running RDST Continuous Monitoring E2E (${ENGINE})"
 cd "$WEB_APPS_DIR/apps/rdst"

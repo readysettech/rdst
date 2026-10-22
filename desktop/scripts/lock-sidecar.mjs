@@ -24,6 +24,11 @@ const result = spawnSync(
     "compile",
     pyproject,
     "scripts/requirements-sidecar.in",
+    // The sidecar ships the Slack integration and the agent HTTP server.
+    "--extra",
+    "slack",
+    "--extra",
+    "agent",
     "--python-version",
     "3.12",
     "--universal",

@@ -12,7 +12,7 @@ const { _electron } = await import(process.env.RDST_PLAYWRIGHT_MODULE ||
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const sourceDir = path.resolve(appDir, '../../../rdst')
 const packaged = process.env.RDST_DESKTOP_EXECUTABLE
-const electronBinary = packaged || path.join(appDir, 'node_modules/electron/dist/electron')
+const electronBinary = packaged || (await import('electron')).default
 const display = process.env.DISPLAY
 
 if (!display) {

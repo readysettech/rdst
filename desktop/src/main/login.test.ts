@@ -23,7 +23,7 @@ describe('start at login', () => {
     const app = fakeApp()
     expect(setStartAtLogin(app, true, platform).enabled).toBe(true)
     expect(app.setLoginItemSettings).toHaveBeenCalledWith({
-      openAtLogin: true, openAsHidden: true, args: ['--hidden'],
+      openAtLogin: true, args: ['--hidden'],
     })
     expect(app.getLoginItemSettings).toHaveBeenCalledWith({ args: ['--hidden'] })
     expect(isHiddenLaunch(['rdst', '--hidden'])).toBe(true)

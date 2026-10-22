@@ -33,7 +33,7 @@
   "devDependencies": {
     "@rs/typescript-config": "workspace:*",
     "@types/node": "catalog:common",
-    "electron": "^40.7.0",
+    "electron": "^45.0.0",
     "electron-builder": "^26.0.12",
     "tsup": "^8.5.0",
     "typescript": "catalog:common",

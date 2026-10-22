@@ -9,13 +9,16 @@ allowBuilds:
   "@biomejs/biome": true
   "@parcel/watcher": false
   core-js: false
-  electron: true
+  electron: false
   electron-winstaller: true
   es5-ext: false
   esbuild: true
   protobufjs: false
   sharp: false
   workerd: false
+
+overrides:
+  lightningcss: ^1.33.0
 
 catalogs:
   common:
@@ -31,9 +34,9 @@ catalogs:
   tanstack:
     "@tanstack/react-query": "5.100.14"
     "@tanstack/react-query-devtools": "5.90.2"
-    "@tanstack/react-router": "1.170.10"
-    "@tanstack/react-router-devtools": "1.167.0"
-    "@tanstack/router-plugin": "1.168.13"
+    "@tanstack/react-router": "1.170.42"
+    "@tanstack/react-router-devtools": "1.167.2"
+    "@tanstack/router-plugin": "1.168.43"
   radix:
     "@radix-ui/react-accessible-icon": "1.1.8"
     "@radix-ui/react-alert-dialog": "1.1.15"
