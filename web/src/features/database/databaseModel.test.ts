@@ -12,6 +12,7 @@ import {
   filterRows,
   fixCount,
   healthMetrics,
+  idleWithHistory,
   markerClock,
   newestJobs,
   pagerLabel,
@@ -309,6 +310,30 @@ describe('query rows', () => {
     )
     const byLatency = sortRows(rows, 'latency')
     expect(byLatency[0].mean_ms).toBeGreaterThanOrEqual(byLatency[1].mean_ms)
+  })
+
+  it('puts idle queries after live ones, heaviest in history first', () => {
+    const idle = (key: string, total: number, mean: number) => ({
+      ...rows[0],
+      key,
+      qps: 0,
+      mean_ms: 0,
+      db_time_share: 0,
+      lifetime: { calls: total / mean, total_ms: total, mean_ms: mean },
+    })
+    const list = [idle('light', 100, 50), rows[0], idle('heavy', 9000, 3)]
+    expect(sortRows(list, 'share').map((row) => row.key)).toEqual([
+      rows[0].key,
+      'heavy',
+      'light',
+    ])
+    expect(sortRows(list, 'latency').map((row) => row.key)).toEqual([
+      rows[0].key,
+      'light',
+      'heavy',
+    ])
+    expect(idleWithHistory(list[0])).toBe(true)
+    expect(idleWithHistory(rows[0])).toBe(false)
   })
 
   it('filters by status, table and text', () => {

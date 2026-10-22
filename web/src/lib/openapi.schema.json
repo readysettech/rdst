@@ -15610,6 +15610,29 @@
         "title": "LibraryEntry",
         "type": "object"
       },
+      "LifetimeTotals": {
+        "properties": {
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "mean_ms": {
+            "title": "Mean Ms",
+            "type": "number"
+          },
+          "total_ms": {
+            "title": "Total Ms",
+            "type": "number"
+          }
+        },
+        "required": [
+          "calls",
+          "total_ms",
+          "mean_ms"
+        ],
+        "title": "LifetimeTotals",
+        "type": "object"
+      },
       "LlmInfo": {
         "additionalProperties": true,
         "properties": {
@@ -16778,6 +16801,16 @@
               }
             ],
             "title": "Latency Delta 24H"
+          },
+          "lifetime": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LifetimeTotals"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "mean_ms": {
             "title": "Mean Ms",

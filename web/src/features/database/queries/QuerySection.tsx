@@ -31,6 +31,7 @@ import {
   deltaLabel,
   filterRows,
   formatSharePercent,
+  idleWithHistory,
   latencyText,
   newestJobs,
   PAGE_SIZE,
@@ -220,6 +221,19 @@ function AnalyzedMark({ query }: { query: MonitorQuery }) {
   )
 }
 
+/** A query that hasn't run in the range: its calls on record from the engine's history. */
+function IdleMark({ calls }: { calls: number }) {
+  return (
+    <span
+      className="shrink-0 whitespace-nowrap text-caption text-content-layout-3"
+      data-testid="row-idle"
+    >
+      Not running now, {calls.toLocaleString('en-US')}{' '}
+      {calls === 1 ? 'call' : 'calls'} on record
+    </span>
+  )
+}
+
 /** "Add index" in the second tone, the index itself in the first. */
 function FixLine({ query }: { query: MonitorQuery }) {
   const fix = query.suggested_fix
@@ -302,6 +316,8 @@ function QueryRow({
   const scan = layout === 'scan'
   const activity = rowActivity(query, job, !scan)
   const chip = rowChip(query, !scan)
+  // Idle in the range: the engine's history stands in for the live numbers.
+  const lifetime = !scan && idleWithHistory(query) ? query.lifetime : null
   return (
     <ListRow
       asChild
@@ -338,15 +354,16 @@ function QueryRow({
               <StatusChip chip={chip?.activity ? null : chip} />
             )}
             <AnalyzedMark query={query} />
+            {lifetime && <IdleMark calls={lifetime.calls} />}
             <FixLine query={query} />
           </span>
         </span>
         <span className="text-right text-body-small tabular-nums text-content-layout-1">
-          {scan ? dailyCalls(query) : query.qps.toFixed(2)}
+          {scan ? dailyCalls(query) : lifetime ? DASH : query.qps.toFixed(2)}
         </span>
         <span className="text-right tabular-nums">
           <span className="text-body-small text-content-layout-1">
-            {latencyText(query.mean_ms)}
+            {latencyText(lifetime ? lifetime.mean_ms : query.mean_ms)}
             <span className="ml-0.5 text-label-extra-small font-normal text-content-layout-3">
               ms
             </span>
@@ -358,12 +375,12 @@ function QueryRow({
                 delta.up ? 'text-content-warning-soft' : 'text-content-layout-3'
               )}
             >
-              {delta.text}
+              {lifetime ? 'from history' : delta.text}
             </span>
           )}
         </span>
-        <span className="text-body-small text-content-layout-1">
-          <ShareBar share={query.db_time_share} />
+        <span className="text-right text-body-small text-content-layout-1">
+          {lifetime ? DASH : <ShareBar share={query.db_time_share} />}
         </span>
         {(layout === 'closed' || layout === 'score') && (
           <>

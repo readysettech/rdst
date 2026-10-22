@@ -443,11 +443,24 @@ export function swatchColor(index: number | null | undefined): string {
 
 export type RowSort = 'share' | 'latency'
 
+/** A query with no calls in the range that the engine's history knows: it ran before. */
+export function idleWithHistory(query: MonitorQuery): boolean {
+  return query.qps === 0 && (query.lifetime?.calls ?? 0) > 0
+}
+
+/** Live rows first; queries idle in the range follow, heaviest in history first. */
 export function sortRows(rows: MonitorQuery[], sort: RowSort): MonitorQuery[] {
-  return [...rows].sort((a, b) =>
+  const history = (query: MonitorQuery) =>
     sort === 'latency'
-      ? b.mean_ms - a.mean_ms || a.key.localeCompare(b.key)
-      : b.db_time_share - a.db_time_share || a.key.localeCompare(b.key)
+      ? (query.lifetime?.mean_ms ?? 0)
+      : (query.lifetime?.total_ms ?? 0)
+  return [...rows].sort(
+    (a, b) =>
+      (sort === 'latency'
+        ? b.mean_ms - a.mean_ms
+        : b.db_time_share - a.db_time_share) ||
+      history(b) - history(a) ||
+      a.key.localeCompare(b.key)
   )
 }
 

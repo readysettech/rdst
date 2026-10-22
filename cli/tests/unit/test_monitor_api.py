@@ -110,6 +110,29 @@ def test_query_page_filters_and_sorts_before_pagination(monkeypatch, tmp_path):
     assert [row["key"] for row in second["queries"]] == ["b"]
 
 
+def test_idle_queries_rank_by_history_and_carry_lifetime_totals(monkeypatch, tmp_path):
+    store = MonitorStore(tmp_path / "monitor.db")
+    store.ensure_open()
+    monkeypatch.setattr(routes, "_store", lambda: store)
+    monkeypatch.setattr(routes, "_now", lambda: 100_000)
+
+    def seed(conn):
+        for key in ("live", "light", "heavy", "unseen"):
+            conn.execute("INSERT INTO query_text VALUES (?,?,?,?,?)",
+                         ("db", key, f"SELECT {key} FROM t", 0, 100_000))
+        conn.execute("INSERT INTO stmt_series (target,query_key,res,bucket_start,calls,total_ms,rows,blks_hit,blks_read) VALUES (?,?,?,?,?,?,?,?,?)",
+                     ("db", "live", 60, 99_960, 1, 1.0, 0, 0, 0))
+        conn.executemany("INSERT INTO query_prior VALUES (?,?,?,?)",
+                         [("db", "light", 10, 50.0), ("db", "heavy", 400, 8000.0)])
+    store._write(seed)
+    page = routes.queries("db", limit=10)
+    assert [row["key"] for row in page["queries"]] == ["live", "heavy", "light", "unseen"]
+    rows = {row["key"]: row for row in page["queries"]}
+    assert rows["heavy"]["lifetime"] == {"calls": 400, "total_ms": 8000.0, "mean_ms": 20.0}
+    assert rows["heavy"]["qps"] == 0
+    assert rows["unseen"]["lifetime"] is None
+
+
 def test_judge_runs_returns_latest_and_validates_limit(monkeypatch, tmp_path):
     original_select = selectors.EpollSelector.select
     monkeypatch.setattr(selectors.EpollSelector, "select",

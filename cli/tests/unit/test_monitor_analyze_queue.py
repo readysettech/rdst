@@ -149,10 +149,13 @@ def test_automatic_queue_rejects_unsupported_statements(sql):
     assert automatic_skip_reason(sql)
 
 
-def test_automatic_queue_accepts_writes_through_their_row_search():
-    assert automatic_skip_reason("UPDATE sessions SET seen=$1 WHERE token=$2") is None
-    assert automatic_skip_reason("DELETE FROM carts WHERE expires_at < $1") is None
-    assert automatic_skip_reason("INSERT INTO archive SELECT * FROM orders WHERE day < $1") is None
+@pytest.mark.parametrize("sql", [
+    "UPDATE sessions SET seen=$1 WHERE token=$2", "DELETE FROM carts WHERE expires_at < $1",
+    "INSERT INTO archive SELECT * FROM orders WHERE day < $1",
+    "WITH gone AS (DELETE FROM carts WHERE id=$1 RETURNING id) SELECT * FROM gone",
+])
+def test_automatic_queue_skips_every_write(sql):
+    assert "changes data" in automatic_skip_reason(sql)
 
 
 def test_automatic_queue_accepts_read_only_selects():
@@ -1444,13 +1447,15 @@ async def test_worker_missing_stored_result_keeps_detail(store, monkeypatch, det
 
 
 @pytest.mark.asyncio
-async def test_a_write_is_analyzed_by_planning_its_row_search(store, monkeypatch):
+async def test_a_write_the_user_analyzes_plans_its_row_search(store, monkeypatch):
     store.record("db", NOW, [{"query_key": "touch", "calls": 10, "total_ms": 100}],
                  {"touch": "UPDATE sessions SET seen = $1 WHERE token = $2"}, [], None)
     monkeypatch.setattr("shared.config.targets.TargetsConfig.load", lambda self: None)
     monkeypatch.setattr("shared.config.targets.TargetsConfig.get",
                         lambda self, target: {"engine": "postgresql"})
     store.set_settings("db", {"execute": True})
+    # Automatic analysis skips writes, so only a click analyzes one.
+    assert enqueue_user("db", "touch", store=store, now=NOW)
     service = FakeService()
     await AnalyzeQueue(store, service=service, clock=lambda: NOW).tick()
     analyzed, options = service.calls[0][0], service.calls[0][1]

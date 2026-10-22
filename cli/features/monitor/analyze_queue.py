@@ -29,7 +29,7 @@ from shared.monitor.monitor_store import (ANALYSIS_CLAIM_ORDER, ANALYSIS_SPENDS_
                                           REANALYSIS_REASONS, MonitorStore,
                                           default_analysis_daily_cap, local_day_bounds)
 from shared import agent_activity, analysis_lane
-from shared.monitor.statements import statement_kind
+from shared.monitor.statements import statement_kind, verb
 from shared.query_safety import is_plain_explainable_write, validate_query_safety
 
 logger = logging.getLogger(__name__)
@@ -440,9 +440,9 @@ _STATE_CHANGING_CALL = re.compile(
 def automatic_skip_reason(sql: str) -> str | None:
     from shared.monitor.statements import analyzability
 
-    if statement_kind(sql) == "write" and (lookup := lookup_for(sql)) is not None:
-        # A write is analyzed through the SELECT that finds its rows, never run or explained.
-        sql = lookup["sql"]
+    if statement_kind(sql) == "write":
+        # Automatic analysis leaves writes alone; a user can still analyze one.
+        return f"{verb(sql) or 'This statement'} changes data, so RDST doesn't run it."
     verdict = analyzability(sql)
     if not verdict["analyzable"] and verdict["analyzable_code"] != "no_text":
         return verdict["not_analyzable_reason"]
@@ -577,13 +577,16 @@ def top_reads(store: MonitorStore, target: str, weights: dict[str, dict[str, Any
             if not automatic_skip_reason(texts.get(key) or ""):
                 top.append(key)
     if len(top) < count:
-        # A small database runs only a few queries; the spare places go to the others it
-        # shows, newest first, so every query on its page gets a score.
+        # A small or idle database runs only a few queries; the spare places go to the
+        # others it shows, heaviest in the engine's history first, the way its page ranks
+        # them, so every query on that page gets a score.
         for row in store.read(
-                "SELECT q.query_key,q.text FROM query_text q WHERE q.target=? "
+                "SELECT q.query_key,q.text FROM query_text q LEFT JOIN query_prior p "
+                "ON p.target=q.target AND p.query_key=q.query_key WHERE q.target=? "
                 "AND q.query_key NOT IN (SELECT value FROM json_each(?)) AND NOT EXISTS ("
                 "SELECT 1 FROM system_query s WHERE s.target=q.target "
-                "AND s.query_key=q.query_key) ORDER BY q.last_seen DESC LIMIT ?",
+                "AND s.query_key=q.query_key) "
+                "ORDER BY COALESCE(p.total_ms,0) DESC,q.last_seen DESC LIMIT ?",
                 (target, json.dumps(keys), 4 * count)):
             if len(top) >= count:
                 break
@@ -643,6 +646,16 @@ def first_hour_facts(store: MonitorStore, target: str, now: int) -> dict[str, An
             "first_queries_at": found}
 
 
+def _readings(store: MonitorStore, target: str, start: int) -> int:
+    """Readings since `start` that read the statement stats. The first only sets each
+    query's starting totals; the second is the first to measure calls."""
+    from features.monitor.connection import ANSWERED
+
+    return store.read("SELECT COUNT(*) AS n FROM monitor_pulse WHERE target=? "
+                      "AND kind='collect' AND ok=1 AND detail!=? AND ts>=?",
+                      (target, ANSWERED, start))[0]["n"]
+
+
 def _first_hour_check_due(store: MonitorStore, target: str, start: int, now: int) -> bool:
     """The top list is read on every pass while the first readings settle, then every
     FIRST_HOUR_RECHECK_S."""
@@ -674,9 +687,11 @@ def enqueue_first_hour(target: str, *, store: MonitorStore | None = None,
     if not _first_hour_check_due(store, target, start, now):
         return []
     weights = _weights(store, target, now)
-    # Impact needs live calls, which the second reading is the first to measure: until a
-    # query has some, nothing is ranked, so nothing is queued (and the check stays due).
-    if not any(_load(weights, key) > 0 for key in weights):
+    # Impact needs live calls, which the second reading is the first to measure: until it
+    # lands nothing is queued (and the check stays due). A database with no live calls
+    # after it is idle, and its reads queue by the engine's history, behind any query
+    # that turns live.
+    if not any(_load(weights, key) > 0 for key in weights) and _readings(store, target, start) < 2:
         return []
     store.write_setting(target, "first_hour_checked_at", str(now))
     top = top_n(target, store)

@@ -375,6 +375,12 @@ export interface WriteCost {
   hot_ratio: number | null
 }
 
+export interface LifetimeTotals {
+  calls: number
+  total_ms: number
+  mean_ms: number
+}
+
 export interface MonitorQuery extends Partial<MonitorQueryView> {
   write_cost?: WriteCost | null
   key: string
@@ -389,6 +395,8 @@ export interface MonitorQuery extends Partial<MonitorQueryView> {
   db_time_share: number
   /** What the Impact sort ranks by: live calls at a steadied cost per call. */
   impact_ms?: number
+  /** The engine's running totals for the statement, from before this range included. */
+  lifetime?: LifetimeTotals | null
   change: QueryChange
   series: MiniSeriesPoint[]
   state: QueryState[]

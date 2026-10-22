@@ -9964,6 +9964,15 @@ export interface components {
             /** Hash */
             hash: string;
         };
+        /** LifetimeTotals */
+        LifetimeTotals: {
+            /** Calls */
+            calls: number;
+            /** Mean Ms */
+            mean_ms: number;
+            /** Total Ms */
+            total_ms: number;
+        };
         /** LlmInfo */
         LlmInfo: {
             /**
@@ -10335,6 +10344,7 @@ export interface components {
             last_compare: components["schemas"]["LastCompare"] | null;
             /** Latency Delta 24H */
             latency_delta_24h?: number | null;
+            lifetime?: components["schemas"]["LifetimeTotals"] | null;
             /** Mean Ms */
             mean_ms: number;
             /** Not Analyzable Reason */

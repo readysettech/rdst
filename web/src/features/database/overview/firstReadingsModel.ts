@@ -113,6 +113,7 @@ export interface FirstRunInput {
   queries:
     | (Pick<MonitorQuery, 'key' | 'assessment' | 'analyzable'> & {
         qps?: number
+        lifetime?: MonitorQuery['lifetime']
       })[]
     | null
     | undefined
@@ -135,8 +136,8 @@ export interface FirstRunModel {
   queriesFound: number | null
   /** Readings are coming in and the database hasn't run a query yet. */
   waitingForQueries: boolean
-  /** Queries are known but no reading has measured their calls yet: the list would only
-   * show them unranked, so the page waits for the reading that ranks them. */
+  /** Queries are known but nothing ranks them yet, neither a reading's calls nor the
+   * engine's history: the list would only show them unranked, so the page waits. */
   measuring: boolean
   steps: FirstRunStep[]
   /** Every step but the first report is done (or off): the panel collapses to one line. */
@@ -323,7 +324,9 @@ export function firstRun(input: FirstRunInput): FirstRunModel {
     !waitingForQueries &&
     listed != null &&
     listed > 0 &&
-    (input.queries ?? []).every((query) => !((query.qps ?? 0) > 0))
+    (input.queries ?? []).every(
+      (query) => !((query.qps ?? 0) > 0) && !((query.lifetime?.calls ?? 0) > 0)
+    )
 
   const can = input.can ?? aiCanRun({ settings, now })
   const deep = deepStep(input.queue, startAt, can.deep, Boolean(listed))

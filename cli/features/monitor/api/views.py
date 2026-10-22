@@ -669,7 +669,7 @@ def _query_page(store: MonitorStore, target: str, start: int, end: int, seconds:
            # average (features.monitor.ranking.blended_ms); a query not running ranks last.
            "CASE WHEN COALESCE(c.calls,0)>0 THEN c.calls*(c.ms+?*COALESCE("
            "pr.total_ms/NULLIF(pr.calls,0),c.ms/c.calls))/(c.calls+?) ELSE 0 END impact,"
-           "COALESCE(c.ms/NULLIF(c.calls,0),0) mean,"
+           "COALESCE(c.ms/NULLIF(c.calls,0),0) mean,COALESCE(pr.total_ms,0) lifetime_ms,"
            "c.ms/NULLIF(c.calls,0)/(p.ms/NULLIF(p.calls,0))-1 latency,"
            "(? AND c.calls>=30 AND p.calls>=30 AND "
            "ABS(c.ms/c.calls/(p.ms/p.calls)-1)>=0.2) significant,"
@@ -739,7 +739,8 @@ def _query_page(store: MonitorStore, target: str, start: int, end: int, seconds:
                         "(SELECT ms FROM current WHERE query_key=?),0) db_ms,"
                         "(SELECT COUNT(*) FROM selected) total FROM facts", (*parameters, EVERYTHING_ELSE))[0]
     metric = {"qps": "calls", "mean_ms": "mean", "db_time_share": "impact", "change": "ABS(latency)", "score_low": "-score", "score_high": "score"}[sort]
-    order = f"{metric} DESC,ms DESC,query_key"
+    # Queries idle in the range follow the live ones, heaviest in the engine's history first.
+    order = f"{metric} DESC,ms DESC,lifetime_ms DESC,query_key"
     order_params = parameters
     if active_order:
         order = ("COALESCE((SELECT CAST(key AS INTEGER) FROM json_each(?) "
@@ -907,6 +908,10 @@ def queries(store: MonitorStore, target: str, range: str, now: int, *, sort: str
             "tables": _tables(text), "qps": calls / recorded, "mean_ms": mean,
             "db_time_ms": total_ms, "db_time_share": total_ms / db_ms if db_ms else 0.0,
             "impact_ms": blended_ms(calls, total_ms, priors.get(key)),
+            # The engine's running totals: what an idle query cost before this range.
+            "lifetime": ({"calls": priors[key][0], "total_ms": priors[key][1],
+                          "mean_ms": priors[key][1] / priors[key][0]}
+                         if priors.get(key) and priors[key][0] else None),
             "change": {"latency": latency, "qps": qps_change, "significant": significant,
                        "verdict": verdict},
             "series": series,

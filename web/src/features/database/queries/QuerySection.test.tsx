@@ -63,6 +63,28 @@ describe('QuerySection', () => {
     expect(onOpen).toHaveBeenCalledTimes(1)
   })
 
+  it('shows a query idle in the range with its history in place of zeros', () => {
+    const idle = {
+      ...rows[0],
+      key: 'idle',
+      display_name: 'SELECT on orders by status',
+      qps: 0,
+      mean_ms: 0,
+      db_time_ms: 0,
+      db_time_share: 0,
+      latency_delta_24h: null,
+      lifetime: { calls: 1204, total_ms: 15050, mean_ms: 12.5 },
+    }
+    render(<QuerySection {...props({ rows: [rows[0], idle] })} />)
+    const row = screen.getAllByTestId('query-row')[1]
+    expect(
+      within(row).getByText('Not running now, 1,204 calls on record')
+    ).toBeTruthy()
+    expect(within(row).getByText('12.5')).toBeTruthy()
+    expect(within(row).getByText('from history')).toBeTruthy()
+    expect(within(row).queryByText('0.00')).toBeNull()
+  })
+
   it('keeps four columns while the pane is open and marks the open row', () => {
     render(
       <QuerySection {...props({ paneOpen: true, openKey: rows[0].key })} />

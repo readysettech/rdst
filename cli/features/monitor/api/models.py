@@ -398,6 +398,12 @@ class TrendMean(BaseModel):
     mean_ms: float | None
 
 
+class LifetimeTotals(BaseModel):
+    calls: int
+    total_ms: float
+    mean_ms: float
+
+
 class MonitorQuery(BaseModel):
     key: str
     text: str
@@ -411,6 +417,8 @@ class MonitorQuery(BaseModel):
     db_time_share: float
     #: What the Impact sort ranks by: live calls at a steadied cost per call.
     impact_ms: float = 0.0
+    #: The engine's running totals for the statement, from before this range included.
+    lifetime: LifetimeTotals | None = None
     change: QueryChange
     series: list[MiniSeriesPoint]
     state: list[Literal["attention", "new", "fixed", "fix_no_effect", "stuck", "muted"]]

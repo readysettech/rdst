@@ -307,6 +307,26 @@ describe('firstRun', () => {
     expect(model.waitingForQueries).toBe(false)
   })
 
+  it('waits to rank queries no reading has measured, unless their history ranks them', () => {
+    const input = {
+      now: NOW,
+      settings,
+      history: history(ON, NOW),
+      pulses: [collect(NOW - 5, 'Read 2 queries')],
+      queue: null,
+    }
+    const idle = [
+      { key: 'a', qps: 0, assessment: null, analyzable: true },
+      { key: 'b', qps: 0, assessment: null, analyzable: true },
+    ]
+    expect(firstRun({ ...input, queries: idle }).measuring).toBe(true)
+    const known = [
+      { ...idle[0], lifetime: { calls: 40, total_ms: 800, mean_ms: 20 } },
+      idle[1],
+    ]
+    expect(firstRun({ ...input, queries: known }).measuring).toBe(false)
+  })
+
   it('marks steps that need sign-in, AI, or are turned off', () => {
     const base = {
       now: NOW,

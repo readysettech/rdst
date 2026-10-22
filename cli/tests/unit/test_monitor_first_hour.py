@@ -258,3 +258,31 @@ def test_nothing_is_queued_before_a_reading_has_measured_calls(store):
     assert enqueue_first_hour("db", store=store, now=T0 + 5) == []
     reads(store, 10)
     assert enqueue_first_hour("db", store=store, now=T0 + 70)
+
+
+def idle_database(store):
+    """Three reads and a write the engine has history for, none running: the baseline
+    reading records their running totals and no calls."""
+    texts = {"light": "SELECT a FROM t", "heavy": "SELECT b FROM t", "mid": "SELECT c FROM t",
+             "write": "UPDATE t SET a = 1"}
+    store.record("db", T0, [], texts, [], None,
+                 priors={"light": (10, 50.0), "heavy": (400, 8000.0), "mid": (100, 900.0),
+                         "write": (900, 9000.0)})
+
+
+def test_an_idle_database_queues_its_history_after_the_second_reading(store):
+    idle_database(store)
+    assert enqueue_first_hour("db", store=store, now=T0 + 5) == []
+    store.record("db", T0 + 60, [], {}, [], None)
+    jobs = enqueue_first_hour("db", store=store, now=T0 + 65)
+    # Heaviest history first; a write with no row lookup never queues on its own.
+    assert [job["query_key"] for job in jobs] == ["heavy", "mid", "light"]
+
+
+def test_a_query_that_turns_live_goes_ahead_of_history(store):
+    idle_database(store)
+    store.record("db", T0 + 60, [], {}, [], None)
+    enqueue_first_hour("db", store=store, now=T0 + 65)
+    add(store, "live", 5, at=T0 + 120)
+    enqueue_first_hour("db", store=store, now=T0 + 125)
+    assert store.claim_analysis("db", T0 + 130)["query_key"] == "live"
