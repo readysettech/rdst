@@ -267,7 +267,12 @@ function buildWithPyInstaller() {
     rdstEntry
   ].filter(Boolean);
 
-  run(python, args, { cwd: rdstDir });
+  // Agents on one Mac share a HOME, and with it PyInstaller's binary cache: a
+  // build reading it while another writes it fails, so each build keeps its own.
+  run(python, args, {
+    cwd: rdstDir,
+    env: { PYINSTALLER_CONFIG_DIR: path.resolve(buildRoot, "config") }
+  });
   stageSidecarDir(pyinstallerAppDir);
 }
 
