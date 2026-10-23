@@ -137,7 +137,7 @@ export function ConnectionFailureActions({
             size="small"
             icon="database-settings"
             iconPosition="left"
-            label="Open target settings"
+            label="Edit connection details"
             onClick={openSettings}
           />
         </HStack>

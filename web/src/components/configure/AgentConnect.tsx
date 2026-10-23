@@ -1,6 +1,7 @@
-// The add-database dialog's agent path: copy a prompt into Claude Code (or any coding agent
-// open in the user's project) and wait while the agent connects and adds the database. Once
-// it's added, the database's page opens on the same turn-on dialog the connection form
+// The add-database dialog's agent path. When Claude Code or Codex is installed, RDST runs it to
+// find the databases in the user's recent projects and lists them to pick from. Any agent can
+// also take a copied prompt instead, and RDST waits while it connects and adds the database.
+// Once one is added, the database's page opens on the same turn-on dialog the connection form
 // leads to, with its prerequisite checks, and follows the agent from there.
 import { cn } from '@rs/tailwind-base'
 import { Alert } from '@rs/ui-new/alert'
@@ -33,6 +34,12 @@ import {
   subscribeAgentConnect,
 } from '../../lib/agentConnect'
 import {
+  type FoundDatabase,
+  openInApp,
+  PROMPT_SUMMARY,
+  type SignInProvider,
+} from '../../lib/agentDiscovery'
+import {
   agentAttemptId,
   type DatabaseAddStage,
   trackEvent,
@@ -40,6 +47,7 @@ import {
 import { startBootstrapRun } from '../../lib/backgroundRuns'
 import { userErrorClass } from '../../lib/userErrorClass'
 import { notifyDatabasesChanged } from './addDatabase'
+import { FindDatabases } from './FindDatabases'
 
 /** How long "Added" stays up before the database's page opens on its turn-on dialog. */
 const HANDOFF_DELAY_MS = 1400
@@ -69,7 +77,7 @@ function PromptCard({
   onCopy,
 }: {
   prompt: AgentPrompt | null
-  caption: string
+  caption?: string
   copied: boolean
   /** Copy is the view's one solid action until the agent connects. */
   primary: boolean
@@ -104,14 +112,16 @@ function PromptCard({
           >
             Prompt for your agent
           </Text>
-          <Text
-            as="span"
-            level="caption"
-            className="block text-content-layout-3"
-            data-testid="agent-prompt-caption"
-          >
-            {caption}
-          </Text>
+          {caption && (
+            <Text
+              as="span"
+              level="caption"
+              className="block text-content-layout-3"
+              data-testid="agent-prompt-caption"
+            >
+              {caption}
+            </Text>
+          )}
         </span>
         <Button
           variant="primary"
@@ -235,10 +245,16 @@ function AgentStatus({
 
 export function AgentConnect({
   onAddByHand,
+  onSignIn,
+  onFillIn,
   attempt: given,
 }: {
   /** Leave the agent path for the connection form. */
   onAddByHand: () => void
+  /** A found database lives with a provider: open its sign-in and import. */
+  onSignIn?: (provider: SignInProvider) => void
+  /** Open the connection form filled in with a found database. */
+  onFillIn?: (found: FoundDatabase) => void
   /** The dialog's add attempt, for the funnel it reports. */
   attempt?: AddAttempt
 }) {
@@ -249,6 +265,8 @@ export function AgentConnect({
   const [prompt, setPrompt] = useState<AgentPrompt | null>(null)
   const [promptError, setPromptError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [settingUp, setSettingUp] = useState(false)
+  const [showPrompt, setShowPrompt] = useState(false)
   const [progress, setProgress] = useState<AgentProgress>(NO_PROGRESS)
   const [opening, setOpening] = useState(false)
   const loadRef = useRef<AbortController | null>(null)
@@ -300,8 +318,12 @@ export function AgentConnect({
   useEffect(() => {
     if (!promptLoaded) return
     setProgress(NO_PROGRESS)
+    // An agent RDST runs itself reports in FindDatabases, not here.
     return subscribeAgentConnect(
-      (event) => setProgress((current) => advanceAgentProgress(current, event)),
+      (event) => {
+        if (!event.run)
+          setProgress((current) => advanceAgentProgress(current, event))
+      },
       { since: issuedAt }
     )
   }, [promptLoaded, issuedAt])
@@ -374,27 +396,32 @@ export function AgentConnect({
   )
 
   // Added: the database's page takes over, on the turn-on dialog unless the agent already
-  // turned monitoring on.
+  // turned monitoring on. An agent RDST is running to set a database up stays in view
+  // instead, until it needs the user.
   useEffect(() => {
-    if (!added || !target) return
+    if (!added || !target || settingUp) return
     const timer = window.setTimeout(
       () => void openDatabase(target, !monitored),
       HANDOFF_DELAY_MS
     )
     return () => window.clearTimeout(timer)
-  }, [added, target, monitored, openDatabase])
+  }, [added, target, monitored, openDatabase, settingUp])
 
   const copy = async () => {
     if (!prompt) return
     try {
       await navigator.clipboard.writeText(prompt.prompt)
       setCopied(true)
+      void agentAttemptId(prompt.attempt).then((id) =>
+        trackEvent('agent_prompt_copied', { attempt_id: id })
+      )
     } catch {
       setPromptError("RDST couldn't copy the prompt. Select it and copy it.")
     }
   }
 
   const manually = () => {
+    trackEvent('find_option_chosen', { option: 'manual' })
     attempt.switching = true
     onAddByHand()
   }
@@ -439,9 +466,7 @@ export function AgentConnect({
       </>
     )
 
-  const caption = connected
-    ? 'Your agent connected.'
-    : "It has RDST's local address."
+  const caption = connected ? 'Your agent connected.' : undefined
 
   const status: { state: AgentState; title: string; caption: ReactNode } =
     added && target
@@ -475,20 +500,65 @@ export function AgentConnect({
   return (
     <>
       <Scrollable rootClassName="min-h-0" className="px-6 pt-2 pb-5">
-        <Text as="p" level="body-small" className="text-content-layout-2">
-          Paste this into Claude Code (or any coding agent) open in the project
-          whose database you want RDST to watch.
-        </Text>
-
-        <div className="mt-4">
-          <PromptCard
-            prompt={prompt}
-            caption={caption}
-            copied={copied}
-            primary={!connected}
-            onCopy={() => void copy()}
+        <div className="mb-5">
+          <FindDatabases
+            onOpen={(name, enable) => {
+              attempt.switching = true
+              void openDatabase(name, enable)
+            }}
+            onSetupChange={setSettingUp}
+            onPastePrompt={() => setShowPrompt(true)}
+            promptShown={showPrompt}
+            onOpenApp={async (app) => {
+              if (!prompt?.attempt)
+                throw new Error('RDST is still making the prompt.')
+              await openInApp(app, prompt.attempt)
+              setShowPrompt(true)
+            }}
+            onSignIn={(provider) => {
+              attempt.switching = true
+              onSignIn?.(provider)
+            }}
+            onFillIn={(found) => {
+              attempt.switching = true
+              if (found) onFillIn?.(found)
+              else onAddByHand()
+            }}
+            onEdit={(name) => {
+              attempt.switching = true
+              void navigate({
+                to: '/configure',
+                search: {
+                  edit: name,
+                  returnTo: `${window.location.pathname}${window.location.search}`,
+                },
+              })
+            }}
           />
         </div>
+
+        {showPrompt && (
+          <>
+            <Text
+              as="p"
+              level="body-small"
+              className="text-content-layout-2"
+              data-testid="agent-prompt-summary"
+            >
+              {PROMPT_SUMMARY}
+            </Text>
+
+            <div className="mt-4">
+              <PromptCard
+                prompt={prompt}
+                caption={caption}
+                copied={copied}
+                primary={!connected}
+                onCopy={() => void copy()}
+              />
+            </div>
+          </>
+        )}
 
         {promptError && (
           <div className="mt-3">
@@ -496,9 +566,11 @@ export function AgentConnect({
           </div>
         )}
 
-        <div className="mt-3">
-          <AgentStatus {...status} />
-        </div>
+        {(showPrompt || copied || connected || added || progress.error) && (
+          <div className="mt-3">
+            <AgentStatus {...status} />
+          </div>
+        )}
 
         {progress.error && (
           <Text as="p" level="caption" className="mt-2 text-content-layout-3">
@@ -558,7 +630,7 @@ export function AgentConnectOption({ onPick }: { onPick: () => void }) {
       className="group grid w-full cursor-pointer grid-cols-[2.25rem_1fr_auto] items-center gap-3 rounded-panel border border-border-layout-2 bg-surface-layout-2 px-3.5 py-3 text-left transition-colors duration-fast ease-base hover:border-border-primary-soft hover:bg-surface-primary-soft-hover"
     >
       <span className="grid size-9 place-items-center rounded-control bg-surface-rising-soft text-content-rising-soft">
-        <Icon name="sparkles" label="" size="small" />
+        <Icon name="search" label="" size="small" />
       </span>
       <span className="min-w-0">
         <Text
@@ -566,10 +638,11 @@ export function AgentConnectOption({ onPick }: { onPick: () => void }) {
           level="body-small"
           className="block text-content-layout-1"
         >
-          Connect with Claude (or any coding agent)
+          Import local databases
         </Text>
         <Text as="span" level="caption" className="block text-content-layout-3">
-          Your agent finds the database your project uses and adds it here.
+          From your recent projects, Docker and the databases running on this
+          computer.
         </Text>
       </span>
       <Icon

@@ -46,6 +46,7 @@ import {
 import { formatClock } from '@/features/monitor-kit/format'
 import { Radar, type RadarState } from '@/features/monitor-kit/Radar'
 import { useMonitorPulse } from '@/features/monitor-kit/useMonitorPulse'
+import { usePrerequisites } from '@/features/prerequisites'
 import type { SwitcherTone } from '@/features/shared/filters/DatabaseFilter'
 import { useTargetResolution } from '@/hooks/useTarget'
 import { fetchTargets } from '@/lib/api'
@@ -69,6 +70,7 @@ import {
 } from '@/lib/monitor/hooks'
 import type { MonitorQuery } from '@/lib/monitor/types'
 import { useSystemStatus } from '@/lib/useSystemStatus'
+import { AskYourAgent } from './AskYourAgent'
 import {
   buildingFirstPlan,
   changeCount,
@@ -107,6 +109,8 @@ import { LoadCard } from './overview/LoadCard'
 import { QueryDetail } from './queries/QueryDetail'
 import { queryName } from './queries/querySelectors'
 import { useQueryListUrl } from './queries/useQueryListUrl'
+import { AgentFix } from './settings/AgentFix'
+import { ConnectionProblem } from './settings/ConnectionProblem'
 import {
   ConnectionRepair,
   connectionWarning,
@@ -305,6 +309,12 @@ function DatabaseView({ target }: { target: string }) {
   const unmonitored = settings.data ? !settings.data.enabled : false
   const outage = data?.outages?.find((entry) => entry.end === null) ?? null
   const unreachable = pulse.state === 'connection_lost' || outage !== null
+  // A database that was never monitored has no readings to say it's unreachable: RDST checks
+  // the connection itself, so its page can offer the fixes.
+  const precheck = usePrerequisites(target, {
+    enabled: unmonitored,
+    live: false,
+  })
   const now = pageNow(pulse.now, history?.last_ts)
   const queue = jobs.data?.queue
   // What AI work can run now: every promise of checks, analyses, a plan or a report reads it.
@@ -741,6 +751,12 @@ function DatabaseView({ target }: { target: string }) {
   const live = (
     <PageContainer className="pt-9 pb-24">
       {unreachableAlert}
+      {unreachable && !unmonitored && (
+        // Monitored and lost: the user's coding agent can work out why from here too.
+        <div className="-mt-3 mb-6">
+          <AgentFix target={target} onFinished={() => void health.refetch()} />
+        </div>
+      )}
       {!unmonitored && !unreachable && (
         <div className="mb-6 empty:hidden">
           <FirstPlanPointer
@@ -757,7 +773,16 @@ function DatabaseView({ target }: { target: string }) {
           <FirstRunStrip model={firstRunModel} now={pulse.now} />
         </div>
       )}
-      {unmonitored ? (
+      {unmonitored && precheck.result?.connection_error ? (
+        // Never monitored and RDST can't connect: fix that here first.
+        <div className="mb-6" data-testid="database-connection-problem">
+          <ConnectionProblem
+            target={target}
+            state={precheck}
+            onCheck={() => void precheck.recheck()}
+          />
+        </div>
+      ) : unmonitored ? (
         <div className="flex items-center gap-4 border-y border-border-layout-2 py-5">
           <Text as="p" level="body-medium" className="text-content-layout-2">
             Turn on monitoring to see live numbers, fixes and a daily report.
@@ -794,6 +819,7 @@ function DatabaseView({ target }: { target: string }) {
             staleSince={unreachable ? (data.last_reading_at ?? null) : null}
           />
           {loadCard(selectKey)}
+          <AskYourAgent target={target} />
         </>
       ) : null}
       {waiting ? null : measuring ? (
@@ -815,6 +841,7 @@ function DatabaseView({ target }: { target: string }) {
           mode={unmonitored ? 'scan' : firstRun ? 'first_run' : 'live'}
           scanAt={unmonitored ? (rows.data?.history.first_ts ?? null) : null}
           seenTotal={rows.data?.seen_total}
+          systemTotal={rows.data?.system_total}
           filters={{ status: page.status, table: page.table, q: page.q }}
           onFiltersChange={page.setFilters}
           onAnalyzeQuery={() => page.setPanel('analyze')}

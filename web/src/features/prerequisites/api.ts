@@ -60,6 +60,8 @@ export interface PrereqResult {
   warnings: number
   checks: PrereqCheck[]
   connection_error: string | null
+  /** Why the connection failed, when RDST can tell: a provider's network restrictions. */
+  connection_category?: string | null
 }
 
 export class PrereqRequestError extends Error {
@@ -106,4 +108,48 @@ export async function fetchPrerequisites(
     throw new PrereqRequestError(code, message)
   }
   return (await response.json()) as PrereqResult
+}
+
+/** The in-database setup RDST can run itself, on Neon: creating an extension. */
+export const SETUP_STATEMENT = /^\s*create\s+extension\b/i
+
+export interface SetupRunResult {
+  target: string
+  ran: string
+  ready_to_monitor: boolean
+}
+
+/**
+ * Runs one statement the check lists for a saved target over RDST's own
+ * connection: POST /api/configure/targets/{name}/prerequisites/run. A refusal
+ * (from RDST or the database) throws with the reason to show.
+ */
+export async function runSetupStatement(
+  target: string,
+  statement: string
+): Promise<SetupRunResult> {
+  const response = await fetch(
+    `/api/configure/targets/${encodeURIComponent(target)}/prerequisites/run`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ statement }),
+    }
+  )
+  if (!response.ok) {
+    let message = `RDST couldn't run it (${response.status}).`
+    try {
+      const body = (await response.json()) as { detail?: unknown }
+      const detail = body.detail
+      if (typeof detail === 'string') message = detail
+      else if (detail && typeof detail === 'object') {
+        const text = (detail as Record<string, unknown>).message
+        if (typeof text === 'string') message = text
+      }
+    } catch {
+      // The status line is all there is.
+    }
+    throw new Error(message)
+  }
+  return (await response.json()) as SetupRunResult
 }

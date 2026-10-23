@@ -17,7 +17,8 @@ import { Skeleton } from '@rs/ui-new/skeleton'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { PrereqCheck } from './api'
+import { trackEvent } from '@/lib/analytics'
+import { type PrereqCheck, runSetupStatement } from './api'
 import { FixPanel } from './FixPanel'
 import {
   type CheckerPhase,
@@ -273,6 +274,7 @@ function CheckRow({
   checking,
   compact,
   database,
+  onRun,
 }: {
   check: PrereqCheck
   open: boolean
@@ -280,9 +282,12 @@ function CheckRow({
   checking: boolean
   compact: boolean
   database?: string
+  onRun?: (statement: string) => Promise<unknown>
 }) {
   const reduced = useReducedMotion()
   const fixable = Boolean(check.fix) && check.status !== 'ok'
+  // RDST runs only the in-database SQL of a blocking check, never a restart's.
+  const runnable = check.blocking && !check.fix?.restart ? onRun : undefined
   const flash = useRef(check.status)
   const [justPassed, setJustPassed] = useState(false)
   useEffect(() => {
@@ -372,7 +377,11 @@ function CheckRow({
           >
             <div className="px-3 pb-4 tablet:pl-14 tablet:pr-4">
               <div className="rounded-panel border border-border-layout-1 bg-surface-layout-1 p-3.5">
-                <FixPanel fix={check.fix} database={database} />
+                <FixPanel
+                  fix={check.fix}
+                  database={database}
+                  onRun={runnable}
+                />
               </div>
             </div>
           </m.div>
@@ -424,11 +433,13 @@ function CheckList({
   checking,
   compact,
   database,
+  onRun,
 }: {
   checks: PrereqCheck[]
   checking: boolean
   compact: boolean
   database?: string
+  onRun?: (statement: string) => Promise<unknown>
 }) {
   const { required, optional } = orderedChecks(checks)
   const initial = firstOpenFix(checks)
@@ -467,6 +478,7 @@ function CheckList({
           checking={checking}
           compact={compact && check.status === 'ok'}
           database={database}
+          onRun={onRun}
         />
       ))}
     </ul>
@@ -560,6 +572,21 @@ export function PrerequisitesChecker({
 
   const page = layout === 'page'
   const database = result?.database ?? undefined
+  const { recheck } = state
+  const provider = result?.provider ?? 'unknown'
+  const runStatement = useCallback(
+    async (statement: string) => {
+      try {
+        await runSetupStatement(target, statement)
+      } catch (caught) {
+        trackEvent('prereq_fix_run', { provider, ok: false })
+        throw caught
+      }
+      trackEvent('prereq_fix_run', { provider, ok: true })
+      await recheck()
+    },
+    [target, recheck, provider]
+  )
 
   return (
     <section
@@ -698,6 +725,11 @@ export function PrerequisitesChecker({
           checking={state.checking}
           compact
           database={database}
+          // Neon already loads pg_stat_statements, so creating the extension works at once.
+          // Elsewhere the fix can need a restart, and the user's agent makes it.
+          onRun={
+            target && result.provider === 'neon' ? runStatement : undefined
+          }
         />
       )}
 

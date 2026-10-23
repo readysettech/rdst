@@ -1,5 +1,11 @@
 import { McpClient } from '../firstRun'
-import { acceptBrowserError, clearTargets, expect, test } from '../fixtures'
+import {
+  acceptBrowserError,
+  clearTargets,
+  expect,
+  mockSignedIn,
+  test,
+} from '../fixtures'
 
 // A database with no report yet answers report/latest with 404, which the browser logs.
 const NO_REPORT_404 =
@@ -15,16 +21,19 @@ test('a coding agent connects and adds a database, then the user turns monitorin
   test.setTimeout(180_000)
   acceptBrowserError(browserErrors, NO_REPORT_404)
   await clearTargets(page.request)
+  // Turning on monitoring needs a Readyset account (monitoring-signin-gate.spec.ts).
+  await mockSignedIn(page)
 
   await page.goto('/?add=agent')
-  const dialog = page.getByRole('dialog', {
-    name: 'Connect with your coding agent',
-  })
+  const dialog = page.getByRole('dialog', { name: 'Find your database' })
   await expect(dialog).toBeVisible()
+  await dialog.getByTestId('agent-prompt-reveal').click()
   const agentStatus = dialog.getByTestId('agent-status')
   await expect(agentStatus).toHaveAttribute('data-state', 'waiting')
   await expect(dialog.getByText('Waiting for your agent')).toBeVisible()
-  await expect(dialog.getByText('Prompt for your agent')).toBeVisible()
+  await expect(
+    dialog.getByText('Prompt for your agent', { exact: true })
+  ).toBeVisible()
 
   // What the user pastes: RDST's local MCP URL, with no secret and nothing that expires.
   const prompt = await dialog.getByTestId('agent-prompt').innerText()
@@ -32,9 +41,7 @@ test('a coding agent connects and adds a database, then the user turns monitorin
   expect(prompt).toContain(`${baseUrl}/mcp?a=`)
   expect(prompt).toContain('keeps the connection here')
   expect(prompt).not.toMatch(/pair|expire|token|Authorization|Bearer/i)
-  await expect(dialog.getByTestId('agent-prompt-caption')).toHaveText(
-    "It has RDST's local address."
-  )
+  await expect(dialog.getByTestId('agent-prompt-caption')).toHaveCount(0)
 
   // /mcp refuses a web page and a DNS-rebound host name.
   const fromPage = await request.post(`${baseUrl}/mcp`, {
@@ -107,10 +114,8 @@ test('a coding agent connects and adds a database, then the user turns monitorin
 
   const tested = await agent.callTool('rdst_test_database', { name: TARGET })
   expect(tested).toMatchObject({ target: TARGET, ok: true })
-  // This tier runs signed out, so turning on asks for a sign-in to get AI first.
-  await expect(turnOn.getByTestId('monitoring-signin-gate')).toBeVisible()
   await expect(
-    turnOn.getByRole('button', { name: 'Sign up or sign in' })
+    turnOn.getByRole('button', { name: 'Turn on monitoring' })
   ).toBeEnabled({ timeout: 15_000 })
 
   // The agent asks to turn monitoring on. The first time is the user's call: the dialog
@@ -127,7 +132,7 @@ test('a coding agent connects and adds a database, then the user turns monitorin
     'RDST is showing the Turn on monitoring screen.'
   )
   await expect(turnOn.getByTestId('agent-awaiting-user')).toContainText(
-    'Your turn: read and click Sign up or sign in'
+    'Your turn: read and click Turn on monitoring'
   )
   await expect(turnOn.getByTestId('explain-analyze-warning')).toBeVisible()
   await page.waitForTimeout(1_500)
@@ -139,8 +144,8 @@ test('a coding agent connects and adds a database, then the user turns monitorin
     ])
   )
 
-  // The user turns it on without AI; the dialog closes on the monitored page.
-  await turnOn.getByRole('button', { name: 'Turn on without AI' }).click()
+  // The user turns it on; the dialog closes on the monitored page.
+  await turnOn.getByRole('button', { name: 'Turn on monitoring' }).click()
   await expect(turnOn).toHaveCount(0, { timeout: 15_000 })
   await expect(
     page.getByRole('heading', { level: 1, name: TARGET })

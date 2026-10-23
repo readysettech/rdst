@@ -295,9 +295,6 @@ export function ConnectScene({ t }: { t: number }) {
               {PROMPT_TEXT}
               <span className="absolute inset-x-0 bottom-0 h-8 bg-linear-to-t from-surface-layout-2 to-transparent" />
             </div>
-            <div className="mt-1.5 text-label-extra-small font-normal text-content-layout-3">
-              It has RDST's local address.
-            </div>
           </div>
           <div className="mx-5 mt-3 rounded-panel border border-border-layout-2 px-3 py-1.5">
             {STEPS.map((step, index) => (

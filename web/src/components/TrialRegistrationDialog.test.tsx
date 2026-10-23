@@ -76,6 +76,20 @@ describe('AccountLoginDialog', () => {
     delete window.rdstDesktop
   })
 
+  it('opens as getting started with Google sign-up leading', async () => {
+    renderWithClient(
+      <AccountLoginDialog isOpen signUp onClose={vi.fn()} />,
+      createTestQueryClient()
+    )
+    expect(
+      screen.getByRole('heading', { name: 'Get started with Readyset' })
+    ).toBeTruthy()
+    const google = screen.getByRole('button', { name: 'Sign up with Google' })
+    fireEvent.click(google)
+    await waitFor(() => expect(startAccountGoogleOAuth).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: 'Email me a link' })).toBeTruthy()
+  })
+
   it('starts magic-link authentication from the RDST dialog', async () => {
     renderWithClient(
       <AccountLoginDialog isOpen onClose={vi.fn()} />,

@@ -10,8 +10,13 @@ import secrets
 import threading
 import time
 from collections import deque
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
+
+# The agent run RDST started that the current request comes from, if any: its events say so,
+# so the paste prompt's progress doesn't mistake them for its own agent.
+run_source: ContextVar[str | None] = ContextVar("agent_connect_run_source", default=None)
 
 EVENT_HISTORY = 50
 STEPS = ("connected", "database_added", "tested", "needs_setup", "awaiting_user",
@@ -42,6 +47,13 @@ def issue_attempt(now: float | None = None) -> str:
             del _issued[next(iter(_issued))]
         _awaiting = nonce
     return nonce
+
+
+def attempt_known(nonce: str, now: float | None = None) -> bool:
+    """Whether ``nonce`` names a recent prompt."""
+    with _lock:
+        _prune_attempts(time.time() if now is None else now)
+        return nonce in _issued
 
 
 def agent_request(nonce: str | None, now: float | None = None) -> bool:
@@ -112,6 +124,8 @@ class EventBus:
             if message is not None:
                 event["message"] = message
             event.update({key: value for key, value in fields.items() if value is not None})
+            if run := run_source.get():
+                event["run"] = run
             self._history.append(event)
             subscribers = list(self._subscribers)
         for subscriber in subscribers:

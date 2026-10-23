@@ -356,7 +356,7 @@ it('signed in, turns on with one action and asks for no sign-in', () => {
   ).toBeTruthy()
   expect(screen.queryByTestId('monitoring-signin-gate')).toBeNull()
   expect(
-    screen.queryByRole('button', { name: 'Sign up or sign in' })
+    screen.queryByRole('button', { name: 'Get started with Readyset' })
   ).toBeNull()
   expect(trackEvent).not.toHaveBeenCalledWith(
     'monitoring_signin_gate_shown',
@@ -364,32 +364,23 @@ it('signed in, turns on with one action and asks for no sign-in', () => {
   )
 })
 
-it('signed out, asks for a sign-in to get AI and keeps turning on without AI secondary', () => {
+it('signed out, must sign up to turn monitoring on, with no way around it', () => {
   account.signedIn = false
   renderWithClient(
     <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
   )
   expect(screen.getByTestId('monitoring-signin-gate').textContent).toContain(
-    'Turning on monitoring needs AI, which is free with a Readyset account.'
+    'Monitoring runs on a free Readyset account.'
   )
   expect(
     screen.queryByRole('button', { name: 'Turn on monitoring' })
   ).toBeNull()
-  expect(screen.getByTestId('monitoring-signin-gate').textContent).toContain(
-    'Without AI, RDST only charts query stats and alerts on connection problems.'
-  )
+  expect(
+    screen.queryByRole('button', { name: 'Turn on without AI' })
+  ).toBeNull()
   expect(trackEvent).toHaveBeenCalledWith('monitoring_signin_gate_shown', {
     via: 'page',
   })
-
-  fireEvent.click(screen.getByRole('button', { name: 'Turn on without AI' }))
-  expect(trackEvent).toHaveBeenCalledWith('monitoring_signin_gate_choice', {
-    choice: 'without_ai',
-  })
-  expect(mutate).toHaveBeenCalledWith(
-    { enabled: true, deep_analysis: true, analysis_mode: 'execute' },
-    expect.anything()
-  )
 })
 
 it('signed out, signing in turns monitoring on with the choices made', () => {
@@ -399,7 +390,9 @@ it('signed out, signing in turns monitoring on with the choices made', () => {
   )
   fireEvent.click(screen.getByRole('button', { name: /Advanced/ }))
   fireEvent.click(screen.getByRole('switch', { name: 'Measure real timings' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Sign up or sign in' }))
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Get started with Readyset' })
+  )
   expect(trackEvent).toHaveBeenCalledWith('monitoring_signin_gate_choice', {
     choice: 'sign_in',
   })
@@ -421,7 +414,9 @@ it('signed out, closing sign-in leaves monitoring off', () => {
   renderWithClient(
     <EnableMonitoringDialog target="reports" open onClose={vi.fn()} />
   )
-  fireEvent.click(screen.getByRole('button', { name: 'Sign up or sign in' }))
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Get started with Readyset' })
+  )
   fireEvent.click(screen.getByRole('button', { name: 'Close sign-in' }))
   expect(mutate).not.toHaveBeenCalled()
 })
@@ -438,7 +433,7 @@ it("signed out, the agent's turn-on request names the sign-in button", () => {
   )
   FakeEventSource.last?.emit({ step: 'awaiting_user', target: 'reports' })
   expect(screen.getByTestId('agent-awaiting-user').textContent).toContain(
-    'Your turn: read and click Sign up or sign in'
+    'Your turn: read and click Get started with Readyset'
   )
 })
 

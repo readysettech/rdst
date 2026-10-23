@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import sys
 import threading
 import time
@@ -378,7 +379,7 @@ def database_properties(target: str) -> dict[str, Any]:
 # Monitoring events
 
 def monitoring_enabled(target: str, *, monitored_count: int, ai_monitoring: str | None = None,
-                       signed_in: bool | None = None) -> None:
+                       signed_in: bool | None = None, via: str = "app") -> None:
     if not enabled():
         return
     key = own_key()
@@ -400,6 +401,7 @@ def monitoring_enabled(target: str, *, monitored_count: int, ai_monitoring: str 
         "own_key": key,
         "monitored_count": monitored_count,
         "account_kind": account_kind(),
+        "via": via if via in ("app", "agent") else "app",
     })
 
 
@@ -653,7 +655,7 @@ def _report_generated(target: str, trigger: str, ok: bool, duration_s: float,
 
 # Onboarding: adding a database, turning on monitoring, and the account
 
-VIAS = frozenset({"url", "fields", "provider", "agent", "cli", "mcp"})
+VIAS = frozenset({"url", "fields", "provider", "agent", "cli", "mcp", "app"})
 ERROR_CLASSES = ("auth_failed", "host_unreachable", "timeout", "tls", "db_not_found",
                  "permission_denied", "ssh_failed", "unknown")
 MONITORING_ENABLE_FAILURES = frozenset({"unavailable", "local_limit", "invalid", "unknown"})
@@ -736,10 +738,16 @@ def monitoring_enable_failed(reason: str) -> None:
 
 # Agent connect: a coding agent connecting to RDST and calling its MCP tools
 
-AGENT_CONNECT_STEPS = frozenset({"prompt_issued", "connected", "tool_called"})
+AGENT_CONNECT_STEPS = frozenset({"prompt_issued", "connected", "tool_called", "search_started",
+                                 "search_finished", "setup_started", "setup_finished",
+                                 "scan_finished", "app_opened",
+                                 "reply_sent", "agent_registered", "found_connected",
+                                 "signin_retried"})
 AGENT_ERROR_CLASSES = frozenset(ERROR_CLASSES) | {
     "needs_setup", "awaiting_user", "signin_required", "invalid_arguments", "unknown_target",
-    "tool_error", "unexpected"}
+    "tool_error", "unexpected", "agent_timeout", "agent_start_failed", "agent_signed_out",
+    "agent_rate_limited", "agent_exited", "stopped_before_adding", "nothing_proposed",
+    "cancelled"}
 PREREQ_CHECKS = frozenset({
     "pg_stat_statements_preload", "pg_stat_statements", "read_all_stats", "visibility_probe",
     "performance_schema", "statement_consumers", "query_text_size", "statement_history"})
@@ -755,8 +763,12 @@ def agent_attempt_id(nonce: str) -> str:
 
 
 def agent_connect_step(step: str, *, attempt_id: str | None, tool: str | None = None,
-                       ok: bool | None = None, error_class: str | None = None) -> None:
-    """One step of an agent connecting, at most once per (attempt_id, step, tool, ok)."""
+                       ok: bool | None = None, error_class: str | None = None,
+                       agent_version: str | None = None,
+                       counts: dict[str, int] | None = None) -> None:
+    """One step of an agent connecting, at most once per (attempt_id, step, tool, ok).
+    ``agent_version`` is the agent's own version, like 2.1.312, when it reported one, and
+    ``counts`` how a search went over RDST's list: proposed, skipped, unmentioned."""
     if step not in AGENT_CONNECT_STEPS or not enabled():
         return
     key = (attempt_id, step, tool, ok)
@@ -771,7 +783,43 @@ def agent_connect_step(step: str, *, attempt_id: str | None, tool: str | None = 
         props["tool"] = tool if tool.startswith("rdst_") and len(tool) <= 40 else "other"
     if ok is False:
         props["error_class"] = error_class if error_class in AGENT_ERROR_CLASSES else "unknown"
+    if agent_version and re.fullmatch(r"\d{1,4}(\.\d{1,5}){1,3}", agent_version):
+        props["agent_version"] = agent_version
+    for name, value in (counts or {}).items():
+        if name in ("proposed", "skipped", "unmentioned") and isinstance(value, int):
+            props[name] = value
     capture("agent_connect_step", props)
+
+
+def database_scan_finished(*, seconds: float, methods: dict[str, int],
+                           candidates: list[dict[str, Any]]) -> None:
+    """What RDST's own scan found, as counts only: how many databases, of which kinds and
+    from where. No names, hosts or paths leave the machine."""
+    if not enabled():
+        return
+    from collections import Counter
+
+    from features.agent_connect.discover import ENVIRONMENTS, PROVIDERS
+
+    def count(key: str, allowed: tuple[str, ...]) -> dict[str, int]:
+        return dict(Counter(str(c.get(key)) if c.get(key) in allowed else "other"
+                            for c in candidates))
+
+    found = [c for c in candidates if not c.get("deferred")]
+    capture("database_scan_finished", {
+        "seconds": round(float(seconds), 1), "found": len(found),
+        "methods": {str(k)[:20]: int(v) for k, v in methods.items()},
+        "providers": count("provider", PROVIDERS),
+        "engines": count("engine", ("postgresql", "mysql")),
+        "environments": count("environment", ENVIRONMENTS),
+        "with_password": sum(1 for c in found if c.get("env_file") or c.get("password_file")
+                             or c.get("url_file")),
+        "incomplete": sum(1 for c in found if c.get("incomplete")),
+        "from_history": sum(1 for c in found if c.get("history")),
+        "with_secret_manager": sum(1 for c in found if c.get("secrets")),
+        "already_saved": sum(1 for c in found if c.get("saved_as")),
+        "waiting_for_pick": sum(1 for c in candidates if c.get("deferred")),
+    })
 
 
 def database_add_prereq_result(engine: Any, *, check: str, ok: bool, via: Any,
@@ -847,8 +895,9 @@ def _location(error: BaseException | None) -> str | None:
 def report_error(component: str, error: BaseException | None = None, *,
                  error_class: str | None = None, message: str | None = None,
                  source: str = "backend", handled: bool = True,
-                 extra: dict[str, Any] | None = None) -> None:
-    """Send `app_error`: error class, component, a scrubbed short message, never raising."""
+                 extra: dict[str, Any] | None = None, event: str = "app_error") -> None:
+    """Send `app_error` (or `app_degraded`): error class, component, a scrubbed short
+    message, never raising."""
     if getattr(_reporting, "active", False):
         return
     _reporting.active = True
@@ -871,11 +920,38 @@ def report_error(component: str, error: BaseException | None = None, *,
             route = extra.get("route")
             if isinstance(route, str) and _ROUTE.fullmatch(route):
                 props["route"] = route
-        capture("app_error", props)
+        capture(event, props)
     except Exception:
         pass
     finally:
         _reporting.active = False
+
+
+# Text of a connection to the user's database failing or dropping, from any driver.
+_UNREACHABLE = ("failed to connect", "could not connect", "connection refused",
+                "timeout expired", "server closed the connection", "connection reset",
+                "connection timed out", "can't connect to mysql server",
+                "lost connection to mysql server", "no route to host",
+                "could not translate host", "name or service not known",
+                "network is unreachable", "ssl syscall error")
+
+
+def expected_condition(error: BaseException | None) -> str | None:
+    """The outside condition behind a failure RDST recovers from on its own, when nothing in
+    RDST broke: its storage briefly busy, a call that timed out, or the user's database
+    unreachable. None for anything else."""
+    for _ in range(5):
+        if error is None:
+            return None
+        text = str(error).lower()
+        if isinstance(error, sqlite3.OperationalError) and ("locked" in text or "busy" in text):
+            return "storage_busy"
+        if type(error).__name__ == "TimeoutError":
+            return "timed_out"
+        if isinstance(error, ConnectionError) or any(part in text for part in _UNREACHABLE):
+            return "database_unreachable"
+        error = error.__cause__ or error.__context__
+    return None
 
 
 # Logger name prefix -> component. Most specific first.
@@ -905,7 +981,8 @@ def component_for(logger_name: str) -> str:
 
 
 class AppErrorLogHandler(logging.Handler):
-    """Reports logged errors (ERROR, or WARNING with a traceback) as app_error.
+    """Reports logged errors (ERROR, or WARNING with a traceback) as app_error, and warnings
+    from an expected condition (see expected_condition) as app_degraded.
 
     The message is the log call's format string, not the formatted text, so target names,
     hosts and SQL passed as arguments never reach it.
@@ -923,9 +1000,15 @@ class AppErrorLogHandler(logging.Handler):
             detail = scrub(template, 120)
             if error is not None and str(error):
                 detail = f"{detail}: {scrub(str(error), 120)}"
+            extra: dict[str, Any] = {"level": record.levelname.lower()}
+            # A warning RDST recovers from is information, not the app failing.
+            condition = expected_condition(error) if record.levelno < logging.ERROR else None
+            if condition:
+                extra["condition"] = condition
             report_error(component_for(record.name), error,
                          error_class=type(error).__name__ if error is not None else "LoggedError",
-                         message=detail, extra={"level": record.levelname.lower()})
+                         message=detail, extra=extra,
+                         event="app_degraded" if condition else "app_error")
         except Exception:
             pass
 

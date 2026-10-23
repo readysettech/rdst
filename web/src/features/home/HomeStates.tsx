@@ -151,9 +151,9 @@ export function homeCaption(
 /** Home with no database yet: the Get started steps, at connecting a database. */
 export function HomeEmpty() {
   const openAddDatabase = useOpenAddDatabase()
-  // The first step pops up on its own once per app session.
+  // The first step pops up on its own once per app session, on the coding agent prompt.
   useEffect(() => {
-    if (claimFirstRunPopup('add-database')) openAddDatabase()
+    if (claimFirstRunPopup('add-database')) openAddDatabase('agent')
   }, [openAddDatabase])
   return (
     <GetStarted

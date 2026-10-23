@@ -18,7 +18,12 @@ export const Route = createFileRoute('/configure')({
         ? search.panel
         : undefined,
     returnTo: typeof search.returnTo === 'string' ? search.returnTo : undefined,
-    add: search.add === 1 || search.add === '1' ? 1 : parseAddTab(search.add),
+    add:
+      search.add === 1 || search.add === '1'
+        ? 1
+        : search.add === 'agent'
+          ? 'agent'
+          : parseAddTab(search.add),
     from:
       search.from === 'fleet' || search.from === 'dev-settings'
         ? search.from

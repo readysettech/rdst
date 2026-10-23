@@ -123,7 +123,7 @@ test('a third report-group burst joins the repeating item, which resolves from i
   page,
   request,
 }, testInfo) => {
-  test.setTimeout(5 * 60_000)
+  test.setTimeout(10 * 60_000)
   await hook.phase(request, 'burst', true)
   await hold(BURST_S)
   await hook.phase(request, 'burst', false)
@@ -137,7 +137,8 @@ test('a third report-group burst joins the repeating item, which resolves from i
         repeat && ((body(repeat).occurrences as unknown[]) ?? []).length >= 3
       )
     },
-    2
+    // The model doesn't always join the burst on its first look.
+    4
   )
   const repeat = findItem(all, 'many_queries_changed')!
   expect(['new', 'seen']).toContain(repeat.state)

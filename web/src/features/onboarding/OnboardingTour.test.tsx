@@ -228,11 +228,11 @@ describe('OnboardingTour', () => {
 })
 
 describe('OnboardingTourHost', () => {
-  it('shows on a new install, then opens the add-database dialog', async () => {
+  it('shows on a new install, then opens the add-database dialog on the agent prompt', async () => {
     renderWithClient(<OnboardingTourHost />)
     expect(await screen.findByTestId('onboarding-tour')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
-    expect(openAddDatabase).toHaveBeenCalled()
+    expect(openAddDatabase).toHaveBeenCalledWith('agent')
     expect(tourPending()).toBe(false)
   })
 
@@ -309,6 +309,18 @@ describe('OnboardingTourHost', () => {
     expect(await screen.findByText('Step 4 of 4')).toBeTruthy()
     fireEvent.click(next())
     expect(savedTourStep()).toBeNull()
+  })
+
+  it("opens the add-database dialog from a replay's last step", async () => {
+    vi.mocked(useSystemStatus).mockReturnValue({
+      data: { targets: [{ name: 'shop' }] },
+    } as never)
+    markTourDone()
+    renderWithClient(<OnboardingTourHost />)
+    act(() => openTour(3))
+    expect(await screen.findByText('Step 4 of 4')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Add a database' }))
+    expect(openAddDatabase).toHaveBeenCalledWith('agent')
   })
 
   it('replays on request without opening the add-database dialog', async () => {

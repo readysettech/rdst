@@ -481,6 +481,11 @@ async function createWindow(
 
   mainWindow = window
   hideWindowOnClose(window, () => quitState.started || SMOKE_MODE)
+  // Windows shutting down or signing out: quit the normal way, so the background service
+  // stops cleanly and its exit isn't taken for a failure.
+  window.on('session-end', () =>
+    cleanUpThen(quitState, cleanup, () => app.quit())
+  )
   if (deepLinkPending) {
     deepLinkPending = false
     focusMainWindow()
@@ -967,6 +972,9 @@ function showNotification(
   capture('system_notification_shown', { kind, critical })
 }
 
+// 0x40010004, DBG_TERMINATE_PROCESS: the exit code Windows gives a process it ends at logoff.
+const WINDOWS_SESSION_ENDED = 0x40010004
+
 // The sidecar exiting outside a quit leaves nothing watching the databases; restart it.
 function keepBackendUp(handle: BackendHandle): void {
   backendKeeper = keepBackendRunning(handle, {
@@ -979,6 +987,8 @@ function keepBackendUp(handle: BackendHandle): void {
       )
       backend = null
       telemetry?.setBackend(null)
+      // Windows ended the session before the app heard about it; nothing failed.
+      if (code === WINDOWS_SESSION_ENDED) return
       capture('app_error', {
         component: 'backend_exit',
         error_class: signal ?? `exit_${code ?? 'unknown'}`,

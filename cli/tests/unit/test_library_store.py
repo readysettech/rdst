@@ -2535,3 +2535,23 @@ class TestParameterProvenanceGuard:
 
         assert params == typed
         assert observed == self.OBSERVED
+
+
+def test_write_waits_out_a_writer_holding_the_lock_past_busy_timeout(tmp_path, monkeypatch):
+    import threading
+
+    monkeypatch.setattr(observation_store, "_connection_pragmas",
+                        lambda: ("PRAGMA busy_timeout = 50",))
+    monkeypatch.setattr(library_store, "_connection_pragmas",
+                        lambda: ("PRAGMA busy_timeout = 50",))
+    store = library_store.LibraryStore(tmp_path / "library.db", tmp_path / "queries.toml")
+    store.ensure_open()
+    holder = sqlite3.connect(tmp_path / "library.db", isolation_level=None,
+                             check_same_thread=False)
+    holder.execute("BEGIN IMMEDIATE")
+    threading.Timer(0.3, lambda: holder.execute("COMMIT")).start()
+    try:
+        with store._write() as conn:
+            conn.execute("SELECT 1")
+    finally:
+        holder.close()

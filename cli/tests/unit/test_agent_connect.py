@@ -31,7 +31,14 @@ def data_dir(tmp_path, monkeypatch):
 @pytest.fixture
 def app(data_dir, monkeypatch):
     from features.account.api import routes as account
+    from features.agent_connect import tools as agent_tools
     from features.monitor import database_limit
+
+    # These databases don't exist; a test of saving one that doesn't connect says so.
+    async def connects(name, fields):
+        return True, None, None
+
+    monkeypatch.setattr(agent_tools, "_try_connection", connects)
     from features.monitor.api import routes as monitor
     from shared.api.app import create_app
 
@@ -233,6 +240,31 @@ def test_first_mcp_request_after_a_prompt_reports_the_agent_connected(app):
     assert run(scenario()) == ["connected"]
 
 
+def test_a_registered_session_starting_up_isnt_the_agent_the_dialog_waits_for(app):
+    async def scenario():
+        subscriber, _ = session.events.subscribe()
+        try:
+            await _request(app, "POST", "/api/agent-connect/prompt")
+            headers = {"Accept": ACCEPT}
+            for method in ("initialize", "tools/list"):
+                await _request(app, "POST", "/mcp", headers=headers, json={
+                    "jsonrpc": "2.0", "id": 1, "method": method, "params": {}})
+            quiet = subscriber.queue.empty()
+            await _request(app, "POST", "/mcp", headers=headers, json={
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": "rdst_status", "arguments": {}}})
+            steps = []
+            while not subscriber.queue.empty():
+                steps.append(subscriber.queue.get_nowait()["step"])
+            return quiet, steps
+        finally:
+            session.events.unsubscribe(subscriber)
+
+    quiet, steps = run(scenario())
+    assert quiet
+    assert steps[0] == "connected"
+
+
 def test_unknown_query_parameters_and_saved_agents_still_reach_mcp(app):
     run(_request(app, "POST", "/api/agent-connect/prompt"))
     assert _rpc(app, "tools/list").status_code == 200
@@ -382,8 +414,17 @@ def test_add_database_errors_never_echo_the_url(app):
     assert failed
     assert "topsecret" not in text
     _add_shop(app)
-    failed, text = _add_shop(app)
+    failed, text = _tool(app, "rdst_add_database", name="shop",
+                         url="postgresql://app:s3cret@localhost:5433/other")  # trufflehog:ignore
     assert failed and "already exists" in text
+
+
+def test_adding_a_database_rdst_already_has_carries_on_with_its_name(app):
+    _add_shop(app)
+    failed, text = _tool(app, "rdst_add_database", name="shop-app",
+                         url="postgresql://app:s3cret@localhost:5433/shop")  # trufflehog:ignore
+    assert not failed
+    assert text["target"] == "shop" and text["already_saved"] is True
 
 
 def test_test_and_monitoring_tools_follow_the_routes(app, monkeypatch, prereqs):
@@ -444,7 +485,7 @@ def test_the_user_turns_monitoring_on_the_first_time(app, prereqs):
     assert waiting["message"].startswith(
         "RDST is showing the Turn on monitoring screen. Ask the user to read it and click "
         "Turn on monitoring in the RDST app.")
-    assert "rdst_status" in waiting["message"]
+    assert "rdst_wait_for_monitoring" in waiting["message"]
     assert [(event["step"], event["target"]) for event in events] == [("awaiting_user", "shop")]
     assert "Turn on monitoring" in events[0]["message"]
     assert not _monitoring(app)
@@ -477,9 +518,10 @@ def test_signed_out_the_user_signs_in_and_turns_monitoring_on_in_the_app(
         lambda: _tool(app, "rdst_enable_monitoring", name="shop"))
     assert not failed and waiting["waiting_for_user"] is True
     assert waiting["signed_in"] is False
-    assert "sign in" in waiting["message"] and "free with a Readyset account" in waiting["message"]
+    assert "Get started with Readyset" in waiting["message"]
+    assert "free Readyset account" in waiting["message"]
     assert [(event["step"], event["target"]) for event in events] == [("awaiting_user", "shop")]
-    assert "sign in" in events[0]["message"]
+    assert "sign up" in events[0]["message"]
     assert not _monitoring(app)
 
 
@@ -1025,7 +1067,7 @@ def test_prompt_works_in_a_fresh_agent_session():
     assert "waiting_for_user: true" in text
     assert "sign in to Readyset if it asks" in text
     assert "click Turn on monitoring in the RDST app" in text
-    assert "check rdst_status" in text and "monitoring: true" in text
+    assert "call rdst_wait_for_monitoring" in text and "monitoring: true" in text
     assert "call rdst_action with did_it" in text
     assert "rdst_query_timeseries" in text
     assert "quietly" not in text and all(ord(char) < 128 for char in text)

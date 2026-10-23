@@ -107,20 +107,23 @@ test('Next, Back, the step bars and the arrow keys page through the tour', async
   await next.click()
   await expect(tour).toHaveCount(0)
   await expect(
-    page.getByRole('dialog', { name: 'Add a database' })
+    page.getByRole('dialog', { name: 'Find your database' })
   ).toBeVisible()
 })
 
-test('Skip opens the add-database dialog and the tour stays done', async ({
+test('Skip opens Find your database and the tour stays done', async ({
   page,
 }) => {
   await openTour(page)
   await onboardingTour(page).getByRole('button', { name: 'Skip' }).click()
   await expect(onboardingTour(page)).toHaveCount(0)
-  const add = page.getByRole('dialog', { name: 'Add a database' })
-  await expect(add).toBeVisible()
+  await expect(page).toHaveURL(/\?add=agent/)
+  const add = page.getByRole('dialog', { name: 'Find your database' })
+  await expect(add.getByTestId('find-databases')).toBeVisible()
+  // Connecting by hand stays one click away.
+  await add.getByTestId('agent-connect-manually').click()
   await expect(
-    add.getByRole('button', { name: /Connect with Claude/ })
+    page.getByRole('dialog', { name: 'Add a database' })
   ).toBeVisible()
   // The flag is keyed to the installation /api/status names.
   expect(
@@ -159,7 +162,7 @@ test('skipping a resumed tour opens the add-database dialog once', async ({
   await page.getByTestId('tour-resume').click()
   await expectStep(page, 2)
   await onboardingTour(page).getByRole('button', { name: 'Skip' }).click()
-  const add = page.getByRole('dialog', { name: 'Add a database' })
+  const add = page.getByRole('dialog', { name: 'Find your database' })
   await expect(add).toBeVisible()
 
   // Home doesn't open it a second time in this session.

@@ -1,0 +1,120 @@
+let blocks := inputs.blocks;
+let text := inputs.text;
+
+// Where the person is and where they came from, on every message, with a link to everything
+// their device did. The event's own location wins; the person's fills in for older versions.
+let city := event.properties.$geoip_city_name ?? person.properties.$geoip_city_name;
+let country := event.properties.$geoip_country_name ?? person.properties.$geoip_country_name;
+let parts := [];
+if (notEmpty(country)) {
+  if (notEmpty(city)) {
+    parts := arrayPushBack(parts, concat(':round_pushpin: ', city, ', ', country));
+  } else {
+    parts := arrayPushBack(parts, concat(':round_pushpin: ', country));
+  }
+}
+// Where they came from: the readyset.io download made from the same IP shortly before
+// the install, and the campaign or site that brought that visit. A best-effort match that
+// stays off the line when nothing matches; later events use what the install saved.
+let src := person.properties.install_source;
+let campaign := person.properties.install_campaign;
+let adClick := person.properties.install_ad_click;
+if (event.event == 'installation' and notEmpty(event.properties.$ip) and notEmpty(inputs.posthog_api_key)) {
+  let found := fetch('https://us.posthog.com/api/environments/425754/query/', {
+    'method': 'POST',
+    'headers': {'Authorization': f'Bearer {inputs.posthog_api_key}', 'Content-Type': 'application/json'},
+    'body': {'query': {'kind': 'HogQLQuery', 'values': {'ip': toString(event.properties.$ip), 'at': replaceAll(substring(event.timestamp, 1, 19), 'T', ' ')}, 'query': 'select s.src, s.campaign, s.gclid, s.ref from (select properties.$session_id as sid from events where event = \'rdst_download_started\' and toString(properties.$ip) = {ip} and timestamp > toDateTime({at}) - interval 2 day and timestamp <= toDateTime({at}) + interval 5 minute order by timestamp desc limit 1) d left join (select properties.$session_id as sid, any(nullIf(toString(properties.utm_source), \'\')) as src, any(nullIf(toString(properties.utm_campaign), \'\')) as campaign, max(notEmpty(toString(properties.gclid))) as gclid, any(nullIf(toString(properties.$referring_domain), \'$direct\')) as ref from events where event = \'$pageview\' and timestamp > toDateTime({at}) - interval 3 day group by sid) s on d.sid = s.sid'}}
+  });
+  if (found.status == 200 and length(found.body.results) > 0) {
+    let row := found.body.results[1];
+    src := row[1];
+    campaign := row[2];
+    adClick := row[3] == 1 or row[3] == true;
+    let ref := row[4];
+    if (empty(src) and notEmpty(ref)) {
+      src := ref;
+      if (ref like '%reddit.com%') { src := 'Reddit'; }
+      else if (ref like '%t.co%' or ref like '%x.com%' or ref like '%twitter.com%') { src := 'X'; }
+      else if (ref like '%youtube.com%') { src := 'YouTube'; }
+      else if (ref like '%google.%') { src := 'Google'; }
+      else if (ref like '%linkedin.com%') { src := 'LinkedIn'; }
+      else if (ref like '%ycombinator.com%') { src := 'Hacker News'; }
+      src := concat(src, ' (referral)');
+    }
+    if (empty(src)) { src := 'readyset.io'; }
+    // Saved on the device's person, so every chart in this project can split by it.
+    fetch('https://us.i.posthog.com/capture/', {
+      'method': 'POST',
+      'headers': {'Content-Type': 'application/json'},
+      'body': {'api_key': inputs.project_token, 'event': '$set', 'distinct_id': event.distinct_id, 'properties': {'$set_once': {'install_source': src, 'install_campaign': campaign, 'install_ad_click': adClick}}}
+    });
+  }
+}
+if (notEmpty(src)) {
+  let came := src;
+  if (notEmpty(campaign)) { came := concat(src, ' / ', campaign); }
+  if (adClick == true) { came := concat(came, ' (Google Ads)'); }
+  parts := arrayPushBack(parts, concat(':link: ', came));
+}
+parts := arrayPushBack(parts, concat('<', person.url, '#activeTab=events|See everything this device did>'));
+let whereBlock := {'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': arrayStringConcat(parts, '   ·   ')}]};
+if (event.event == 'account_signup' or event.event == 'account_quota_80_percent') {
+  let email := replaceAll(replaceAll(replaceAll(event.properties.email, '&', '&amp;'), '<', '&lt;'), '>', '&gt;');
+  let label := 'RDST · Account activity';
+  if (event.properties.is_test == true) {
+    label := '🧪 Test notification · RDST';
+  }
+  blocks := [
+    {'type': 'header', 'text': {'type': 'plain_text', 'text': '👋 New RDST signup', 'emoji': true}},
+    {'type': 'section', 'text': {'type': 'mrkdwn', 'text': f'*{email}*
+Signed in and verified their account.'}},
+    {'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': label}]}
+  ];
+  text := f'New RDST signup: {event.properties.email}';
+  if (event.event == 'account_quota_80_percent') {
+    let percent := event.properties.quota_percent;
+    let adminUrl := concat('https://rdst-keyservice.readysetio.workers.dev/admin#email=', encodeURLComponent(event.properties.email), '&action=increase-quota');
+    let remaining := 100 - percent;
+    if (remaining < 0) { remaining := 0; }
+    let progress := '';
+    for (let step in [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]) {
+      if (percent >= step) { progress := concat(progress, '▰'); }
+      else { progress := concat(progress, '▱'); }
+    }
+    blocks := [
+      {'type': 'header', 'text': {'type': 'plain_text', 'text': '📊 Monthly quota milestone', 'emoji': true}},
+      {'type': 'section', 'text': {'type': 'mrkdwn', 'text': f'*{email}* has used *{percent}%* of their monthly AI quota.'}},
+      {'type': 'section', 'text': {'type': 'mrkdwn', 'text': f'{progress}  *{percent}%*'}},
+      {'type': 'divider'},
+      {'type': 'section', 'fields': [
+        {'type': 'mrkdwn', 'text': f'*Remaining*
+{remaining}%'},
+        {'type': 'mrkdwn', 'text': f'*Quota month*
+{event.properties.period_start}'}
+      ]},
+      {'type': 'actions', 'elements': [{'type': 'button', 'text': {'type': 'plain_text', 'text': 'Increase quota ↗', 'emoji': true}, 'style': 'primary', 'url': adminUrl, 'action_id': 'rdst_increase_quota'}]},
+      {'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': label}]}
+    ];
+    text := f'RDST: {event.properties.email} reached {percent}% of their monthly quota';
+  }
+  if (event.properties.is_test == true) { text := concat('[TEST] ', text); }
+}
+blocks := arrayPushBack(blocks, whereBlock);
+let res := fetch('https://slack.com/api/chat.postMessage', {
+  'body': {
+    'channel': inputs.channel,
+    'icon_emoji': inputs.icon_emoji,
+    'username': inputs.username,
+    'blocks': blocks,
+    'text': text
+  },
+  'method': 'POST',
+  'headers': {
+    'Authorization': f'Bearer {inputs.slack_workspace.access_token}',
+    'Content-Type': 'application/json'
+  }
+});
+
+if (res.status != 200 or res.body.ok == false) {
+  throw Error(f'Failed to post message to Slack: {res.status}: {res.body}');
+}

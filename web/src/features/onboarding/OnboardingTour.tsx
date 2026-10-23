@@ -1,6 +1,6 @@
 // The first-run tour: four short videos of the real app. Each plays on its own and moves on
-// when it ends; Back, Next and the step bars move by hand, and Skip goes straight to adding a
-// database. A video that can't play falls back to the same scene drawn live with motion.
+// when it ends; Back, Next and the step bars move by hand, and Skip goes straight to the
+// coding agent prompt. A video that can't play falls back to the same scene drawn live with motion.
 import { Button } from '@rs/ui-new/button'
 import { ReadysetLogo } from '@rs/ui-new/logo'
 import { Modal, ModalContent, ModalContentContainer } from '@rs/ui-new/modal'
@@ -544,7 +544,7 @@ export function OnboardingTour({
  * Shows the tour on a new install before anything else, and again when a screen asks
  * for it, at the step it asks for. Closing part way saves the step so the tour can resume
  * there; finishing or skipping clears it. Finishing or skipping the first run opens the
- * add-database dialog, the next step.
+ * add-database dialog on the coding agent prompt, the next step.
  */
 export function OnboardingTourHost() {
   const status = useSystemStatus()
@@ -584,11 +584,15 @@ export function OnboardingTourHost() {
     if (exit === 'close') saveTourStep(step)
     else clearTourStep()
     setOpen(false)
-    // Resuming a tour closed part way finishes the first run too, so with no database
-    // yet the next step is adding one. HomeEmpty doesn't open it a second time.
-    if (exit !== 'close' && (firstRun || (resumed && targets === 0))) {
+    // The last step's button says Add a database, so it always opens the coding agent
+    // prompt. Skipping does on the first run, and on a resumed one with no database yet.
+    // HomeEmpty doesn't open it a second time.
+    if (
+      exit === 'done' ||
+      (exit === 'skip' && (firstRun || (resumed && targets === 0)))
+    ) {
       markFirstRunPopupShown('add-database')
-      openAddDatabase()
+      openAddDatabase('agent')
     }
     setFirstRun(false)
   }

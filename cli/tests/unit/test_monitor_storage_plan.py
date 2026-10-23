@@ -4,6 +4,8 @@ import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 
+from pathlib import Path
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -236,6 +238,26 @@ def test_whole_install_budget_counts_other_stores_and_retained_backup(tmp_path):
     (tmp_path / "cache.db-wal").write_bytes(b"x" * 512)
     (tmp_path / "unrelated.txt").write_bytes(b"x" * 4096)
     assert store._install_size_bytes() == initial + 3584
+
+
+def test_install_size_skips_a_file_sqlite_removes_mid_count(tmp_path, monkeypatch):
+    store = MonitorStore(tmp_path / "monitor.db")
+    store.ensure_open()
+    initial = store._install_size_bytes()
+    gone = tmp_path / "library.db-wal"
+    gone.write_bytes(b"x" * 512)
+    (tmp_path / "library.db").write_bytes(b"x" * 1024)
+    real_is_file = Path.is_file
+
+    def is_file(path, *args, **kwargs):
+        found = real_is_file(path, *args, **kwargs)
+        if path == gone:
+            # SQLite closes that store's last connection right after the folder is listed.
+            gone.unlink()
+        return found
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+    assert store._install_size_bytes() == initial + 1024
 
 
 def test_reopened_single_query_pins_each_episode_without_the_gap(tmp_path):

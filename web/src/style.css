@@ -263,6 +263,34 @@
   }
 }
 
+/* Text that's still working: a light band sweeps across it. Still under reduced motion. */
+@keyframes rdst-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rdst-shimmer {
+    background-image: linear-gradient(
+      90deg,
+      currentColor 0%,
+      currentColor 40%,
+      color-mix(in oklab, currentColor 35%, transparent) 50%,
+      currentColor 60%,
+      currentColor 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: rdst-shimmer 2s linear infinite;
+  }
+}
+
 /* The working indicator: a dot in a faint ring. While monitoring is on a sector sweeps the
    ring once per 6.4 s and blips appear where readings land; the ring fills clockwise with
    the first hour's analyses. The first blip plays once per reading. Reduced motion keeps the

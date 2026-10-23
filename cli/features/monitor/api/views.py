@@ -964,8 +964,13 @@ def queries(store: MonitorStore, target: str, range: str, now: int, *, sort: str
         "system_query x WHERE x.target=t.target AND x.query_key=t.query_key) AND COALESCE("
         "(SELECT workload FROM query_ui u WHERE u.target=t.target AND u.query_key=t.query_key),1)=1",
         (target,))[0]["n"]
+    # Statements RDST leaves out as the platform's own (a provider's auth and storage
+    # services, RDST's checks): an empty list can say why it's empty.
+    system_total = store.read("SELECT COUNT(*) n FROM system_query WHERE target=?",
+                              (target,))[0]["n"]
     return {"target": target, "range": label, "window": label, "queries": page,
-            "total": total, "seen_total": int(seen_total), "limit": limit, "offset": offset,
+            "total": total, "seen_total": int(seen_total),
+            "system_total": int(system_total), "limit": limit, "offset": offset,
             "counts": counts,
             "composition": composition, "history": history,
             **({"located": located} if locate is not None else {})}

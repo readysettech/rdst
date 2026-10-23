@@ -47,8 +47,71 @@ def _tag_value(target: dict[str, Any], prefix: str) -> Optional[str]:
 
 
 def provider_for_target(target: dict[str, Any]) -> Optional[str]:
-    provider = _tag_value(target, "provider:")
+    """The provider a database is on: its tag from a sign-in import or a scan, else its
+    host."""
+    from features.agent_connect.traces import provider_of
+
+    provider = _tag_value(target, "provider:") or provider_of(target.get("host"))
     return provider if provider in SUPPORTED_PROVIDERS else None
+
+
+def _supabase_ref_of(target: dict[str, Any]) -> Optional[str]:
+    """A Supabase project's ref, from its direct host or its pooler user."""
+    import re
+
+    match = re.match(r"^(?:db\.)?([a-z0-9]{20})\.supabase\.co$",
+                     str(target.get("host") or "").lower()) or \
+        re.match(r"^postgres\.([a-z0-9]{20})$", str(target.get("user") or ""))
+    return match.group(1) if match else None
+
+
+def _endpoint_of(host: str) -> str:
+    """A Neon endpoint's ID from its host, direct or pooled."""
+    first = host.split(".")[0]
+    return first[: -len("-pooler")] if first.endswith("-pooler") else first
+
+
+def _neon_project_for(target: dict[str, Any], token: str) -> Optional[str]:
+    """The Neon project a database added from its URL is in, found by its endpoint."""
+    from features.providers.neon import _get, _list_projects
+
+    host = str(target.get("host") or "").lower()
+    if not host:
+        return None
+    endpoint = _endpoint_of(host)
+    for project in _list_projects(token, []) or []:
+        project_id = str(project.get("id") or "")
+        try:
+            response = _get(f"/projects/{project_id}/endpoints", token)
+        except requests.RequestException:
+            continue
+        if response.status_code != 200:
+            continue
+        try:
+            endpoints = response.json().get("endpoints") or []
+        except (ValueError, AttributeError):
+            continue
+        if any(isinstance(item, dict) and (item.get("id") == endpoint or
+                                           str(item.get("host") or "").lower() == host)
+               for item in endpoints):
+            return project_id
+    return None
+
+
+def _digitalocean_cluster_for(target: dict[str, Any], token: str) -> Optional[str]:
+    """The DigitalOcean cluster a database added from its URL is in, found by its host."""
+    from features.providers.digitalocean import _list_databases
+
+    host = str(target.get("host") or "").lower()
+    if not host:
+        return None
+    for cluster in _list_databases(token, []) or []:
+        hosts = {str((cluster.get(key) or {}).get("host") or "").lower()
+                 for key in ("connection", "private_connection")
+                 if isinstance(cluster.get(key), dict)}
+        if host in hosts:
+            return str(cluster.get("id") or "") or None
+    return None
 
 
 def credential_for_provider(provider: str) -> tuple[Optional[str], Optional[str]]:
@@ -134,7 +197,7 @@ def _response_object(response: requests.Response, provider: str) -> dict[str, An
 def _read_supabase(target: dict[str, Any], token: str) -> AllowlistState:
     from features.providers.supabase_oauth import API_BASE
 
-    ref = _tag_value(target, "supabase-ref:")
+    ref = _tag_value(target, "supabase-ref:") or _supabase_ref_of(target)
     if not ref:
         raise ProviderAllowlistError("Target is missing its Supabase project reference")
     try:
@@ -195,7 +258,7 @@ def _write_supabase(state: AllowlistState, token: str, cidr: str) -> None:
 def _read_neon(target: dict[str, Any], token: str) -> AllowlistState:
     from features.providers.neon import API_BASE
 
-    project_id = _tag_value(target, "neon-project:")
+    project_id = _tag_value(target, "neon-project:") or _neon_project_for(target, token)
     if not project_id:
         raise ProviderAllowlistError("Target is missing its Neon project ID")
     try:
@@ -266,7 +329,8 @@ def _write_neon(state: AllowlistState, token: str, cidr: str) -> None:
 def _read_digitalocean(target: dict[str, Any], token: str) -> AllowlistState:
     from features.providers.digitalocean_oauth import API_BASE
 
-    cluster_id = _tag_value(target, "do-cluster:")
+    cluster_id = _tag_value(target, "do-cluster:") or _digitalocean_cluster_for(target,
+                                                                                token)
     if not cluster_id:
         raise ProviderAllowlistError(
             "Target is missing its DigitalOcean database cluster ID"

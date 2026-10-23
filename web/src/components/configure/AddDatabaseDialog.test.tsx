@@ -505,7 +505,7 @@ describe('AddDatabaseDialog', () => {
     renderDialog()
     fireEvent.click(screen.getByTestId('agent-connect-option'))
     await screen.findByRole('heading', {
-      name: 'Connect with your coding agent',
+      name: 'Find your database',
     })
     expect(trackEvent).not.toHaveBeenCalledWith(
       'database_add_abandoned',

@@ -1112,6 +1112,39 @@ async def test_monitored_reading_goes_ahead_of_a_reader_stuck_on_the_database(mo
     await scheduler.stop()
 
 
+@pytest.mark.asyncio
+async def test_time_asleep_doesnt_count_toward_the_collection_deadline(monkeypatch):
+    import time
+
+    monkeypatch.setattr(scheduler_module, "COLLECTION_DEADLINE_SECONDS", 0.5)
+    monkeypatch.setattr(scheduler_module, "SUSPENDED_SECONDS", 0.1)
+    monkeypatch.setattr(scheduler_module, "ABORT_GRACE_SECONDS", 0.02)
+    monkeypatch.setattr(scheduler_module, "TICK_SECONDS", 0.1)
+    scheduler, coordinator, clock = make_scheduler(["demo"])
+    scheduler._monitored.add("demo")
+    collector = coordinator.collector_for("demo")
+    collector.gate = asyncio.Event()
+    real_wait = asyncio.wait
+    slept = []
+
+    async def wait(*args, **kwargs):
+        if not slept and sys._getframe(1).f_code.co_name == "_await_collection":
+            # The computer sleeps mid-read: the clock moves on while nothing runs.
+            slept.append(True)
+            time.sleep(1.0)
+            asyncio.get_running_loop().call_later(0.2, collector.gate.set)
+            return await real_wait(*args, **{**kwargs, "timeout": 0})
+        return await real_wait(*args, **kwargs)
+
+    monkeypatch.setattr(scheduler_module.asyncio, "wait", wait)
+    try:
+        result = await asyncio.wait_for(scheduler.check_now("demo"), 3)
+        assert result["ok"] is True
+    finally:
+        collector.gate.set()
+        await scheduler.stop()
+
+
 async def test_timed_out_collection_stays_in_flight_until_its_work_returns(monkeypatch):
     from features.query_registry.scheduler import ADMISSION_WAIT_SECONDS
 

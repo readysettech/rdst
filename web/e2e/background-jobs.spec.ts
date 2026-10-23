@@ -1,6 +1,7 @@
 import {
   acceptBrowserError,
   configureTestTarget,
+  connectManually,
   continuePastSessionOnlyPassword,
   expect,
   setBackendFixtures,
@@ -62,6 +63,7 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
 
   await page.goto('/configure')
   await page.getByRole('button', { name: 'Add a database' }).click()
+  await connectManually(page)
   const dialog = page.getByRole('dialog', { name: 'Add a database' })
   await dialog.locator('[name="host"]').fill('database.external.test')
   await dialog.locator('[name="database"]').fill('needs-key-db')

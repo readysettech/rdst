@@ -231,12 +231,12 @@ function deepStep(
     return {
       ...base,
       state: waiting.length ? 'active' : 'blocked',
-      meta: `${completed} analyzed, ${failures} failed`,
+      meta: `${completed} analyzed, ${failures} not analyzed`,
       sub: needsSignIn
         ? 'Needs sign-in'
         : waiting.length
           ? null
-          : 'Open the analysis list to see what failed',
+          : 'Open the analysis list to see why',
       progress: total ? completed / total : 0,
       at: null,
     }

@@ -5,11 +5,18 @@ import { base, engine, eventually, hook, ok, openDatabase, target } from './cim'
 // Shapes that don't run in the steady load: the burst-only aggregate, the
 // new heavy query and the history-only stopped query.
 const OFF_IN_STEADY = new Set(['burst_only', 'new_heavy', 'stopped'])
+// How long the whole suite takes, with room to spare.
+const SUITE_MS = 20 * 60_000
 
 test('ci-shop is monitored with two days of history', async ({
   page,
 }, testInfo) => {
-  test.setTimeout(9 * 60_000)
+  // The suite seeds yesterday and today and checks reports against them, so a run that
+  // crosses midnight reads them as the wrong days. Close to midnight, it starts after.
+  const midnight = new Date().setHours(24, 1, 0, 0) - Date.now()
+  const wait = midnight < SUITE_MS ? midnight : 0
+  test.setTimeout(9 * 60_000 + wait)
+  if (wait) await page.waitForTimeout(wait)
   expect((await page.request.post('/api/account/logout')).ok()).toBe(true)
   await clearTargets(page.request)
   const signedIn = await signInWithEmail(

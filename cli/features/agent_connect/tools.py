@@ -6,6 +6,8 @@ import asyncio
 import json
 import logging
 import os
+import re
+import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -13,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
 
-from features.agent_connect import session
+from features.agent_connect import resolve, session
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +92,9 @@ def _require_target(args: dict, key: str = "name") -> str:
 
 def _read_env_file(path: str, variable: str) -> str:
     """One variable's value from a dotenv-style file, read here so it never passes the agent."""
-    file = Path(path).expanduser()
+    from features.agent_connect import discover
+
+    file = Path(discover.rdst_path(path)).expanduser()
     if not file.is_absolute():
         raise ToolError("env_file must be an absolute path")
     try:
@@ -115,7 +119,15 @@ def _connection_fields(args: dict) -> dict[str, Any]:
     from shared.config.targets import default_port_for, normalize_db_type, parse_connection_string
 
     fields = {**(args.get("fields") or {}), **{key: args[key] for key in (
-        "engine", "host", "port", "database", "user", "password", "tls") if key in args}}
+        "engine", "host", "port", "database", "user", "password", "tls", "ssh") if key in args}}
+    # A password in a .env-style file, by name: RDST reads it here, so it never passes the
+    # agent. Agents pass it at the top level or among the fields.
+    password_file = args.get("password_file") or fields.pop("password_file", None)
+    password_var = args.get("password_var") or fields.pop("password_var", None)
+    if password_file or password_var:
+        if not (password_file and password_var):
+            raise ToolError("Pass password_file and password_var together")
+        fields["password"] = _read_env_file(str(password_file), str(password_var))
     url = args.get("url")
     if args.get("env_file") or args.get("env_var"):
         url = _read_env_file(str(_require(args, "env_file")), str(_require(args, "env_var")))
@@ -143,24 +155,68 @@ def _connection_fields(args: dict) -> dict[str, Any]:
     return fields
 
 
-async def add_database(app: FastAPI, args: dict) -> dict:
+async def add_database(app: FastAPI, args: dict, announce: bool = True) -> dict:
+    """Save a database. ``announce`` posts it to the progress feed a pasted prompt's agent
+    is followed by; RDST's own Connect leaves that out, since its view shows the result."""
     from features.configure.api import routes as configure
+    from shared.config.targets import TargetsConfig
     from shared.secret_store_service import SecretStoreService
 
     name = str(_require(args, "name"))
     fields = _connection_fields(args)
     password = fields.get("password")
+    if not password:
+        # Saved without one, every check after this fails on the login.
+        raise ToolError("RDST needs this database's password. Pass it, or where it is: "
+                        "env_file and env_var for a URL, password_file and password_var "
+                        "for a password in a .env-style file.")
+    # Already saved, under any name: the setup carries on with that one.
+    config = TargetsConfig()
+    config.load()
+    saved_as = configure._saved_as(config, fields)
+    replacing = bool(args.get("replace")) and config.get(name) is not None
+    if saved_as is not None and not replacing:
+        if announce:
+            session.events.publish("database_added", target=saved_as)
+            _tell_setup("database_added", saved_as)
+        return {"target": saved_as, "added": False, "already_saved": True,
+                "message": f"RDST already has this database as {saved_as}. Carry on with "
+                           f"that name; nothing was changed."}
+    if not replacing and config.get(name) is not None:
+        raise ToolError(f"A database named {name} already exists. Pass replace: true to "
+                        "correct it, or pick another name.")
+    # Only a database RDST can connect to is saved: one that can't is fixed first, not kept.
+    ok, message, category = await _try_connection(name, fields)
+    if not ok:
+        near = [str(args[key]) for key in ("env_file", "password_file") if args.get(key)]
+        pooled = await asyncio.to_thread(resolve.supabase_pooler, fields, near)
+        if pooled is not None:
+            ok, message, category = await _try_connection(name, pooled)
+            if ok:
+                ref = resolve.supabase_ref(fields.get("host"))
+                fields = pooled
+                args = {**args, "tags": [*(args.get("tags") or []), "provider:supabase",
+                                         f"supabase-ref:{ref}"]}
+    if not ok:
+        raise ConnectionFailed(message, category)
     try:
-        body = configure.AddTargetRequest(name=name, target=configure.TargetData(**fields))
+        target_data = configure.TargetData(**fields)
     except ValidationError as exc:
         # Field names and reasons only: the input values can include the host or password.
         problems = "; ".join(f"{'.'.join(map(str, error['loc']))}: {error['msg']}"
                              for error in exc.errors())
         raise ToolError(f"Those connection details aren't valid: {problems}") from exc
-    result = await _route(configure.add_target, internal_request(app), body)
+    if replacing:
+        result = await _route(configure.update_target, internal_request(app), name,
+                              configure.UpdateTargetRequest(target=target_data))
+    else:
+        result = await _route(configure.add_target, internal_request(app),
+                              configure.AddTargetRequest(name=name, target=target_data))
     if not getattr(result, "success", False):
         raise ToolError(getattr(result, "message", None) or "RDST couldn't add the database")
     target = getattr(result, "target_name", None) or name
+    if args.get("tags"):
+        await asyncio.to_thread(_add_tags, target, [str(tag) for tag in args["tags"]][:8])
     persisted = getattr(result, "persisted", None)
     if persisted is None:
         if password is None:
@@ -170,13 +226,61 @@ async def add_database(app: FastAPI, args: dict) -> dict:
             env = saved.get("password_env")
             persisted = bool(env) and await asyncio.to_thread(
                 SecretStoreService().get_secret, env) == password
-    session.events.publish("database_added", target=target)
+    if announce:
+        session.events.publish("database_added", target=target)
+        _tell_setup("database_added", target)
     reply = {"target": target, "added": True, "persisted": bool(persisted),
              "message": getattr(result, "message", None)}
     if not persisted:
         reply["warning"] = ("The OS keyring isn't available, so RDST keeps this password only "
                             "until it restarts. Add it again in RDST's Settings to keep it.")
     return reply
+
+
+class ConnectionFailed(ToolError):
+    """RDST couldn't connect with the details given, so it saved nothing."""
+
+    def __init__(self, message: str | None, category: str | None):
+        self.reason = message or "the connection test failed"
+        self.category = category
+        super().__init__(f"RDST couldn't connect with these details, so it saved nothing: "
+                         f"{self.reason.rstrip('. ')}. Fix the details and add it again.")
+
+
+async def _try_connection(name: str, fields: dict) -> tuple[bool, str | None, str | None]:
+    """Test unsaved connection details the way the connection form does."""
+    from features.configure.events import ConfigureConnectionTestEvent
+    from features.configure.service import ConfigureService
+
+    final = None
+    async for event in ConfigureService().test_connection(name, {**fields, "name": name}):
+        if isinstance(event, ConfigureConnectionTestEvent) and event.status != "in_progress":
+            final = event
+    if final is None:
+        return False, "RDST didn't get a result from the test", None
+    return final.status == "success", final.message, final.category
+
+
+def _add_tags(target: str, tags: list[str]) -> None:
+    """Which provider a database is on, and its project there, for fixes that need that
+    provider's sign-in, like letting RDST's address through its network restrictions."""
+    from shared.config.targets import TargetsConfig
+
+    config = TargetsConfig()
+    config.load()
+    entry = config.get(target)
+    if entry is None:
+        return
+    entry["tags"] = [*dict.fromkeys([*(entry.get("tags") or []), *tags])]
+    config.upsert(target, entry)
+    config.save()
+
+
+def _tell_setup(step: str, target: str) -> None:
+    """A database setup RDST started follows its agent's progress."""
+    from features.agent_connect import discover
+
+    discover.saw(step, target)
 
 
 async def prerequisites(name: str) -> dict[str, Any]:
@@ -210,11 +314,14 @@ _SETUP_FIELDS = ("check", "source", "ready_to_monitor", "blocking_reason", "next
                  "instructions", "sql", "needs_restart")
 
 
-def report_prerequisites(name: str, state: dict[str, Any], via: str | None) -> None:
+def report_prerequisites(name: str, state: dict[str, Any], via: str | None,
+                         announce: bool = True) -> None:
     """Publish tested or needs_setup for the UI, and count each check's outcome."""
     from shared import product_telemetry
 
-    if state["ready_to_monitor"]:
+    if not announce:
+        pass
+    elif state["ready_to_monitor"]:
         session.events.publish("tested", target=name)
     else:
         prereqs = {key: value for key, value in state.items()
@@ -239,16 +346,77 @@ async def _setup_passed(app: FastAPI, name: str) -> None:
         logger.debug("Couldn't refresh monitoring for %s", name, exc_info=True)
 
 
-async def check_prerequisites(app: FastAPI, args: dict, via: str | None = "mcp") -> dict:
+async def check_prerequisites(app: FastAPI, args: dict, via: str | None = "mcp",
+                              announce: bool = True) -> dict:
     name = _require_target(args)
     state = await prerequisites(name)
-    report_prerequisites(name, state, via)
+    report_prerequisites(name, state, via, announce)
     if state["ready_to_monitor"]:
         await _setup_passed(app, name)
     return state
 
 
-async def test_database(app: FastAPI, args: dict, via: str = "mcp") -> dict:
+# The in-database setup an agent may have RDST run: enabling an extension, granting a role.
+SETUP_STATEMENT = re.compile(r"(?is)^\s*(create\s+extension|grant)\b")
+
+
+def _statement_key(statement: str) -> str:
+    return " ".join(statement.strip().rstrip(";").split()).lower()
+
+
+class StatementRefused(ToolError):
+    """The database refused a setup statement RDST ran."""
+
+
+async def run_listed_statement(name: str, statement: str, via: str, announce: bool = True,
+                               lister: str = "rdst_check_prerequisites") -> dict:
+    """Run one statement the prerequisite check lists for ``name`` over RDST's own
+    connection, then check again. ``lister`` names the check in the refusal."""
+    from shared.api.target_guard import ensure_target_password
+    from shared.db_connection import close_connection, create_direct_connection
+
+    listed = {_statement_key(sql): sql for sql in (await prerequisites(name)).get("sql") or []
+              if SETUP_STATEMENT.match(sql)}
+    if _statement_key(statement) not in listed:
+        offer = "; ".join(listed.values()) or "none right now"
+        raise ToolError("RDST only runs the CREATE EXTENSION and GRANT statements "
+                        f"{lister} lists for {name}. It lists: {offer}")
+    sql = listed[_statement_key(statement)]
+
+    def run() -> None:
+        guard = ensure_target_password(name)
+        conn = create_direct_connection(guard.target_config, connect_timeout=10, target=name,
+                                        lane="rdst/setup", query_timeout_seconds=60)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql)
+            conn.commit()
+        finally:
+            close_connection(conn)
+
+    try:
+        await asyncio.to_thread(run)
+    except Exception as exc:
+        from features.configure.prerequisites import redact
+
+        raise StatementRefused(f"The database refused it: {redact(str(exc).strip())}") from exc
+    state = await prerequisites(name)
+    report_prerequisites(name, state, via, announce)
+    return {"target": name, "ran": sql, "ready_to_monitor": state["ready_to_monitor"],
+            **({} if state["ready_to_monitor"] else
+               {"instructions": state["instructions"], "sql": state["sql"]})}
+
+
+async def run_setup_statement(app: FastAPI, args: dict) -> dict:
+    """Run one statement rdst_check_prerequisites lists for ``name``, over RDST's own
+    connection, so an agent can finish setup without the database's password."""
+    name = _require_target(args)
+    statement = str(_require(args, "statement")).strip()
+    return await run_listed_statement(name, statement, "mcp")
+
+
+async def test_database(app: FastAPI, args: dict, via: str = "mcp",
+                        announce: bool = True) -> dict:
     from features.configure.api import routes as configure
 
     name = _require_target(args)
@@ -272,9 +440,10 @@ async def test_database(app: FastAPI, args: dict, via: str = "mcp") -> dict:
     if not ok:
         reply.update(ready_to_monitor=False, next_step="fix_connection",
                      blocking_reason=f"RDST couldn't connect: {final.get('message')}")
-        session.events.publish("error", target=name, message=final.get("message"))
+        if announce:
+            session.events.publish("error", target=name, message=final.get("message"))
         return reply
-    state = await check_prerequisites(app, {"name": name}, via)
+    state = await check_prerequisites(app, {"name": name}, via, announce)
     reply.update({key: state.get(key) for key in _SETUP_FIELDS})
     reply["prerequisites"] = {key: state.get(key) for key in (
         "engine", "provider", "provider_name", "ready", "checks", "connection_error")}
@@ -299,9 +468,9 @@ async def _require_ready(name: str) -> None:
 
 AWAITING_USER = ("RDST is showing the Turn on monitoring screen. Ask the user to read it and "
                  "click Turn on monitoring in the RDST app.")
-AWAITING_SIGNIN = ("RDST is showing the Turn on monitoring screen. Monitoring's AI is free with "
-                   "a Readyset account, so ask the user to sign up or sign in there and turn "
-                   "monitoring on in the RDST app.")
+AWAITING_SIGNIN = ("RDST is showing the Turn on monitoring screen. Monitoring runs on a free "
+                   "Readyset account, so ask the user to click Get started with Readyset there "
+                   "and sign up; monitoring turns on right after.")
 
 
 def _signed_in() -> bool:
@@ -333,9 +502,11 @@ async def _await_user(name: str) -> dict | None:
     if message is None:
         return None
     session.events.publish("awaiting_user", target=name, message=message)
+    _tell_setup("awaiting_user", name)
     return {"target": name, "enabled": False, "waiting_for_user": True,
             "signed_in": message is not AWAITING_SIGNIN,
-            "message": f"{message} Then call rdst_status until {name} shows monitoring: true."}
+            "message": f"{message} Then call rdst_wait_for_monitoring until {name} shows "
+                       "monitoring: true."}
 
 
 async def enable_monitoring(app: FastAPI, args: dict) -> dict:
@@ -350,7 +521,27 @@ async def enable_monitoring(app: FastAPI, args: dict) -> dict:
             update[key] = args[key]
     values = await _put_settings(app, name, update)
     session.events.publish("monitoring_enabled", target=name)
+    _tell_setup("monitoring_enabled", name)
     return {"target": name, **values}
+
+
+# Under the 60-second tool timeout agents commonly use; the agent calls again to keep waiting.
+WAIT_LIMIT_SECONDS = 50
+
+
+async def wait_for_monitoring(app: FastAPI, args: dict) -> dict:
+    """Return as soon as ``name`` is monitored, or after WAIT_LIMIT_SECONDS."""
+    from features.monitor.api import routes as monitor
+
+    name = _require_target(args)
+    deadline = time.monotonic() + WAIT_LIMIT_SECONDS
+    while True:
+        if name in await asyncio.to_thread(lambda: monitor._store().monitored_targets()):
+            return {"target": name, "monitoring": True}
+        if time.monotonic() >= deadline:
+            return {"target": name, "monitoring": False,
+                    "message": "Not yet. Call rdst_wait_for_monitoring again to keep waiting."}
+        await asyncio.sleep(1)
 
 
 async def disable_monitoring(app: FastAPI, args: dict) -> dict:
@@ -526,6 +717,37 @@ async def latest_report(app: FastAPI, args: dict) -> dict | None:
                         view="quick")
 
 
+async def ask_user(app: FastAPI, args: dict) -> dict:
+    from features.agent_connect import discover
+
+    try:
+        discover.ask(args.get("question"), args.get("options"))
+    except (LookupError, ValueError) as exc:
+        raise ToolError(str(exc)) from exc
+    return {"asked": True,
+            "message": "RDST is showing the user your question with these choices. Stop "
+                       "here and end your turn: their answer comes as your next message."}
+
+
+async def propose_databases(app: FastAPI, args: dict) -> dict:
+    from features.agent_connect import discover
+
+    try:
+        found = discover.propose(discover.current_run.get(), args.get("databases") or [],
+                                 args.get("skip"))
+    except LookupError as exc:
+        raise ToolError(str(exc)) from exc
+    return {"received": len(found),
+            "message": "RDST is showing these to the user, who picks which ones it adds. "
+                       "Don't add any yourself."}
+
+
+def _providers() -> tuple[str, ...]:
+    from features.agent_connect.discover import PROVIDERS
+
+    return PROVIDERS
+
+
 def _schema(properties: dict | None = None, required: list[str] | None = None) -> dict:
     schema: dict[str, Any] = {"type": "object", "properties": properties or {}}
     if required:
@@ -556,21 +778,82 @@ TOOLS: dict[str, tuple[str, dict, Handler]] = {
     "rdst_add_database": (
         "Save a PostgreSQL or MySQL database in RDST. Pass url, or env_file plus env_var so "
         "RDST reads the URL from that file itself, or host, port, database, user and "
-        "password. The password goes to the OS keyring; `persisted` is false when the "
-        "keyring is unavailable and the password only lasts until RDST restarts.",
+        "password (or password_file plus password_var for a password in a .env-style file). "
+        "RDST won't save one without its password, and saves it only once it connects: if "
+        "it can't, nothing is saved and the reply says why. A Supabase db.<ref> host that "
+        "this network can't reach is saved through the project's pooler automatically. For "
+        "a database only a jump host can reach, pass ssh. The password goes to "
+        "the OS keyring; `persisted` is false when the keyring is unavailable and the password "
+        "only lasts until RDST restarts.",
         _schema({
             "name": {"type": "string", "description": "A short name for the database."},
             "url": {"type": "string", "description": "postgresql:// or mysql:// URL."},
             "env_file": {"type": "string",
                          "description": "Absolute path of a .env-style file holding the URL."},
             "env_var": {"type": "string", "description": "The variable in env_file."},
+            "password_file": {"type": "string", "description": (
+                "Absolute path of a .env-style file holding just the password.")},
+            "password_var": {"type": "string",
+                             "description": "The password's variable in password_file."},
+            "replace": {"type": "boolean", "description": (
+                "Correct a database already saved under this name, like one this setup "
+                "added with the wrong host.")},
             "engine": {"type": "string", "enum": ["postgresql", "mysql"]},
             "host": {"type": "string"}, "port": {"type": "integer"},
             "database": {"type": "string"}, "user": {"type": "string"},
             "password": {"type": "string"}, "tls": {"type": "boolean"},
+            "ssh": {"type": "object", "description": (
+                "The SSH jump host RDST tunnels through: profile (a Host alias in "
+                "~/.ssh/config), or host with user, port and key_path (a private key file's "
+                "path). Never a key's contents or a passphrase."),
+                "properties": {"profile": {"type": "string"}, "host": {"type": "string"},
+                               "user": {"type": "string"}, "port": {"type": "integer"},
+                               "key_path": {"type": "string"}}},
             "fields": {"type": "object",
                        "description": "The same connection fields, grouped."},
         }, ["name"]), add_database),
+    "rdst_ask_user": (
+        "Ask the user to decide something you can't work out yourself about the database "
+        "they picked, like which SSH jump host reaches it or which login to use, as one short "
+        "question with 2 to 4 short choices. RDST shows "
+        "them as buttons, with a way to type something else. Then stop and end your turn: "
+        "the user's answer comes as your next message. Only in a conversation RDST started.",
+        _schema({"question": {"type": "string"},
+                 "options": {"type": "array", "items": {"type": "string"},
+                             "minItems": 2, "maxItems": 4}},
+                ["question", "options"]), ask_user),
+    "rdst_propose_databases": (
+        "Hand RDST the PostgreSQL and MySQL databases found in the user's projects, most "
+        "recently used first, to show in its database search for the user to pick from. Never pass passwords or whole connection URLs; for a URL in a "
+        ".env-style file pass env_file and env_var instead, and for a password alone in "
+        "one pass password_file and password_var with the other fields.",
+        _schema({"databases": {"type": "array", "items": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "A short name, like the project's."},
+            "engine": {"type": "string", "enum": ["postgresql", "mysql"]},
+            "host": {"type": "string"}, "port": {"type": "integer"},
+            "database": {"type": "string"}, "user": {"type": "string"},
+            "provider": {"type": "string", "enum": list(_providers())},
+            "environment": {"type": "string",
+                            "enum": ["development", "staging", "production", "unknown"]},
+            "project": {"type": "string", "description": "The project folder's path."},
+            "source": {"type": "string", "description": "The file it's configured in."},
+            "env_file": {"type": "string",
+                         "description": "Absolute path of a .env-style file holding the URL."},
+            "env_var": {"type": "string", "description": "The variable in env_file."},
+            "password_file": {"type": "string", "description": (
+                "When only the password is in a .env-style file: its absolute path.")},
+            "password_var": {"type": "string",
+                             "description": "The password's variable in password_file."},
+            "note": {"type": "string", "description": "One short line of context."},
+            "found": {"type": "integer", "description": (
+                "When RDST gave you a numbered list of what it found: the number of the line "
+                "this one is.")},
+        }, "required": ["engine"]}}, "skip": {"type": "array", "description": (
+            "When RDST gave you a numbered list: each line you leave out, with why in a few "
+            "words. A line you neither propose nor skip still shows."),
+            "items": {"type": "object", "properties": {
+                "found": {"type": "integer"}, "reason": {"type": "string"}},
+                "required": ["found", "reason"]}}}, ["databases"]), propose_databases),
     "rdst_test_database": (
         "Connect to a saved database, then run rdst_check_prerequisites on it. "
         "ready_to_monitor tells whether monitoring can start; when it's false, "
@@ -585,6 +868,14 @@ TOOLS: dict[str, tuple[str, dict, Handler]] = {
         "server setting and a restart) or manual. instructions lists the fixes as plain "
         "lines and sql the in-database statements.",
         _schema(_NAME, ["name"]), check_prerequisites),
+    "rdst_run_setup_statement": (
+        "Run one in-database statement rdst_check_prerequisites lists in sql for a saved "
+        "database (CREATE EXTENSION or GRANT), over RDST's own connection, so you don't need "
+        "its password. Copy the statement exactly. Only for a database the user said to set "
+        "up; never a production one. Returns ready_to_monitor after it ran.",
+        _schema({**_NAME, "statement": {"type": "string",
+                                        "description": "The statement, as listed."}},
+                ["name", "statement"]), run_setup_statement),
     "rdst_enable_monitoring": (
         "Turn on monitoring for a saved database: RDST reads its query statistics in the "
         "background and files findings in its Inbox. Refused, with the prerequisite result, "
@@ -592,8 +883,14 @@ TOOLS: dict[str, tuple[str, dict, Handler]] = {
         "database the user turns it on in the app: the reply has waiting_for_user: true and "
         "RDST shows the user its Turn on monitoring screen, which asks them to sign up or sign "
         "in when they're signed out (monitoring's AI is free with an account). Pass on the "
-        "reply's message, then call rdst_status until the database shows monitoring: true.",
+        "reply's message, then call rdst_wait_for_monitoring until it reports monitoring: "
+        "true.",
         _schema({**_NAME, **_SETTING_FIELDS}, ["name"]), enable_monitoring),
+    "rdst_wait_for_monitoring": (
+        "Wait for the user to turn monitoring on for a saved database, after "
+        "rdst_enable_monitoring answered waiting_for_user. Returns monitoring: true as soon as "
+        "it's on, or monitoring: false after about 50 seconds; call it again to keep waiting.",
+        _schema(_NAME, ["name"]), wait_for_monitoring),
     "rdst_disable_monitoring": (
         "Turn off monitoring for a database. Its history stays.",
         _schema(_NAME, ["name"]), disable_monitoring),
@@ -672,6 +969,20 @@ TOOLS: dict[str, tuple[str, dict, Handler]] = {
 PROGRESS_TOOLS = ("rdst_add_database", "rdst_test_database", "rdst_check_prerequisites",
                   "rdst_enable_monitoring")
 
+# How a setup continued in the agent's app reads each call it makes, as RDST shows it.
+APP_CALLS = {"rdst_add_database": "Saving {name} in RDST",
+             "rdst_test_database": "Testing the connection to {name}",
+             "rdst_check_prerequisites": "Checking {name} can be monitored",
+             "rdst_run_setup_statement": "Changing a setting on {name}",
+             "rdst_enable_monitoring": "Turning on monitoring for {name}"}
+
+
+def _app_failure(name: str, args: dict, message: str) -> None:
+    from features.agent_connect import discover
+
+    if name in APP_CALLS:
+        discover.app_call(args.get("name"), f"Couldn't: {message.splitlines()[0][:200]}")
+
 
 def tool_list() -> list[dict]:
     return [{"name": name, "description": f"{description} {ABOUT}", "inputSchema": schema}
@@ -684,6 +995,10 @@ async def call_tool(app: FastAPI, name: str, args: dict | None) -> dict:
     if entry is None:
         raise KeyError(name)
     args = dict(args or {})
+    if name in APP_CALLS and args.get("name"):
+        from features.agent_connect import discover
+
+        discover.app_call(args["name"], APP_CALLS[name].format(name=args["name"]))
     try:
         result = await entry[2](app, args)
     except NeedsSetup as exc:
@@ -691,6 +1006,7 @@ async def call_tool(app: FastAPI, name: str, args: dict | None) -> dict:
         _count(name, False, "needs_setup")
         return {"content": [{"type": "text", "text": str(exc)}], "isError": True}
     except ToolError as exc:
+        _app_failure(name, args, str(exc))
         if name in PROGRESS_TOOLS:
             session.events.publish("error", target=args.get("name"), message=str(exc))
         _count(name, False, "unknown_target" if "has no database named" in str(exc)
@@ -703,7 +1019,12 @@ async def call_tool(app: FastAPI, name: str, args: dict | None) -> dict:
     except Exception:
         _count(name, False, "unexpected")
         raise
-    _count(name, *_outcome(result))
+    ok, _reason = _outcome(result)
+    _count(name, ok, _reason)
+    if not ok and isinstance(result, dict) and name in APP_CALLS:
+        message = result.get("message") or result.get("connection_error")
+        if message:
+            _app_failure(name, args, str(message))
     text = json.dumps(jsonable_encoder(result), default=str)
     return {"content": [{"type": "text", "text": text}], "isError": False}
 

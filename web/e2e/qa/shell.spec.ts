@@ -284,7 +284,7 @@ test('A-25 - the sidebar offers a way to add a database', async ({ page }) => {
     .getByRole('button', { name: 'Add database' })
     .click()
   await expect(
-    page.getByRole('dialog', { name: 'Add a database' })
+    page.getByRole('dialog', { name: 'Find your database' })
   ).toBeVisible()
 })
 

@@ -161,19 +161,19 @@ describe('held analyses', () => {
     expect(analysesWaitForSignIn({ ...checkup, held: null }, [])).toBe(false)
   })
 
-  it('says Failed when the last analysis did not finish, but not while it retries', () => {
+  it("says Couldn't analyze when the last analysis did not finish, but not while it retries", () => {
     expect(
       rowChip(query({ state: 'failed', reason: 'Plan failed' }))?.label
-    ).toBe('Failed')
+    ).toBe("Couldn't analyze")
     expect(
       rowChip(query({ state: 'failed', error_kind: 'retrying' }))?.label
-    ).not.toBe('Failed')
+    ).not.toBe("Couldn't analyze")
     expect(
       rowChip({
         ...query({ state: 'failed' }),
         status: 'not_analyzed',
       })?.label
-    ).toBe('Failed')
+    ).toBe("Couldn't analyze")
   })
 
   it('drops Analyzing once monitoring is off, unless a job still runs', () => {

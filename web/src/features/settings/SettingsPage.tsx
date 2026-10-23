@@ -96,7 +96,7 @@ export type ConfigureSearch = {
   panel?: SettingsPanel
   returnTo?: string
   /** The add-database dialog's request: 1 for the form, or a provider tab. */
-  add?: AddTab | 1
+  add?: AddTab | 'agent' | 1
   from?: 'fleet' | 'dev-settings'
 }
 

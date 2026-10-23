@@ -657,7 +657,8 @@ def check_target(
         message = str(exc).strip() or type(exc).__name__
         return {**base, "provider": _host_provider(str(target_config.get("host") or "")),
                 "provider_name": None, "ready": False, "blocking": 0, "attention": 0, "warnings": 0,
-                "checks": [], "connection_error": redact(message)}
+                "checks": [], "connection_error": redact(message),
+                "connection_category": _failure_category(target_config, message)}
     try:
         if engine == "mysql" and hasattr(conn, "autocommit"):
             try:
@@ -688,6 +689,18 @@ def check_target(
         "checks": [check.as_dict() for check in checks],
         "connection_error": None,
     }
+
+
+def _failure_category(target_config: dict, message: str) -> str | None:
+    """Whether a managed provider's network restrictions may be what refused RDST, so the
+    screen can offer to add this computer's address."""
+    try:
+        from features.allowlist.service import connection_failure_category
+
+        return connection_failure_category(target_config, message)
+    except Exception:
+        logger.debug("Couldn't tell why the connection failed", exc_info=True)
+        return None
 
 
 _REDACT = re.compile(r"password=\S+", re.IGNORECASE)

@@ -584,3 +584,34 @@ def test_public_ip_falls_back_and_is_not_cached(monkeypatch):
         call.kwargs["timeout"] == service.PUBLIC_IP_TIMEOUT
         for call in get.call_args_list
     )
+
+
+def test_a_database_added_from_its_url_finds_its_provider_project_by_host(monkeypatch):
+    """No sign-in import tagged it, so the allowlist looks its project up by its host."""
+    from types import SimpleNamespace
+
+    from features.allowlist import providers
+    from features.providers import digitalocean, neon
+
+    monkeypatch.setattr(neon, "_list_projects", lambda key, errors: [{"id": "p-1"},
+                                                                     {"id": "p-2"}])
+    endpoints = {"/projects/p-1/endpoints": [{"id": "ep-other-1"}],
+                 "/projects/p-2/endpoints": [{"id": "ep-cool-1", "host": "x"}]}
+    monkeypatch.setattr(neon, "_get", lambda path, key, **_: SimpleNamespace(
+        status_code=200, json=lambda: {"endpoints": endpoints[path]}))
+    neon_target = {"host": "ep-cool-1-pooler.us-east-2.aws.neon.tech"}
+    assert providers.provider_for_target(neon_target) == "neon"
+    assert providers._neon_project_for(neon_target, "key") == "p-2"
+
+    monkeypatch.setattr(digitalocean, "_list_databases", lambda token, errors: [
+        {"id": "c-1", "connection": {"host": "a.db.ondigitalocean.com"}},
+        {"id": "c-2", "connection": {"host": "b.db.ondigitalocean.com"},
+         "private_connection": {"host": "private-b.db.ondigitalocean.com"}}])
+    assert providers._digitalocean_cluster_for(
+        {"host": "private-b.db.ondigitalocean.com"}, "token") == "c-2"
+
+    assert providers._supabase_ref_of({"host": "db.abcdefghijklmnopqrst.supabase.co"}) == \
+        "abcdefghijklmnopqrst"
+    assert providers._supabase_ref_of({"host": "aws-0-us-east-1.pooler.supabase.com",
+                                       "user": "postgres.abcdefghijklmnopqrst"}) == \
+        "abcdefghijklmnopqrst"

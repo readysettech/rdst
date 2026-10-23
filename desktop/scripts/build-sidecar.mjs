@@ -264,6 +264,8 @@ function buildWithPyInstaller() {
     `--specpath=${specRoot}`,
     ...PYINSTALLER_ARGS,
     addDataArg("web_dist", "web_dist"),
+    // The scan copies its trace reader into WSL to run there, so it ships as source too.
+    addDataArg("features/agent_connect/traces.py", "features/agent_connect"),
     rdstEntry
   ].filter(Boolean);
 

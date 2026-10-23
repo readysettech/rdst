@@ -8,6 +8,7 @@ import platform
 import shlex
 import shutil
 import stat
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -199,7 +200,11 @@ def discover_ssh_auth_options(
         candidate_paths.extend([ssh_dir / "id_ed25519", ssh_dir / "id_rsa"])
         candidate_paths.extend(sorted(ssh_dir.glob("*.pem")))
 
-    downloads_dirs = [(Path.home() / "Downloads", "Downloads")]
+    # macOS asks the user before an app reads Downloads, so RDST leaves it to a key the
+    # user picks there.
+    downloads_dirs = (
+        [] if sys.platform == "darwin" else [(Path.home() / "Downloads", "Downloads")]
+    )
     for downloads_dir, location in downloads_dirs:
         download_paths = _download_key_paths(downloads_dir)
         prevalidated_paths.update(download_paths)

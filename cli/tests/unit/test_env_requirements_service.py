@@ -334,6 +334,9 @@ def test_get_allowed_names_includes_targets_and_anthropic():
     with patch.object(service, "_load_config", return_value=_mock_config()):
         restored_names = service.get_required_names_for_restore()
     assert set(SESSION_SECRET_NAMES).issubset(restored_names)
+    # A database's password is read when that database is used, never at startup.
+    assert "PROD_DB_PASSWORD" not in restored_names
+    assert "ANTHROPIC_API_KEY" in restored_names
 
 
 def test_target_with_direct_password_shows_config_source(monkeypatch):

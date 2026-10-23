@@ -42,6 +42,7 @@ import {
   databaseTargets,
   execSql,
   installBastionKey,
+  installCodingAgent,
   prepareTesterRole,
   type Service,
   setPaused,
@@ -206,6 +207,7 @@ export class Session {
     if (options.homeFrom) cpSync(options.homeFrom, home, { recursive: true })
     writeFixtures(join(options.runDir, 'fixtures'))
     await prepareTesterRole()
+    installCodingAgent(home)
     const secretService = await startSecretService(
       {
         ...process.env,
@@ -380,6 +382,8 @@ export class Session {
               ? 'shown as a new user sees them'
               : 'held back, as the app does under automation; open each step yourself',
             databases: 'rt db list',
+            coding_agent:
+              'a stand-in Claude Code in ~/.local/bin/claude; RDST can search with it, and it finds the four projects under ~/work',
             ssh_bastion: this.bastion
               ? 'running; see rt db list'
               : 'not running',

@@ -7,6 +7,7 @@ import {
   expect,
   type Locator,
   type Page,
+  type Route,
 } from '@playwright/test'
 
 type BrowserErrors = {
@@ -210,7 +211,7 @@ export async function mockAiKeyReady(page: Page) {
  * signed-in user does. The browser suites' backend has no account session.
  */
 export async function mockSignedIn(page: Page) {
-  await page.route('**/api/account/status', (route) =>
+  const answer = (route: Route) =>
     route.fulfill({
       json: {
         signed_in: true,
@@ -219,7 +220,9 @@ export async function mockSignedIn(page: Page) {
         detail: 'Signed in',
       },
     })
-  )
+  await page.route('**/api/account/status', answer)
+  /** Stop answering, so the real account status shows again. */
+  return () => page.unroute('**/api/account/status', answer)
 }
 
 /**
@@ -357,6 +360,20 @@ export async function continuePastSessionOnlyPassword(
  * warning shows before monitoring turns on. The database is named after its
  * database name.
  */
+/**
+ * "Add a database" opens on finding the database; this goes on to the connection form
+ * through "Connect manually instead".
+ */
+export async function connectManually(page: Page) {
+  await page
+    .getByRole('dialog', { name: 'Find your database' })
+    .getByTestId('agent-connect-manually')
+    .click()
+  await expect(
+    page.getByRole('dialog', { name: 'Add a database' })
+  ).toBeVisible()
+}
+
 export async function addDatabaseThroughDialog(
   page: Page,
   fields: {
@@ -367,6 +384,8 @@ export async function addDatabaseThroughDialog(
     password: string
   }
 ) {
+  // Turning on monitoring needs a Readyset account; the add counts as signed in.
+  const signedOut = await mockSignedIn(page)
   await page.goto('/?add=1')
   const dialog = page.getByRole('dialog', { name: 'Add a database' })
   await expect(dialog).toBeVisible()
@@ -382,11 +401,9 @@ export async function addDatabaseThroughDialog(
   await continuePastSessionOnlyPassword(page, enable)
   await expect(page).toHaveURL(/\/database/, { timeout: 60_000 })
   await expect(enable.getByTestId('explain-analyze-warning')).toBeVisible()
-  // Signed out, the dialog asks for a sign-in; these tests turn on without AI.
-  const turnOn = enable.getByRole('button', {
-    name: /^(Turn on monitoring|Turn on without AI)$/,
-  })
+  const turnOn = enable.getByRole('button', { name: 'Turn on monitoring' })
   await expect(turnOn).toBeEnabled({ timeout: 60_000 })
   await turnOn.click()
   await expect(enable).toHaveCount(0)
+  await signedOut()
 }

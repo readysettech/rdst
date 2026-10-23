@@ -6,7 +6,7 @@ import {
   readFileSync,
 } from 'node:fs'
 import { createServer } from 'node:net'
-import { basename, join } from 'node:path'
+import { basename, delimiter, join } from 'node:path'
 import {
   _electron,
   type Browser,
@@ -149,6 +149,10 @@ export function appEnvironment(options: AppOptions): NodeJS.ProcessEnv {
     RDST_TESTING: '1',
     RDST_TELEMETRY: 'off',
     DBUS_SESSION_BUS_ADDRESS: options.busAddress,
+    // As a shell profile does, so RDST finds the run's stand-in coding agent first.
+    PATH: [join(options.home, '.local', 'bin'), process.env.PATH]
+      .filter(Boolean)
+      .join(delimiter),
   }
   // The app starts the way a new user's does: no AI credentials, and no
   // provider endpoint or keyring override inherited from the test host.

@@ -10,6 +10,7 @@ describe('configure search', () => {
   it('keeps the add-database dialog request alongside provider tabs', () => {
     expect(parse({ add: '1' }).add).toBe(1)
     expect(parse({ add: 1 }).add).toBe(1)
+    expect(parse({ add: 'agent' }).add).toBe('agent')
     expect(parse({ add: 'aws' }).add).toBe('aws')
     expect(parse({ add: 'nope' }).add).toBeUndefined()
     expect(parse({}).add).toBeUndefined()

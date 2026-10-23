@@ -3003,7 +3003,12 @@ class MonitorStore:
             if path == self.path or not path.is_file() or path.is_symlink():
                 continue
             if re.fullmatch(r".+\.db(?:-(?:wal|shm)|\.pre-v[0-9]+\.bak)?", path.name):
-                size += path.stat().st_size
+                # SQLite removes another store's -wal or -shm file whenever its last connection
+                # closes, between listing the folder and reading the size.
+                try:
+                    size += path.stat().st_size
+                except FileNotFoundError:
+                    continue
         return size
 
     def _enforce_install_budget(self, *, pause_s: float) -> None:

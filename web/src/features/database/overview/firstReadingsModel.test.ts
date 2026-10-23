@@ -348,7 +348,7 @@ describe('firstRun', () => {
     })
     expect(byId(login).deep).toMatchObject({
       state: 'blocked',
-      meta: '0 analyzed, 1 failed',
+      meta: '0 analyzed, 1 not analyzed',
       sub: 'Needs sign-in',
     })
     // With the nightly report off, no first report is promised.
@@ -421,7 +421,7 @@ it.each([
   expect(model.complete).toBe(false)
   expect(model.steps.find((step) => step.id === 'deep')).toMatchObject({
     state: 'blocked',
-    meta: `${completed} analyzed, ${12 - completed} failed`,
+    meta: `${completed} analyzed, ${12 - completed} not analyzed`,
   })
 })
 
@@ -445,6 +445,6 @@ it('uses full first-hour totals when the recent list omits a completed analysis'
   })
   expect(model.complete).toBe(false)
   expect(model.steps.find((step) => step.id === 'deep')?.meta).toBe(
-    '1 analyzed, 11 failed'
+    '1 analyzed, 11 not analyzed'
   )
 })

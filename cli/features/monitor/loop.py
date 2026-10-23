@@ -39,13 +39,16 @@ _active_loop: MonitorLoop | None = None
 LOCK_WAIT_THRESHOLD = 3
 LOCK_WAIT_OPEN_MINUTES = 5
 LOCK_WAIT_RECOVERY_MINUTES = 3
+# The session at the root of the oldest wait: Postgres also names the waiters queued ahead
+# of a waiter as its blockers, so the one that isn't waiting itself comes first.
 PG_TOP_BLOCKER_SQL = (
     "/*rdst:observe*/ SELECT b.query,b.state,"
     "EXTRACT(EPOCH FROM (clock_timestamp()-b.xact_start)) FROM pg_stat_activity b "
-    "WHERE b.pid = (SELECT unnest(pg_blocking_pids(w.pid)) FROM pg_stat_activity w "
+    "WHERE b.pid IN (SELECT unnest(pg_blocking_pids(w.pid)) FROM pg_stat_activity w "
     "WHERE w.datname=current_database() AND w.wait_event_type='Lock' "
     "AND w.pid<>pg_backend_pid() AND COALESCE(w.application_name,'') NOT LIKE 'rdst/%' "
-    "ORDER BY w.query_start LIMIT 1) LIMIT 1"
+    "ORDER BY w.query_start LIMIT 1) "
+    "ORDER BY cardinality(pg_blocking_pids(b.pid)), b.xact_start LIMIT 1"
 )
 
 

@@ -528,4 +528,15 @@ async def nightly(engine: str, target: str):
     await asyncio.to_thread(store._write, lambda conn: conn.execute(
         "DELETE FROM report_run WHERE target=? AND ts>=? AND ts<?", (target, start, end)))
     report = await run_report(target, "nightly", store=store)
+
+    def drop_orphans(conn) -> None:
+        # A notice whose report went with today's runs makes the Inbox ask for it, and the
+        # page reports the 404. Today's summary points at the new run by now and stays.
+        notices = ("SELECT id FROM inbox_item WHERE target=? AND type IN "
+                   "('report_ready','daily_summary') AND json_extract(body_json,'$.report_id') "
+                   "NOT IN (SELECT id FROM report_run WHERE target=?)")
+        conn.execute(f"DELETE FROM inbox_event WHERE item_id IN ({notices})", (target, target))
+        conn.execute(f"DELETE FROM inbox_item WHERE id IN ({notices})", (target, target))
+
+    await asyncio.to_thread(store._write, drop_orphans)
     return {"id": report.get("id"), "state": report["state"]}

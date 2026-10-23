@@ -473,6 +473,8 @@ class MonitorQueryPage(BaseModel):
     total: int
     # Every application query RDST has seen on the database, listed in the range or not.
     seen_total: int = 0
+    # Statements left out as the platform's own (auth and storage services, RDST's checks).
+    system_total: int = 0
     counts: QueryCounts
     composition: list[CompositionSlice]
     history: HistorySpan

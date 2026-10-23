@@ -8,6 +8,7 @@
 import type { Page, Route } from '@playwright/test'
 import {
   configureTestTarget,
+  connectManually,
   expect,
   mockPrerequisites,
   sseBody,
@@ -295,6 +296,7 @@ test('completes the signed-out AWS SSO browser flow and polls to success', async
   // Signed out, AWS sign-in lives inside the provider import.
   await page.goto('/configure')
   await page.getByRole('button', { name: 'Add a database' }).click()
+  await connectManually(page)
   await page.getByRole('button', { name: 'AWS', exact: true }).click()
 
   await expect(
@@ -480,6 +482,7 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
 
   await page.goto('/configure')
   await page.getByRole('button', { name: 'Add a database' }).click()
+  await connectManually(page)
   await page.getByRole('button', { name: 'AWS', exact: true }).click()
   await expect(
     page.getByText(
@@ -633,6 +636,7 @@ test('CSV picker posts browser file content instead of a server path', async ({
     'browser-csv,browser.test,postgresql,5432,app,app_user\n'
   await page.goto('/configure')
   await page.getByRole('button', { name: 'Add a database' }).click()
+  await connectManually(page)
   await page.getByRole('button', { name: 'CSV file', exact: true }).click()
   await expect(
     page.getByRole('button', { name: 'Choose CSV file' })

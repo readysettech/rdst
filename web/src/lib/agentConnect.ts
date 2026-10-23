@@ -23,6 +23,8 @@ export interface AgentEvent {
   check?: string | null
   /** With `needs_setup`: what to change on the server, in order. */
   instructions?: string[]
+  /** Set when an agent RDST started itself (a search or setup) sent it. */
+  run?: string
 }
 
 export interface AgentPrompt {
@@ -185,6 +187,7 @@ export function parseAgentEvent(
     message: typeof record.message === 'string' ? record.message : null,
   }
   if (typeof record.ts === 'number') event.ts = record.ts
+  if (typeof record.run === 'string') event.run = record.run
   if (step === 'needs_setup') {
     event.check = typeof record.check === 'string' ? record.check : null
     event.instructions = Array.isArray(record.instructions)

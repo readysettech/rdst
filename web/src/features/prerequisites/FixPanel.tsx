@@ -1,13 +1,16 @@
 // How to fix one failed prerequisite: a one-line summary, copyable SQL, console
-// steps, copyable commands, a restart warning and the provider's guide.
+// steps, copyable commands, a restart warning and the provider's guide. On Neon, a
+// CREATE EXTENSION gets a button that runs it over RDST's connection.
 import { cn } from '@rs/tailwind-base'
+import { Button } from '@rs/ui-new/button'
 import { CopyButton } from '@rs/ui-new/copy-button'
 import { Icon } from '@rs/ui-new/icon'
 import { Scrollable } from '@rs/ui-new/scrollable'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
+import { useState } from 'react'
 import { SqlTokens } from '@/components/SqlTokens'
-import type { PrereqFix } from './api'
+import { type PrereqFix, SETUP_STATEMENT } from './api'
 
 export function CodeBlock({
   code,
@@ -60,13 +63,69 @@ export function Steps({ steps, start }: { steps: string[]; start: number }) {
   )
 }
 
+function RunnableStatement({
+  statement,
+  onRun,
+}: {
+  statement: string
+  onRun: (statement: string) => Promise<unknown>
+}) {
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const run = async () => {
+    setRunning(true)
+    setError(null)
+    try {
+      await onRun(statement)
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "RDST couldn't run it."
+      )
+    } finally {
+      setRunning(false)
+    }
+  }
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <CodeBlock code={statement} kind="sql" />
+        </div>
+        <Button
+          variant="primary"
+          modifier="solid"
+          size="small"
+          label={running ? 'Running' : 'Run it for me'}
+          loading={running}
+          onClick={run}
+          className="mt-1"
+        />
+      </div>
+      {error && (
+        <div role="alert">
+          <Text
+            as="p"
+            level="caption"
+            className="text-content-negative-soft [overflow-wrap:anywhere]"
+          >
+            {error}
+          </Text>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function FixPanel({
   fix,
   database,
+  onRun,
   className,
 }: {
   fix: PrereqFix
   database?: string
+  /** Runs a CREATE EXTENSION for the user, then checks again. */
+  onRun?: (statement: string) => Promise<unknown>
   className?: string
 }) {
   return (
@@ -95,9 +154,17 @@ export function FixPanel({
           <Text as="p" level="caption" className="text-content-layout-3">
             {database ? `Run in ${database}` : 'Run this SQL'}
           </Text>
-          {fix.sql.map((statement) => (
-            <CodeBlock key={statement} code={statement} kind="sql" />
-          ))}
+          {fix.sql.map((statement) =>
+            onRun && SETUP_STATEMENT.test(statement) ? (
+              <RunnableStatement
+                key={statement}
+                statement={statement}
+                onRun={onRun}
+              />
+            ) : (
+              <CodeBlock key={statement} code={statement} kind="sql" />
+            )
+          )}
         </div>
       )}
 

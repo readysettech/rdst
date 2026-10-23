@@ -17,11 +17,12 @@ export function parseAddRequest(value: unknown): AddRequest | null {
 
 type Search = Record<string, unknown>
 
-/** Open the dialog over the current page, keeping the page's own params. */
+/** Open the dialog over the current page, keeping the page's own params. It opens on
+ * finding the database, with the connection form one click away. */
 export function useOpenAddDatabase() {
   const navigate = useNavigate()
   return useCallback(
-    (request: AddRequest = 'form') =>
+    (request: AddRequest = 'agent') =>
       void navigate({
         to: '.',
         search: ((current: Search) => ({

@@ -78,7 +78,7 @@ test.afterEach(async ({ page }) => {
   })
 })
 
-test('signed out, turning on asks for a sign-in and can go ahead without AI', async ({
+test('signed out, turning on needs a Readyset account, with no way around it', async ({
   page,
 }) => {
   await mockAccount(page)
@@ -86,21 +86,21 @@ test('signed out, turning on asks for a sign-in and can go ahead without AI', as
 
   const gate = dialog.getByTestId('monitoring-signin-gate')
   await expect(gate).toContainText(
-    'Turning on monitoring needs AI, which is free with a Readyset account.'
-  )
-  await expect(gate).toContainText(
-    'Without AI, RDST only charts query stats and alerts on connection problems.'
+    'Monitoring runs on a free Readyset account.'
   )
   await expect(
     dialog.getByRole('button', { name: 'Turn on monitoring' })
   ).toHaveCount(0)
-  const signIn = dialog.getByRole('button', { name: 'Sign up or sign in' })
-  await expect(signIn).toBeEnabled()
-
-  const enabled = page.waitForRequest(turnOnRequest)
-  await dialog.getByRole('button', { name: 'Turn on without AI' }).click()
-  await enabled
-  await expect(dialog).toHaveCount(0)
+  await expect(
+    dialog.getByRole('button', { name: 'Turn on without AI' })
+  ).toHaveCount(0)
+  await dialog
+    .getByRole('button', { name: 'Get started with Readyset' })
+    .click()
+  const signUp = page.getByRole('dialog', { name: 'Get started with Readyset' })
+  await expect(
+    signUp.getByRole('button', { name: 'Sign up with Google' })
+  ).toBeVisible()
 })
 
 test('signing in from the gate turns monitoring on once the sign-in finishes', async ({
@@ -114,11 +114,13 @@ test('signing in from the gate turns monitoring on once the sign-in finishes', a
   page.on('request', (request) => {
     if (turnOnRequest(request)) turnedOn = true
   })
-  await dialog.getByRole('button', { name: 'Sign up or sign in' }).click()
-  const login = page.getByRole('dialog', { name: 'Sign in to Readyset' })
+  await dialog
+    .getByRole('button', { name: 'Get started with Readyset' })
+    .click()
+  const login = page.getByRole('dialog', { name: 'Get started with Readyset' })
   await expect(login).toBeVisible()
   await login.getByLabel('Email address').fill('new@example.com')
-  await login.getByRole('button', { name: 'Send sign-in link' }).click()
+  await login.getByRole('button', { name: 'Email me a link' }).click()
   await expect(login.getByText('Check your email')).toBeVisible()
   expect(turnedOn).toBe(false)
 

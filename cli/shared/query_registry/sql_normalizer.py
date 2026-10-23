@@ -171,6 +171,10 @@ _RELATION_TOKEN = re.compile(
 )
 
 
+_CTE_NAME = re.compile(
+    r"\b([A-Za-z_][\w$]*)\s+AS\s+(?:NOT\s+)?(?:MATERIALIZED\s+)?\(", re.IGNORECASE)
+
+
 def _is_system_relation(token: str) -> bool:
     parts = [part.strip().strip('"`').lower() for part in token.split(".")]
     schema = parts[0] if len(parts) == 2 else ""
@@ -210,7 +214,11 @@ def references_user_relations(sql: str, dialect: str = None) -> bool:
     try:
         parsed = parse_one(stripped, dialect=dialect)
     except Exception:
-        tokens = _RELATION_TOKEN.findall(stripped)
+        # CTE names, LATERAL and set-returning function calls look like relations here.
+        ctes = {name.lower() for name in _CTE_NAME.findall(stripped)}
+        tokens = [match.group(1) for match in _RELATION_TOKEN.finditer(stripped)
+                  if not stripped[match.end():].lstrip().startswith("(")
+                  and match.group(1).strip('"`').lower() not in ctes | {"lateral"}]
         if tokens:
             return any(not _is_system_relation(token) for token in tokens)
         return True

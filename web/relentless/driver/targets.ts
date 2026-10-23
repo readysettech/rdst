@@ -4,9 +4,11 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { paths } from './paths.ts'
 import { isPsqlCommand } from './reach.ts'
@@ -76,6 +78,64 @@ export function writeFixtures(dir: string) {
       '',
     ].join('\n')
   )
+}
+
+/**
+ * A home that looks like a developer's to RDST's database search: recent Claude Code sessions in
+ * four projects whose .env files name this run's PostgreSQL (by URL) and MySQL (by parts), a
+ * Supabase production database, and one with no password on file. A stand-in `claude` in
+ * ~/.local/bin does the search; see fake_claude.cjs.
+ */
+export function installCodingAgent(home: string) {
+  const { postgres, mysql } = databaseTargets()
+  const projects: Record<string, Record<string, string>> = {
+    shop: {
+      '.env': `DATABASE_URL=postgresql://${postgres.user}:${postgres.password}@${postgres.host}:${postgres.port}/${postgres.database}\n`, // trufflehog:ignore
+    },
+    billing: {
+      '.env.local': [
+        'DB_ENGINE=mysql',
+        `DB_HOST=${mysql.host}`,
+        `DB_PORT=${mysql.port}`,
+        `DB_NAME=${mysql.database}`,
+        `DB_USER=${mysql.user}`,
+        `DB_PASSWORD=${mysql.password}`,
+        '',
+      ].join('\n'),
+    },
+    tenants: {
+      '.env.production':
+        'PROD_DATABASE_URL=postgresql://postgres@db.qwhzkcpvtnrlmaxe.supabase.co:5432/postgres\n',
+    },
+    analytics: {
+      '.env':
+        'DB_HOST=analytics.internal\nDB_PORT=5432\nDB_NAME=events\nDB_USER=analyst\n',
+    },
+  }
+  // Sessions newest first in the order above: shop is the project worked on most recently.
+  const now = Date.now() / 1000
+  for (const [index, [name, files]] of Object.entries(projects).entries()) {
+    const dir = join(home, 'work', name)
+    mkdirSync(dir, { recursive: true })
+    for (const [file, text] of Object.entries(files)) {
+      writeFileSync(join(dir, file), text)
+    }
+    const sessions = join(home, '.claude', 'projects', dir.replace(/\//g, '-'))
+    mkdirSync(sessions, { recursive: true })
+    const session = join(sessions, 'session.jsonl')
+    writeFileSync(
+      session,
+      `${JSON.stringify({ type: 'user', cwd: dir, message: { content: 'fix the tests' } })}\n`
+    )
+    utimesSync(session, now - index * 3600, now - index * 3600)
+  }
+  const bin = join(home, '.local', 'bin')
+  mkdirSync(bin, { recursive: true })
+  copyFileSync(
+    fileURLToPath(new URL('./fake_claude.cjs', import.meta.url)),
+    join(bin, 'claude')
+  )
+  chmodSync(join(bin, 'claude'), 0o755)
 }
 
 /** Copy the bastion's client key into the run's ~/.ssh, if a bastion runs. */

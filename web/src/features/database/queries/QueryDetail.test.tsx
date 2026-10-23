@@ -268,7 +268,7 @@ describe('QueryDetail', () => {
         onAnalyzeAgain={onAnalyzeAgain}
       />
     )
-    expect(screen.getByText('Failed')).toBeTruthy()
+    expect(screen.getByText("Couldn't analyze")).toBeTruthy()
     expect(screen.getByTestId('analysis-line').textContent).toContain(
       "The last analysis didn't finish. EXPLAIN timed out after 30 s."
     )

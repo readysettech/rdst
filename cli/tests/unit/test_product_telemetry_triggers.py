@@ -41,7 +41,7 @@ CONTRACTS = {
     **{name: {**BASE, **SURFACE, 'source': str, **{k: type(v) for k, v in props.items()}}
        for name, props in DESKTOP.items()},
     'monitoring_enabled': {**DB, 'display_name': str, 'first_for_account': bool,
-        'ai_monitoring': str, 'own_key': bool, 'monitored_count': int},
+        'ai_monitoring': str, 'own_key': bool, 'monitored_count': int, 'via': str},
     'monitoring_disabled': {**DB, 'display_name': str, 'monitored_count': int, 'reason': str, 'own_key': bool},
     'monitoring_limit_reached': {**DB, 'display_name': str, 'reason': str, 'feature': str,
         'monitored_count': int, 'limit': int, 'own_key': bool},

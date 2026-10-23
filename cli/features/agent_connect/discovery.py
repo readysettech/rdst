@@ -226,6 +226,9 @@ class AgentConnectRuntime:
                 logger.debug("Couldn't refresh the WSL listener", exc_info=True)
 
     async def stop(self) -> None:
+        from features.agent_connect import discover
+
+        await discover.stop_all()
         if self._probe is not None:
             self._probe.cancel()
             self._probe = None

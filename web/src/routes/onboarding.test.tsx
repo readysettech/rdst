@@ -13,6 +13,6 @@ describe('onboarding route', () => {
 
     const redirect = JSON.stringify(thrown)
     expect(redirect).toContain('"to":"/"')
-    expect(redirect).toContain('"add":1')
+    expect(redirect).toContain('"add":"agent"')
   })
 })

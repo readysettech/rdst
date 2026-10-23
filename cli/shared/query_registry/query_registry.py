@@ -1395,6 +1395,7 @@ class QueryRegistry:
         analyzed: bool = False,
         compared: bool = False,
         save_intent: bool = False,
+        known_complete: bool = False,
     ) -> tuple[str, bool]:
         """
         Add a query to the registry with parameter extraction and history.
@@ -1475,10 +1476,10 @@ class QueryRegistry:
         if not dialect:
             dialect = dialect_for_target(target)
 
-        if not skip_param_extraction:
-            # Only validate syntax for user-provided queries. Audit-captured
-            # queries come directly from the database and are known-complete;
-            # their MySQL DIGEST_TEXT formatting may trip SQLGlot's parser.
+        if not skip_param_extraction and not known_complete:
+            # Only validate syntax for user-provided queries. Audit- and
+            # monitor-captured queries come directly from the database and are
+            # known-complete; their formatting may trip SQLGlot's parser.
             is_valid, parse_error = verify_query_completeness(canonical_sql, dialect)
             if not is_valid:
                 raise ValueError(

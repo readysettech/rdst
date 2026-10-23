@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Optional, Union
 
 from fastapi import APIRouter, Body, HTTPException, Request
@@ -734,3 +735,32 @@ async def get_prerequisites(http_request: Request, name: str) -> dict:
         await setup_check_passed(guard.target_name,
                                  getattr(http_request.app.state, "monitor_scheduler", None))
     return result
+
+
+class SetupStatementRequest(BaseModel):
+    statement: str = Field(min_length=1)
+
+
+@router.post("/configure/targets/{name}/prerequisites/run")
+async def run_prerequisite_statement(http_request: Request, name: str,
+                                     body: SetupStatementRequest) -> dict:
+    """Run the CREATE EXTENSION the prerequisite check lists for a Neon database, then check
+    again. Neon already loads the library, so the extension works at once with no restart;
+    anywhere else the user's agent makes the change, and RDST runs nothing."""
+    from features.agent_connect import tools
+    from features.configure.prerequisites import _host_provider
+    from shared.api.target_guard import ensure_target_password
+
+    require_local_request(http_request)
+    guard = ensure_target_password(name)
+    if _host_provider(str(guard.target_config.get("host") or "")) != "neon" or \
+            not re.match(r"(?is)^\s*create\s+extension\b", body.statement):
+        raise HTTPException(400, "RDST runs only a listed CREATE EXTENSION on a Neon "
+                                 "database. Use Fix with Claude for this one.")
+    try:
+        return await tools.run_listed_statement(guard.target_name, body.statement.strip(),
+                                                via="app", announce=False, lister="the check")
+    except tools.StatementRefused as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except tools.ToolError as exc:
+        raise HTTPException(400, str(exc)) from exc

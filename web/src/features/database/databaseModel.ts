@@ -348,9 +348,9 @@ export const QUEUED_CHIP: StatusChip = {
 }
 
 export const FAILED_CHIP: StatusChip = {
-  label: 'Failed',
-  variant: 'negative',
-  modifier: 'ghost',
+  label: "Couldn't analyze",
+  variant: 'neutral',
+  modifier: 'outline',
 }
 
 export const ON_HOLD_CHIP: StatusChip = {
@@ -363,7 +363,7 @@ export const ON_HOLD_CHIP: StatusChip = {
  * A row's chip. A queued analysis reads "Queued" until it starts. A held analysis never
  * reads "Analyzing": it waits for a sign-in, or reads "On hold" while it waits on something
  * else (AI paused, automatic analysis off). An unanalyzed row whose last analysis didn't
- * finish reads "Failed"; a retry on its way doesn't.
+ * finish reads "Couldn't analyze"; a retry on its way doesn't.
  */
 export function rowChip(
   query: MonitorQuery,

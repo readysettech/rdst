@@ -8,6 +8,22 @@ control in this build, cover the closest thing it offers and say so.
 Start from a fresh install and add a database from wherever the app offers it
 (Home, the sidebar, Settings, or a `?add=` link). Cover at least:
 
+- The first-run pop-up opening on "Find your database": the provider tiles,
+  the folded paste prompt (copying it, the waiting status) and "Connect
+  manually instead" leading to the form.
+- "Search for databases with Claude" (the stand-in Claude Code) shows the
+  scan's steps and Claude's trace, then only its short list. "Just search this
+  computer" is RDST's own scan, with no agent. The four projects
+  under ~/work (see the run's dependencies) should be found in seconds, grouped
+  by project, each saying what pointed at it. shop comes picked; only one
+  database can be picked at a time. With its URL in .env, "Connect shop" adds it
+  with no agent and opens it. "Set it up here with Claude Code" (the stand-in
+  Claude Code) shows
+  numbered steps, adds shop, checks it and asks to turn monitoring on, which
+  opens shop's Turn on monitoring screen; turning it on there finishes the
+  agent's run. Also: "Connect manually" on billing (the form comes filled in),
+  the Supabase one's sign-in, leaving the view and coming back (the results
+  stay), and importing again after adding (names mustn't clash).
 - Adding the disposable PostgreSQL described below, both from its fields and
   as a connection string, and landing on its Database page with it selected
   and the turn-on step for monitoring offered. Turning monitoring on belongs to

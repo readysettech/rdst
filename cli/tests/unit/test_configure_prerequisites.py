@@ -407,6 +407,18 @@ def test_check_target_reports_connection_errors_without_secrets():
     assert result["checks"] == []
     assert "hunter2" not in result["connection_error"]
     assert "password=***" in result["connection_error"]
+    assert result["connection_category"] is None
+
+
+def test_check_target_says_when_a_providers_network_restrictions_may_be_why():
+    def connect(*_args, **_kwargs):
+        raise RuntimeError("connection to server timed out")
+
+    result = check_target("shop", {"engine": "postgresql",
+                                   "host": "db.abcdefghijklmnopqrst.supabase.co"},
+                          connect=connect)
+    assert result["connection_category"] is not None
+    assert result["connection_category"].startswith("provider_ip_blocked")
 
 
 def test_check_target_runs_postgres_checks_and_summarizes():
@@ -479,6 +491,89 @@ def test_prerequisites_route_checks_the_saved_target(monkeypatch):
     assert response.status_code == 200
     assert response.json() == {"target": "orders", "ready": True, "checks": []}
     assert seen["args"] == ("orders", {"engine": "postgresql", "host": "db"})
+
+
+def test_run_route_runs_only_a_listed_create_extension_on_neon_and_checks_again(monkeypatch):
+    """Neon already loads pg_stat_statements, so creating the extension works at once. RDST
+    writes nothing anywhere else: on RDS or MySQL the fix needs a parameter group and a
+    restart, which the user's agent handles."""
+    import asyncio
+
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    import shared.api.target_guard as target_guard
+    import shared.db_connection as db_connection
+    from features.agent_connect import tools
+    from features.configure.api import routes
+    from shared.api.target_guard import TargetGuard
+
+    create = "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
+    state = {"ready": False, "refuse": None}
+    ran: list[str] = []
+    reports: list[tuple] = []
+
+    async def listed(name):
+        return ({"ready_to_monitor": True, "sql": []} if state["ready"] else
+                {"ready_to_monitor": False, "instructions": ["Create it."],
+                 "sql": [create, "ALTER SYSTEM SET track_activity_query_size = 4096;"]})
+
+    class Cursor:
+        def execute(self, sql):
+            if state["refuse"]:
+                raise state["refuse"]
+            ran.append(sql)
+            state["ready"] = True
+
+    class Conn:
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            pass
+
+    guard = TargetGuard("orders", {"engine": "postgresql",
+                                   "host": "ep-cool-1.us-east-2.aws.neon.tech"}, "postgresql")
+    monkeypatch.setattr(target_guard, "ensure_target_password", lambda name: guard)
+    monkeypatch.setattr(db_connection, "create_direct_connection", lambda *a, **k: Conn())
+    monkeypatch.setattr(db_connection, "close_connection", lambda conn: None)
+    monkeypatch.setattr(tools, "prerequisites", listed)
+    monkeypatch.setattr(tools, "report_prerequisites",
+                        lambda name, result, via, announce=True: reports.append((via, announce)))
+    monkeypatch.setattr(routes, "require_local_request", lambda _request: None)
+    app = FastAPI()
+    app.include_router(routes.router, prefix="/api")
+
+    async def post(statement):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            return await client.post("/api/configure/targets/orders/prerequisites/run",
+                                     json={"statement": statement})
+
+    for statement in ("DROP TABLE orders", "ALTER SYSTEM SET track_activity_query_size = 4096",
+                      "GRANT pg_read_all_stats TO rdst"):
+        refused = asyncio.run(post(statement))
+        assert refused.status_code == 400
+        assert "only a listed CREATE EXTENSION on a Neon" in refused.json()["detail"]
+    unlisted = asyncio.run(post("CREATE EXTENSION hstore"))
+    assert unlisted.status_code == 400
+    assert "CREATE EXTENSION IF NOT EXISTS" in unlisted.json()["detail"]
+    guard.target_config["host"] = "orders.c9x1.us-east-1.rds.amazonaws.com"
+    assert asyncio.run(post(create)).status_code == 400
+    guard.target_config["host"] = "ep-cool-1.us-east-2.aws.neon.tech"
+    assert ran == [] and reports == []
+
+    state["refuse"] = RuntimeError("permission denied to create extension")
+    denied = asyncio.run(post(create))
+    assert denied.status_code == 409
+    assert denied.json()["detail"] == (
+        "The database refused it: permission denied to create extension")
+
+    state["refuse"] = None
+    response = asyncio.run(post("create extension if not exists   pg_stat_statements"))
+    assert response.status_code == 200
+    assert response.json() == {"target": "orders", "ran": create, "ready_to_monitor": True}
+    assert ran == [create]
+    assert reports == [("app", False)]
 
 
 # CLI flow ------------------------------------------------------------------

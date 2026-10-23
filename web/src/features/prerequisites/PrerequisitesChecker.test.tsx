@@ -349,4 +349,109 @@ describe('PrerequisitesChecker', () => {
         .length
     ).toBeGreaterThan(0)
   })
+
+  describe('running the setup SQL', () => {
+    const CREATE = 'CREATE EXTENSION IF NOT EXISTS pg_stat_statements;'
+    const neon = (restart = false, provider = 'neon') =>
+      result(
+        [
+          check('pg_stat_statements', 'missing', {
+            fix: {
+              summary: 'Create pg_stat_statements.',
+              sql: [CREATE],
+              steps: ['In the Neon console, open SQL Editor.'],
+              commands: [],
+              after: [],
+              restart,
+              note: null,
+              docs_url: null,
+            },
+          }),
+        ],
+        { provider, provider_name: provider === 'neon' ? 'Neon' : 'Amazon RDS' }
+      )
+
+    it('runs a listed statement and checks again', async () => {
+      const recheck = vi.fn(async () => undefined)
+      const fetchMock = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          target: 'orders',
+          ran: CREATE,
+          ready_to_monitor: true,
+        }),
+      }))
+      vi.stubGlobal('fetch', fetchMock)
+      renderWithClient(
+        <PrerequisitesChecker
+          target="orders"
+          state={state(neon(), { recheck })}
+        />
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: 'Run it for me' }))
+      await waitFor(() => expect(recheck).toHaveBeenCalledTimes(1))
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/configure/targets/orders/prerequisites/run',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ statement: CREATE }),
+        })
+      )
+      expect(screen.queryByRole('alert')).toBeNull()
+    })
+
+    it("shows the database's refusal and keeps the manual steps", async () => {
+      const recheck = vi.fn(async () => undefined)
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({
+          ok: false,
+          status: 409,
+          json: async () => ({
+            detail:
+              'The database refused it: permission denied to create extension',
+          }),
+        }))
+      )
+      renderWithClient(
+        <PrerequisitesChecker
+          target="orders"
+          state={state(neon(), { recheck })}
+        />
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: 'Run it for me' }))
+      expect((await screen.findByRole('alert')).textContent).toBe(
+        'The database refused it: permission denied to create extension'
+      )
+      expect(recheck).not.toHaveBeenCalled()
+      expect(hasSql(CREATE)).toBe(true)
+      expect(
+        screen.getByText('In the Neon console, open SQL Editor.')
+      ).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy()
+    })
+
+    it('leaves a fix that needs a restart to the user', () => {
+      renderWithClient(
+        <PrerequisitesChecker target="orders" state={state(neon(true))} />
+      )
+      expect(hasSql(CREATE)).toBe(true)
+      expect(screen.queryByRole('button', { name: 'Run it for me' })).toBeNull()
+    })
+
+    it('runs nothing on a database that is not on Neon', () => {
+      // On RDS the same fix can need a parameter group and a reboot.
+      renderWithClient(
+        <PrerequisitesChecker
+          target="orders"
+          state={state(neon(false, 'rds'))}
+        />
+      )
+      expect(hasSql(CREATE)).toBe(true)
+      expect(screen.queryByRole('button', { name: 'Run it for me' })).toBeNull()
+    })
+  })
 })

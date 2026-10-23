@@ -336,6 +336,9 @@ class TelemetryManager:
                 try:
                     posthog.api_key = self.POSTHOG_API_KEY
                     posthog.host = self.POSTHOG_HOST
+                    # RDST runs on the user's computer, so the address PostHog sees is
+                    # theirs: let it add where they are (city and country only).
+                    posthog.disable_geoip = False
                 except Exception:
                     pass
 
@@ -641,7 +644,7 @@ class TelemetryManager:
         if delivered is not None:
             posthog = posthog.Client(
                 self.POSTHOG_API_KEY, host=self.POSTHOG_HOST, sync_mode=True,
-                max_retries=0, timeout=10,
+                max_retries=0, timeout=10, disable_geoip=False,
             )
 
         try:
@@ -1083,10 +1086,12 @@ class TelemetryManager:
         module = _get_posthog()
         if sync:
             return module.Client(key, host=self.POSTHOG_HOST, sync_mode=True,
-                                 max_retries=0, timeout=10)
+                                 max_retries=0, timeout=10, disable_geoip=False)
         with self._identity_lock:
             if getattr(self, "_preview_client", None) is None:
-                self._preview_client = module.Client(key, host=self.POSTHOG_HOST)
+                self._preview_client = module.Client(
+                    key, host=self.POSTHOG_HOST, disable_geoip=False
+                )
             return self._preview_client
 
     def _enqueue_posthog_send(self, send: Callable[[bool], None]) -> None:

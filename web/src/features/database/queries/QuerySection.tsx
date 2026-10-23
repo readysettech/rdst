@@ -71,6 +71,8 @@ export interface QuerySectionProps {
   scanAt?: number | null
   /** Queries seen so far on a first run, from the page meta; the rest are on their way. */
   seenTotal?: number
+  /** Statements left out as the platform's own, to say why an empty list is empty. */
+  systemTotal?: number
   /** The Status, Tables and search filters, from the URL. */
   filters: ListFilters
   onFiltersChange: (patch: Partial<ListFilters>) => void
@@ -422,6 +424,7 @@ export function QuerySection({
   mode,
   scanAt = null,
   seenTotal,
+  systemTotal = 0,
   filters,
   onFiltersChange,
   onAnalyzeQuery,
@@ -631,8 +634,15 @@ export function QuerySection({
           <Skeleton className="h-16 w-full rounded-panel" />
         </div>
       ) : rows && rows.length === 0 ? (
-        <Text as="p" level="caption" className="mt-3.5 text-content-layout-3">
-          No queries recorded yet.
+        <Text
+          as="p"
+          level="caption"
+          className="mt-3.5 text-content-layout-3"
+          data-testid="queries-empty"
+        >
+          {systemTotal > 0
+            ? `No queries from your app yet. RDST leaves out the ${systemTotal} statements the database's own services ran, like Supabase's Auth and Storage, and its own checks. Your app's queries show here once it runs them.`
+            : 'No queries recorded yet.'}
         </Text>
       ) : filtering && shown.length === 0 ? (
         <div className="mt-3.5 flex items-center gap-3">

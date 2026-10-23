@@ -202,7 +202,10 @@ class EnvRequirementsService:
         return sorted(names)
 
     def get_required_names_for_restore(self) -> List[str]:
-        return sorted(set(self.get_allowed_secret_names() + SESSION_SECRET_NAMES))
+        """What startup reads from the keyring. Database passwords aren't among them: each is
+        read when its database is used, so starting RDST or adding one database never reads
+        (or, on a Mac, asks about) another's."""
+        return sorted(set(self.ANTHROPIC_ACCEPTED_NAMES) | set(SESSION_SECRET_NAMES))
 
     def get_clearable_secret_names(self) -> List[str]:
         """Include retired credentials when explicitly clearing local state."""

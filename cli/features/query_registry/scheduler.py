@@ -55,6 +55,9 @@ MAX_DUTY_CYCLE = 0.05
 # Per-cycle budget upper bound: the 30s statement timeout plus the 120s text
 # fetch budget cap; a cycle cancelled at the deadline is a failed tick.
 COLLECTION_DEADLINE_SECONDS = 120
+# A wait that returns this much later than asked means the computer slept (Windows' monotonic
+# clock keeps counting through sleep); that time doesn't count toward the deadline.
+SUSPENDED_SECONDS = 30.0
 # How long a collection aborted at its deadline gets to unwind before the tick stops waiting.
 ABORT_GRACE_SECONDS = 5.0
 # A database read left unanswered this long gets a liveness probe on a fresh connection. When the
@@ -521,12 +524,17 @@ class ObservationScheduler:
                 remaining = deadline - loop.time()
                 if remaining <= 0:
                     raise asyncio.TimeoutError()
+                # Short waits, so a sleep is measured to within a tick.
+                asked = min(remaining, TICK_SECONDS)
+                started = loop.time()
                 done, _ = await asyncio.wait(
                     {work} if probe is None else {work, probe},
-                    timeout=remaining if reported else min(remaining, TICK_SECONDS),
-                    return_when=asyncio.FIRST_COMPLETED)
+                    timeout=asked, return_when=asyncio.FIRST_COMPLETED)
                 if work in done:
                     return work.result()
+                late = loop.time() - started - asked
+                if late > SUSPENDED_SECONDS:
+                    deadline += late
                 if reported:
                     continue
                 answered = None

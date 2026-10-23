@@ -202,7 +202,7 @@ test('surfaces a semantic-layer status failure', async ({
     page.getByText('Database introspection is unavailable.', { exact: true })
   ).toBeVisible()
   await expect(
-    page.getByRole('button', { name: 'Open target settings' })
+    page.getByRole('button', { name: 'Edit connection details' })
   ).toBeVisible()
   await expect(page.getByText(/^Error: HTTP 503:/)).toHaveCount(0)
   consumeBrowserError(

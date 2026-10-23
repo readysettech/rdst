@@ -172,6 +172,45 @@ def test_logged_errors_report_the_format_string_not_the_arguments(fake):
     assert_private(fake)
 
 
+def test_warnings_rdst_recovers_from_are_degraded_not_errors(fake):
+    import sqlite3
+
+    handler = product_telemetry.AppErrorLogHandler()
+    log = logging.getLogger("features.query_registry.scheduler")
+    log.addHandler(handler)
+
+    def warn(error: BaseException) -> None:
+        try:
+            raise error
+        except BaseException:
+            log.warning("Scheduled collection failed for target %s", TARGET, exc_info=True)
+
+    try:
+        warn(sqlite3.OperationalError("database is locked"))
+        warn(TimeoutError())
+        try:
+            raise ConnectionRefusedError("refused")
+        except ConnectionRefusedError as cause:
+            try:
+                raise RuntimeError("Failed to connect to PostgreSQL") from cause
+            except RuntimeError as wrapped:
+                warn(wrapped)
+        warn(KeyError("missing"))
+        try:
+            raise TimeoutError()
+        except TimeoutError:
+            log.error("Report for %s failed", TARGET, exc_info=True)
+    finally:
+        log.removeHandler(handler)
+    degraded = fake.named("app_degraded")
+    assert [event["condition"] for event in degraded] == [
+        "storage_busy", "timed_out", "database_unreachable"]
+    # Only a bug, or anything logged as an error, is the app failing.
+    assert [event["error_class"] for event in fake.named("app_error")] == [
+        "KeyError", "TimeoutError"]
+    assert_private(fake)
+
+
 def test_quota_refusals_send_one_limit_event_a_day(fake, monkeypatch):
     from shared import account_session
 
@@ -437,3 +476,56 @@ async def test_local_identity_route_respects_opt_out_and_reports_internal_users(
     remote = Request({**request.scope, "client": ("203.0.113.1", 1234)})
     with pytest.raises(HTTPException):
         await telemetry_route.get_telemetry_identity(remote)
+
+
+def test_app_events_carry_where_the_user_is(monkeypatch, tmp_path):
+    """The app runs on the user's computer, so PostHog may look up its address's city."""
+    import types
+
+    from shared import telemetry_manager
+
+    module = types.SimpleNamespace(api_key=None, host=None, disable_geoip=True)
+    monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(telemetry_manager, "_get_posthog", lambda: module)
+    monkeypatch.setattr(telemetry_manager, "_get_sentry", lambda: None)
+    monkeypatch.setattr(telemetry_manager.TelemetryManager, "POSTHOG_API_KEY", "phc_test")
+    manager = telemetry_manager.TelemetryManager()
+    monkeypatch.setattr(manager, "is_enabled", lambda: True)
+    manager._ensure_initialized()
+    assert module.disable_geoip is False
+
+
+def test_internal_user_events_carry_where_the_user_is(monkeypatch, tmp_path):
+    """Events routed to the preview project keep the city lookup too."""
+    import types
+
+    from shared import telemetry_manager
+
+    made = []
+    module = types.SimpleNamespace(Client=lambda key, **kwargs: made.append(kwargs))
+    monkeypatch.setenv("RDST_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(telemetry_manager, "_get_posthog", lambda: module)
+    monkeypatch.setattr(telemetry_manager, "routed_posthog_key", lambda key, internal: "phc_preview")
+    manager = telemetry_manager.TelemetryManager()
+    manager._routed_client(object(), True, True)
+    manager._routed_client(object(), True, False)
+    assert [kwargs["disable_geoip"] for kwargs in made] == [False, False]
+
+
+def test_an_agent_step_carries_the_agents_version_and_how_it_went_over_the_list(monkeypatch):
+    from shared import product_telemetry
+
+    sent = []
+    monkeypatch.setattr(product_telemetry, "enabled", lambda: True)
+    monkeypatch.setattr(product_telemetry, "capture", lambda event, props: sent.append(props))
+    product_telemetry.agent_connect_step(
+        "search_finished", attempt_id="a-telemetry-1", tool="rdst_search_claude", ok=True,
+        agent_version="2.1.312", counts={"proposed": 3, "skipped": 2, "unmentioned": 1,
+                                         "names": 9})
+    product_telemetry.agent_connect_step(
+        "signin_retried", attempt_id="a-telemetry-1", tool="rdst_search_claude",
+        agent_version="not a version")
+    assert sent[0]["agent_version"] == "2.1.312"
+    assert (sent[0]["proposed"], sent[0]["skipped"], sent[0]["unmentioned"]) == (3, 2, 1)
+    assert "names" not in sent[0]
+    assert sent[1]["step"] == "signin_retried" and "agent_version" not in sent[1]

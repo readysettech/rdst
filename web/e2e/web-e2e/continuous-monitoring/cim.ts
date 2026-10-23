@@ -57,8 +57,20 @@ export async function ok<T>(response: Promise<APIResponse>): Promise<T> {
 }
 
 export const hook = {
-  locks: (request: APIRequestContext, waiters: number) =>
-    ok(request.post(`${hooks}/locks/${target}`, { data: { waiters } })),
+  // The hook releases any sessions it started before starting new ones, so a connection
+  // reset on the way gets one more go.
+  locks: async (request: APIRequestContext, waiters: number) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await ok(
+          request.post(`${hooks}/locks/${target}`, { data: { waiters } })
+        )
+      } catch (error) {
+        if (attempt || !/ECONNRESET|socket hang up/.test(String(error)))
+          throw error
+      }
+    }
+  },
   releaseLocks: (request: APIRequestContext) =>
     ok(request.delete(`${hooks}/locks/${target}`)),
   spill: (request: APIRequestContext, seconds: number) =>

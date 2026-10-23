@@ -5,8 +5,8 @@
 // "Finish later". A database a coding agent just added lands here too, and the dialog
 // follows the agent's progress until monitoring is on. The first turn-on is always the
 // user's: when the agent asks for it, the dialog says it's their turn and waits.
-// Monitoring's AI runs through a Readyset account, so a signed-out user is asked to sign
-// in right here, and turning on without AI stays possible but discouraged.
+// Monitoring's AI runs through a Readyset account, so a signed-out user signs up or in right
+// here before monitoring turns on.
 import { Alert } from '@rs/ui-new/alert'
 import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
 import { Button } from '@rs/ui-new/button'
@@ -52,6 +52,8 @@ import { DialogShell } from '../../../components/DialogShell'
 import { GetStartedStrip } from '../../../components/GetStarted'
 import { useSystemStatus } from '../../../lib/useSystemStatus'
 import { StatsBlocked } from '../../prerequisites/StatsBlocked'
+import { AgentFix } from './AgentFix'
+import { ConnectionProblem } from './ConnectionProblem'
 import { SettingRow } from './SettingRow'
 
 /** Checks that are query statistics themselves: failing, monitoring has nothing to read. */
@@ -153,7 +155,7 @@ export function EnableMonitoringDialog({
   const [automatic, setAutomatic] = useState(true)
   const [measure, setMeasure] = useState(true)
   const [signInOpen, setSignInOpen] = useState(false)
-  // Set by "Sign up or sign in": monitoring turns on once the sign-in finishes.
+  // Set by "Get started with Readyset": monitoring turns on once the sign-in finishes.
   const turnOnAfterSignIn = useRef(false)
   const initialized = useRef(false)
   const saved = settings.data
@@ -330,23 +332,8 @@ export function EnableMonitoringDialog({
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
               variant="primary"
-              modifier="ghost"
-              size="small"
-              label="Turn on without AI"
-              loading={update.isPending && !turnOnAfterSignIn.current}
-              disabled={Boolean(unavailable) || !settings.data || !ready}
-              onClick={() => {
-                trackEvent('monitoring_signin_gate_choice', {
-                  choice: 'without_ai',
-                })
-                turnOn()
-              }}
-              data-testid="monitoring-without-ai"
-            />
-            <Button
-              variant="primary"
               modifier="solid"
-              label="Sign up or sign in"
+              label="Get started with Readyset"
               loading={update.isPending && turnOnAfterSignIn.current}
               disabled={Boolean(unavailable) || !settings.data || !ready}
               onClick={() => {
@@ -389,7 +376,7 @@ export function EnableMonitoringDialog({
               className="block text-content-layout-1"
             >
               Your turn: read and click{' '}
-              {gated ? 'Sign up or sign in' : 'Turn on monitoring'}
+              {gated ? 'Get started with Readyset' : 'Turn on monitoring'}
             </Text>
             <Text
               as="span"
@@ -421,17 +408,12 @@ export function EnableMonitoringDialog({
           />
           <div className="min-w-0">
             <Text as="p" level="label-medium" className="text-content-layout-1">
-              Turning on monitoring needs AI, which is free with a Readyset
-              account.
+              Monitoring runs on a free Readyset account.
             </Text>
             <Text as="p" level="caption" className="mt-1 text-content-layout-2">
-              AI finds what's slowing each query, works out the indexes worth
-              adding and writes your nightly report. Sign up or sign in with
-              Google or email, and monitoring turns on right after.
-            </Text>
-            <Text as="p" level="caption" className="mt-2 text-content-layout-3">
-              Without AI, RDST only charts query stats and alerts on connection
-              problems. Deep analysis, Actions and nightly reports don't run.
+              Its AI finds what's slowing each query, works out the indexes
+              worth adding and writes your nightly report. Sign up with Google
+              or email, and monitoring turns on right after.
             </Text>
           </div>
         </section>
@@ -445,13 +427,25 @@ export function EnableMonitoringDialog({
           }
         />
       )}
-      <PrerequisitesChecker
-        target={target}
-        state={prerequisites}
-        layout="panel"
-        celebrate={false}
-        recheckButton={phase !== 'blocked'}
-      />
+      {phase === 'unreachable' && (
+        <ConnectionProblem
+          target={target}
+          state={prerequisites}
+          onCheck={() => void checkAgain()}
+        />
+      )}
+      {phase === 'blocked' && (
+        <AgentFix target={target} onFinished={() => void checkAgain()} />
+      )}
+      {phase !== 'unreachable' && (
+        <PrerequisitesChecker
+          target={target}
+          state={prerequisites}
+          layout="panel"
+          celebrate={false}
+          recheckButton={phase !== 'blocked'}
+        />
+      )}
       <Text as="p" level="body-small" className="mt-4 text-content-layout-2">
         Reads query statistics every minute and files what needs you in the
         Inbox. Deep analysis runs EXPLAIN on the busiest queries, or EXPLAIN
@@ -526,6 +520,7 @@ export function EnableMonitoringDialog({
       )}
       <AccountLoginDialog
         isOpen={signInOpen}
+        signUp
         source="monitoring_gate"
         onClose={() => {
           turnOnAfterSignIn.current = false

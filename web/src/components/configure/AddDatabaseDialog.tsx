@@ -29,6 +29,7 @@ import {
   newAddAttempt,
   onceForAttempt,
 } from '../../lib/addFlow'
+import type { FoundDatabase } from '../../lib/agentDiscovery'
 import {
   type AddDatabaseEntry,
   type DatabaseAddField,
@@ -255,10 +256,30 @@ const fieldsOf = (saved?: ConfigureTargetDetail): Fields =>
       }
     : EMPTY
 
+/** What a coding agent found, to start the form from. */
+export interface FormPrefill {
+  engine: string
+  host: string
+  port: string
+  database: string
+  user: string
+  name: string
+}
+
+export const prefillFrom = (found: FoundDatabase): FormPrefill => ({
+  engine: found.engine ?? 'postgresql',
+  host: found.host ?? '',
+  port: found.port ? String(found.port) : '',
+  database: found.database ?? '',
+  user: found.user ?? '',
+  name: found.name ?? '',
+})
+
 function ConnectionForm({
   onImport,
   onAgent,
   editing,
+  prefill,
   onSaved,
   attempt,
 }: {
@@ -267,6 +288,8 @@ function ConnectionForm({
   onAgent?: () => void
   /** The saved database being edited; adding when absent. */
   editing?: ConfigureTargetDetail
+  /** A found database to start from, password left for the user. */
+  prefill?: FormPrefill | null
   onSaved?: (name: string) => void
   /** The dialog's add attempt, for the funnel it reports; set while adding. */
   attempt?: AddAttempt
@@ -277,11 +300,14 @@ function ConnectionForm({
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [url, setUrl] = useState('')
-  const [fields, setFields] = useState<Fields>(() => fieldsOf(editing))
-  const [name, setName] = useState(editing?.name ?? '')
-  const [advanced, setAdvanced] = useState<Advanced>(() =>
-    advancedFrom(editing)
+  const [fields, setFields] = useState<Fields>(() =>
+    prefill ? { ...EMPTY, ...prefill } : fieldsOf(editing)
   )
+  const [name, setName] = useState(editing?.name ?? prefill?.name ?? '')
+  const [advanced, setAdvanced] = useState<Advanced>(() => ({
+    ...advancedFrom(editing),
+    ...(prefill ? { engine: prefill.engine } : {}),
+  }))
   const [check, setCheck] = useState<Check | null>(null)
   const [phase, setPhase] = useState<'testing' | 'saving' | null>(null)
   const [attempted, setAttempted] = useState(false)
@@ -782,6 +808,7 @@ export function AddDatabaseDialog({
   const [step, setStep] = useState<ImportStep>('source')
   const [lastEdit, setLastEdit] = useState(edit)
   const [attempt, setAttempt] = useState(newAddAttempt)
+  const [prefill, setPrefill] = useState<FormPrefill | null>(null)
   // Adding the first database is step 2 of getting started. Held while open, so the strip
   // stays through the add that ends the step.
   const status = useSystemStatus()
@@ -794,6 +821,7 @@ export function AddDatabaseDialog({
       setImporting(importingFor(request))
       setStep('source')
       setFirstDatabase(false)
+      setPrefill(null)
     }
   }
   if (request && !edit && status.data?.targets.length === 0 && !firstDatabase)
@@ -822,7 +850,7 @@ export function AddDatabaseDialog({
   const title = editing
     ? 'Edit database'
     : importing === 'agent'
-      ? 'Connect with your coding agent'
+      ? 'Find your database'
       : importing
         ? step === 'source'
           ? `Import from ${sourceLabel(importing)}`
@@ -834,9 +862,20 @@ export function AddDatabaseDialog({
       <ModalContentContainer open={open}>
         <ModalContent
           tone="quiet"
+          // The agent view's activity and found databases read better with more room.
+          className={
+            !editing && importing === 'agent' ? 'max-w-150' : undefined
+          }
           onEscapeKeyDown={(event) => {
-            // Escape in a provider view goes back to the form, as Back does.
-            if (editing || !importing || step !== 'source') return
+            // Escape in a provider view goes back to the form, as Back does. The find view
+            // is the way in, so Escape there closes the dialog.
+            if (
+              editing ||
+              !importing ||
+              importing === 'agent' ||
+              step !== 'source'
+            )
+              return
             event.preventDefault()
             attempt.switching = true
             setImporting(null)
@@ -849,19 +888,22 @@ export function AddDatabaseDialog({
           data-testid="add-database"
         >
           <div className="flex items-center gap-2 pt-4.5 pr-14 pl-6">
-            {!editing && importing && step === 'source' && (
-              <Button
-                variant="primary"
-                modifier="ghost"
-                size="small"
-                icon="arrow-left"
-                label="Back"
-                onClick={() => {
-                  attempt.switching = true
-                  setImporting(null)
-                }}
-              />
-            )}
+            {!editing &&
+              importing &&
+              importing !== 'agent' &&
+              step === 'source' && (
+                <Button
+                  variant="primary"
+                  modifier="ghost"
+                  size="small"
+                  icon="arrow-left"
+                  label="Back"
+                  onClick={() => {
+                    attempt.switching = true
+                    setImporting(null)
+                  }}
+                />
+              )}
             <ModalTitle>{title}</ModalTitle>
           </div>
           {firstDatabase && !editing && (
@@ -879,7 +921,13 @@ export function AddDatabaseDialog({
           ) : importing === 'agent' ? (
             <AgentConnect
               attempt={attempt}
+              onSignIn={importFrom}
+              onFillIn={(found) => {
+                setPrefill(prefillFrom(found))
+                setImporting(null)
+              }}
               onAddByHand={() => {
+                setPrefill(null)
                 setImporting(null)
                 // Leaving the agent path lands on the connection string, the next way in.
                 window.setTimeout(() =>
@@ -899,11 +947,36 @@ export function AddDatabaseDialog({
               onStepChange={setStep}
             />
           ) : (
-            <ConnectionForm
-              onImport={importFrom}
-              onAgent={withAgent}
-              attempt={attempt}
-            />
+            <>
+              {prefill && (
+                // Filled in from the list: the list is one step back.
+                <Button
+                  variant="primary"
+                  modifier="ghost"
+                  size="small"
+                  icon="arrow-left"
+                  iconPosition="left"
+                  label="Back to the list"
+                  className="-ml-2 mb-2"
+                  onClick={() => {
+                    setPrefill(null)
+                    setImporting('agent')
+                  }}
+                  data-testid="form-back-to-list"
+                />
+              )}
+              <ConnectionForm
+                key={
+                  prefill
+                    ? `prefill-${prefill.host}-${prefill.database}`
+                    : 'form'
+                }
+                onImport={importFrom}
+                onAgent={withAgent}
+                prefill={prefill}
+                attempt={attempt}
+              />
+            </>
           )}
         </ModalContent>
       </ModalContentContainer>

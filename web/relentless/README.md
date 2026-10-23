@@ -228,7 +228,10 @@ The agent reaches them through `rt`:
 
 Each run writes fixtures into its directory, listed by `rt db list`:
 `targets.csv` (two good rows, one without a host, one duplicate) and
-`queries.sql` (four statements, one broken).
+`queries.sql` (four statements, one broken). Its `home/` also gets a
+stand-in Claude Code at `~/.local/bin/claude` and four projects under `~/work`
+with recent sessions, so RDST's database search runs for real; see
+`driver/fake_claude.cjs`.
 
 `--home-from DIR` on `run.ts` and `rt start` copies an earlier run's `home/`
 into the new run, keychain included, so an area can start past onboarding:

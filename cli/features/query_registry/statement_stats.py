@@ -178,6 +178,15 @@ class StatementStatsSource(abc.ABC):
 # pg_stat_statements text and never enter the Query Library.
 RDST_OBSERVE_MARKER = "/*rdst:observe*/ "
 
+# Roles that hosting platforms run their own services as (Supabase's auth, storage, realtime
+# and PostgREST's schema cache). Their statements aren't the user's workload, so their text
+# comes back marked as RDST's own and is filed as system traffic.
+PLATFORM_ROLES = ("authenticator", "dashboard_user", "pgbouncer", "supabase_admin",
+                  "supabase_auth_admin", "supabase_etl_admin", "supabase_functions_admin",
+                  "supabase_read_only_user", "supabase_realtime_admin",
+                  "supabase_replication_admin", "supabase_storage_admin")
+PLATFORM_MARKER = "/*rdst:platform*/ "
+
 PG_VERSION_SQL = RDST_OBSERVE_MARKER + "SELECT current_setting('server_version_num')::int"
 
 # Epoch material (Q9 rule 5) and captured_at in one round trip. dealloc rides along as a capacity
@@ -425,9 +434,12 @@ class PgStatStatementsSource(StatementStatsSource):
         materializes, so it saves text I/O and transfer, not the scan; in steady state the
         needs_text set is empty and this never runs.
         """
-        columns = "userid, dbid, queryid, query"
+        roles = ", ".join(f"'{role}'" for role in PLATFORM_ROLES)
+        query = (f"CASE WHEN userid IN (SELECT oid FROM pg_roles WHERE rolname IN ({roles})) "
+                 f"THEN '{PLATFORM_MARKER}' || query ELSE query END")
+        columns = f"userid, dbid, queryid, {query}"
         if server_version_num >= 140000:
-            columns = "userid, dbid, queryid, toplevel, query"
+            columns = f"userid, dbid, queryid, toplevel, {query}"
         sql = (
             f"{RDST_OBSERVE_MARKER}SELECT {columns} FROM pg_stat_statements"
             " WHERE queryid = ANY(%s) AND dbid = %s"

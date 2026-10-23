@@ -7,6 +7,7 @@ actual execution plans and performance metrics for analysis.
 
 import contextvars
 import json
+import logging
 import os
 import re
 import time
@@ -58,6 +59,7 @@ _WORKER_SETTLE_TIMEOUT_SECONDS = 1.0
 # EXPLAIN wrappers reference the user's tables and land in statement stores
 # as their own texts; the marker keeps them out of registry admission.
 _SELF_MARKER = rdst_self_marker("rdst/analyze")
+logger = logging.getLogger(__name__)
 
 
 def _mysql_analyze_sql(sql: str, version: str, timeout_ms: int | None) -> str | None:
@@ -1307,10 +1309,39 @@ def _postgres_connection(conn_params):
     with analysis_lane.connection_budget():
         try:
             conn = psycopg2.connect(**conn_params)
+            _widen_search_path(conn)
             yield conn
         finally:
             if conn:
                 conn.close()
+
+
+def _widen_search_path(conn) -> None:
+    """Resolve a captured query's unqualified names the way its app's own connection did.
+
+    Apps often run with other schemas on their search_path (Supabase's services use auth and
+    storage), so the same text can name a table this connection can't see. The connection's
+    own path comes first, so names resolve as before; every other schema follows.
+    """
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"{_SELF_MARKER}SELECT current_setting('search_path'), "
+                "array(SELECT quote_ident(nspname) FROM pg_namespace WHERE nspname NOT LIKE "
+                "'pg\\_%' AND nspname <> 'information_schema' ORDER BY nspname)")
+            current, schemas = cursor.fetchone()
+            named = {part.strip().strip('"').lower() for part in (current or "").split(",")}
+            extra = [schema for schema in schemas or []
+                     if schema.strip('"').lower() not in named]
+            if extra:
+                cursor.execute(f"{_SELF_MARKER}SET search_path TO {current}, {', '.join(extra)}")
+        conn.commit()
+    except Exception:
+        logger.debug("Couldn't widen the analysis search_path", exc_info=True)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
 
 
 _GENERIC_PLAN_STATEMENT = "rdst_generic_plan"

@@ -249,6 +249,32 @@ def test_ssh_key_discovery_scans_downloads_shallowly(tmp_rdst_home, monkeypatch)
     assert not any("ignored.pem" in option["label"] for option in options)
 
 
+def test_ssh_key_discovery_leaves_downloads_alone_on_a_mac(tmp_rdst_home, monkeypatch):
+    """macOS asks before an app reads Downloads; RDST never makes it ask."""
+    from shared import ssh_keys
+
+    home = tmp_rdst_home.parent
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir()
+    downloads = home / "Downloads"
+    downloads.mkdir()
+    (downloads / "jump.pem").write_text(
+        "-----BEGIN RSA PRIVATE KEY-----\nnot-a-real-test-key\n", encoding="utf-8")
+    monkeypatch.setattr(ssh_keys.sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "iterdir", lambda path: (_ for _ in ()).throw(
+        AssertionError(f"read {path}")) if path == downloads else iter([]))
+
+    class EmptyAgent:
+        def get_keys(self):
+            return ()
+
+        def close(self):
+            pass
+
+    options = ssh_keys.discover_ssh_auth_options("", ssh_dir=ssh_dir, agent_factory=EmptyAgent)
+    assert not any(option.get("label", "").startswith("Downloads:") for option in options)
+
+
 async def test_import_ssh_key_copies_and_sets_permissions(
     tmp_rdst_home, monkeypatch
 ):

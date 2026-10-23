@@ -44,6 +44,24 @@ export async function signInWithEmail(
   emailLabel: string
 ): Promise<Page> {
   const email = ciAddress(emailLabel)
+
+  // A preview Worker deployed moments ago can answer 404 until its route is live, and the
+  // sign-in page would show that as a browser error.
+  await expect
+    .poll(
+      async () =>
+        (
+          await page.request.get(`${keyservice}/health`).catch(() => null)
+        )?.status(),
+      {
+        timeout: 120_000,
+        intervals: [2_000],
+        // A job retried after its build finished finds the preview already torn down:
+        // only a new build deploys one.
+        message: `${keyservice} isn't answering. On a retry after the build finished, its preview Worker was torn down: rebuild the whole build instead of retrying this job.`,
+      }
+    )
+    .toBe(200)
   const requestedAt = new Date()
 
   // Signed out, the app runs up to turning on monitoring, and the sidebar's account
@@ -67,6 +85,11 @@ export async function signInWithEmail(
     expect(response.ok()).toBe(true)
     expect((await response.json()).signed_in).toBe(true)
   }).toPass({ timeout: 60_000 })
+  // The sign-in page leaves on its own once it has refreshed the account; a page opened
+  // before that would be replaced by where it goes.
+  await expect(signedInPage).not.toHaveURL(/\/account-login/, {
+    timeout: 30_000,
+  })
 
   // Make the included AI the active provider, as choosing it in Settings does.
   const provider = await signedInPage.request.post('/api/env/ai-provider', {

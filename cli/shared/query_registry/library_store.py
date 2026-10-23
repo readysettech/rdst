@@ -79,6 +79,8 @@ __all__ = [
 ]
 
 SCHEMA_VERSION = 18
+# How long opening a connection or a write waits out another writer, past busy_timeout.
+LOCK_RETRY_S = 10.0
 
 # Analyses kept per query. A re-run appends, and the oldest beyond this
 # many is dropped at insert, so the history stays bounded per query
@@ -1314,18 +1316,32 @@ class LibraryStore:
 
     # -- lifecycle ----------------------------------------------------------
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(
-            self._db_path, isolation_level=None, check_same_thread=False
-        )
-        conn.row_factory = sqlite3.Row
-        try:
-            for pragma in _connection_pragmas():
-                conn.execute(pragma)
-        except BaseException:
-            conn.close()
-            raise
-        return conn
+    def _connect(self, *, begin: bool = False) -> sqlite3.Connection:
+        """A configured connection, in a write transaction when ``begin``. Lock contention
+        past busy_timeout is retried for LOCK_RETRY_S: nothing has run yet, so it's safe."""
+        deadline = time.monotonic() + LOCK_RETRY_S
+        delay = 0.05
+        while True:
+            conn = sqlite3.connect(
+                self._db_path, isolation_level=None, check_same_thread=False
+            )
+            conn.row_factory = sqlite3.Row
+            try:
+                for pragma in _connection_pragmas():
+                    conn.execute(pragma)
+                if begin:
+                    conn.execute("BEGIN IMMEDIATE")
+                return conn
+            except sqlite3.OperationalError as exc:
+                conn.close()
+                locked = "locked" in str(exc) or "busy" in str(exc)
+                if not locked or time.monotonic() + delay > deadline:
+                    raise
+            except BaseException:
+                conn.close()
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 1.0)
 
     @_storage_guard
     def ensure_open(self) -> None:
@@ -3381,9 +3397,8 @@ class LibraryStore:
         if self._read_only_reason:
             raise RegistryReadOnlyError(self._read_only_reason)
         with self._lock:
-            conn = self._connect()
+            conn = self._connect(begin=True)
             try:
-                conn.execute("BEGIN IMMEDIATE")
                 try:
                     yield conn
                     conn.execute("COMMIT")

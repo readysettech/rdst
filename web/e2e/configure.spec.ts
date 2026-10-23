@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test'
 import {
   acceptBrowserError,
   configureTestTarget,
+  connectManually,
   continuePastSessionOnlyPassword,
   expect,
   setBackendFixtures,
@@ -42,6 +43,8 @@ test('adds, updates, defaults, and deletes a database target', async ({
   await expect(seedRow).toBeVisible()
 
   await page.getByRole('button', { name: 'Add a database' }).click()
+
+  await connectManually(page)
   const dialog = page.getByRole('dialog', { name: 'Add a database' })
   await expect(dialog.getByRole('button', { name: 'Test' })).toBeVisible()
   await expect(dialog.locator('[name="read_only"]')).toHaveCount(0)

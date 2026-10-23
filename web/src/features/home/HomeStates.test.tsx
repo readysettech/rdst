@@ -54,14 +54,18 @@ async function renderHome(path = '/') {
 }
 
 describe('HomeEmpty', () => {
-  it('pops the add-database dialog up once per session', async () => {
+  it('pops the add-database dialog up once per session, on the agent prompt', async () => {
     sessionStorage.clear()
     // The first-run tour comes first on a new install; this install has seen it.
     localStorage.setItem(scopedKey('rdst_onboarding_tour_done'), '1')
     const router = await renderHome()
 
-    expect(await screen.findByLabelText('Connection string')).toBeTruthy()
-    expect(router.state.location.search).toEqual({ add: 1 })
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Find your database',
+      })
+    ).toBeTruthy()
+    expect(router.state.location.search).toEqual({ add: 'agent' })
     expect(
       sessionStorage.getItem(scopedKey('rdst_get_started_add-database'))
     ).toBe('1')
@@ -90,9 +94,12 @@ describe('HomeEmpty', () => {
       await screen.findByRole('button', { name: 'Add a database' })
     )
 
-    expect(await screen.findByLabelText('Connection string')).toBeTruthy()
+    // It opens on finding the database; the form is one click away.
+    expect(
+      await screen.findByRole('heading', { name: 'Find your database' })
+    ).toBeTruthy()
     expect(router.state.location.pathname).toBe('/')
-    expect(router.state.location.search).toEqual({ add: 1 })
+    expect(router.state.location.search).toEqual({ add: 'agent' })
   })
 
   it('drops the request from the URL when the dialog closes', async () => {

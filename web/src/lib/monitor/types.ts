@@ -436,6 +436,8 @@ export interface MonitorQueryPage {
   total: number
   /** Every application query RDST has seen on the database, listed in the range or not. */
   seen_total?: number
+  /** Statements left out as the platform's own (auth and storage services, RDST's checks). */
+  system_total?: number
   counts: QueryCounts
   composition: CompositionSlice[]
   history: HistorySpan

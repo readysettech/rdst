@@ -826,7 +826,9 @@ async def put_settings(target: str, body: MonitorSettingsUpdate, request: Reques
             ai_monitoring = "pending" if signed_in else "signed_out"
         await asyncio.to_thread(product_telemetry.monitoring_enabled, target,
                                 monitored_count=len(_store().monitored_targets()),
-                                ai_monitoring=ai_monitoring)
+                                ai_monitoring=ai_monitoring,
+                                via="agent" if request.headers.get("x-rdst-via") == "mcp"
+                                else "app")
     if was_enabled and not values["enabled"]:
         await asyncio.to_thread(_release_monitoring_slot, target)
         await asyncio.to_thread(product_telemetry.monitoring_disabled, target,

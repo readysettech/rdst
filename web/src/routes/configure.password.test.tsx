@@ -535,7 +535,7 @@ describe('Settings row password save', () => {
     expect(opened.to).toBe('.')
     expect(opened.search({ panel: 'connections' })).toEqual({
       panel: 'connections',
-      add: 1,
+      add: 'agent',
     })
   })
 

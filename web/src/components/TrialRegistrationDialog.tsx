@@ -32,6 +32,8 @@ interface AccountLoginDialogProps {
   callbackLoginId?: string | null
   /** Where the sign-in was asked for, sent with the sign-in events. */
   source?: SigninSource
+  /** Opens as getting started: Google sign-up leads, and email is the other way. */
+  signUp?: boolean
 }
 
 // The mark on the sign-in page, so the dialog offers the same button.
@@ -93,6 +95,7 @@ export function AccountLoginDialog({
   onSuccess,
   callbackLoginId = null,
   source,
+  signUp = false,
 }: AccountLoginDialogProps) {
   const queryClient = useQueryClient()
   const emailFieldId = useId()
@@ -288,7 +291,13 @@ export function AccountLoginDialog({
     <DialogShell
       open={isOpen}
       onClose={handleClose}
-      title={complete ? 'Signed in to Readyset' : 'Sign in to Readyset'}
+      title={
+        complete
+          ? 'Signed in to Readyset'
+          : signUp
+            ? 'Get started with Readyset'
+            : 'Sign in to Readyset'
+      }
       // Radix would open with focus on the first control, which here is a
       // one-Enter trip into a third-party OAuth redirect. The email field
       // is the safe landing spot. [F-45]
@@ -318,8 +327,8 @@ export function AccountLoginDialog({
           {showProviders && (
             <Button
               variant="primary"
-              modifier="solid"
-              label="Send sign-in link"
+              modifier={signUp ? 'outline' : 'solid'}
+              label={signUp ? 'Email me a link' : 'Send sign-in link'}
               onClick={() => {
                 if (validateEmailField()) magicLinkMutation.mutate()
               }}
@@ -388,9 +397,9 @@ export function AccountLoginDialog({
           <VStack className="items-stretch gap-2.5">
             <Button
               variant="primary"
-              modifier="outline"
+              modifier={signUp ? 'solid' : 'outline'}
               fullWidth
-              label="Continue with Google"
+              label={signUp ? 'Sign up with Google' : 'Continue with Google'}
               onClick={() => googleMutation.mutate()}
               loading={googleMutation.isPending}
               disabled={pending}

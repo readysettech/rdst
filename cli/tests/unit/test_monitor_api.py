@@ -108,6 +108,10 @@ def test_query_page_filters_and_sorts_before_pagination(monkeypatch, tmp_path):
     assert [row["key"] for row in first["queries"]] == ["a"]
     second = routes.queries("db", q="needle", sort="mean_ms", limit=1, offset=1)
     assert [row["key"] for row in second["queries"]] == ["b"]
+    assert second["system_total"] == 0
+    # The platform's own statements are left out, and counted so an empty list says why.
+    store._write(lambda conn: conn.execute("INSERT INTO system_query VALUES (?,?)", ("db", "c")))
+    assert routes.queries("db", sort="mean_ms")["system_total"] == 1
 
 
 def test_idle_queries_rank_by_history_and_carry_lifetime_totals(monkeypatch, tmp_path):

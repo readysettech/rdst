@@ -119,6 +119,8 @@ def store_analysis_results(**kwargs) -> Dict[str, Any]:
             analyzed=True,
             save_intent=False,
             dialect="postgres" if engine in ("postgresql", "postgres") else None,
+            # Monitoring's queries come from the database's own statistics, whole.
+            known_complete=source == "monitor",
         )
 
         stored_analysis_id = _persist_analysis_record(stored_hash, target, kwargs)

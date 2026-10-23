@@ -291,7 +291,7 @@ export type AnalysisRerunReason =
 // plan's event table — properties are limited to enums, hashes and buckets;
 // SQL text, identifiers and connection details never belong here (session
 // replay input masking does not cover event properties).
-type RdstEventProperties = {
+export type RdstEventProperties = {
   setup_step_completed: { step: SetupGuideStep }
   setup_guide_opened: undefined
   setup_guide_dismissed: undefined
@@ -354,6 +354,154 @@ type RdstEventProperties = {
   }
   /** `attempt_id` joins the server's `agent_connect_step` events; never the code itself. */
   agent_prompt_shown: { attempt_id: string | null }
+  /**
+   * The find-your-database view. Counts and kinds only: never a path, host or name.
+   * `run_id` joins the server's `agent_connect_step` events for that scan, search or setup.
+   */
+  /** `signed_out` lists the agents that reported no sign-in, like `claude:local`. */
+  find_view_shown: {
+    agents: number
+    agent_keys: string
+    apps: string
+    signed_out: string
+  }
+  /** Run it for me on a readiness fix (Neon's CREATE EXTENSION), and how it went. */
+  prereq_fix_run: { provider: string; ok: boolean }
+  /** The way in the user chose: RDST's scan, a provider's sign-in, the paste prompt, a
+   * conversation staged in their Claude app, or the form. */
+  find_option_chosen: {
+    option:
+      | 'scan'
+      | 'search_with_agent'
+      | 'sign_in'
+      | 'paste_prompt'
+      | 'open_app'
+      | 'manual'
+    provider?: string
+    app?: string
+    /** For a scan: `auto` when RDST looked on opening, `click` when the user asked. */
+    started?: 'auto' | 'click'
+  }
+  /** RDST's own scan finished: what each method found, and which couldn't look. */
+  find_scan_finished: {
+    run_id: string
+    /** `done`, or `failed` when the scan itself broke (then `found` says nothing). */
+    state: string
+    found: number
+    /** Of those found: already in RDST, and hosted where a sign-in imports them. */
+    already_added: number
+    hosted: number
+    /** Of those found: running right now (a live container or a server answering on a
+     * port), and named in a project's files. */
+    running: number
+    from_projects: number
+    /** How many of the project folders read use at least one database. */
+    projects_with_databases: number
+    seconds: number
+    projects: number
+    docker: number
+    ports: number
+    clients: number
+    folders: number
+    failed: string
+  }
+  /** The user picked one found database. `source` says whether RDST's scan or an agent
+   * found it, and `found_by` the kinds of evidence (env, compose, docker, port...). */
+  find_database_picked: {
+    source: 'scan' | 'search'
+    provider: string
+    environment: string
+    has_secret: boolean
+    found_by: string
+  }
+  /** What the user did with the picked database. */
+  find_action: {
+    action:
+      | 'agent_setup'
+      | 'add_self'
+      | 'fill_in'
+      | 'sign_in'
+      | 'look_in_project'
+      | 'look_for_more'
+      | 'describe'
+    agent?: string
+    provider?: string
+    source: 'scan' | 'search'
+    /** For add_self: whether RDST reached the database. */
+    ok?: boolean
+  }
+  /** An agent's search through the user's projects started or ended. */
+  find_agent_search: {
+    stage: 'started' | 'finished'
+    run_id: string
+    agent: string
+    state?: string
+    found?: number
+    seconds?: number
+  }
+  /** An agent's setup of one database ended, and how far it got. */
+  find_agent_setup_finished: {
+    run_id: string
+    agent: string
+    state: string
+    reached:
+      | 'starting'
+      | 'adding'
+      | 'getting_ready'
+      | 'awaiting_user'
+      | 'monitoring'
+    seconds: number
+    tool_steps: number
+  }
+  /** The agent's conversation was opened in its desktop app. */
+  find_continue_in_app: { run_id: string; app: string; kind: string }
+  /** The agent was signed out: the user opened its sign-in, then RDST saw it signed in. */
+  find_agent_sign_in: { agent: string; via?: 'terminal' | 'app' }
+  find_agent_signed_in: { agent: string }
+  /** The user copied the paste prompt. */
+  agent_prompt_copied: { attempt_id: string | null }
+  /** The find view closed, and where the user stood: what stopped them, if anything. */
+  find_view_closed: {
+    stage:
+      | 'choosing'
+      | 'scanning'
+      | 'picking'
+      | 'agent_searching'
+      | 'setting_up'
+      | 'awaiting_user'
+      | 'setup_done'
+      | 'setup_failed'
+    found: number
+    used_agent: boolean
+    seconds_open: number
+  }
+  /** The user answered the agent's question in RDST, by one of its choices or their own
+   * words; the conversation carried on as `run_id`. */
+  agent_question_answered: {
+    run_id: string
+    agent: string
+    chose: 'option' | 'other'
+    options: number
+  }
+  /** The "Ask your agent" card on a database's page: connecting the agent to RDST, opening
+   * its app (`resumed` when it reopened the conversation that set the database up), or
+   * copying the prompt. */
+  agent_ask: {
+    action: 'connect' | 'open_app' | 'copy'
+    agent?: string
+    app?: string
+    resumed?: boolean
+  }
+  /** "Fix with Claude" (or Codex) on a database that isn't ready to monitor. */
+  agent_help: {
+    stage: 'started' | 'finished'
+    where: 'turn_on'
+    run_id: string
+    agent: string
+    state?: string
+    seconds?: number
+    tool_steps?: number
+  }
   /** `via` is how the database arrived, or `page` when opened from its page. */
   monitoring_dialog_shown: { via: DatabaseAddVia | 'page' }
   monitoring_prereq_failed: { check: string }

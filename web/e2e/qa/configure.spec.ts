@@ -10,6 +10,7 @@ import type { Page } from '@playwright/test'
 import {
   acceptBrowserError,
   configureTestTarget,
+  connectManually,
   expect,
   mainContent,
   mockConnectivityOk,
@@ -52,6 +53,7 @@ async function mockReadysetAccount(page: Page, email = 'qa@readyset.io') {
 /** Open the add-database dialog on its connection form. */
 async function openManualAddForm(page: Page) {
   await page.getByRole('button', { name: 'Add a database' }).click()
+  await connectManually(page)
   await expect(page.locator('[name="host"]')).toBeVisible()
 }
 

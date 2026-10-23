@@ -629,3 +629,23 @@ def test_mysql_table_case_restores_digest_upper_cased_tables():
     # Ambiguous or already exact names stay as written.
     assert mysql_table_case("SELECT * FROM ORDERS2", tables) == "SELECT * FROM ORDERS2"
     assert mysql_table_case("SELECT * FROM Orders2", tables) == "SELECT * FROM Orders2"
+
+
+def test_platform_service_statements_come_back_marked_as_rdst_traffic():
+    from features.query_registry.statement_stats import PLATFORM_MARKER
+    from shared.query_registry.sql_normalizer import references_user_relations
+
+    sql = PgStatStatementsSource().text_fetch_sql(["10:16384:7:t"], 150002)[0][0]
+    assert "'supabase_auth_admin'" in sql and PLATFORM_MARKER in sql
+    assert not references_user_relations(f"{PLATFORM_MARKER}SELECT * FROM users", "postgres")
+
+
+def test_catalog_query_the_parser_rejects_is_still_system_traffic():
+    from shared.query_registry.sql_normalizer import references_user_relations
+
+    sql = ("WITH RECURSIVE recurse AS (SELECT oid FROM pg_type UNION SELECT t.oid FROM recurse t "
+           "JOIN pg_type b ON t.oid = b.oid), args AS (SELECT oid FROM pg_proc, "
+           "unnest(proargnames) WITH ORDINALITY AS _ (name, idx)) SELECT * FROM args "
+           "JOIN LATERAL (SELECT 1) x ON true WHERE nspname = ANY($1")
+    assert not references_user_relations(sql, "postgres")
+    assert references_user_relations(sql.replace("FROM args", "FROM orders"), "postgres")
