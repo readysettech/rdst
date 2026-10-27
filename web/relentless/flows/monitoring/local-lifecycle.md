@@ -15,8 +15,8 @@ must collect on its own schedule and never claim AI results it cannot have.
 Start from a fresh install with no Readyset sign-in. Then:
 
 1. Add PostgreSQL. On the Database page's turn-on step, read the setup
-   checks, leave monitoring off once and confirm it stays off, then turn on
-   local monitoring.
+   checks and what it asks for, leave monitoring off once and confirm it
+   stays off, then turn on local monitoring without signing in.
 2. Run several different SELECTs with `rt db exec postgres -- SQL` and wait
    for scheduled readings: the chart and the Queries ranking should reflect
    what you ran. `rt api GET /api/monitor/targets/TARGET/health` may

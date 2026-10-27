@@ -256,6 +256,17 @@ if [[ " ${MODES} " == *" desktop "* && -z "$desktop_exec" && -z "${RELENTLESS_UI
   [[ -n "$desktop_exec" ]] || { echo "ERROR: no rdst-desktop executable in the AppImage" >&2; exit 1; }
 fi
 
+# The CI machine's AWS credentials are for its agent, not for the app or the
+# tester, and nothing in this container needs them: the app's AWS features see
+# what a new user without credentials sees.
+if ! iptables -I OUTPUT -d 169.254.169.254 -j REJECT 2>/dev/null; then
+  if command -v buildkite-agent >/dev/null 2>&1; then
+    echo "ERROR: cannot block instance metadata; the container needs NET_ADMIN and iptables" >&2
+    exit 1
+  fi
+  echo "WARNING: instance metadata is reachable from this run" >&2
+fi
+
 echo "--- Preparing the relentless UI environment"
 COREPACK_BIN="${COREPACK_BIN:-/tmp/rdst-relentless-corepack-bin}"
 mkdir -p "$COREPACK_BIN"
@@ -282,6 +293,22 @@ if [[ ! -f "${RDST_ROOT}/_version_build.py" ]]; then
 fi
 mkdir -p "${RDST_ROOT}/web_dist"
 uv sync --directory "$RDST_ROOT" --quiet
+
+# A shop application in both databases, beside the test data, with steady
+# traffic for the whole job: monitoring, analyses and plans see a busy
+# database, not only the statements the tester types.
+echo "--- Seeding the shop workload"
+shop_args=(
+  --postgres "postgresql://rdst_test:${RDST_E2E_DB_PASSWORD:-rdst_e2e_password}@${RDST_E2E_DB_HOST:-127.0.0.1}:${RDST_E2E_DB_PORT:-15432}/rdst_test"
+  --mysql "mysql://testuser:testpassword@${RDST_RELENTLESS_MYSQL_HOST:-127.0.0.1}:${RDST_RELENTLESS_MYSQL_PORT:-13307}/testdb"
+  --scale 0.5
+)
+shop_python="${UV_PROJECT_ENVIRONMENT}/bin/python"
+(cd "$RDST_ROOT" && "$shop_python" -m tests.app_sim.attached seed "${shop_args[@]}")
+(cd "$RDST_ROOT" && exec "$shop_python" -m tests.app_sim.attached run "${shop_args[@]}") \
+  >"${RUNS_DIR}/workload.log" 2>&1 &
+shop_pid=$!
+trap 'kill "$shop_pid" 2>/dev/null || true; cleanup_sandbox' EXIT
 
 AGENT_PREFIX=/tmp/rdst-relentless-agent
 if [[ "$AGENT" == pi ]]; then
@@ -333,7 +360,7 @@ for mode in $MODES; do
   mode_args=()
   [[ "$mode" == "desktop" ]] && mode_args=(--desktop-exec "$desktop_exec")
 
-  # The scripted self-test proves the driver and the real AI path before any
+  # The scripted self-test proves the driver and the real key before any
   # agent budget is spent on this mode. It is named after its job too, since
   # the report reads every job's.
   echo "--- :white_check_mark: ${mode} self-test"

@@ -2,14 +2,15 @@ FROM mcr.microsoft.com/playwright:v1.61.0-noble
 
 # The desktop app's runtime libraries (its .deb dependencies), a private
 # Secret Service for each run's keychain, a virtual display for Electron, Python
-# GObject bindings for the stand-in tray panel, and the Docker CLI for the
-# managed Readyset sandbox.
+# GObject bindings for the stand-in tray panel, the Docker CLI for the
+# managed Readyset sandbox, and iptables to keep instance metadata out of reach.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         dbus \
         docker.io \
         gir1.2-glib-2.0 \
         gnome-keyring \
+        iptables \
         libasound2t64 \
         libatspi2.0-0t64 \
         libgtk-3-0t64 \

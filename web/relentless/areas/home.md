@@ -1,8 +1,8 @@
 # Area: home
 
 Home answers, for every watched database, what needs the user, since when,
-and how the day is going, and leads a new user through getting started: sign
-in, connect a database, turn on monitoring. Test that it tells the truth at
+and how the day is going, and leads a new user from an empty install to a
+watched database. Test that it tells the truth at
 every stage and that every link opens what it names, on the right database.
 
 Start from a fresh install with the first-run guidance shown. Generate real

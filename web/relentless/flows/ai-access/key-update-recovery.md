@@ -13,8 +13,8 @@ an unchecked one.
 
 ## Mission
 
-Start from a fresh install and get past the AI gate with the real key
-(`rt fill-secret TARGET anthropic-api-key`). Then:
+Start from a fresh install and add the real key where the app first asks
+for AI (`rt fill-secret TARGET anthropic-api-key`). Then:
 
 1. In Settings, AI, use "Update key" with a key that is plainly wrong
    (`sk-ant-not-a-real-key`). What does the app check before saving, and

@@ -10,10 +10,11 @@ reloads, restarts, and turning it off. Name what you find by what the app
 shows; when a step below has no matching control in this build, cover the
 closest thing it offers and say so.
 
-Monitoring reads from the database on a timer. Generate real traffic with
-`rt db exec postgres -- SQL` (several different SELECTs, some slow, some
-repeated) and wait for scheduled readings; a reading you forced does not prove
-the schedule works. Read-only calls such as
+Monitoring reads from the database on a timer. The shop's traffic is always
+running; add statements of your own with `rt db exec postgres -- SQL`
+(several different SELECTs, some slow, some repeated) to see new work picked
+up, and wait for scheduled readings; a reading you forced does not prove the
+schedule works. Read-only calls such as
 `rt api GET /api/monitor/targets/TARGET/health` and `.../queries` can
 corroborate the screen.
 
@@ -50,8 +51,9 @@ Cover at least:
   first-run introduction.
 - AI monitoring without Readyset sign-in: the page must say what it cannot do
   rather than imply analyses it did not run. When `rt status` says mail is
-  available, sign in and check that automatic analysis starts from the
-  schedule, without a request from you.
+  available, sign in where the app asks and check that monitoring turns on
+  and automatic analysis starts from the schedule, without a request from
+  you.
 
 A personal Anthropic key alone does not turn on AI monitoring. Never seed
 monitoring data, backdate history, or call collect-now to prove the schedule.

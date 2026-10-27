@@ -12,7 +12,7 @@ Cover at least:
   options. Afterwards, check each one on screen and compare with `rt api`.
   Compare `rt status` before and after: in desktop mode note whether the
   page origin changed, and what that did to anything the page keeps in
-  `localStorage` (`rt eval 'JSON.stringify(localStorage)'`).
+  `localStorage` (`rt storage get`).
 - `rt kill-backend` while idle, while a page is loading, and while a
   streaming operation (a connection test, a schema load) is running. The UI
   should say the backend is gone rather than hang or show stale data as

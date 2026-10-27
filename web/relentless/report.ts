@@ -48,6 +48,8 @@ interface Verdict {
   dir: string
   usage?: Record<string, number> | null
   quota?: { before: Quota | null; after: Quota | null } | null
+  /** Commands the driver refused, such as a goto outside the app. */
+  refused?: { command: string; reason: string }[]
 }
 
 const verdicts: Verdict[] = existsSync(runsDir)
@@ -141,6 +143,18 @@ for (const v of verdicts.filter(
       )
     }
   } else for (const title of v.finding_titles) lines.push(`- ${title}`)
+}
+const refusals = verdicts.filter(({ refused }) => refused?.length)
+if (refusals.length > 0) {
+  lines.push('', '**Commands the driver refused**', '')
+  for (const v of refusals) {
+    const counts = new Map<string, number>()
+    for (const { command } of v.refused ?? []) {
+      counts.set(command, (counts.get(command) ?? 0) + 1)
+    }
+    const listed = [...counts].map(([command, n]) => `${command} (${n})`)
+    lines.push(`- ${v.mode} / ${v.area}: ${listed.join(', ')}`)
+  }
 }
 if (baseline && baseline.checked.length > 0) {
   lines.push(

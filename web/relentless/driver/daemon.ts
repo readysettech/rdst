@@ -26,6 +26,8 @@ const { values } = parseArgs({
     headed: { type: 'boolean', default: false },
     'home-from': { type: 'string' },
     'no-first-run-popups': { type: 'boolean', default: false },
+    'page-scripts': { type: 'boolean', default: false },
+    deadline: { type: 'string' },
   },
 })
 
@@ -235,6 +237,8 @@ server.listen(0, '127.0.0.1', async () => {
       mail: mailConfig(),
       homeFrom: values['home-from'] && resolve(values['home-from']),
       firstRunPopups: !values['no-first-run-popups'],
+      pageScripts: values['page-scripts'],
+      deadline: values.deadline ? Number(values.deadline) : undefined,
     })
     await session.launch()
     writeFileSync(

@@ -102,7 +102,11 @@ function translate(command: Command): string | null {
         return `await expect(page.getByText(${quote(flags.text)}).first()).toBeVisible()`
       if (flags.url)
         return `await page.waitForURL((url) => url.href.includes(${quote(flags.url)}))`
+      if (flags.seconds)
+        return `await page.waitForTimeout(${Number(flags.seconds) * 1000})`
       return null
+    case 'scroll':
+      return `await ${locator(command)}.scrollIntoViewIfNeeded()`
     case 'viewport':
       return `await page.setViewportSize({ width: ${Number(a0)}, height: ${Number(a1)} })`
     case 'eval':

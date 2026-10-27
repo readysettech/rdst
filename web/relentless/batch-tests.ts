@@ -20,7 +20,14 @@ import {
   patchsetCommit,
   similarity,
 } from './batch.ts'
+import { minutesLeft, waitSeconds } from './driver/budget.ts'
 import { EvidenceLog, redactIssuedTokens } from './driver/evidence.ts'
+import {
+  isDeepLink,
+  isPsqlCommand,
+  linkedFromMail,
+  opensFromApp,
+} from './driver/reach.ts'
 
 test('build specs name local packages, Buildkite builds, changes, and main', () => {
   assert.deepEqual(parseBuildSpec('main'), { kind: 'main', flavor: 'staging' })
@@ -324,4 +331,81 @@ test('the agent reads only the run directory, outside the app home', () => {
   } finally {
     rmSync(runDir, { recursive: true, force: true })
   }
+})
+
+test('the tester opens the app, its docs and the keyservice, and nothing else', () => {
+  const keyservice = 'https://keyservice-staging.readyset.io'
+  for (const [url, base] of [
+    ['rdst-app://ui/db/rdst_test', 'rdst-app://ui'],
+    ['http://127.0.0.1:47815/inbox', 'http://127.0.0.1:47815'],
+    ['https://docs.readyset.io/rdst/ask', 'rdst-app://ui'],
+    [`${keyservice}/verify?token=x`, 'rdst-app://ui'],
+  ]) {
+    assert.ok(opensFromApp(url, base, keyservice), url)
+  }
+  for (const url of [
+    'https://example.com/?data=secret',
+    'http://docs.readyset.io/',
+    'http://169.254.169.254/latest/meta-data/',
+    'http://127.0.0.1:9222/json',
+    'file:///etc/passwd',
+    'rdst-app://other/',
+  ]) {
+    assert.ok(!opensFromApp(url, 'rdst-app://ui', keyservice), url)
+  }
+  assert.ok(
+    !opensFromApp(
+      'https://keyservice-staging.readyset.io/',
+      'rdst-app://ui',
+      undefined
+    )
+  )
+})
+
+test("a browser tab reopens the sites the run's emails linked to", () => {
+  const mail = [
+    'https://abc.supabase.co/auth/v1/verify?token=t&type=magiclink',
+    'mailto:support@readyset.io',
+  ]
+  assert.ok(
+    linkedFromMail('https://abc.supabase.co/auth/v1/verify?token=u', mail)
+  )
+  for (const url of [
+    'http://abc.supabase.co/auth/v1/verify',
+    'https://evil.supabase.co/',
+    'https://abc.supabase.co.example.com/',
+    'https://readyset.io/',
+  ]) {
+    assert.ok(!linkedFromMail(url, mail), url)
+  }
+  assert.ok(!linkedFromMail('https://abc.supabase.co/', []))
+})
+
+test('a wait leaves the run time to finish before its limit', () => {
+  const now = 1_000_000
+  const minutes = (n: number) => now + n * 60_000
+  assert.equal(waitSeconds(65, undefined, now), 65)
+  assert.equal(waitSeconds(900, undefined, now), 300)
+  assert.equal(waitSeconds(300, minutes(30), now), 300)
+  // Three minutes stay for filing and rt finish.
+  assert.equal(waitSeconds(300, minutes(5), now), 120)
+  assert.equal(waitSeconds(300, minutes(2), now), 0)
+  assert.equal(minutesLeft(minutes(5.5), now), 5)
+  assert.equal(minutesLeft(minutes(-1), now), 0)
+  assert.equal(minutesLeft(undefined, now), undefined)
+})
+
+test('deep links and SQL reach only the app and the database', () => {
+  assert.ok(isDeepLink('rdst://db/rdst_test'))
+  for (const url of [
+    '--renderer-cmd-prefix=sh',
+    'https://example.com',
+    ' rdst://x',
+  ]) {
+    assert.ok(!isDeepLink(url), url)
+  }
+  assert.ok(isPsqlCommand('\\! id'))
+  assert.ok(isPsqlCommand('  \\copy t TO /tmp/x'))
+  assert.ok(!isPsqlCommand('SELECT 1; \\! id'))
+  assert.ok(!isPsqlCommand("SELECT '\\! id'"))
 })

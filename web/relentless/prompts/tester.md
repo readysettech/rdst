@@ -30,8 +30,10 @@ rt click TARGET | hover TARGET | fill TARGET TEXT | type TARGET TEXT
 rt press KEY [--target TARGET]    Enter, Escape, Tab, Control+a, ...
 rt select TARGET VALUE | check TARGET | uncheck TARGET
 rt wait --selector T [--state hidden] | --text T | --url S | --api /api/x
+rt wait --seconds N               let time pass, up to 300 seconds
+rt scroll TARGET                  scroll it into view
 rt viewport W H                   resize the window
-rt eval 'JS'                      evaluate in the page (e.g. localStorage)
+rt storage get [KEY] | set KEY VALUE | remove KEY | clear    localStorage
 rt api GET|POST|PUT|DELETE /api/... [--json BODY]   call the backend directly
 rt evidence [--kinds page_error,console,request_failed,api,stream,lifecycle]
 rt logs [--grep REGEX]            backend log tail
@@ -41,7 +43,7 @@ rt upload TARGET FILE             set a file input to a file in the run director
 rt tab list | new [PATH] | switch N | close N    browser mode: more tabs
 rt menu | menu "View > Actual Size"              desktop: the native menu
 rt tray | tray "Monitoring > Pause all"          desktop: the tray icon's menu
-rt deeplink URL                   desktop: open a URL as the OS does (rdst://...)
+rt deeplink rdst://...            desktop: open a URL as the OS does
 rt crash-renderer                 desktop: crash the page's renderer process
 rt db list                        databases and the SSH jump host to connect
 rt db exec postgres|mysql -- SQL  run SQL on the database directly
@@ -65,7 +67,10 @@ while monitoring continues; renderer `document.visibilityState` alone does
 not prove native window visibility.
 
 `rt goto` loads a URL fresh, as typing it in the address bar does: it is a
-reload, and page state held in memory is gone. To move around the way a
+reload, and page state held in memory is gone. It opens the app's own
+pages, docs.readyset.io and the run's keyservice; in a tab `rt mail open`
+opened, it also opens the sites this run's emails link to, as a person
+reopening a link from their inbox would. To move around the way a
 person does, click links and the sidebar. When you report a problem with
 leaving a page, say which way you left.
 
@@ -74,6 +79,10 @@ The environment is real and yours to disturb:
 - `rt db list` shows a PostgreSQL and a MySQL database, and an SSH jump
   host whose key is already in `~/.ssh`. Through the jump host the
   databases are `postgres:5432` and `mysql:3306`.
+- Both databases hold a small online shop next to the test data, and its
+  application runs the whole time: page reads, checkouts and background
+  jobs, several statements a second. It is the busy production app a user
+  would point RDST at; it keeps running through pauses and restarts.
 - `rt db exec` is another application using the database: create traffic
   for the app to discover or capture, or change the schema under it.
 - `rt db pause` makes a database or the jump host stop answering, as an
@@ -95,11 +104,11 @@ Honor the flow's provider choice. A hosted-AI flow signs into Readyset with
 no Anthropic key and verifies `selected_provider: readyset` and
 `anthropic_key_configured: false` through `/api/env/requirements`.
 
-The application starts the way a fresh install does: no AI provider is
-configured, so it opens on "Choose how RDST uses AI". Everything here is
-real, including the AI calls, and the keychain is a real (isolated) one.
-Connect AI the way a user would: choose "Add Anthropic key", put the key in
-the dialog's input with `rt fill-secret TARGET anthropic-api-key`, and save.
+The application starts the way a fresh install does: signed out, with no
+Anthropic key. Everything here is real, including the AI calls, and the
+keychain is a real (isolated) one. Connect AI the way a user would, through
+what the app offers for adding an Anthropic key; put the key in its input
+with `rt fill-secret TARGET anthropic-api-key`, and save.
 You never see the key; wherever it would appear, output shows
 `[REDACTED]`. Do not try to read or print it. The Readyset account option
 signs in by email: when `rt status` says mail is available, sign in the way a
@@ -114,8 +123,10 @@ Every run starts from a fresh install. Unless your area is about these steps
 themselves, get through them quickly and move on: connect AI as above, then
 add the disposable PostgreSQL from the app's add-database dialog. Adding it
 lands on the Database page offering to turn on monitoring; leave it off
-unless your area or flow needs monitoring. Still report anything broken you
-hit on the way.
+unless your area or flow needs monitoring. If turning it on asks you to sign
+in, sign in by email when mail is available and the flow needs AI
+monitoring; otherwise turn it on without signing in and say so. Still report
+anything broken you hit on the way.
 
 Some areas list leads: problems suspected from reading the code, not yet
 seen in the running app. Try to reproduce each one. File it only if you see
@@ -190,3 +201,8 @@ Call `rt finish` exactly once, at the end:
 
 The summary lists what you covered, what you could not, and the finding ids.
 If you stop without calling `rt finish`, the run counts as incomplete.
+
+The run has a time limit; `rt status` and `rt wait --seconds` report
+`minutes_left`. A run the limit stops counts as a timeout even with findings
+filed, so keep a few minutes to finish. Something on a schedule that has not
+come by then is worth a sentence in the summary, not the rest of the run.

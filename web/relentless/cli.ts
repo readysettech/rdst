@@ -40,7 +40,7 @@ const USAGE = `rt <command>
   goto PATH | reload | back | forward | kill-backend
   restart [--offline | --online]    relaunch; --offline makes the internet unreachable
   upload TARGET FILE                a file from the run directory, e.g. fixtures/targets.csv
-  deeplink URL                      desktop: a second instance opened with rdst:// URL
+  deeplink rdst://...               desktop: a second instance opened with the URL
   crash-renderer                    crash the page's renderer process
   click TARGET [--double] [--button right] | hover TARGET
   fill TARGET TEXT | type TARGET TEXT | press KEY [--target TARGET]
@@ -48,8 +48,11 @@ const USAGE = `rt <command>
   select TARGET VALUE | check TARGET | uncheck TARGET
   wait [--selector TARGET [--state visible|hidden|attached|detached]]
        [--text TEXT] [--url SUBSTRING] [--api PATH_SUBSTRING] [--timeout MS]
+  wait --seconds N                  let time pass, up to 300 seconds
+  scroll TARGET
   viewport WIDTH HEIGHT
-  eval JS_EXPRESSION
+  storage get [KEY] | storage set KEY VALUE | storage remove KEY | storage clear
+  eval JS_EXPRESSION                self-test only
   api METHOD /api/PATH [--json BODY]
   evidence [--since SEQ | --all] [--kinds console,page_error,request_failed,api,stream,lifecycle]
   logs [--last N] [--grep REGEX]

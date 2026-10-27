@@ -16,9 +16,10 @@ This flow needs mail: if `rt status` says mail is not available, record the
 flow as blocked. Start from a fresh install and add no Anthropic key. Then:
 
 1. Sign in to Readyset with a fresh address from `rt mail address`, opening
-   the link with `rt mail open ADDRESS`, and choose the included AI.
-   `rt api GET /api/env/requirements` must report `selected_provider`
-   `readyset` and no Anthropic key.
+   the link with `rt mail open ADDRESS`, and choose the included AI. The
+   backend's own account of the AI setup (the request the page makes for it,
+   from `rt evidence --kinds api`) must say the included AI is in use with no
+   Anthropic key.
 2. Connect PostgreSQL and turn on monitoring with deep analysis. Run varied
    SELECTs, some slow, and wait. Analyses must start without an "Analyze
    now" click; follow one from queued to finished and read its plan, numbers,

@@ -62,34 +62,41 @@ flowchart TD
   desk_load --> spa_boot["SPA boot: GET /api/env/requirements"]
 
   spa_boot --> shell["App shell: sidebar and page (section 3.9)"]
-  shell --> exempt{"Path is /database, /inbox, /actions, /configure or /account-login?"}
+  shell --> exempt{"Path is /, /database, /inbox, /actions, /configure or /account-login?"}
   exempt -->|"yes"| route["Route renders"]
   exempt -->|"no"| gate{"AI gate (section 3.4)"}
   gate -->|"checking"| g_check["Checking your AI setup"]
   gate -->|"error, also when the backend is down"| g_err["Could not check your AI setup: Try again"]
-  gate -->|"blocked"| g_block["Find out what's slowing your database.: Sign in, Use my own Anthropic key instead"]
+  gate -->|"blocked: signed out with no key, or a rejected or used-up key"| g_block["Set up AI: Sign in, Use my own Anthropic key instead"]
   gate -->|"ready or unverified"| route
   route -->|"render error"| root_err["Something went wrong: Back to Home, Try again"]
   route -->|"unknown path"| root_404["Page not found: Back to Home"]
   route --> pages["Home, Inbox, Actions, Ask, a database's page, Activity, Settings, Help, Readyset Platform"]
+  shell -->|"no database and the tour not seen"| tour["Welcome to RDST, four steps: Skip, Back, Next, Add a database (section 2)"]
   shell -.->|"an /api call fails or the desktop backend is not running"| down["RDST stopped. Restarting... (desktop) / RDST stopped (browser)"]
 ```
 
-The AI gate stands in for a page inside the shell; the sidebar stays usable.
-Database pages, Inbox, Actions and Settings are never gated, so local
-monitoring and database setup work before AI is set up. There is no
-no-targets lockout: pages without a database show "No database yet" with
-"Add a database".
+AI comes from a free Readyset account or from the user's own Anthropic key.
+A new install opens on Home, which is never gated, with the Get started
+steps and the first-run tour. Browser automation skips the tour unless a run
+opts in; the desktop app shows it. Signed out with no key, Ask, `/results`,
+Activity, Readyset Platform and Help show the gate as `blocked missing`. The
+AI gate stands in for a page inside the shell; the sidebar stays usable.
+Home, database pages, Inbox, Actions and Settings are never gated, so adding
+a database, the tour and local monitoring work signed out; turning on
+monitoring is where a signed-out user is asked to sign in (section 3.12).
+There is no no-targets lockout: pages without a database show "No database
+yet" with "Add a database".
 
 ## 2. How areas hand off to each other
 
 ```mermaid
 flowchart LR
-  gate["AI gate"] -->|"first-run sign-in done"| add["Add a database dialog"]
+  tour["First-run tour"] -->|"Add a database, Skip; closing saves the step to resume"| add["Add a database dialog"]
   home["Home"] -->|"Add a database"| add
   platform["Readyset Platform"] -->|"Connect a database"| add
   add -->|"Add and monitor"| enable["Database page: Monitor X"]
-  enable --> db["Database page"]
+  enable -->|"Turn on monitoring; signed out: Sign up or sign in (sign-in dialog), or Turn on without AI"| db["Database page"]
   home -->|"Open X, a database row, Can't reach X"| db
   home -->|"N need you"| inbox["Inbox"]
   home -->|"N changes to do, Fixes ready, See Applied"| actions["Actions"]
@@ -126,7 +133,7 @@ Inbox each keep their own `?db=` filter.
 ```mermaid
 flowchart TD
   openers["Sidebar Add database; Add a database on Home, Settings and empty pages; Connect a database on Platform; /onboarding"] -->|"?add=1"| dlg["Add a database: Connect a database for RDST to monitor."]
-  first_run["Fresh install Home, once per session"] -->|"auto-open"| dlg
+  first_run["Fresh install Home, once per session, unless the tour opened it"] -->|"auto-open"| dlg
   links["?add=aws, supabase, neon, digitalocean, csv; /fleet?add=X"] --> import["Provider import"]
   dlg -->|"Import from: AWS, Supabase, Neon, DigitalOcean, CSV file"| import
   dlg -->|"or connect one by hand"| form["Connection string, or Host, Port, Database, User, Password, Name"]
@@ -224,7 +231,7 @@ flowchart TD
   home["/: Home and the date"] --> phase{"Home"}
   phase -->|"loading"| h_load["Skeleton bars"]
   phase -->|"error"| h_err["Home could not load: Try again"]
-  phase -->|"no databases"| empty["Find out what's slowing your database.: 1 Sign in to Readyset (done), 2 Connect your database: Add a database, 3 Turn on monitoring"]
+  phase -->|"no databases"| empty["Find out what's slowing your database.: See how it works; 1 Connect your database: Add a database, 2 Turn on monitoring (Sign in there for free AI...)"]
   empty -->|"Add a database, or auto-open once per session"| add["?add=1 (section 3.1)"]
   phase -->|"one or more databases"| view["Status sentence, caption, day card, Today log"]
   view -->|"N need you"| inbox["The item's place, else /inbox"]
@@ -249,21 +256,22 @@ reach X since ...; no readings or alerts until it answers.", "N changes to
 do", "All quiet on X since ...", the paused line ("charts and stuck-query
 alerts running; AI checks paused since ..."), then "X: not monitored." The
 caption reads "Watching N of M databases. Last reading ... Next report at
-...". Get started on Home only reaches the "Connect your database" step; the
-add-database dialog shows getting-started progress as step 2 of 3, and turning
-on monitoring for the only database shows step 3 of 3. Once a database exists Home shows the status view, so an unmonitored single
+...". Get started has two steps, and Home only reaches the first, "Connect
+your database"; the add-database dialog shows getting-started progress as
+step 1 of 2, and turning on monitoring for the only database shows step 2 of
+2. Once a database exists Home shows the status view, so an unmonitored single
 database gets "X: not monitored." and no turn-on button on Home. `?db=`
 narrows the day card and the Today log, not the strip; it is remembered in
-localStorage `rdst_filter_db:home`. The sign-in step lives in the AI gate
-(section 3.4), not on Home.
+localStorage `rdst_filter_db:home`. Signing in happens when turning on
+monitoring (section 3.12) or from any Sign in link (section 3.4).
 
 ### 3.4 AI gate and account sign-in (ai-access)
 
 ```mermaid
 flowchart TD
-  gate_block["Gate, blocked: Find out what's slowing your database."] -->|"reason invalid"| a_inv["Anthropic rejected the saved key. Add a valid key or sign in to Readyset."]
-  gate_block -->|"reason exhausted"| a_exh["Your AI access is no longer active. Sign in to Readyset or add an Anthropic key."]
-  gate_block -->|"Sign in, or auto-open once per session on first run"| dlg["Sign in to Readyset / Sign in or sign up to get started"]
+  gate_block["Gate, blocked: Set up AI: Sign in to Readyset for the included AI, or add your own Anthropic key..."] -->|"reason invalid"| a_inv["Anthropic rejected the saved key. Add a valid key or sign in to Readyset."]
+  gate_block -->|"reason exhausted"| a_exh["Your AI access has ended. Sign in to Readyset or add an Anthropic key."]
+  gate_block -->|"Sign in"| dlg["Sign in to Readyset"]
   gate_block -->|"Use my own Anthropic key instead"| key["Update Anthropic API key"]
   key -->|"Sign in to Readyset instead"| dlg
   key -->|"empty"| k_empty["Enter at least one secret value before saving."]
@@ -278,14 +286,15 @@ flowchart TD
   oauth -->|"desktop: system browser"| poll["Polls browser-callback every 500 ms"]
   link -->|"web: dialog polls account status every 2 s"| done
   link -->|"desktop"| poll
-  poll --> done["Readyset account connected. Your included AI is ready to use.: Done"]
+  poll --> done["Signed in to Readyset: Readyset account connected. Your free AI is ready to use.: Done"]
   cb --> finishing["Finishing sign-in..."]
   finishing -->|"any callback error, or expired or used"| expired["This sign-in link has expired or was already used.: Send a new link"]
   finishing -->|"ok"| ret["Stored return path, else /"]
   done --> revalidate
   revalidate -->|"ready"| app["Page renders"]
   revalidate -->|"still blocked"| gate_block
-  done -->|"first run"| add["?add=1"]
+  monitor["Monitor X, signed out: Sign up or sign in"] --> dlg
+  done -->|"opened from Monitor X"| mon_on["Monitoring turns on with the dialog's choices (section 3.12)"]
 
   login_page["/account-login, no shell: RDST, Find slow queries. Prove the fix."] --> dlg_same["Same choices as the dialog; Back"]
   settings_ai["Settings, AI: Hosted by Readyset"] -->|"on, signed in"| use_rs["POST /api/env/ai-provider readyset: Using the included AI"]
@@ -295,9 +304,11 @@ flowchart TD
 ```
 
 Gate states, in order: `error` (the requirements query failed), `checking`,
-`blocked missing`, `ready` for a Readyset account, then the key probe:
-valid is `ready`, a provider error is `unverified` (let through with no
-badge), anything else `blocked invalid`. Only Settings' "Hosted by Readyset"
+`blocked missing` (signed out with no key), `ready` for a Readyset account,
+then the key probe: valid is `ready`, a provider error is `unverified` (let
+through with no badge), anything else `blocked invalid`. The sign-in dialog
+and `/account-login` read "A Readyset account is free and comes with AI for
+monitoring, analyses, checks and Ask." Only Settings' "Hosted by Readyset"
 switches the provider to Readyset; signing in from the gate, `/account-login`,
 banners, Platform or monitoring does not, so a gate blocked as "invalid" with
 the Anthropic provider stays blocked after sign-in. Saving a key forces the
@@ -571,8 +582,12 @@ flowchart TD
   db["/database: title is the database; Live and Report tabs; Monitoring settings gear"] -->|"no database chosen"| choose["Choose a database to monitor / No database yet.: Add a database"]
   db -->|"not monitored"| off["Turn on monitoring to see live numbers, fixes and a daily report.: Turn on monitoring"]
   off --> enable["Monitor X (panel=enable): prerequisites check, Analyze automatically, Measure real timings"]
-  enable -->|"signed out"| so["You're signed out. Without a Readyset account, RDST only charts your database and alerts on connection problems...: Turn on monitoring, Sign in to Readyset"]
-  enable -->|"Turn on monitoring"| live
+  enable -->|"signed out"| so["Turning on monitoring needs AI, which is free with a Readyset account.: Turn on without AI, Sign up or sign in"]
+  so -->|"Sign up or sign in"| so_dlg["Sign in to Readyset (section 3.4)"]
+  so_dlg -->|"signed in"| live
+  so_dlg -->|"Cancel or close"| so
+  so -->|"Turn on without AI"| live
+  enable -->|"signed in: Turn on monitoring"| live
   db -->|"panel=setup"| setup["Monitoring setup: checker, Done"]
   live["Live: Queries per second, Connections, Cache hit, Rollbacks and deadlocks; load chart Queries/s, Latency, Time spent; ranges"] --> first["First run: Waiting for queries, Building your first plan, Your first plan is ready"]
   live -->|"can't reach"| repair["Alert: Fix connection: Can't reach X: Host, Port, Database, User, Password; Check again"]
@@ -594,8 +609,16 @@ flowchart TD
 
 Monitoring runs on the backend schedule. Signed out, it charts and raises
 connection and stuck-query alerts; deep analysis and Actions need a Readyset
-sign-in, even with an Anthropic key. The enable dialog has no "Not now" and
-no local-versus-AI choice; closing it leaves monitoring off. Reports come
+sign-in, even with an Anthropic key. Signed out, the enable dialog adds
+"Turning on monitoring needs AI, which is free with a Readyset account." and
+"Without AI, RDST only charts query stats and alerts on connection problems.
+Deep analysis, Actions and nightly reports don't run."; "Sign up or sign in"
+opens the sign-in dialog and turns monitoring on, with the dialog's choices,
+once the sign-in finishes; "Turn on without AI" is the small ghost button.
+Both wait for the prerequisites check. When a coding agent asks for the
+turn-on, the dialog shows "Your turn: read and click Sign up or sign in" (or
+"Turn on monitoring" when signed in). The enable dialog has no "Not now";
+closing it leaves monitoring off. Reports come
 only from the nightly schedule; nothing in the app runs one on demand.
 Turning monitoring off keeps history. `target` on the URL selects the database
 and is stripped; `view=actions|indexes` redirects to `/actions`. Several
@@ -662,8 +685,8 @@ Redirects: `/onboarding` to `/?add=1`; `/demo` to `/platform`; `/agents` to
 
 | Gate | Source | Effect |
 |---|---|---|
-| AI access | `GET /api/env/requirements`, `POST /api/env/anthropic/validate` | On every path except `/database`, `/inbox`, `/actions`, `/configure`, `/account-login`, the page is replaced by the gate (section 3.4) |
-| Readyset sign-in | `/api/account/status`, monitor settings `ai_reason` | Deep analysis, the plan in Actions and written reports wait: "Sign in to run AI checks.", "Sign in to run the first analyses" |
+| AI access | `GET /api/env/requirements`, `POST /api/env/anthropic/validate` | On every path except `/`, `/database`, `/inbox`, `/actions`, `/configure`, `/account-login`, the page is replaced by the gate (section 3.4) |
+| Readyset sign-in | `/api/account/status`, monitor settings `ai_reason` | Turning on monitoring signed out offers "Sign up or sign in" or "Turn on without AI". Deep analysis, the plan in Actions and written reports wait: "Sign in to run AI checks.", "Sign in to run the first analyses" |
 | AI monitoring slots | `GET /api/monitor/limit` | A database beyond the account's slots monitors locally: "Make an AI slot available to turn on AI here" |
 | Query statistics | `GET /api/configure/targets/{name}/prerequisites` | "Add and monitor" refuses; "Turn on monitoring" stays disabled until the check passes |
 | Target password | `/api/status` `has_password` | Ask: "Connection needs a password"; Settings row: "Password needed" |
@@ -691,7 +714,7 @@ it, so no control is disabled.
 | Push notifications (cache) | localStorage `rdst_inbox_desktop_notifications` | kept | kept | kept |
 | Server background runs | localStorage `rdst_background_runs` | reattached | reattached | become interrupted |
 | Sign-in return path, temporary Supabase session | localStorage `rdst_login_return_to`, `rdst-account-{login_id}` | kept until sign-in finishes | kept | kept |
-| First-run popups shown, notifications banner hidden | sessionStorage `rdst_get_started_sign-in`, `rdst_get_started_add-database`, `rdst_notifications_banner_hidden` | kept | lost | kept |
+| First-run popups shown, notifications banner hidden | sessionStorage `rdst_get_started_add-database`, `rdst_notifications_banner_hidden` | kept | lost | kept |
 | Desktop zoom | Electron, per origin; window opens at 0.8 | kept | unverified | kept |
 | Tray notifications, start at login | `desktop-settings.json` | kept | kept | kept |
 | Ask answer and clarification, Inbox Muted view, AI warning Hide | memory | lost | lost | lost |
@@ -725,7 +748,9 @@ in context; this table is the checklist.
 | any | keys `g h`, `g i`, `g a`, `g d`, `?` | `/`, `/inbox`, `/actions`, `/database`, `/help#keys` |
 | any | error boundary or 404 "Back to Home" | `/` |
 | any | AI warning "Sign in to Readyset", "Set API key" | sign-in dialog, key dialog |
-| AI gate | Sign in; Use my own Anthropic key instead; first-run sign-in done | sign-in dialog; key dialog; current page `?add=1` |
+| AI gate | Sign in; Use my own Anthropic key instead | sign-in dialog; key dialog |
+| First-run tour | Add a database; Skip | current page `?add=1` |
+| Monitor X, signed out | Sign up or sign in; Turn on without AI | sign-in dialog, then monitoring on and `/database`; monitoring on and `/database` |
 | `/account-login` | Back; signed in | history back or `/`; stored return path or `/` |
 | Add dialog | Add and monitor; Add without monitoring | `/database?target=X&panel=enable`; `/database?target=X` |
 | Add dialog | import Turn on monitoring; Done | `/database?panel=enable`; `/database` |
@@ -827,7 +852,7 @@ so most of the Actions brief went untested.
 | The gate's error state blames AI setup when the backend is down |
 | `/account-login` shows "This sign-in link has expired or was already used." for any callback error |
 | Desktop browser-callback polling never times out |
-| First-run "add a database" and the sidebar's Add database do nothing while the gate shows (no dialog host mounted) |
+| The sidebar's Add database does nothing while the gate shows (no dialog host mounted) |
 | An invalid port gets the missing-fields message; the connection-string error always shows the `postgresql://` form |
 | The manual add ignores the test's write privileges; only imports show the read-only notice |
 | Generated default names skip the name rule (can start with `_`, exceed 64 characters, collide by case) |
@@ -900,8 +925,9 @@ and `web-apps/apps/rdst-desktop/src`, excluding tests and generated types;
   Sign in or add a key in Settings."), the gate's `blocked exhausted` path
   from a `trial_exhausted` source, ConfigWarning's trial "used up" and
   "running low" banners, and its `/demo`, `/audit`, `/db` exemptions.
-- The gate dialog's complete state and "Next: connect your database" (the
-  gate unmounts first); `AccountLoginDialog`'s callback branches ("Completing
+- The sign-in dialog's complete state ("Signed in to Readyset") from the
+  gate and the enable dialog, which both close it on success;
+  `AccountLoginDialog`'s callback branches ("Completing
   your Readyset sign-in...", "Start over"); the "Readyset sign-in is still
   completing. Try again." fallback; the `unverified` badge; the key dialog's
   success alert.
@@ -940,7 +966,7 @@ and `web-apps/apps/rdst-desktop/src`, excluding tests and generated types;
 | shell-navigation | legacy redirects, sidebar leaving the Database page; full nav sweep only in the QA suite | `g` shortcuts and account menu (QA only), feedback, 404 |
 | app-lifecycle | smoke load, parked bootstrap resume | backend restart and reattach |
 | desktop-shell | none in Playwright; vitest units in `rdst-desktop/src/main` | everything in 3.11 |
-| monitoring | Database page, settings pane, turn off, report, benchmark dialog, `/results` analysis (fake and live) | scheduled behavior beyond the seeded live suite |
+| monitoring | Database page, settings pane, signed-out turn-on (`monitoring-signin-gate.spec.ts`), turn off, report, benchmark dialog, `/results` analysis (fake and live) | scheduled behavior beyond the seeded live suite |
 | inbox | open, resolve, closed, links, filing and recovery (live) | notification settings, desktop push |
 
 Specs for retired or unlinked pages still run in the main suite:

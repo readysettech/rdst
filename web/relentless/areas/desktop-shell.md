@@ -12,9 +12,9 @@ Cover at least:
   (`rt viewport 900 620`) and to a very large window on every main page.
 - Zoom: Ctrl+=, Ctrl+-, Ctrl+0 (`rt press Control+Equal`, and so on), and
   the native menu's View > Zoom In, Zoom Out, and Actual Size
-  (`rt menu "View > Actual Size"`). Compare `window.devicePixelRatio`
-  (`rt eval`) after each: does every way back to actual size agree with the
-  size the app opened at?
+  (`rt menu "View > Actual Size"`). Compare the zoom `rt status` reports
+  (`device_pixel_ratio`) after each: does every way back to actual size
+  agree with the size the app opened at?
 - The rest of the native menu (`rt menu` lists it): View > Reload and Force
   Reload mid-operation, Toggle Full Screen, Window > Minimize.
 - Links to Docs, Discord, and external sites: they should open outside the

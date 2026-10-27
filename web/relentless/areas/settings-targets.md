@@ -30,7 +30,7 @@ sidebar. Cover at least:
   saving or cancelling return to the page that sent you?
 - AI: the current provider, testing and updating the key with an empty value
   and with the real key (`rt fill-secret`), and switching to the included AI
-  without an account.
+  while signed out.
 - Notifications and retained readings: each choice, its saved state after a
   restart, and whether the rest of the app follows it.
 - Clearing local data. Afterward the app should behave as a fresh install:

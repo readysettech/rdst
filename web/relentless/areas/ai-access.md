@@ -8,9 +8,14 @@ the closest thing it offers and say so.
 
 Cover at least:
 
-- A fresh install: where the app first asks about AI, both choices it
-  offers, keyboard-only use, the smallest window, and reload. What can a
-  person reach before choosing (Settings, the demo)?
+- A fresh install, signed out with no key: which pages work and which ask
+  for AI first, whether a user can tell why and what to do, every way
+  forward the app offers, keyboard-only use, the smallest window, and
+  reload.
+- Turning on monitoring signed out: signing in where the app asks should
+  turn monitoring on with the choices made, and turning it on without AI
+  should say what it leaves out. Cancel the sign-in once: does the dialog
+  come back unchanged?
 - Adding a key: empty save, whitespace, a key with surrounding spaces, an
   obviously invalid key (type it with `rt fill`, never the real one), a key
   with non-ASCII characters, then the real key with `rt fill-secret`. A bad

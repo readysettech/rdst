@@ -1,5 +1,5 @@
 {
-  "selector": "f1df8cf57fbbff56007afcc2e8808d4f122a48e6e4ee69074b7eea19198aa0b9",
+  "selector": "5327b5b9da7ded7559e4a0a205f033e2c1f0783c69b2da43ec7788015795cd45",
   "labels": "9b28e46a7c57e50c07b6a05441d6931736927eda1dbdd8ebd776d2ca888bf7b8",
   "held_out": {
     "changes": 83,
@@ -13,8 +13,8 @@
     "changes": 298,
     "recall_recommended": 0.799,
     "recall_affected": 0.901,
-    "false_alarm_minutes": 2196,
-    "area_minutes": 12014,
+    "false_alarm_minutes": 2198,
+    "area_minutes": 12009,
     "mission_minutes": 2520
   },
   "found_bugs": {

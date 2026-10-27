@@ -25,8 +25,8 @@ Connect AI and PostgreSQL first. Cover at least:
   window (`rt viewport 900 620`).
 - Account menu and sign-out, when `rt status` says mail is available: sign
   in with `rt mail address`, then sign out from the sidebar and from
-  Settings > AI. What does the gate show afterward with an Anthropic key
-  still saved?
+  Settings > Account. What does the gate show afterward with an Anthropic
+  key still saved?
 - Offline: `rt restart --offline` blocks the internet but not the local
   databases, as on a plane. The AI gate, Ask, Docs links, and feedback
   should fail in ways that say so; local pages should keep working. Then

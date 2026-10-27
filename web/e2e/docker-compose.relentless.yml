@@ -48,6 +48,9 @@ services:
       dockerfile: web-apps/apps/rdst/e2e/Dockerfile.relentless
     user: "${RDST_E2E_BROWSER_USER:-0:0}"
     working_dir: /workdir
+    # To block instance metadata; see run-relentless-ci.sh.
+    cap_add:
+      - NET_ADMIN
     environment:
       CI: "${CI:-true}"
       RDST_E2E_DB_HOST: postgres

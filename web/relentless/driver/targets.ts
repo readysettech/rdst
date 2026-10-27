@@ -9,6 +9,7 @@ import {
 import { join } from 'node:path'
 
 import { paths } from './paths.ts'
+import { isPsqlCommand } from './reach.ts'
 
 /**
  * The disposable databases and SSH jump host a run can connect RDST to, and
@@ -139,9 +140,76 @@ async function containerFor(service: Service) {
 }
 
 /**
- * SQL as the fixture's application user, or with `admin` as the database's
- * administrator, the way an operator applies a fix the app recommends. The
- * PostgreSQL fixture user already owns its database.
+ * The PostgreSQL role the tester's SQL runs as. It owns the tables, so it can
+ * index, alter and drop them, and it may tune settings, but it is not a
+ * superuser: no server programs, no server files.
+ */
+const POSTGRES_TESTER = 'relentless_tester'
+
+const POSTGRES_TESTER_SETUP = `
+SET client_min_messages = warning;
+DO $$
+DECLARE r record;
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${POSTGRES_TESTER}') THEN
+    CREATE ROLE ${POSTGRES_TESTER} LOGIN NOSUPERUSER;
+  END IF;
+  FOR r IN
+    SELECT c.oid::regclass AS name FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm')
+      AND pg_get_userbyid(c.relowner) <> '${POSTGRES_TESTER}'
+  LOOP
+    EXECUTE format('ALTER TABLE %s OWNER TO ${POSTGRES_TESTER}', r.name);
+  END LOOP;
+END $$;
+GRANT pg_read_all_stats TO ${POSTGRES_TESTER};
+GRANT CREATE, USAGE ON SCHEMA public TO ${POSTGRES_TESTER};
+GRANT EXECUTE ON FUNCTION pg_reload_conf() TO ${POSTGRES_TESTER};
+GRANT ALTER SYSTEM ON PARAMETER work_mem, maintenance_work_mem,
+  effective_cache_size, random_page_cost, effective_io_concurrency,
+  default_statistics_target, max_parallel_workers_per_gather, jit,
+  log_min_duration_statement TO ${POSTGRES_TESTER};
+`
+
+/**
+ * Hand the PostgreSQL fixture's tables to the tester role, including any a
+ * workload created before the run. Without the compose databases there is
+ * nothing to prepare, and `rt db exec` reports that itself.
+ */
+export async function prepareTesterRole() {
+  let container: string
+  try {
+    container = await containerFor('postgres')
+  } catch {
+    return
+  }
+  const { user, database } = databaseTargets().postgres
+  const result = await docker([
+    'exec',
+    container,
+    'psql',
+    '-X',
+    '-U',
+    user,
+    '-d',
+    database,
+    '-v',
+    'ON_ERROR_STOP=1',
+    '-c',
+    POSTGRES_TESTER_SETUP,
+  ])
+  if (result.code !== 0) {
+    throw new Error(`preparing ${POSTGRES_TESTER}: ${result.stderr.trim()}`)
+  }
+}
+
+/**
+ * SQL as another application would run it: on PostgreSQL as the tester role,
+ * on MySQL as the fixture's application user, or with `admin` as MySQL's
+ * administrator, the way an operator applies a fix the app recommends. Only
+ * SQL reaches the database: the command-line clients' own commands, which
+ * run a shell in the database's container, are refused or turned off.
  */
 export async function execSql(
   service: 'postgres' | 'mysql',
@@ -157,12 +225,20 @@ export async function execSql(
           password: env.RDST_RELENTLESS_MYSQL_ROOT_PASSWORD ?? 'rootpassword',
         }
       : databaseTargets()[service]
+  if (service === 'postgres' && isPsqlCommand(sql)) {
+    return {
+      code: 2,
+      stdout: '',
+      stderr: 'only SQL runs here, not psql commands',
+    }
+  }
   const command =
     service === 'postgres'
       ? [
           'psql',
+          '-X',
           '-U',
-          target.user,
+          POSTGRES_TESTER,
           '-d',
           target.database,
           '-v',
@@ -170,7 +246,14 @@ export async function execSql(
           '-c',
           sql,
         ]
-      : ['mysql', `-u${target.user}`, target.database, '-e', sql]
+      : [
+          'mysql',
+          '--skip-commands',
+          `-u${target.user}`,
+          target.database,
+          '-e',
+          sql,
+        ]
   return docker([
     'exec',
     '-e',

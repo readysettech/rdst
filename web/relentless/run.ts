@@ -209,6 +209,24 @@ function readJson<T>(file: string): T | null {
   }
 }
 
+/** Commands the driver refused: what the tester tried beyond its reach. */
+function readRefused() {
+  const file = join(runDir, 'events.jsonl')
+  if (!existsSync(file)) return []
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .flatMap((line) => {
+      try {
+        const event = JSON.parse(line)
+        return event.kind === 'lifecycle' && event.event === 'refused'
+          ? [{ command: String(event.command), reason: String(event.reason) }]
+          : []
+      } catch {
+        return []
+      }
+    })
+}
+
 function readFindings() {
   const file = join(runDir, 'findings.jsonl')
   if (!existsSync(file)) return []
@@ -625,6 +643,8 @@ async function main() {
       headed: values.headed,
       homeFrom: values['home-from'],
       noFirstRunPopups: values['no-first-run-popups'],
+      // The agent's own limit starts once the app is up, a little later.
+      deadline: Date.now() + timeoutMin * 60_000,
     })
     status = ((await call(runDir, 'status')).data ?? {}) as Record<
       string,
@@ -746,6 +766,7 @@ async function main() {
     duration_s: Math.round((Date.now() - startedAt) / 1000),
     dependencies: status.dependencies ?? null,
     orphans: cleanup?.orphans ?? null,
+    refused: readRefused(),
     run_dir: runDir,
   }
   writeFileSync(

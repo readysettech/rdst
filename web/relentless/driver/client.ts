@@ -22,6 +22,10 @@ export interface StartOptions {
   headed?: boolean
   homeFrom?: string
   noFirstRunPopups?: boolean
+  /** Allow `rt eval`: the self-test builds inputs of its own; missions never. */
+  pageScripts?: boolean
+  /** When the run's time limit ends, in epoch milliseconds. */
+  deadline?: number
 }
 
 const START_TIMEOUT_MS = 240_000
@@ -65,6 +69,8 @@ export async function startDriver(options: StartOptions): Promise<DriverFile> {
   if (options.headed) args.push('--headed')
   if (options.homeFrom) args.push('--home-from', options.homeFrom)
   if (options.noFirstRunPopups) args.push('--no-first-run-popups')
+  if (options.pageScripts) args.push('--page-scripts')
+  if (options.deadline) args.push('--deadline', String(options.deadline))
   const log = openSync(join(options.runDir, 'daemon.log'), 'a')
   const child = spawn(process.execPath, args, {
     detached: true,

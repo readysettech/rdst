@@ -14,7 +14,8 @@ import { readableFrom } from './read-guard.ts'
  * `Read(runDir/**)`. When RDST_RELENTLESS_MAX_TURNS or
  * RDST_RELENTLESS_BUDGET_USD is set, it also stops the agent after that many
  * turns, or once the models' reported cost reaches it, recording why in
- * RDST_RELENTLESS_PI_STOP_FILE.
+ * RDST_RELENTLESS_PI_STOP_FILE. A throttled request is retried like any
+ * other transient provider error.
  */
 
 const runDir = resolve(process.env.RDST_RELENTLESS_RUN_DIR ?? '.')
@@ -81,6 +82,20 @@ export default function (pi: ExtensionAPI) {
         reason: `Only existing files inside the run directory (${runDir}), outside its home/, can be read.`,
       }
     }
+  })
+
+  // Codex reports throttling of a burst of requests as a usage limit with no
+  // reset time, and the proxy answers auth_unavailable while its login cools
+  // down after a failed upstream request; pi retries neither. A real usage
+  // limit says when it ends.
+  pi.on('message_end', async ({ message }) => {
+    if (message.role !== 'assistant' || message.stopReason !== 'error') return
+    const error = message.errorMessage ?? ''
+    const throttled =
+      error.startsWith('auth_unavailable') ||
+      (error.includes('usage limit') && !error.includes('Try again'))
+    if (!throttled) return
+    return { message: { ...message, errorMessage: `rate limit: ${error}` } }
   })
 
   let turns = 0

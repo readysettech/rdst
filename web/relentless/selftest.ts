@@ -1,4 +1,4 @@
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 
@@ -8,12 +8,14 @@ import { paths } from './driver/paths.ts'
 import type { CommandInput } from './driver/session.ts'
 
 /**
- * Scripted proof that the driver works end to end, with no agent and no
- * fakes: pass the AI gate with a real Anthropic key, connect a live Postgres
- * target through the add dialog, get an answer from Ask, then reload, restart,
- * crash the backend, recover, and stop with no surviving processes. Product
- * behavior the script observes but does not gate on is reported under
- * `probes`.
+ * Scripted proof that the driver and what CI gives the agents work, with no
+ * agent and no fakes: the app starts, snapshots, clicks, typing and secret
+ * fill reach the page, the real Anthropic key is accepted by Anthropic, both
+ * databases and the jump host answer, and the app survives reloads,
+ * restarts, crashes and a killed backend, then stops with no surviving
+ * processes. It walks no product screen: how the app behaves is for the
+ * missions to judge, so a product change cannot hold them back. What it sees
+ * of the product on the way is reported under `probes`.
  */
 const { values } = parseArgs({
   options: {
@@ -27,20 +29,15 @@ const mode = values.mode as Mode
 const runDir = resolve(
   values['run-dir'] ?? join(paths.runsDir, `selftest-${mode}-${Date.now()}`)
 )
-const db = {
-  host: process.env.RDST_E2E_DB_HOST ?? '127.0.0.1',
-  port: process.env.RDST_E2E_DB_PORT ?? '15432',
-  database: 'rdst_test',
-  user: 'rdst_test',
-  password: process.env.RDST_E2E_DB_PASSWORD ?? 'rdst_e2e_password',
-}
-const target = 'relentless-selftest'
-if (
-  !process.env.RDST_RELENTLESS_ANTHROPIC_API_KEY &&
-  !process.env.RDST_RELENTLESS_ANTHROPIC_API_KEY_FILE
-) {
+const keyFile = process.env.RDST_RELENTLESS_ANTHROPIC_API_KEY_FILE
+const anthropicKey = (
+  keyFile
+    ? readFileSync(keyFile, 'utf8')
+    : (process.env.RDST_RELENTLESS_ANTHROPIC_API_KEY ?? '')
+).trim()
+if (!anthropicKey) {
   console.error(
-    'set RDST_RELENTLESS_ANTHROPIC_API_KEY_FILE (or RDST_RELENTLESS_ANTHROPIC_API_KEY); the self-test uses the real AI path'
+    'set RDST_RELENTLESS_ANTHROPIC_API_KEY_FILE (or RDST_RELENTLESS_ANTHROPIC_API_KEY); the agents use the real AI path'
   )
   process.exit(2)
 }
@@ -72,31 +69,8 @@ async function check(name: string, body: () => Promise<unknown>) {
   }
 }
 
-async function targetNames() {
-  const response = await rt('api', ['GET', '/api/configure/targets'])
-  return (response.json.targets as { name: string }[]).map(({ name }) => name)
-}
-
-async function aiRequirement() {
-  const response = await rt('api', ['GET', '/api/env/requirements'])
-  const requirement = (
-    response.json.requirements as { kind: string; satisfied: boolean }[]
-  ).find(({ kind }) => kind === 'anthropic_api_key')
-  return { keyring_available: response.json.keyring_available, ...requirement }
-}
-
-/** The recorded summary of the first finished stream from an endpoint. */
-async function finishedStream(path: string, timeoutMs: number) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const { events } = await rt('evidence', [], { all: true, kinds: 'stream' })
-    const stream = events.find((event: { path: string }) =>
-      event.path.startsWith(path)
-    )
-    if (stream) return stream
-    await new Promise((resolve) => setTimeout(resolve, 1_000))
-  }
-  throw new Error(`no finished ${path} stream in ${timeoutMs}ms`)
+async function backendAnswers() {
+  return (await rt('api', ['GET', '/health'])).status === 200
 }
 
 async function localValue(key: string) {
@@ -110,72 +84,60 @@ try {
     mode,
     desktopExecutable: values['desktop-exec'],
     headed: values.headed,
+    pageScripts: true,
   })
   checks.push({ name: 'driver starts the app', ok: true })
 
-  const ownKey = 'role=button[name="Use my own Anthropic key instead"]'
-  await check('a new install opens into sign-in', async () => {
-    const dialog = 'role=dialog[name="Sign in or sign up to get started"]'
-    await rt('wait', [], { selector: dialog, timeout: '30000' })
-    await rt('press', ['Escape'])
-    await rt('wait', [], { selector: dialog, state: 'hidden' })
+  try {
+    const screen: string = (await rt('snapshot', [], { 'max-chars': '20000' }))
+      .text
+    const { json } = await rt('api', ['GET', '/api/account/status'])
+    probes.first_run = {
+      dialogs: [...screen.matchAll(/dialog "([^"]+)"/g)].map(
+        ([, name]) => name
+      ),
+      signed_in: json.signed_in ?? null,
+    }
+  } catch (error) {
+    probes.first_run = String(error)
+  }
+
+  await check('snapshot returns refs', async () => {
+    const snapshot = await rt('snapshot', [], { 'max-chars': '5000' })
+    return /\[ref=e\d+\]/.test(snapshot.text)
+  })
+
+  // A scratch input of the selftest's own, so no product screen is involved.
+  await check('click, fill and fill-secret reach the page', async () => {
+    const input = '#relentless-selftest'
+    await rt('eval', [
+      // Above anything the app shows, and clickable while a modal holds the page.
+      `(() => { const input = document.createElement('input'); input.id = 'relentless-selftest'; input.style.cssText = 'position:fixed;top:0;left:0;width:200px;height:24px;z-index:2147483647;pointer-events:auto'; input.addEventListener('click', () => { input.dataset.clicked = 'yes' }); document.body.append(input) })()`,
+    ])
+    const read = async (expression: string) =>
+      (await rt('eval', [`document.querySelector('${input}').${expression}`]))
+        .value
+    await rt('click', [input])
+    await rt('fill', [input, 'typed by rt'])
+    const typed = await read('value')
+    await rt('fill-secret', [input, 'anthropic-api-key'])
+    const secretLength = await read('value.length')
+    const clicked = await read('dataset.clicked')
+    await rt('eval', [`document.querySelector('${input}').remove()`])
+    if (clicked !== 'yes') throw new Error('the click did not land')
+    if (typed !== 'typed by rt') throw new Error(`fill typed ${typed}`)
+    if (secretLength !== anthropicKey.length)
+      throw new Error('fill-secret did not type the key')
     return true
   })
 
-  await check('the AI gate accepts a real Anthropic key', async () => {
-    await rt('click', [ownKey])
-    const input = 'role=dialog >> input[name^="rdst-secret-"]'
-    await rt('wait', [], { selector: input })
-    await rt('fill-secret', [input, 'anthropic-api-key'])
-    await rt('click', ['role=dialog >> role=button[name="Save secrets"]'])
-    await rt('wait', [], {
-      selector: ownKey,
-      state: 'hidden',
-      timeout: '60000',
+  await check('Anthropic accepts the real key', async () => {
+    const response = await fetch('https://api.anthropic.com/v1/models', {
+      headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01' },
+      signal: AbortSignal.timeout(30_000),
     })
-    const requirement = await aiRequirement()
-    return requirement.satisfied ? requirement : false
-  })
-
-  await check('adding a database connects a live Postgres target', async () => {
-    const dialog = 'role=dialog[name="Add a database"]'
-    // The first-run pop-up opens it once the AI is set; a link opens it otherwise.
-    try {
-      await rt('wait', [], { selector: dialog, timeout: '10000' })
-    } catch {
-      await rt('goto', ['/?add=1'])
-      await rt('wait', [], { selector: dialog })
-    }
-    for (const [field, value] of Object.entries({ name: target, ...db })) {
-      await rt('fill', [`${dialog} >> [name="${field}"]`, value])
-    }
-    await rt('click', [`${dialog} >> role=button[name="Add and monitor"]`])
-    // A database monitoring cannot read yet is added with monitoring off.
-    const without = `${dialog} >> role=button[name="Add without monitoring"]`
-    try {
-      await rt('wait', [], { selector: without, timeout: '20000' })
-      await rt('click', [without])
-    } catch {}
-    await rt('wait', [], { url: '/database', timeout: '30000' })
-    return (await targetNames()).includes(target)
-  })
-
-  await check('ask answers through the real AI path', async () => {
-    await rt('goto', ['/ask'])
-    await rt('fill', [
-      'role=textbox[name="Question"]',
-      'How many titles are in title_basics?',
-    ])
-    await rt('click', ['role=button[name="Ask"]'])
-    const stream = await finishedStream('/api/ask', 180_000)
-    await rt('screenshot', [], { label: 'ask-answer' })
-    const types: string[] = stream.event_types
-    if (types.includes('result') && !types.includes('error')) {
-      return { event_types: types }
-    }
-    throw new Error(
-      `no result event: ${types.join(',')} last=${stream.last_event}`
-    )
+    if (response.ok) return true
+    throw new Error(`Anthropic answered ${response.status}`)
   })
 
   await check('SQL reaches both databases', async () => {
@@ -202,17 +164,13 @@ try {
     return true
   })
 
-  await check('snapshot returns refs', async () => {
-    const snapshot = await rt('snapshot', [], { 'max-chars': '5000' })
-    return /\[ref=e\d+\]/.test(snapshot.text)
-  })
-
   await check('screenshot is written', async () => {
     const { path } = await rt('screenshot', [], { label: 'selftest' })
     return existsSync(path)
   })
 
   await check('evidence records API traffic', async () => {
+    await backendAnswers()
     const { events } = await rt('evidence', [], { all: true, kinds: 'api' })
     return events.length > 0
   })
@@ -223,7 +181,7 @@ try {
     return (await localValue('relentless_sentinel')) === 'kept'
   })
 
-  await check('restart relaunches with persisted targets', async () => {
+  await check('restart relaunches the app', async () => {
     const restarted = await rt('restart')
     // An app scheme's origin is opaque, so compare scheme and host.
     const where = (url: string) =>
@@ -233,18 +191,12 @@ try {
       where(restarted.previous_url) !== restarted.base_url
     probes.local_storage_survives_restart =
       (await localValue('relentless_sentinel')) === 'kept'
-    probes.ai_key_survives_restart = (await aiRequirement()).satisfied === true
-    return (await targetNames()).includes(target)
+    return backendAnswers()
   })
 
   if (mode === 'desktop') {
     // The tray menu as a desktop panel reads it; observed, not gated.
     probes.tray_menu = (await rt('tray')).tray
-
-    await check('rt api reaches the sidecar directly', async () => {
-      const { status } = await rt('api', ['GET', '/health'])
-      return status === 200
-    })
 
     await check('a crashed renderer comes back', async () => {
       await rt('crash-renderer')
@@ -253,7 +205,7 @@ try {
         const { windows } = await rt('status')
         if (windows?.some((w: { crashed: boolean }) => !w.crashed)) {
           await rt('restart')
-          return (await targetNames()).includes(target)
+          return backendAnswers()
         }
         await new Promise((resolve) => setTimeout(resolve, 1_000))
       }
@@ -265,7 +217,7 @@ try {
     const killed = await rt('kill-backend')
     if (killed.killed.length === 0) return false
     await rt('restart')
-    return (await targetNames()).includes(target)
+    return backendAnswers()
   })
 } catch (error) {
   checks.push({

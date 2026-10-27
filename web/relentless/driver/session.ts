@@ -21,8 +21,10 @@ import {
   findMarkedProcesses,
   type Launch,
   type Mode,
+  type PrepareContext,
   RUN_MARKER,
 } from './app.ts'
+import { MAX_WAIT_SECONDS, minutesLeft, waitSeconds } from './budget.ts'
 import {
   type EvidenceKind,
   EvidenceLog,
@@ -31,9 +33,16 @@ import {
 import { type SecretService, startSecretService } from './keyring.ts'
 import { type MailConfig, waitForMail } from './mail.ts'
 import {
+  GOTO_HOSTS,
+  isDeepLink,
+  linkedFromMail,
+  opensFromApp,
+} from './reach.ts'
+import {
   databaseTargets,
   execSql,
   installBastionKey,
+  prepareTesterRole,
   type Service,
   setPaused,
   writeFixtures,
@@ -61,6 +70,10 @@ export interface SessionOptions {
   homeFrom?: string
   /** Show the first-run pop-ups the app holds back under automation. */
   firstRunPopups?: boolean
+  /** Allow `rt eval`, arbitrary script in the page; only the self-test does. */
+  pageScripts?: boolean
+  /** When the run's time limit ends, in epoch milliseconds. */
+  deadline?: number
 }
 
 export const SECRET_NAMES = ['anthropic-api-key'] as const
@@ -128,6 +141,8 @@ export class Session {
   // Stands in for the person's own browser when a desktop run opens a link
   // from an email, as the desktop app's sign-in expects.
   private system: { browser: Browser; context: BrowserContext } | null = null
+  // Every link this run's emails held, read or opened.
+  private readonly mailLinks = new Set<string>()
   private readonly paused = new Set<Service>()
   private resolvedTarget: string | null = null
   private lastSnapshot = ''
@@ -190,6 +205,7 @@ export class Session {
     mkdirSync(home, { recursive: true })
     if (options.homeFrom) cpSync(options.homeFrom, home, { recursive: true })
     writeFixtures(join(options.runDir, 'fixtures'))
+    await prepareTesterRole()
     const secretService = await startSecretService(
       {
         ...process.env,
@@ -244,7 +260,7 @@ export class Session {
   }
 
   async launch() {
-    const launch = await this.app.launch(async (context) => {
+    const prepare: PrepareContext = async (context) => {
       await this.evidence.attach(context)
       if (this.options.firstRunPopups) {
         await context.addInitScript(() => {
@@ -253,7 +269,22 @@ export class Session {
           ).__RDST_FIRST_RUN_POPUPS__ = true
         })
       }
-    })
+    }
+    let launch: Launch
+    try {
+      launch = await this.app.launch(prepare)
+    } catch (error) {
+      // A launch can lose its DevTools connection before the window opens. A
+      // second attempt tells that apart from an app that cannot start, and the
+      // evidence keeps the first failure.
+      this.evidence.record('lifecycle', {
+        event: 'launch_failed',
+        error: String(error).split('\n')[0],
+      })
+      await this.app.shutdown()
+      await new Promise((resolve) => setTimeout(resolve, 2_000))
+      launch = await this.app.launch(prepare)
+    }
     this.launchCount += 1
     this.activePage = null
     if (this.tracing) {
@@ -320,7 +351,17 @@ export class Session {
           url: this.current?.page.url(),
           base_url: this.current?.baseUrl,
           launches: this.launchCount,
-          windows: await this.app.windows?.(),
+          minutes_left: minutesLeft(this.options.deadline),
+          // The page's zoom: 1 at actual size on the run's display.
+          device_pixel_ratio: await this.current?.page
+            .evaluate(() => window.devicePixelRatio)
+            .catch(() => undefined),
+          // An app quit from its own menu or tray leaves the driver running.
+          windows: await this.app
+            .windows?.()
+            .catch(
+              () => 'the app is not running; rt restart launches it again'
+            ),
           evidence_cursor: this.evidence.cursor,
           evidence_counts: this.evidence.counts(),
           findings: this.findingCount,
@@ -384,6 +425,7 @@ export class Session {
         const url = /^https?:/.test(target)
           ? target
           : new URL(target, this.current?.baseUrl).toString()
+        this.mustOpen('goto', url)
         await page().goto(url, { timeout })
         return this.outcome(before)
       }
@@ -459,9 +501,22 @@ export class Session {
       case 'wait':
         return this.wait(input, before, timeout)
       case 'eval': {
+        if (!this.options.pageScripts) {
+          this.refuse(
+            'eval',
+            'eval runs only in the self-test; use rt storage, rt scroll, or rt wait --seconds'
+          )
+        }
         const value = await page().evaluate(required(input, 0, 'expression'))
         return { value }
       }
+      case 'storage':
+        return this.storage(input)
+      case 'scroll':
+        await (
+          await this.target(required(input, 0, 'target'))
+        ).scrollIntoViewIfNeeded({ timeout })
+        return this.outcome(before)
       case 'api':
         return this.api(input)
       case 'evidence': {
@@ -515,6 +570,9 @@ export class Session {
         if (!this.app.deepLink)
           throw new CommandError('deeplink is desktop-only')
         const url = required(input, 0, 'url')
+        if (!isDeepLink(url)) {
+          this.refuse('deeplink', 'deeplink opens rdst:// URLs only')
+        }
         const result = await this.app.deepLink(url)
         this.evidence.record('lifecycle', {
           event: 'deep_link',
@@ -571,12 +629,31 @@ export class Session {
   }
 
   private async wait(input: CommandInput, before: number, timeout: number) {
+    const seconds = flag(input, 'seconds')
+    if (seconds !== undefined) {
+      const requested = Number(seconds)
+      if (!(requested >= 0)) throw new CommandError('--seconds takes a number')
+      const { deadline } = this.options
+      const waited = waitSeconds(requested, deadline)
+      await new Promise((resolve) => setTimeout(resolve, waited * 1000))
+      return this.outcome(before, {
+        waited_seconds: waited,
+        minutes_left: minutesLeft(deadline),
+        ...(waited < Math.min(requested, MAX_WAIT_SECONDS)
+          ? {
+              note: 'the run is nearly out of time: file what you found and rt finish',
+            }
+          : {}),
+      })
+    }
     const selector = flag(input, 'selector')
     const text = flag(input, 'text')
     const url = flag(input, 'url')
     const api = flag(input, 'api')
     if (!selector && !text && !url && !api) {
-      throw new CommandError('wait needs --selector, --text, --url, or --api')
+      throw new CommandError(
+        'wait needs --seconds, --selector, --text, --url, or --api'
+      )
     }
     const page = this.page
     if (selector) {
@@ -696,6 +773,67 @@ export class Session {
     }))
   }
 
+  /** localStorage of the app's page, read and written as the app does. */
+  private async storage(input: CommandInput) {
+    const action = required(input, 0, 'get | set | remove | clear')
+    const key = input.pos[1]
+    if (action === 'get') {
+      const value = await this.page.evaluate(
+        (key) =>
+          key === undefined
+            ? Object.fromEntries(Object.entries(localStorage))
+            : localStorage.getItem(key),
+        key
+      )
+      return { value }
+    }
+    if (action === 'set') {
+      const value = required(input, 2, 'value')
+      await this.page.evaluate(
+        ([key, value]) => localStorage.setItem(key, value),
+        [required(input, 1, 'key'), value] as const
+      )
+      return { set: key }
+    }
+    if (action === 'remove') {
+      await this.page.evaluate(
+        (key) => localStorage.removeItem(key),
+        required(input, 1, 'key')
+      )
+      return { removed: key }
+    }
+    if (action === 'clear') {
+      await this.page.evaluate(() => localStorage.clear())
+      return { cleared: true }
+    }
+    throw new CommandError(
+      'storage get [KEY] | set KEY VALUE | remove KEY | clear'
+    )
+  }
+
+  private mustOpen(command: string, url: string) {
+    const keyservice =
+      'keyserviceUrl' in this.options.mail
+        ? this.options.mail.keyserviceUrl
+        : undefined
+    if (opensFromApp(url, this.current?.baseUrl, keyservice)) return
+    // The desktop window runs with the app's privileges; a browser tab does not.
+    const appWindow =
+      this.options.mode !== 'browser' &&
+      (this.current?.context.pages().includes(this.page) ?? false)
+    if (!appWindow && linkedFromMail(url, this.mailLinks)) return
+    this.refuse(
+      command,
+      `${command} opens the app's own pages, ${GOTO_HOSTS.join(', ')}, the run's keyservice and, outside the desktop window, the sites this run's emails link to`
+    )
+  }
+
+  /** A command the tester may not run: the evidence keeps the attempt. */
+  private refuse(command: string, reason: string): never {
+    this.evidence.record('lifecycle', { event: 'refused', command, reason })
+    throw new CommandError(reason)
+  }
+
   private async tab(input: CommandInput, before: number) {
     const action = input.pos[0] ?? 'list'
     if (action === 'list') return { tabs: this.describeTabs() }
@@ -705,6 +843,7 @@ export class Session {
       const url = /^https?:/.test(path)
         ? path
         : new URL(path, this.current.baseUrl).toString()
+      this.mustOpen('tab new', url)
       if (this.options.mode !== 'browser') {
         throw new CommandError(
           'the desktop app has one window; tab new is browser-mode only'
@@ -810,6 +949,7 @@ export class Session {
       contains: flag(input, 'contains'),
       timeoutMs: timeoutOf(input, MAIL_TIMEOUT_MS),
     })
+    for (const link of message.links) this.mailLinks.add(link)
     if (action === 'read') return message
     if (action !== 'open')
       throw new CommandError(
