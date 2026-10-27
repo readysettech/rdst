@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 
 import anthropic
-import httpx
+import httpx2
 import pytest
 
 from features.monitor import database_limit
@@ -42,7 +42,7 @@ def test_monitor_transport_routing(monkeypatch, source, preference, provider):
     def direct(request):
         payload = json.loads(request.content)
         calls.append((operation[0], str(request.url), dict(request.headers), payload))
-        return httpx.Response(200, json={
+        return httpx2.Response(200, json={
             "id": "msg-test", "type": "message", "role": "assistant",
             "model": payload["model"], "content": [{"type": "text", "text": "answer"}],
             "stop_reason": "end_turn", "usage": {"input_tokens": 17, "output_tokens": 5},
@@ -50,7 +50,7 @@ def test_monitor_transport_routing(monkeypatch, source, preference, provider):
 
     sdk = anthropic.Anthropic
     monkeypatch.setattr(anthropic, "Anthropic", lambda **kw:
-                        sdk(**kw, http_client=httpx.Client(transport=httpx.MockTransport(direct))))
+                        sdk(**kw, http_client=httpx2.Client(transport=httpx2.MockTransport(direct))))
 
     class ServiceTransport:
         def post(self, url, *, json, headers, timeout):
@@ -90,8 +90,7 @@ def test_monitor_transport_routing(monkeypatch, source, preference, provider):
         assert payload["max_tokens"] == (32_768 if provider == "claude" else 123)
         if provider == "claude":
             assert url == "https://api.anthropic.com/v1/messages"
-            assert headers["x-api-key"] == f"test-own-{source}"
-            assert "authorization" not in headers
+            assert headers["authorization"] == f"Bearer test-own-{source}"
             assert "x-rdst-monitor-database" not in headers
             assert "attribution" not in payload
         else:

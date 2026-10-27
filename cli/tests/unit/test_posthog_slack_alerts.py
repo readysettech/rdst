@@ -711,7 +711,7 @@ class TestTrialServiceDisplayName:
         mock_httpx = MagicMock()
         mock_httpx.AsyncClient.return_value = MockAsyncClient()
 
-        with patch.dict("sys.modules", {"httpx": mock_httpx}):
+        with patch.dict("sys.modules", {"httpx2": mock_httpx}):
             import importlib
             import features.trial.service as ts_mod
             importlib.reload(ts_mod)

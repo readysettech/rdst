@@ -77,7 +77,7 @@ export function findSafePython({ requiredMinor, probe = probePython } = {}) {
       continue;
     }
     const [pythonMajor, pythonMinor] = probeResult.python.split(".").map(Number);
-    if (pythonMajor !== 3 || pythonMinor < 10) {
+    if (pythonMajor !== 3 || pythonMinor < 11) {
       attempted.push(`${label} (unsupported Python ${probeResult.python})`);
       continue;
     }

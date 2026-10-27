@@ -141,7 +141,7 @@ def test_bird_live_runner_uses_pinned_subscription_provider():
     ensure_node = ENSURE_NODE.read_text(encoding="utf-8")
 
     assert UV_LOCK.is_file()
-    assert "uv sync --python 3.10 --frozen --group dev --group eval" in script
+    assert "uv sync --python 3.11 --frozen --group dev --group eval" in script
     assert "--models claude-sonnet-4.6-subscription-medium" in script
     assert f'CLAUDE_CODE_VERSION="{PINNED_CLAUDE_CODE_VERSION}"' in script
     assert 'source "${SCRIPT_DIR}/ensure_node.sh"' in script

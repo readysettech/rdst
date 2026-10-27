@@ -2,14 +2,7 @@
 Database configuration type definitions shared across commands and services.
 """
 
-from typing import TypedDict
-
-try:
-    # Python 3.11+
-    from typing import NotRequired, Required
-except ImportError:
-    # Python 3.8-3.10
-    from typing_extensions import NotRequired, Required
+from typing import NotRequired, Required, TypedDict
 
 
 class TargetConfig(TypedDict):

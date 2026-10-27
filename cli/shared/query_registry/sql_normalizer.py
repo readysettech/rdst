@@ -259,6 +259,10 @@ def normalize_and_extract(sql: str, dialect: str = None) -> Tuple[str, Dict[str,
     except Exception as e:
         logger.debug(f"SQLGlot parsing failed, falling back to regex: {e}")
         return _fallback_normalize(sql)
+    # A Postgres LOCK parses as a Command whose whole body is one string literal; normalize its
+    # text so the statement keeps the locked table and mode.
+    if isinstance(tree, exp.Command) and str(tree.this).upper() == "LOCK":
+        return _fallback_normalize(sql)
 
     params = _extract_literals(tree)
     return _compat_generator(dialect).generate(tree), params

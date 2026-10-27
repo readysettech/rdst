@@ -97,7 +97,7 @@ the actual thinking-token count. The job uses RDST's shared `ensure_node.sh` hel
 install a checksum-verified Node.js toolchain when the Buildkite image has no `npm`,
 then installs the exact pinned Claude Code version into its temporary directory. A
 checked-in `uv.lock` makes `uv sync --frozen` valid on a clean checkout.
-The runner pins Python 3.10 and creates the ignored development-version and empty
+The runner pins Python 3.11 and creates the ignored development-version and empty
 `web_dist` inputs before the editable install. Release builds still generate the real
 version and frontend bundle.
 

@@ -13,10 +13,7 @@ from pathlib import Path
 
 import pytest
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python 3.10
-    import tomli as tomllib
+import tomllib
 MIGRATIONS_DIR = Path(__file__).parents[2] / "keyservice" / "migrations"
 WRANGLER_CONFIG = MIGRATIONS_DIR.parent / "wrangler.toml"
 

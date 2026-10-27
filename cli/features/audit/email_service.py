@@ -41,7 +41,7 @@ class EmailService:
         ttl_days: int,
         mode: str,
     ) -> Dict[str, Any]:
-        import httpx
+        import httpx2 as httpx
         try:
             payload: Dict[str, Any] = {"email": email}
             if html:
@@ -80,7 +80,7 @@ class EmailService:
         return {"verified": False, "timed_out": True}
 
     async def _check_status(self, email: str) -> Dict[str, Any]:
-        import httpx
+        import httpx2 as httpx
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.get(
@@ -123,7 +123,7 @@ class EmailService:
         ttl_days: int = 30,
         summary: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        import httpx
+        import httpx2 as httpx
         try:
             payload = {
                 "report_token": report_token,

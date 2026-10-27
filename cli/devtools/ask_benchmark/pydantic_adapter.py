@@ -11,6 +11,7 @@ from decimal import Decimal
 from time import perf_counter
 from typing import Any
 
+import pydantic_ai
 from anthropic import AsyncAnthropic
 from google.genai.types import HttpRetryOptions
 from openai import AsyncOpenAI
@@ -44,6 +45,9 @@ from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.usage import RunUsage
 
 from .models import ModelCallRecord, ModelSpec
+
+# The benchmark CLI owns its terminal output.
+pydantic_ai.BANNER_ENABLED = False
 
 ModelFactory = Callable[[ModelSpec], Any]
 _PROVIDER_DISPLAY_SLUGS = {
@@ -480,7 +484,10 @@ def _build_model(spec: ModelSpec):
             settings=settings,
         )
     if spec.transport == "anthropic":
-        client = AsyncAnthropic(max_retries=0)
+        # Specs set a temperature, which API version 2026-10-21 rejects.
+        client = AsyncAnthropic(
+            max_retries=0, default_headers={"anthropic-version": "2023-06-01"}
+        )
         return AnthropicModel(
             spec.model,
             provider=AnthropicProvider(anthropic_client=client),
@@ -602,10 +609,7 @@ def _configuration_fingerprint(settings: dict[str, Any]) -> str:
 
 
 def _model_error_kind(exc: Exception) -> str:
-    # asyncio.TimeoutError became an alias of the built-in TimeoutError in
-    # Python 3.11. RDST's CI still exercises Python 3.10, where they are
-    # distinct classes.
-    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+    if isinstance(exc, TimeoutError):
         return "timeout"
     if isinstance(exc, ModelHTTPError):
         if exc.status_code == 429:

@@ -87,6 +87,7 @@ class ClaudeProvider(Provider):
 
     _DEFAULT_MODEL = os.getenv("RDST_ANTHROPIC_MODEL", AnthropicModel.HAIKU_5_5.value)
     _BASE_URL = "https://api.anthropic.com"
+    # 2026-10-21 rejects sampling parameters, which models before Claude 4.7 still honor.
     _API_VERSION = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
 
     def default_model(self) -> str:
@@ -147,12 +148,15 @@ class ClaudeProvider(Provider):
             "messages": messages,
             "max_tokens": _MAX_OUTPUT_TOKENS if reasoning else request.max_tokens or 800,
         }
+        # The SDK's message methods have no sampling parameters; older models still honor them
+        # under the API version RDST sends, so they go in the raw request body.
+        sampling: dict[str, Any] = {}
         if reasoning:
             payload["output_config"] = {"effort": _REASONING_EFFORT}
         else:
-            payload["temperature"] = request.temperature
+            sampling["temperature"] = request.temperature
             if request.top_p is not None:
-                payload["top_p"] = request.top_p
+                sampling["top_p"] = request.top_p
         if system:
             payload["system"] = system
         if request.stop_sequences:
@@ -192,8 +196,8 @@ class ClaudeProvider(Provider):
                     "No markdown, no explanation, no code fences - just the JSON object."
                 )
                 payload["system"] = payload.get("system", "") + instruction
-        if extra:
-            payload["extra_body"] = extra
+        if sampling or extra:
+            payload["extra_body"] = {**sampling, **extra}
         return payload
 
     @staticmethod

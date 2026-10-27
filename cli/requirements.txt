@@ -8,8 +8,8 @@ pygments
 sqlparse
 pyyaml
 sqlglot
-anthropic==0.122.0
+anthropic==2.3.0
 botocore
 packaging>=26.0
-filelock>=3.32.2
+filelock>=4.2.1
 psutil>=7.2.2

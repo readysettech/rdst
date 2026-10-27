@@ -30,7 +30,7 @@ class TrialService:
 
     async def register(self, email: str, source: str = "cli") -> TrialRegisterResult:
         """Proxy registration to keyservice, return structured result."""
-        import httpx
+        import httpx2 as httpx
 
         if not email or "@" not in email:
             return TrialRegisterResult(

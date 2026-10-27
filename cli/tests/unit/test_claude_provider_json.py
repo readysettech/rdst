@@ -73,7 +73,7 @@ class TestJsonObjectResponseFormat:
 
         payload = create.call_args.kwargs
         assert "response_format" not in payload
-        assert "extra_body" not in payload
+        assert payload["extra_body"] == {"temperature": 0.0}
 
     def test_json_schema_uses_forced_tool(self):
         client, create = _sdk_client()

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import anthropic
-import httpx
+import httpx2
 import pytest
 
 from shared.llm_manager.base import LLMError, ProviderRequest
@@ -61,7 +61,7 @@ def _completion_client(*, message=None, headers=None):
 
 
 def test_supported_anthropic_sdk_version_is_installed():
-    assert anthropic.__version__ == "0.122.0"
+    assert anthropic.__version__ == "2.3.0"
 
 
 def test_request_payload_size_matches_compact_utf8_json() -> None:
@@ -105,7 +105,7 @@ def test_real_sdk_posts_once_to_messages_endpoint():
 
     def handle(request):
         requests.append(request)
-        return httpx.Response(
+        return httpx2.Response(
             200,
             headers={"request-id": "req_transport"},
             json={
@@ -120,13 +120,13 @@ def test_real_sdk_posts_once_to_messages_endpoint():
             },
         )
 
-    transport = httpx.MockTransport(handle)
+    transport = httpx2.MockTransport(handle)
     real_client = anthropic.Anthropic
 
     def client_factory(**kwargs):
         return real_client(
             **kwargs,
-            http_client=httpx.Client(transport=transport),
+            http_client=httpx2.Client(transport=transport),
         )
 
     with patch(
@@ -137,7 +137,7 @@ def test_real_sdk_posts_once_to_messages_endpoint():
 
     assert len(requests) == 1
     assert str(requests[0].url) == "https://api.anthropic.com/v1/messages"
-    assert requests[0].headers["x-api-key"] == "sk-ant-test"
+    assert requests[0].headers["authorization"] == "Bearer sk-ant-test"
     assert json.loads(requests[0].content)["model"] == "claude-sonnet-4-6"
     assert response.raw["_request_id"] == "req_transport"
 
@@ -147,7 +147,7 @@ def test_real_sdk_joins_trial_origin_to_messages_endpoint():
 
     def handle(request):
         requests.append(request)
-        return httpx.Response(
+        return httpx2.Response(
             200,
             headers={"request-id": "req_trial"},
             json={
@@ -162,13 +162,13 @@ def test_real_sdk_joins_trial_origin_to_messages_endpoint():
             },
         )
 
-    transport = httpx.MockTransport(handle)
+    transport = httpx2.MockTransport(handle)
     real_client = anthropic.Anthropic
 
     def client_factory(**kwargs):
         return real_client(
             **kwargs,
-            http_client=httpx.Client(transport=transport),
+            http_client=httpx2.Client(transport=transport),
         )
 
     with patch(
@@ -184,7 +184,7 @@ def test_real_sdk_joins_trial_origin_to_messages_endpoint():
 
     assert len(requests) == 1
     assert str(requests[0].url) == "https://trial.example/v1/messages"
-    assert requests[0].headers["x-api-key"] == "trial-token"
+    assert requests[0].headers["authorization"] == "Bearer trial-token"
     assert requests[0].headers["x-rdst-signature"] == "123.sig"
 
 
@@ -209,8 +209,7 @@ def test_direct_client_is_pinned_to_origin_timeout_and_zero_retries():
     assert payload["model"] == "claude-sonnet-4-6"
     assert payload["system"] == "system"
     assert payload["messages"] == [{"role": "user", "content": "question"}]
-    assert payload["temperature"] == 0.0
-    assert payload["top_p"] == 0.9
+    assert payload["extra_body"] == {"temperature": 0.0, "top_p": 0.9}
     assert "output_config" not in payload
     assert payload["stop_sequences"] == ["stop"]
 
@@ -222,7 +221,7 @@ def test_models_that_reject_custom_sampling_reason_at_hosted_effort():
 
     payload = create.call_args.kwargs
     assert payload["model"] == "claude-haiku-5-5"
-    assert "temperature" not in payload and "top_p" not in payload
+    assert "extra_body" not in payload
     assert payload["output_config"] == {"effort": "medium"}
     # Reasoning shares the output budget, so the caller's answer-sized cap is not sent.
     assert payload["max_tokens"] == 32_768
@@ -256,7 +255,7 @@ def test_only_reasoning_models_lose_sampling_and_the_callers_cap(model, reasons)
 
     payload = create.call_args.kwargs
     assert ("output_config" in payload) is reasons
-    assert ("temperature" in payload) is not reasons
+    assert ("temperature" in payload.get("extra_body", {})) is not reasons
     assert payload["max_tokens"] == (32_768 if reasons else 800)
 
 
@@ -353,7 +352,9 @@ def test_provider_extra_uses_sdk_extra_body():
             api_key="sk-ant-test",
         )
 
-    assert create.call_args.kwargs["extra_body"] == {"metadata": {"user_id": "test"}}
+    assert create.call_args.kwargs["extra_body"] == {
+        "temperature": 0.0, "top_p": 0.9, "metadata": {"user_id": "test"},
+    }
 
 
 def test_stream_uses_sdk_text_stream_and_zero_retries():

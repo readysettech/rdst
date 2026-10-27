@@ -3,7 +3,7 @@ name = "rdst"
 dynamic = ["version"]
 description = "Readyset Data and SQL Toolkit - CLI tool for database diagnostics and query optimization"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Readyset", email = "support@readyset.io" }]
 keywords = [
@@ -22,7 +22,6 @@ classifiers = [
     "Topic :: Database",
     "Topic :: Software Development :: Testing",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -46,14 +45,15 @@ dependencies = [
     "sqlparse",
     "pyyaml",
     "sqlglot",
-    "anthropic==0.122.0",
+    "anthropic==2.3.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "sse-starlette>=2.0.0",
     "fastapi-ai-sdk>=0.1.0",
+    "httpx2>=2.0.0",
     "keyring>=25.0.0",
     "packaging>=26.0",
-    "filelock>=3.32.2",
+    "filelock>=4.2.1",
 ]
 
 [project.optional-dependencies]
@@ -99,7 +99,7 @@ dev = [
 ]
 eval = [
     "plotly>=6.0,<7",
-    "pydantic-ai-slim[anthropic,google,openai,openrouter]==2.31.0",
+    "pydantic-ai-slim[anthropic,google,openai,openrouter]==2.62.0",
 ]
 
 [tool.pytest.ini_options]

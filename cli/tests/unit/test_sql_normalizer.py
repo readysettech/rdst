@@ -534,6 +534,13 @@ class TestFallbackBehavior:
         assert "$:p" not in normalized
         assert [p["value"] for p in params.values()] == ["10"]
 
+    @pytest.mark.parametrize("sql", [
+        "LOCK TABLE orders IN ACCESS EXCLUSIVE MODE",
+        "lock table public.orders in share mode nowait",
+    ])
+    def test_postgres_lock_keeps_its_table_and_mode(self, sql):
+        assert normalize_and_extract(sql, dialect="postgres") == (sql, {})
+
     def test_fallback_multi_digit_slot_index_preserved(self):
         from shared.query_registry.sql_normalizer import _fallback_normalize
 

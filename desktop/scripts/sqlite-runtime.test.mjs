@@ -57,9 +57,9 @@ describe("findSafePython candidate selection", () => {
     expect(findSafePython({ probe }).executable).toBe("/fake/python3.13");
   });
 
-  it("rejects interpreters older than Python 3.10", () => {
-    const probe = probeByVersion({ default: runtime("3.9", [3, 53, 4]) });
-    expect(() => findSafePython({ probe })).toThrow(/unsupported Python 3\.9/);
+  it("rejects interpreters older than Python 3.11", () => {
+    const probe = probeByVersion({ default: runtime("3.10", [3, 53, 4]) });
+    expect(() => findSafePython({ probe })).toThrow(/unsupported Python 3\.10/);
   });
 
   it("honors requiredMinor and reports version mismatches", () => {
